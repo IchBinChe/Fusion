@@ -3,6 +3,7 @@ import type { TaskDetail, TaskCreateInput, Task } from "@kb/core";
 import { fetchConfig, fetchSettings, fetchAuthStatus, updateSettings } from "./api";
 import { Header } from "./components/Header";
 import { Board } from "./components/Board";
+import { ListView } from "./components/ListView";
 import { TaskDetailModal } from "./components/TaskDetailModal";
 import { SettingsModal } from "./components/SettingsModal";
 import type { SectionId } from "./components/SettingsModal";
@@ -21,6 +22,16 @@ function AppInner() {
   const [autoMerge, setAutoMerge] = useState(true);
   const [globalPaused, setGlobalPaused] = useState(false);
   const [enginePaused, setEnginePaused] = useState(false);
+  const [view, setView] = useState<"board" | "list">(() => {
+    // Initialize from localStorage if available
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("kb-dashboard-view");
+      if (saved === "list" || saved === "board") {
+        return saved;
+      }
+    }
+    return "board";
+  });
   const { tasks, createTask, moveTask, deleteTask, mergeTask, retryTask } = useTasks();
 
   useEffect(() => {
@@ -44,6 +55,15 @@ function AppInner() {
       .catch(() => {/* fail silently — do not auto-open */});
   }, []);
   const { toasts, addToast, removeToast } = useToast();
+
+  // Persist view preference to localStorage
+  useEffect(() => {
+    localStorage.setItem("kb-dashboard-view", view);
+  }, [view]);
+
+  const handleChangeView = useCallback((newView: "board" | "list") => {
+    setView(newView);
+  }, []);
 
   const handleCreateOpen = useCallback(() => setIsCreating(true), []);
   const handleCancelCreate = useCallback(() => setIsCreating(false), []);
@@ -106,21 +126,37 @@ function AppInner() {
         enginePaused={enginePaused}
         onToggleGlobalPause={handleToggleGlobalPause}
         onToggleEnginePause={handleToggleEnginePause}
+        view={view}
+        onChangeView={handleChangeView}
       />
-      <Board
-        tasks={tasks}
-        maxConcurrent={maxConcurrent}
-        onMoveTask={moveTask}
-        onOpenDetail={handleDetailOpen}
-        addToast={addToast}
-        isCreating={isCreating}
-        onCancelCreate={handleCancelCreate}
-        onCreateTask={handleCreateTask}
-        onNewTask={handleCreateOpen}
-        autoMerge={autoMerge}
-        onToggleAutoMerge={handleToggleAutoMerge}
-        globalPaused={globalPaused}
-      />
+      {view === "board" ? (
+        <Board
+          tasks={tasks}
+          maxConcurrent={maxConcurrent}
+          onMoveTask={moveTask}
+          onOpenDetail={handleDetailOpen}
+          addToast={addToast}
+          isCreating={isCreating}
+          onCancelCreate={handleCancelCreate}
+          onCreateTask={handleCreateTask}
+          onNewTask={handleCreateOpen}
+          autoMerge={autoMerge}
+          onToggleAutoMerge={handleToggleAutoMerge}
+          globalPaused={globalPaused}
+        />
+      ) : (
+        <ListView
+          tasks={tasks}
+          onMoveTask={moveTask}
+          onOpenDetail={handleDetailOpen}
+          addToast={addToast}
+          globalPaused={globalPaused}
+          isCreating={isCreating}
+          onCancelCreate={handleCancelCreate}
+          onCreateTask={handleCreateTask}
+          onNewTask={handleCreateOpen}
+        />
+      )}
       {detailTask && (
         <TaskDetailModal
           task={detailTask}

@@ -1,4 +1,4 @@
-import { Settings, Pause, Play, Square, Download } from "lucide-react";
+import { Settings, Pause, Play, Square, Download, LayoutGrid, List } from "lucide-react";
 
 interface HeaderProps {
   onOpenSettings?: () => void;
@@ -7,6 +7,8 @@ interface HeaderProps {
   enginePaused?: boolean;
   onToggleGlobalPause?: () => void;
   onToggleEnginePause?: () => void;
+  view?: "board" | "list";
+  onChangeView?: (view: "board" | "list") => void;
 }
 
 export function Header({
@@ -16,6 +18,8 @@ export function Header({
   enginePaused,
   onToggleGlobalPause,
   onToggleEnginePause,
+  view = "board",
+  onChangeView,
 }: HeaderProps) {
   return (
     <header className="header">
@@ -25,6 +29,29 @@ export function Header({
         <span className="logo-sub">board</span>
       </div>
       <div className="header-actions">
+        {/* View Toggle */}
+        {onChangeView && (
+          <div className="view-toggle">
+            <button
+              className={`view-toggle-btn${view === "board" ? " active" : ""}`}
+              onClick={() => onChangeView("board")}
+              title="Board view"
+              aria-label="Board view"
+              aria-pressed={view === "board"}
+            >
+              <LayoutGrid size={16} />
+            </button>
+            <button
+              className={`view-toggle-btn${view === "list" ? " active" : ""}`}
+              onClick={() => onChangeView("list")}
+              title="List view"
+              aria-label="List view"
+              aria-pressed={view === "list"}
+            >
+              <List size={16} />
+            </button>
+          </div>
+        )}
         {/* Import from GitHub */}
         <button className="btn-icon" onClick={onOpenGitHubImport} title="Import from GitHub">
           <Download size={16} />

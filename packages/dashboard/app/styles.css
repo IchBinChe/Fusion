@@ -98,6 +98,47 @@ body {
 .btn-icon--stopped:hover {
   color: var(--color-error);
 }
+
+/* View Toggle */
+.view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px;
+}
+
+.view-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.view-toggle-btn:hover {
+  color: var(--text);
+  background: var(--card-hover);
+}
+
+.view-toggle-btn.active {
+  background: var(--todo);
+  color: var(--bg);
+}
+
+.view-toggle-btn.active:hover {
+  background: var(--todo);
+  color: var(--bg);
+}
+
 .logo {
   font-size: 20px;
   font-weight: 700;
@@ -1789,3 +1830,392 @@ body {
 .spin {
   animation: spin 1s linear infinite;
 }
+
+/* === List View === */
+.list-view {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 57px);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.list-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 320px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  transition: border-color var(--transition-fast);
+}
+
+.list-filter:focus-within {
+  border-color: var(--todo);
+}
+
+.filter-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.filter-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.filter-input::placeholder {
+  color: var(--text-dim);
+}
+
+.filter-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  transition: color var(--transition-fast);
+}
+
+.filter-clear:hover {
+  color: var(--text);
+}
+
+.list-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* Drop zones for drag and drop */
+.list-drop-zones {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+.list-drop-zone {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.list-drop-zone:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+
+.list-drop-zone.drag-over {
+  border-color: var(--todo);
+  box-shadow: 0 0 0 1px var(--todo);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.drop-zone-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.drop-zone-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.drop-zone-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* Table container */
+.list-table-container {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+}
+
+.list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.list-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.list-header-cell {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.list-header-cell:hover {
+  color: var(--text);
+}
+
+.sort-icon {
+  vertical-align: middle;
+  margin-left: 4px;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+}
+
+.sort-icon.active {
+  opacity: 1;
+  color: var(--todo);
+}
+
+/* Table rows */
+.list-row {
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.list-row:hover {
+  background: var(--card-hover);
+}
+
+.list-row.dragging {
+  opacity: 0.4;
+}
+
+.list-row.failed {
+  border-left: 3px solid #da3633;
+}
+
+.list-row.paused {
+  opacity: 0.55;
+}
+
+.list-row.agent-active {
+  border-left: 3px solid var(--in-progress);
+  animation: list-agent-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes list-agent-glow {
+  0%,
+  100% {
+    background: rgba(188, 140, 255, 0.05);
+  }
+  50% {
+    background: rgba(188, 140, 255, 0.12);
+  }
+}
+
+/* Table cells */
+.list-cell {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.list-cell-id {
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.list-cell-title {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-cell-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.list-cell-deps {
+  text-align: center;
+}
+
+/* Badges */
+.list-status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-muted);
+}
+
+.list-status-badge.failed {
+  background: rgba(218, 54, 51, 0.15);
+  color: #da3633;
+}
+
+.list-status-badge.pulsing {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.list-column-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.list-dep-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--triage);
+}
+
+/* Progress bar */
+.list-cell-progress {
+  min-width: 100px;
+}
+
+.list-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.list-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.list-progress-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  flex-shrink: 0;
+  min-width: 30px;
+  text-align: right;
+}
+
+/* Empty state */
+.list-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* === List View Mobile Responsive === */
+@media (max-width: 768px) {
+  .list-toolbar {
+    padding: 12px;
+    flex-wrap: wrap;
+  }
+
+  .list-filter {
+    max-width: none;
+    width: 100%;
+    order: 2;
+    margin-top: 8px;
+  }
+
+  .list-stats {
+    order: 1;
+  }
+
+  .list-drop-zones {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+
+  .drop-zone-label {
+    display: none;
+  }
+
+  .list-table-container {
+    overflow-x: auto;
+  }
+
+  .list-table {
+    min-width: 800px;
+  }
+
+  .list-cell-title {
+    max-width: 150px;
+  }
+
+  .list-cell-date {
+    display: none;
+  }
+
+  .list-header-cell:nth-child(5),
+  .list-header-cell:nth-child(6) {
+    display: none;
+  }
+}
+

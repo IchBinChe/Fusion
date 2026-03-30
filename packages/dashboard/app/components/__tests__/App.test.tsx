@@ -262,6 +262,106 @@ describe("App engine pause (soft pause)", () => {
   });
 });
 
+describe("App view switching", () => {
+  it("renders Board view by default", async () => {
+    render(<App />);
+
+    // Wait for the app to render and check that the board is visible
+    await waitFor(() => {
+      expect(screen.getByRole("main")).toBeTruthy();
+    });
+
+    // Board should be rendered
+    expect(screen.getByRole("main").className).toContain("board");
+  });
+
+  it("renders ListView when view is switched to list", async () => {
+    render(<App />);
+
+    // Wait for the header to render with view toggle
+    await waitFor(() => {
+      expect(screen.getByTitle("List view")).toBeTruthy();
+    });
+
+    // Click to switch to list view
+    fireEvent.click(screen.getByTitle("List view"));
+
+    // List view should be rendered (it has a different structure)
+    await waitFor(() => {
+      expect(document.querySelector(".list-view")).toBeTruthy();
+    });
+  });
+
+  it("switches back to Board view from list view", async () => {
+    render(<App />);
+
+    // Wait for the header to render
+    await waitFor(() => {
+      expect(screen.getByTitle("List view")).toBeTruthy();
+    });
+
+    // Switch to list view
+    fireEvent.click(screen.getByTitle("List view"));
+    await waitFor(() => {
+      expect(document.querySelector(".list-view")).toBeTruthy();
+    });
+
+    // Switch back to board view
+    fireEvent.click(screen.getByTitle("Board view"));
+    await waitFor(() => {
+      expect(document.querySelector(".board")).toBeTruthy();
+    });
+  });
+
+  it("persists view preference to localStorage", async () => {
+    // Clear any previous value
+    localStorage.removeItem("kb-dashboard-view");
+
+    render(<App />);
+
+    // Wait for the header to render
+    await waitFor(() => {
+      expect(screen.getByTitle("List view")).toBeTruthy();
+    });
+
+    // Switch to list view
+    fireEvent.click(screen.getByTitle("List view"));
+
+    // Should have saved to localStorage
+    await waitFor(() => {
+      expect(localStorage.getItem("kb-dashboard-view")).toBe("list");
+    });
+  });
+
+  it("initializes view from localStorage if available", async () => {
+    // Set localStorage to list view
+    localStorage.setItem("kb-dashboard-view", "list");
+
+    render(<App />);
+
+    // Wait for the app to render
+    await waitFor(() => {
+      expect(document.querySelector(".list-view")).toBeTruthy();
+    });
+
+    // List view should be active
+    expect(screen.getByTitle("List view").className).toContain("active");
+
+    // Cleanup
+    localStorage.removeItem("kb-dashboard-view");
+  });
+
+  it("shows view toggle buttons in header", async () => {
+    render(<App />);
+
+    // Wait for the header to render with view toggle
+    await waitFor(() => {
+      expect(screen.getByTitle("Board view")).toBeTruthy();
+      expect(screen.getByTitle("List view")).toBeTruthy();
+    });
+  });
+});
+
 describe("App GitHub import", () => {
   it("opens GitHub import modal when import button is clicked", async () => {
     render(<App />);

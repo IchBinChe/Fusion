@@ -59,16 +59,21 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks }: GitHubIm
           setRemotes(fetchedRemotes);
           setLoadingRemotes(false);
 
-          // Auto-populate if exactly one remote and fields are empty
           if (fetchedRemotes.length === 1) {
+            // Single remote: auto-select it
             const remote = fetchedRemotes[0];
             setOwner(remote.owner);
             setRepo(remote.repo);
             setSelectedRemoteName(remote.name);
+          } else if (fetchedRemotes.length > 1) {
+            // Multiple remotes: don't auto-select, user must choose
+            setOwner("");
+            setRepo("");
+            setSelectedRemoteName("");
           }
+          // If no remotes, owner/repo remain empty
         })
         .catch(() => {
-          // Silently fail - manual input remains available
           if (mountedRef.current) {
             setLoadingRemotes(false);
           }
@@ -84,7 +89,6 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks }: GitHubIm
   const handleRemoteChange = useCallback((remoteName: string) => {
     setSelectedRemoteName(remoteName);
     if (remoteName === "") {
-      // Manual mode - clear fields
       setOwner("");
       setRepo("");
     } else {
@@ -108,7 +112,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks }: GitHubIm
 
   const handleLoad = useCallback(async () => {
     if (!owner.trim() || !repo.trim()) {
-      setError("Owner and repo are required");
+      setError("Repository must be selected");
       return;
     }
 
@@ -159,9 +163,10 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks }: GitHubIm
 
   if (!isOpen) return null;
 
-  // Determine if we should show the remote dropdown
-  const showRemoteDropdown = remotes.length > 1 || (remotes.length === 1 && !loadingRemotes);
+  // Determine the repository selection UI state
   const hasRemotes = remotes.length > 0;
+  const singleRemote = remotes.length === 1;
+  const multipleRemotes = remotes.length > 1;
 
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -174,59 +179,54 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks }: GitHubIm
         </div>
 
         <div className="modal-body">
-          {/* Remote Selection Dropdown */}
-          {(showRemoteDropdown || loadingRemotes) && (
-            <div className="form-row">
-              <div className="form-group">
-                <label htmlFor="gh-remote">
-                  Repository
-                  {loadingRemotes && <Loader2 size={12} className="spin" style={{ marginLeft: 8, display: "inline" }} />}
-                </label>
+          {/* Repository Selection Section */}
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="gh-remote">
+                Repository
+                {loadingRemotes && <Loader2 size={12} className="spin" style={{ marginLeft: 8, display: "inline" }} />}
+              </label>
+
+              {/* Loading state */}
+              {loadingRemotes && (
+                <span className="text-muted">Loading remotes...</span>
+              )}
+
+              {/* No remotes */}
+              {!loadingRemotes && !hasRemotes && (
+                <div className="form-error">
+                  No GitHub remotes detected. Add a remote with:
+                  <code style={{ display: "block", marginTop: 4, padding: 4, background: "#f5f5f5", borderRadius: 4 }}>
+                    git remote add origin https://github.com/owner/repo.git
+                  </code>
+                </div>
+              )}
+
+              {/* Single remote - read only display */}
+              {!loadingRemotes && singleRemote && (
+                <span className="text-muted">
+                  {remotes[0].name} ({remotes[0].owner}/{remotes[0].repo})
+                </span>
+              )}
+
+              {/* Multiple remotes - dropdown */}
+              {!loadingRemotes && multipleRemotes && (
                 <select
                   id="gh-remote"
                   value={selectedRemoteName}
                   onChange={(e) => handleRemoteChange(e.target.value)}
-                  disabled={loadingRemotes || loading || importing}
+                  disabled={loading || importing}
                 >
-                  {hasRemotes && <option value="">Select a remote...</option>}
-                  {loadingRemotes && <option value="">Loading remotes...</option>}
-                  {!hasRemotes && !loadingRemotes && <option value="">No GitHub remotes detected</option>}
+                  <option value="">Select a remote...</option>
                   {remotes.map((remote) => (
                     <option key={remote.name} value={remote.name}>
                       {remote.name} ({remote.owner}/{remote.repo})
                     </option>
                   ))}
                 </select>
-              </div>
+              )}
             </div>
-          )}
 
-          {/* Form Row */}
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="gh-owner">Owner</label>
-              <input
-                id="gh-owner"
-                type="text"
-                placeholder="e.g. dustinbyrne"
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleLoad()}
-                disabled={loading || importing}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="gh-repo">Repo</label>
-              <input
-                id="gh-repo"
-                type="text"
-                placeholder="e.g. kb"
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleLoad()}
-                disabled={loading || importing}
-              />
-            </div>
             <div className="form-group">
               <label htmlFor="gh-labels">Labels (optional)</label>
               <input
@@ -239,9 +239,14 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks }: GitHubIm
                 disabled={loading || importing}
               />
             </div>
+
             <div className="form-group form-group--action">
               <label>&nbsp;</label>
-              <button className="btn btn-primary" onClick={handleLoad} disabled={loading || importing || !owner.trim() || !repo.trim()}>
+              <button
+                className="btn btn-primary"
+                onClick={handleLoad}
+                disabled={loading || importing || !owner.trim() || !repo.trim()}
+              >
                 {loading ? <Loader2 size={14} className="spin" /> : "Load"}
               </button>
             </div>

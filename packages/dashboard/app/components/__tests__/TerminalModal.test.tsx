@@ -11,12 +11,12 @@ vi.mock("../../hooks/useTerminal", () => ({
 
 vi.mock("../../api", () => ({
   createTerminalSession: vi.fn(),
-  killTerminalSession: vi.fn(),
+  killPtyTerminalSession: vi.fn(),
 }));
 
 const mockUseTerminal = vi.mocked(useTerminalModule.useTerminal);
 const mockCreateTerminalSession = vi.mocked(apiModule.createTerminalSession);
-const mockKillTerminalSession = vi.mocked(apiModule.killTerminalSession);
+const mockKillPtyTerminalSession = vi.mocked(apiModule.killPtyTerminalSession);
 
 describe("TerminalModal", () => {
   const mockOnClose = vi.fn();
@@ -43,7 +43,7 @@ describe("TerminalModal", () => {
       shell: "/bin/bash",
       cwd: "/project",
     });
-    mockKillTerminalSession.mockResolvedValue({ killed: true });
+    mockKillPtyTerminalSession.mockResolvedValue({ killed: true });
     mockUseTerminal.mockReturnValue(createMockTerminalState());
   });
 
@@ -130,7 +130,7 @@ describe("TerminalModal", () => {
     rerender(<TerminalModal isOpen={false} onClose={mockOnClose} />);
 
     await waitFor(() => {
-      expect(mockKillTerminalSession).toHaveBeenCalledWith("test-session-123");
+      expect(mockKillPtyTerminalSession).toHaveBeenCalledWith("test-session-123");
     });
   });
 

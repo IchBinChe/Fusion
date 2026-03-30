@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TerminalService } from "./terminal-service";
+import { TerminalService } from "./terminal-service.js";
 
 // Mock node-pty
 const mockPtyProcess = {
@@ -153,8 +153,8 @@ describe("TerminalService", () => {
       const sessions = service.getAllSessions();
       
       expect(sessions).toHaveLength(2);
-      expect(sessions.some((s) => s.id === session1?.id)).toBe(true);
-      expect(sessions.some((s) => s.id === session2?.id)).toBe(true);
+      expect(sessions.some((s: { id: string }) => s.id === session1?.id)).toBe(true);
+      expect(sessions.some((s: { id: string }) => s.id === session2?.id)).toBe(true);
     });
 
     it("cleans up all sessions", async () => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Trash2, Terminal as TerminalIcon, RefreshCw } from "lucide-react";
 import { useTerminal } from "../hooks/useTerminal";
-import { createTerminalSession, killTerminalSession } from "../api";
+import { createTerminalSession, killPtyTerminalSession } from "../api";
 import type { Terminal as XTerm, ITerminalAddon } from "@xterm/xterm";
 
 import "@xterm/xterm/css/xterm.css";
@@ -184,7 +184,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
     if (!isOpen) {
       // Cleanup session on close
       if (sessionId) {
-        killTerminalSession(sessionId).catch(() => {
+        killPtyTerminalSession(sessionId).catch(() => {
           // Ignore errors during cleanup
         });
         setSessionId(null);
@@ -308,7 +308,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
   const handleRestart = useCallback(async () => {
     // Kill current session
     if (sessionId) {
-      await killTerminalSession(sessionId).catch(() => {
+      await killPtyTerminalSession(sessionId).catch(() => {
         // Ignore errors
       });
     }

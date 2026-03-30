@@ -437,7 +437,7 @@ export function createTerminalSession(
 }
 
 /** Kill a PTY terminal session */
-export function killTerminalSession(sessionId: string): Promise<{ killed: boolean }> {
+export function killPtyTerminalSession(sessionId: string): Promise<{ killed: boolean }> {
   return api<{ killed: boolean }>(`/terminal/sessions/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
   });

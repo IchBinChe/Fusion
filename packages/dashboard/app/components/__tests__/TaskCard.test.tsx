@@ -2008,3 +2008,212 @@ describe("TaskCard GitHub badges", () => {
     }
   });
 });
+
+/**
+ * Tests for touch gesture handling in TaskCard.
+ * Ensures that scrolling/dragging does not accidentally open the modal,
+ * while intentional taps still work correctly.
+ */
+describe("TaskCard touch gesture handling", () => {
+  const noopToast = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("opens modal on quick tap without movement", async () => {
+    const { fetchTaskDetail } = await import("../../api");
+    const mockFetch = vi.mocked(fetchTaskDetail);
+    const mockDetail: TaskDetail = {
+      ...makeTask({ id: "KB-099" }),
+      prompt: "",
+      attachments: [],
+    };
+    mockFetch.mockResolvedValueOnce(mockDetail);
+    const onOpenDetail = vi.fn();
+
+    const task = makeTask();
+
+    render(
+      <TaskCard
+        task={task}
+        onOpenDetail={onOpenDetail}
+        addToast={noopToast}
+      />
+    );
+
+    const card = document.querySelector('[data-id="KB-099"]');
+    expect(card).toBeDefined();
+
+    // Simulate a quick tap: touchStart, then touchEnd without touchMove
+    fireEvent.touchStart(card!, {
+      touches: [{ clientX: 100, clientY: 100 }],
+    });
+
+    // Small delay but still within tap duration
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    fireEvent.touchEnd(card!, {
+      changedTouches: [{ clientX: 100, clientY: 100 }],
+      target: card,
+    });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("KB-099");
+      expect(onOpenDetail).toHaveBeenCalledWith(mockDetail);
+    });
+  });
+
+  it("does NOT open modal when touch moves beyond threshold (scrolling)", async () => {
+    const onOpenDetail = vi.fn();
+
+    const task = makeTask();
+
+    render(
+      <TaskCard
+        task={task}
+        onOpenDetail={onOpenDetail}
+        addToast={noopToast}
+      />
+    );
+
+    const card = document.querySelector('[data-id="KB-099"]');
+    expect(card).toBeDefined();
+
+    // Simulate scrolling: touchStart, touchMove with significant movement, then touchEnd
+    fireEvent.touchStart(card!, {
+      touches: [{ clientX: 100, clientY: 100 }],
+    });
+
+    fireEvent.touchMove(card!, {
+      touches: [{ clientX: 120, clientY: 120 }], // 20px movement (> 10px threshold)
+    });
+
+    fireEvent.touchEnd(card!, {
+      changedTouches: [{ clientX: 120, clientY: 120 }],
+      target: card,
+    });
+
+    // Wait for any async operations
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Modal should NOT have opened
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("does NOT open modal on long press (slow touch)", async () => {
+    const onOpenDetail = vi.fn();
+
+    const task = makeTask();
+
+    render(
+      <TaskCard
+        task={task}
+        onOpenDetail={onOpenDetail}
+        addToast={noopToast}
+      />
+    );
+
+    const card = document.querySelector('[data-id="KB-099"]');
+    expect(card).toBeDefined();
+
+    // Simulate long press: touchStart, wait > 300ms, then touchEnd
+    fireEvent.touchStart(card!, {
+      touches: [{ clientX: 100, clientY: 100 }],
+    });
+
+    // Wait longer than tap threshold (300ms)
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    fireEvent.touchEnd(card!, {
+      changedTouches: [{ clientX: 100, clientY: 100 }],
+      target: card,
+    });
+
+    // Wait for any async operations
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Modal should NOT have opened
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("does NOT open modal when touch starts on interactive element (button)", async () => {
+    const onOpenDetail = vi.fn();
+    const onArchiveTask = vi.fn().mockResolvedValue(makeTask());
+
+    const task = makeTask({ column: "done" });
+
+    render(
+      <TaskCard
+        task={task}
+        onOpenDetail={onOpenDetail}
+        addToast={noopToast}
+        onArchiveTask={onArchiveTask}
+      />
+    );
+
+    // Find the archive button (an interactive element)
+    const archiveButton = screen.getByRole("button", { name: /Archive task/i });
+    expect(archiveButton).toBeDefined();
+
+    // Simulate touch on the button
+    fireEvent.touchStart(archiveButton, {
+      touches: [{ clientX: 100, clientY: 100 }],
+    });
+
+    fireEvent.touchEnd(archiveButton, {
+      changedTouches: [{ clientX: 100, clientY: 100 }],
+      target: archiveButton,
+    });
+
+    // Wait for any async operations
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Modal should NOT have opened (button click should be handled separately)
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("opens modal for tap with minimal movement within threshold", async () => {
+    const { fetchTaskDetail } = await import("../../api");
+    const mockFetch = vi.mocked(fetchTaskDetail);
+    const mockDetail: TaskDetail = {
+      ...makeTask({ id: "KB-099" }),
+      prompt: "",
+      attachments: [],
+    };
+    mockFetch.mockResolvedValueOnce(mockDetail);
+    const onOpenDetail = vi.fn();
+
+    const task = makeTask();
+
+    render(
+      <TaskCard
+        task={task}
+        onOpenDetail={onOpenDetail}
+        addToast={noopToast}
+      />
+    );
+
+    const card = document.querySelector('[data-id="KB-099"]');
+    expect(card).toBeDefined();
+
+    // Simulate tap with small movement (5px, under 10px threshold)
+    fireEvent.touchStart(card!, {
+      touches: [{ clientX: 100, clientY: 100 }],
+    });
+
+    fireEvent.touchMove(card!, {
+      touches: [{ clientX: 105, clientY: 105 }], // 5px movement (< 10px threshold)
+    });
+
+    fireEvent.touchEnd(card!, {
+      changedTouches: [{ clientX: 105, clientY: 105 }],
+      target: card,
+    });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("KB-099");
+      expect(onOpenDetail).toHaveBeenCalledWith(mockDetail);
+    });
+  });
+});

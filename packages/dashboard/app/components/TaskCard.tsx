@@ -135,6 +135,10 @@ function TaskCardComponent({
   const cardRef = useRef<HTMLDivElement>(null);
   const [isInViewport, setIsInViewport] = useState(false);
 
+  // Touch gesture detection refs
+  const touchStartPosRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const hasTouchMovedRef = useRef(false);
+
   const isInteractiveTarget = useCallback((target: EventTarget | null): boolean => {
     if (!(target instanceof HTMLElement)) return false;
     return !!target.closest("button, a, input, textarea, select, label, [role='button']");
@@ -239,10 +243,48 @@ function TaskCardComponent({
     void handleClick();
   }, [handleClick, isInteractiveTarget]);
 
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    hasTouchMovedRef.current = false;
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchStartPosRef.current) return;
+    
+    const touch = e.touches[0];
+    if (!touch) return;
+    
+    const dx = Math.abs(touch.clientX - touchStartPosRef.current.x);
+    const dy = Math.abs(touch.clientY - touchStartPosRef.current.y);
+    
+    // If moved beyond threshold, mark as moved (scrolling/dragging)
+    if (dx > TOUCH_MOVE_THRESHOLD || dy > TOUCH_MOVE_THRESHOLD) {
+      hasTouchMovedRef.current = true;
+    }
+  }, []);
+
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (isInteractiveTarget(e.target)) return;
-    touchOpenHandledRef.current = true;
-    void handleClick();
+    
+    // Check if this was a valid tap (not a scroll)
+    if (!touchStartPosRef.current) return;
+    
+    const touchDuration = Date.now() - touchStartPosRef.current.time;
+    const isQuickTap = touchDuration < TOUCH_TAP_MAX_DURATION;
+    const isStationary = !hasTouchMovedRef.current;
+    
+    // Only open modal for quick taps that didn't move significantly
+    if (isQuickTap && isStationary) {
+      touchOpenHandledRef.current = true;
+      void handleClick();
+    }
+    
+    // Reset touch tracking
+    touchStartPosRef.current = null;
+    hasTouchMovedRef.current = false;
   }, [handleClick, isInteractiveTarget]);
 
   const handleDepClick = useCallback(async (e: React.MouseEvent, depId: string) => {
@@ -450,6 +492,8 @@ function TaskCardComponent({
       onDragLeave={handleFileDragLeave}
       onDrop={handleFileDrop}
       onClick={handleCardClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onDoubleClick={handleDoubleClick}
     >
@@ -603,6 +647,9 @@ function TaskCardComponent({
     </div>
   );
 }
+
+const TOUCH_MOVE_THRESHOLD = 10; // pixels
+const TOUCH_TAP_MAX_DURATION = 300; // milliseconds
 
 export const TaskCard = memo(TaskCardComponent, areTaskCardPropsEqual);
 TaskCard.displayName = "TaskCard";

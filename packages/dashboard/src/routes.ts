@@ -48,6 +48,23 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
+function validateOptionalModelField(value: unknown, name: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string`);
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeModelSelectionPair(provider: string | undefined, modelId: string | undefined) {
+  if (!provider || !modelId) {
+    return { provider: undefined, modelId: undefined };
+  }
+
+  return { provider, modelId };
+}
+
 // ── Git Remote Detection ──────────────────────────────────────────
 
 /** Git remote info returned by the remotes endpoint */
@@ -577,7 +594,17 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Create task
   router.post("/tasks", async (req, res) => {
     try {
-      const { title, description, column, dependencies, breakIntoSubtasks } = req.body;
+      const {
+        title,
+        description,
+        column,
+        dependencies,
+        breakIntoSubtasks,
+        modelProvider,
+        modelId,
+        validatorModelProvider,
+        validatorModelId,
+      } = req.body;
       if (!description || typeof description !== "string") {
         res.status(400).json({ error: "description is required" });
         return;
@@ -586,16 +613,30 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         res.status(400).json({ error: "breakIntoSubtasks must be a boolean" });
         return;
       }
+
+      const validatedModelProvider = validateOptionalModelField(modelProvider, "modelProvider");
+      const validatedModelId = validateOptionalModelField(modelId, "modelId");
+      const validatedValidatorModelProvider = validateOptionalModelField(validatorModelProvider, "validatorModelProvider");
+      const validatedValidatorModelId = validateOptionalModelField(validatorModelId, "validatorModelId");
+
+      const executorModel = normalizeModelSelectionPair(validatedModelProvider, validatedModelId);
+      const validatorModel = normalizeModelSelectionPair(validatedValidatorModelProvider, validatedValidatorModelId);
+
       const task = await store.createTask({
         title,
         description,
         column,
         dependencies,
         breakIntoSubtasks,
+        modelProvider: executorModel.provider,
+        modelId: executorModel.modelId,
+        validatorModelProvider: validatorModel.provider,
+        validatorModelId: validatorModel.modelId,
       });
       res.status(201).json(task);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const status = err.message?.includes("must be a string") ? 400 : 500;
+      res.status(status).json({ error: err.message });
     }
   });
 

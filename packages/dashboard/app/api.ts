@@ -32,7 +32,18 @@ export async function fetchTaskDetail(id: string): Promise<TaskDetail> {
 }
 
 export function createTask(input: TaskCreateInput): Promise<Task> {
-  const { title, description, column, dependencies, breakIntoSubtasks } = input;
+  const {
+    title,
+    description,
+    column,
+    dependencies,
+    breakIntoSubtasks,
+    modelProvider,
+    modelId,
+    validatorModelProvider,
+    validatorModelId,
+  } = input;
+
   return api<Task>("/tasks", {
     method: "POST",
     body: JSON.stringify({
@@ -41,6 +52,10 @@ export function createTask(input: TaskCreateInput): Promise<Task> {
       column,
       dependencies,
       breakIntoSubtasks,
+      modelProvider,
+      modelId,
+      validatorModelProvider,
+      validatorModelId,
     }),
   });
 }

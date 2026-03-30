@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
 import { LayoutGrid, List as ListIcon, ArrowUpDown, ArrowUp, ArrowDown, Search, Link, Columns3, EyeOff, Eye } from "lucide-react";
-import type { Task, TaskDetail, Column, TaskStep } from "@kb/core";
+import type { Task, TaskDetail, Column, TaskStep, TaskCreateInput } from "@kb/core";
 import { COLUMN_LABELS, COLUMNS } from "@kb/core";
 import { fetchTaskDetail } from "../api";
 import { InlineCreateCard } from "./InlineCreateCard";
@@ -32,7 +32,7 @@ interface ListViewProps {
   globalPaused?: boolean;
   isCreating?: boolean;
   onCancelCreate?: () => void;
-  onCreateTask?: (input: { description: string; column: Column; dependencies?: string[] }) => Promise<Task>;
+  onCreateTask?: (input: TaskCreateInput) => Promise<Task>;
   onNewTask?: () => void;
 }
 

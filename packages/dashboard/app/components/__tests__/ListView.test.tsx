@@ -5,6 +5,7 @@ import type { Task, TaskDetail } from "@kb/core";
 
 // Mock the API
 vi.mock("../../api", () => ({
+  fetchModels: vi.fn().mockResolvedValue([]),
   fetchTaskDetail: vi.fn(),
 }));
 

@@ -1,28 +1,89 @@
-import { describe, it, expect, vi } from "vitest";
+import type { ComponentProps } from "react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { InlineCreateCard } from "../InlineCreateCard";
 import type { Task, Column } from "@kb/core";
+import { fetchModels } from "../../api";
+import type { ModelInfo } from "../../api";
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
+  Brain: () => null,
+  Cpu: () => null,
   Link: () => null,
+  Search: () => null,
+  Sparkles: () => null,
+  Terminal: () => null,
 }));
 
 // Mock the api module
 vi.mock("../../api", () => ({
+  fetchModels: vi.fn().mockResolvedValue([]),
   uploadAttachment: vi.fn(),
 }));
 
-function renderCard(tasks: Task[] = []) {
-  const props = {
+const MOCK_MODELS: ModelInfo[] = [
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-4-5",
+    name: "Claude Sonnet 4.5",
+    reasoning: true,
+    contextWindow: 200_000,
+  },
+  {
+    provider: "openai",
+    id: "gpt-4o",
+    name: "GPT-4o",
+    reasoning: true,
+    contextWindow: 128_000,
+  },
+];
+
+function createMockTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "KB-001",
+    title: "Test task",
+    description: "Task description",
+    column: "todo" as Column,
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function renderCard(
+  tasks: Task[] = [],
+  overrides: Partial<ComponentProps<typeof InlineCreateCard>> = {},
+) {
+  const props: ComponentProps<typeof InlineCreateCard> = {
     tasks,
-    onSubmit: vi.fn().mockResolvedValue({ id: "KB-001" }),
+    onSubmit: vi.fn().mockResolvedValue({ id: "KB-001" } as Task),
     onCancel: vi.fn(),
     addToast: vi.fn(),
+    availableModels: MOCK_MODELS,
+    ...overrides,
   };
   const result = render(<InlineCreateCard {...props} />);
   return { ...result, props };
 }
+
+function openModelPanel() {
+  fireEvent.click(screen.getByRole("button", { name: /Models/i }));
+}
+
+function chooseModel(label: "Executor Model" | "Validator Model", optionText: string) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  fireEvent.click(screen.getByText(optionText));
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(fetchModels).mockResolvedValue(MOCK_MODELS);
+});
 
 describe("InlineCreateCard blur-to-cancel", () => {
   it("calls onCancel when focus leaves the card with empty input", () => {
@@ -69,19 +130,15 @@ describe("InlineCreateCard blur-to-cancel", () => {
 
 describe("InlineCreateCard dep-dropdown focus retention", () => {
   const testTasks: Task[] = [
-    { id: "KB-010", title: "Task A", description: "First task", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+    createMockTask({ id: "KB-010", title: "Task A", description: "First task" }),
   ];
 
   it("dep-dropdown-item mouseDown calls preventDefault to retain focus", () => {
     renderCard(testTasks);
-    // Open the dropdown
     fireEvent.click(screen.getByText(/Deps/));
     const item = document.querySelector(".dep-dropdown-item") as HTMLElement;
     expect(item).toBeTruthy();
 
-    // Fire mouseDown and verify preventDefault was called —
-    // this is the mechanism that keeps focus on the search input in
-    // real browsers and prevents a focusout with relatedTarget: null
     const prevented = !fireEvent.mouseDown(item);
     expect(prevented).toBe(true);
   });
@@ -90,13 +147,11 @@ describe("InlineCreateCard dep-dropdown focus retention", () => {
     const { props } = renderCard(testTasks);
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
-    // Open dropdown and select a dependency
     fireEvent.click(screen.getByText(/Deps/));
     const item = document.querySelector(".dep-dropdown-item") as HTMLElement;
     expect(item).toBeTruthy();
     fireEvent.click(item);
 
-    // Focus the textarea then blur out of the card entirely
     textarea.focus();
     fireEvent.focusOut(textarea, { relatedTarget: null });
 
@@ -104,11 +159,180 @@ describe("InlineCreateCard dep-dropdown focus retention", () => {
   });
 });
 
+describe("InlineCreateCard model selector", () => {
+  it("opens and closes the model disclosure dropdown", () => {
+    renderCard();
+
+    openModelPanel();
+    expect(screen.getByText("Executor Model")).toBeTruthy();
+    expect(screen.getByText("Validator Model")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Models/i }));
+    expect(screen.queryByText("Executor Model")).toBeNull();
+  });
+
+  it("updates executor selection and shows the selected model badge", () => {
+    renderCard();
+
+    openModelPanel();
+    chooseModel("Executor Model", "Claude Sonnet 4.5");
+
+    expect(screen.getByText("anthropic/claude-sonnet-4-5")).toBeTruthy();
+  });
+
+  it("updates validator selection and shows the selected model badge", () => {
+    renderCard();
+
+    openModelPanel();
+    chooseModel("Validator Model", "GPT-4o");
+
+    expect(screen.getByText("openai/gpt-4o")).toBeTruthy();
+  });
+
+  it("clears the model selection when Use default is chosen", () => {
+    renderCard();
+
+    openModelPanel();
+    chooseModel("Executor Model", "Claude Sonnet 4.5");
+    expect(screen.getByText("anthropic/claude-sonnet-4-5")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Executor Model" }));
+    const defaultOption = document.querySelector(".model-combobox-dropdown .model-combobox-option") as HTMLElement;
+    expect(defaultOption).toBeTruthy();
+    fireEvent.click(defaultOption);
+
+    expect(screen.getAllByText("Using default")).toHaveLength(2);
+  });
+
+  it("omits model fields from the submit payload after clearing back to default", async () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    fireEvent.change(textarea, { target: { value: "Task using defaults again" } });
+    openModelPanel();
+    chooseModel("Executor Model", "Claude Sonnet 4.5");
+    fireEvent.click(screen.getByRole("button", { name: "Executor Model" }));
+    const defaultOption = document.querySelector(".model-combobox-dropdown .model-combobox-option") as HTMLElement;
+    expect(defaultOption).toBeTruthy();
+    fireEvent.click(defaultOption);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(props.onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Task using defaults again",
+          modelProvider: undefined,
+          modelId: undefined,
+          validatorModelProvider: undefined,
+          validatorModelId: undefined,
+        }),
+      );
+    });
+  });
+
+  it("includes selected models in the submit payload", async () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    fireEvent.change(textarea, { target: { value: "Task with model overrides" } });
+    openModelPanel();
+    chooseModel("Executor Model", "Claude Sonnet 4.5");
+    chooseModel("Validator Model", "GPT-4o");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(props.onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Task with model overrides",
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          validatorModelProvider: "openai",
+          validatorModelId: "gpt-4o",
+        }),
+      );
+    });
+  });
+
+  it("does NOT call onCancel when focus leaves while the model dropdown is open", () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    openModelPanel();
+    textarea.focus();
+    fireEvent.focusOut(textarea, { relatedTarget: null });
+
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call onCancel after a model override is selected and focus leaves the card", () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    openModelPanel();
+    chooseModel("Executor Model", "Claude Sonnet 4.5");
+    fireEvent.click(screen.getByRole("button", { name: /1 model/i }));
+
+    textarea.focus();
+    fireEvent.focusOut(textarea, { relatedTarget: null });
+
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("prevents default on model option mouseDown to retain focus while selecting", () => {
+    const { props } = renderCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    textarea.focus();
+    openModelPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Executor Model" }));
+    const option = screen.getByText("Claude Sonnet 4.5");
+    const prevented = !fireEvent.mouseDown(option);
+    fireEvent.click(option);
+
+    expect(prevented).toBe(true);
+    expect(props.onCancel).not.toHaveBeenCalled();
+    expect(screen.getByText("anthropic/claude-sonnet-4-5")).toBeTruthy();
+  });
+
+  it("uses parent-provided models without fetching again", () => {
+    renderCard();
+    expect(fetchModels).not.toHaveBeenCalled();
+  });
+
+  it("fetches models when parent-provided models are omitted", async () => {
+    renderCard([], { availableModels: undefined });
+
+    await waitFor(() => {
+      expect(fetchModels).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows an error state and retries model loading", async () => {
+    vi.mocked(fetchModels)
+      .mockRejectedValueOnce(new Error("no auth"))
+      .mockResolvedValueOnce(MOCK_MODELS);
+
+    renderCard([], { availableModels: undefined });
+    openModelPanel();
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load models.")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Failed to load models.")).toBeNull();
+    });
+    expect(fetchModels).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("InlineCreateCard dependency dropdown sort order", () => {
   const scrambledTasks: Task[] = [
-    { id: "KB-001", title: "Oldest", description: "First", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
-    { id: "KB-003", title: "Newest", description: "Third", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z" },
-    { id: "KB-002", title: "Middle", description: "Second", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-02-01T00:00:00Z", updatedAt: "2026-02-01T00:00:00Z" },
+    createMockTask({ id: "KB-001", title: "Oldest", description: "First", createdAt: "2026-01-01T00:00:00Z" }),
+    createMockTask({ id: "KB-003", title: "Newest", description: "Third", createdAt: "2026-03-01T00:00:00Z" }),
+    createMockTask({ id: "KB-002", title: "Middle", description: "Second", createdAt: "2026-02-01T00:00:00Z" }),
   ];
 
   it("renders dependency dropdown items sorted newest-first by createdAt", () => {
@@ -124,7 +348,6 @@ describe("InlineCreateCard dependency dropdown sort order", () => {
     renderCard(scrambledTasks);
     fireEvent.click(screen.getByText(/Deps/));
     const input = document.querySelector(".dep-dropdown-search") as HTMLInputElement;
-    // All three tasks match "KB-00" so we can verify order with a filter active
     fireEvent.change(input, { target: { value: "KB-00" } });
     const items = document.querySelectorAll(".dep-dropdown-item");
     expect(items).toHaveLength(3);
@@ -135,9 +358,9 @@ describe("InlineCreateCard dependency dropdown sort order", () => {
 
 describe("InlineCreateCard dependency dropdown sort with identical timestamps", () => {
   const sameTimeTasks: Task[] = [
-    { id: "KB-001", title: "First", description: "First task", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
-    { id: "KB-002", title: "Second", description: "Second task", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
-    { id: "KB-003", title: "Third", description: "Third task", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+    createMockTask({ id: "KB-001", title: "First", description: "First task" }),
+    createMockTask({ id: "KB-002", title: "Second", description: "Second task" }),
+    createMockTask({ id: "KB-003", title: "Third", description: "Third task" }),
   ];
 
   it("renders tasks with identical createdAt sorted newest-ID-first (descending numeric ID)", () => {
@@ -163,9 +386,9 @@ describe("InlineCreateCard dependency dropdown sort with identical timestamps", 
 
 describe("InlineCreateCard dependency dropdown search", () => {
   const testTasks: Task[] = [
-    { id: "KB-001", title: "Fix login", description: "Login page broken", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
-    { id: "KB-002", title: "Add dark mode", description: "Theme support", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-02-01T00:00:00Z", updatedAt: "2026-02-01T00:00:00Z" },
-    { id: "KB-003", title: "Refactor API", description: "Clean up endpoints", column: "todo" as Column, dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z" },
+    createMockTask({ id: "KB-001", title: "Fix login", description: "Login page broken", createdAt: "2026-01-01T00:00:00Z" }),
+    createMockTask({ id: "KB-002", title: "Add dark mode", description: "Theme support", createdAt: "2026-02-01T00:00:00Z" }),
+    createMockTask({ id: "KB-003", title: "Refactor API", description: "Clean up endpoints", createdAt: "2026-03-01T00:00:00Z" }),
   ];
 
   it("shows search input when dropdown is opened", () => {

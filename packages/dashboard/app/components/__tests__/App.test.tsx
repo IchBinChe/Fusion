@@ -318,6 +318,26 @@ describe("App view switching", () => {
     });
   });
 
+  it("opens the inline create card from the list view new-task button", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle("List view")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTitle("List view"));
+
+    await waitFor(() => {
+      expect(document.querySelector(".list-view")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("+ New Task"));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("What needs to be done?")).toBeTruthy();
+    });
+  });
+
   it("persists view preference to localStorage", async () => {
     // Clear any previous value
     localStorage.removeItem("kb-dashboard-view");

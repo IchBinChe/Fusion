@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Link } from "lucide-react";
+import { Brain, Link } from "lucide-react";
 import type { Task, TaskCreateInput } from "@kb/core";
 import type { ToastType } from "../hooks/useToast";
-import { uploadAttachment } from "../api";
+import { fetchModels, uploadAttachment } from "../api";
+import type { ModelInfo } from "../api";
+import { CustomModelDropdown } from "./CustomModelDropdown";
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
@@ -16,18 +18,77 @@ interface InlineCreateCardProps {
   onSubmit: (input: TaskCreateInput) => Promise<Task>;
   onCancel: () => void;
   addToast: (msg: string, type?: ToastType) => void;
+  /**
+   * Optional model list from a parent surface. When omitted, InlineCreateCard
+   * fetches models itself so it can stay reusable in both list and board flows
+   * without forcing model data to be threaded through every caller.
+   */
+  availableModels?: ModelInfo[];
 }
 
-export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: InlineCreateCardProps) {
+function getModelSelectionValue(provider?: string, modelId?: string): string {
+  return provider && modelId ? `${provider}/${modelId}` : "";
+}
+
+function parseModelSelection(value: string): { provider?: string; modelId?: string } {
+  if (!value) {
+    return { provider: undefined, modelId: undefined };
+  }
+
+  const slashIndex = value.indexOf("/");
+  if (slashIndex === -1) {
+    return { provider: undefined, modelId: undefined };
+  }
+
+  return {
+    provider: value.slice(0, slashIndex),
+    modelId: value.slice(slashIndex + 1),
+  };
+}
+
+export function InlineCreateCard({
+  tasks,
+  onSubmit,
+  onCancel,
+  addToast,
+  availableModels,
+}: InlineCreateCardProps) {
   const [description, setDescription] = useState("");
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [showDeps, setShowDeps] = useState(false);
   const [depSearch, setDepSearch] = useState("");
+  const [showModels, setShowModels] = useState(false);
+  const [executorProvider, setExecutorProvider] = useState<string | undefined>(undefined);
+  const [executorModelId, setExecutorModelId] = useState<string | undefined>(undefined);
+  const [validatorProvider, setValidatorProvider] = useState<string | undefined>(undefined);
+  const [validatorModelId, setValidatorModelId] = useState<string | undefined>(undefined);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [loadedModels, setLoadedModels] = useState<ModelInfo[]>(availableModels ?? []);
   const [breakIntoSubtasks, setBreakIntoSubtasks] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  const loadModels = useCallback(async () => {
+    if (availableModels) {
+      setLoadedModels(availableModels);
+      setModelsError(null);
+      setModelsLoading(false);
+      return;
+    }
+
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      setLoadedModels(await fetchModels());
+    } catch (err: any) {
+      setModelsError(err?.message || "Failed to load models");
+    } finally {
+      setModelsLoading(false);
+    }
+  }, [availableModels]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -37,6 +98,56 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
     if (!showDeps) setDepSearch("");
   }, [showDeps]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (availableModels) {
+      setLoadedModels(availableModels);
+      setModelsLoading(false);
+      setModelsError(null);
+      return;
+    }
+
+    setModelsLoading(true);
+    setModelsError(null);
+    fetchModels()
+      .then((models) => {
+        if (!cancelled) {
+          setLoadedModels(models);
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setModelsError(err?.message || "Failed to load models");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setModelsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [availableModels]);
+
+  const executorSelectionValue = getModelSelectionValue(executorProvider, executorModelId);
+  const validatorSelectionValue = getModelSelectionValue(validatorProvider, validatorModelId);
+
+  const hasExecutorOverride = Boolean(executorProvider && executorModelId);
+  const hasValidatorOverride = Boolean(validatorProvider && validatorModelId);
+  const selectedModelCount = Number(hasExecutorOverride) + Number(hasValidatorOverride);
+
+  const getModelBadgeLabel = useCallback(
+    (provider?: string, modelId?: string) => {
+      if (!provider || !modelId) return "Using default";
+      const matched = loadedModels.find((model) => model.provider === provider && model.id === modelId);
+      return matched ? `${matched.provider}/${matched.id}` : `${provider}/${modelId}`;
+    },
+    [loadedModels],
+  );
+
   // Cancel when focus leaves the card entirely and there's no content
   useEffect(() => {
     const card = cardRef.current;
@@ -44,20 +155,33 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
     const handleFocusOut = (e: FocusEvent) => {
       // relatedTarget is the element receiving focus — if it's inside the card, ignore
       if (e.relatedTarget instanceof Node && card.contains(e.relatedTarget)) return;
-      // Only cancel if empty and dropdown is not open
+      // Only cancel if empty and dropdowns are not open
       if (
         description.trim() === "" &&
         pendingImages.length === 0 &&
         dependencies.length === 0 &&
         !breakIntoSubtasks &&
-        !showDeps
+        !hasExecutorOverride &&
+        !hasValidatorOverride &&
+        !showDeps &&
+        !showModels
       ) {
         onCancel();
       }
     };
     card.addEventListener("focusout", handleFocusOut);
     return () => card.removeEventListener("focusout", handleFocusOut);
-  }, [description, pendingImages, dependencies, breakIntoSubtasks, showDeps, onCancel]);
+  }, [
+    description,
+    pendingImages,
+    dependencies,
+    breakIntoSubtasks,
+    hasExecutorOverride,
+    hasValidatorOverride,
+    showDeps,
+    showModels,
+    onCancel,
+  ]);
 
   // Clean up object URLs on unmount to prevent memory leaks
   useEffect(() => {
@@ -109,6 +233,10 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
         column: "triage",
         dependencies: dependencies.length ? dependencies : undefined,
         breakIntoSubtasks,
+        modelProvider: hasExecutorOverride ? executorProvider : undefined,
+        modelId: hasExecutorOverride ? executorModelId : undefined,
+        validatorModelProvider: hasValidatorOverride ? validatorProvider : undefined,
+        validatorModelId: hasValidatorOverride ? validatorModelId : undefined,
       });
 
       // Upload pending images as attachments
@@ -136,7 +264,21 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
     } finally {
       setSubmitting(false);
     }
-  }, [description, dependencies, breakIntoSubtasks, submitting, pendingImages, onSubmit, addToast]);
+  }, [
+    description,
+    dependencies,
+    breakIntoSubtasks,
+    submitting,
+    pendingImages,
+    onSubmit,
+    addToast,
+    hasExecutorOverride,
+    executorProvider,
+    executorModelId,
+    hasValidatorOverride,
+    validatorProvider,
+    validatorModelId,
+  ]);
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent) => {
@@ -157,6 +299,45 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
     setDependencies((prev) =>
       prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id],
     );
+  }, []);
+
+  const toggleDepsDropdown = useCallback(() => {
+    setShowDeps((prev) => {
+      const next = !prev;
+      if (next) setShowModels(false);
+      return next;
+    });
+  }, []);
+
+  const toggleModelsDropdown = useCallback(() => {
+    setShowModels((prev) => {
+      const next = !prev;
+      if (next) setShowDeps(false);
+      return next;
+    });
+  }, []);
+
+  const handleExecutorChange = useCallback((value: string) => {
+    const next = parseModelSelection(value);
+    setExecutorProvider(next.provider);
+    setExecutorModelId(next.modelId);
+  }, []);
+
+  const handleValidatorChange = useCallback((value: string) => {
+    const next = parseModelSelection(value);
+    setValidatorProvider(next.provider);
+    setValidatorModelId(next.modelId);
+  }, []);
+
+  const handleModelDropdownMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.closest("button") || target.closest("input"))
+    ) {
+      return;
+    }
+    e.preventDefault();
   }, []);
 
   const truncate = (s: string, len: number) =>
@@ -199,16 +380,145 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
         </div>
       )}
       <div className="inline-create-footer">
-        <div className="dep-trigger-wrap">
-          <button
-            type="button"
-            className="btn btn-sm dep-trigger"
-            onClick={() => setShowDeps((v) => !v)}
-          >
-            <Link size={12} style={{ verticalAlign: 'middle' }} />{dependencies.length > 0 ? ` ${dependencies.length} deps` : " Deps"}
-          </button>
+        <div className="inline-create-controls">
+          <div className="dep-trigger-wrap">
+            <button
+              type="button"
+              className="btn btn-sm dep-trigger"
+              onClick={toggleDepsDropdown}
+            >
+              <Link size={12} style={{ verticalAlign: "middle" }} />
+              {dependencies.length > 0 ? ` ${dependencies.length} deps` : " Deps"}
+            </button>
+            {showDeps && (() => {
+              const term = depSearch.toLowerCase();
+              const filtered = (term
+                ? tasks.filter((t) =>
+                    t.id.toLowerCase().includes(term) ||
+                    (t.title && t.title.toLowerCase().includes(term)) ||
+                    (t.description && t.description.toLowerCase().includes(term))
+                  )
+                : [...tasks]
+              ).sort((a, b) => {
+                const cmp = b.createdAt.localeCompare(a.createdAt);
+                if (cmp !== 0) return cmp;
+                const aNum = parseInt(a.id.slice(a.id.lastIndexOf("-") + 1), 10) || 0;
+                const bNum = parseInt(b.id.slice(b.id.lastIndexOf("-") + 1), 10) || 0;
+                return bNum - aNum;
+              });
+              return (
+                <div className="dep-dropdown" onMouseDown={(e) => e.preventDefault()}>
+                  <input
+                    className="dep-dropdown-search"
+                    placeholder="Search tasks…"
+                    autoFocus
+                    value={depSearch}
+                    onChange={(e) => setDepSearch(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  {filtered.length === 0 ? (
+                    <div className="dep-dropdown-empty">No existing tasks</div>
+                  ) : (
+                    filtered.map((t) => (
+                      <div
+                        key={t.id}
+                        className={`dep-dropdown-item${dependencies.includes(t.id) ? " selected" : ""}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => toggleDep(t.id)}
+                      >
+                        <span className="dep-dropdown-id">{t.id}</span>
+                        <span className="dep-dropdown-title">{truncate(t.title || t.description || t.id, 30)}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="inline-create-model-wrap">
+            <button
+              type="button"
+              className="btn btn-sm inline-create-model-trigger"
+              onClick={toggleModelsDropdown}
+              aria-expanded={showModels}
+              aria-haspopup="dialog"
+            >
+              <Brain size={12} style={{ verticalAlign: "middle" }} />
+              {selectedModelCount > 0
+                ? ` ${selectedModelCount} model${selectedModelCount === 1 ? "" : "s"}`
+                : " Models"}
+            </button>
+            {showModels && (
+              <div
+                className="inline-create-model-dropdown"
+                onMouseDown={handleModelDropdownMouseDown}
+              >
+                {modelsLoading ? (
+                  <div className="inline-create-model-empty">Loading models…</div>
+                ) : modelsError ? (
+                  <div className="inline-create-model-empty">
+                    <span>Failed to load models.</span>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => void loadModels()}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : loadedModels.length === 0 ? (
+                  <div className="inline-create-model-empty">
+                    No models available. Configure authentication in Settings to enable model selection.
+                  </div>
+                ) : (
+                  <>
+                    <div className="inline-create-model-row">
+                      <label htmlFor="inline-create-executor-model" className="inline-create-model-label">
+                        Executor Model
+                      </label>
+                      <span className={`model-badge ${hasExecutorOverride ? "model-badge-custom" : "model-badge-default"}`}>
+                        {getModelBadgeLabel(executorProvider, executorModelId)}
+                      </span>
+                      <CustomModelDropdown
+                        id="inline-create-executor-model"
+                        label="Executor Model"
+                        value={executorSelectionValue}
+                        onChange={handleExecutorChange}
+                        models={loadedModels}
+                        disabled={submitting}
+                        placeholder="Select executor model…"
+                      />
+                    </div>
+
+                    <div className="inline-create-model-row">
+                      <label htmlFor="inline-create-validator-model" className="inline-create-model-label">
+                        Validator Model
+                      </label>
+                      <span className={`model-badge ${hasValidatorOverride ? "model-badge-custom" : "model-badge-default"}`}>
+                        {getModelBadgeLabel(validatorProvider, validatorModelId)}
+                      </span>
+                      <CustomModelDropdown
+                        id="inline-create-validator-model"
+                        label="Validator Model"
+                        value={validatorSelectionValue}
+                        onChange={handleValidatorChange}
+                        models={loadedModels}
+                        disabled={submitting}
+                        placeholder="Select validator model…"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
           {!submitting && (
-            <label className="inline-create-hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 8 }}>
+            <label
+              className="inline-create-hint"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 8 }}
+            >
               <input
                 type="checkbox"
                 data-testid="break-into-subtasks-toggle"
@@ -218,50 +528,6 @@ export function InlineCreateCard({ tasks, onSubmit, onCancel, addToast }: Inline
               Break into subtasks
             </label>
           )}
-          {showDeps && (() => {
-            const term = depSearch.toLowerCase();
-            const filtered = (term
-              ? tasks.filter((t) =>
-                  t.id.toLowerCase().includes(term) ||
-                  (t.title && t.title.toLowerCase().includes(term)) ||
-                  (t.description && t.description.toLowerCase().includes(term))
-                )
-              : [...tasks]
-            ).sort((a, b) => {
-              const cmp = b.createdAt.localeCompare(a.createdAt);
-              if (cmp !== 0) return cmp;
-              const aNum = parseInt(a.id.slice(a.id.lastIndexOf("-") + 1), 10) || 0;
-              const bNum = parseInt(b.id.slice(b.id.lastIndexOf("-") + 1), 10) || 0;
-              return bNum - aNum;
-            });
-            return (
-              <div className="dep-dropdown" onMouseDown={(e) => e.preventDefault()}>
-                <input
-                  className="dep-dropdown-search"
-                  placeholder="Search tasks…"
-                  autoFocus
-                  value={depSearch}
-                  onChange={(e) => setDepSearch(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-                {filtered.length === 0 ? (
-                  <div className="dep-dropdown-empty">No existing tasks</div>
-                ) : (
-                  filtered.map((t) => (
-                    <div
-                      key={t.id}
-                      className={`dep-dropdown-item${dependencies.includes(t.id) ? " selected" : ""}`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => toggleDep(t.id)}
-                    >
-                      <span className="dep-dropdown-id">{t.id}</span>
-                      <span className="dep-dropdown-title">{truncate(t.title || t.description || t.id, 30)}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            );
-          })()}
         </div>
         <div className="inline-create-actions">
           <span className="inline-create-hint">Enter to create · Esc to cancel</span>

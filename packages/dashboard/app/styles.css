@@ -1959,8 +1959,26 @@ body {
 
 .inline-create-footer {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inline-create-controls {
+  display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.inline-create-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .inline-create-hint {
@@ -2018,7 +2036,12 @@ body {
   position: relative;
 }
 
-.dep-trigger {
+.inline-create-model-wrap {
+  position: relative;
+}
+
+.dep-trigger,
+.inline-create-model-trigger {
   font-size: 12px;
   padding: 3px 8px;
 }
@@ -2096,6 +2119,86 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inline-create-model-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  width: min(320px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 50;
+  box-shadow: var(--shadow);
+}
+
+.inline-create-model-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inline-create-model-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.inline-create-model-select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.inline-create-model-select:focus {
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring);
+}
+
+.inline-create-model-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.inline-create-model-row .model-badge {
+  width: fit-content;
+}
+
+@media (max-width: 640px) {
+  .inline-create-actions {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+
+  .inline-create-hint {
+    margin-left: 0;
+  }
+
+  .inline-create-model-dropdown {
+    left: 0;
+    right: auto;
+    width: min(360px, calc(100vw - 48px));
+    max-width: calc(100vw - 48px);
+  }
 }
 
 /* === Empty state === */

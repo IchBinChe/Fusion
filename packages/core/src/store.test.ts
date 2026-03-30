@@ -654,6 +654,30 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("createTask — model overrides", () => {
+    it("persists executor and validator model overrides on creation", async () => {
+      const created = await store.createTask({
+        title: "Task with model overrides",
+        description: "Use explicit executor and validator models",
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+        validatorModelProvider: "openai",
+        validatorModelId: "gpt-4o",
+      });
+
+      expect(created.modelProvider).toBe("anthropic");
+      expect(created.modelId).toBe("claude-sonnet-4-5");
+      expect(created.validatorModelProvider).toBe("openai");
+      expect(created.validatorModelId).toBe("gpt-4o");
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.modelProvider).toBe("anthropic");
+      expect(persisted.modelId).toBe("claude-sonnet-4-5");
+      expect(persisted.validatorModelProvider).toBe("openai");
+      expect(persisted.validatorModelId).toBe("gpt-4o");
+    });
+  });
+
   describe("updateTask — model overrides", () => {
     it("sets executor model provider and id via updateTask", async () => {
       const task = await createTestTask();

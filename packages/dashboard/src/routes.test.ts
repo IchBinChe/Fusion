@@ -194,6 +194,95 @@ describe("POST /tasks", () => {
     });
   });
 
+  it("forwards model overrides when both provider and id are supplied", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      validatorModelProvider: "openai",
+      validatorModelId: "gpt-4o",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Use explicit models",
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+        validatorModelProvider: "openai",
+        validatorModelId: "gpt-4o",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith({
+      title: undefined,
+      description: "Use explicit models",
+      column: undefined,
+      dependencies: undefined,
+      breakIntoSubtasks: undefined,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      validatorModelProvider: "openai",
+      validatorModelId: "gpt-4o",
+    });
+  });
+
+  it("normalizes partial model overrides back to defaults", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Ignore partial model selection",
+        modelProvider: "anthropic",
+        validatorModelId: "gpt-4o",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith({
+      title: undefined,
+      description: "Ignore partial model selection",
+      column: undefined,
+      dependencies: undefined,
+      breakIntoSubtasks: undefined,
+      modelProvider: undefined,
+      modelId: undefined,
+      validatorModelProvider: undefined,
+      validatorModelId: undefined,
+    });
+  });
+
+  it("returns 400 when model fields are not strings", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Invalid model payload",
+        modelProvider: ["anthropic"],
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("modelProvider must be a string");
+    expect(store.createTask).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when description is missing", async () => {
     const res = await REQUEST(
       buildApp(),

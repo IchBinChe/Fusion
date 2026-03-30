@@ -41,6 +41,7 @@ AI-guided interactive planning for creating well-specified tasks from high-level
 - **Kanban Board**: Drag-and-drop task management across columns (Triage, Todo, In Progress, In Review, Done)
 - **Inline Editing**: Quick-edit task title and description directly on the board for Triage and Todo columns. Double-click a card or use the pencil icon that appears on hover.
 - **List View**: Alternative tabular view for tasks with sorting and filtering. The "Hide Done" toggle hides both Done and Archived tasks for an active-work-only view.
+- **Model Selection at Creation**: Choose executor and validator AI models while creating tasks from the board or list view, or leave them unset to use the global defaults.
 - **Task Details**: View full task specifications, agent logs, and attachments
 - **GitHub Import**: Import issues directly from GitHub repositories
 - **PR Management**: Create, monitor, and merge pull requests for in-review tasks

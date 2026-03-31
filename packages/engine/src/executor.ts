@@ -675,6 +675,7 @@ export class TaskExecutor {
         const task = await store.createTask({
           description: params.description,
           dependencies: params.dependencies,
+          column: "triage",
         });
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
         return {

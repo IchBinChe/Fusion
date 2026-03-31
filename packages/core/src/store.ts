@@ -379,7 +379,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const id = await this.allocateId();
     // Generate title from description if not provided
-    const title = input.title?.trim() || generateTitleFromDescription(input.description);
+    const generatedTitle = await generateTitleFromDescription(input.description, this.rootDir);
+    const title = input.title?.trim() || generatedTitle;
 
     const now = new Date().toISOString();
     const task: Task = {
@@ -2236,47 +2237,121 @@ ${notificationsSection}`;
  * @param description - The task description
  * @returns A generated title string, or empty string if no valid words found
  */
-function generateTitleFromDescription(description: string): string {
+/** System prompt for AI title generation */
+const TITLE_GENERATION_PROMPT = `You are a title generation assistant for a task management system.
+
+Your job is to create a concise, descriptive title from a task description.
+
+## Guidelines
+- Maximum 60 characters
+- 3-8 words preferred
+- Summarize the key intent/action of the task
+- Use clear, professional language
+- Remove filler words (the, a, an) where possible
+- Output ONLY the title text, no quotes, no markdown, no explanations
+- If the input is already a good short title (3 words or less), return it as-is`;
+
+// Dynamic import for @kb/engine to avoid resolution issues in test environment
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createKbAgent: any;
+
+// Initialize the import (this runs in actual code, mocked in tests)
+async function initEngine() {
+  if (!createKbAgent) {
+    try {
+      // Use dynamic import with variable to prevent static analysis
+      const engineModule = "@kb/engine";
+      const engine = await import(/* @vite-ignore */ engineModule);
+      createKbAgent = engine.createKbAgent;
+    } catch {
+      // Allow failure in test environments - agent functionality will be stubbed
+      createKbAgent = undefined;
+    }
+  }
+}
+
+// Initialize on module load (will be awaited in actual usage)
+const engineReady = initEngine();
+
+/**
+ * Generate a title from description using AI summarization.
+ * Returns empty string if AI fails or description is empty.
+ */
+async function generateTitleFromDescription(description: string, rootDir: string): Promise<string> {
   if (!description?.trim()) {
     return "";
   }
 
-  // Normalize whitespace and remove extra newlines
-  const normalized = description.trim().replace(/\s+/g, " ");
-
-  // Extract words (sequences of alphanumeric chars, preserving internal hyphens/apostrophes)
-  const words = normalized.match(/[a-zA-Z0-9]+(?:['\-_][a-zA-Z0-9]+)*/g) || [];
-
-  if (words.length === 0) {
-    // If no alphanumeric words found, fallback to first 50 chars of normalized text
-    const fallback = normalized.slice(0, 50).trim();
-    return fallback || "";
+  // For very short descriptions (3 words or less), use as-is without AI call
+  const trimmed = description.trim();
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount <= 3 && trimmed.length <= 60) {
+    return trimmed;
   }
 
-  // Build title from first 8-10 words (max ~50 chars)
-  const maxWords = Math.min(10, words.length);
-  const minWords = Math.min(8, words.length);
+  // Ensure engine is loaded before using createKbAgent
+  await engineReady;
 
-  let title = "";
-  let wordCount = 0;
-
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-
-    // Check if adding this word would exceed ~50 chars
-    const candidate = wordCount === 0 ? word : `${title} ${word}`;
-    if (candidate.length > 50 && wordCount >= minWords) {
-      break;
-    }
-
-    title = candidate;
-    wordCount++;
-
-    // Stop at max words
-    if (wordCount >= maxWords) {
-      break;
-    }
+  if (!createKbAgent) {
+    // AI engine not available - return empty string (no fallback to truncation)
+    return "";
   }
 
-  return title || "";
+  try {
+    const agentResult = await createKbAgent({
+      cwd: rootDir,
+      systemPrompt: TITLE_GENERATION_PROMPT,
+      tools: "readonly",
+    });
+
+    if (!agentResult?.session) {
+      return "";
+    }
+
+    // Send the description to the agent
+    await agentResult.session.prompt(`Generate a title for this task:\n\n${description}`);
+
+    // Get the response text from the agent's state
+    interface AgentMessage {
+      role: string;
+      content?: string | Array<{ type: string; text: string }>;
+    }
+    const lastMessage = (agentResult.session.state.messages as AgentMessage[])
+      .filter((m: AgentMessage) => m.role === "assistant")
+      .pop();
+
+    let title = "";
+    if (lastMessage?.content) {
+      // Handle both string and array content types
+      if (typeof lastMessage.content === "string") {
+        title = lastMessage.content.trim();
+      } else if (Array.isArray(lastMessage.content)) {
+        // Extract text from content blocks
+        title = lastMessage.content
+          .filter((c: { type: string; text: string }): c is { type: "text"; text: string } => c.type === "text")
+          .map((c: { type: string; text: string }) => c.text)
+          .join("")
+          .trim();
+      }
+    }
+
+    // Clean the title: remove surrounding quotes, normalize whitespace
+    title = title
+      .replace(/^["']|["']$/g, "")  // Remove surrounding quotes
+      .replace(/\s+/g, " ")          // Normalize whitespace
+      .trim();
+
+    // Dispose the agent session
+    try {
+      agentResult.session.dispose?.();
+    } catch {
+      // Ignore disposal errors
+    }
+
+    // Return empty string if AI returned nothing (no fallback)
+    return title || "";
+  } catch {
+    // AI failed - return empty string (no fallback to truncation)
+    return "";
+  }
 }

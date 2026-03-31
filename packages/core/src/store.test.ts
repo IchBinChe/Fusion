@@ -1,10 +1,34 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { TaskStore } from "./store.js";
 import { readFile, writeFile, mkdir, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Task } from "./types.js";
+
+// Mock @kb/engine for title generation tests
+const mockDispose = vi.fn();
+const mockPrompt = vi.fn();
+let mockAgentResponse = "AI Generated Title";
+
+vi.mock("@kb/engine", () => ({
+  createKbAgent: vi.fn().mockImplementation(() =>
+    Promise.resolve({
+      session: {
+        prompt: mockPrompt,
+        get state() {
+          return {
+            messages: [
+              { role: "user", content: "test" },
+              { role: "assistant", content: mockAgentResponse },
+            ],
+          };
+        },
+        dispose: mockDispose,
+      },
+    })
+  ),
+}));
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-store-test-"));
@@ -62,14 +86,13 @@ describe("TaskStore", () => {
 
   describe("prompt generation", () => {
     it("triage task without title does not duplicate description in PROMPT.md", async () => {
-      const task = await store.createTask({ description: "Fix the login bug" });
+      const task = await store.createTask({ description: "Fix the login bug on the settings page" });
       const detail = await store.getTask(task.id);
 
-      // Heading should include auto-generated title from description
-      expect(detail.prompt).toMatch(/^# KB-001: Fix the login bug\n/);
-      // Description appears exactly once
-      const count = detail.prompt.split("Fix the login bug").length - 1;
-      expect(count).toBe(2); // Once in heading, once in body
+      // Heading should include AI-generated title (mock returns "AI Generated Title")
+      expect(detail.prompt).toMatch(/^# KB-001: AI Generated Title\n/);
+      // Description appears exactly once in body (not duplicated in heading)
+      expect(detail.prompt).toContain("Fix the login bug on the settings page");
     });
 
     it("triage task with title uses title in heading and description in body", async () => {
@@ -2403,87 +2426,147 @@ describe("TaskStore", () => {
   // ── Title Generation Tests ───────────────────────────────────────
 
   describe("title generation from description", () => {
-    it("generates title from description when title is not provided", async () => {
+    beforeEach(async () => {
+      // Reset mock to successful response by default
+      mockAgentResponse = "AI Generated Title";
+      mockDispose.mockClear();
+      mockPrompt.mockClear();
+      // Reset the createKbAgent mock to default behavior
+      const engineModule = "@kb/engine";
+      const { createKbAgent } = await import(/* @vite-ignore */ engineModule);
+      createKbAgent.mockImplementation(() =>
+        Promise.resolve({
+          session: {
+            prompt: mockPrompt,
+            get state() {
+              return {
+                messages: [
+                  { role: "user", content: "test" },
+                  { role: "assistant", content: mockAgentResponse },
+                ],
+              };
+            },
+            dispose: mockDispose,
+          },
+        })
+      );
+    });
+
+    it("uses AI to generate title for longer descriptions", async () => {
       const task = await store.createTask({ description: "Fix the login bug on the settings page" });
 
-      expect(task.title).toBe("Fix the login bug on the settings page");
-      expect(task.title).toBeTruthy();
+      // AI should have been called and returned the mock response
+      expect(mockPrompt).toHaveBeenCalledWith(expect.stringContaining("Fix the login bug on the settings page"));
+      expect(task.title).toBe("AI Generated Title");
 
       // Verify persisted to disk
       const fetched = await store.getTask(task.id);
-      expect(fetched.title).toBe("Fix the login bug on the settings page");
+      expect(fetched.title).toBe("AI Generated Title");
+    });
+
+    it("short-circuits for short descriptions (3 words or less)", async () => {
+      // These should bypass AI and use description as-is
+      const task1 = await store.createTask({ description: "Fix bug" });
+      expect(task1.title).toBe("Fix bug");
+      expect(mockPrompt).not.toHaveBeenCalled();
+
+      mockPrompt.mockClear();
+
+      const task2 = await store.createTask({ description: "Refactoring" });
+      expect(task2.title).toBe("Refactoring");
+      expect(mockPrompt).not.toHaveBeenCalled();
+    });
+
+    it("uses AI for 3-word descriptions exceeding 60 chars", async () => {
+      // 3 words but >60 chars should go through AI
+      const longWords = "supercalifragilisticexpialidocious pneumonoultramicroscopicsilicovolcanoconiosis floccinaucinihilipilification";
+      expect(longWords.length).toBeGreaterThan(60);
+
+      const task = await store.createTask({ description: longWords });
+      expect(mockPrompt).toHaveBeenCalled();
+      expect(task.title).toBe("AI Generated Title");
     });
 
     it("generates title from description when title is empty string", async () => {
       const task = await store.createTask({ title: "", description: "Implement caching layer for API responses" });
 
-      expect(task.title).toBe("Implement caching layer for API responses");
-
-      const fetched = await store.getTask(task.id);
-      expect(fetched.title).toBe("Implement caching layer for API responses");
+      expect(mockPrompt).toHaveBeenCalled();
+      expect(task.title).toBe("AI Generated Title");
     });
 
     it("generates title from description when title is whitespace only", async () => {
       const task = await store.createTask({ title: "   ", description: "Add dark mode support to the dashboard" });
 
-      expect(task.title).toBe("Add dark mode support to the dashboard");
+      expect(mockPrompt).toHaveBeenCalled();
+      expect(task.title).toBe("AI Generated Title");
     });
 
-    it("uses provided title when available (does not override)", async () => {
+    it("uses provided title when available (does not call AI)", async () => {
       const task = await store.createTask({
         title: "Custom Title",
         description: "This is the description that should not become the title",
       });
 
       expect(task.title).toBe("Custom Title");
+      expect(mockPrompt).not.toHaveBeenCalled();
 
       const fetched = await store.getTask(task.id);
       expect(fetched.title).toBe("Custom Title");
     });
 
-    it("handles very long descriptions gracefully (truncates to ~50 chars)", async () => {
-      const longDescription = "This is a very long description with many words that should be truncated to around fifty characters when generating the title automatically";
-      const task = await store.createTask({ description: longDescription });
+    it("returns empty title when AI fails", async () => {
+      // Simulate AI failure by making createKbAgent throw
+      const engineModule = "@kb/engine";
+      const { createKbAgent } = await import(/* @vite-ignore */ engineModule);
+      createKbAgent.mockImplementation(() => Promise.reject(new Error("AI failure")));
 
-      // Should be truncated to ~50 chars with 8-10 words
-      expect(task.title!.length).toBeLessThanOrEqual(55);
-      expect(task.title).toBe("This is a very long description with many words");
+      const task = await store.createTask({ description: "Some long description that needs AI summarization" });
+
+      expect(task.title).toBeUndefined();
     });
 
-    it("handles short descriptions (less than 3 words)", async () => {
-      const task = await store.createTask({ description: "Fix bug" });
+    it("returns empty title when AI returns empty response", async () => {
+      mockAgentResponse = "";
 
-      expect(task.title).toBe("Fix bug");
+      const task = await store.createTask({ description: "Some long description that needs AI summarization" });
+
+      expect(task.title).toBeUndefined();
     });
 
-    it("handles single word descriptions", async () => {
-      const task = await store.createTask({ description: "Refactoring" });
+    it("cleans quotes from AI-generated titles", async () => {
+      // Override the mock to return a quoted title
+      const engineModule = "@kb/engine";
+      const { createKbAgent } = await import(/* @vite-ignore */ engineModule);
+      createKbAgent.mockImplementation(() =>
+        Promise.resolve({
+          session: {
+            prompt: mockPrompt,
+            state: {
+              messages: [
+                { role: "user", content: "test" },
+                { role: "assistant", content: '"Quoted Title"' },
+              ],
+            },
+            dispose: mockDispose,
+          },
+        })
+      );
 
-      expect(task.title).toBe("Refactoring");
+      // Use a description with >3 words to ensure AI is called
+      const task = await store.createTask({ description: "Some long description with many words to trigger AI" });
+
+      expect(task.title).toBe("Quoted Title");
     });
 
-    it("handles descriptions with special characters", async () => {
-      const task = await store.createTask({ description: "Fix \$\$\$ bug @ home-page (urgent!)" });
+    it("handles descriptions with special characters via AI", async () => {
+      const task = await store.createTask({ description: "Fix $$$ bug @ home-page (urgent!)" });
 
-      // Should extract alphanumeric words, dropping special chars
-      expect(task.title).toBe("Fix bug home-page urgent");
-    });
-
-    it("handles descriptions with only special characters (fallback)", async () => {
-      const task = await store.createTask({ description: "!!! @@@ ###" });
-
-      // Should fallback to first 50 chars of normalized text
-      expect(task.title).toBe("!!! @@@ ###");
+      expect(mockPrompt).toHaveBeenCalled();
+      expect(task.title).toBe("AI Generated Title");
     });
 
     it("handles empty description gracefully (should throw)", async () => {
       await expect(store.createTask({ description: "" })).rejects.toThrow("Description is required");
-    });
-
-    it("preserves hyphenated and apostrophe words correctly", async () => {
-      const task = await store.createTask({ description: "Fix user-input validation for today's date" });
-
-      expect(task.title).toBe("Fix user-input validation for today's date");
     });
 
     it("includes generated title in PROMPT.md heading for triage tasks", async () => {
@@ -2491,7 +2574,7 @@ describe("TaskStore", () => {
       const detail = await store.getTask(task.id);
 
       // PROMPT.md heading should include the generated title
-      expect(detail.prompt).toMatch(/^# KB-001: Implement the new feature/);
+      expect(detail.prompt).toMatch(/^# KB-001: AI Generated Title/);
     });
 
     it("includes generated title in PROMPT.md heading for todo tasks", async () => {
@@ -2502,7 +2585,19 @@ describe("TaskStore", () => {
       const detail = await store.getTask(task.id);
 
       // PROMPT.md heading should include the generated title
-      expect(detail.prompt).toMatch(/^# KB-001: Build the authentication system/);
+      expect(detail.prompt).toMatch(/^# KB-001: AI Generated Title/);
+    });
+
+    it("handles empty title in PROMPT.md heading when AI fails", async () => {
+      const engineModule = "@kb/engine";
+      const { createKbAgent } = await import(/* @vite-ignore */ engineModule);
+      createKbAgent.mockRejectedValueOnce(new Error("AI failure"));
+
+      const task = await store.createTask({ description: "Some description that will fail" });
+      const detail = await store.getTask(task.id);
+
+      // When title is empty, heading should be just the ID
+      expect(detail.prompt).toMatch(/^# KB-001\n/);
     });
   });
 

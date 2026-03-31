@@ -1,11 +1,12 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
-import { Link, Clock, Layers, Pencil, ChevronDown } from "lucide-react";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder } from "lucide-react";
 import type { Task, TaskDetail, Column, PrInfo, IssueInfo } from "@kb/core";
 import { fetchTaskDetail, uploadAttachment } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { pickPreferredBadge } from "./TaskCardBadge";
 import { useBadgeWebSocket } from "../hooks/useBadgeWebSocket";
 import { getFreshBatchData } from "../hooks/useBatchBadgeFetch";
+import { useSessionFiles } from "../hooks/useSessionFiles";
 import type { ToastType } from "../hooks/useToast";
 
 const COLUMN_COLOR_MAP: Record<Column, string> = {
@@ -42,6 +43,7 @@ interface TaskCardProps {
   ) => Promise<Task>;
   onArchiveTask?: (id: string) => Promise<Task>;
   onUnarchiveTask?: (id: string) => Promise<Task>;
+  onOpenFilesForTask?: (taskId: string) => void;
 }
 
 function areTaskBadgeInfosEqual(
@@ -83,6 +85,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.onUpdateTask === next.onUpdateTask &&
     previous.onArchiveTask === next.onArchiveTask &&
     previous.onUnarchiveTask === next.onUnarchiveTask &&
+    previous.onOpenFilesForTask === next.onOpenFilesForTask &&
     previousTask.id === nextTask.id &&
     previousTask.title === nextTask.title &&
     previousTask.description === nextTask.description &&
@@ -123,6 +126,7 @@ function TaskCardComponent({
   onUpdateTask,
   onArchiveTask,
   onUnarchiveTask,
+  onOpenFilesForTask,
 }: TaskCardProps) {
   const [dragging, setDragging] = useState(false);
   const [fileDragOver, setFileDragOver] = useState(false);
@@ -324,6 +328,7 @@ function TaskCardComponent({
   }, [hasGitHubBadge, isInViewport, subscribeToBadge, task.id, unsubscribeFromBadge]);
 
   const liveBadgeData = badgeUpdates.get(task.id);
+  const { files: sessionFiles, loading: sessionFilesLoading } = useSessionFiles(task.id, task.worktree, task.column);
 
   // Get fresh batch data if available
   const batchData = useMemo(() => getFreshBatchData(task.id), [task.id]);
@@ -683,6 +688,22 @@ function TaskCardComponent({
           </>
         );
       })()}
+      {task.worktree && (task.column === "in-progress" || task.column === "in-review") && (
+        <button
+          type="button"
+          className="card-session-files"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenFilesForTask?.(task.id);
+          }}
+          disabled={!onOpenFilesForTask}
+        >
+          <Folder size={12} />
+          <span>
+            {sessionFilesLoading ? "Checking files…" : `${sessionFiles.length} files changed`}
+          </span>
+        </button>
+      )}
       {((task.dependencies && task.dependencies.length > 0) || queued || task.status === "queued" || task.blockedBy) && (
         <div className="card-meta">
           {task.dependencies && task.dependencies.length > 0 && (

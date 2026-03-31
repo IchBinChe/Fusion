@@ -25,7 +25,8 @@ interface HeaderProps {
   onOpenSchedules?: () => void;
   onOpenGitManager?: () => void;
   onToggleTerminal?: () => void;
-  onToggleFiles?: () => void;
+  /** Opens the top-level workspace-aware file browser modal. */
+  onOpenFiles?: () => void;
   filesOpen?: boolean;
   globalPaused?: boolean;
   enginePaused?: boolean;
@@ -63,7 +64,7 @@ export function Header({
   onOpenSchedules,
   onOpenGitManager,
   onToggleTerminal,
-  onToggleFiles,
+  onOpenFiles,
   filesOpen,
   globalPaused,
   enginePaused,
@@ -293,11 +294,11 @@ export function Header({
         )}
 
         {/* Files button - desktop only */}
-        {!isMobile && onToggleFiles && (
+        {!isMobile && onOpenFiles && (
           <button
             className={`btn-icon${filesOpen ? " btn-icon--active" : ""}`}
-            onClick={onToggleFiles}
-            title="Browse Files"
+            onClick={onOpenFiles}
+            title="Browse files"
             data-testid="files-toggle-btn"
           >
             <Folder size={16} />
@@ -376,10 +377,10 @@ export function Header({
               <span>Open Terminal</span>
             </button>
             {/* Files - in overflow on mobile */}
-            {onToggleFiles && (
+            {onOpenFiles && (
               <button
                 className="mobile-overflow-item"
-                onClick={() => handleOverflowAction(onToggleFiles)}
+                onClick={() => handleOverflowAction(onOpenFiles)}
                 role="menuitem"
                 data-testid="overflow-files-btn"
               >

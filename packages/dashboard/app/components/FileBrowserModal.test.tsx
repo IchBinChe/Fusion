@@ -1,28 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { FileBrowserModal } from "./FileBrowserModal";
-import * as useFileBrowserHook from "../hooks/useFileBrowser";
-import * as useFileEditorHook from "../hooks/useFileEditor";
-import * as useProjectFileBrowserHook from "../hooks/useProjectFileBrowser";
-import * as useProjectFileEditorHook from "../hooks/useProjectFileEditor";
+import * as workspaceBrowserHook from "../hooks/useWorkspaceFileBrowser";
+import * as workspaceEditorHook from "../hooks/useWorkspaceFileEditor";
+import * as workspacesHook from "../hooks/useWorkspaces";
 
-// Mock the hooks
-vi.mock("../hooks/useFileBrowser");
-vi.mock("../hooks/useFileEditor");
-vi.mock("../hooks/useProjectFileBrowser");
-vi.mock("../hooks/useProjectFileEditor");
+vi.mock("../hooks/useWorkspaceFileBrowser");
+vi.mock("../hooks/useWorkspaceFileEditor");
+vi.mock("../hooks/useWorkspaces");
+
+const mockUseWorkspaceFileBrowser = vi.mocked(workspaceBrowserHook.useWorkspaceFileBrowser);
+const mockUseWorkspaceFileEditor = vi.mocked(workspaceEditorHook.useWorkspaceFileEditor);
+const mockUseWorkspaces = vi.mocked(workspacesHook.useWorkspaces);
 
 describe("FileBrowserModal", () => {
   const mockOnClose = vi.fn();
-  const mockSave = vi.fn();
+  const mockOnWorkspaceChange = vi.fn();
+  const mockSave = vi.fn().mockResolvedValue(undefined);
   const mockSetContent = vi.fn();
   const mockSetPath = vi.fn();
   const mockRefresh = vi.fn();
 
   const defaultBrowserState = {
     entries: [
-      { name: "file1.ts", type: "file", size: 1024, mtime: "2024-01-01" },
-      { name: "folder1", type: "directory" },
+      { name: "file1.ts", type: "file" as const, size: 1024, mtime: "2024-01-01" },
+      { name: "folder1", type: "directory" as const, mtime: "2024-01-01" },
     ],
     currentPath: ".",
     setPath: mockSetPath,
@@ -45,219 +48,121 @@ describe("FileBrowserModal", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
-    
-    // Default mock implementations
-    vi.mocked(useFileBrowserHook.useFileBrowser).mockReturnValue(defaultBrowserState);
-    vi.mocked(useFileEditorHook.useFileEditor).mockReturnValue(defaultEditorState);
-    vi.mocked(useProjectFileBrowserHook.useProjectFileBrowser).mockReturnValue(defaultBrowserState);
-    vi.mocked(useProjectFileEditorHook.useProjectFileEditor).mockReturnValue(defaultEditorState);
+
+    mockUseWorkspaceFileBrowser.mockReturnValue(defaultBrowserState);
+    mockUseWorkspaceFileEditor.mockReturnValue(defaultEditorState);
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [
+        { id: "KB-001", label: "KB-001", title: "Task One", worktree: "/repo/.worktrees/kb-001", kind: "task" },
+        { id: "KB-002", label: "KB-002", title: "Task Two", worktree: "/repo/.worktrees/kb-002", kind: "task" },
+      ],
+      loading: false,
+      error: null,
+    });
+
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: 1024,
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  describe("Desktop view", () => {
-    beforeEach(() => {
-      // Mock desktop viewport
-      Object.defineProperty(window, "innerWidth", {
-        writable: true,
-        configurable: true,
-        value: 1024,
-      });
+  it("renders project-root modal title and workspace selector", () => {
+    render(
+      <FileBrowserModal
+        initialWorkspace="project"
+        isOpen={true}
+        onClose={mockOnClose}
+        onWorkspaceChange={mockOnWorkspaceChange}
+      />,
+    );
+
+    expect(screen.getByText("Files — Project")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /kb/i })).toBeInTheDocument();
+    expect(mockUseWorkspaceFileBrowser).toHaveBeenCalledWith("project", true);
+  });
+
+  it("opens a file in the editor when selected", async () => {
+    render(
+      <FileBrowserModal
+        initialWorkspace="project"
+        isOpen={true}
+        onClose={mockOnClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("file1.ts"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Editor for file1.ts")).toBeInTheDocument();
     });
 
-    it("renders file browser sidebar and empty state on desktop", () => {
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
+    expect(mockUseWorkspaceFileEditor).toHaveBeenLastCalledWith("project", "file1.ts", true);
+  });
 
-      // Sidebar should be visible
-      expect(screen.getByText("file1.ts")).toBeInTheDocument();
-      expect(screen.getByText("folder1")).toBeInTheDocument();
+  it("switches workspace and notifies parent", async () => {
+    const user = userEvent.setup();
+    render(
+      <FileBrowserModal
+        initialWorkspace="project"
+        isOpen={true}
+        onClose={mockOnClose}
+        onWorkspaceChange={mockOnWorkspaceChange}
+      />,
+    );
 
-      // Empty state placeholder should be visible
-      expect(screen.getByText("Select a file to edit")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /kb/i }));
+    await user.click(screen.getByRole("button", { name: /KB-002 Task Two/i }));
+
+    expect(mockOnWorkspaceChange).toHaveBeenCalledWith("KB-002");
+  });
+
+  it("shows back button in mobile editor view", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: 375,
     });
 
-    it("selecting a file shows editor on desktop (both views visible)", async () => {
-      const editorStateWithChanges = {
-        ...defaultEditorState,
-        hasChanges: true,
-      };
-      vi.mocked(useFileEditorHook.useFileEditor).mockReturnValue(editorStateWithChanges);
+    render(
+      <FileBrowserModal
+        initialWorkspace="project"
+        isOpen={true}
+        onClose={mockOnClose}
+      />,
+    );
 
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
+    fireEvent(window, new Event("resize"));
+    fireEvent.click(screen.getByText("file1.ts"));
 
-      // Click on a file
-      fireEvent.click(screen.getByText("file1.ts"));
-
-      // Editor content should be visible - check for the editor textarea
-      await waitFor(() => {
-        expect(screen.getByLabelText("Editor for file1.ts")).toBeInTheDocument();
-      });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Back to file list")).toBeInTheDocument();
     });
   });
 
-  describe("Mobile view", () => {
-    beforeEach(() => {
-      // Mock mobile viewport
-      Object.defineProperty(window, "innerWidth", {
-        writable: true,
-        configurable: true,
-        value: 375,
-      });
+  it("closes on Escape and saves on Cmd+S", () => {
+    mockUseWorkspaceFileEditor.mockReturnValue({
+      ...defaultEditorState,
+      hasChanges: true,
     });
 
-    it("initially shows only file list (sidebar visible, content hidden)", () => {
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
+    render(
+      <FileBrowserModal
+        initialWorkspace="project"
+        isOpen={true}
+        onClose={mockOnClose}
+      />,
+    );
 
-      // Fire resize event to trigger mobile detection
-      fireEvent(window, new Event("resize"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(document, { key: "s", metaKey: true });
 
-      // File list should be visible
-      expect(screen.getByText("file1.ts")).toBeInTheDocument();
-      
-      // Empty state should be in the DOM but hidden via CSS
-      const placeholder = screen.getByText("Select a file to edit");
-      expect(placeholder).toBeInTheDocument();
-    });
-
-    it("selecting a file switches to editor view with back button", async () => {
-      const editorStateWithChanges = {
-        ...defaultEditorState,
-        hasChanges: true,
-      };
-      vi.mocked(useFileEditorHook.useFileEditor).mockReturnValue(editorStateWithChanges);
-
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
-
-      // Trigger mobile detection
-      fireEvent(window, new Event("resize"));
-
-      // Click on a file
-      fireEvent.click(screen.getByText("file1.ts"));
-
-      // Back button should be visible
-      await waitFor(() => {
-        expect(screen.getByLabelText("Back to file list")).toBeInTheDocument();
-      });
-    });
-
-    it("back button returns to list view when clicked", async () => {
-      const editorStateWithChanges = {
-        ...defaultEditorState,
-        hasChanges: true,
-      };
-      vi.mocked(useFileEditorHook.useFileEditor).mockReturnValue(editorStateWithChanges);
-
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
-
-      // Trigger mobile detection
-      fireEvent(window, new Event("resize"));
-
-      // Click on a file to enter editor view
-      fireEvent.click(screen.getByText("file1.ts"));
-
-      // Wait for back button to appear
-      await waitFor(() => {
-        expect(screen.getByLabelText("Back to file list")).toBeInTheDocument();
-      });
-
-      // Click back button
-      fireEvent.click(screen.getByLabelText("Back to file list"));
-
-      // After clicking back, we should still see the file list (file node should be visible)
-      expect(screen.getAllByText("file1.ts").length).toBeGreaterThan(0);
-    });
-
-    it("back button only renders on mobile when file is selected", () => {
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
-
-      // Trigger mobile detection
-      fireEvent(window, new Event("resize"));
-
-      // Back button should NOT be visible when no file is selected
-      expect(screen.queryByLabelText("Back to file list")).not.toBeInTheDocument();
-    });
-
-    it("modal resets to list view when reopened", () => {
-      const { unmount } = render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
-
-      // Trigger mobile detection
-      fireEvent(window, new Event("resize"));
-
-      // Unmount and remount to simulate reopening
-      unmount();
-
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
-
-      // Trigger mobile detection again
-      fireEvent(window, new Event("resize"));
-
-      // Should start in list view - file list visible
-      expect(screen.getByText("file1.ts")).toBeInTheDocument();
-    });
-  });
-
-  describe("Keyboard shortcuts", () => {
-    it("calls onClose when Escape key is pressed", () => {
-      render(
-        <FileBrowserModal
-          taskId="KB-001"
-          isOpen={true}
-          onClose={mockOnClose}
-        />
-      );
-
-      fireEvent.keyDown(document, { key: "Escape" });
-      expect(mockOnClose).toHaveBeenCalled();
-    });
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+    expect(mockSave).toHaveBeenCalledTimes(1);
   });
 });

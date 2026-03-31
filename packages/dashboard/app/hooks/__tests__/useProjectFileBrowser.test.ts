@@ -6,14 +6,14 @@ import type { FileListResponse } from "../../api";
 
 // Mock the api module
 vi.mock("../../api", () => ({
-  fetchProjectFileList: vi.fn(),
+  fetchWorkspaceFileList: vi.fn(),
 }));
 
-const mockFetchProjectFileList = vi.mocked(api.fetchProjectFileList);
+const mockFetchWorkspaceFileList = vi.mocked(api.fetchWorkspaceFileList);
 
 describe("useProjectFileBrowser", () => {
   beforeEach(() => {
-    mockFetchProjectFileList.mockReset();
+    mockFetchWorkspaceFileList.mockReset();
   });
 
   afterEach(() => {
@@ -37,20 +37,17 @@ describe("useProjectFileBrowser", () => {
         { name: "package.json", type: "file", size: 100, mtime: "2024-01-01T00:00:00Z" },
       ],
     };
-    mockFetchProjectFileList.mockResolvedValueOnce(mockResponse);
+    mockFetchWorkspaceFileList.mockResolvedValueOnce(mockResponse);
 
     const { result } = renderHook(() => useProjectFileBrowser("/project", true));
 
-    // Should start loading
     expect(result.current.loading).toBe(true);
-
-    // Wait for fetch to complete
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.entries).toHaveLength(2);
     expect(result.current.entries[0].name).toBe("src");
     expect(result.current.entries[1].name).toBe("package.json");
-    expect(mockFetchProjectFileList).toHaveBeenCalledWith(undefined);
+    expect(mockFetchWorkspaceFileList).toHaveBeenCalledWith("project", undefined);
   });
 
   it("fetches subdirectory when path changes", async () => {
@@ -63,7 +60,7 @@ describe("useProjectFileBrowser", () => {
       entries: [{ name: "index.ts", type: "file", size: 200, mtime: "2024-01-01T00:00:00Z" }],
     };
 
-    mockFetchProjectFileList
+    mockFetchWorkspaceFileList
       .mockResolvedValueOnce(rootResponse)
       .mockResolvedValueOnce(subdirResponse);
 
@@ -72,7 +69,6 @@ describe("useProjectFileBrowser", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.entries).toHaveLength(1);
 
-    // Navigate to subdirectory
     act(() => {
       result.current.setPath("src");
     });
@@ -80,11 +76,11 @@ describe("useProjectFileBrowser", () => {
     await waitFor(() => expect(result.current.currentPath).toBe("src"));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchProjectFileList).toHaveBeenLastCalledWith("src");
+    expect(mockFetchWorkspaceFileList).toHaveBeenLastCalledWith("project", "src");
   });
 
   it("handles fetch errors", async () => {
-    mockFetchProjectFileList.mockRejectedValueOnce(new Error("Failed to load files"));
+    mockFetchWorkspaceFileList.mockRejectedValueOnce(new Error("Failed to load files"));
 
     const { result } = renderHook(() => useProjectFileBrowser("/project", true));
 
@@ -107,7 +103,7 @@ describe("useProjectFileBrowser", () => {
       ],
     };
 
-    mockFetchProjectFileList
+    mockFetchWorkspaceFileList
       .mockResolvedValueOnce(initialResponse)
       .mockResolvedValueOnce(refreshedResponse);
 
@@ -116,17 +112,16 @@ describe("useProjectFileBrowser", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.entries).toHaveLength(1);
 
-    // Refresh
     act(() => {
       result.current.refresh();
     });
 
     await waitFor(() => expect(result.current.entries).toHaveLength(2));
-    expect(mockFetchProjectFileList).toHaveBeenCalledTimes(2);
+    expect(mockFetchWorkspaceFileList).toHaveBeenCalledTimes(2);
   });
 
   it("clears error when path changes", async () => {
-    mockFetchProjectFileList
+    mockFetchWorkspaceFileList
       .mockRejectedValueOnce(new Error("Failed to load files"))
       .mockResolvedValueOnce({
         path: ".",
@@ -137,7 +132,6 @@ describe("useProjectFileBrowser", () => {
 
     await waitFor(() => expect(result.current.error).toBe("Failed to load files"));
 
-    // Change path should clear error
     act(() => {
       result.current.setPath("subdir");
     });
@@ -148,10 +142,9 @@ describe("useProjectFileBrowser", () => {
   it("does not fetch when disabled", async () => {
     renderHook(() => useProjectFileBrowser("/project", false));
 
-    // Wait a bit to ensure no fetch happens
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(mockFetchProjectFileList).not.toHaveBeenCalled();
+    expect(mockFetchWorkspaceFileList).not.toHaveBeenCalled();
   });
 
   it("cancels in-flight requests on unmount", async () => {
@@ -159,23 +152,19 @@ describe("useProjectFileBrowser", () => {
     const fetchPromise = new Promise<FileListResponse>((resolve) => {
       resolveFetch = resolve;
     });
-    mockFetchProjectFileList.mockReturnValueOnce(fetchPromise);
+    mockFetchWorkspaceFileList.mockReturnValueOnce(fetchPromise);
 
     const { unmount } = renderHook(() => useProjectFileBrowser("/project", true));
 
-    // Unmount before fetch completes
     unmount();
 
-    // Complete the fetch after unmount
     resolveFetch!({
       path: ".",
       entries: [{ name: "file.txt", type: "file", size: 100, mtime: "2024-01-01T00:00:00Z" }],
     });
 
-    // Wait a bit to ensure state update doesn't happen
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Should not throw or have any issues
-    expect(mockFetchProjectFileList).toHaveBeenCalledTimes(1);
+    expect(mockFetchWorkspaceFileList).toHaveBeenCalledTimes(1);
   });
 });

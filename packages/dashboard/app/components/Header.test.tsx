@@ -138,6 +138,44 @@ describe("Header", () => {
     });
   });
 
+  describe("files button", () => {
+    it("renders files button on desktop when handler is provided", () => {
+      renderHeader({ onOpenFiles: vi.fn() }, false);
+      expect(screen.getByTitle("Browse files")).toBeDefined();
+    });
+
+    it("does not render files button on desktop when handler is omitted", () => {
+      renderHeader({}, false);
+      expect(screen.queryByTitle("Browse files")).toBeNull();
+    });
+
+    it("calls onOpenFiles when desktop files button is clicked", () => {
+      const onOpenFiles = vi.fn();
+      renderHeader({ onOpenFiles }, false);
+      fireEvent.click(screen.getByTitle("Browse files"));
+      expect(onOpenFiles).toHaveBeenCalled();
+    });
+
+    it("applies active class when files modal is open", () => {
+      renderHeader({ onOpenFiles: vi.fn(), filesOpen: true }, false);
+      expect(screen.getByTitle("Browse files").className).toContain("btn-icon--active");
+    });
+
+    it("shows files action in mobile overflow menu", () => {
+      renderHeader({ onOpenFiles: vi.fn() }, true);
+      fireEvent.click(screen.getByTitle("More header actions"));
+      expect(screen.getByTestId("overflow-files-btn")).toBeDefined();
+    });
+
+    it("calls onOpenFiles from mobile overflow menu", () => {
+      const onOpenFiles = vi.fn();
+      renderHeader({ onOpenFiles }, true);
+      fireEvent.click(screen.getByTitle("More header actions"));
+      fireEvent.click(screen.getByTestId("overflow-files-btn"));
+      expect(onOpenFiles).toHaveBeenCalled();
+    });
+  });
+
   describe("pause controls", () => {
     it("renders pause button for engine pause", () => {
       renderHeader();

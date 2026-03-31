@@ -12,6 +12,10 @@ import {
   fetchGitRemotes,
   refineTask,
   fetchBatchStatus,
+  fetchWorkspaces,
+  fetchWorkspaceFileList,
+  fetchWorkspaceFileContent,
+  saveWorkspaceFileContent,
 } from "./api";
 import type { Task, TaskDetail, BatchStatusResponse } from "@kb/core";
 
@@ -797,6 +801,67 @@ describe("Git Management API", () => {
       globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Task not in archived" }, 400));
 
       await expect(unarchiveTask("KB-001")).rejects.toThrow("Task not in archived");
+    });
+  });
+
+  describe("workspace file APIs", () => {
+    it("fetchWorkspaces requests the workspace list", async () => {
+      const payload = {
+        project: "/repo",
+        tasks: [{ id: "KB-001", title: "Task", worktree: "/repo/.worktrees/kb-001" }],
+      };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      const response = await fetchWorkspaces();
+
+      expect(response).toEqual(payload);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/workspaces", {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    it("fetchWorkspaceFileList sends workspace and path query params", async () => {
+      const payload = { path: "src", entries: [] };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      const response = await fetchWorkspaceFileList("KB-001", "src");
+
+      expect(response).toEqual(payload);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files?workspace=KB-001&path=src", {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    it("fetchWorkspaceFileContent sends the workspace query param", async () => {
+      const payload = { content: "hello", mtime: "2026-01-01T00:00:00.000Z", size: 5 };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      const response = await fetchWorkspaceFileContent("project", "src/index.ts");
+
+      expect(response).toEqual(payload);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/src%2Findex.ts?workspace=project", {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    it("saveWorkspaceFileContent posts content to the workspace route", async () => {
+      const payload = { success: true, mtime: "2026-01-01T00:00:00.000Z", size: 5 };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      const response = await saveWorkspaceFileContent("KB-001", "src/index.ts", "hello");
+
+      expect(response).toEqual(payload);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/src%2Findex.ts?workspace=KB-001", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ content: "hello" }),
+      });
+    });
+
+    it("propagates workspace API errors", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Task not found" }, 404));
+
+      await expect(fetchWorkspaceFileList("KB-404")).rejects.toThrow("Task not found");
     });
   });
 });

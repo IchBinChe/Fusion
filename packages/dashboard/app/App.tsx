@@ -33,6 +33,7 @@ function AppInner() {
   const [usageOpen, setUsageOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [fileBrowserWorkspace, setFileBrowserWorkspace] = useState("project");
   const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [gitManagerOpen, setGitManagerOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SectionId | undefined>(undefined);
@@ -208,8 +209,17 @@ function AppInner() {
     setTerminalOpen(false);
   }, []);
 
-  const handleToggleFiles = useCallback(() => {
-    setFilesOpen((prev) => !prev);
+  const handleOpenFiles = useCallback(() => {
+    setFilesOpen(true);
+  }, []);
+
+  const handleOpenFilesForTask = useCallback((taskId: string) => {
+    setFileBrowserWorkspace(taskId);
+    setFilesOpen(true);
+  }, []);
+
+  const handleWorkspaceChange = useCallback((workspace: string) => {
+    setFileBrowserWorkspace(workspace);
   }, []);
 
   // Activity log handlers
@@ -231,7 +241,7 @@ function AppInner() {
         onOpenSchedules={handleOpenSchedules}
         onOpenGitManager={handleOpenGitManager}
         onToggleTerminal={handleToggleTerminal}
-        onToggleFiles={handleToggleFiles}
+        onOpenFiles={handleOpenFiles}
         filesOpen={filesOpen}
         globalPaused={globalPaused}
         enginePaused={enginePaused}
@@ -262,6 +272,7 @@ function AppInner() {
           onArchiveAllDone={archiveAllDone}
           searchQuery={searchQuery}
           availableModels={availableModels}
+          onOpenFilesForTask={handleOpenFilesForTask}
         />
       ) : (
         // List view now uses the same modal-based create flow as board view.
@@ -326,9 +337,10 @@ function AppInner() {
       />
       {filesOpen && (
         <FileBrowserModal
-          projectRoot={rootDir}
+          initialWorkspace={fileBrowserWorkspace}
           isOpen={true}
           onClose={() => setFilesOpen(false)}
+          onWorkspaceChange={handleWorkspaceChange}
         />
       )}
       <UsageIndicator

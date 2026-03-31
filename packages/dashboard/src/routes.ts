@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import multer from "multer";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import type { TaskStore, Column, MergeResult, ScheduleType, ActivityEventType } from "@kb/core";
 import { COLUMNS, VALID_TRANSITIONS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore } from "@kb/core";
@@ -9,7 +9,7 @@ import { GitHubClient, getCurrentGitHubRepo, parseBadgeUrl } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
 import { terminalSessionManager } from "./terminal.js";
 import { getTerminalService } from "./terminal-service.js";
-import { listFiles, readFile, writeFile, listProjectFiles, readProjectFile, writeProjectFile, FileServiceError, type FileListResponse, type FileContentResponse, type SaveFileResponse } from "./file-service.js";
+import { listFiles, readFile, writeFile, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, FileServiceError, type FileListResponse, type FileContentResponse, type SaveFileResponse } from "./file-service.js";
 import { fetchAllProviderUsage } from "./usage.js";
 import {
   getGitHubAppConfig,
@@ -565,6 +565,7 @@ function pushGitBranch(): GitPushResult {
 
 export function createApiRoutes(store: TaskStore, options?: ServerOptions): Router {
   const router = Router();
+  const sessionFilesCache = new Map<string, { files: string[]; expiresAt: number }>();
 
   // Get GitHub token from options or env
   const githubToken = options?.githubToken ?? process.env.GITHUB_TOKEN;
@@ -911,6 +912,55 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         res.status(404).json({ error: `Task ${req.params.id} not found` });
       } else {
         res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  router.get("/tasks/:id/session-files", async (req, res) => {
+    try {
+      const task = await store.getTask(req.params.id);
+      if (!task.worktree || !existsSync(task.worktree)) {
+        res.json([]);
+        return;
+      }
+
+      const cached = sessionFilesCache.get(task.id);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.json(cached.files);
+        return;
+      }
+
+      const baseBranch = task.baseBranch ?? "main";
+      let files: string[] = [];
+
+      try {
+        const output = execSync(`git diff --name-only ${baseBranch}...HEAD`, {
+          cwd: task.worktree,
+          encoding: "utf-8",
+          timeout: 5000,
+        }).trim();
+
+        files = output ? output.split("\n").filter(Boolean) : [];
+      } catch {
+        const fallback = execSync("git diff --name-only HEAD", {
+          cwd: task.worktree,
+          encoding: "utf-8",
+          timeout: 5000,
+        }).trim();
+        files = fallback ? fallback.split("\n").filter(Boolean) : [];
+      }
+
+      sessionFilesCache.set(task.id, {
+        files,
+        expiresAt: Date.now() + 10000,
+      });
+
+      res.json(files);
+    } catch (err: any) {
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: `Task ${req.params.id} not found` });
+      } else {
+        res.status(500).json({ error: err.message || "Internal server error" });
       }
     }
   });
@@ -2751,22 +2801,47 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
   });
 
-  // ── Project File API Routes ───────────────────────────────────────
+  // ── Workspace File API Routes ─────────────────────────────────────
+
+  /**
+   * GET /api/workspaces
+   * List available file browser workspaces.
+   * Returns: { project: string; tasks: Array<{ id: string; title?: string; worktree: string }> }
+   */
+  router.get("/workspaces", async (_req, res) => {
+    try {
+      const tasks = await store.listTasks();
+      res.json({
+        project: store.getRootDir(),
+        tasks: tasks
+          .filter((task) => typeof task.worktree === "string" && task.worktree.length > 0 && existsSync(task.worktree))
+          .map((task) => ({
+            id: task.id,
+            title: task.title,
+            worktree: task.worktree!,
+          })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Internal server error" });
+    }
+  });
 
   /**
    * GET /api/files
-   * List files in project root directory.
-   * Query param: ?path=relative/path for subdirectory navigation.
+   * List files in the requested workspace. Defaults to the project root when omitted.
+   * Query params: ?workspace=project|TASK-ID and ?path=relative/path for subdirectory navigation.
    * Returns: { path: string; entries: FileNode[] }
    */
   router.get("/files", async (req, res) => {
     try {
-      const { path: subPath } = req.query;
-      const result = await listProjectFiles(store, typeof subPath === "string" ? subPath : undefined);
+      const { path: subPath, workspace } = req.query;
+      const workspaceId = typeof workspace === "string" && workspace.length > 0 ? workspace : "project";
+      const result = await listWorkspaceFiles(store, workspaceId, typeof subPath === "string" ? subPath : undefined);
       res.json(result);
     } catch (err: any) {
       if (err instanceof FileServiceError) {
-        const status = err.code === "ENOENT" ? 404
+        const status = err.code === "ENOTASK" ? 404
+          : err.code === "ENOENT" ? 404
           : err.code === "EACCES" ? 403
           : 400;
         res.status(status).json({ error: err.message, code: err.code });
@@ -2778,17 +2853,22 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   /**
    * GET /api/files/{*filepath}
-   * Read file contents from project directory.
+   * Read file contents from the requested workspace. Defaults to the project root when omitted.
+   * Query param: ?workspace=project|TASK-ID
    * Returns: { content: string; mtime: string; size: number }
    */
   router.get("/files/{*filepath}", async (req, res) => {
     try {
       const filePath = Array.isArray(req.params.filepath) ? req.params.filepath[0] : req.params.filepath ?? "";
-      const result = await readProjectFile(store, filePath);
+      const workspace = typeof req.query.workspace === "string" && req.query.workspace.length > 0
+        ? req.query.workspace
+        : "project";
+      const result = await readWorkspaceFile(store, workspace, filePath);
       res.json(result);
     } catch (err: any) {
       if (err instanceof FileServiceError) {
-        const status = err.code === "ENOENT" ? 404
+        const status = err.code === "ENOTASK" ? 404
+          : err.code === "ENOENT" ? 404
           : err.code === "EACCES" ? 403
           : err.code === "ETOOLARGE" ? 413
           : err.code === "EINVAL" && err.message.includes("Binary file") ? 415
@@ -2802,7 +2882,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   /**
    * POST /api/files/{*filepath}
-   * Write file contents to project directory.
+   * Write file contents to the requested workspace. Defaults to the project root when omitted.
+   * Query param: ?workspace=project|TASK-ID
    * Body: { content: string }
    * Returns: { success: true; mtime: string; size: number }
    */
@@ -2810,17 +2891,21 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const filePath = Array.isArray(req.params.filepath) ? req.params.filepath[0] : req.params.filepath ?? "";
       const { content } = req.body;
+      const workspace = typeof req.query.workspace === "string" && req.query.workspace.length > 0
+        ? req.query.workspace
+        : "project";
       
       if (typeof content !== "string") {
         res.status(400).json({ error: "content is required and must be a string" });
         return;
       }
 
-      const result = await writeProjectFile(store, filePath, content);
+      const result = await writeWorkspaceFile(store, workspace, filePath, content);
       res.json(result);
     } catch (err: any) {
       if (err instanceof FileServiceError) {
-        const status = err.code === "ENOENT" ? 404
+        const status = err.code === "ENOTASK" ? 404
+          : err.code === "ENOENT" ? 404
           : err.code === "EACCES" ? 403
           : err.code === "ETOOLARGE" ? 413
           : 400;

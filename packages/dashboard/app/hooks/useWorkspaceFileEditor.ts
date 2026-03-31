@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { FileContentResponse, SaveFileResponse } from "../api";
 import { fetchWorkspaceFileContent, saveWorkspaceFileContent } from "../api";
 
-interface UseProjectFileEditorReturn {
+interface UseWorkspaceFileEditorReturn {
   content: string;
   setContent: (content: string) => void;
   originalContent: string;
@@ -15,18 +15,17 @@ interface UseProjectFileEditorReturn {
 }
 
 /**
- * Hook for editing a file in the project directory.
+ * Hook for editing a file in a selected workspace.
  *
- * @param rootPath - The project root directory path (from config/store)
- * @param filePath - The file path to edit (null if no file selected)
- * @param enabled - Whether to enable loading (e.g., when editor is visible)
- * @returns File editor state and controls
+ * @param workspace - The workspace identifier ("project" or task ID)
+ * @param filePath - The selected file path
+ * @param enabled - Whether loading is enabled
  */
-export function useProjectFileEditor(
-  rootPath: string,
+export function useWorkspaceFileEditor(
+  workspace: string,
   filePath: string | null,
-  enabled: boolean
-): UseProjectFileEditorReturn {
+  enabled: boolean,
+): UseWorkspaceFileEditorReturn {
   const [content, setContentState] = useState<string>("");
   const [originalContent, setOriginalContent] = useState<string>("");
   const [mtime, setMtime] = useState<string | null>(null);
@@ -39,9 +38,8 @@ export function useProjectFileEditor(
     setError(null);
   }, []);
 
-  // Load file content when filePath changes
   useEffect(() => {
-    if (!enabled || !filePath) {
+    if (!enabled || !workspace || !filePath) {
       setContentState("");
       setOriginalContent("");
       setMtime(null);
@@ -56,7 +54,7 @@ export function useProjectFileEditor(
       setError(null);
 
       try {
-        const response: FileContentResponse = await fetchWorkspaceFileContent("project", filePath!);
+        const response: FileContentResponse = await fetchWorkspaceFileContent(workspace, filePath!);
 
         if (!cancelled) {
           setContentState(response.content);
@@ -77,17 +75,17 @@ export function useProjectFileEditor(
       }
     }
 
-    loadFile();
+    void loadFile();
 
     return () => {
       cancelled = true;
     };
-  }, [filePath, enabled]);
+  }, [workspace, filePath, enabled]);
 
   const hasChanges = content !== originalContent;
 
   const save = useCallback(async () => {
-    if (!filePath || !hasChanges) {
+    if (!workspace || !filePath || !hasChanges) {
       return;
     }
 
@@ -95,7 +93,7 @@ export function useProjectFileEditor(
     setError(null);
 
     try {
-      const response: SaveFileResponse = await saveWorkspaceFileContent("project", filePath, content);
+      const response: SaveFileResponse = await saveWorkspaceFileContent(workspace, filePath, content);
       setOriginalContent(content);
       setMtime(response.mtime);
     } catch (err: any) {
@@ -104,7 +102,7 @@ export function useProjectFileEditor(
     } finally {
       setSaving(false);
     }
-  }, [filePath, content, hasChanges]);
+  }, [workspace, filePath, content, hasChanges]);
 
   return {
     content,

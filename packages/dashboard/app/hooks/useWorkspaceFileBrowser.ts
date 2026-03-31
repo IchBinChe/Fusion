@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { FileNode, FileListResponse } from "../api";
 import { fetchWorkspaceFileList } from "../api";
 
-interface UseProjectFileBrowserReturn {
+interface UseWorkspaceFileBrowserReturn {
   entries: FileNode[];
   currentPath: string;
   setPath: (path: string) => void;
@@ -12,13 +12,15 @@ interface UseProjectFileBrowserReturn {
 }
 
 /**
- * Hook for browsing files in the project root directory.
+ * Hook for browsing files in a selected workspace.
  *
- * @param rootPath - The project root directory path (from config/store)
- * @param enabled - Whether to enable fetching (e.g., when modal is open)
- * @returns File browser state and controls
+ * @param workspace - The workspace identifier ("project" or task ID)
+ * @param enabled - Whether fetching is enabled
  */
-export function useProjectFileBrowser(rootPath: string, enabled: boolean): UseProjectFileBrowserReturn {
+export function useWorkspaceFileBrowser(
+  workspace: string,
+  enabled: boolean,
+): UseWorkspaceFileBrowserReturn {
   const [entries, setEntries] = useState<FileNode[]>([]);
   const [currentPath, setCurrentPath] = useState<string>(".");
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,7 @@ export function useProjectFileBrowser(rootPath: string, enabled: boolean): UsePr
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
+    setRefreshKey((key) => key + 1);
   }, []);
 
   const setPath = useCallback((path: string) => {
@@ -35,7 +37,13 @@ export function useProjectFileBrowser(rootPath: string, enabled: boolean): UsePr
   }, []);
 
   useEffect(() => {
-    if (!enabled) {
+    setCurrentPath(".");
+    setError(null);
+    setEntries([]);
+  }, [workspace]);
+
+  useEffect(() => {
+    if (!enabled || !workspace) {
       return;
     }
 
@@ -47,8 +55,8 @@ export function useProjectFileBrowser(rootPath: string, enabled: boolean): UsePr
 
       try {
         const response: FileListResponse = await fetchWorkspaceFileList(
-          "project",
-          currentPath === "." ? undefined : currentPath
+          workspace,
+          currentPath === "." ? undefined : currentPath,
         );
 
         if (!cancelled) {
@@ -66,12 +74,12 @@ export function useProjectFileBrowser(rootPath: string, enabled: boolean): UsePr
       }
     }
 
-    loadFiles();
+    void loadFiles();
 
     return () => {
       cancelled = true;
     };
-  }, [currentPath, enabled, refreshKey]);
+  }, [workspace, currentPath, enabled, refreshKey]);
 
   return {
     entries,

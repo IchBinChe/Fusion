@@ -227,6 +227,10 @@ export function fetchAgentLogs(taskId: string): Promise<AgentLogEntry[]> {
   return api<AgentLogEntry[]>(`/tasks/${taskId}/logs`);
 }
 
+export function fetchSessionFiles(taskId: string): Promise<string[]> {
+  return api<string[]>(`/tasks/${taskId}/session-files`);
+}
+
 export function addSteeringComment(id: string, text: string): Promise<Task> {
   return api<Task>(`/tasks/${id}/steer`, {
     method: "POST",
@@ -759,22 +763,43 @@ export function saveFileContent(taskId: string, filePath: string, content: strin
   });
 }
 
-// --- Project File Browser API ---
+// --- Workspace File Browser API ---
 
-/** List files in project root directory */
-export function fetchProjectFileList(path?: string): Promise<FileListResponse> {
-  const query = path ? `?path=${encodeURIComponent(path)}` : "";
-  return api<FileListResponse>(`/files${query}`);
+export interface WorkspaceTaskInfo {
+  id: string;
+  title?: string;
+  worktree: string;
 }
 
-/** Fetch file content from project directory */
-export function fetchProjectFileContent(filePath: string): Promise<FileContentResponse> {
-  return api<FileContentResponse>(`/files/${encodeURIComponent(filePath)}`);
+export interface WorkspaceListResponse {
+  project: string;
+  tasks: WorkspaceTaskInfo[];
 }
 
-/** Save file content to project directory */
-export function saveProjectFileContent(filePath: string, content: string): Promise<SaveFileResponse> {
-  return api<SaveFileResponse>(`/files/${encodeURIComponent(filePath)}`, {
+/** Fetch available file browser workspaces. */
+export function fetchWorkspaces(): Promise<WorkspaceListResponse> {
+  return api<WorkspaceListResponse>("/workspaces");
+}
+
+/** List files in a workspace (project root or task worktree). */
+export function fetchWorkspaceFileList(workspace: string, path?: string): Promise<FileListResponse> {
+  const query = new URLSearchParams({ workspace });
+  if (path) {
+    query.set("path", path);
+  }
+  return api<FileListResponse>(`/files?${query.toString()}`);
+}
+
+/** Fetch file content from a workspace. */
+export function fetchWorkspaceFileContent(workspace: string, filePath: string): Promise<FileContentResponse> {
+  const query = new URLSearchParams({ workspace });
+  return api<FileContentResponse>(`/files/${encodeURIComponent(filePath)}?${query.toString()}`);
+}
+
+/** Save file content to a workspace. */
+export function saveWorkspaceFileContent(workspace: string, filePath: string, content: string): Promise<SaveFileResponse> {
+  const query = new URLSearchParams({ workspace });
+  return api<SaveFileResponse>(`/files/${encodeURIComponent(filePath)}?${query.toString()}`, {
     method: "POST",
     body: JSON.stringify({ content }),
   });

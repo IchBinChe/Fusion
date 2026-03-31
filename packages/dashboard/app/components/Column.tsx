@@ -45,9 +45,10 @@ interface ColumnProps {
    * Called when the user clicks the "Subtask" button in the inline create card.
    */
   onSubtaskBreakdown?: (description: string) => void;
+  onOpenFilesForTask?: (taskId: string) => void;
 }
 
-function ColumnComponent({ column, tasks, maxConcurrent, onMoveTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onArchiveTask, onUnarchiveTask, onArchiveAllDone, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown }: ColumnProps) {
+function ColumnComponent({ column, tasks, maxConcurrent, onMoveTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onArchiveTask, onUnarchiveTask, onArchiveAllDone, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenFilesForTask }: ColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const [visibleTaskCount, setVisibleTaskCount] = useState(VISIBLE_TASKS_INITIAL);
   const countFlashing = useFlashOnIncrease(tasks.length);
@@ -209,6 +210,7 @@ function ColumnComponent({ column, tasks, maxConcurrent, onMoveTask, onOpenDetai
                   addToast={addToast}
                   globalPaused={globalPaused}
                   onUpdateTask={onUpdateTask}
+                  onOpenFilesForTask={onOpenFilesForTask}
                 />
               ))
             )
@@ -226,6 +228,7 @@ function ColumnComponent({ column, tasks, maxConcurrent, onMoveTask, onOpenDetai
                   onUpdateTask={onUpdateTask}
                   onArchiveTask={onArchiveTask}
                   onUnarchiveTask={onUnarchiveTask}
+                  onOpenFilesForTask={onOpenFilesForTask}
                 />
               ))}
               {shouldPaginate && hiddenTaskCount > 0 && (

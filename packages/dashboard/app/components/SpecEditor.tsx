@@ -47,7 +47,7 @@ export function SpecEditor({
     setFeedback("");
   }, [onRequestRevision, feedback, isRequesting]);
 
-  // Keyboard shortcut: Ctrl/Cmd+Enter to save in edit mode
+  // Keyboard shortcut: Ctrl/Cmd+Enter to save in edit mode, Escape to cancel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isEditing && (e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -55,6 +55,9 @@ export function SpecEditor({
         if (canSave) {
           void handleSave();
         }
+      } else if (isEditing && e.key === "Escape") {
+        e.preventDefault();
+        handleCancelEdit();
       }
     };
 
@@ -71,6 +74,13 @@ export function SpecEditor({
     setIsEditing(false);
     setEditContent(content);
   };
+
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (!readOnly && !isEditing) {
+      e.stopPropagation();
+      handleEnterEditMode();
+    }
+  }, [readOnly, isEditing, content]);
 
   const stripLeadingHeading = (text: string): string => {
     return text.replace(/^#\s+[^\n]*\n+/, "");
@@ -130,7 +140,7 @@ export function SpecEditor({
             placeholder="Enter task specification in Markdown..."
           />
         ) : content ? (
-          <div className="markdown-body">
+          <div className="markdown-body" onDoubleClick={handleDoubleClick}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {stripLeadingHeading(content)}
             </ReactMarkdown>

@@ -85,6 +85,63 @@ Test mission description.
     expect(screen.getByText("Test mission description.")).toBeTruthy();
   });
 
+  it("enters edit mode on double-click when not in readOnly mode", () => {
+    render(<SpecEditor content={mockContent} onSave={mockOnSave} />);
+
+    // Double-click on the markdown body
+    const markdownBody = document.querySelector(".markdown-body");
+    expect(markdownBody).toBeTruthy();
+    fireEvent.doubleClick(markdownBody!);
+
+    // Should now be in edit mode
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    const editButton = screen.getByText("Edit") as HTMLButtonElement;
+    expect(editButton.classList.contains("btn-primary")).toBe(true);
+  });
+
+  it("does not enter edit mode on double-click when readOnly is true", () => {
+    render(<SpecEditor content={mockContent} readOnly={true} />);
+
+    // Double-click on the markdown body
+    const markdownBody = document.querySelector(".markdown-body");
+    expect(markdownBody).toBeTruthy();
+    fireEvent.doubleClick(markdownBody!);
+
+    // Should NOT be in edit mode (no textarea)
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("does not enter edit mode on double-click when already in edit mode", () => {
+    render(<SpecEditor content={mockContent} onSave={mockOnSave} />);
+
+    // Enter edit mode via Edit button
+    fireEvent.click(screen.getByText("Edit"));
+    expect(screen.getByRole("textbox")).toBeTruthy();
+
+    // Double-clicking again should not break anything
+    const markdownBody = document.querySelector(".markdown-body");
+    // Note: in edit mode, markdown-body is not rendered, so this query returns null
+    expect(markdownBody).toBeNull();
+  });
+
+  it("cancels edit mode when pressing Escape key", () => {
+    render(<SpecEditor content={mockContent} onSave={mockOnSave} />);
+
+    // Enter edit mode
+    fireEvent.click(screen.getByText("Edit"));
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+    // Make a change
+    fireEvent.change(textarea, { target: { value: "Changed content" } });
+
+    // Press Escape
+    fireEvent.keyDown(textarea, { key: "Escape" });
+
+    // Should be back in view mode
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("Test mission description.")).toBeTruthy();
+  });
+
   it("disables Edit button when already in edit mode", () => {
     render(<SpecEditor content={mockContent} onSave={mockOnSave} />);
 

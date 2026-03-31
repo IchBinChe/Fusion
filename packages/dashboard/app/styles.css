@@ -7857,6 +7857,11 @@ html .column.drag-over * {
   overflow: hidden;
 }
 
+/* Double-click to edit cursor - only when not readOnly */
+.spec-editor:not(.spec-editor-readonly) .markdown-body {
+  cursor: pointer;
+}
+
 /* Toolbar - fixed at top */
 .spec-editor-toolbar {
   display: flex;

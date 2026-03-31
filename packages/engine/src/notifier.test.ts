@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import type { Task, Column, MergeResult, Settings } from "@kb/core";
+import type { Task, Column, MergeResult, Settings } from "@fusion/core";
 import { NtfyNotifier } from "./notifier.js";
 
 // Mock the logger

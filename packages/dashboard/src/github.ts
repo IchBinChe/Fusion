@@ -1,4 +1,4 @@
-import type { IssueInfo, PrInfo } from "@kb/core";
+import type { IssueInfo, PrInfo } from "@fusion/core";
 import {
   isGhAvailable,
   isGhAuthenticated,
@@ -7,7 +7,7 @@ import {
   getGhErrorMessage,
   getCurrentRepo,
   runGh,
-} from "@kb/core";
+} from "@fusion/core";
 
 /**
  * Sleep for a specified number of milliseconds.
@@ -933,7 +933,7 @@ export class GitHubClient {
     owner: string,
     repo: string,
     number: number,
-  ): Promise<Omit<import("@kb/core").IssueInfo, "lastCheckedAt"> | null> {
+  ): Promise<Omit<import("@fusion/core").IssueInfo, "lastCheckedAt"> | null> {
     if (this.hasGhAuth()) {
       try {
         return await this.getIssueStatusWithGh(owner, repo, number);
@@ -955,7 +955,7 @@ export class GitHubClient {
     owner: string,
     repo: string,
     number: number,
-  ): Promise<Omit<import("@kb/core").IssueInfo, "lastCheckedAt"> | null> {
+  ): Promise<Omit<import("@fusion/core").IssueInfo, "lastCheckedAt"> | null> {
     try {
       const issue = await runGhJsonAsync<GhIssueViewJson>([
         "issue", "view", String(number),
@@ -984,7 +984,7 @@ export class GitHubClient {
     owner: string,
     repo: string,
     number: number,
-  ): Promise<Omit<import("@kb/core").IssueInfo, "lastCheckedAt"> | null> {
+  ): Promise<Omit<import("@fusion/core").IssueInfo, "lastCheckedAt"> | null> {
     const url = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}`;
 
     const headers = this.buildHeaders();

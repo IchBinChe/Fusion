@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import http from "node:http";
 import { createServer } from "./server.js";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {

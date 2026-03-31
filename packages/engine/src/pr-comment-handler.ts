@@ -1,5 +1,5 @@
-import type { TaskStore } from "@kb/core";
-import type { PrInfo } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
+import type { PrInfo } from "@fusion/core";
 import { prMonitorLog } from "./logger.js";
 
 interface PrComment {

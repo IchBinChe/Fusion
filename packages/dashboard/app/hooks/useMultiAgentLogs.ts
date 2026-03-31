@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { AgentLogEntry } from "@kb/core";
+import type { AgentLogEntry } from "@fusion/core";
 import { fetchAgentLogs } from "../api";
 
 export const MAX_LOG_ENTRIES = 500;

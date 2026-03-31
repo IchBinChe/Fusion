@@ -3,7 +3,7 @@ import {
   type IssueInfo,
   type PrInfo,
   type TaskStore,
-} from "@kb/core";
+} from "@fusion/core";
 import { GitHubClient, type BadgeBatchRequest, type BadgeBatchResponse } from "./github.js";
 
 export type WatchedBadgeType = "pr" | "issue";

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { IssueInfo, PrInfo } from "@kb/core";
+import type { IssueInfo, PrInfo } from "@fusion/core";
 
 /**
  * Badge snapshot message envelope for shared pub/sub.

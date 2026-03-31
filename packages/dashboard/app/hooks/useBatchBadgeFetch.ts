@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { fetchBatchStatus } from "../api";
-import type { BatchStatusResult } from "@kb/core";
+import type { BatchStatusResult } from "@fusion/core";
 
 // Module-level store to share batch data across hook instances
 const batchBadgeStore = {

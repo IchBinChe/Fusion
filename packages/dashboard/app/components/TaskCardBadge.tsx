@@ -1,5 +1,5 @@
 import { memo, useEffect } from "react";
-import type { IssueInfo, PrInfo } from "@kb/core";
+import type { IssueInfo, PrInfo } from "@fusion/core";
 import { useBadgeWebSocket } from "../hooks/useBadgeWebSocket";
 import { GitHubBadge } from "./GitHubBadge";
 

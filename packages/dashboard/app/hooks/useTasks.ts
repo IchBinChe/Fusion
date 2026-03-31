@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Task, Column, TaskCreateInput, MergeResult } from "@kb/core";
+import type { Task, Column, TaskCreateInput, MergeResult } from "@fusion/core";
 import * as api from "../api";
 
 function normalizeTask(task: Task): Task {

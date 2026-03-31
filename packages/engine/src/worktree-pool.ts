@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 import { worktreePoolLog } from "./logger.js";
 
 /**

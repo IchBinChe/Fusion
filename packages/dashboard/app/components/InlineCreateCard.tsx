@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Brain, Link, Lightbulb, ListTree, Zap } from "lucide-react";
-import type { Task, TaskCreateInput, Settings } from "@kb/core";
+import type { Task, TaskCreateInput, Settings } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { fetchModels, uploadAttachment, fetchSettings } from "../api";
 import type { ModelInfo } from "../api";

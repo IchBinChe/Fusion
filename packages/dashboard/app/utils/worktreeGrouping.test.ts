@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { groupByWorktree, getWorktreeLabel } from "./worktreeGrouping";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 
 function makeTask(overrides: Partial<Task> & { id: string }): Task {
   return {

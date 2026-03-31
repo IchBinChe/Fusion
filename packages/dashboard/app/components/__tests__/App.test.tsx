@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { App } from "../../App";
-import type { Settings } from "@kb/core";
+import type { Settings } from "@fusion/core";
 
 const defaultSettings: Settings = {
   maxConcurrent: 2,

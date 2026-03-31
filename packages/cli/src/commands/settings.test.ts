@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock @kb/core before importing the module under test
-vi.mock("@kb/core", () => {
+// Mock @fusion/core before importing the module under test
+vi.mock("@fusion/core", () => {
   const DEFAULT_SETTINGS = {
     maxConcurrent: 2,
     maxWorktrees: 4,
@@ -21,7 +21,7 @@ vi.mock("@kb/core", () => {
   };
 });
 
-import { TaskStore, DEFAULT_SETTINGS } from "@kb/core";
+import { TaskStore, DEFAULT_SETTINGS } from "@fusion/core";
 import {
   runSettingsShow,
   runSettingsSet,

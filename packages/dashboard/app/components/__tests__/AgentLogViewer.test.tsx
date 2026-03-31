@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { AgentLogViewer } from "../AgentLogViewer";
-import type { AgentLogEntry } from "@kb/core";
+import type { AgentLogEntry } from "@fusion/core";
 
 function makeEntry(overrides: Partial<AgentLogEntry> = {}): AgentLogEntry {
   return {

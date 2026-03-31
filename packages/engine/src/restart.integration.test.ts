@@ -36,7 +36,7 @@ import { WorktreePool, scanIdleWorktrees, cleanupOrphanedWorktrees } from "./wor
 import { createKbAgent } from "./pi.js";
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import type { Task, TaskDetail, TaskStep, Column, Settings, StepStatus } from "@kb/core";
+import type { Task, TaskDetail, TaskStep, Column, Settings, StepStatus } from "@fusion/core";
 
 const mockedCreateHaiAgent = vi.mocked(createKbAgent);
 const mockedExecSync = vi.mocked(execSync);
@@ -267,7 +267,7 @@ describe("In-progress task resume after restart", () => {
 // ── Step 3: In-review merge re-queue tests ────────────────────────────────
 //
 // The merge queue/enqueueMerge logic lives in dashboard.ts (CLI layer).
-// These tests focus on what @kb/engine owns: aiMergeTask() behaviour
+// These tests focus on what @fusion/engine owns: aiMergeTask() behaviour
 // relevant to restart resilience — state validation, status lifecycle,
 // and error handling with git reset --merge cleanup.
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useBatchBadgeFetch, __resetBatchBadgeStoreForTests } from "../useBatchBadgeFetch";
 import * as api from "../../api";
-import type { BatchStatusResult } from "@kb/core";
+import type { BatchStatusResult } from "@fusion/core";
 
 // Mock the API module
 vi.mock("../../api", () => ({

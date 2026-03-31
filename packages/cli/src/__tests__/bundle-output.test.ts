@@ -15,18 +15,18 @@ describe("CLI bundle output", () => {
     expect(content.startsWith("#!/usr/bin/env node")).toBe(true);
   });
 
-  it("does not contain bare @kb/* import specifiers", () => {
+  it("does not contain bare @fusion/* import specifiers", () => {
     const content = readFileSync(bundlePath, "utf-8");
-    expect(content).not.toMatch(/from\s+["']@kb\/core["']/);
-    expect(content).not.toMatch(/from\s+["']@kb\/dashboard["']/);
-    expect(content).not.toMatch(/from\s+["']@kb\/engine["']/);
+    expect(content).not.toMatch(/from\s+["']@fusion\/core["']/);
+    expect(content).not.toMatch(/from\s+["']@fusion\/dashboard["']/);
+    expect(content).not.toMatch(/from\s+["']@fusion\/engine["']/);
   });
 
   it("contains inlined workspace code", () => {
     const content = readFileSync(bundlePath, "utf-8");
-    // TaskStore from @kb/core
+    // TaskStore from @fusion/core
     expect(content).toContain("TaskStore");
-    // createServer from @kb/dashboard
+    // createServer from @fusion/dashboard
     expect(content).toContain("createServer");
   });
 

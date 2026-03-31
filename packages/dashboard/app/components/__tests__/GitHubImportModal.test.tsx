@@ -8,7 +8,7 @@ import {
   apiImportGitHubPull,
   fetchGitRemotes,
 } from "../../api";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 import type { GitRemote } from "../../api";
 
 // Mock the API module

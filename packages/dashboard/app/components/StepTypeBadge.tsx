@@ -1,5 +1,5 @@
 import { Terminal, Sparkles } from "lucide-react";
-import type { AutomationStepType } from "@kb/core";
+import type { AutomationStepType } from "@fusion/core";
 
 interface StepTypeBadgeProps {
   type: AutomationStepType;

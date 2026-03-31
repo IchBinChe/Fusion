@@ -24,9 +24,9 @@ function makeMockStore() {
   };
 }
 
-// ── Mock @kb/core ──────────────────────────────────────────────────
+// ── Mock @fusion/core ──────────────────────────────────────────────────
 
-vi.mock("@kb/core", () => ({
+vi.mock("@fusion/core", () => ({
   TaskStore: vi.fn().mockImplementation(() => makeMockStore()),
   AutomationStore: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
@@ -35,7 +35,7 @@ vi.mock("@kb/core", () => ({
   })),
 }));
 
-// ── Mock @kb/dashboard ─────────────────────────────────────────────
+// ── Mock @fusion/dashboard ─────────────────────────────────────────────
 
 /** Create a mock server (EventEmitter) that simulates net.Server behavior. */
 function createMockServer(portToReturn: number = 0) {
@@ -64,15 +64,15 @@ const MockGitHubClient = vi.fn().mockImplementation(() => ({
   mergePr: vi.fn(),
 }));
 
-vi.mock("@kb/dashboard", () => ({
+vi.mock("@fusion/dashboard", () => ({
   createServer: vi.fn(() => ({ listen: mockListen })),
   GitHubClient: MockGitHubClient,
 }));
 
-// ── Mock @kb/engine ────────────────────────────────────────────────
+// ── Mock @fusion/engine ────────────────────────────────────────────────
 
-vi.mock("@kb/engine", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@kb/engine")>();
+vi.mock("@fusion/engine", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@fusion/engine")>();
   return {
     ...original,
     WorktreePool: original.WorktreePool,
@@ -134,12 +134,12 @@ describe("runDashboard — AuthStorage & ModelRegistry wiring", () => {
       runtime: { pendingProviderRegistrations: [] },
       errors: [],
     });
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
   });
 
   it("passes authStorage and modelRegistry to createServer", async () => {
-    const { createServer } = await import("@kb/dashboard");
+    const { createServer } = await import("@fusion/dashboard");
 
     await runDashboard(0, {});
 

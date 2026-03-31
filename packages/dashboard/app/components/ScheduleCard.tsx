@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { Play, Pause, Pencil, Trash2, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Layers } from "lucide-react";
-import type { ScheduledTask, AutomationRunResult, AutomationStepResult } from "@kb/core";
+import type { ScheduledTask, AutomationRunResult, AutomationStepResult } from "@fusion/core";
 
 /**
  * Format a duration in milliseconds to a human-readable string.

@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useCallback, useEffect } from "react";
 import { useFlashOnIncrease } from "../hooks/useFlashOnIncrease";
-import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@kb/core";
-import { COLUMN_LABELS, COLUMN_DESCRIPTIONS } from "@kb/core";
+import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@fusion/core";
+import { COLUMN_LABELS, COLUMN_DESCRIPTIONS } from "@fusion/core";
 import { TaskCard } from "./TaskCard";
 import { WorktreeGroup } from "./WorktreeGroup";
 import { QuickEntryBox } from "./QuickEntryBox";

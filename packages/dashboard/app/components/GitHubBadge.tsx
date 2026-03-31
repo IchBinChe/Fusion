@@ -1,5 +1,5 @@
 import { GitPullRequest, CircleDot } from "lucide-react";
-import type { IssueInfo, PrInfo } from "@kb/core";
+import type { IssueInfo, PrInfo } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 
 interface GitHubBadgeProps {

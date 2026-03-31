@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ScheduledTasksModal } from "../ScheduledTasksModal";
-import type { ScheduledTask, AutomationRunResult } from "@kb/core";
+import type { ScheduledTask, AutomationRunResult } from "@fusion/core";
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
@@ -17,8 +17,8 @@ vi.mock("lucide-react", () => ({
   ChevronUp: () => <span data-testid="icon-up">▲</span>,
 }));
 
-// Mock @kb/core (no runtime values needed — ScheduleForm inlines presets)
-vi.mock("@kb/core", () => ({}));
+// Mock @fusion/core (no runtime values needed — ScheduleForm inlines presets)
+vi.mock("@fusion/core", () => ({}));
 
 // Mock the API module
 const mockFetchAutomations = vi.fn();

@@ -1,4 +1,4 @@
-import { resolveDependencyOrder, type TaskStore, type Task } from "@kb/core";
+import { resolveDependencyOrder, type TaskStore, type Task } from "@fusion/core";
 import type { AgentSemaphore } from "./concurrency.js";
 import { schedulerLog } from "./logger.js";
 import type { PrMonitor } from "./pr-monitor.js";

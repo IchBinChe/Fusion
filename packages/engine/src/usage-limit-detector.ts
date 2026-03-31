@@ -9,7 +9,7 @@
  * on their own via per-session retry.
  */
 
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("usage-limit");

@@ -16,7 +16,7 @@ import {
 } from "./ai-refine.js";
 
 // Mock the engine module to avoid dynamic import issues in tests
-vi.mock("@kb/engine", () => ({
+vi.mock("@fusion/engine", () => ({
   createKbAgent: vi.fn().mockResolvedValue(null),
 }));
 

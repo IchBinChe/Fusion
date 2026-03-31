@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ToastType } from "../hooks/useToast";
-import type { Task, TaskCreateInput } from "@kb/core";
+import type { Task, TaskCreateInput } from "@fusion/core";
 import type { ModelInfo, RefinementType } from "../api";
 import { fetchModels, refineText, getRefineErrorMessage } from "../api";
 import { Link, Brain, Lightbulb, ListTree, Sparkles, Save } from "lucide-react";

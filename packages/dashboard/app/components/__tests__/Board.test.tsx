@@ -2,9 +2,9 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Board } from "../Board";
-import { COLUMNS } from "@kb/core";
+import { COLUMNS } from "@fusion/core";
 
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 
 const columnRenderCounts: Record<string, number> = {};
 

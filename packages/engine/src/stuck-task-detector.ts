@@ -11,7 +11,7 @@
  * compares the last activity timestamp against `taskStuckTimeoutMs` from settings.
  */
 
-import type { TaskStore, Settings } from "@kb/core";
+import type { TaskStore, Settings } from "@fusion/core";
 import { createLogger } from "./logger.js";
 
 const stuckLog = createLogger("stuck-detector");

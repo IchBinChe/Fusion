@@ -12,7 +12,7 @@ vi.mock("node:fs", () => ({
 import { WorktreePool, scanIdleWorktrees, cleanupOrphanedWorktrees } from "./worktree-pool.js";
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import type { Task, Column } from "@kb/core";
+import type { Task, Column } from "@fusion/core";
 
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);

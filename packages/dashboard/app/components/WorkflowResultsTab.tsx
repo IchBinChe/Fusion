@@ -1,4 +1,4 @@
-import type { WorkflowStepResult } from "@kb/core";
+import type { WorkflowStepResult } from "@fusion/core";
 
 interface WorkflowResultsTabProps {
   taskId: string;

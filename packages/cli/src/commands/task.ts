@@ -1,12 +1,12 @@
-import { TaskStore, COLUMNS, COLUMN_LABELS, type Column, type MergeResult, type StepStatus, type AgentLogType, type AgentLogEntry } from "@kb/core";
-import { aiMergeTask } from "@kb/engine";
+import { TaskStore, COLUMNS, COLUMN_LABELS, type Column, type MergeResult, type StepStatus, type AgentLogType, type AgentLogEntry } from "@fusion/core";
+import { aiMergeTask } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
-import type { PlanningQuestion, PlanningSummary } from "@kb/core";
-import { createSession, submitResponse, RateLimitError, SessionNotFoundError, InvalidSessionStateError } from "@kb/dashboard/planning";
+import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
+import { createSession, submitResponse, RateLimitError, SessionNotFoundError, InvalidSessionStateError } from "@fusion/dashboard/planning";
 import { watchFile, unwatchFile, statSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { GitHubClient } from "@kb/dashboard";
-import { isGhAvailable, isGhAuthenticated, getCurrentRepo } from "@kb/core/gh-cli";
+import { GitHubClient } from "@fusion/dashboard";
+import { isGhAvailable, isGhAuthenticated, getCurrentRepo } from "@fusion/core/gh-cli";
 
 const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"];
 

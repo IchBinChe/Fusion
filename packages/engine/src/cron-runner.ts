@@ -1,8 +1,8 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { TaskStore } from "@kb/core";
-import type { AutomationStore } from "@kb/core";
-import type { ScheduledTask, AutomationRunResult, AutomationStep, AutomationStepResult } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
+import type { AutomationStore } from "@fusion/core";
+import type { ScheduledTask, AutomationRunResult, AutomationStep, AutomationStepResult } from "@fusion/core";
 import { createLogger } from "./logger.js";
 
 const execAsync = promisify(exec);

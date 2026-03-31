@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AgentLogger, summarizeToolArgs } from "./agent-logger.js";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 // ── summarizeToolArgs tests ──────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, History, Trash2, Filter, RefreshCw, CheckCircle, XCircle, ArrowRight, Plus, Settings, AlertCircle, Loader2 } from "lucide-react";
 import { fetchActivityLog, clearActivityLog, type ActivityLogEntry, type ActivityEventType } from "../api";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 
 interface ActivityLogModalProps {
   isOpen: boolean;

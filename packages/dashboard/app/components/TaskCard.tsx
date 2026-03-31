@@ -1,6 +1,6 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder } from "lucide-react";
-import type { Task, TaskDetail, Column, PrInfo, IssueInfo } from "@kb/core";
+import type { Task, TaskDetail, Column, PrInfo, IssueInfo } from "@fusion/core";
 import { fetchTaskDetail, uploadAttachment } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { pickPreferredBadge } from "./TaskCardBadge";

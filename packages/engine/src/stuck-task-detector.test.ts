@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { StuckTaskDetector } from "./stuck-task-detector.js";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 // Mock store factory
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {

@@ -14,8 +14,8 @@ vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
 }));
 
-// Mock @kb/core before importing the module under test
-vi.mock("@kb/core", () => {
+// Mock @fusion/core before importing the module under test
+vi.mock("@fusion/core", () => {
   const COLUMNS = ["triage", "specified", "in-progress", "review", "done"];
   const COLUMN_LABELS: Record<string, string> = {
     triage: "Triage",
@@ -32,29 +32,29 @@ vi.mock("@kb/core", () => {
   };
 });
 
-// Mock @kb/engine
-vi.mock("@kb/engine", () => ({ aiMergeTask: vi.fn() }));
+// Mock @fusion/engine
+vi.mock("@fusion/engine", () => ({ aiMergeTask: vi.fn() }));
 
-// Mock @kb/dashboard
-vi.mock("@kb/dashboard", () => ({
+// Mock @fusion/dashboard
+vi.mock("@fusion/dashboard", () => ({
   GitHubClient: vi.fn().mockImplementation(() => ({
     createPr: vi.fn(),
   })),
 }));
 
-// Mock @kb/core/gh-cli
-vi.mock("@kb/core/gh-cli", () => ({
+// Mock @fusion/core/gh-cli
+vi.mock("@fusion/core/gh-cli", () => ({
   isGhAvailable: vi.fn(),
   isGhAuthenticated: vi.fn(),
   getCurrentRepo: vi.fn(),
 }));
 
 import { createInterface } from "node:readline/promises";
-import { TaskStore } from "@kb/core";
+import { TaskStore } from "@fusion/core";
 import { watchFile, unwatchFile, statSync, existsSync, readFileSync } from "node:fs";
 import { runTaskShow, runTaskCreate, runTaskDuplicate, runTaskRefine, runTaskDelete, runTaskRetry, runTaskLogs, runTaskPrCreate, type LogsOptions } from "./task.js";
-import { isGhAvailable, isGhAuthenticated, getCurrentRepo } from "@kb/core/gh-cli";
-import { GitHubClient } from "@kb/dashboard";
+import { isGhAvailable, isGhAuthenticated, getCurrentRepo } from "@fusion/core/gh-cli";
+import { GitHubClient } from "@fusion/dashboard";
 
 function makeTask(overrides: Record<string, unknown> = {}) {
   return {
@@ -1299,7 +1299,7 @@ describe("runTaskLogs", () => {
   let mockReadFileSync: ReturnType<typeof vi.fn>;
   let sigintHandlers: Array<() => void> = [];
 
-  function makeAgentLogEntry(overrides: Record<string, unknown> = {}): import("@kb/core").AgentLogEntry {
+  function makeAgentLogEntry(overrides: Record<string, unknown> = {}): import("@fusion/core").AgentLogEntry {
     return {
       timestamp: new Date().toISOString(),
       taskId: "KB-001",
@@ -1461,7 +1461,7 @@ describe("runTaskLogs", () => {
   it("filters by type with --limit combined", async () => {
     mockGetTask.mockResolvedValueOnce(makeTask({ id: "KB-001" }));
     // Create 50 tool entries interspersed with text entries
-    const entries: import("@kb/core").AgentLogEntry[] = [];
+    const entries: import("@fusion/core").AgentLogEntry[] = [];
     for (let i = 0; i < 100; i++) {
       entries.push(makeAgentLogEntry({ 
         type: i % 2 === 0 ? "tool" : "text", 
@@ -1599,7 +1599,7 @@ describe("runTaskLogs", () => {
 
 // ── PR Create Tests ───────────────────────────────────────────────────────────
 
-import type { PrInfo } from "@kb/core";
+import type { PrInfo } from "@fusion/core";
 
 describe("runTaskPrCreate", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;

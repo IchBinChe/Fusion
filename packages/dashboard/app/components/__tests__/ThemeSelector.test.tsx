@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { COLOR_THEMES } from "@kb/core";
+import { COLOR_THEMES } from "@fusion/core";
 import { ThemeSelector } from "../ThemeSelector";
 
 describe("ThemeSelector", () => {

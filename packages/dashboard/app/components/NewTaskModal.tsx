@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import type { Task, TaskCreateInput, ModelPreset, Settings, WorkflowStep } from "@kb/core";
+import type { Task, TaskCreateInput, ModelPreset, Settings, WorkflowStep } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { uploadAttachment, fetchModels, fetchSettings, fetchWorkflowSteps, refineText, getRefineErrorMessage, type RefinementType } from "../api";
 import type { ModelInfo } from "../api";

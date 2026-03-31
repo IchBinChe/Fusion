@@ -57,9 +57,9 @@
     }
   },
   "devDependencies": {
-    "@kb/core": "workspace:*",
-    "@kb/dashboard": "workspace:*",
-    "@kb/engine": "workspace:*",
+    "@fusion/core": "workspace:*",
+    "@fusion/dashboard": "workspace:*",
+    "@fusion/engine": "workspace:*",
     "@sinclair/typebox": "^0.34.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^3.1.0",

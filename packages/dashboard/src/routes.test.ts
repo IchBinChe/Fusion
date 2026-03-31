@@ -4,23 +4,23 @@ import http from "node:http";
 import { createApiRoutes } from "./routes.js";
 import { GitHubClient } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
-import type { TaskStore, TaskAttachment } from "@kb/core";
-import type { TaskDetail } from "@kb/core";
+import type { TaskStore, TaskAttachment } from "@fusion/core";
+import type { TaskDetail } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { __resetPlanningState } from "./planning.js";
 import { __resetSubtaskBreakdownState } from "./subtask-breakdown.js";
 import * as terminalServiceModule from "./terminal-service.js";
 
-// Mock @kb/core for gh CLI auth checks
-vi.mock("@kb/core", async () => {
-  const actual = await vi.importActual<typeof import("@kb/core")>("@kb/core");
+// Mock @fusion/core for gh CLI auth checks
+vi.mock("@fusion/core", async () => {
+  const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
     isGhAuthenticated: vi.fn(),
   };
 });
 
-import { isGhAuthenticated } from "@kb/core";
+import { isGhAuthenticated } from "@fusion/core";
 
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
 
@@ -4652,7 +4652,7 @@ describe("Automation routes", () => {
 
 // --- Settings API Tests ---
 
-import { DEFAULT_SETTINGS } from "@kb/core";
+import { DEFAULT_SETTINGS } from "@fusion/core";
 
 describe("GET /settings", () => {
   let store: TaskStore;

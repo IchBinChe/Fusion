@@ -5,8 +5,8 @@ vi.mock("node:readline/promises", () => ({
   createInterface: vi.fn(),
 }));
 
-// Mock @kb/core before importing
-vi.mock("@kb/core", () => ({
+// Mock @fusion/core before importing
+vi.mock("@fusion/core", () => ({
   TaskStore: vi.fn(),
   COLUMNS: ["triage", "todo", "in-progress", "in-review", "done", "archived"],
   COLUMN_LABELS: {
@@ -19,8 +19,8 @@ vi.mock("@kb/core", () => ({
   },
 }));
 
-// Mock @kb/dashboard/planning
-vi.mock("@kb/dashboard/planning", () => ({
+// Mock @fusion/dashboard/planning
+vi.mock("@fusion/dashboard/planning", () => ({
   createSession: vi.fn(),
   submitResponse: vi.fn(),
   RateLimitError: class RateLimitError extends Error {
@@ -45,8 +45,8 @@ vi.mock("@kb/dashboard/planning", () => ({
 
 // Import after mocking
 import { createInterface } from "node:readline/promises";
-import { TaskStore } from "@kb/core";
-import { createSession, submitResponse, RateLimitError, SessionNotFoundError } from "@kb/dashboard/planning";
+import { TaskStore } from "@fusion/core";
+import { createSession, submitResponse, RateLimitError, SessionNotFoundError } from "@fusion/dashboard/planning";
 import { runTaskPlan } from "../commands/task.js";
 
 describe("runTaskPlan", () => {

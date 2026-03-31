@@ -9,7 +9,7 @@
  * - Rate limiting per IP
  * - Session expiration and cleanup
  * 
- * NOTE: AI Agent integration uses createKbAgent from "@kb/engine" for
+ * NOTE: AI Agent integration uses createKbAgent from "@fusion/engine" for
  * real-time planning conversations with thinking output streaming.
  */
 
@@ -18,11 +18,11 @@ import type {
   PlanningSummary,
   PlanningResponse,
   TaskStore,
-} from "@kb/core";
+} from "@fusion/core";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
-// Dynamic import for @kb/engine to avoid resolution issues in test environment
+// Dynamic import for @fusion/engine to avoid resolution issues in test environment
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports, @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +33,7 @@ async function initEngine() {
   if (!createKbAgent) {
     try {
       // Use dynamic import with variable to prevent static analysis
-      const engineModule = "@kb/engine";
+      const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
       createKbAgent = engine.createKbAgent;
     } catch {

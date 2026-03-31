@@ -4,7 +4,7 @@ import type {
   TaskDetail,
   TaskAttachment,
   Settings,
-} from "@kb/core";
+} from "@fusion/core";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type {

@@ -1,5 +1,5 @@
-import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@kb/core";
-import { COLUMNS } from "@kb/core";
+import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@fusion/core";
+import { COLUMNS } from "@fusion/core";
 import { Column } from "./Column";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";

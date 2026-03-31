@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PlanningModeModal } from "./PlanningModeModal";
 import { TaskDetailModal } from "./TaskDetailModal";
-import type { Task, TaskDetail, PlanningQuestion, PlanningSummary, MergeResult } from "@kb/core";
+import type { Task, TaskDetail, PlanningQuestion, PlanningSummary, MergeResult } from "@fusion/core";
 
 // Mock the API functions
 const mockStartPlanning = vi.fn();

@@ -10,7 +10,7 @@
  * - onTerminated: Called when an unresponsive agent is terminated
  */
 
-import type { AgentStore, Agent, AgentState } from "@kb/core";
+import type { AgentStore, Agent, AgentState } from "@fusion/core";
 
 /** Options for HeartbeatMonitor constructor */
 export interface HeartbeatMonitorOptions {

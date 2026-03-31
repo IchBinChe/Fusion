@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GitManagerModal } from "../GitManagerModal";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 
 // Mock the API module with all functions
 vi.mock("../../api", async () => {

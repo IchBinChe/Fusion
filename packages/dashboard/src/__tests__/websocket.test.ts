@@ -1,7 +1,7 @@
 import { EventEmitter, once } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 import { createServer } from "../server.js";
 import { WebSocketManager } from "../websocket.js";
 import { InMemoryBadgePubSub, type BadgePubSub } from "../badge-pubsub.js";

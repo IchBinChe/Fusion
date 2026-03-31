@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ScheduleCard } from "../ScheduleCard";
-import type { ScheduledTask, AutomationRunResult } from "@kb/core";
+import type { ScheduledTask, AutomationRunResult } from "@fusion/core";
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({

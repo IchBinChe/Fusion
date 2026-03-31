@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter, once } from "node:events";
 import http from "node:http";
-import type { Task, TaskStore, PrInfo, IssueInfo } from "@kb/core";
+import type { Task, TaskStore, PrInfo, IssueInfo } from "@fusion/core";
 import { createServer } from "../server.js";
 import { getGitHubAppConfig } from "../github-webhooks.js";
 

@@ -33,9 +33,9 @@ function makeMockStore() {
   };
 }
 
-// ── Mock @kb/core ──────────────────────────────────────────────────
+// ── Mock @fusion/core ──────────────────────────────────────────────────
 
-vi.mock("@kb/core", () => ({
+vi.mock("@fusion/core", () => ({
   TaskStore: vi.fn().mockImplementation(() => makeMockStore()),
   AutomationStore: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
@@ -78,7 +78,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-// ── Mock @kb/dashboard ─────────────────────────────────────────────
+// ── Mock @fusion/dashboard ─────────────────────────────────────────────
 
 /** Create a mock server (EventEmitter) that simulates net.Server behavior. */
 function createMockServer(portToReturn: number = 0) {
@@ -100,7 +100,7 @@ const mockListen = vi.fn((port: number) => {
   return server;
 });
 
-vi.mock("@kb/dashboard", () => ({
+vi.mock("@fusion/dashboard", () => ({
   createServer: vi.fn(() => ({ listen: mockListen })),
   GitHubClient: vi.fn().mockImplementation(() => ({
     findPrForBranch: mockFindPrForBranch,
@@ -116,13 +116,13 @@ vi.mock("node:readline", () => ({
   createInterface: vi.fn(),
 }));
 
-// ── Mock @kb/engine ────────────────────────────────────────────────
+// ── Mock @fusion/engine ────────────────────────────────────────────────
 
 // We need the real WorktreePool class so we can assert `instanceof`.
-const { WorktreePool } = await import("@kb/engine");
+const { WorktreePool } = await import("@fusion/engine");
 
-vi.mock("@kb/engine", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@kb/engine")>();
+vi.mock("@fusion/engine", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@fusion/engine")>();
   return {
     ...original,
     // Keep real WorktreePool & AgentSemaphore
@@ -452,12 +452,12 @@ describe("runDashboard — PR-first auto-merge queue", () => {
       log: [],
     });
 
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
   });
 
   it("uses PR lifecycle instead of aiMergeTask when mergeStrategy is pull-request", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     await runDashboard(0, { open: false });
     await new Promise((r) => setTimeout(r, 100));
@@ -477,10 +477,10 @@ describe("runDashboard — WorktreePool wiring", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     // Re-set TaskStore mock (clearAllMocks wipes implementations)
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
     // Re-set engine mocks
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -500,8 +500,8 @@ describe("runDashboard — WorktreePool wiring", () => {
   });
 
   it("passes a WorktreePool instance to aiMergeTask via rawMerge", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
-    const { createServer } = await import("@kb/dashboard");
+    const { aiMergeTask } = await import("@fusion/engine");
+    const { createServer } = await import("@fusion/dashboard");
 
     await runDashboard(0, { open: false });
 
@@ -518,8 +518,8 @@ describe("runDashboard — WorktreePool wiring", () => {
   });
 
   it("shares the same WorktreePool instance between executor and merger", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
-    const { createServer } = await import("@kb/dashboard");
+    const { aiMergeTask } = await import("@fusion/engine");
+    const { createServer } = await import("@fusion/dashboard");
 
     await runDashboard(0, { open: false });
 
@@ -545,9 +545,9 @@ describe("runDashboard — auto-merge pause exclusion", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -569,7 +569,7 @@ describe("runDashboard — auto-merge pause exclusion", () => {
 
     await runDashboard(0, { open: false });
 
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     // Emit task:moved with a paused task
     mockStore.emit("task:moved", {
@@ -596,7 +596,7 @@ describe("runDashboard — auto-merge pause exclusion", () => {
       { id: "KB-ACTIVE", column: "in-review", paused: false },
     ]);
 
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
     // Reset after import
     (aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
@@ -623,9 +623,9 @@ describe("runDashboard — immediate resume on unpause", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -649,7 +649,7 @@ describe("runDashboard — immediate resume on unpause", () => {
   });
 
   it("calls executor.resumeOrphaned() when globalPause transitions true → false", async () => {
-    const { TaskExecutor } = await import("@kb/engine");
+    const { TaskExecutor } = await import("@fusion/engine");
     const resumeOrphaned = vi.fn().mockResolvedValue(undefined);
     (TaskExecutor as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (_store: unknown, _cwd: unknown, opts: unknown) => {
@@ -694,7 +694,7 @@ describe("runDashboard — immediate resume on unpause", () => {
       paused: false,
     }));
 
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
     (aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -729,16 +729,16 @@ describe("runDashboard — engine pause/unpause cycle", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
   });
 
   it("calls executor.resumeOrphaned() when enginePaused transitions true → false", async () => {
-    const { TaskExecutor } = await import("@kb/engine");
+    const { TaskExecutor } = await import("@fusion/engine");
     const resumeOrphaned = vi.fn().mockResolvedValue(undefined);
     (TaskExecutor as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (_store: unknown, _cwd: unknown, opts: unknown) => {
@@ -770,9 +770,9 @@ describe("runDashboard — port fallback on EADDRINUSE", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     resetGitHubMocks();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.TaskExecutor as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () => ({ resumeOrphaned: vi.fn().mockResolvedValue(undefined) }),
     );
@@ -888,9 +888,9 @@ describe("runDashboard — enginePaused (soft pause)", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -913,7 +913,7 @@ describe("runDashboard — enginePaused (soft pause)", () => {
 
     await runDashboard(0, { open: false });
 
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     // Emit task:moved
     mockStore.emit("task:moved", {
@@ -928,7 +928,7 @@ describe("runDashboard — enginePaused (soft pause)", () => {
   });
 
   it("calls executor.resumeOrphaned() when enginePaused transitions true → false", async () => {
-    const { TaskExecutor } = await import("@kb/engine");
+    const { TaskExecutor } = await import("@fusion/engine");
     const resumeOrphaned = vi.fn().mockResolvedValue(undefined);
     (TaskExecutor as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (_store: unknown, _cwd: unknown, opts: unknown) => {
@@ -971,7 +971,7 @@ describe("runDashboard — enginePaused (soft pause)", () => {
       paused: false,
     }));
 
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
     (aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -1003,9 +1003,9 @@ describe("runDashboard — --paused flag", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -1064,9 +1064,9 @@ describe("runDashboard — --paused flag", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.TaskExecutor as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () => ({ resumeOrphaned: vi.fn().mockResolvedValue(undefined) }),
     );
@@ -1117,9 +1117,9 @@ describe("runDashboard — --dev mode", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -1137,25 +1137,25 @@ describe("runDashboard — --dev mode", () => {
   });
 
   it("does NOT start TriageProcessor in dev mode", async () => {
-    const { TriageProcessor } = await import("@kb/engine");
+    const { TriageProcessor } = await import("@fusion/engine");
     await runDashboard(0, { open: false, dev: true });
     expect(TriageProcessor).not.toHaveBeenCalled();
   });
 
   it("does NOT start TaskExecutor in dev mode", async () => {
-    const { TaskExecutor } = await import("@kb/engine");
+    const { TaskExecutor } = await import("@fusion/engine");
     await runDashboard(0, { open: false, dev: true });
     expect(TaskExecutor).not.toHaveBeenCalled();
   });
 
   it("does NOT start Scheduler in dev mode", async () => {
-    const { Scheduler } = await import("@kb/engine");
+    const { Scheduler } = await import("@fusion/engine");
     await runDashboard(0, { open: false, dev: true });
     expect(Scheduler).not.toHaveBeenCalled();
   });
 
   it("starts the server correctly in dev mode", async () => {
-    const { createServer } = await import("@kb/dashboard");
+    const { createServer } = await import("@fusion/dashboard");
     await runDashboard(4040, { open: false, dev: true });
 
     // Wait for async 'listening' event
@@ -1201,7 +1201,7 @@ describe("runDashboard — --dev mode", () => {
   });
 
   it("starts all engine components when dev is false (default)", async () => {
-    const { TriageProcessor, TaskExecutor, Scheduler } = await import("@kb/engine");
+    const { TriageProcessor, TaskExecutor, Scheduler } = await import("@fusion/engine");
     await runDashboard(0, { open: false });
 
     expect(TriageProcessor).toHaveBeenCalled();
@@ -1231,7 +1231,7 @@ describe("runDashboard — merge conflict retry logic", () => {
     vi.clearAllMocks();
     resetGitHubMocks();
     mockStore = makeMockStore();
-    const { TaskStore } = await import("@kb/core");
+    const { TaskStore } = await import("@fusion/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
 
     // Default mock store.getTask implementation
@@ -1242,7 +1242,7 @@ describe("runDashboard — merge conflict retry logic", () => {
       mergeRetries: 0,
     }));
 
-    const engine = await import("@kb/engine");
+    const engine = await import("@fusion/engine");
     (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
       Promise.resolve({ merged: true }),
     );
@@ -1260,7 +1260,7 @@ describe("runDashboard — merge conflict retry logic", () => {
   });
 
   it("increments mergeRetries and re-enqueues on conflict error", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     // Simulate merge failure with conflict
     (aiMergeTask as ReturnType<typeof vi.fn>).mockRejectedValue(
@@ -1300,7 +1300,7 @@ describe("runDashboard — merge conflict retry logic", () => {
   });
 
   it("gives up after max retries (3) exceeded", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     (aiMergeTask as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Merge conflict detected"),
@@ -1347,7 +1347,7 @@ describe("runDashboard — merge conflict retry logic", () => {
   });
 
   it("skips retry when autoResolveConflicts is disabled", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     (aiMergeTask as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Merge conflict detected"),
@@ -1381,7 +1381,7 @@ describe("runDashboard — merge conflict retry logic", () => {
   });
 
   it("clears mergeRetries on successful merge after retries", async () => {
-    const { aiMergeTask } = await import("@kb/engine");
+    const { aiMergeTask } = await import("@fusion/engine");
 
     (aiMergeTask as ReturnType<typeof vi.fn>).mockResolvedValue({ merged: true });
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Clock } from "lucide-react";
-import type { ScheduledTask, ScheduledTaskCreateInput } from "@kb/core";
+import type { ScheduledTask, ScheduledTaskCreateInput } from "@fusion/core";
 import {
   fetchAutomations,
   createAutomation,

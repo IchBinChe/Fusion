@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { Task, PlanningQuestion, PlanningSummary } from "@kb/core";
+import type { Task, PlanningQuestion, PlanningSummary } from "@fusion/core";
 import {
   startPlanning,
   startPlanningStreaming,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import type { WorkflowStep, WorkflowStepInput } from "@kb/core";
+import type { WorkflowStep, WorkflowStepInput } from "@fusion/core";
 import {
   fetchWorkflowSteps,
   createWorkflowStep,

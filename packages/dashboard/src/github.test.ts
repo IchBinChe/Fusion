@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GitHubClient, CreatePrParams, PrComment, isPrMergeReady } from "./github.js";
 
-// Mock the gh-cli module from @kb/core
-vi.mock("@kb/core", async () => {
-  const actual = await vi.importActual<typeof import("@kb/core")>("@kb/core");
+// Mock the gh-cli module from @fusion/core
+vi.mock("@fusion/core", async () => {
+  const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
     isGhAvailable: vi.fn(),
@@ -25,7 +25,7 @@ import {
   runGhJson,
   runGhJsonAsync,
   getCurrentRepo,
-} from "@kb/core";
+} from "@fusion/core";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);

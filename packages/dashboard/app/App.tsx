@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import type { TaskDetail, TaskCreateInput, Task, ThemeMode } from "@kb/core";
+import type { TaskDetail, TaskCreateInput, Task, ThemeMode } from "@fusion/core";
 import { fetchConfig, fetchSettings, fetchAuthStatus, updateSettings, fetchModels } from "./api";
 import type { ModelInfo } from "./api";
 import { Header } from "./components/Header";

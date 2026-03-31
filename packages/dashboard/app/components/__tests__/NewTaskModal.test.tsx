@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { NewTaskModal } from "../NewTaskModal";
-import type { Task, Column } from "@kb/core";
+import type { Task, Column } from "@fusion/core";
 
 // Mock the api module
 vi.mock("../../api", () => ({

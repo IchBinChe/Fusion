@@ -1,5 +1,5 @@
 import { prMonitorLog } from "./logger.js";
-import type { PrInfo } from "@kb/core";
+import type { PrInfo } from "@fusion/core";
 
 export interface TrackedPr {
   owner: string;
@@ -44,7 +44,7 @@ interface GhPrViewJson {
  */
 async function checkGhAuth(): Promise<boolean> {
   try {
-    const { isGhAvailable, isGhAuthenticated } = await import("@kb/core");
+    const { isGhAvailable, isGhAuthenticated } = await import("@fusion/core");
     return isGhAvailable() && isGhAuthenticated();
   } catch {
     return false;
@@ -60,7 +60,7 @@ async function fetchCommentsWithGh(
   prNumber: number,
   since?: string
 ): Promise<PrComment[]> {
-  const { runGhJson } = await import("@kb/core");
+  const { runGhJson } = await import("@fusion/core");
   
   const pr = await runGhJson<GhPrViewJson>([
     "pr", "view", String(prNumber),

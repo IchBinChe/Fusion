@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Scheduler, pathsOverlap } from "./scheduler.js";
-import type { TaskStore, Task } from "@kb/core";
+import { AgentSemaphore } from "./concurrency.js";
+import type { TaskStore, Task } from "@fusion/core";
 
 // Helper to create mock tasks
 function createMockTask(overrides: Partial<Task> = {}): Task {
@@ -181,7 +182,7 @@ describe("Scheduler", () => {
         totalCount: 2,
         acquire: vi.fn().mockResolvedValue(undefined),
         release: vi.fn(),
-      };
+      } as unknown as AgentSemaphore;
       
       const tasks = [
         createMockTask({ id: "KB-001", column: "in-progress" }),

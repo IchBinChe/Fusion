@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 import {
   startSubtaskBreakdown,
   connectSubtaskStream,

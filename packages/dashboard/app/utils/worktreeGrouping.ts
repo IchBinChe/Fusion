@@ -1,4 +1,4 @@
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 
 export interface WorktreeGroupData {
   label: string;
@@ -18,8 +18,8 @@ export function getWorktreeLabel(worktreePath: string): string {
 
 /**
  * Topological sort of tasks by dependency order.
- * Mirrors resolveDependencyOrder from @kb/core but inlined to avoid
- * build alias issues (Vite aliases @kb/core to types.ts only).
+ * Mirrors resolveDependencyOrder from @fusion/core but inlined to avoid
+ * build alias issues (Vite aliases @fusion/core to types.ts only).
  */
 function resolveDependencyOrder(tasks: Task[]): string[] {
   const taskMap = new Map(tasks.map((t) => [t.id, t]));

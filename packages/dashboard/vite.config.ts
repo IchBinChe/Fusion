@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@kb/core": resolve(__dirname, "../core/src/types.ts"),
+      "@fusion/core": resolve(__dirname, "../core/src/types.ts"),
     },
   },
   build: {

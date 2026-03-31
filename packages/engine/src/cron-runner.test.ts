@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CronRunner } from "./cron-runner.js";
-import type { TaskStore, AutomationStore, ScheduledTask, AutomationRunResult, AutomationStep, Settings } from "@kb/core";
+import type { TaskStore, AutomationStore, ScheduledTask, AutomationRunResult, AutomationStep, Settings } from "@fusion/core";
 import { randomUUID } from "node:crypto";
 
-// Default settings inline to avoid @kb/core build dependency during tests
+// Default settings inline to avoid @fusion/core build dependency during tests
 const DEFAULT_SETTINGS: Settings = {
   maxConcurrent: 2,
   maxWorktrees: 4,
@@ -21,9 +21,9 @@ const DEFAULT_SETTINGS: Settings = {
   planningModelId: "claude-sonnet-4-5",
   validatorProvider: "openai",
   validatorModelId: "gpt-4o",
-  autoUpdatePrStatus: true,
-  autoCreatePr: false,
   taskStuckTimeoutMs: undefined,
+  groupOverlappingFiles: false,
+  autoMerge: true,
 };
 
 function createMockSchedule(overrides: Partial<ScheduledTask> = {}): ScheduledTask {

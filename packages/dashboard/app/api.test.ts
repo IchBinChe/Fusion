@@ -19,7 +19,7 @@ import {
   startPlanningStreaming,
   fetchTasks,
 } from "./api";
-import type { Task, TaskDetail, BatchStatusResponse } from "@kb/core";
+import type { Task, TaskDetail, BatchStatusResponse } from "@fusion/core";
 
 const FAKE_DETAIL: TaskDetail = {
   id: "KB-001",
@@ -1061,7 +1061,7 @@ describe("Git Management API", () => {
 // --- Planning Mode API Tests ---
 
 import { startPlanning, respondToPlanning, cancelPlanning, createTaskFromPlanning } from "./api";
-import type { PlanningQuestion, PlanningSummary } from "@kb/core";
+import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 
 describe("Planning Mode API", () => {
   const originalFetch = globalThis.fetch;

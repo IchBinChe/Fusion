@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Column } from "../Column";
-import type { Task, Column as ColumnType } from "@kb/core";
+import type { Task, Column as ColumnType } from "@fusion/core";
 
 // Mock child components to keep tests focused on the Column badge behavior
 const taskCardRenderSpy = vi.fn();

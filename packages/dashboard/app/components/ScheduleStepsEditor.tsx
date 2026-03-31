@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { Plus, Trash2, ChevronUp, ChevronDown, Pencil, GripVertical } from "lucide-react";
-import type { AutomationStep, AutomationStepType } from "@kb/core";
+import type { AutomationStep, AutomationStepType } from "@fusion/core";
 import { StepTypeBadge } from "./StepTypeBadge";
 
 interface ScheduleStepsEditorProps {

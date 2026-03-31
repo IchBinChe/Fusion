@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { TaskDetailModal } from "../TaskDetailModal";
-import type { TaskDetail, Column, MergeResult, Task } from "@kb/core";
+import type { TaskDetail, Column, MergeResult, Task } from "@fusion/core";
 
 vi.mock("../../api", () => ({
   uploadAttachment: vi.fn(),

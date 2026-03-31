@@ -2,8 +2,8 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import multer from "multer";
 import { createReadStream, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
-import type { TaskStore, Column, MergeResult, ScheduleType, ActivityEventType, ModelPreset, AutomationStep } from "@kb/core";
-import { COLUMNS, VALID_TRANSITIONS, GLOBAL_SETTINGS_KEYS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore } from "@kb/core";
+import type { TaskStore, Column, MergeResult, ScheduleType, ActivityEventType, ModelPreset, AutomationStep } from "@fusion/core";
+import { COLUMNS, VALID_TRANSITIONS, GLOBAL_SETTINGS_KEYS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore } from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { GitHubClient, getCurrentGitHubRepo, parseBadgeUrl } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
@@ -3091,7 +3091,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
 
     // Fetch canonical badge state
-    let badgeData: Omit<PrInfo, "lastCheckedAt"> | Omit<import("@kb/core").IssueInfo, "lastCheckedAt"> | null = null;
+    let badgeData: Omit<PrInfo, "lastCheckedAt"> | Omit<import("@fusion/core").IssueInfo, "lastCheckedAt"> | null = null;
     if (classification.resourceType === "pr") {
       badgeData = await GitHubClient.fetchPrWithInstallationToken(
         classification.owner,
@@ -3156,9 +3156,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           if (changed) badgeFieldsChanged = true;
         }
       } else {
-        const current = match.current as import("@kb/core").IssueInfo;
-        const next = { ...(badgeData as Omit<import("@kb/core").IssueInfo, "lastCheckedAt">), lastCheckedAt: checkedAt };
-        const changed = hasIssueBadgeFieldsChanged(current, badgeData as Omit<import("@kb/core").IssueInfo, "lastCheckedAt">);
+        const current = match.current as import("@fusion/core").IssueInfo;
+        const next = { ...(badgeData as Omit<import("@fusion/core").IssueInfo, "lastCheckedAt">), lastCheckedAt: checkedAt };
+        const changed = hasIssueBadgeFieldsChanged(current, badgeData as Omit<import("@fusion/core").IssueInfo, "lastCheckedAt">);
         if (changed || current.lastCheckedAt !== checkedAt) {
           await store.updateIssueInfo(match.id, next);
           if (changed) badgeFieldsChanged = true;
@@ -3412,7 +3412,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/github/batch/status", async (req, res) => {
     try {
-      const { taskIds } = (req.body ?? {}) as import("@kb/core").BatchStatusRequest;
+      const { taskIds } = (req.body ?? {}) as import("@fusion/core").BatchStatusRequest;
       if (!Array.isArray(taskIds)) {
         res.status(400).json({ error: "taskIds must be an array" });
         return;
@@ -4738,7 +4738,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const schedule = await automationStore.getSchedule(id);
 
       const startedAt = new Date().toISOString();
-      let result: import("@kb/core").AutomationRunResult;
+      let result: import("@fusion/core").AutomationRunResult;
 
       if (schedule.steps && schedule.steps.length > 0) {
         // Multi-step execution
@@ -5015,7 +5015,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       let refinedPrompt: string;
       try {
         // Dynamic import to avoid resolution issues in tests
-        const engineModule = "@kb/engine";
+        const engineModule = "@fusion/engine";
         const { createKbAgent } = await import(/* @vite-ignore */ engineModule);
         const settings = await store.getSettings();
 
@@ -5076,7 +5076,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
    */
   router.get("/workflow-step-templates", async (_req, res) => {
     try {
-      const { WORKFLOW_STEP_TEMPLATES } = await import("@kb/core");
+      const { WORKFLOW_STEP_TEMPLATES } = await import("@fusion/core");
       res.json({ templates: WORKFLOW_STEP_TEMPLATES });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5090,7 +5090,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
    */
   router.post("/workflow-step-templates/:id/create", async (req, res) => {
     try {
-      const { WORKFLOW_STEP_TEMPLATES } = await import("@kb/core");
+      const { WORKFLOW_STEP_TEMPLATES } = await import("@fusion/core");
       const template = WORKFLOW_STEP_TEMPLATES.find((t) => t.id === req.params.id);
 
       if (!template) {
@@ -5135,11 +5135,11 @@ Output ONLY the prompt text (no markdown, no explanations).`;
         filter.role = req.query.role;
       }
 
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
-      const agents = await agentStore.listAgents(filter as { state?: "idle" | "active" | "paused" | "terminated"; role?: import("@kb/core").AgentCapability });
+      const agents = await agentStore.listAgents(filter as { state?: "idle" | "active" | "paused" | "terminated"; role?: import("@fusion/core").AgentCapability });
       res.json(agents);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5163,11 +5163,11 @@ Output ONLY the prompt text (no markdown, no explanations).`;
         return;
       }
 
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
-      const agent = await agentStore.createAgent({ name, role: role as import("@kb/core").AgentCapability, metadata });
+      const agent = await agentStore.createAgent({ name, role: role as import("@fusion/core").AgentCapability, metadata });
       res.status(201).json(agent);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5180,7 +5180,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
    */
   router.get("/agents/:id", async (req, res) => {
     try {
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
@@ -5203,7 +5203,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
     try {
       const { name, role, metadata } = req.body;
 
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
@@ -5231,11 +5231,11 @@ Output ONLY the prompt text (no markdown, no explanations).`;
         return;
       }
 
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
-      const agent = await agentStore.updateAgentState(req.params.id, state as import("@kb/core").AgentState);
+      const agent = await agentStore.updateAgentState(req.params.id, state as import("@fusion/core").AgentState);
       res.json(agent);
     } catch (err: any) {
       if (err.message?.includes("not found")) {
@@ -5254,7 +5254,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
    */
   router.delete("/agents/:id", async (req, res) => {
     try {
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
@@ -5277,7 +5277,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
     try {
       const { status = "ok" } = req.body;
 
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
@@ -5301,7 +5301,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
     try {
       const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 50;
 
-      const { AgentStore } = await import("@kb/core");
+      const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: store.getRootDir() });
       await agentStore.init();
 
@@ -5360,7 +5360,7 @@ async function executeSingleCommand(
   command: string,
   timeoutMs: number | undefined,
   startedAt: string,
-): Promise<import("@kb/core").AutomationRunResult> {
+): Promise<import("@fusion/core").AutomationRunResult> {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsyncFn = promisify(exec);
@@ -5413,11 +5413,11 @@ async function executeSingleCommand(
  * Execute all steps in a multi-step schedule (used by manual run endpoint).
  */
 async function executeScheduleSteps(
-  schedule: import("@kb/core").ScheduledTask,
+  schedule: import("@fusion/core").ScheduledTask,
   startedAt: string,
-): Promise<import("@kb/core").AutomationRunResult> {
+): Promise<import("@fusion/core").AutomationRunResult> {
   const steps = schedule.steps!;
-  const stepResults: import("@kb/core").AutomationStepResult[] = [];
+  const stepResults: import("@fusion/core").AutomationStepResult[] = [];
   let overallSuccess = true;
   let stoppedEarly = false;
 
@@ -5426,7 +5426,7 @@ async function executeScheduleSteps(
     const stepStartedAt = new Date().toISOString();
     const timeoutMs = step.timeoutMs ?? schedule.timeoutMs ?? 300000;
 
-    let stepResult: import("@kb/core").AutomationStepResult;
+    let stepResult: import("@fusion/core").AutomationStepResult;
 
     if (step.type === "command") {
       const cmdResult = await executeSingleCommand(step.command ?? "", timeoutMs, stepStartedAt);
@@ -5585,7 +5585,7 @@ async function refreshPrInBackground(store: TaskStore, taskId: string, currentPr
 async function refreshIssueInBackground(
   store: TaskStore,
   taskId: string,
-  currentIssueInfo: import("@kb/core").IssueInfo,
+  currentIssueInfo: import("@fusion/core").IssueInfo,
   token?: string,
 ): Promise<void> {
   try {

@@ -6,11 +6,11 @@
  *
  * Features:
  * - Rate limiting per IP (10 requests per hour)
- * - Dynamic import of @kb/engine for AI agent creation
+ * - Dynamic import of @fusion/engine for AI agent creation
  * - Text length validation (1-2000 characters)
  */
 
-// Dynamic import for @kb/engine to avoid resolution issues in test environment
+// Dynamic import for @fusion/engine to avoid resolution issues in test environment
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports, @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,7 +21,7 @@ async function initEngine() {
   if (!createKbAgent) {
     try {
       // Use dynamic import with variable to prevent static analysis
-      const engineModule = "@kb/engine";
+      const engineModule = "@fusion/engine";
       const engine = await import(/* @vite-ignore */ engineModule);
       createKbAgent = engine.createKbAgent;
     } catch {

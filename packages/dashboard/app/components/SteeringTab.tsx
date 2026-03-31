@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import type { TaskDetail } from "@kb/core";
+import type { TaskDetail } from "@fusion/core";
 import { addSteeringComment } from "../api";
 import type { ToastType } from "../hooks/useToast";
 

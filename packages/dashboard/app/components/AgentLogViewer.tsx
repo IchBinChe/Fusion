@@ -1,4 +1,4 @@
-import type { AgentLogEntry } from "@kb/core";
+import type { AgentLogEntry } from "@fusion/core";
 import { ProviderIcon } from "./ProviderIcon";
 import { useRef, useEffect } from "react";
 

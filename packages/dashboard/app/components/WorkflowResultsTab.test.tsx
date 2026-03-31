@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WorkflowResultsTab } from "./WorkflowResultsTab";
-import type { WorkflowStepResult } from "@kb/core";
+import type { WorkflowStepResult } from "@fusion/core";
 
 describe("WorkflowResultsTab", () => {
   const mockResults: WorkflowStepResult[] = [

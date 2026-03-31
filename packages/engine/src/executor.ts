@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import type { TaskStore, Task, TaskDetail, StepStatus, Settings, WorkflowStep } from "@kb/core";
+import type { TaskStore, Task, TaskDetail, StepStatus, Settings, WorkflowStep } from "@fusion/core";
 import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
@@ -1028,7 +1028,7 @@ export class TaskExecutor {
     if (!currentTask.enabledWorkflowSteps?.length) return true;
 
     const workflowStepIds = currentTask.enabledWorkflowSteps;
-    const results: import("@kb/core").WorkflowStepResult[] = [];
+    const results: import("@fusion/core").WorkflowStepResult[] = [];
 
     for (const wsId of workflowStepIds) {
       const ws = await this.store.getWorkflowStep(wsId);

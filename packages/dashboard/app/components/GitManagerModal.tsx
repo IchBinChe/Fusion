@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import type {
   GitStatus,

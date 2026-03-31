@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
-import type { ScheduledTask, ScheduledTaskCreateInput, ScheduleType, AutomationStep } from "@kb/core";
+import type { ScheduledTask, ScheduledTaskCreateInput, ScheduleType, AutomationStep } from "@fusion/core";
 import { ScheduleStepsEditor } from "./ScheduleStepsEditor";
 
-/** Mapping from preset schedule types to their cron expressions. Mirrored from @kb/core. */
+/** Mapping from preset schedule types to their cron expressions. Mirrored from @fusion/core. */
 const PRESET_CRON: Record<Exclude<ScheduleType, "custom">, string> = {
   hourly: "0 * * * *",
   daily: "0 0 * * *",

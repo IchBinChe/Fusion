@@ -1,4 +1,4 @@
-import type { ModelPreset } from "@kb/core";
+import type { ModelPreset } from "@fusion/core";
 
 export function getPresetByName(presets: ModelPreset[], name: string): ModelPreset | undefined {
   const normalizedName = name.trim().toLowerCase();

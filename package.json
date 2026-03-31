@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "tsx packages/cli/src/bin.ts",
-    "dev:ui": "pnpm --filter @kb/dashboard dev",
+    "dev:ui": "pnpm --filter @fusion/dashboard dev",
     "build": "pnpm -r build",
     "build:exe": "pnpm build && pnpm --filter @dustinbyrne/kb build:exe",
     "build:exe:all": "pnpm build && pnpm --filter @dustinbyrne/kb build:exe:all",

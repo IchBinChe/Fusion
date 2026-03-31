@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { Sun, Moon, Monitor } from "lucide-react";
-import type { ThemeMode, ColorTheme } from "@kb/core";
+import type { ThemeMode, ColorTheme } from "@fusion/core";
 
 interface ThemeSelectorProps {
   themeMode: ThemeMode;

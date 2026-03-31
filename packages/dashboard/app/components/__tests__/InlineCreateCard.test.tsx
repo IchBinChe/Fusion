@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { InlineCreateCard } from "../InlineCreateCard";
-import type { Task, Column } from "@kb/core";
+import type { Task, Column } from "@fusion/core";
 import { fetchModels, fetchSettings } from "../../api";
 import type { ModelInfo } from "../../api";
 

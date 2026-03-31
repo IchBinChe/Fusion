@@ -1,10 +1,10 @@
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createKbAgent: any;
-const engineModule = "@kb/engine";
+const engineModule = "@fusion/engine";
 
 async function initEngine() {
   if (!createKbAgent) {

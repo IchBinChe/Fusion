@@ -12,7 +12,7 @@ import {
   writeWorkspaceFile,
   MAX_FILE_SIZE,
 } from "../file-service.js";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 // Mock node:fs/promises
 const mockReaddir = vi.fn();

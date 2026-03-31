@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { QuickEntryBox } from "../QuickEntryBox";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 
 const MOCK_MODELS = [
   {

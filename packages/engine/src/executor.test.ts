@@ -38,7 +38,7 @@ import { execSync } from "node:child_process";
 import { findWorktreeUser, aiMergeTask } from "./merger.js";
 import { WorktreePool } from "./worktree-pool.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
-import type { Column, Task, TaskDetail } from "@kb/core";
+import type { Column, Task, TaskDetail } from "@fusion/core";
 
 const mockedCreateHaiAgent = vi.mocked(createKbAgent);
 

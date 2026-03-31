@@ -17,9 +17,9 @@ import type {
   WorkflowStep,
   WorkflowStepInput,
   WorkflowStepResult,
-} from "@kb/core";
-import type { PlanningQuestion, PlanningSummary, PlanningResponse } from "@kb/core";
-import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, AutomationStep } from "@kb/core";
+} from "@fusion/core";
+import type { PlanningQuestion, PlanningSummary, PlanningResponse } from "@fusion/core";
+import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, AutomationStep } from "@fusion/core";
 
 function looksLikeHtml(body: string): boolean {
   const trimmed = body.trim();
@@ -564,16 +564,16 @@ export function refreshPrStatus(id: string): Promise<PrRefreshResponse> {
 // --- Issue Management API ---
 
 /** Re-export GitHub badge-related types for convenience */
-export type { IssueInfo, BatchStatusResult, BatchStatusEntry } from "@kb/core";
+export type { IssueInfo, BatchStatusResult, BatchStatusEntry } from "@fusion/core";
 
 /** Fetch cached issue status for a task */
-export function fetchIssueStatus(id: string): Promise<{ issueInfo: import("@kb/core").IssueInfo; stale: boolean }> {
-  return api<{ issueInfo: import("@kb/core").IssueInfo; stale: boolean }>(`/tasks/${id}/issue/status`);
+export function fetchIssueStatus(id: string): Promise<{ issueInfo: import("@fusion/core").IssueInfo; stale: boolean }> {
+  return api<{ issueInfo: import("@fusion/core").IssueInfo; stale: boolean }>(`/tasks/${id}/issue/status`);
 }
 
 /** Force refresh issue status from GitHub */
-export function refreshIssueStatus(id: string): Promise<import("@kb/core").IssueInfo> {
-  return api<import("@kb/core").IssueInfo>(`/tasks/${id}/issue/refresh`, {
+export function refreshIssueStatus(id: string): Promise<import("@fusion/core").IssueInfo> {
+  return api<import("@fusion/core").IssueInfo>(`/tasks/${id}/issue/refresh`, {
     method: "POST",
   });
 }
@@ -1221,7 +1221,7 @@ export function reorderAutomationSteps(id: string, stepIds: string[]): Promise<S
 // ── Activity Log API ────────────────────────────────────────────
 
 /** Re-export ActivityLogEntry type from core for convenience */
-export type { ActivityLogEntry, ActivityEventType } from "@kb/core";
+export type { ActivityLogEntry, ActivityEventType } from "@fusion/core";
 
 /** Fetch activity log entries */
 export function fetchActivityLog(options?: { limit?: number; since?: string; type?: ActivityEventType }): Promise<ActivityLogEntry[]> {
@@ -1281,11 +1281,11 @@ export function fetchWorkflowResults(taskId: string): Promise<WorkflowStepResult
 // ── Workflow Step Templates ──────────────────────────────────────────────
 
 /** Re-export WorkflowStepTemplate type from core */
-export type { WorkflowStepTemplate } from "@kb/core";
+export type { WorkflowStepTemplate } from "@fusion/core";
 
 /** Fetch all built-in workflow step templates */
-export function fetchWorkflowStepTemplates(): Promise<{ templates: import("@kb/core").WorkflowStepTemplate[] }> {
-  return api<{ templates: import("@kb/core").WorkflowStepTemplate[] }>("/workflow-step-templates");
+export function fetchWorkflowStepTemplates(): Promise<{ templates: import("@fusion/core").WorkflowStepTemplate[] }> {
+  return api<{ templates: import("@fusion/core").WorkflowStepTemplate[] }>("/workflow-step-templates");
 }
 
 /** Create a workflow step from a built-in template */
@@ -1477,7 +1477,7 @@ export function cancelSubtaskBreakdown(sessionId: string): Promise<void> {
 
 // ── Agent API ────────────────────────────────────────────────────────────
 
-import type { Agent, AgentDetail, AgentCapability, AgentState, AgentHeartbeatEvent, AgentCreateInput, AgentUpdateInput } from "@kb/core";
+import type { Agent, AgentDetail, AgentCapability, AgentState, AgentHeartbeatEvent, AgentCreateInput, AgentUpdateInput } from "@fusion/core";
 export type { Agent, AgentDetail, AgentCapability, AgentState, AgentHeartbeatEvent, AgentCreateInput, AgentUpdateInput };
 
 /** Fetch all agents, optionally filtered by state or role */

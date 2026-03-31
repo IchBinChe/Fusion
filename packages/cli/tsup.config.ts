@@ -12,7 +12,7 @@ export default defineConfig({
   format: ["esm"],
   platform: "node",
   target: "node22",
-  noExternal: [/^@kb\//],
+  noExternal: [/^@fusion\//],
   splitting: false,
   clean: true,
   onSuccess: async () => {

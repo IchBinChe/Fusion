@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ActivityLogModal } from "../ActivityLogModal";
 import * as apiModule from "../../api";
-import type { ActivityLogEntry } from "@kb/core";
+import type { ActivityLogEntry } from "@fusion/core";
 
 // Mock the API module
 vi.mock("../../api", () => ({

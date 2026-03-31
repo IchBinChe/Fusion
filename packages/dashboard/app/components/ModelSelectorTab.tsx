@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { fetchModels, updateTask } from "../api";
 import type { ModelInfo } from "../api";
-import type { Task, TaskDetail } from "@kb/core";
+import type { Task, TaskDetail } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";

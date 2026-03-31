@@ -75,11 +75,11 @@ describe("CLI package.json publishing config", () => {
   });
 });
 
-describe("Scoped @kb/* packages publishing config", () => {
+describe("Scoped @fusion/* packages publishing config", () => {
   const scopedPackages = ["core", "engine", "dashboard"];
 
   for (const name of scopedPackages) {
-    describe(`@kb/${name}`, () => {
+    describe(`@fusion/${name}`, () => {
       const pkg = loadPackageJson(name);
 
       it('has publishConfig with access "public"', () => {

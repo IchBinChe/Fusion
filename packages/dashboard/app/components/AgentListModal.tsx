@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import type { JSX } from "react";
 import { X, Plus, Play, Pause, Square, Activity, Heart, Trash2, RefreshCw, Bot } from "lucide-react";
 import type { Agent, AgentCapability, AgentState } from "../api";
 import { fetchAgents, createAgent, updateAgentState, deleteAgent } from "../api";

@@ -1,5 +1,5 @@
 /**
- * Lightweight structured logger for the `@kb/engine` package.
+ * Lightweight structured logger for the `@fusion/engine` package.
  *
  * Usage:
  * ```ts

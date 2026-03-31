@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useLayoutEffect } from "react";
-import { COLOR_THEMES, type ThemeMode, type ColorTheme } from "@kb/core";
+import { COLOR_THEMES, type ThemeMode, type ColorTheme } from "@fusion/core";
 
 const THEME_MODE_STORAGE_KEY = "kb-dashboard-theme-mode";
 const COLOR_THEME_STORAGE_KEY = "kb-dashboard-color-theme";

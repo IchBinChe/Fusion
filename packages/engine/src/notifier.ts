@@ -1,4 +1,4 @@
-import type { TaskStore, Task, Column, Settings, MergeResult } from "@kb/core";
+import type { TaskStore, Task, Column, Settings, MergeResult } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { schedulerLog } from "./logger.js";
 

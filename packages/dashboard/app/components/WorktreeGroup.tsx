@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { Task, TaskDetail } from "@kb/core";
+import type { Task, TaskDetail } from "@fusion/core";
 import { ClipboardList, GitBranch } from "lucide-react";
 import { TaskCard } from "./TaskCard";
 import type { ToastType } from "../hooks/useToast";

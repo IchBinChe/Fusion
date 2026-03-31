@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { ListView } from "../ListView";
-import type { Task, TaskDetail } from "@kb/core";
+import type { Task, TaskDetail } from "@fusion/core";
 
 // Mock the API
 vi.mock("../../api", () => ({

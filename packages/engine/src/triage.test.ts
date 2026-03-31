@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { TaskStore, Task, TaskDetail, Settings } from "@kb/core";
+import type { TaskStore, Task, TaskDetail, Settings } from "@fusion/core";
 import {
   TriageProcessor,
   TRIAGE_SYSTEM_PROMPT,

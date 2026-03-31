@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import kbExtension from "../extension.js";
-import { TaskStore } from "@kb/core";
+import { TaskStore } from "@fusion/core";
 
 // ── Mock ExtensionAPI that captures registrations ──────────────────
 

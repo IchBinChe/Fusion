@@ -1,4 +1,4 @@
-import { TaskStore, type Settings, DEFAULT_SETTINGS } from "@kb/core";
+import { TaskStore, type Settings, DEFAULT_SETTINGS } from "@fusion/core";
 
 // Settings that can be updated via CLI
 export const VALID_SETTINGS = [

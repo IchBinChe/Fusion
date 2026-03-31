@@ -1,10 +1,10 @@
 import { execSync } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline";
-import { TaskStore, AutomationStore } from "@kb/core";
-import type { Settings, TaskDetail, PrInfo } from "@kb/core";
-import { createServer, GitHubClient } from "@kb/dashboard";
-import { TriageProcessor, TaskExecutor, Scheduler, AgentSemaphore, WorktreePool, aiMergeTask, UsageLimitPauser, PRIORITY_MERGE, scanIdleWorktrees, cleanupOrphanedWorktrees, NtfyNotifier, PrMonitor, PrCommentHandler, CronRunner, StuckTaskDetector } from "@kb/engine";
+import { TaskStore, AutomationStore } from "@fusion/core";
+import type { Settings, TaskDetail, PrInfo } from "@fusion/core";
+import { createServer, GitHubClient } from "@fusion/dashboard";
+import { TriageProcessor, TaskExecutor, Scheduler, AgentSemaphore, WorktreePool, aiMergeTask, UsageLimitPauser, PRIORITY_MERGE, scanIdleWorktrees, cleanupOrphanedWorktrees, NtfyNotifier, PrMonitor, PrCommentHandler, CronRunner, StuckTaskDetector } from "@fusion/engine";
 import { AuthStorage, ModelRegistry, discoverAndLoadExtensions, createExtensionRuntime } from "@mariozechner/pi-coding-agent";
 
 /**

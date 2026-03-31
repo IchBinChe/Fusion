@@ -32,7 +32,7 @@ import {
 } from "./merger.js";
 import { createKbAgent } from "./pi.js";
 import { execSync } from "node:child_process";
-import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@kb/core";
+import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@fusion/core";
 
 const mockedCreateHaiAgent = vi.mocked(createKbAgent);
 const mockedExecSync = vi.mocked(execSync);

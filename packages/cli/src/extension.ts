@@ -7,7 +7,7 @@ import {
   COLUMN_LABELS,
   type Column,
   type Task,
-} from "@kb/core";
+} from "@fusion/core";
 import { resolve, basename, extname } from "node:path";
 import { readFile } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";

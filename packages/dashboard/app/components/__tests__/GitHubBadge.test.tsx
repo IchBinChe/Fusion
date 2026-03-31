@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { IssueInfo, PrInfo } from "@kb/core";
+import type { IssueInfo, PrInfo } from "@fusion/core";
 import { GitHubBadge } from "../GitHubBadge";
 
 describe("GitHubBadge", () => {

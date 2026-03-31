@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "../SettingsModal";
-import type { Settings } from "@kb/core";
+import type { Settings } from "@fusion/core";
 
 const defaultSettings: Settings = {
   maxConcurrent: 2,

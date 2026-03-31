@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { WorkflowStepManager } from "../WorkflowStepManager";
-import type { WorkflowStep } from "@kb/core";
+import type { WorkflowStep } from "@fusion/core";
 
 const mockSteps: WorkflowStep[] = [
   {

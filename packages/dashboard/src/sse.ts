@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 export function createSSE(store: TaskStore) {
   return (_req: Request, res: Response) => {

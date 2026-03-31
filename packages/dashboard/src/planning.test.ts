@@ -14,7 +14,7 @@ import {
   SessionNotFoundError,
   InvalidSessionStateError,
 } from "./planning.js";
-import type { PlanningQuestion, PlanningSummary } from "@kb/core";
+import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 
 // Counter for unique IPs per test
 let ipCounter = 0;

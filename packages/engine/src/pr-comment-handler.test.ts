@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PrCommentHandler } from "./pr-comment-handler.js";
-import type { TaskStore, Task } from "@kb/core";
+import type { TaskStore, Task } from "@fusion/core";
 
 const mockStore = {
   addSteeringComment: vi.fn<(id: string, text: string, author?: "user" | "agent") => Promise<Task>>(),

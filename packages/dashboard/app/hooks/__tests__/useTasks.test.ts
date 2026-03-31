@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useTasks } from "../useTasks";
 import * as api from "../../api";
-import type { Task, Column } from "@kb/core";
+import type { Task, Column } from "@fusion/core";
 
 // Mock the api module
 vi.mock("../../api", () => ({

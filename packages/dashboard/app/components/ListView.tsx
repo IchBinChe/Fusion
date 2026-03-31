@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
 import { LayoutGrid, List as ListIcon, ArrowUpDown, ArrowUp, ArrowDown, Search, Link, Columns3, EyeOff, Eye, ChevronRight } from "lucide-react";
-import type { Task, TaskDetail, Column, TaskStep, TaskCreateInput } from "@kb/core";
-import { COLUMN_LABELS, COLUMNS } from "@kb/core";
+import type { Task, TaskDetail, Column, TaskStep, TaskCreateInput } from "@fusion/core";
+import { COLUMN_LABELS, COLUMNS } from "@fusion/core";
 import { fetchTaskDetail } from "../api";
 import type { ModelInfo } from "../api";
 import { QuickEntryBox } from "./QuickEntryBox";

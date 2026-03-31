@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import type { TaskStore, Task, MergeResult } from "@kb/core";
+import type { TaskStore, Task, MergeResult } from "@fusion/core";
 import { createKbAgent } from "./pi.js";
 import type { WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";

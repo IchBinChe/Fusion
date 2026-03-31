@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare } from "lucide-react";
-import type { PrInfo } from "@kb/core";
+import type { PrInfo } from "@fusion/core";
 import { createPr, refreshPrStatus, type PrRefreshResponse } from "../api";
 import type { ToastType } from "../hooks/useToast";
 

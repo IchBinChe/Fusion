@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ScheduleForm } from "../ScheduleForm";
-import type { ScheduledTask } from "@kb/core";
+import type { ScheduledTask } from "@fusion/core";
 
-// Mock @kb/core to provide type-only exports (no runtime values needed)
-vi.mock("@kb/core", () => ({}));
+// Mock @fusion/core to provide type-only exports (no runtime values needed)
+vi.mock("@fusion/core", () => ({}));
 
 function makeSchedule(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   return {

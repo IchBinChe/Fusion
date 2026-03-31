@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { GitHubRateLimiter, GitHubPollingService, githubPoller, githubRateLimiter } from "../github-poll.js";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 // Mock the GitHubClient
 const mockGetBadgeStatusesBatch = vi.fn();
@@ -98,9 +98,9 @@ describe("GitHubRateLimiter", () => {
 describe("GitHubPollingService", () => {
   let service: GitHubPollingService;
   let mockStore: TaskStore;
-  let mockUpdatePrInfo: vi.Mock;
-  let mockUpdateIssueInfo: vi.Mock;
-  let mockGetTask: vi.Mock;
+  let mockUpdatePrInfo: Mock;
+  let mockUpdateIssueInfo: Mock;
+  let mockGetTask: Mock;
 
   beforeEach(() => {
     vi.useFakeTimers();

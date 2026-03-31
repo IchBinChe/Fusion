@@ -8,7 +8,7 @@
  * - Verdict + feedback is returned to the worker
  */
 
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 import { createKbAgent } from "./pi.js";
 import { AgentLogger } from "./agent-logger.js";
 import { checkSessionError } from "./usage-limit-detector.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelPreset } from "@kb/core";
+import type { ModelPreset } from "@fusion/core";
 import {
   applyPresetToSelection,
   generatePresetId,

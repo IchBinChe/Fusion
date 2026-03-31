@@ -5,8 +5,8 @@ vi.mock("node:readline/promises", () => ({
   createInterface: vi.fn(),
 }));
 
-// Mock @kb/core before importing
-vi.mock("@kb/core", () => ({
+// Mock @fusion/core before importing
+vi.mock("@fusion/core", () => ({
   TaskStore: vi.fn(),
   COLUMNS: ["triage", "todo", "in-progress", "in-review", "done", "archived"],
   COLUMN_LABELS: {
@@ -21,7 +21,7 @@ vi.mock("@kb/core", () => ({
 
 // Import after mocking
 import { createInterface } from "node:readline/promises";
-import { TaskStore } from "@kb/core";
+import { TaskStore } from "@fusion/core";
 import { runTaskSteer } from "../commands/task.js";
 
 describe("runTaskSteer", () => {

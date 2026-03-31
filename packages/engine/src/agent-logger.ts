@@ -1,4 +1,4 @@
-import type { TaskStore, AgentRole } from "@kb/core";
+import type { TaskStore, AgentRole } from "@fusion/core";
 
 /** Default byte threshold before an automatic flush. */
 const FLUSH_SIZE_BYTES = 1024;

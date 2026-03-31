@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModelSelectorTab } from "../ModelSelectorTab";
-import type { Task } from "@kb/core";
+import type { Task } from "@fusion/core";
 import * as api from "../../api";
 
 vi.mock("../../api", async () => {

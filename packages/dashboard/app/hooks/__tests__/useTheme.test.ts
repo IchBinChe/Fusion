@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { COLOR_THEMES } from "@kb/core";
+import { COLOR_THEMES } from "@fusion/core";
 import { useTheme, getThemeInitScript } from "../useTheme";
 
 describe("useTheme", () => {

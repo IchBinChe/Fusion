@@ -1,7 +1,7 @@
 import { join, resolve, relative, dirname } from "node:path";
 import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import type { TaskStore } from "@kb/core";
+import type { TaskStore } from "@fusion/core";
 
 /**
  * File node type representing a file or directory entry.

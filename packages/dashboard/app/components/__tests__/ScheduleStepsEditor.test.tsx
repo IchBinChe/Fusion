@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ScheduleStepsEditor } from "../ScheduleStepsEditor";
-import type { AutomationStep } from "@kb/core";
+import type { AutomationStep } from "@fusion/core";
 
-// Mock @kb/core
-vi.mock("@kb/core", () => ({}));
+// Mock @fusion/core
+vi.mock("@fusion/core", () => ({}));
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({

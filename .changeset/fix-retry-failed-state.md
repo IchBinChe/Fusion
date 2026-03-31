@@ -1,5 +1,5 @@
 ---
-"@kb/dashboard": patch
+"@fusion/dashboard": patch
 ---
 
 Fix retry button for failed tasks in non-in-progress columns

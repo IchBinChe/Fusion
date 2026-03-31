@@ -1,5 +1,5 @@
 ---
-"@kb/dashboard": minor
+"@fusion/dashboard": minor
 ---
 
 Move file browser to top-level toolbar with workspace selection

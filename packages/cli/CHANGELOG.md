@@ -1,10 +1,10 @@
-# @dustinbyrne/kb
+# @gsxdsm/fusion
 
 ## 0.4.0
 
 ### Minor Changes
 
-- 2d13b82: Add pi extension. Installing `@dustinbyrne/kb` via `pi install` now provides native tools (`kb_task_create`, `kb_task_list`, `kb_task_show`, `kb_task_attach`, `kb_task_pause`, `kb_task_unpause`) and a `/kb` command to start the dashboard and AI engine from within a pi session.
+- 2d13b82: Add pi extension. Installing `@gsxdsm/fusion` via `pi install` now provides native tools (`kb_task_create`, `kb_task_list`, `kb_task_show`, `kb_task_attach`, `kb_task_pause`, `kb_task_unpause`) and a `/kb` command to start the dashboard and AI engine from within a pi session.
 - 494de14: Changed `autoMerge` to default to `true` for new boards.
 - 50821fc: Add global pause button to stop all automated agents and scheduling
 - cac10af: Split engine control into Pause (soft) and Stop (hard). The dashboard Header now shows two buttons: "Pause AI engine" stops new work from being dispatched while letting in-flight agents finish gracefully, and "Stop AI engine" (previously the only Pause button) immediately kills all active agent sessions. A new `enginePaused` setting field controls the soft-pause state alongside the existing `globalPause` hard-stop.

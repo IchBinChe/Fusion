@@ -707,7 +707,7 @@ Packages are published to npm automatically via GitHub Actions and [changesets](
 ### Installing from npm
 
 ```bash
-npm install -g kb
+npm install -g @gsxdsm/fusion
 ```
 
 ### Triggering a release

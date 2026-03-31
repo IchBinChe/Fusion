@@ -1,5 +1,5 @@
 ---
-"@kb/dashboard": minor
+"@fusion/dashboard": minor
 ---
 
 Add real-time streaming for planning mode with AI thinking display

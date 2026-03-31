@@ -23,6 +23,15 @@ import { isGhAuthenticated } from "@kb/core";
 
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
 
+function createMockGlobalSettingsStore() {
+  return {
+    getSettings: vi.fn().mockResolvedValue({}),
+    updateSettings: vi.fn().mockResolvedValue({}),
+    getSettingsPath: vi.fn().mockReturnValue("/fake/home/.pi/kb/settings.json"),
+    init: vi.fn().mockResolvedValue(false),
+  };
+}
+
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     getTask: vi.fn(),
@@ -36,6 +45,9 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     unarchiveTask: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn(),
+    updateGlobalSettings: vi.fn(),
+    getSettingsByScope: vi.fn().mockResolvedValue({ global: {}, project: {} }),
+    getGlobalSettingsStore: vi.fn().mockReturnValue(createMockGlobalSettingsStore()),
     logEntry: vi.fn().mockResolvedValue(undefined),
     getAgentLogs: vi.fn().mockResolvedValue([]),
     addSteeringComment: vi.fn(),
@@ -4487,6 +4499,50 @@ describe("PUT /settings", () => {
     expect(res.body.error).toContain("must include both provider and modelId or neither");
   });
 
+  it("rejects global-only fields with 400 error and helpful message", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ themeMode: "dark", maxConcurrent: 4 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("global settings");
+    expect(res.body.error).toContain("themeMode");
+    expect(res.body.error).toContain("/settings/global");
+  });
+
+  it("rejects when only global fields are sent", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("defaultProvider");
+  });
+
+  it("allows project-only fields to pass through successfully", async () => {
+    const updatedSettings = { ...DEFAULT_SETTINGS, maxConcurrent: 8 };
+    (store.updateSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ maxConcurrent: 8, autoMerge: false }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateSettings).toHaveBeenCalledWith({ maxConcurrent: 8, autoMerge: false });
+  });
+
   it("returns 500 on store update error", async () => {
     (store.updateSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Write failed"));
 
@@ -4500,5 +4556,130 @@ describe("PUT /settings", () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toContain("Write failed");
+  });
+});
+
+describe("GET /settings/global", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("returns global settings from the global settings store", async () => {
+    const mockGlobalStore = createMockGlobalSettingsStore();
+    mockGlobalStore.getSettings.mockResolvedValue({ themeMode: "light", colorTheme: "ocean" });
+    (store.getGlobalSettingsStore as ReturnType<typeof vi.fn>).mockReturnValue(mockGlobalStore);
+
+    const res = await GET(buildApp(), "/api/settings/global");
+
+    expect(res.status).toBe(200);
+    expect(res.body.themeMode).toBe("light");
+    expect(res.body.colorTheme).toBe("ocean");
+    // Should NOT include server-only fields
+    expect(res.body.githubTokenConfigured).toBeUndefined();
+  });
+
+  it("returns 500 on global store error", async () => {
+    const mockGlobalStore = createMockGlobalSettingsStore();
+    mockGlobalStore.getSettings.mockRejectedValue(new Error("Read failed"));
+    (store.getGlobalSettingsStore as ReturnType<typeof vi.fn>).mockReturnValue(mockGlobalStore);
+
+    const res = await GET(buildApp(), "/api/settings/global");
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain("Read failed");
+  });
+});
+
+describe("PUT /settings/global", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("updates global settings via store.updateGlobalSettings", async () => {
+    const updatedMerged = { themeMode: "light", maxConcurrent: 2 };
+    (store.updateGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedMerged);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings/global",
+      JSON.stringify({ themeMode: "light" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ themeMode: "light" });
+  });
+
+  it("returns 500 on update error", async () => {
+    (store.updateGlobalSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Write failed"));
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings/global",
+      JSON.stringify({ themeMode: "light" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain("Write failed");
+  });
+});
+
+describe("GET /settings/scopes", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("returns settings separated by scope", async () => {
+    (store.getSettingsByScope as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: { themeMode: "dark", defaultProvider: "anthropic" },
+      project: { maxConcurrent: 4, autoMerge: false },
+    });
+
+    const res = await GET(buildApp(), "/api/settings/scopes");
+
+    expect(res.status).toBe(200);
+    expect(res.body.global.themeMode).toBe("dark");
+    expect(res.body.global.defaultProvider).toBe("anthropic");
+    expect(res.body.project.maxConcurrent).toBe(4);
+    expect(res.body.project.autoMerge).toBe(false);
+  });
+
+  it("returns 500 on store error", async () => {
+    (store.getSettingsByScope as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Failed"));
+
+    const res = await GET(buildApp(), "/api/settings/scopes");
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain("Failed");
   });
 });

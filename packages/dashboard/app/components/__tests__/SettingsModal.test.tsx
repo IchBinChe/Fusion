@@ -28,6 +28,7 @@ const defaultSettings: Settings = {
 vi.mock("../../api", () => ({
   fetchSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   updateSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
+  updateGlobalSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   fetchAuthStatus: vi.fn(() => Promise.resolve({ providers: [{ id: "anthropic", name: "Anthropic", authenticated: false }] })),
   loginProvider: vi.fn(() => Promise.resolve({ url: "https://auth.example.com/login" })),
   logoutProvider: vi.fn(() => Promise.resolve({ success: true })),
@@ -38,7 +39,7 @@ vi.mock("../../api", () => ({
   testNtfyNotification: vi.fn(() => Promise.resolve({ success: true })),
 }));
 
-import { fetchSettings, updateSettings, fetchAuthStatus, loginProvider, logoutProvider, fetchModels, testNtfyNotification } from "../../api";
+import { fetchSettings, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, fetchModels, testNtfyNotification } from "../../api";
 
 const onClose = vi.fn();
 const addToast = vi.fn();
@@ -369,6 +370,36 @@ describe("SettingsModal", () => {
     expect(payload.pollIntervalMs).toBe(15000);
   });
 
+  it("saving project settings does not update global settings endpoint", async () => {
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    // General section is project-scoped — change a project setting
+    const input = screen.getByLabelText("Task Prefix") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "TEST" } });
+
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+
+    // Global settings should NOT be called when in a project section
+    expect(updateGlobalSettings).not.toHaveBeenCalled();
+  });
+
+  it("saving in Model section only updates global settings", async () => {
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Model"));
+    await waitFor(() => expect(fetchModels).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Save"));
+    // Model section is global-scoped
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
+
+    // Project settings should NOT be updated when in a global section
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
   it("shows Model in sidebar", async () => {
     render(<SettingsModal onClose={onClose} addToast={addToast} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
@@ -464,9 +495,10 @@ describe("SettingsModal", () => {
     await user.click(screen.getByText("Claude Sonnet 4.5"));
 
     fireEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    // defaultProvider and defaultModelId are global settings, so they go through updateGlobalSettings
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
 
-    const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.defaultProvider).toBe("anthropic");
     expect(payload.defaultModelId).toBe("claude-sonnet-4-5");
   });
@@ -499,9 +531,10 @@ describe("SettingsModal", () => {
     }
 
     fireEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    // defaultProvider and defaultModelId are global settings
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
 
-    const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.defaultProvider).toBeUndefined();
     expect(payload.defaultModelId).toBeUndefined();
   });
@@ -684,9 +717,10 @@ describe("SettingsModal", () => {
     fireEvent.change(select, { target: { value: "high" } });
 
     fireEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    // defaultThinkingLevel is a global setting
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
 
-    const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.defaultThinkingLevel).toBe("high");
   });
 
@@ -799,17 +833,29 @@ describe("SettingsModal", () => {
     expect(layout!.querySelector(".settings-content")).toBeTruthy();
   });
 
-  it("has .settings-sidebar with 8 .settings-nav-item buttons for all sections", async () => {
+  it("has .settings-sidebar with 10 .settings-nav-item buttons for all sections", async () => {
     const { container } = render(<SettingsModal onClose={onClose} addToast={addToast} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     const sidebar = container.querySelector(".settings-sidebar");
     expect(sidebar).toBeTruthy();
     const navItems = sidebar!.querySelectorAll(".settings-nav-item");
-    expect(navItems.length).toBe(9);
+    expect(navItems.length).toBe(10);
 
+    // Labels include scope emoji indicators (🌐 for global, 📁 for project)
     const labels = Array.from(navItems).map((el) => el.textContent);
-    expect(labels).toEqual(["General", "Model", "Appearance", "Scheduling", "Worktrees", "Commands", "Merge", "Notifications", "Authentication"]);
+    expect(labels).toEqual([
+      "📁General",
+      "🌐Model",
+      "📁Model Presets",
+      "🌐Appearance",
+      "📁Scheduling",
+      "📁Worktrees",
+      "📁Commands",
+      "📁Merge",
+      "🌐Notifications",
+      "Authentication",
+    ]);
   });
 
   it("has .settings-content as sibling of .settings-sidebar", async () => {
@@ -828,16 +874,16 @@ describe("SettingsModal", () => {
     const { container } = render(<SettingsModal onClose={onClose} addToast={addToast} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
-    // Default active section is General
+    // Default active section is General (with scope emoji prefix)
     const activeItems = container.querySelectorAll(".settings-nav-item.active");
     expect(activeItems.length).toBe(1);
-    expect(activeItems[0].textContent).toBe("General");
+    expect(activeItems[0].textContent).toBe("📁General");
 
     // Switch to Scheduling
     fireEvent.click(screen.getByText("Scheduling"));
     const newActive = container.querySelectorAll(".settings-nav-item.active");
     expect(newActive.length).toBe(1);
-    expect(newActive[0].textContent).toBe("Scheduling");
+    expect(newActive[0].textContent).toBe("📁Scheduling");
   });
 
   it("auth provider rows contain .auth-provider-info and action button", async () => {
@@ -910,9 +956,10 @@ describe("SettingsModal", () => {
     fireEvent.click(checkbox);
 
     fireEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    // ntfyEnabled is a global setting, so it goes through updateGlobalSettings
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
 
-    const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.ntfyEnabled).toBe(true);
   });
 
@@ -929,9 +976,10 @@ describe("SettingsModal", () => {
     expect(input.value).toBe("my-topic");
 
     fireEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    // ntfyTopic is a global setting
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
 
-    const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.ntfyTopic).toBe("my-topic");
   });
 
@@ -950,9 +998,10 @@ describe("SettingsModal", () => {
     fireEvent.change(input, { target: { value: "" } });
 
     fireEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    // ntfyTopic is a global setting
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
 
-    const payload = (updateSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.ntfyTopic).toBeUndefined();
   });
 
@@ -1262,5 +1311,19 @@ describe("SettingsModal", () => {
 
     fireEvent.click(screen.getByText("Scheduling"));
     expect(screen.getByText(/Timeout in milliseconds for detecting stuck tasks/)).toBeTruthy();
+  });
+
+  it("scope banners render for global and project sections", async () => {
+    const { container } = render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    // General section is project-scoped → should show project banner
+    expect(container.querySelector(".settings-scope-project")).toBeTruthy();
+    expect(container.querySelector(".settings-scope-global")).toBeNull();
+
+    // Switch to Model → should show global banner
+    fireEvent.click(screen.getByText("Model"));
+    expect(container.querySelector(".settings-scope-global")).toBeTruthy();
+    expect(container.querySelector(".settings-scope-project")).toBeNull();
   });
 });

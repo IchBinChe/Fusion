@@ -12,17 +12,20 @@ function makeTmpDir(): string {
 
 describe("TaskStore", () => {
   let rootDir: string;
+  let globalDir: string;
   let store: TaskStore;
 
   beforeEach(async () => {
     rootDir = makeTmpDir();
-    store = new TaskStore(rootDir);
+    globalDir = makeTmpDir();
+    store = new TaskStore(rootDir, globalDir);
     await store.init();
   });
 
   afterEach(async () => {
     store.stopWatching();
     await rm(rootDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
   });
 
   async function createTestTask(): Promise<Task> {
@@ -356,8 +359,8 @@ describe("TaskStore", () => {
   // ── Settings tests ────────────────────────────────────────────────
 
   describe("model settings", () => {
-    it("persists defaultProvider and defaultModelId and returns them via getSettings", async () => {
-      await store.updateSettings({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" });
+    it("persists defaultProvider and defaultModelId via updateGlobalSettings", async () => {
+      await store.updateGlobalSettings({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" });
       const settings = await store.getSettings();
       expect(settings.defaultProvider).toBe("anthropic");
       expect(settings.defaultModelId).toBe("claude-sonnet-4-5");
@@ -406,6 +409,111 @@ describe("TaskStore", () => {
       await store.updateSettings({ mergeStrategy: "pull-request" });
       const settings = await store.getSettings();
       expect(settings.mergeStrategy).toBe("pull-request");
+    });
+  });
+
+  // ── Global/Project Settings Merging ─────────────────────────────
+
+  describe("global/project settings merging", () => {
+    it("getSettings returns global defaults when no overrides exist", async () => {
+      const settings = await store.getSettings();
+      expect(settings.themeMode).toBe("dark");
+      expect(settings.colorTheme).toBe("default");
+      expect(settings.maxConcurrent).toBe(2);
+    });
+
+    it("global settings are visible through getSettings", async () => {
+      await store.updateGlobalSettings({ themeMode: "light", colorTheme: "ocean" });
+      const settings = await store.getSettings();
+      expect(settings.themeMode).toBe("light");
+      expect(settings.colorTheme).toBe("ocean");
+    });
+
+    it("project settings override global defaults", async () => {
+      await store.updateSettings({ maxConcurrent: 8 });
+      const settings = await store.getSettings();
+      expect(settings.maxConcurrent).toBe(8);
+    });
+
+    it("updateSettings silently filters out global-only fields", async () => {
+      // themeMode is a global field — should not be persisted to project config
+      await store.updateSettings({ maxConcurrent: 5, themeMode: "light" } as any);
+
+      const settings = await store.getSettings();
+      expect(settings.maxConcurrent).toBe(5);
+      // themeMode should still be the global default, not "light"
+      expect(settings.themeMode).toBe("dark");
+
+      // Verify the project config doesn't contain themeMode
+      const configRaw = await readFile(join(rootDir, ".kb", "config.json"), "utf-8");
+      const config = JSON.parse(configRaw);
+      expect(config.settings.themeMode).toBeUndefined();
+    });
+
+    it("updateGlobalSettings persists global fields", async () => {
+      await store.updateGlobalSettings({ defaultProvider: "openai", defaultModelId: "gpt-4o" });
+
+      const settings = await store.getSettings();
+      expect(settings.defaultProvider).toBe("openai");
+      expect(settings.defaultModelId).toBe("gpt-4o");
+    });
+
+    it("updateGlobalSettings emits settings:updated event", async () => {
+      const events: Array<{ settings: any; previous: any }> = [];
+      store.on("settings:updated", (data) => events.push(data));
+
+      await store.updateGlobalSettings({ ntfyEnabled: true, ntfyTopic: "test" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0].settings.ntfyEnabled).toBe(true);
+      expect(events[0].settings.ntfyTopic).toBe("test");
+    });
+
+    it("getSettingsByScope returns separated global and project settings", async () => {
+      await store.updateGlobalSettings({ themeMode: "system", defaultProvider: "anthropic" });
+      await store.updateSettings({ maxConcurrent: 4, autoMerge: false });
+
+      const { global, project } = await store.getSettingsByScope();
+
+      expect(global.themeMode).toBe("system");
+      expect(global.defaultProvider).toBe("anthropic");
+      expect(project.maxConcurrent).toBe(4);
+      expect(project.autoMerge).toBe(false);
+    });
+
+    it("getSettingsByScope does not include global keys in project settings", async () => {
+      // Write global-key directly into config.json for backward compat testing
+      const configRaw = await readFile(join(rootDir, ".kb", "config.json"), "utf-8");
+      const config = JSON.parse(configRaw);
+      config.settings = { maxConcurrent: 3, themeMode: "light" };
+      await writeFile(join(rootDir, ".kb", "config.json"), JSON.stringify(config));
+
+      const { project } = await store.getSettingsByScope();
+
+      expect(project.maxConcurrent).toBe(3);
+      // themeMode is a global key — should not appear in project scope
+      expect((project as any).themeMode).toBeUndefined();
+    });
+
+    it("backward compat: existing projects with global fields in config.json still work", async () => {
+      // Simulate an old config that has both global and project fields
+      const configRaw = await readFile(join(rootDir, ".kb", "config.json"), "utf-8");
+      const config = JSON.parse(configRaw);
+      config.settings = { maxConcurrent: 6, themeMode: "system", ntfyEnabled: true };
+      await writeFile(join(rootDir, ".kb", "config.json"), JSON.stringify(config));
+
+      // getSettings should still see these values (project overrides global)
+      const settings = await store.getSettings();
+      expect(settings.maxConcurrent).toBe(6);
+      // These are global fields stored in old config — they show up via config.settings spread
+      expect(settings.themeMode).toBe("system");
+      expect(settings.ntfyEnabled).toBe(true);
+    });
+
+    it("getGlobalSettingsStore returns the store instance", () => {
+      const globalStore = store.getGlobalSettingsStore();
+      expect(globalStore).toBeDefined();
+      expect(globalStore.getSettingsPath()).toContain("settings.json");
     });
   });
 
@@ -2773,7 +2881,7 @@ describe("TaskStore", () => {
       await store.cleanupArchivedTasks();
 
       // Create new store instance
-      const newStore = new TaskStore(rootDir);
+      const newStore = new TaskStore(rootDir, globalDir);
       await newStore.init();
 
       const entries = await newStore.readArchiveLog();
@@ -2866,7 +2974,7 @@ describe("TaskStore", () => {
       await store.recordActivity({ type: "task:created", taskId: "KB-001", details: "Test" });
 
       // Create new store instance
-      const newStore = new TaskStore(rootDir);
+      const newStore = new TaskStore(rootDir, globalDir);
       await newStore.init();
 
       const logs = await newStore.getActivityLog();
@@ -2915,7 +3023,8 @@ describe("TaskStore", () => {
     });
 
     it("records activity on settings:updated for important changes", async () => {
-      await store.updateSettings({ ntfyEnabled: true, ntfyTopic: "test-topic" });
+      // ntfyEnabled/ntfyTopic are now global settings, use updateGlobalSettings
+      await store.updateGlobalSettings({ ntfyEnabled: true, ntfyTopic: "test-topic" });
       // Wait for async activity recording
       await new Promise((r) => setTimeout(r, 10));
       const logs = await store.getActivityLog({ type: "settings:updated" });

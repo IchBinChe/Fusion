@@ -3,7 +3,7 @@ import multer from "multer";
 import { createReadStream, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import type { TaskStore, Column, MergeResult, ScheduleType, ActivityEventType, ModelPreset } from "@kb/core";
-import { COLUMNS, VALID_TRANSITIONS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore } from "@kb/core";
+import { COLUMNS, VALID_TRANSITIONS, GLOBAL_SETTINGS_KEYS, type BatchStatusEntry, type BatchStatusResponse, type BatchStatusResult, type IssueInfo, type PrInfo, isGhAuthenticated, AUTOMATION_PRESETS, AutomationStore } from "@kb/core";
 import type { ServerOptions } from "./server.js";
 import { GitHubClient, getCurrentGitHubRepo, parseBadgeUrl } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
@@ -932,6 +932,16 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { githubTokenConfigured, ...clientSettings } = req.body;
 
+      // Reject global-only fields with a helpful error pointing to the correct endpoint
+      const globalKeySet = new Set<string>(GLOBAL_SETTINGS_KEYS);
+      const globalFieldsFound = Object.keys(clientSettings).filter((k) => globalKeySet.has(k));
+      if (globalFieldsFound.length > 0) {
+        res.status(400).json({
+          error: `Cannot update global settings via this endpoint. Use PUT /settings/global instead. Global fields found: ${globalFieldsFound.join(", ")}`,
+        });
+        return;
+      }
+
       if (Object.prototype.hasOwnProperty.call(clientSettings, "modelPresets")) {
         clientSettings.modelPresets = validateModelPresets(clientSettings.modelPresets);
       }
@@ -943,6 +953,51 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         err.message.includes("modelPresets") || err.message.includes("must include both provider and modelId")
       ) ? 400 : 500;
       res.status(status).json({ error: err.message });
+    }
+  });
+
+  // ── Global Settings Routes ─────────────────────────────────────
+
+  /**
+   * GET /api/settings/global
+   * Returns the global (user-level) settings from ~/.pi/kb/settings.json.
+   * Does NOT include computed/server-only fields like githubTokenConfigured.
+   */
+  router.get("/settings/global", async (_req, res) => {
+    try {
+      const globalStore = store.getGlobalSettingsStore();
+      const settings = await globalStore.getSettings();
+      res.json(settings);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * PUT /api/settings/global
+   * Update global (user-level) settings in ~/.pi/kb/settings.json.
+   * These settings persist across all kb projects for the current user.
+   */
+  router.put("/settings/global", async (req, res) => {
+    try {
+      const settings = await store.updateGlobalSettings(req.body);
+      res.json(settings);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/settings/scopes
+   * Returns settings separated by scope: { global, project }.
+   * Useful for the UI to show which scope each setting comes from.
+   */
+  router.get("/settings/scopes", async (_req, res) => {
+    try {
+      const scopes = await store.getSettingsByScope();
+      res.json(scopes);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

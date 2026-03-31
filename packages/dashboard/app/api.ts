@@ -7,6 +7,8 @@ import type {
   Column,
   MergeResult,
   Settings,
+  GlobalSettings,
+  ProjectSettings,
   BatchStatusResult,
   BatchStatusResponse,
   BatchStatusEntry,
@@ -196,6 +198,24 @@ export function updateSettings(settings: Partial<Settings>): Promise<Settings> {
     method: "PUT",
     body: JSON.stringify(settings),
   });
+}
+
+/** Fetch global (user-level) settings from ~/.pi/kb/settings.json */
+export function fetchGlobalSettings(): Promise<GlobalSettings> {
+  return api<GlobalSettings>("/settings/global");
+}
+
+/** Update global (user-level) settings. These persist across all kb projects. */
+export function updateGlobalSettings(settings: Partial<GlobalSettings>): Promise<Settings> {
+  return api<Settings>("/settings/global", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+/** Fetch settings separated by scope: { global, project } */
+export function fetchSettingsByScope(): Promise<{ global: GlobalSettings; project: Partial<ProjectSettings> }> {
+  return api<{ global: GlobalSettings; project: Partial<ProjectSettings> }>("/settings/scopes");
 }
 
 export function testNtfyNotification(): Promise<{ success: boolean }> {

@@ -236,7 +236,69 @@ export interface TaskCreateInput {
   validatorModelId?: string;
 }
 
-export interface Settings {
+// ── Settings Scope Types ────────────────────────────────────────────────
+//
+// Settings are split into two scopes:
+//
+// 1. **GlobalSettings** — User preferences stored in `~/.pi/kb/settings.json`.
+//    These persist across all kb projects for the current user (theme, default
+//    AI models, notification preferences).
+//
+// 2. **ProjectSettings** — Project-specific workflow and resource settings stored
+//    in `.kb/config.json`. These control how the engine operates for this
+//    particular project (concurrency, merge strategy, worktree management, etc.).
+//
+// The merged view (`Settings`) combines both scopes: project values override
+// global values. This is the type returned by `TaskStore.getSettings()` and
+// used by most consumers.
+//
+// Computed/server-only fields (like `githubTokenConfigured`) live only on
+// `Settings` and are injected at read time by the API layer.
+
+/** Settings scope discriminator for UI and validation. */
+export type SettingsScope = "global" | "project";
+
+/**
+ * Global (user-level) settings stored in `~/.pi/kb/settings.json`.
+ *
+ * These are user preferences that persist across all kb projects.
+ * The dashboard UI shows these under a "Global" section.
+ */
+export interface GlobalSettings {
+  /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
+  themeMode?: ThemeMode;
+  /** Color theme preference for accent colors and styling. Default: "default". */
+  colorTheme?: ColorTheme;
+  /** Default AI model provider name (e.g. `"anthropic"`, `"openai"`).
+   *  Must be set together with `defaultModelId`. When both are undefined,
+   *  the engine uses pi's automatic model resolution. */
+  defaultProvider?: string;
+  /** Default AI model ID within the provider (e.g. `"claude-sonnet-4-5"`).
+   *  Must be set together with `defaultProvider`. When both are undefined,
+   *  the engine uses pi's automatic model resolution. */
+  defaultModelId?: string;
+  /** Default thinking effort level for AI agent sessions.
+   *  Controls how much reasoning effort the model uses — higher levels
+   *  produce better results but cost more. When undefined, the engine
+   *  uses the model's default thinking level. */
+  defaultThinkingLevel?: ThinkingLevel;
+  /** When true, enables ntfy.sh push notifications for task completion and failures.
+   *  Requires ntfyTopic to be set. Default: false. */
+  ntfyEnabled?: boolean;
+  /** ntfy.sh topic name for push notifications. When set along with ntfyEnabled,
+   *  notifications are sent to https://ntfy.sh/{topic} when tasks complete or fail. */
+  ntfyTopic?: string;
+}
+
+/**
+ * Project-level settings stored in `.kb/config.json`.
+ *
+ * These control how the engine operates for this particular project:
+ * concurrency, merge strategy, worktree management, build/test commands, etc.
+ * Runtime state fields (globalPause, enginePaused) also live here because
+ * different projects may need independent pause control.
+ */
+export interface ProjectSettings {
   /** Hard stop: when true, all automated agent activity is **immediately**
    *  terminated — active triage, execution, and merge agent sessions are
    *  killed, and the scheduler stops dispatching new work. Acts as a
@@ -288,21 +350,10 @@ export interface Settings {
    *  Defaults to `"KB"`. Only affects new tasks — existing tasks retain
    *  their original IDs. */
   taskPrefix?: string;
-  /** Whether GitHub token is configured for PR operations (read-only, set by server).
-   *  When false, PR creation features are disabled in the UI. */
-  githubTokenConfigured?: boolean;
   /** When true, merge commit messages include the task ID as the conventional
    *  commit scope (e.g. `feat(KB-001): ...`). When false, the scope is
    *  omitted (e.g. `feat: ...`). Default: true. */
   includeTaskIdInCommit?: boolean;
-  /** Default AI model provider name (e.g. `"anthropic"`, `"openai"`).
-   *  Must be set together with `defaultModelId`. When both are undefined,
-   *  the engine uses pi's automatic model resolution. */
-  defaultProvider?: string;
-  /** Default AI model ID within the provider (e.g. `"claude-sonnet-4-5"`).
-   *  Must be set together with `defaultProvider`. When both are undefined,
-   *  the engine uses pi's automatic model resolution. */
-  defaultModelId?: string;
   /** AI model provider for planning/triage (specification) agent.
    *  Must be set together with `planningModelId`. When both are undefined,
    *  falls back to `defaultProvider`/`defaultModelId`. */
@@ -325,11 +376,6 @@ export interface Settings {
   autoSelectModelPreset?: boolean;
   /** Mapping of task sizes to preset IDs used for auto-selection during task creation. */
   defaultPresetBySize?: { S?: string; M?: string; L?: string };
-  /** Default thinking effort level for AI agent sessions.
-   *  Controls how much reasoning effort the model uses — higher levels
-   *  produce better results but cost more. When undefined, the engine
-   *  uses the model's default thinking level. */
-  defaultThinkingLevel?: ThinkingLevel;
   /** When true, auto-merge will automatically resolve common conflict patterns
    *  (lock files, generated files, trivial conflicts) without requiring AI
    *  intervention. When AI resolution fails, the system will retry with escalating
@@ -344,24 +390,41 @@ export interface Settings {
    *  remain in triage with status "awaiting-approval" until a user approves
    *  or rejects the plan. Default: false. */
   requirePlanApproval?: boolean;
-  /** ntfy.sh topic name for push notifications. When set along with ntfyEnabled,
-   *  notifications are sent to https://ntfy.sh/{topic} when tasks complete or fail. */
-  ntfyTopic?: string;
-  /** When true, enables ntfy.sh push notifications for task completion and failures.
-   *  Requires ntfyTopic to be set. Default: false. */
-  ntfyEnabled?: boolean;
   /** Timeout in milliseconds for detecting stuck tasks. When a task's agent session
    *  shows no activity (no text deltas, tool calls, or progress updates) for longer
    *  than this duration, the task is considered stuck and will be terminated and retried.
    *  Default: undefined (disabled). Suggested value: 600000 (10 minutes). */
   taskStuckTimeoutMs?: number;
-  /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
-  themeMode?: ThemeMode;
-  /** Color theme preference for accent colors and styling. Default: "default". */
-  colorTheme?: ColorTheme;
 }
 
-export const DEFAULT_SETTINGS: Settings = {
+/**
+ * Merged settings view combining global and project scopes.
+ *
+ * This is the primary type returned by `TaskStore.getSettings()` and used
+ * by most consumers. Project settings override global settings.
+ *
+ * Also includes computed/server-only fields like `githubTokenConfigured`
+ * that are injected at read time by the API layer.
+ */
+export interface Settings extends GlobalSettings, ProjectSettings {
+  /** Whether GitHub token is configured for PR operations (read-only, set by server).
+   *  When false, PR creation features are disabled in the UI. */
+  githubTokenConfigured?: boolean;
+}
+
+/** Default values for global (user-level) settings. */
+export const DEFAULT_GLOBAL_SETTINGS: Required<Pick<GlobalSettings, "themeMode" | "colorTheme">> & GlobalSettings = {
+  themeMode: "dark",
+  colorTheme: "default",
+  defaultProvider: undefined,
+  defaultModelId: undefined,
+  defaultThinkingLevel: undefined,
+  ntfyEnabled: false,
+  ntfyTopic: undefined,
+};
+
+/** Default values for project-level settings. */
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   globalPause: false,
   enginePaused: false,
   maxConcurrent: 2,
@@ -375,8 +438,6 @@ export const DEFAULT_SETTINGS: Settings = {
   worktreeNaming: "random",
   taskPrefix: undefined,
   includeTaskIdInCommit: true,
-  defaultProvider: undefined,
-  defaultModelId: undefined,
   planningProvider: undefined,
   planningModelId: undefined,
   validatorProvider: undefined,
@@ -384,16 +445,62 @@ export const DEFAULT_SETTINGS: Settings = {
   modelPresets: [],
   autoSelectModelPreset: false,
   defaultPresetBySize: {},
-  defaultThinkingLevel: undefined,
   autoResolveConflicts: true,
   smartConflictResolution: true,
   requirePlanApproval: false,
-  ntfyEnabled: false,
-  ntfyTopic: undefined,
   taskStuckTimeoutMs: undefined,
-  themeMode: "dark",
-  colorTheme: "default",
 };
+
+/**
+ * Merged default settings (backward compatible).
+ * This combines global and project defaults into a single object
+ * that matches the legacy `DEFAULT_SETTINGS` shape.
+ */
+export const DEFAULT_SETTINGS: Settings = {
+  ...DEFAULT_GLOBAL_SETTINGS,
+  ...DEFAULT_PROJECT_SETTINGS,
+};
+
+/** Keys that belong to the global settings scope. */
+export const GLOBAL_SETTINGS_KEYS: ReadonlyArray<keyof GlobalSettings> = [
+  "themeMode",
+  "colorTheme",
+  "defaultProvider",
+  "defaultModelId",
+  "defaultThinkingLevel",
+  "ntfyEnabled",
+  "ntfyTopic",
+] as const;
+
+/** Keys that belong to the project settings scope. */
+export const PROJECT_SETTINGS_KEYS: ReadonlyArray<keyof ProjectSettings> = [
+  "globalPause",
+  "enginePaused",
+  "maxConcurrent",
+  "maxWorktrees",
+  "pollIntervalMs",
+  "groupOverlappingFiles",
+  "autoMerge",
+  "mergeStrategy",
+  "worktreeInitCommand",
+  "testCommand",
+  "buildCommand",
+  "recycleWorktrees",
+  "worktreeNaming",
+  "taskPrefix",
+  "includeTaskIdInCommit",
+  "planningProvider",
+  "planningModelId",
+  "validatorProvider",
+  "validatorModelId",
+  "modelPresets",
+  "autoSelectModelPreset",
+  "defaultPresetBySize",
+  "autoResolveConflicts",
+  "smartConflictResolution",
+  "requirePlanApproval",
+  "taskStuckTimeoutMs",
+] as const;
 
 export interface BoardConfig {
   nextId: number;

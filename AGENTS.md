@@ -105,7 +105,38 @@ Use `useBadgeWebSocket()` when a UI surface needs live badge snapshots for speci
 
 ## Settings
 
-The following settings are available in the kb configuration (stored in `.kb/config.json`):
+kb uses a two-tier settings hierarchy:
+
+- **Global settings** — User preferences stored in `~/.pi/kb/settings.json`. These persist across all kb projects for the current user.
+- **Project settings** — Project-specific workflow and resource settings stored in `.kb/config.json`. These control how the engine operates for a particular project.
+
+When reading settings, project values override global values. The merged view is what the engine and dashboard use.
+
+### Settings Hierarchy
+
+**Global settings** (`~/.pi/kb/settings.json`):
+- `themeMode` — UI theme preference (dark/light/system)
+- `colorTheme` — Color theme (default/ocean/forest/etc)
+- `defaultProvider` — Default AI model provider
+- `defaultModelId` — Default AI model ID
+- `defaultThinkingLevel` — Default thinking effort level
+- `ntfyEnabled` — Enable push notifications
+- `ntfyTopic` — ntfy.sh topic for notifications
+
+**Project settings** (`~/.kb/config.json`):
+- All other settings listed below (concurrency, merge, worktrees, commands, etc.)
+
+The dashboard Settings modal shows scope indicators (🌐 global, 📁 project) in the sidebar to help users understand where each setting is stored. Saving only updates the scope matching the active section.
+
+### API Endpoints
+
+- `GET /api/settings` — Returns the merged view (project overrides global)
+- `PUT /api/settings` — Updates project-level settings only (rejects global-only fields with 400)
+- `GET /api/settings/global` — Returns global settings
+- `PUT /api/settings/global` — Updates global settings
+- `GET /api/settings/scopes` — Returns settings separated by scope: `{ global, project }`
+
+The following settings are available in the kb configuration:
 
 ### `autoResolveConflicts` (default: `true`)
 

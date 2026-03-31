@@ -3,8 +3,9 @@ import { execSync } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile, readdir, rename, unlink } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { existsSync, watch, type FSWatcher, readFileSync } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, ActivityLogEntry, ActivityEventType } from "./types.js";
-import { VALID_TRANSITIONS, DEFAULT_SETTINGS } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType } from "./types.js";
+import { VALID_TRANSITIONS, DEFAULT_SETTINGS, DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROJECT_SETTINGS, GLOBAL_SETTINGS_KEYS } from "./types.js";
+import { GlobalSettingsStore } from "./global-settings.js";
 
 export interface TaskStoreEvents {
   "task:created": [task: Task];
@@ -37,8 +38,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private taskLocks: Map<string, Promise<void>> = new Map();
   /** Promise chain for serializing config.json read-modify-write cycles */
   private configLock: Promise<void> = Promise.resolve();
+  /** Global settings store (`~/.pi/kb/settings.json`) */
+  private globalSettingsStore: GlobalSettingsStore;
 
-  constructor(private rootDir: string) {
+  constructor(private rootDir: string, globalSettingsDir?: string) {
     super();
     this.setMaxListeners(100);
     this.kbDir = join(rootDir, ".kb");
@@ -46,6 +49,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.configPath = join(this.kbDir, "config.json");
     this.archiveLogPath = join(this.kbDir, "archive.jsonl");
     this.activityLogPath = join(this.kbDir, "activity-log.jsonl");
+    this.globalSettingsStore = new GlobalSettingsStore(globalSettingsDir);
   }
 
   async init(): Promise<void> {
@@ -232,21 +236,105 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     await rename(tmpPath, taskJsonPath);
   }
 
+  /**
+   * Get merged settings: global defaults ← global user prefs ← project overrides.
+   *
+   * Returns the combined view that most consumers should use. Project-level
+   * values in `.kb/config.json` override global values from `~/.pi/kb/settings.json`.
+   */
   async getSettings(): Promise<Settings> {
-    const config = await this.readConfig();
-    return { ...DEFAULT_SETTINGS, ...config.settings };
+    const [globalSettings, config] = await Promise.all([
+      this.globalSettingsStore.getSettings(),
+      this.readConfig(),
+    ]);
+    return {
+      ...DEFAULT_SETTINGS,
+      ...globalSettings,
+      ...config.settings,
+    };
   }
 
+  /**
+   * Get settings separated by scope. Returns both the global and
+   * project-level settings independently (useful for the UI to show
+   * which scope a value comes from).
+   */
+  async getSettingsByScope(): Promise<{ global: GlobalSettings; project: Partial<ProjectSettings> }> {
+    const [globalSettings, config] = await Promise.all([
+      this.globalSettingsStore.getSettings(),
+      this.readConfig(),
+    ]);
+
+    // Extract only project-level keys from config.settings
+    const projectSettings: Partial<ProjectSettings> = {};
+    if (config.settings) {
+      const globalKeySet = new Set<string>(GLOBAL_SETTINGS_KEYS);
+      for (const key of Object.keys(config.settings)) {
+        if (!globalKeySet.has(key)) {
+          (projectSettings as any)[key] = (config.settings as any)[key];
+        }
+      }
+    }
+
+    return { global: globalSettings, project: projectSettings };
+  }
+
+  /**
+   * Update project-level settings in `.kb/config.json`.
+   *
+   * Accepts `Partial<Settings>` for backward compatibility. Any global-only
+   * fields in the patch are silently filtered out — they will not be persisted
+   * to the project config. Use `updateGlobalSettings()` for global fields.
+   */
   async updateSettings(patch: Partial<Settings>): Promise<Settings> {
+    // Filter out global-only fields — they should go through updateGlobalSettings()
+    const projectPatch: Partial<Settings> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (!(GLOBAL_SETTINGS_KEYS as readonly string[]).includes(key)) {
+        (projectPatch as Record<string, unknown>)[key] = value;
+      }
+    }
+
     return this.withConfigLock(async () => {
       const config = await this.readConfig();
-      const previous = { ...DEFAULT_SETTINGS, ...config.settings };
-      const updated = { ...previous, ...patch };
-      config.settings = updated;
+      const globalSettings = await this.globalSettingsStore.getSettings();
+      const previousMerged: Settings = { ...DEFAULT_SETTINGS, ...globalSettings, ...config.settings } as Settings;
+      const updatedProjectSettings = { ...config.settings, ...projectPatch };
+      config.settings = updatedProjectSettings as Settings;
       await this.writeConfig(config);
-      this.emit("settings:updated", { settings: updated, previous });
-      return updated;
+      const updatedMerged: Settings = { ...DEFAULT_SETTINGS, ...globalSettings, ...updatedProjectSettings } as Settings;
+      this.emit("settings:updated", { settings: updatedMerged, previous: previousMerged });
+      return updatedMerged;
     });
+  }
+
+  /**
+   * Update global (user-level) settings in `~/.pi/kb/settings.json`.
+   *
+   * These settings persist across all kb projects for the current user.
+   * Only fields defined in `GlobalSettings` are accepted.
+   */
+  async updateGlobalSettings(patch: Partial<GlobalSettings>): Promise<Settings> {
+    // Read previous state BEFORE writing so the diff is correct
+    const [previousGlobal, config] = await Promise.all([
+      this.globalSettingsStore.getSettings(),
+      this.readConfig(),
+    ]);
+    const previous: Settings = { ...DEFAULT_SETTINGS, ...previousGlobal, ...config.settings } as Settings;
+
+    const updatedGlobal = await this.globalSettingsStore.updateSettings(patch);
+    const merged: Settings = { ...DEFAULT_SETTINGS, ...updatedGlobal, ...config.settings } as Settings;
+
+    // Emit settings:updated so SSE listeners pick up the change
+    this.emit("settings:updated", { settings: merged, previous });
+    return merged;
+  }
+
+  /**
+   * Get the GlobalSettingsStore instance (used by API routes).
+   */
+  getGlobalSettingsStore(): GlobalSettingsStore {
+    return this.globalSettingsStore;
   }
 
   private async readConfig(): Promise<BoardConfig> {
@@ -1917,7 +2005,11 @@ ${notificationsSection}`;
 
   /**
    * Synchronous version of getSettings for internal use.
-   * Returns cached settings or default settings if not loaded.
+   * Returns project-level settings merged with defaults.
+   * Note: This does NOT merge global settings because it's synchronous
+   * and global settings require async I/O. For prompt generation this
+   * is fine since the fields used (ntfyEnabled, ntfyTopic) will be
+   * present in project config for backward compatibility.
    */
   private getSettingsSync(): Settings {
     // Since we can't easily make generateSpecifiedPrompt async,

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { THINKING_LEVELS } from "@kb/core";
-import type { Settings, ThemeMode, ColorTheme, ModelPreset } from "@kb/core";
-import { fetchSettings, updateSettings, fetchAuthStatus, loginProvider, logoutProvider, fetchModels, testNtfyNotification } from "../api";
+import { THINKING_LEVELS, GLOBAL_SETTINGS_KEYS, PROJECT_SETTINGS_KEYS } from "@kb/core";
+import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset } from "@kb/core";
+import { fetchSettings, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, fetchModels, testNtfyNotification } from "../api";
 import type { AuthProvider, ModelInfo } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { ThemeSelector } from "./ThemeSelector";
@@ -12,32 +12,38 @@ import { applyPresetToSelection, generatePresetId, validatePresetId } from "../u
  * Settings sections configuration.
  *
  * Each section groups related settings fields under a sidebar nav item.
+ * Sections have a `scope` to indicate where their settings are stored:
+ *   - "global": User-level settings stored in ~/.pi/kb/settings.json (shared across projects)
+ *   - "project": Project-specific settings stored in .kb/config.json
+ *   - undefined: Section operates independently of settings storage (e.g. authentication)
+ *
  * To add a new section:
- *   1. Add an entry to SETTINGS_SECTIONS with a unique id and label
+ *   1. Add an entry to SETTINGS_SECTIONS with a unique id, label, and scope
  *   2. Add a corresponding case in renderSectionFields()
  *
  * Sections:
- *   - general: Task prefix configuration
- *   - model: Default AI model selection
- *   - appearance: Theme and color settings
- *   - scheduling: Concurrency, poll interval, file overlap serialization
- *   - worktrees: Worktree limits, init commands, recycling
- *   - commands: Test and build command configuration
- *   - merge: Auto-merge settings
- *   - notifications: ntfy.sh notification settings
- *   - authentication: OAuth provider status, login/logout (operates independently of Save)
+ *   - general: Task prefix configuration (project)
+ *   - model: Default AI model selection (global)
+ *   - model-presets: Reusable model presets (project)
+ *   - appearance: Theme and color settings (global)
+ *   - scheduling: Concurrency, poll interval, file overlap serialization (project)
+ *   - worktrees: Worktree limits, init commands, recycling (project)
+ *   - commands: Test and build command configuration (project)
+ *   - merge: Auto-merge settings (project)
+ *   - notifications: ntfy.sh notification settings (global)
+ *   - authentication: OAuth provider status, login/logout (independent)
  */
 const SETTINGS_SECTIONS = [
-  { id: "general", label: "General" },
-  { id: "model", label: "Model" },
-  { id: "model-presets", label: "Model Presets" },
-  { id: "appearance", label: "Appearance" },
-  { id: "scheduling", label: "Scheduling" },
-  { id: "worktrees", label: "Worktrees" },
-  { id: "commands", label: "Commands" },
-  { id: "merge", label: "Merge" },
-  { id: "notifications", label: "Notifications" },
-  { id: "authentication", label: "Authentication" },
+  { id: "general", label: "General", scope: "project" as const },
+  { id: "model", label: "Model", scope: "global" as const },
+  { id: "model-presets", label: "Model Presets", scope: "project" as const },
+  { id: "appearance", label: "Appearance", scope: "global" as const },
+  { id: "scheduling", label: "Scheduling", scope: "project" as const },
+  { id: "worktrees", label: "Worktrees", scope: "project" as const },
+  { id: "commands", label: "Commands", scope: "project" as const },
+  { id: "merge", label: "Merge", scope: "project" as const },
+  { id: "notifications", label: "Notifications", scope: "global" as const },
+  { id: "authentication", label: "Authentication", scope: undefined },
 ] as const;
 
 export type SectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
@@ -212,6 +218,9 @@ export function SettingsModal({
     [onClose],
   );
 
+  /** Get the scope of the currently active section */
+  const activeSectionScope = SETTINGS_SECTIONS.find((s) => s.id === activeSection)?.scope;
+
   const handleSave = useCallback(async () => {
     if (prefixError || presetDraft) return;
     try {
@@ -220,13 +229,38 @@ export function SettingsModal({
         worktreeInitCommand: form.worktreeInitCommand?.trim() || undefined,
         taskPrefix: form.taskPrefix?.trim() || undefined,
       };
-      await updateSettings(payload);
+
+      // Save only the scope matching the currently active section.
+      // This prevents stale values from one scope being accidentally
+      // overwritten when the user only changed fields in the other scope.
+      if (activeSectionScope === "global") {
+        const globalKeySet = new Set<string>(GLOBAL_SETTINGS_KEYS);
+        const globalPatch: Partial<GlobalSettings> = {};
+        for (const [key, value] of Object.entries(payload)) {
+          if (globalKeySet.has(key)) {
+            (globalPatch as any)[key] = value;
+          }
+        }
+        await updateGlobalSettings(globalPatch);
+      } else if (activeSectionScope === "project") {
+        const projectKeySet = new Set<string>(PROJECT_SETTINGS_KEYS as readonly string[]);
+        const projectPatch: Partial<Settings> = {};
+        for (const [key, value] of Object.entries(payload)) {
+          if (key === "githubTokenConfigured") continue; // server-only field
+          if (projectKeySet.has(key)) {
+            (projectPatch as any)[key] = value;
+          }
+        }
+        await updateSettings(projectPatch);
+      }
+      // Authentication section (scope: undefined) doesn't use the save button
+
       addToast("Settings saved", "success");
       onClose();
     } catch (err: any) {
       addToast(err.message, "error");
     }
-  }, [form, prefixError, onClose, addToast]);
+  }, [form, prefixError, presetDraft, activeSectionScope, onClose, addToast]);
 
   const savePresetDraft = () => {
     if (!presetDraft) return;
@@ -266,11 +300,33 @@ export function SettingsModal({
     setPresetIdTouched(false);
   };
 
+  /** Render a scope indicator banner for the current section */
+  const renderScopeBanner = () => {
+    if (activeSectionScope === "global") {
+      return (
+        <div className="settings-scope-banner settings-scope-global">
+          <span>🌐</span>
+          <span>These settings are shared across all your kb projects.</span>
+        </div>
+      );
+    }
+    if (activeSectionScope === "project") {
+      return (
+        <div className="settings-scope-banner settings-scope-project">
+          <span>📁</span>
+          <span>These settings only affect this project.</span>
+        </div>
+      );
+    }
+    return null;
+  };
+
   const renderSectionFields = () => {
     switch (activeSection) {
       case "general":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">General</h4>
             <div className="form-group">
               <label htmlFor="taskPrefix">Task Prefix</label>
@@ -320,6 +376,7 @@ export function SettingsModal({
           : "";
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Model</h4>
             {modelsLoading ? (
               <div className="settings-empty-state">Loading available models…</div>
@@ -437,6 +494,7 @@ export function SettingsModal({
 
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Model Presets</h4>
             <div className="form-group">
               <label>Configured presets</label>
@@ -650,18 +708,26 @@ export function SettingsModal({
       case "appearance":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Appearance</h4>
             <ThemeSelector
               themeMode={themeMode}
               colorTheme={colorTheme}
-              onThemeModeChange={onThemeModeChange || (() => {})}
-              onColorThemeChange={onColorThemeChange || (() => {})}
+              onThemeModeChange={(mode) => {
+                setForm((f) => ({ ...f, themeMode: mode }));
+                onThemeModeChange?.(mode);
+              }}
+              onColorThemeChange={(theme) => {
+                setForm((f) => ({ ...f, colorTheme: theme }));
+                onColorThemeChange?.(theme);
+              }}
             />
           </>
         );
       case "scheduling":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Scheduling</h4>
             <div className="form-group">
               <label htmlFor="maxConcurrent">Max Concurrent Tasks</label>
@@ -724,6 +790,7 @@ export function SettingsModal({
       case "worktrees":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Worktrees</h4>
             <div className="form-group">
               <label htmlFor="maxWorktrees">Max Worktrees</label>
@@ -791,6 +858,7 @@ export function SettingsModal({
       case "commands":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Commands</h4>
             <div className="form-group">
               <label htmlFor="testCommand">Test Command</label>
@@ -823,6 +891,7 @@ export function SettingsModal({
       case "merge":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Merge</h4>
             <div className="form-group">
               <label htmlFor="autoMerge" className="checkbox-label">
@@ -901,6 +970,7 @@ export function SettingsModal({
       case "notifications":
         return (
           <>
+            {renderScopeBanner()}
             <h4 className="settings-section-heading">Notifications</h4>
             <div className="form-group">
               <label htmlFor="ntfyEnabled" className="checkbox-label">
@@ -1036,7 +1106,10 @@ export function SettingsModal({
                   key={section.id}
                   className={`settings-nav-item${activeSection === section.id ? " active" : ""}`}
                   onClick={() => setActiveSection(section.id)}
+                  title={section.scope === "global" ? "Shared across all projects" : section.scope === "project" ? "Specific to this project" : undefined}
                 >
+                  {section.scope === "global" && <span className="settings-scope-icon" aria-label="Global setting">🌐</span>}
+                  {section.scope === "project" && <span className="settings-scope-icon" aria-label="Project setting">📁</span>}
                   {section.label}
                 </button>
               ))}

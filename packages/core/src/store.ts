@@ -382,7 +382,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (input.dependencies?.includes(id)) {
       throw new Error(`Task ${id} cannot depend on itself`);
     }
-
     const now = new Date().toISOString();
     const task: Task = {
       id,

@@ -491,4 +491,197 @@ describe("PlanningModeModal", () => {
       expect(container.querySelector(".detail-body")).not.toBeNull();
     });
   });
+
+  describe("Loading state", () => {
+    it("shows 'Generating next question...' text when loading without streaming content", async () => {
+      // Mock to delay the question response so we stay in loading state
+      mockConnectPlanningStream.mockImplementationOnce((sessionId: string, handlers: any) => {
+        // Don't call any handlers - stay in loading state
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      // Wait for loading state to appear
+      await waitFor(() => {
+        expect(container.querySelector(".planning-loading")).not.toBeNull();
+      });
+
+      // Should show "Generating next question..." not "Connecting..."
+      expect(screen.getByText("Generating next question...")).toBeDefined();
+      expect(screen.queryByText("Connecting...")).toBeNull();
+    });
+
+    it("shows thinking container even when streaming output is initially empty", async () => {
+      // Mock to delay the question response so we stay in loading state
+      mockConnectPlanningStream.mockImplementationOnce((sessionId: string, handlers: any) => {
+        // Don't call any handlers - stay in loading state
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      // Wait for loading state to appear
+      await waitFor(() => {
+        expect(container.querySelector(".planning-loading")).not.toBeNull();
+      });
+
+      // Thinking container should be visible even without streaming content
+      expect(container.querySelector(".planning-thinking-container")).not.toBeNull();
+      // showThinking defaults to true, so button shows "Hide thinking"
+      expect(screen.getByText("Hide thinking")).toBeDefined();
+    });
+
+    it("shows 'AI is thinking...' text and renders streaming content when it arrives", async () => {
+      let streamHandlers: any = null;
+
+      mockConnectPlanningStream.mockImplementationOnce((sessionId: string, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      // Wait for loading state to appear
+      await waitFor(() => {
+        expect(container.querySelector(".planning-loading")).not.toBeNull();
+      });
+
+      // Initially shows "Generating next question..."
+      expect(screen.getByText("Generating next question...")).toBeDefined();
+
+      // Simulate streaming content arriving
+      await waitFor(() => {
+        streamHandlers.onThinking?.("Analyzing requirements...");
+      });
+
+      // Now should show "AI is thinking..."
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+      });
+
+      // The streaming content should be visible (showThinking defaults to true)
+      await waitFor(() => {
+        expect(screen.getByText("Analyzing requirements...")).toBeDefined();
+      });
+
+      // Click "Hide thinking" to hide the output
+      fireEvent.click(screen.getByText("Hide thinking"));
+
+      // The output should now be hidden
+      expect(screen.queryByText("Analyzing requirements...")).toBeNull();
+    });
+
+    it("shows loading state with appropriate text after submitting a response", async () => {
+      const secondQuestion: PlanningQuestion = {
+        id: "q-requirements",
+        type: "text",
+        question: "What are the key requirements?",
+        description: "Describe the requirements",
+      };
+
+      let streamHandlers: any = null;
+
+      mockConnectPlanningStream.mockImplementation((sessionId: string, handlers: any) => {
+        streamHandlers = handlers;
+        
+        setTimeout(() => {
+          handlers.onQuestion?.(mockQuestion);
+        }, 10);
+        
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      mockRespondToPlanning.mockImplementation(async () => {
+        // Simulate server broadcasting second question via the existing SSE connection
+        setTimeout(() => {
+          if (streamHandlers) {
+            streamHandlers.onQuestion?.(secondQuestion);
+          }
+        }, 50);
+        return { sessionId: "session-123", currentQuestion: null, summary: null };
+      });
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      // Wait for first question
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      // Answer the first question
+      fireEvent.click(screen.getByText("Medium"));
+      fireEvent.click(screen.getByText("Continue"));
+
+      // Verify loading state appears with correct message
+      await waitFor(() => {
+        expect(container.querySelector(".planning-loading")).not.toBeNull();
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      // Verify thinking container is visible during loading
+      expect(container.querySelector(".planning-thinking-container")).not.toBeNull();
+
+      // Wait for second question to appear
+      await waitFor(() => {
+        expect(screen.getByText("What are the key requirements?")).toBeDefined();
+      }, { timeout: 3000 });
+    });
+  });
 });

@@ -401,23 +401,21 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, tasks, initi
           {view.type === "loading" && (
             <div className="planning-loading">
               <Loader2 size={40} className="spin" style={{ color: "var(--todo)" }} />
-              <p>{streamingOutput ? "AI is thinking..." : "Connecting..."}</p>
-              {streamingOutput && (
-                <div className="planning-thinking-container">
-                  <button
-                    className="planning-thinking-toggle"
-                    onClick={() => setShowThinking(!showThinking)}
-                    type="button"
-                  >
-                    {showThinking ? "Hide thinking" : "Show thinking"}
-                  </button>
-                  {showThinking && (
-                    <div className="planning-thinking-output">
-                      <pre>{streamingOutput}</pre>
-                    </div>
-                  )}
-                </div>
-              )}
+              <p>{streamingOutput ? "AI is thinking..." : "Generating next question..."}</p>
+              <div className="planning-thinking-container">
+                <button
+                  className="planning-thinking-toggle"
+                  onClick={() => setShowThinking(!showThinking)}
+                  type="button"
+                >
+                  {showThinking ? "Hide thinking" : "Show thinking"}
+                </button>
+                {showThinking && streamingOutput && (
+                  <div className="planning-thinking-output">
+                    <pre>{streamingOutput}</pre>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

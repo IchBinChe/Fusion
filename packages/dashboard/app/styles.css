@@ -7643,9 +7643,9 @@ html .column.drag-over * {
   font-weight: 500;
 }
 
-/* ahead = consuming faster than expected (now shown in info color) */
+/* ahead = over pace, consuming faster than expected (warning - red) */
 .pace-ahead {
-  color: #3b82f6; /* blue - was var(--color-error) */
+  color: var(--color-error);
 }
 
 /* on-track = good/expected usage (unchanged) */
@@ -7653,9 +7653,9 @@ html .column.drag-over * {
   color: var(--color-success);
 }
 
-/* behind = consuming slower than expected (now shown in warning color) */
+/* behind = under pace, consuming slower than expected (positive - green) */
 .pace-behind {
-  color: var(--color-error); /* red - was #3b82f6 */
+  color: var(--color-success);
 }
 
 /* Empty state */

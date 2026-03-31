@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, RefreshCw, Activity, TrendingUp, CheckCircle, Info } from "lucide-react";
+import { X, RefreshCw, Activity, TrendingUp, CheckCircle, AlertTriangle } from "lucide-react";
 import type { ProviderUsage, UsageWindow } from "../api";
 import { useUsageData } from "../hooks/useUsageData";
 import { ProviderIcon } from "./ProviderIcon";
@@ -90,13 +90,13 @@ function UsageWindowRow({ window, viewMode }: UsageWindowRowProps) {
         <div className="usage-pace-row" data-testid="pace-row">
           {isAhead && (
             <>
-              <TrendingUp size={14} className="pace-icon pace-ahead" />
+              <AlertTriangle size={14} className="pace-icon pace-ahead" />
               <span className="pace-text pace-ahead">{pace.message}</span>
             </>
           )}
           {isBehind && (
             <>
-              <Info size={14} className="pace-icon pace-behind" />
+              <TrendingUp size={14} className="pace-icon pace-behind" />
               <span className="pace-text pace-behind">{pace.message}</span>
             </>
           )}

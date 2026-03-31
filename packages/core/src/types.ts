@@ -676,7 +676,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   maxConcurrent: 2,
   maxWorktrees: 4,
   pollIntervalMs: 15000,
-  groupOverlappingFiles: false,
+  groupOverlappingFiles: true,
   autoMerge: true,
   mergeStrategy: "direct",
   worktreeInitCommand: undefined,

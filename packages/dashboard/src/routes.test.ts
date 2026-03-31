@@ -4311,3 +4311,146 @@ describe("Automation routes", () => {
     });
   });
 });
+
+
+// --- Settings API Tests ---
+
+import { DEFAULT_SETTINGS } from "@kb/core";
+
+describe("GET /settings", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, { githubToken: "ghp_test_token" }));
+    return app;
+  }
+
+  it("returns persisted settings merged with defaults", async () => {
+    const persistedSettings = { maxConcurrent: 5, autoMerge: false };
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ ...DEFAULT_SETTINGS, ...persistedSettings });
+
+    const res = await GET(buildApp(), "/api/settings");
+
+    expect(res.status).toBe(200);
+    expect(res.body.maxConcurrent).toBe(5);
+    expect(res.body.autoMerge).toBe(false);
+    expect(res.body.pollIntervalMs).toBe(DEFAULT_SETTINGS.pollIntervalMs);
+  });
+
+  it("injects githubTokenConfigured as true when token is configured", async () => {
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SETTINGS);
+
+    const res = await GET(buildApp(), "/api/settings");
+
+    expect(res.status).toBe(200);
+    expect(res.body.githubTokenConfigured).toBe(true);
+  });
+
+  it("injects githubTokenConfigured as false when no token", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store)); // no githubToken option
+
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SETTINGS);
+
+    const res = await GET(app, "/api/settings");
+
+    expect(res.status).toBe(200);
+    expect(res.body.githubTokenConfigured).toBe(false);
+  });
+
+  it("returns 500 on store error", async () => {
+    (store.getSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Config read failed"));
+
+    const res = await GET(buildApp(), "/api/settings");
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain("Config read failed");
+  });
+});
+
+describe("PUT /settings", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, { githubToken: "ghp_test_token" }));
+    return app;
+  }
+
+  it("updates settings with valid payload", async () => {
+    const updatedSettings = { ...DEFAULT_SETTINGS, maxConcurrent: 8 };
+    (store.updateSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ maxConcurrent: 8 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateSettings).toHaveBeenCalledWith({ maxConcurrent: 8 });
+  });
+
+  it("strips server-owned fields (githubTokenConfigured) before calling store.updateSettings", async () => {
+    const updatedSettings = { ...DEFAULT_SETTINGS, maxConcurrent: 4 };
+    (store.updateSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ maxConcurrent: 4, githubTokenConfigured: true }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    // The server should strip githubTokenConfigured before passing to store
+    expect(store.updateSettings).toHaveBeenCalledWith({ maxConcurrent: 4 });
+  });
+
+  it("strips multiple server-owned fields if present", async () => {
+    const updatedSettings = { ...DEFAULT_SETTINGS, maxWorktrees: 10 };
+    (store.updateSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
+
+    // Currently only githubTokenConfigured is server-owned
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ maxWorktrees: 10, githubTokenConfigured: true }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateSettings).toHaveBeenCalledWith({ maxWorktrees: 10 });
+  });
+
+  it("returns 500 on store update error", async () => {
+    (store.updateSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Write failed"));
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ maxConcurrent: 3 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain("Write failed");
+  });
+});

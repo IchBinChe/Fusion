@@ -599,7 +599,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.put("/settings", async (req, res) => {
     try {
-      const settings = await store.updateSettings(req.body);
+      // Strip server-owned fields that should never be persisted to config.json.
+      // These are computed server-side and injected only on GET /settings.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { githubTokenConfigured, ...clientSettings } = req.body;
+      const settings = await store.updateSettings(clientSettings);
       res.json(settings);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

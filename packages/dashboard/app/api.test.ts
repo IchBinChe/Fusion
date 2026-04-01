@@ -277,6 +277,125 @@ describe("fetchBatchStatus", () => {
   });
 });
 
+describe("batchUpdateTaskModels", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("calls API with correct parameters for executor model update", async () => {
+    const mockResponse = {
+      updated: [{ id: "KB-001", modelProvider: "openai", modelId: "gpt-4o" }],
+      count: 1,
+    };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockFetchResponse(true, mockResponse)
+    );
+
+    const { batchUpdateTaskModels } = await import("./api");
+    const result = await batchUpdateTaskModels(["KB-001"], "openai", "gpt-4o");
+
+    expect(result.count).toBe(1);
+    expect(result.updated).toHaveLength(1);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/tasks/batch-update-models",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskIds: ["KB-001"],
+          modelProvider: "openai",
+          modelId: "gpt-4o",
+        }),
+      })
+    );
+  });
+
+  it("calls API with correct parameters for validator model update", async () => {
+    const mockResponse = { updated: [], count: 0 };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockFetchResponse(true, mockResponse)
+    );
+
+    const { batchUpdateTaskModels } = await import("./api");
+    await batchUpdateTaskModels(
+      ["KB-001", "KB-002"],
+      undefined,
+      undefined,
+      "anthropic",
+      "claude-sonnet-4-5"
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/tasks/batch-update-models",
+      expect.objectContaining({
+        body: JSON.stringify({
+          taskIds: ["KB-001", "KB-002"],
+          validatorModelProvider: "anthropic",
+          validatorModelId: "claude-sonnet-4-5",
+        }),
+      })
+    );
+  });
+
+  it("calls API with null values to clear models", async () => {
+    const mockResponse = { updated: [{ id: "KB-001" }], count: 1 };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockFetchResponse(true, mockResponse)
+    );
+
+    const { batchUpdateTaskModels } = await import("./api");
+    await batchUpdateTaskModels(["KB-001"], null, null);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/tasks/batch-update-models",
+      expect.objectContaining({
+        body: JSON.stringify({
+          taskIds: ["KB-001"],
+          modelProvider: null,
+          modelId: null,
+        }),
+      })
+    );
+  });
+
+  it("throws on 400 validation error", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockFetchResponse(false, { error: "taskIds must be an array" }, 400)
+    );
+
+    const { batchUpdateTaskModels } = await import("./api");
+    await expect(batchUpdateTaskModels([], "openai", "gpt-4o")).rejects.toThrow(
+      "taskIds must be an array"
+    );
+  });
+
+  it("throws on 404 when task not found", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockFetchResponse(false, { error: "Task KB-999 not found" }, 404)
+    );
+
+    const { batchUpdateTaskModels } = await import("./api");
+    await expect(batchUpdateTaskModels(["KB-999"], "openai", "gpt-4o")).rejects.toThrow(
+      "Task KB-999 not found"
+    );
+  });
+
+  it("throws on network error", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Network failed"));
+
+    const { batchUpdateTaskModels } = await import("./api");
+    await expect(batchUpdateTaskModels(["KB-001"], "openai", "gpt-4o")).rejects.toThrow(
+      "Network failed"
+    );
+  });
+});
+
 describe("fetchAuthStatus", () => {
   const originalFetch = globalThis.fetch;
 

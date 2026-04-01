@@ -315,7 +315,7 @@ describe("ListView", () => {
     const columns = ["triage", "todo", "in-progress", "in-review", "done"] as const;
 
     const tasks = columns.map((col, i) =>
-      createMockTask({ id: `KB-00${i + 1}`, column: col })
+      createMockTask({ id: `FN-00${i + 1}`, column: col })
     );
 
     renderListView({ tasks });
@@ -1769,7 +1769,7 @@ describe("ListView - Bulk Selection", () => {
     ];
     render(<ListView tasks={tasks} onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} />);
 
-    const checkboxes = screen.getAllByLabelText(/Select KB-/);
+    const checkboxes = screen.getAllByLabelText(/Select FN-/);
     expect(checkboxes).toHaveLength(2);
   });
 
@@ -1794,7 +1794,7 @@ describe("ListView - Bulk Selection", () => {
     ];
     render(<ListView tasks={tasks} onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} />);
 
-    const checkbox = screen.getByLabelText("Select KB-001");
+    const checkbox = screen.getByLabelText("Select FN-001");
     fireEvent.click(checkbox);
 
     expect(screen.getByText("1 selected")).toBeDefined();
@@ -1806,7 +1806,7 @@ describe("ListView - Bulk Selection", () => {
     ];
     render(<ListView tasks={tasks} onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} />);
 
-    const checkbox = screen.getByLabelText("Select KB-001");
+    const checkbox = screen.getByLabelText("Select FN-001");
     fireEvent.click(checkbox);
     expect(screen.getByText("1 selected")).toBeDefined();
 
@@ -1845,7 +1845,7 @@ describe("ListView - Bulk Selection", () => {
       />
     );
 
-    const checkbox = screen.getByLabelText("Select KB-001");
+    const checkbox = screen.getByLabelText("Select FN-001");
     fireEvent.click(checkbox);
 
     expect(screen.getByText("Bulk Edit Models:")).toBeDefined();
@@ -1867,7 +1867,7 @@ describe("ListView - Bulk Selection", () => {
       />
     );
 
-    const checkbox = screen.getByLabelText("Select KB-001");
+    const checkbox = screen.getByLabelText("Select FN-001");
     fireEvent.click(checkbox);
 
     const applyButton = screen.getByText("Apply");
@@ -1878,7 +1878,7 @@ describe("ListView - Bulk Selection", () => {
     const tasks = [createMockTask({ id: "FN-001" })];
     render(<ListView tasks={tasks} onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} />);
 
-    const checkbox = screen.getByLabelText("Select KB-001");
+    const checkbox = screen.getByLabelText("Select FN-001");
     fireEvent.click(checkbox);
 
     expect(localStorage.getItem("kb-dashboard-selected-tasks")).toBe('["FN-001"]');
@@ -1891,7 +1891,7 @@ describe("ListView - Bulk Selection", () => {
     ];
     render(<ListView tasks={tasks} onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} />);
 
-    const checkboxes = screen.getAllByLabelText(/Select KB-/);
+    const checkboxes = screen.getAllByLabelText(/Select FN-/);
     // Select only first task
     fireEvent.click(checkboxes[0]);
 
@@ -1919,7 +1919,7 @@ describe("ListView - Bulk Selection", () => {
     );
 
     // Select the task
-    const checkbox = screen.getByLabelText("Select KB-001");
+    const checkbox = screen.getByLabelText("Select FN-001");
     fireEvent.click(checkbox);
 
     // Initially disabled

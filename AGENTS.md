@@ -401,6 +401,140 @@ Choose isolation mode based on your requirements:
 - Status transitions to `errored` on fatal errors
 - Manual intervention required to restart
 
+## Multi-Project CLI Usage
+
+The kb CLI supports managing multiple projects through the `kb project` subcommand and the `--project` global flag.
+
+### Project Subcommands
+
+```bash
+# List all registered projects
+kb project list
+
+# Register a new project
+kb project add my-app /path/to/app
+
+# Unregister a project (data is preserved)
+kb project remove my-app [--force]
+
+# Show project details
+kb project show my-app
+
+# Set default project for CLI operations
+kb project set-default my-app
+
+# Detect which project you're currently in
+kb project detect
+```
+
+### Global --project Flag
+
+All task commands accept a `--project` (or `-P`) flag to target a specific project:
+
+```bash
+# Create a task in a specific project
+kb task create "Fix login bug" --project my-app
+
+# List tasks from a specific project
+kb task list --project my-app
+
+# Show task details from a project
+kb task show KB-001 --project my-app
+
+# Move a task to a different column
+kb task move KB-001 done --project my-app
+
+# Archive a completed task
+kb task archive KB-001 --project my-app
+
+# Delete a task
+kb task delete KB-001 --force --project my-app
+
+# Attach a file to a task
+kb task attach KB-001 screenshot.png --project my-app
+
+# Pause/unpause a task
+kb task pause KB-001 --project my-app
+kb task unpause KB-001 --project my-app
+
+# Retry a failed task
+kb task retry KB-001 --project my-app
+
+# Create a PR for a task
+kb task pr-create KB-001 --project my-app
+
+# Import GitHub issues as tasks
+kb task import owner/repo --project my-app
+
+# Show and update settings for a project
+kb settings --project my-app
+kb settings set maxConcurrent 4 --project my-app
+
+# Git operations in a project
+kb git status --project my-app
+kb git pull --project my-app
+kb git push --project my-app
+
+# Backup operations for a project
+kb backup --create --project my-app
+kb backup --list --project my-app
+```
+
+### Project Resolution Order
+
+When you run a kb command without `--project`, the CLI resolves the project in this order:
+
+1. **Explicit `--project` flag** — Uses the specified project
+2. **Default project** — Uses the project set via `kb project set-default`
+3. **CWD auto-detection** — Walks up the directory tree looking for `.fusion/kb.db`
+
+If no project is found, the CLI exits with an error:
+```
+No kb project found in current directory. Use --project or run from a project directory.
+```
+
+### Common Workflows
+
+**Cross-project operations without changing directories:**
+```bash
+# Create tasks in different projects from the same shell
+kb task create "Backend API endpoint" --project api-service
+kb task create "Frontend component" --project web-ui
+kb task create "Documentation update" --project docs
+
+# Check status of all projects
+kb project list
+
+# Archive completed tasks across projects
+kb task archive API-042 --project api-service
+kb task archive WEB-123 --project web-ui
+```
+
+**Setting up a default project:**
+```bash
+# Register your main project
+kb project add main ~/projects/my-app
+
+# Set it as default
+kb project set-default main
+
+# Now all commands use the default project without --project
+kb task list
+kb task create "New feature"
+kb git status
+```
+
+**Switching between projects:**
+```bash
+# Quick switch with shell aliases
+alias kb-api='kb --project api-service'
+alias kb-web='kb --project web-ui'
+
+# Or use the explicit flag
+kb task list --project api-service
+kb task list --project web-ui
+```
+
 ## Pi Extension (`packages/cli/src/extension.ts`)
 
 The pi extension provides tools and a `/kb` command for interacting with kb from within a pi session. It ships as part of `@gsxdsm/fusion` — one `pi install` gives you both the CLI and the extension.

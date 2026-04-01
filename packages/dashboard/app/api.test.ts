@@ -52,7 +52,7 @@ const FAKE_DETAIL: TaskDetail = {
   log: [],
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
-  prompt: "# KB-001",
+  prompt: "# FN-001",
 };
 
 function mockFetchResponse(
@@ -141,7 +141,7 @@ describe("updateTask", () => {
     const result = await updateTask("FN-001", { dependencies: ["FN-002"] });
 
     expect(result.dependencies).toEqual(["FN-002"]);
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001", {
       headers: { "Content-Type": "application/json" },
       method: "PATCH",
       body: JSON.stringify({ dependencies: ["FN-002"] }),
@@ -182,7 +182,7 @@ describe("task comments api", () => {
     const result = await fetchTaskComments("FN-001");
 
     expect(result).toEqual(comments);
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/comments", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/comments", {
       headers: { "Content-Type": "application/json" },
     });
   });
@@ -193,7 +193,7 @@ describe("task comments api", () => {
     const result = await addTaskComment("FN-001", "Hello", "user");
 
     expect(result).toEqual(FAKE_TASK);
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/comments", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/comments", {
       headers: { "Content-Type": "application/json" },
       method: "POST",
       body: JSON.stringify({ text: "Hello", author: "user" }),
@@ -205,7 +205,7 @@ describe("task comments api", () => {
 
     await updateTaskComment("FN-001", "c1", "Updated");
 
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/comments/c1", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/comments/c1", {
       headers: { "Content-Type": "application/json" },
       method: "PATCH",
       body: JSON.stringify({ text: "Updated" }),
@@ -217,7 +217,7 @@ describe("task comments api", () => {
 
     await deleteTaskComment("FN-001", "c1");
 
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/comments/c1", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/comments/c1", {
       headers: { "Content-Type": "application/json" },
       method: "DELETE",
     });
@@ -529,7 +529,7 @@ describe("addSteeringComment", () => {
     expect(result.id).toBe("FN-001");
     expect(result.steeringComments).toHaveLength(1);
     expect(result.steeringComments![0].text).toBe("Please handle the edge case");
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/steer", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/steer", {
       headers: { "Content-Type": "application/json" },
       method: "POST",
       body: JSON.stringify({ text: "Please handle the edge case" }),
@@ -794,7 +794,7 @@ describe("approvePlan", () => {
 
     expect(result.column).toBe("todo");
     expect(result.status).toBeUndefined();
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/approve-plan", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/approve-plan", {
       headers: { "Content-Type": "application/json" },
       method: "POST",
     });
@@ -828,7 +828,7 @@ describe("rejectPlan", () => {
 
     expect(result.column).toBe("triage");
     expect(result.status).toBeUndefined();
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/reject-plan", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/reject-plan", {
       headers: { "Content-Type": "application/json" },
       method: "POST",
     });
@@ -854,7 +854,7 @@ describe("refineTask", () => {
 
   const FAKE_REFINED_TASK: Task = {
     id: "FN-002",
-    description: "Refinement of KB-001",
+    description: "Refinement of FN-001",
     column: "triage",
     dependencies: ["FN-001"],
     steps: [],
@@ -872,7 +872,7 @@ describe("refineTask", () => {
     expect(result.id).toBe("FN-002");
     expect(result.column).toBe("triage");
     expect(result.dependencies).toContain("FN-001");
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/refine", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/refine", {
       headers: { "Content-Type": "application/json" },
       method: "POST",
       body: JSON.stringify({ feedback: "Need to add more tests and improve error handling" }),
@@ -1171,7 +1171,7 @@ describe("Git Management API", () => {
       const response = await archiveTask("FN-001");
 
       expect(response.column).toBe("archived");
-      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/archive", {
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/archive", {
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
@@ -1192,7 +1192,7 @@ describe("Git Management API", () => {
       const response = await unarchiveTask("FN-001");
 
       expect(response.column).toBe("done");
-      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/KB-001/unarchive", {
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/unarchive", {
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
@@ -1228,7 +1228,7 @@ describe("Git Management API", () => {
       const response = await fetchWorkspaceFileList("FN-001", "src");
 
       expect(response).toEqual(payload);
-      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files?workspace=KB-001&path=src", {
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files?workspace=FN-001&path=src", {
         headers: { "Content-Type": "application/json" },
       });
     });
@@ -1252,7 +1252,7 @@ describe("Git Management API", () => {
       const response = await saveWorkspaceFileContent("FN-001", "src/index.ts", "hello");
 
       expect(response).toEqual(payload);
-      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/src%2Findex.ts?workspace=KB-001", {
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/src%2Findex.ts?workspace=FN-001", {
         headers: { "Content-Type": "application/json" },
         method: "POST",
         body: JSON.stringify({ content: "hello" }),
@@ -2155,4 +2155,3 @@ describe("fetchProjectConfig", () => {
     expect(result.rootDir).toBe("/path/to/project");
   });
 });
-

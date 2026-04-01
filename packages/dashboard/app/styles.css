@@ -382,6 +382,7 @@ body {
   gap: var(--column-gap);
   padding: var(--board-padding);
   height: calc(100vh - 57px);
+  height: calc(100dvh - 57px);
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x proximity;

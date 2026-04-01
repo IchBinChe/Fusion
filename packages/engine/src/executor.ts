@@ -448,6 +448,26 @@ export class TaskExecutor {
               await this.store.logEntry(task.id, `Worktree init command failed: ${message}`);
             }
           }
+
+          // Run setup script for fresh worktrees (after worktreeInitCommand)
+          if (settings.setupScript) {
+            const scriptCommand = settings.scripts?.[settings.setupScript];
+            if (scriptCommand) {
+              try {
+                execSync(scriptCommand, {
+                  cwd: worktreePath,
+                  stdio: "pipe",
+                  timeout: 120_000,
+                });
+                await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' completed`, scriptCommand);
+              } catch (err: any) {
+                const message = err.stderr?.toString() || err.message || "Unknown error";
+                await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' failed: ${message}`);
+              }
+            } else {
+              await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' not found in scripts map — skipping`);
+            }
+          }
         }
       } else if (task.worktree) {
         // Task already had a worktree assigned and it exists on disk — reuse it

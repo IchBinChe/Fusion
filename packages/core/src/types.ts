@@ -673,6 +673,12 @@ export interface ProjectSettings {
    *  Key is the script name, value is the shell command to execute.
    *  Script names must be alphanumeric with hyphens and underscores only. */
   scripts?: Record<string, string>;
+  /** Name of a script from the `scripts` map to run automatically when
+   *  fresh worktrees are created. Runs after `worktreeInitCommand` (if both
+   *  are configured). Has no effect on pooled/recycled worktrees.
+   *  If the referenced script doesn't exist, a warning is logged and
+   *  the task continues. */
+  setupScript?: string;
 }
 
 /**
@@ -739,6 +745,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   titleSummarizerProvider: undefined,
   titleSummarizerModelId: undefined,
   scripts: {},
+  setupScript: undefined,
 };
 
 /**
@@ -802,6 +809,7 @@ export const PROJECT_SETTINGS_KEYS: ReadonlyArray<keyof ProjectSettings> = [
   "titleSummarizerProvider",
   "titleSummarizerModelId",
   "scripts",
+  "setupScript",
 ] as const;
 
 export interface BoardConfig {

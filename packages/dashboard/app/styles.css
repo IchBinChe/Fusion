@@ -6131,11 +6131,20 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 100;
+  z-index: 500;
   max-height: 320px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.model-combobox-dropdown--portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  margin-top: 0;
+  z-index: 1000;
 }
 
 .model-combobox-search-wrapper {

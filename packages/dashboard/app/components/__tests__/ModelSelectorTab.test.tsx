@@ -157,13 +157,18 @@ describe("ModelSelectorTab", () => {
     expect(screen.queryByTestId(/provider-icon-/)).not.toBeInTheDocument();
   });
 
-  it("opens combobox when trigger is clicked", async () => {
+  it("opens combobox in the shared portal layer when trigger is clicked", async () => {
     const user = userEvent.setup();
     render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
 
     await waitForSelectors();
 
     await user.click(getSelector("Executor Model"));
+
+    const portal = await screen.findByTestId("model-combobox-portal");
+    expect(portal).toBeInTheDocument();
+    expect(portal).toHaveClass("model-combobox-dropdown--portal");
+    expect(document.body).toContainElement(portal);
 
     expect(screen.getByPlaceholderText("Filter models…")).toBeInTheDocument();
     expect(screen.getByText("3 models")).toBeInTheDocument();

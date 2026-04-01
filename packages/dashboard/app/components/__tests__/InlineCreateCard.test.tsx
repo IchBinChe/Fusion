@@ -279,6 +279,19 @@ describe("InlineCreateCard model selector", () => {
     expect(screen.queryByText("Executor Model")).toBeNull();
   });
 
+  it("renders the shared model dropdown in the portal layer from the inline create surface", async () => {
+    renderCard();
+    expandInlineCreate();
+
+    openModelPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Executor Model" }));
+
+    const portal = await screen.findByTestId("model-combobox-portal");
+    expect(portal).toBeTruthy();
+    expect(portal.classList.contains("model-combobox-dropdown--portal")).toBe(true);
+    expect(document.body.contains(portal)).toBe(true);
+  });
+
   it("updates executor selection and shows the selected model badge", () => {
     renderCard();
     expandInlineCreate();

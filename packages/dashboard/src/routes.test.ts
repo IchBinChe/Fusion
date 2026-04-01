@@ -97,24 +97,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     getWorkflowStep: vi.fn(),
     updateWorkflowStep: vi.fn(),
     deleteWorkflowStep: vi.fn(),
-    getMissionStore: vi.fn().mockReturnValue({
-      listMissions: vi.fn().mockReturnValue([]),
-      createMission: vi.fn(),
-      getMissionWithHierarchy: vi.fn(),
-      updateMission: vi.fn(),
-      getMission: vi.fn(),
-      deleteMission: vi.fn(),
-      listMilestonesByMission: vi.fn().mockReturnValue([]),
-      createMilestone: vi.fn(),
-      updateMilestone: vi.fn(),
-      getMilestone: vi.fn(),
-      deleteMilestone: vi.fn(),
-      listTasksByMilestone: vi.fn().mockReturnValue([]),
-      createMissionTask: vi.fn(),
-      updateMissionTask: vi.fn(),
-      getMissionTask: vi.fn(),
-      deleteMissionTask: vi.fn(),
-    }),
+    getMissionStore: vi.fn().mockReturnValue(createMockMissionStore()),
     ...overrides,
   } as unknown as TaskStore;
 }
@@ -4067,6 +4050,7 @@ describe("GET /tasks/:id/file-diffs", () => {
       Date.now = originalDateNow;
     }
   });
+
   it("returns empty array when worktree is missing", async () => {
     store = createMockStore({
       getTask: vi.fn().mockResolvedValue({ ...FAKE_TASK_DETAIL, id: "KB-651", worktree: join(testRoot, "missing"), baseBranch: "main" }),

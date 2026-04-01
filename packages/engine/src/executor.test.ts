@@ -1151,6 +1151,10 @@ describe("TaskExecutor dependency-based worktree creation", () => {
     // After 3 retry attempts, should fail with combined error message
     expect(store.updateTask).toHaveBeenCalledWith("FN-065", {
       status: "failed",
+      error: expect.stringContaining("Worktree conflict"),
+    });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-065", {
+      status: "failed",
       error: expect.stringContaining("automatic cleanup failed"),
     });
   });

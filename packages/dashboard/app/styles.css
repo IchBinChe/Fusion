@@ -131,11 +131,11 @@ body {
   position: relative;
 }
 
-/* Project selector in header */
+/* Project selector in header (inside header-left) */
 .header-project-selector {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  margin: 0 var(--space-md);
+  position: relative;
   flex-shrink: 1;
   min-width: 0;
 }
@@ -1522,8 +1522,8 @@ body {
 .project-selector__dropdown {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
-  z-index: 50;
+  left: 0;
+  z-index: 100;
   min-width: 320px;
   max-width: min(420px, 90vw);
   max-height: min(70vh, 520px);
@@ -4175,8 +4175,7 @@ body {
 
   /* Project selector mobile adjustments */
   .header-project-selector {
-    margin: 0 8px;
-    max-width: 140px;
+    max-width: 120px;
     flex-shrink: 1;
   }
 

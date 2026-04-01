@@ -559,6 +559,27 @@ describe("Header", () => {
     expect(screen.getByTestId("project-selector-trigger")).toBeDefined();
   });
 
+  it("renders ProjectSelector within header-left when multiple projects exist", () => {
+    const projects = [
+      { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+      { id: "proj_2", name: "Project Two", path: "/path/2", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+    ];
+    const { container } = render(
+      <Header
+        projects={projects}
+        currentProject={projects[0]}
+        onSelectProject={vi.fn()}
+        onViewAllProjects={vi.fn()}
+      />
+    );
+    // ProjectSelector should be inside header-left, not a sibling
+    const headerLeft = container.querySelector(".header-left");
+    expect(headerLeft).not.toBeNull();
+    const selectorInLeft = headerLeft!.querySelector(".header-project-selector");
+    expect(selectorInLeft).not.toBeNull();
+    expect(selectorInLeft!.querySelector("[data-testid='project-selector-trigger']")).not.toBeNull();
+  });
+
   it("does not show ProjectSelector with single project", () => {
     const projects = [
       { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },

@@ -75,24 +75,24 @@ fn dashboard --dev                        # Start web UI only (no AI engine)
 **Task Management:**
 ```bash
 fn task create "Fix the login bug"         # Create a new task (goes to triage)
-fn task create "Bug" --attach screenshot.png --depends KB-001
+fn task create "Bug" --attach screenshot.png --depends FN-001
 fn task plan "Build auth system"          # Create task via AI-guided planning
 fn task list                              # List all tasks
-fn task show KB-001                       # Show task details, steps, log
-fn task logs KB-001 [--follow] [--limit 50] [--type tool]
-fn task move KB-001 todo                   # Move a task to a column
-fn task merge KB-001                     # Merge an in-review task
-fn task duplicate KB-001                 # Duplicate a task (copy to triage)
-fn task refine KB-001 --feedback "Add tests"  # Create refinement task
-fn task archive KB-001                   # Archive a done task
-fn task unarchive KB-001                 # Restore an archived task
-fn task delete KB-001 [--force]          # Delete a task
-fn task retry KB-001                     # Retry a failed task
-fn task comment KB-001 "Looks good"      # Add a general task comment
-fn task comments KB-001                  # List task comments
-fn task steer KB-001 "Use TypeScript"    # Add steering comment
-fn task pause KB-001                     # Pause automation for task
-fn task unpause KB-001                   # Resume automation for task
+fn task show FN-001                       # Show task details, steps, log
+fn task logs FN-001 [--follow] [--limit 50] [--type tool]
+fn task move FN-001 todo                   # Move a task to a column
+fn task merge FN-001                     # Merge an in-review task
+fn task duplicate FN-001                 # Duplicate a task (copy to triage)
+fn task refine FN-001 --feedback "Add tests"  # Create refinement task
+fn task archive FN-001                   # Archive a done task
+fn task unarchive FN-001                 # Restore an archived task
+fn task delete FN-001 [--force]          # Delete a task
+fn task retry FN-001                     # Retry a failed task
+fn task comment FN-001 "Looks good"      # Add a general task comment
+fn task comments FN-001                  # List task comments
+fn task steer FN-001 "Use TypeScript"    # Add steering comment
+fn task pause FN-001                     # Pause automation for task
+fn task unpause FN-001                   # Resume automation for task
 ```
 
 **GitHub Integration:**
@@ -101,7 +101,7 @@ fn task import owner/repo                  # Import all open issues
 fn task import owner/repo --interactive    # Interactive issue selection
 fn task import owner/repo --limit 10       # Limit number of issues
 fn task import owner/repo --labels bug     # Filter by label(s)
-fn task pr-create KB-001 --title "Fix" --base main
+fn task pr-create FN-001 --title "Fix" --base main
 ```
 
 **Git Commands:**
@@ -146,9 +146,9 @@ Fusion reuses your existing pi authentication.
 
 | Package         | Description                                                     |
 | --------------- | --------------------------------------------------------------- |
-| `@kb/core`      | Domain model — tasks, board columns, file-based store           |
-| `@kb/dashboard` | Web UI — Express server + kanban board with SSE                 |
-| `@kb/engine`    | AI engine — triage (pi), execution (pi + worktrees), scheduling |
+| `@fusion/core`  | Domain model — tasks, board columns, file-based store           |
+| `@fusion/dashboard` | Web UI — Express server + kanban board with SSE                 |
+| `@fusion/engine`    | AI engine — triage (pi), execution (pi + worktrees), scheduling |
 | `kb` (cli)      | CLI — `fn dashboard`, `fn task create/list/move/attach`         |
 
 ## Architecture
@@ -161,7 +161,7 @@ Tasks live on disk in `.kb/tasks/` in the project root:
 .kb/
 ├── config.json              # Board config + ID counter
 └── tasks/
-    └── KB-001/
+    └── FN-001/
         ├── task.json        # Metadata (column, deps, timestamps)
         ├── PROMPT.md        # Task specification
         └── attachments/     # File attachments — images & text files (optional)
@@ -353,8 +353,8 @@ Completed tasks can be archived to keep the board focused on recent work while p
 
 **CLI:**
 ```bash
-fn task archive KB-001        # Archive a done task
-fn task unarchive KB-001      # Restore an archived task to done
+fn task archive FN-001        # Archive a done task
+fn task unarchive FN-001      # Restore an archived task to done
 ```
 
 **Dashboard:**
@@ -440,7 +440,7 @@ Create GitHub Pull Requests from the CLI or dashboard:
 
 **CLI:**
 ```bash
-fn task pr-create KB-001 --title "Fix login bug" --base main --body "Detailed description"
+fn task pr-create FN-001 --title "Fix login bug" --base main --body "Detailed description"
 ```
 
 **Dashboard:**
@@ -466,7 +466,7 @@ Fusion supports two completion strategies once a task reaches **In Review**:
 PR-first automation is designed for repositories that require GitHub-side governance:
 
 - Authenticate GitHub access with `gh auth login` or `GITHUB_TOKEN`
-- Ensure the task branch already exists on GitHub using the normal kb branch naming convention: `kb/<task-id-lower>`
+- Ensure the task branch already exists on GitHub using the normal fusion branch naming convention: `fusion/<task-id-lower>`
 - Expect the task to remain in **In Review** while required checks are pending/failing or a review is blocking merge
 
 **Important:** Fusion does **not** implicitly push task branches before creating a PR. PR-first mode assumes branch publishing is handled by your existing workflow or repository automation.

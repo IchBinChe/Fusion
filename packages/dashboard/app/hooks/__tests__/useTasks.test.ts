@@ -35,6 +35,11 @@ vi.mock("../../api", () => ({
   archiveAllDone: vi.fn(),
 }));
 
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 const mockFetchTasks = vi.mocked(api.fetchTasks);
 const mockUpdateTask = vi.mocked(api.updateTask);
 const mockArchiveAllDone = vi.mocked(api.archiveAllDone);
@@ -230,14 +235,10 @@ describe("useTasks", () => {
   });
 
   it("closes the broken SSE connection and reconnects after an error", async () => {
-    // Note: We use real timers here because React Testing Library's waitFor
-    // doesn't play well with fake timers - it can hang waiting for promises.
-    // The test relies on the actual 3-second reconnect delay being processed.
+    vi.useFakeTimers();
     const { unmount } = renderHook(() => useTasks());
 
-    await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(1);
-    });
+    expect(MockEventSource.instances).toHaveLength(1);
 
     const first = MockEventSource.instances[0];
 
@@ -247,15 +248,47 @@ describe("useTasks", () => {
 
     expect(first.close).toHaveBeenCalledTimes(1);
 
-    // Wait for reconnect timer (3s) to create a second EventSource
-    await waitFor(
-      () => {
-        expect(MockEventSource.instances).toHaveLength(2);
-      },
-      { timeout: 5000 }
-    );
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+      await flushPromises();
+    });
+
+    expect(MockEventSource.instances).toHaveLength(2);
 
     unmount();
+  });
+
+  it("reproduces the board stall: tasks changed while SSE is disconnected stay stale after reconnect without a resync fetch", async () => {
+    vi.useFakeTimers();
+    const initialTask = createMockTask({
+      id: "FN-001",
+      title: "Stale title",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    mockFetchTasks.mockResolvedValueOnce([initialTask]);
+
+    const { result } = renderHook(() => useTasks());
+
+    await act(async () => {
+      await flushPromises();
+    });
+
+    expect(result.current.tasks[0]?.title).toBe("Stale title");
+
+    const first = MockEventSource.instances[0];
+
+    act(() => {
+      first._emit("error");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+      await flushPromises();
+    });
+
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+    expect(result.current.tasks[0]?.title).toBe("Stale title");
   });
 
   describe("SSE event: task:updated", () => {
@@ -277,6 +310,7 @@ describe("useTasks", () => {
         id: "FN-001",
         title: "New Title",
         column: "in-progress" as Column,
+        columnMovedAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-02T00:00:00Z",
       });
 

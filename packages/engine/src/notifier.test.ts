@@ -220,18 +220,56 @@ describe("NtfyNotifier", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("uses task ID when title is not available", async () => {
+    it("uses task ID and description when title is not available", async () => {
       notifier = new NtfyNotifier(store);
       await notifier.start();
 
-      store.triggerTaskMoved(createTask("KB-001"), "in-progress", "in-review");
+      const taskWithoutTitle = { ...createTask("KB-001"), description: "Implement user authentication flow" };
+      store.triggerTaskMoved(taskWithoutTitle, "in-progress", "in-review");
 
       await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(fetchMock).toHaveBeenCalledWith(
         "https://ntfy.sh/test-topic",
         expect.objectContaining({
-          body: 'Task "KB-001" is ready for review',
+          body: 'Task "KB-001: Implement user authentication flow" is ready for review',
+        })
+      );
+    });
+
+    it("truncates description to 200 characters when no title is set", async () => {
+      notifier = new NtfyNotifier(store);
+      await notifier.start();
+
+      const longDescription = "A".repeat(250);
+      const taskWithoutTitle = { ...createTask("KB-001"), description: longDescription };
+      store.triggerTaskMoved(taskWithoutTitle, "in-progress", "in-review");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const expectedSnippet = "A".repeat(200) + "...";
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://ntfy.sh/test-topic",
+        expect.objectContaining({
+          body: `Task "KB-001: ${expectedSnippet}" is ready for review`,
+        })
+      );
+    });
+
+    it("does not truncate description at exactly 200 characters", async () => {
+      notifier = new NtfyNotifier(store);
+      await notifier.start();
+
+      const exactDescription = "B".repeat(200);
+      const taskWithoutTitle = { ...createTask("KB-001"), description: exactDescription };
+      store.triggerTaskMoved(taskWithoutTitle, "in-progress", "in-review");
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://ntfy.sh/test-topic",
+        expect.objectContaining({
+          body: `Task "KB-001: ${exactDescription}" is ready for review`,
         })
       );
     });

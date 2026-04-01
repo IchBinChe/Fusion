@@ -7,6 +7,22 @@ export interface NtfyNotifierOptions {
   ntfyBaseUrl?: string;
 }
 
+/**
+ * Format a task identifier for notifications.
+ * - If title exists: returns "{title}"
+ * - If no title: returns "{id}: {first 200 chars of description}" (truncated with "..." if > 200)
+ */
+function formatTaskIdentifier(task: Task): string {
+  if (task.title) {
+    return task.title;
+  }
+  const maxLen = 200;
+  const snippet = task.description.length > maxLen
+    ? task.description.slice(0, maxLen) + "..."
+    : task.description;
+  return `${task.id}: ${snippet}`;
+}
+
 /** Minimal store interface needed by NtfyNotifier */
 interface NtfyNotifierStore {
   getSettings(): Promise<Settings> | Settings;
@@ -104,7 +120,7 @@ export class NtfyNotifier {
         this.sendNotification(
           this.config.topic!,
           `Task ${task.id} completed`,
-          `Task "${task.title ?? task.id}" is ready for review`,
+          `Task "${formatTaskIdentifier(task)}" is ready for review`,
           "default",
         ),
       );
@@ -123,7 +139,7 @@ export class NtfyNotifier {
         this.sendNotification(
           this.config.topic!,
           `Task ${task.id} failed`,
-          `Task "${task.title ?? task.id}" has failed and needs attention`,
+          `Task "${formatTaskIdentifier(task)}" has failed and needs attention`,
           "high",
         ),
       );
@@ -139,7 +155,7 @@ export class NtfyNotifier {
         this.sendNotification(
           this.config.topic!,
           `Task ${result.task.id} merged`,
-          `Task "${result.task.title ?? result.task.id}" has been merged to main`,
+          `Task "${formatTaskIdentifier(result.task)}" has been merged to main`,
           "default",
         ),
       );

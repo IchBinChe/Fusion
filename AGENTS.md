@@ -288,6 +288,7 @@ When true, enables ntfy.sh push notifications for task completion and failures.
 **Notes:**
 - No authentication required for public topics (keep it simple)
 - Topic must be 1–64 alphanumeric/hyphen/underscore characters
+- Notifications include the task title when available, or fall back to a truncated task description snippet (first 200 characters) prefixed with the task ID when no title is set
 - Notifications are best-effort: failures are logged but don't block task execution
 
 ### `taskStuckTimeoutMs` (default: `undefined` — disabled)

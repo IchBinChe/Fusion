@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { useState } from "react";
 import { ScheduleStepsEditor } from "../ScheduleStepsEditor";
 import type { AutomationStep } from "@fusion/core";
 
@@ -138,14 +139,42 @@ describe("ScheduleStepsEditor", () => {
     });
   });
 
-  describe("step editing", () => {
-    it("shows step editor when edit button is clicked", () => {
+  describe("step editor state", () => {
+    function StatefulEditor(props: Omit<ScheduleStepsEditorProps, 'onChange'>) {
+      const [steps, setSteps] = useState<AutomationStep[]>(props.steps);
+      return <ScheduleStepsEditor steps={steps} onChange={setSteps} />;
+    }
+
+    it("opens step editor automatically when adding a new step", () => {
+      render(<StatefulEditor steps={[]} />);
+      fireEvent.click(screen.getByText("Add Command Step"));
+      // After adding, the editor should be open (showing Save Step button)
+      expect(screen.getByText("Save Step")).toBeDefined();
+    });
+
+    it("notifies parent when editing state changes", () => {
+      const onEditingChange = vi.fn();
+      function StatefulEditorWithCallback(props: Omit<ScheduleStepsEditorProps, 'onChange'>) {
+        const [steps, setSteps] = useState<AutomationStep[]>(props.steps);
+        return <ScheduleStepsEditor steps={steps} onChange={setSteps} onEditingChange={onEditingChange} />;
+      }
+      render(<StatefulEditorWithCallback steps={[]} />);
+      
+      // Should be called with true when opening editor
+      fireEvent.click(screen.getByText("Add Command Step"));
+      expect(onEditingChange).toHaveBeenLastCalledWith(true);
+      
+      // Should be called with false when canceling
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("opens step editor for existing steps when edit is clicked", () => {
       const steps = [makeStep({ id: "s1", name: "Build" })];
       render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
       fireEvent.click(screen.getByLabelText("Edit Build"));
-      // Editor should show form fields
-      expect(screen.getByLabelText("Step Name")).toBeDefined();
       expect(screen.getByText("Save Step")).toBeDefined();
+      expect(screen.getByLabelText("Step Name")).toHaveProperty("value", "Build");
     });
 
     it("closes editor on cancel", () => {

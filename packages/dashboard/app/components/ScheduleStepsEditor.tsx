@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Plus, Trash2, ChevronUp, ChevronDown, Pencil, GripVertical } from "lucide-react";
 import type { AutomationStep, AutomationStepType } from "@fusion/core";
 import { StepTypeBadge } from "./StepTypeBadge";
@@ -6,6 +6,8 @@ import { StepTypeBadge } from "./StepTypeBadge";
 interface ScheduleStepsEditorProps {
   steps: AutomationStep[];
   onChange: (steps: AutomationStep[]) => void;
+  /** Called when editing state changes. Useful for parent form validation. */
+  onEditingChange?: (isEditing: boolean) => void;
 }
 
 function generateStepId(): string {
@@ -193,8 +195,13 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
   );
 }
 
-export function ScheduleStepsEditor({ steps, onChange }: ScheduleStepsEditorProps) {
+export function ScheduleStepsEditor({ steps, onChange, onEditingChange }: ScheduleStepsEditorProps) {
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
+
+  // Notify parent when editing state changes
+  useEffect(() => {
+    onEditingChange?.(editingStepId !== null);
+  }, [editingStepId, onEditingChange]);
 
   const handleAddStep = useCallback((type: AutomationStepType) => {
     const newStep = createEmptyStep(type);

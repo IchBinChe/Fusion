@@ -211,4 +211,160 @@ describe("ScheduleForm", () => {
       expect(onCancel).toHaveBeenCalled();
     });
   });
+
+  describe("multi-step mode", () => {
+    it("switches to Multi-Step mode and adds a command step", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+      
+      // Fill in basic info
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "My Multi-Step" } });
+      
+      // Switch to Multi-Step mode
+      fireEvent.click(screen.getByText("Multi-Step"));
+      
+      // Add a command step
+      fireEvent.click(screen.getByText("Add Command Step"));
+      
+      // Step editor should be open
+      expect(screen.getByText("Save Step")).toBeDefined();
+      
+      // Fill in step details - use placeholder to find the command field
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Run Tests" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. npm test"), { target: { value: "npm test" } });
+      
+      // Save the step
+      fireEvent.click(screen.getByText("Save Step"));
+      
+      // Step should be visible in the list
+      expect(screen.getByText("Run Tests")).toBeDefined();
+    });
+
+    it("adds an AI prompt step", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+      
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AI Schedule" } });
+      fireEvent.click(screen.getByText("Multi-Step"));
+      
+      // Add an AI prompt step
+      fireEvent.click(screen.getByText("Add AI Prompt Step"));
+      
+      // Fill in step details
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Summarize Results" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. Summarize the test results and highlight any failures"), { 
+        target: { value: "Summarize test output" } 
+      });
+      
+      // Save the step
+      fireEvent.click(screen.getByText("Save Step"));
+      
+      // Step should be visible
+      expect(screen.getByText("Summarize Results")).toBeDefined();
+    });
+
+    it("prevents submission with incomplete steps (missing command)", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+      
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Incomplete Schedule" } });
+      fireEvent.click(screen.getByText("Multi-Step"));
+      
+      // Add a step but don't fill in the command
+      fireEvent.click(screen.getByText("Add Command Step"));
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Run Tests" } });
+      // Note: Not filling in the command field
+      
+      // Try to save step - this should fail validation
+      fireEvent.click(screen.getByText("Save Step"));
+      expect(screen.getByText("Command is required")).toBeDefined();
+      
+      // Cancel the step editor - click the Cancel button in the step editor (not the form Cancel)
+      const cancelButtons = screen.getAllByText("Cancel");
+      // First Cancel is in the step editor, second is the form Cancel
+      fireEvent.click(cancelButtons[0]!);
+      
+      // Try to submit the form - should show error about incomplete steps
+      fireEvent.click(screen.getByText("Create Schedule"));
+      expect(screen.getByText(/Step 1: Command is required/)).toBeDefined();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("prevents submission when steps are being edited", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+      
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Editing Schedule" } });
+      fireEvent.click(screen.getByText("Multi-Step"));
+      
+      // Add a step and keep editor open
+      fireEvent.click(screen.getByText("Add Command Step"));
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Run Tests" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. npm test"), { target: { value: "npm test" } });
+      // Don't save - keep editor open
+      
+      // Try to submit the form
+      fireEvent.click(screen.getByText("Create Schedule"));
+      
+      // Should show editing error
+      expect(screen.getByText(/Please save or cancel all step edits/)).toBeDefined();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("successfully creates a multi-step schedule with valid steps", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+      
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Complete Multi-Step" } });
+      fireEvent.click(screen.getByText("Multi-Step"));
+      
+      // Add first step
+      fireEvent.click(screen.getByText("Add Command Step"));
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Build" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. npm test"), { target: { value: "npm run build" } });
+      fireEvent.click(screen.getByText("Save Step"));
+      
+      // Add second step
+      fireEvent.click(screen.getByText("Add AI Prompt Step"));
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Review" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. Summarize the test results and highlight any failures"), { 
+        target: { value: "Review the build output" } 
+      });
+      fireEvent.click(screen.getByText("Save Step"));
+      
+      // Submit the form
+      fireEvent.click(screen.getByText("Create Schedule"));
+      
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: "Complete Multi-Step",
+            steps: expect.arrayContaining([
+              expect.objectContaining({ name: "Build", type: "command", command: "npm run build" }),
+              expect.objectContaining({ name: "Review", type: "ai-prompt", prompt: "Review the build output" }),
+            ]),
+          }),
+        );
+      });
+    });
+
+    it("edits an existing multi-step schedule", () => {
+      const schedule = makeSchedule({
+        steps: [
+          { id: "step-1", type: "command", name: "Build", command: "npm run build" },
+        ],
+      });
+      render(<ScheduleForm schedule={schedule} onSubmit={onSubmit} onCancel={onCancel} />);
+      
+      // Should be in Multi-Step mode by default when schedule has steps
+      expect(screen.getByText("Steps (1)")).toBeDefined();
+      expect(screen.getByText("Build")).toBeDefined();
+      
+      // Add another step
+      fireEvent.click(screen.getByText("Add Command Step"));
+      fireEvent.change(screen.getByLabelText("Step Name"), { target: { value: "Test" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. npm test"), { target: { value: "npm test" } });
+      fireEvent.click(screen.getByText("Save Step"));
+      
+      // Should show both steps
+      expect(screen.getByText("Steps (2)")).toBeDefined();
+      expect(screen.getByText("Build")).toBeDefined();
+      expect(screen.getByText("Test")).toBeDefined();
+    });
+  });
 });

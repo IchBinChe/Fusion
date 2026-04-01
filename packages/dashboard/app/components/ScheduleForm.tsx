@@ -67,6 +67,7 @@ export function ScheduleForm({ schedule, onSubmit, onCancel }: ScheduleFormProps
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [timeoutMs, setTimeoutMs] = useState<number>(schedule?.timeoutMs ?? 300000);
   const [steps, setSteps] = useState<AutomationStep[]>(schedule?.steps ?? []);
+  const [hasEditingSteps, setHasEditingSteps] = useState(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -83,6 +84,34 @@ export function ScheduleForm({ schedule, onSubmit, onCancel }: ScheduleFormProps
     if (!name.trim()) e.name = "Name is required";
     if (mode === "simple" && !command.trim()) e.command = "Command is required";
     if (mode === "advanced" && steps.length === 0) e.steps = "At least one step is required";
+    
+    // Validate step content in multi-step mode
+    if (mode === "advanced" && steps.length > 0) {
+      const incompleteSteps: string[] = [];
+      
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        if (!step.name?.trim()) {
+          incompleteSteps.push(`Step ${i + 1}: Name is required`);
+        }
+        if (step.type === "command" && !step.command?.trim()) {
+          incompleteSteps.push(`Step ${i + 1}: Command is required`);
+        }
+        if (step.type === "ai-prompt" && !step.prompt?.trim()) {
+          incompleteSteps.push(`Step ${i + 1}: Prompt is required`);
+        }
+      }
+      
+      if (incompleteSteps.length > 0) {
+        e.steps = incompleteSteps.join("; ");
+      }
+      
+      // Check if any steps are currently being edited
+      if (hasEditingSteps) {
+        e.stepsEditing = "Please save or cancel all step edits before saving the schedule";
+      }
+    }
+    
     if (scheduleType === "custom") {
       if (!cronExpression.trim()) {
         e.cronExpression = "Cron expression is required for custom schedules";
@@ -95,7 +124,7 @@ export function ScheduleForm({ schedule, onSubmit, onCancel }: ScheduleFormProps
     }
     setErrors(e);
     return Object.keys(e).length === 0;
-  }, [name, command, mode, steps, scheduleType, cronExpression, timeoutMs]);
+  }, [name, command, mode, steps, scheduleType, cronExpression, timeoutMs, hasEditingSteps]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -249,9 +278,16 @@ export function ScheduleForm({ schedule, onSubmit, onCancel }: ScheduleFormProps
         </div>
       ) : (
         <>
-          <ScheduleStepsEditor steps={steps} onChange={setSteps} />
+          <ScheduleStepsEditor 
+            steps={steps} 
+            onChange={setSteps} 
+            onEditingChange={setHasEditingSteps}
+          />
           {errors.steps && (
             <small className="field-error">{errors.steps}</small>
+          )}
+          {errors.stepsEditing && (
+            <small className="field-error">{errors.stepsEditing}</small>
           )}
         </>
       )}

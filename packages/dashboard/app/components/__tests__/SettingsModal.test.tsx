@@ -22,6 +22,7 @@ const defaultSettings: Settings = {
   defaultPresetBySize: {},
   ntfyEnabled: false,
   ntfyTopic: undefined,
+  ntfyEvents: ["in-review", "merged", "failed"],
   taskStuckTimeoutMs: undefined,
 };
 
@@ -1217,6 +1218,115 @@ describe("SettingsModal", () => {
 
     const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.ntfyEnabled).toBe(false);
+  });
+
+  it("shows ntfyEvents checkboxes when ntfy is enabled", async () => {
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      ntfyEnabled: true,
+      ntfyTopic: "my-topic",
+      ntfyEvents: ["in-review", "merged", "failed"],
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Notifications"));
+    await waitFor(() => expect(screen.getByLabelText("Task completed (in-review)")).toBeTruthy());
+    expect(screen.getByLabelText("Task merged")).toBeTruthy();
+    expect(screen.getByLabelText("Task failed")).toBeTruthy();
+  });
+
+  it("hides ntfyEvents checkboxes when ntfy is disabled", async () => {
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Notifications"));
+    expect(screen.queryByLabelText("Task completed (in-review)")).toBeNull();
+    expect(screen.queryByLabelText("Task merged")).toBeNull();
+    expect(screen.queryByLabelText("Task failed")).toBeNull();
+  });
+
+  it("ntfyEvents checkboxes are all checked by default", async () => {
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      ntfyEnabled: true,
+      ntfyTopic: "my-topic",
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Notifications"));
+    expect((screen.getByLabelText("Task completed (in-review)") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Task merged") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Task failed") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("saves ntfyEvents correctly when checkboxes are toggled", async () => {
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      ntfyEnabled: true,
+      ntfyTopic: "my-topic",
+      ntfyEvents: ["in-review", "merged", "failed"],
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Notifications"));
+
+    // Uncheck "Task merged"
+    const mergedCheckbox = screen.getByLabelText("Task merged");
+    fireEvent.click(mergedCheckbox);
+
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
+
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload.ntfyEvents).toEqual(["in-review", "failed"]);
+  });
+
+  it("sets ntfyEvents to undefined when all checkboxes are unchecked", async () => {
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      ntfyEnabled: true,
+      ntfyTopic: "my-topic",
+      ntfyEvents: ["in-review", "merged", "failed"],
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Notifications"));
+
+    // Uncheck all three
+    fireEvent.click(screen.getByLabelText("Task completed (in-review)"));
+    fireEvent.click(screen.getByLabelText("Task merged"));
+    fireEvent.click(screen.getByLabelText("Task failed"));
+
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(updateGlobalSettings).toHaveBeenCalledTimes(1));
+
+    const payload = (updateGlobalSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload.ntfyEvents).toBeUndefined();
+  });
+
+  it("restores ntfyEvents from saved settings", async () => {
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      ntfyEnabled: true,
+      ntfyTopic: "my-topic",
+      ntfyEvents: ["in-review"],
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Notifications"));
+    expect((screen.getByLabelText("Task completed (in-review)") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Task merged") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText("Task failed") as HTMLInputElement).checked).toBe(false);
   });
 
   // Model filter tests with CustomModelDropdown

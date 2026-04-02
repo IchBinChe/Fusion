@@ -1363,6 +1363,7 @@ export function SettingsModal({
               <small>Receive push notifications when tasks complete or fail via ntfy.sh</small>
             </div>
             {form.ntfyEnabled && (
+              <>
               <div className="form-group">
                 <label htmlFor="ntfyTopic">ntfy Topic</label>
                 <input
@@ -1399,6 +1400,59 @@ export function SettingsModal({
                   {testNotificationLoading ? "Sending…" : "Test notification"}
                 </button>
               </div>
+              <div className="form-group">
+                <label>Notify on events</label>
+                <div className="ntfy-events-list">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={form.ntfyEvents?.includes("in-review") ?? true}
+                      onChange={(e) => {
+                        const current = form.ntfyEvents ?? ["in-review", "merged", "failed"];
+                        const newEvents = e.target.checked
+                          ? [...new Set([...current, "in-review"])]
+                          : current.filter((ev) => ev !== "in-review");
+                        setForm((f) => ({ ...f, ntfyEvents: newEvents.length > 0 ? newEvents : undefined }));
+                      }}
+                    />
+                    Task completed (in-review)
+                  </label>
+                  <small>When a task moves to In Review (ready for review)</small>
+
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={form.ntfyEvents?.includes("merged") ?? true}
+                      onChange={(e) => {
+                        const current = form.ntfyEvents ?? ["in-review", "merged", "failed"];
+                        const newEvents = e.target.checked
+                          ? [...new Set([...current, "merged"])]
+                          : current.filter((ev) => ev !== "merged");
+                        setForm((f) => ({ ...f, ntfyEvents: newEvents.length > 0 ? newEvents : undefined }));
+                      }}
+                    />
+                    Task merged
+                  </label>
+                  <small>When a task is successfully merged to main</small>
+
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={form.ntfyEvents?.includes("failed") ?? true}
+                      onChange={(e) => {
+                        const current = form.ntfyEvents ?? ["in-review", "merged", "failed"];
+                        const newEvents = e.target.checked
+                          ? [...new Set([...current, "failed"])]
+                          : current.filter((ev) => ev !== "failed");
+                        setForm((f) => ({ ...f, ntfyEvents: newEvents.length > 0 ? newEvents : undefined }));
+                      }}
+                    />
+                    Task failed
+                  </label>
+                  <small>When a task fails during execution (high priority)</small>
+                </div>
+              </div>
+              </>
             )}
           </>
         );

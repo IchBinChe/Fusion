@@ -3063,30 +3063,30 @@ body {
 
 /* Mobile responsive for spec tab */
 @media (max-width: 768px) {
-  .changed-files-layout {
+  .changed-files-modal .changed-files-layout {
     grid-template-columns: 1fr;
   }
 
-  .changed-files-sidebar {
+  .changed-files-modal .changed-files-sidebar {
     border-right: none;
     border-bottom: 1px solid var(--border);
-    max-height: 220px;
+    max-height: 35vh;
   }
 
-  .changed-files-content {
+  .changed-files-modal .changed-files-content {
     padding: var(--space-sm);
   }
 
-  .changes-header {
+  .changed-files-layout .changes-header {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .changes-file-header {
+  .changed-files-layout .changes-file-header {
     flex-wrap: wrap;
   }
 
-  .changes-file-stat {
+  .changed-files-layout .changes-file-stat {
     width: 100%;
     padding-left: 30px;
   }
@@ -8621,6 +8621,17 @@ html .column.drag-over * {
 
   .keyboard-hints {
     display: none;
+  }
+
+  .changed-files-modal {
+    width: 100%;
+    max-width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: none;
   }
 }
 

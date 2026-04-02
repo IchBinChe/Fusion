@@ -21,6 +21,7 @@ import {
   checkSessionError,
   type UsageLimitPauser,
 } from "./usage-limit-detector.js";
+import { isTransientError } from "./transient-error-detector.js";
 
 export const TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "kb", an AI-orchestrated task board.
 
@@ -664,6 +665,14 @@ export class TriageProcessor {
             task.id,
             err.message,
           );
+        } else if (isTransientError(err.message)) {
+          // Transient network/infrastructure error — don't mark as failed, allow retry
+          triageLog.warn(`⚡ ${task.id} transient error during triage — will retry: ${err.message}`);
+          await this.store.logEntry(task.id, `Transient error during specification (will retry): ${err.message}`).catch(() => {});
+          // Restore status so triage picks it up again on next pass
+          const restoreStatus = task.status === "needs-respecify" ? "needs-respecify" : undefined;
+          await this.store.updateTask(task.id, { status: restoreStatus }).catch(() => {});
+          return;
         }
         // For re-specification, restore needs-respecify status so it can be retried
         const restoreStatus = task.status === "needs-respecify" ? "needs-respecify" : undefined;

@@ -331,20 +331,26 @@ export class Scheduler {
       // Global pause (hard stop): halt all scheduling activity
       if (settings.globalPause) {
         if (!this.wasGlobalPaused) {
-          schedulerLog.log("Global pause active — scheduling halted");
+          schedulerLog.warn("⚠ Global pause active — scheduling halted. To resume: set globalPause to false in settings.");
           this.wasGlobalPaused = true;
         }
         return;
+      }
+      if (this.wasGlobalPaused) {
+        schedulerLog.log("Global pause cleared — scheduling resumed");
       }
       this.wasGlobalPaused = false;
 
       // Engine paused (soft pause): halt new work dispatch, but let agents finish
       if (settings.enginePaused) {
         if (!this.wasEnginePaused) {
-          schedulerLog.log("Engine paused — scheduling halted (in-flight agents continue)");
+          schedulerLog.warn("⚠ Engine paused — scheduling halted (in-flight agents continue). To resume: set enginePaused to false.");
           this.wasEnginePaused = true;
         }
         return;
+      }
+      if (this.wasEnginePaused) {
+        schedulerLog.log("Engine pause cleared — scheduling resumed");
       }
       this.wasEnginePaused = false;
 

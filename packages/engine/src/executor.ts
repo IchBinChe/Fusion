@@ -13,6 +13,7 @@ import type { WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";
 import { executorLog, reviewerLog } from "./logger.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
+import { isTransientError } from "./transient-error-detector.js";
 import type { StuckTaskDetector } from "./stuck-task-detector.js";
 
 // Re-export for backward compatibility (tests import from executor.ts)
@@ -688,6 +689,12 @@ export class TaskExecutor {
         // Check if the error is a usage-limit error and trigger global pause
         if (this.options.usageLimitPauser && isUsageLimitError(err.message)) {
           await this.options.usageLimitPauser.onUsageLimitHit("executor", task.id, err.message);
+        } else if (isTransientError(err.message)) {
+          // Transient network/infrastructure error — retry instead of failing
+          executorLog.warn(`⚡ ${task.id} transient error — moving to todo for retry: ${err.message}`);
+          await this.store.logEntry(task.id, `Transient error (will retry): ${err.message}`);
+          await this.store.moveTask(task.id, "todo");
+          return;
         }
         executorLog.error(`✗ ${task.id} execution failed:`, err.message);
         await this.store.logEntry(task.id, `Execution failed: ${err.message}`);

@@ -27,7 +27,7 @@ const USAGE_LIMIT_PATTERNS: RegExp[] = [
   /quota/i,
   /billing/i,
   /\bcredit/i,
-  /insufficient/i,
+  /insufficient.*(quota|credit|balance|fund)/i,
 ];
 
 /**
@@ -88,6 +88,7 @@ export class UsageLimitPauser {
       const settings = await this.store.getSettings();
       if (settings.globalPause) {
         // Still paused — no need to trigger again
+        log.log(`Global pause already active — ignoring duplicate from ${agentType}/${taskId}`);
         return;
       }
       // External reset detected — allow re-triggering
@@ -97,6 +98,7 @@ export class UsageLimitPauser {
     this.paused = true;
 
     log.warn(`${agentType} hit usage limit on ${taskId}: ${errorMessage}`);
+    log.warn(`Matched pattern in error: "${errorMessage.slice(0, 200)}"`);
 
     // Log the triggering error on the task
     await this.store.logEntry(

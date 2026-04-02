@@ -594,6 +594,18 @@ export function Header({
                 <span>Workflow Steps</span>
               </button>
             )}
+            {/* Missions - in overflow on mobile */}
+            {onOpenMissions && (
+              <button
+                className="mobile-overflow-item"
+                onClick={() => handleOverflowAction(onOpenMissions)}
+                role="menuitem"
+                data-testid="overflow-missions-btn"
+              >
+                <Target size={16} />
+                <span>Missions</span>
+              </button>
+            )}
           </div>
         )}
       </div>

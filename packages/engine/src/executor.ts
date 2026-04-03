@@ -503,9 +503,10 @@ export class TaskExecutor {
         worktreePath = await this.createWorktree(branchName, worktreePath, task.id);
       }
 
-      // Capture the base commit SHA for diff computation
-      // This is done after worktree creation when we're on the new branch
-      if (!task.baseCommitSha) {
+      // Capture the base commit SHA for diff computation whenever a task
+      // starts with a newly assigned worktree. Recycled worktrees must
+      // overwrite any prior task baseline instead of inheriting it.
+      if (!isResume) {
         try {
           const baseCommitSha = execSync("git rev-parse HEAD", {
             cwd: worktreePath,

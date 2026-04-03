@@ -1318,6 +1318,48 @@ describe("TaskExecutor worktree pool integration", () => {
     expect(pool.size).toBe(0);
   });
 
+  it("overwrites baseCommitSha when starting from a pooled worktree", async () => {
+    const pool = new WorktreePool();
+    pool.release("/tmp/test/.worktrees/idle-wt");
+    mockedExistsSync.mockImplementation((p) => p === "/tmp/test/.worktrees/idle-wt");
+
+    mockedExecSync.mockImplementation((cmd: any) => {
+      if (String(cmd) === "git rev-parse HEAD") {
+        return "newbase123\n" as any;
+      }
+      return "" as any;
+    });
+
+    const store = createMockStore();
+    store.getTask.mockResolvedValue({
+      id: "FN-020",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      baseCommitSha: "stale-base",
+    });
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      recycleWorktrees: true,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", { pool });
+    await executor.execute(makeTask());
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-020", { baseCommitSha: "newbase123" });
+  });
+
   it("creates fresh worktree when pool is empty", async () => {
     const pool = new WorktreePool();
     // Pool is empty

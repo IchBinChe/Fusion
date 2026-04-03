@@ -1927,6 +1927,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       try {
         let baseRef = task.baseCommitSha;
 
+        if (baseRef) {
+          try {
+            nodeChildProcess.execSync(`git merge-base --is-ancestor ${baseRef} HEAD`, {
+              cwd: task.worktree,
+              stdio: "pipe",
+              timeout: 5000,
+            });
+          } catch {
+            baseRef = undefined;
+          }
+        }
+
         if (!baseRef) {
           try {
             baseRef = nodeChildProcess.execSync("git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main", {

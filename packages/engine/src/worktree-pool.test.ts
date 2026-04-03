@@ -138,6 +138,11 @@ describe("WorktreePool", () => {
     it("creates branch from main with force-reset", () => {
       pool.prepareForTask("/tmp/wt", "fusion/fn-042");
 
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        "git checkout --detach main",
+        expect.objectContaining({ cwd: "/tmp/wt" }),
+      );
+
       const checkoutCall = mockedExecSync.mock.calls.find(
         (c) => typeof c[0] === "string" && (c[0] as string).includes("checkout -B"),
       );
@@ -156,6 +161,11 @@ describe("WorktreePool", () => {
 
     it("creates branch from custom startPoint when provided", () => {
       pool.prepareForTask("/tmp/wt", "fusion/fn-042", "fusion/fn-041");
+
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        "git checkout --detach fusion/fn-041",
+        expect.objectContaining({ cwd: "/tmp/wt" }),
+      );
 
       const checkoutCall = mockedExecSync.mock.calls.find(
         (c) => typeof c[0] === "string" && (c[0] as string).includes("checkout -B"),
@@ -176,6 +186,7 @@ describe("WorktreePool", () => {
       // Should still run clean and branch creation
       const calls = mockedExecSync.mock.calls.map((c) => c[0]);
       expect(calls).toContain("git clean -fd");
+      expect(calls).toContain("git checkout --detach main");
       expect(calls).toContain('git checkout -B "fusion/fn-001" main');
     });
 

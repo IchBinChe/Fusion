@@ -108,7 +108,8 @@ export class WorktreePool {
    * Steps performed:
    * 1. `git checkout -- .` — discard tracked file modifications
    * 2. `git clean -fd` — remove untracked files (but not .gitignore'd caches)
-   * 3. `git checkout -B <branchName> <startPoint>` — create/reset branch from start point
+   * 3. `git checkout --detach <startPoint>` — move HEAD to the latest base commit
+   * 4. `git checkout -B <branchName> <startPoint>` — create/reset branch from start point
    *
    * Returns the actual branch name used. This may differ from `branchName`
    * when conflict recovery generates a suffixed name (e.g., `kb/fn-042-2`).
@@ -129,8 +130,13 @@ export class WorktreePool {
     // Remove untracked files (but not .gitignore'd build caches)
     execSync("git clean -fd", { cwd: worktreePath, stdio: "pipe" });
 
-    // Create or force-reset the branch from the start point (or main)
     const base = startPoint || "main";
+    execSync(`git checkout --detach ${base}`, {
+      cwd: worktreePath,
+      stdio: "pipe",
+    });
+
+    // Create or force-reset the branch from the start point (or main)
     const checkoutCmd = `git checkout -B "${branchName}" ${base}`;
     try {
       execSync(checkoutCmd, {

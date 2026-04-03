@@ -91,6 +91,25 @@ describe("project-store-resolver", () => {
     expect(createdStores).toHaveLength(1);
   });
 
+  it("deduplicates concurrent calls — concurrent SSE + API route requests share one store", async () => {
+    // Simulate the race: SSE endpoint and an API mutation both call
+    // getOrCreateProjectStore before either has set the cache.
+    const [store1, store2, store3] = await Promise.all([
+      getOrCreateProjectStore("proj_concurrent"),
+      getOrCreateProjectStore("proj_concurrent"),
+      getOrCreateProjectStore("proj_concurrent"),
+    ]);
+
+    // All callers must receive the same instance so SSE and mutations share an EventEmitter
+    expect(store1).toBe(store2);
+    expect(store2).toBe(store3);
+
+    // Only one underlying store should have been created
+    expect(createdStores).toHaveLength(1);
+    // watch() called exactly once
+    expect(createdStores[0].watchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("creates separate stores for different projectIds", async () => {
     const storeA = await getOrCreateProjectStore("proj_alpha");
     const storeB = await getOrCreateProjectStore("proj_beta");

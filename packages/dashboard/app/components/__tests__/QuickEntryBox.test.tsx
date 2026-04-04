@@ -646,6 +646,95 @@ describe("QuickEntryBox", () => {
       expect(screen.getByTestId("model-menu-validator")).toBeTruthy();
     });
 
+    it("Escape from submenu returns to top-level menu without closing it", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with models" } });
+      fireEvent.click(screen.getByTestId("quick-entry-models-button"));
+      fireEvent.click(screen.getByTestId("model-menu-executor"));
+
+      // Should be in submenu — back button visible
+      expect(screen.getByTestId("model-submenu-back")).toBeTruthy();
+
+      // Press Escape — should go back to top-level, not close the entire menu
+      fireEvent.keyDown(textarea, { key: "Escape" });
+
+      // Top-level menu items should be visible again
+      expect(screen.getByTestId("model-menu-plan")).toBeTruthy();
+      expect(screen.getByTestId("model-menu-executor")).toBeTruthy();
+      expect(screen.getByTestId("model-menu-validator")).toBeTruthy();
+      // Submenu should not be visible
+      expect(screen.queryByTestId("model-submenu-back")).toBeNull();
+    });
+
+    it("selecting Plan model updates the Plan menu item value", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with models" } });
+      fireEvent.click(screen.getByTestId("quick-entry-models-button"));
+      fireEvent.click(screen.getByTestId("model-menu-plan"));
+
+      // Select a model via mocked dropdown
+      fireEvent.click(screen.getByTestId("dropdown-select-plan model"));
+
+      // Go back to top-level menu
+      fireEvent.click(screen.getByTestId("model-submenu-back"));
+
+      // Plan menu item should show the selected model, not "Using default"
+      const planItem = screen.getByTestId("model-menu-plan");
+      expect(planItem.textContent).toContain("anthropic/claude-sonnet-4-5");
+      expect(planItem.textContent).not.toContain("Using default");
+      // Should have active class
+      expect(planItem.classList.contains("model-menu-item--active")).toBe(true);
+    });
+
+    it("selecting Validator model updates the Validator menu item value", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with models" } });
+      fireEvent.click(screen.getByTestId("quick-entry-models-button"));
+      fireEvent.click(screen.getByTestId("model-menu-validator"));
+
+      // Select a model via mocked dropdown
+      fireEvent.click(screen.getByTestId("dropdown-select-validator model"));
+
+      // Go back to top-level menu
+      fireEvent.click(screen.getByTestId("model-submenu-back"));
+
+      // Validator menu item should show the selected model
+      const validatorItem = screen.getByTestId("model-menu-validator");
+      expect(validatorItem.textContent).toContain("anthropic/claude-sonnet-4-5");
+      expect(validatorItem.classList.contains("model-menu-item--active")).toBe(true);
+    });
+
+    it("clearing Plan model returns menu item to default state", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with models" } });
+      fireEvent.click(screen.getByTestId("quick-entry-models-button"));
+      fireEvent.click(screen.getByTestId("model-menu-plan"));
+
+      // Select then clear model
+      fireEvent.click(screen.getByTestId("dropdown-select-plan model"));
+      fireEvent.click(screen.getByTestId("dropdown-clear-plan model"));
+
+      // Go back to top-level menu
+      fireEvent.click(screen.getByTestId("model-submenu-back"));
+
+      // Plan menu item should show "Using default" and no active class
+      const planItem = screen.getByTestId("model-menu-plan");
+      expect(planItem.textContent).toContain("Using default");
+      expect(planItem.classList.contains("model-menu-item--active")).toBe(false);
+    });
+
     it("selects dependencies and includes them in submit payload", async () => {
       const { props } = renderQuickEntryBox({});
       expandQuickEntry();

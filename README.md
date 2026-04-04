@@ -339,6 +339,18 @@ When creating tasks, the AI can refine your description:
 - Suggests appropriate file scopes and steps
 - Available in both Quick Entry and planning mode
 
+### Quick Entry Model Selection
+
+The quick entry box provides a **Models** button (🧠) that opens a nested menu for overriding AI models on a per-task basis:
+
+1. Click the **Models** button (🧠) to open the top-level menu
+2. Choose a role: **Plan**, **Executor**, or **Validator**
+3. Select a specific model from the dropdown submenu
+4. Press **Back** or Escape to return to the role selector
+5. The menu shows "Using default" for roles without an override and highlights roles with a custom selection
+
+The selected executor and validator models are included in the task creation payload. Planning model overrides apply only during task specification (triage).
+
 ### Manual Plan Approval
 
 Enable `requirePlanApproval` in settings for manual review of AI-generated specifications:

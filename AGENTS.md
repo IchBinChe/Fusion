@@ -585,7 +585,7 @@ Both components provide the same task creation experience with the following opt
 
 - **Description input** — Type the task description. Press Enter to create immediately, or use the action buttons for AI-assisted creation.
 - **Deps button** — Add task dependencies before creation.
-- **Models button** — Override the default AI models for this task (executor and validator).
+- **Models button** — Opens a nested menu with Plan, Executor, and Validator roles. Each role opens a submenu with a model dropdown for per-task overrides.
 - **Plan button** (Lightbulb icon) — Opens the AI Planning Mode modal with the current description pre-filled. This allows refining the task through an interactive Q&A before creation.
 - **Subtask button** (ListTree icon) — Opens the subtask breakdown dialog with the current description pre-filled. The dialog generates 2–5 AI-suggested subtasks, lets the user edit titles, descriptions, sizes, and dependencies, and then creates all subtasks in one action.
 

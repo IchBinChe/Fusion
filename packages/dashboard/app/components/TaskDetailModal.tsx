@@ -4,7 +4,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, PrInfo, Settings } from "@fusion/core";
 import { COLUMN_LABELS, VALID_TRANSITIONS } from "@fusion/core";
-import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, requestSpecRevision, approvePlan, rejectPlan, refineTask } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, requestSpecRevision, approvePlan, rejectPlan, refineTask, fetchWorkflowResults } from "../api";
+import type { WorkflowStepResult } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import { AgentLogViewer } from "./AgentLogViewer";
@@ -15,6 +16,7 @@ import { MergeDetails } from "./MergeDetails";
 import { TaskChangesTab } from "./TaskChangesTab";
 import { CommitDiffTab } from "./CommitDiffTab";
 import { TaskForm, type PendingImage } from "./TaskForm";
+import { WorkflowResultsTab } from "./WorkflowResultsTab";
 
 interface ModelSelection {
   provider?: string;
@@ -151,7 +153,7 @@ export function TaskDetailModal({
   addToast,
   githubTokenConfigured,
 }: TaskDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<"definition" | "logs" | "changes" | "commits" | "comments" | "model">("definition");
+  const [activeTab, setActiveTab] = useState<"definition" | "logs" | "changes" | "commits" | "comments" | "model" | "workflow">("definition");
   const [logSubview, setLogSubview] = useState<"activity" | "agent-log">("activity");
   const [attachments, setAttachments] = useState<TaskAttachment[]>(task.attachments || []);
   const [uploading, setUploading] = useState(false);
@@ -183,6 +185,10 @@ export function TaskDetailModal({
   // Merged project settings for effective model resolution in Agent Log header
   const [settings, setSettings] = useState<Settings | undefined>(undefined);
 
+  // Workflow results state
+  const [workflowResults, setWorkflowResults] = useState<WorkflowStepResult[]>([]);
+  const [workflowResultsLoading, setWorkflowResultsLoading] = useState(false);
+
   // Reset edit state when task changes
   useEffect(() => {
     setEditTitle(task.title || "");
@@ -202,6 +208,27 @@ export function TaskDetailModal({
       });
     return () => { cancelled = true; };
   }, [projectId]);
+
+  // Load workflow results when workflow tab is active
+  const hasWorkflowSteps = (task.enabledWorkflowSteps?.length ?? 0) > 0 || (task.workflowStepResults?.length ?? 0) > 0;
+  useEffect(() => {
+    if (activeTab !== "workflow" || !hasWorkflowSteps) return;
+    let cancelled = false;
+    setWorkflowResultsLoading(true);
+    fetchWorkflowResults(task.id, projectId)
+      .then((results) => {
+        if (!cancelled) setWorkflowResults(results);
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          addToast(`Failed to load workflow results: ${err.message}`, "error");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setWorkflowResultsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, task.id, projectId, hasWorkflowSteps, addToast]);
 
   // Reset dependency search when dropdown closes
   useEffect(() => {
@@ -771,8 +798,20 @@ export function TaskDetailModal({
             >
               Model
             </button>
+            {hasWorkflowSteps && (
+              <button
+                className={`detail-tab${activeTab === "workflow" ? " detail-tab-active" : ""}`}
+                onClick={() => setActiveTab("workflow")}
+              >
+                Workflow
+              </button>
+            )}
           </div>
-          {activeTab === "model" ? (
+          {activeTab === "workflow" ? (
+            <div className="detail-section">
+              <WorkflowResultsTab taskId={task.id} results={workflowResults} loading={workflowResultsLoading} />
+            </div>
+          ) : activeTab === "model" ? (
             <div className="detail-section">
               <ModelSelectorTab task={task} addToast={addToast} />
             </div>

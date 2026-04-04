@@ -24,6 +24,7 @@ vi.mock("../../api", () => ({
   updateGlobalSettings: vi.fn().mockResolvedValue({}),
   pauseTask: vi.fn().mockResolvedValue({}),
   unpauseTask: vi.fn().mockResolvedValue({}),
+  fetchWorkflowResults: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock lucide-react icons used by TaskDetailModal, TaskForm, PrSection, CustomModelDropdown
@@ -3554,6 +3555,265 @@ describe("TaskDetailModal", () => {
         expect(mockUpdate).toHaveBeenCalledWith("FN-001", expect.objectContaining({
           enabledWorkflowSteps: ["WS-002", "WS-001"],
         }), undefined);
+      });
+    });
+  });
+
+  describe("Workflow tab", () => {
+    it("does NOT show Workflow tab when enabledWorkflowSteps is empty", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: [] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.queryByText("Workflow")).toBeNull();
+    });
+
+    it("does NOT show Workflow tab when enabledWorkflowSteps is undefined", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: undefined, workflowStepResults: undefined })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.queryByText("Workflow")).toBeNull();
+    });
+
+    it("shows Workflow tab when enabledWorkflowSteps is non-empty", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: ["WS-001"] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("Workflow")).toBeTruthy();
+    });
+
+    it("shows Workflow tab when task has previous workflow results", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({
+            enabledWorkflowSteps: [],
+            workflowStepResults: [
+              { workflowStepId: "WS-001", workflowStepName: "QA Check", status: "passed" },
+            ],
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("Workflow")).toBeTruthy();
+    });
+
+    it("switches to Workflow tab and calls fetchWorkflowResults", async () => {
+      const { fetchWorkflowResults } = await import("../../api");
+      const mockFetch = vi.mocked(fetchWorkflowResults);
+      const mockResults: import("@fusion/core").WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-001",
+          workflowStepName: "QA Check",
+          status: "passed",
+          output: "All tests passed.",
+          startedAt: "2026-04-04T10:00:00Z",
+          completedAt: "2026-04-04T10:02:00Z",
+        },
+      ];
+      mockFetch.mockResolvedValueOnce(mockResults);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: ["WS-001"] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Workflow"));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith("FN-099", undefined);
+      });
+
+      // Should render the workflow results
+      expect(screen.getByText("QA Check")).toBeTruthy();
+    });
+
+    it("shows loading state when workflow results are being fetched", async () => {
+      const { fetchWorkflowResults } = await import("../../api");
+      const mockFetch = vi.mocked(fetchWorkflowResults);
+      // Never resolve to keep loading state
+      mockFetch.mockReturnValueOnce(new Promise(() => {}));
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: ["WS-001"] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Workflow"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("workflow-results-loading")).toBeTruthy();
+      });
+    });
+
+    it("shows error toast when fetchWorkflowResults fails", async () => {
+      const { fetchWorkflowResults } = await import("../../api");
+      const mockFetch = vi.mocked(fetchWorkflowResults);
+      mockFetch.mockRejectedValueOnce(new Error("Server error"));
+      const addToast = vi.fn();
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: ["WS-001"] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={addToast}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Workflow"));
+
+      await waitFor(() => {
+        expect(addToast).toHaveBeenCalledWith(
+          "Failed to load workflow results: Server error",
+          "error",
+        );
+      });
+    });
+
+    it("renders empty state when workflow results are empty", async () => {
+      const { fetchWorkflowResults } = await import("../../api");
+      const mockFetch = vi.mocked(fetchWorkflowResults);
+      mockFetch.mockResolvedValueOnce([]);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: ["WS-001"] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Workflow"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("workflow-results-empty")).toBeTruthy();
+        expect(screen.getByText("No workflow steps have run yet.")).toBeTruthy();
+      });
+    });
+
+    it("renders multiple workflow step results with status badges", async () => {
+      const { fetchWorkflowResults } = await import("../../api");
+      const mockFetch = vi.mocked(fetchWorkflowResults);
+      const mockResults: import("@fusion/core").WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-001",
+          workflowStepName: "QA Check",
+          status: "passed",
+          output: "All tests passed.",
+          startedAt: "2026-04-04T10:00:00Z",
+          completedAt: "2026-04-04T10:02:00Z",
+        },
+        {
+          workflowStepId: "WS-002",
+          workflowStepName: "Security Audit",
+          status: "failed",
+          output: "Found 2 issues.",
+          startedAt: "2026-04-04T10:02:05Z",
+          completedAt: "2026-04-04T10:03:00Z",
+        },
+      ];
+      mockFetch.mockResolvedValueOnce(mockResults);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ enabledWorkflowSteps: ["WS-001", "WS-002"] })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Workflow"));
+
+      await waitFor(() => {
+        expect(screen.getByText("QA Check")).toBeTruthy();
+        expect(screen.getByText("Security Audit")).toBeTruthy();
+        expect(screen.getByTestId("workflow-result-badge-WS-001")).toHaveTextContent("Passed");
+        expect(screen.getByTestId("workflow-result-badge-WS-002")).toHaveTextContent("Failed");
+      });
+    });
+
+    it("hides Definition content when Workflow tab is active", async () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({
+            enabledWorkflowSteps: ["WS-001"],
+            prompt: "# Test prompt",
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      // Definition content visible initially
+      expect(container.querySelector(".markdown-body")).toBeTruthy();
+
+      // Switch to Workflow tab
+      fireEvent.click(screen.getByText("Workflow"));
+
+      // Definition content should be hidden
+      await waitFor(() => {
+        expect(container.querySelector(".markdown-body")).toBeNull();
       });
     });
   });

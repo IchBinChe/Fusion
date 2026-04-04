@@ -4205,38 +4205,6 @@ body {
   outline-offset: 1px;
 }
 
-/* Expand button - visible on hover */
-.card-expand-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-}
-
-.card:hover .card-expand-btn {
-  opacity: 1;
-}
-
-.card-expand-btn:hover {
-  background: var(--border);
-  color: var(--text);
-}
-
-.card-expand-btn:focus {
-  opacity: 1;
-  outline: 1px solid var(--todo);
-  outline-offset: 1px;
-}
-
 /* Archive/Unarchive buttons */
 .card-archive-btn,
 .card-unarchive-btn {
@@ -5190,22 +5158,6 @@ body {
   }
 
   .card-edit-btn svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  /* Card expand button: always visible on mobile (no hover) */
-  .card-expand-btn {
-    opacity: 1;
-    width: 44px;
-    height: 44px;
-    margin-right: -8px;
-    margin-top: -8px;
-    margin-bottom: -8px;
-    border-radius: var(--radius-md);
-  }
-
-  .card-expand-btn svg {
     width: 16px;
     height: 16px;
   }

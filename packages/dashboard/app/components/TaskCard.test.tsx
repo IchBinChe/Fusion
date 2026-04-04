@@ -8,7 +8,6 @@ vi.mock("lucide-react", () => ({
   Link: () => null,
   Clock: () => null,
   Pencil: () => null,
-  Maximize2: () => null,
   Layers: () => null,
   ChevronDown: () => null,
   Folder: () => null,

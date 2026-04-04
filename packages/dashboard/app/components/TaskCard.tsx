@@ -1,5 +1,5 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
-import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Maximize2 } from "lucide-react";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder } from "lucide-react";
 import type { Task, TaskDetail, Column, PrInfo, IssueInfo } from "@fusion/core";
 import { fetchTaskDetail, uploadAttachment } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
@@ -463,11 +463,6 @@ function TaskCardComponent({
     enterEditMode(e);
   }, [enterEditMode]);
 
-  const handleExpandClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    void handleClick();
-  }, [handleClick]);
-
   // Auto-resize textarea (similar to InlineCreateCard)
   const handleDescChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setEditDescription(e.target.value);
@@ -583,14 +578,6 @@ function TaskCardComponent({
           />
         )}
         <div className="card-header-actions">
-          <button
-            className="card-expand-btn"
-            onClick={handleExpandClick}
-            title="Open task details"
-            aria-label="Open task details"
-          >
-            <Maximize2 size={12} />
-          </button>
           {canEdit && (
             <button
               className="card-edit-btn"

@@ -794,6 +794,213 @@ describe("Scheduler", () => {
 
       expect(prMonitor.stopMonitoring).toHaveBeenCalledWith("FN-001");
     });
+
+    it("invokes onClosedPrFeedback with drained comments for closed/merged PR", async () => {
+      const mockComments = [
+        { id: 1, body: "Fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "https://example.com" },
+        { id: 2, body: "Update that", user: { login: "reviewer2" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "https://example.com" },
+      ];
+
+      const prMonitor = {
+        startMonitoring: vi.fn(),
+        stopMonitoring: vi.fn(),
+        updatePrInfo: vi.fn(),
+        getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+        stopAll: vi.fn(),
+        drainComments: vi.fn().mockReturnValue(mockComments),
+      } as unknown as PrMonitor;
+
+      const onClosedPrFeedback = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore();
+      new Scheduler(store, { prMonitor, onClosedPrFeedback });
+
+      const onCalls = (store.on as any).mock.calls;
+      const movedHandler = onCalls.find((call: any) => call[0] === "task:moved")?.[1];
+
+      const task = createMockTask({
+        id: "FN-001",
+        column: "done",
+        prInfo: { status: "merged", number: 42 } as any,
+      });
+
+      movedHandler({ task, from: "in-review", to: "done" });
+
+      // Wait for the void Promise.resolve chain to complete
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(prMonitor.drainComments).toHaveBeenCalledWith("FN-001");
+      expect(onClosedPrFeedback).toHaveBeenCalledWith("FN-001", task.prInfo, mockComments);
+      expect(prMonitor.stopMonitoring).toHaveBeenCalledWith("FN-001");
+    });
+
+    it("does not invoke onClosedPrFeedback when buffer is empty", async () => {
+      const prMonitor = {
+        startMonitoring: vi.fn(),
+        stopMonitoring: vi.fn(),
+        updatePrInfo: vi.fn(),
+        getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+        stopAll: vi.fn(),
+        drainComments: vi.fn().mockReturnValue([]),
+      } as unknown as PrMonitor;
+
+      const onClosedPrFeedback = vi.fn();
+      const store = createMockStore();
+      new Scheduler(store, { prMonitor, onClosedPrFeedback });
+
+      const onCalls = (store.on as any).mock.calls;
+      const movedHandler = onCalls.find((call: any) => call[0] === "task:moved")?.[1];
+
+      const task = createMockTask({
+        id: "FN-001",
+        column: "done",
+        prInfo: { status: "merged", number: 42 } as any,
+      });
+
+      movedHandler({ task, from: "in-review", to: "done" });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(prMonitor.drainComments).toHaveBeenCalledWith("FN-001");
+      expect(onClosedPrFeedback).not.toHaveBeenCalled();
+      expect(prMonitor.stopMonitoring).toHaveBeenCalledWith("FN-001");
+    });
+
+    it("does not invoke onClosedPrFeedback for open PR", async () => {
+      const prMonitor = {
+        startMonitoring: vi.fn(),
+        stopMonitoring: vi.fn(),
+        updatePrInfo: vi.fn(),
+        getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+        stopAll: vi.fn(),
+        drainComments: vi.fn(),
+      } as unknown as PrMonitor;
+
+      const onClosedPrFeedback = vi.fn();
+      const store = createMockStore();
+      new Scheduler(store, { prMonitor, onClosedPrFeedback });
+
+      const onCalls = (store.on as any).mock.calls;
+      const movedHandler = onCalls.find((call: any) => call[0] === "task:moved")?.[1];
+
+      const task = createMockTask({
+        id: "FN-001",
+        column: "done",
+        prInfo: { status: "open", number: 42 } as any,
+      });
+
+      movedHandler({ task, from: "in-review", to: "done" });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(prMonitor.drainComments).not.toHaveBeenCalled();
+      expect(onClosedPrFeedback).not.toHaveBeenCalled();
+      expect(prMonitor.stopMonitoring).toHaveBeenCalledWith("FN-001");
+    });
+
+    it("does not invoke onClosedPrFeedback when callback is not provided", async () => {
+      const prMonitor = {
+        startMonitoring: vi.fn(),
+        stopMonitoring: vi.fn(),
+        updatePrInfo: vi.fn(),
+        getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+        stopAll: vi.fn(),
+        drainComments: vi.fn().mockReturnValue([
+          { id: 1, body: "Fix", user: { login: "r" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+        ]),
+      } as unknown as PrMonitor;
+
+      // No onClosedPrFeedback provided
+      const store = createMockStore();
+      new Scheduler(store, { prMonitor });
+
+      const onCalls = (store.on as any).mock.calls;
+      const movedHandler = onCalls.find((call: any) => call[0] === "task:moved")?.[1];
+
+      const task = createMockTask({
+        id: "FN-001",
+        column: "done",
+        prInfo: { status: "closed", number: 42 } as any,
+      });
+
+      // Should not throw
+      movedHandler({ task, from: "in-review", to: "done" });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(prMonitor.drainComments).toHaveBeenCalledWith("FN-001");
+      expect(prMonitor.stopMonitoring).toHaveBeenCalledWith("FN-001");
+    });
+
+    it("drains comments before stopping monitoring (order matters)", async () => {
+      const callOrder: string[] = [];
+      const mockComments = [
+        { id: 1, body: "Fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+      ];
+
+      const prMonitor = {
+        startMonitoring: vi.fn(),
+        stopMonitoring: vi.fn(() => { callOrder.push("stopMonitoring"); }),
+        updatePrInfo: vi.fn(),
+        getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+        stopAll: vi.fn(),
+        drainComments: vi.fn(() => { callOrder.push("drainComments"); return mockComments; }),
+      } as unknown as PrMonitor;
+
+      const onClosedPrFeedback = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore();
+      new Scheduler(store, { prMonitor, onClosedPrFeedback });
+
+      const onCalls = (store.on as any).mock.calls;
+      const movedHandler = onCalls.find((call: any) => call[0] === "task:moved")?.[1];
+
+      const task = createMockTask({
+        id: "FN-001",
+        column: "done",
+        prInfo: { status: "merged", number: 42 } as any,
+      });
+
+      movedHandler({ task, from: "in-review", to: "done" });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // drainComments should be called before stopMonitoring
+      expect(callOrder).toEqual(["drainComments", "stopMonitoring"]);
+    });
+
+    it("second move event with empty drain does not create duplicate follow-up", async () => {
+      const prMonitor = {
+        startMonitoring: vi.fn(),
+        stopMonitoring: vi.fn(),
+        updatePrInfo: vi.fn(),
+        getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+        stopAll: vi.fn(),
+        drainComments: vi.fn().mockReturnValue([]),
+      } as unknown as PrMonitor;
+
+      const onClosedPrFeedback = vi.fn();
+      const store = createMockStore();
+      new Scheduler(store, { prMonitor, onClosedPrFeedback });
+
+      const onCalls = (store.on as any).mock.calls;
+      const movedHandler = onCalls.find((call: any) => call[0] === "task:moved")?.[1];
+
+      const task = createMockTask({
+        id: "FN-001",
+        column: "done",
+        prInfo: { status: "merged", number: 42 } as any,
+      });
+
+      // First move — comments were already drained, buffer is empty
+      movedHandler({ task, from: "in-review", to: "done" });
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Second move — still empty
+      movedHandler({ task, from: "in-review", to: "done" });
+      await new Promise((r) => setTimeout(r, 10));
+
+      // onClosedPrFeedback should never be called since buffer is empty
+      expect(onClosedPrFeedback).not.toHaveBeenCalled();
+    });
   });
 
   describe("mission integration", () => {

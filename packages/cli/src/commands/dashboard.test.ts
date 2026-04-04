@@ -172,9 +172,11 @@ vi.mock("@fusion/engine", async (importOriginal) => {
       stopAll: vi.fn(),
       getTrackedPrs: vi.fn().mockReturnValue(new Map()),
       updatePrInfo: vi.fn(),
+      drainComments: vi.fn().mockReturnValue([]),
     })),
     PrCommentHandler: vi.fn().mockImplementation(() => ({
       handleNewComments: vi.fn().mockResolvedValue(undefined),
+      createFollowUpTask: vi.fn().mockResolvedValue(undefined),
     })),
     aiMergeTask: vi.fn().mockImplementation(() => Promise.resolve({ merged: true })),
     CronRunner: vi.fn().mockImplementation(() => ({
@@ -1434,6 +1436,86 @@ describe("runDashboard — merge conflict retry logic", () => {
       "FN-SUCCESS",
       expect.objectContaining({ mergeRetries: 0 }),
     );
+  });
+});
+
+describe("runDashboard — PR feedback follow-up wiring", () => {
+  let mockStore: ReturnType<typeof makeMockStore>;
+
+  beforeEach(async () => {
+    capturedExecutorOpts = undefined;
+    vi.clearAllMocks();
+    resetGitHubMocks();
+    mockStore = makeMockStore();
+    const { TaskStore } = await import("@fusion/core");
+    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
+    const engine = await import("@fusion/engine");
+    (engine.aiMergeTask as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.resolve({ merged: true }),
+    );
+    (engine.TaskExecutor as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_store: unknown, _cwd: unknown, opts: unknown) => {
+        capturedExecutorOpts = opts as Record<string, unknown>;
+        return { resumeOrphaned: vi.fn().mockResolvedValue(undefined) };
+      },
+    );
+  });
+
+  it("wires onClosedPrFeedback callback to PrCommentHandler.createFollowUpTask", async () => {
+    const { PrMonitor, PrCommentHandler, Scheduler } = await import("@fusion/engine");
+
+    let capturedOnClosedPrFeedback: ((taskId: string, prInfo: any, comments: any[]) => void) | undefined;
+
+    (Scheduler as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_store: unknown, _opts: unknown) => {
+        capturedOnClosedPrFeedback = _opts.onClosedPrFeedback;
+        return { start: vi.fn(), stop: vi.fn() };
+      },
+    );
+
+    await runDashboard(0, { open: false });
+
+    // Verify the callback was passed to the scheduler
+    expect(capturedOnClosedPrFeedback).toBeDefined();
+
+    // Invoke it to verify it reaches createFollowUpTask
+    const mockPrInfo = { status: "merged", number: 42 };
+    const mockComments = [
+      { id: 1, body: "Fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+    ];
+    await capturedOnClosedPrFeedback("FN-001", mockPrInfo, mockComments);
+
+    // The PrCommentHandler mock should have been called
+    const handlerInstance = (PrCommentHandler as unknown as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(handlerInstance.createFollowUpTask).toHaveBeenCalledWith("FN-001", mockPrInfo, mockComments);
+  });
+
+  it("preserves existing onNewComments steering behavior", async () => {
+    const { PrMonitor, PrCommentHandler } = await import("@fusion/engine");
+
+    let capturedOnNewComments: ((taskId: string, prInfo: any, comments: any[]) => void) | undefined;
+
+    (PrMonitor as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      onNewComments: vi.fn((cb: any) => { capturedOnNewComments = cb; }),
+      startMonitoring: vi.fn(),
+      stopMonitoring: vi.fn(),
+      stopAll: vi.fn(),
+      getTrackedPrs: vi.fn().mockReturnValue(new Map()),
+      updatePrInfo: vi.fn(),
+      drainComments: vi.fn().mockReturnValue([]),
+    }));
+
+    await runDashboard(0, { open: false });
+
+    // The onNewComments callback should still be wired to handleNewComments
+    expect(capturedOnNewComments).toBeDefined();
+    const handlerInstance = (PrCommentHandler as unknown as ReturnType<typeof vi.fn>).mock.results[0].value;
+    const mockComments = [
+      { id: 1, body: "Fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+    ];
+    const mockPrInfo = { status: "open", number: 42 };
+    await capturedOnNewComments("FN-001", mockPrInfo, mockComments);
+    expect(handlerInstance.handleNewComments).toHaveBeenCalledWith("FN-001", mockPrInfo, mockComments);
   });
 });
 

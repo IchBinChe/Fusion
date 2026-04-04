@@ -126,4 +126,73 @@ describe("PrMonitor", () => {
       expect(() => new PrMonitor({ getGitHubToken: () => "token" })).not.toThrow();
     });
   });
+
+  describe("drainComments", () => {
+    it("returns empty array when task is not tracked", () => {
+      const result = monitor.drainComments("FN-999");
+      expect(result).toEqual([]);
+    });
+
+    it("returns empty array for tracked PR with no buffered comments", () => {
+      monitor.startMonitoring("FN-001", "owner", "repo", mockPrInfo);
+      const result = monitor.drainComments("FN-001");
+      expect(result).toEqual([]);
+    });
+
+    it("returns buffered comments and clears buffer (single-consumption)", () => {
+      monitor.startMonitoring("FN-001", "owner", "repo", mockPrInfo);
+
+      // Simulate comments being buffered (this is what checkForComments does internally)
+      const tracked = monitor.getTrackedPrs().get("FN-001")!;
+      const comments: PrComment[] = [
+        { id: 1, body: "Please fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "https://example.com" },
+        { id: 2, body: "Change that", user: { login: "reviewer2" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "https://example.com" },
+      ];
+      tracked.bufferedComments.push(...comments);
+
+      // First drain should return the comments
+      const drained = monitor.drainComments("FN-001");
+      expect(drained).toHaveLength(2);
+      expect(drained[0].id).toBe(1);
+      expect(drained[1].id).toBe(2);
+
+      // Second drain should return empty (buffer was cleared)
+      const drainedAgain = monitor.drainComments("FN-001");
+      expect(drainedAgain).toEqual([]);
+    });
+
+    it("returns empty array after PR is stopped", () => {
+      monitor.startMonitoring("FN-001", "owner", "repo", mockPrInfo);
+      const tracked = monitor.getTrackedPrs().get("FN-001")!;
+      tracked.bufferedComments.push(
+        { id: 1, body: "Fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+      );
+
+      monitor.stopMonitoring("FN-001");
+      const result = monitor.drainComments("FN-001");
+      expect(result).toEqual([]);
+    });
+
+    it("does not affect other tracked PRs", () => {
+      monitor.startMonitoring("FN-001", "owner", "repo", mockPrInfo);
+      monitor.startMonitoring("FN-002", "owner", "repo", { ...mockPrInfo, number: 43 });
+
+      const tracked1 = monitor.getTrackedPrs().get("FN-001")!;
+      const tracked2 = monitor.getTrackedPrs().get("FN-002")!;
+      tracked1.bufferedComments.push(
+        { id: 1, body: "Fix", user: { login: "r" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+      );
+      tracked2.bufferedComments.push(
+        { id: 2, body: "Update", user: { login: "r" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },
+      );
+
+      // Drain FN-001 only
+      const drained1 = monitor.drainComments("FN-001");
+      expect(drained1).toHaveLength(1);
+
+      // FN-002 buffer should still be intact
+      const drained2 = monitor.drainComments("FN-002");
+      expect(drained2).toHaveLength(1);
+    });
+  });
 });

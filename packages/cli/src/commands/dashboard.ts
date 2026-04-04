@@ -606,6 +606,9 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       prMonitor,
       onSchedule: (t) => console.log(`[engine] Scheduled ${t.id}`),
       onBlocked: (t, deps) => console.log(`[engine] ${t.id} blocked by ${deps.join(", ")}`),
+      onClosedPrFeedback: async (taskId, prInfo, comments) => {
+        await prCommentHandler.createFollowUpTask(taskId, prInfo, comments);
+      },
     });
 
     // ── CronRunner: scheduled task execution ──────────────────────────

@@ -1,10 +1,10 @@
-import { resolveDependencyOrder, type TaskStore, type Task, type MissionStore } from "@fusion/core";
+import { resolveDependencyOrder, type TaskStore, type Task, type MissionStore, type PrInfo } from "@fusion/core";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentSemaphore } from "./concurrency.js";
 import { schedulerLog } from "./logger.js";
-import type { PrMonitor } from "./pr-monitor.js";
+import { type PrMonitor, type PrComment } from "./pr-monitor.js";
 import { getCurrentGitHubRepo } from "./github.js";
 
 /**
@@ -62,6 +62,17 @@ export interface SchedulerOptions {
   prMonitor?: PrMonitor;
   /** Optional MissionStore for slice activation and auto-advance */
   missionStore?: MissionStore;
+  /**
+   * Called when a task with a closed/merged PR moves out of in-review
+   * and the PrMonitor has buffered actionable comments.
+   * The callback receives the task ID, PR info, and the drained comments.
+   * If no comments were buffered, this callback is NOT invoked.
+   */
+  onClosedPrFeedback?: (
+    taskId: string,
+    prInfo: PrInfo,
+    comments: PrComment[]
+  ) => void | Promise<void>;
 }
 
 /**
@@ -150,13 +161,23 @@ export class Scheduler {
             this.options.prMonitor.startMonitoring(task.id, repo.owner, repo.repo, task.prInfo);
           }
         } else if (from === "in-review" && to !== "in-review") {
+          // If task has a closed/merged PR, drain buffered comments before
+          // stopping monitoring (drainComments needs the tracked PR to still exist)
+          if (task.prInfo && (task.prInfo.status === "closed" || task.prInfo.status === "merged")) {
+            const comments = this.options.prMonitor.drainComments(task.id);
+            if (comments.length > 0 && this.options.onClosedPrFeedback) {
+              void Promise.resolve(this.options.onClosedPrFeedback(task.id, task.prInfo, comments))
+                .then(() => {
+                  schedulerLog.log(`Invoked onClosedPrFeedback for ${task.id} with ${comments.length} comment(s)`);
+                })
+                .catch((err) => {
+                  schedulerLog.error(`Error in onClosedPrFeedback for ${task.id}:`, err);
+                });
+            }
+          }
+
           // Task moved out of in-review, stop monitoring
           this.options.prMonitor.stopMonitoring(task.id);
-
-          // If task has a closed/merged PR, check for unaddressed feedback
-          if (task.prInfo && (task.prInfo.status === "closed" || task.prInfo.status === "merged")) {
-            // This would need the tracked PR data - handled by PrMonitor/PrCommentHandler
-          }
         }
       }
 

@@ -540,11 +540,15 @@ Fusion supports two completion strategies once a task reaches **In Review**:
 
 PR-first automation is designed for repositories that require GitHub-side governance:
 
-- Authenticate GitHub access with `gh auth login` or `GITHUB_TOKEN`
+- Authenticate GitHub access with `gh auth login` (the `gh` CLI is required for PR monitoring and badge updates)
 - Ensure the task branch already exists on GitHub using the normal fusion branch naming convention: `fusion/<task-id-lower>`
 - Expect the task to remain in **In Review** while required checks are pending/failing or a review is blocking merge
 
 **Important:** Fusion does **not** implicitly push task branches before creating a PR. PR-first mode assumes branch publishing is handled by your existing workflow or repository automation.
+
+#### Manual merge (`autoMerge=false`)
+
+When `autoMerge` is off and a task's PR is closed or merged, Fusion checks for unaddressed review feedback that was collected while the PR was open. If actionable comments were left by reviewers, Fusion automatically creates a follow-up task in **Triage** depending on the original task. This ensures PR feedback is never silently dropped even when automatic merging is disabled.
 
 ### Spec Editing & AI Revision
 
@@ -573,9 +577,9 @@ When a task has a linked PR, Fusion automatically monitors it for new review com
 - **Adaptive polling**: Checks every 30 seconds when active, 5 minutes when idle
 - **Actionable feedback detection**: Filters out "LGTM" and "Thanks" comments, detects requests like "fix", "change", "update"
 - **Steering comments**: Automatically adds actionable review feedback as steering comments on the task
-- **Follow-up tasks**: When a PR is closed with unaddressed feedback, a follow-up task is created
+- **Follow-up tasks**: When a PR is closed or merged with unaddressed feedback, a follow-up task is created in Triage
 
-Uses `gh` CLI authentication when available, falls back to `GITHUB_TOKEN` if set.
+Requires `gh` CLI installed and authenticated (`gh auth login`). PR monitoring does not support `GITHUB_TOKEN` as a fallback.
 
 ## Task Comments vs Steering Comments
 

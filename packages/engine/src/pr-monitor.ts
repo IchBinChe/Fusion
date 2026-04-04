@@ -9,6 +9,8 @@ export interface TrackedPr {
   lastCommentId?: number;
   consecutiveErrors: number;
   isActive: boolean; // true if we've seen recent activity
+  /** Buffered comments collected since last drain, used for follow-up task creation. */
+  bufferedComments: PrComment[];
 }
 
 export interface PrComment {
@@ -141,6 +143,7 @@ export class PrMonitor {
       lastCommentId: undefined,
       consecutiveErrors: 0,
       isActive: true, // Start as active
+      bufferedComments: [],
     };
 
     this.trackedPrs.set(taskId, tracked);
@@ -162,6 +165,20 @@ export class PrMonitor {
     const tracked = this.trackedPrs.get(taskId);
     if (!tracked) return;
     tracked.prInfo = prInfo;
+  }
+
+  /**
+   * Drain (consume and return) buffered comments for a tracked PR.
+   * Returns all comments collected since the last drain and clears the buffer.
+   * This is used for creating follow-up tasks when a PR is closed/merged.
+   * Returns an empty array if the task is not tracked or has no buffered comments.
+   */
+  drainComments(taskId: string): PrComment[] {
+    const tracked = this.trackedPrs.get(taskId);
+    if (!tracked) return [];
+    const comments = tracked.bufferedComments;
+    tracked.bufferedComments = [];
+    return comments;
   }
 
   /**
@@ -252,6 +269,9 @@ export class PrMonitor {
         // Update lastCommentId
         const maxId = Math.max(...newComments.map((c) => c.id));
         tracked.lastCommentId = maxId;
+
+        // Buffer comments for potential follow-up task creation on PR close/merge
+        tracked.bufferedComments.push(...newComments);
 
         // Mark as active since we found new comments
         tracked.isActive = true;

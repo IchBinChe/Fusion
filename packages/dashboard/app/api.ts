@@ -2428,3 +2428,168 @@ export function unlinkFeatureFromTask(featureId: string, projectId?: string): Pr
     method: "POST",
   });
 }
+
+// ── Mission Interview API ─────────────────────────────────────────────────
+
+/** Mission plan types returned by the interview AI */
+export interface MissionPlanFeature {
+  title: string;
+  description?: string;
+  acceptanceCriteria?: string;
+}
+
+export interface MissionPlanSlice {
+  title: string;
+  description?: string;
+  verification?: string;
+  features: MissionPlanFeature[];
+}
+
+export interface MissionPlanMilestone {
+  title: string;
+  description?: string;
+  verification?: string;
+  slices: MissionPlanSlice[];
+}
+
+export interface MissionPlanSummary {
+  missionTitle?: string;
+  missionDescription?: string;
+  milestones: MissionPlanMilestone[];
+}
+
+export type MissionInterviewResponse =
+  | { type: "question"; data: PlanningQuestion }
+  | { type: "complete"; data: MissionPlanSummary };
+
+/** Start a mission interview session with AI streaming */
+export function startMissionInterview(missionTitle: string, projectId?: string): Promise<{ sessionId: string }> {
+  return api<{ sessionId: string }>(withProjectId("/missions/interview/start", projectId), {
+    method: "POST",
+    body: JSON.stringify({ missionTitle }),
+  });
+}
+
+/** Submit a response to the current interview question */
+export function respondToMissionInterview(
+  sessionId: string,
+  responses: Record<string, unknown>,
+  projectId?: string
+): Promise<MissionInterviewResponse> {
+  return api<MissionInterviewResponse>(withProjectId("/missions/interview/respond", projectId), {
+    method: "POST",
+    body: JSON.stringify({ sessionId, responses }),
+  });
+}
+
+/** Cancel an active mission interview session */
+export function cancelMissionInterview(sessionId: string, projectId?: string): Promise<void> {
+  return api<void>(withProjectId("/missions/interview/cancel", projectId), {
+    method: "POST",
+    body: JSON.stringify({ sessionId }),
+  });
+}
+
+/** Create mission from completed interview */
+export function createMissionFromInterview(
+  sessionId: string,
+  summary?: MissionPlanSummary,
+  projectId?: string
+): Promise<MissionWithHierarchy> {
+  return api<MissionWithHierarchy>(withProjectId("/missions/interview/create-mission", projectId), {
+    method: "POST",
+    body: JSON.stringify({ sessionId, summary }),
+  });
+}
+
+/** Connect to mission interview SSE stream and handle events */
+export function connectMissionInterviewStream(
+  sessionId: string,
+  projectId: string | undefined,
+  handlers: {
+    onThinking?: (data: string) => void;
+    onQuestion?: (data: PlanningQuestion) => void;
+    onSummary?: (data: MissionPlanSummary) => void;
+    onError?: (data: string) => void;
+    onComplete?: () => void;
+  }
+): { close: () => void; isConnected: () => boolean } {
+  const url = buildApiUrl(withProjectId(`/missions/interview/${encodeURIComponent(sessionId)}/stream`, projectId));
+  const eventSource = new EventSource(url);
+  let isClosed = false;
+
+  eventSource.onopen = () => {
+    isClosed = false;
+  };
+
+  eventSource.onmessage = (event) => {
+    if (event.data.startsWith(":")) return;
+  };
+
+  eventSource.addEventListener("thinking", (event: Event) => {
+    try {
+      const messageEvent = event as MessageEvent;
+      const data = JSON.parse(messageEvent.data);
+      handlers.onThinking?.(data);
+    } catch {
+      const messageEvent = event as MessageEvent;
+      handlers.onThinking?.(messageEvent.data);
+    }
+  });
+
+  eventSource.addEventListener("question", (event: Event) => {
+    try {
+      const messageEvent = event as MessageEvent;
+      const data = JSON.parse(messageEvent.data) as PlanningQuestion;
+      handlers.onQuestion?.(data);
+    } catch (err) {
+      console.error("[mission-interview] Failed to parse question event:", err);
+    }
+  });
+
+  eventSource.addEventListener("summary", (event: Event) => {
+    try {
+      const messageEvent = event as MessageEvent;
+      const data = JSON.parse(messageEvent.data) as MissionPlanSummary;
+      handlers.onSummary?.(data);
+    } catch (err) {
+      console.error("[mission-interview] Failed to parse summary event:", err);
+    }
+  });
+
+  eventSource.addEventListener("error", (event: Event) => {
+    try {
+      const messageEvent = event as MessageEvent;
+      const data = JSON.parse(messageEvent.data);
+      handlers.onError?.(data.message || data);
+    } catch {
+      const messageEvent = event as MessageEvent;
+      handlers.onError?.(messageEvent.data || "Stream error");
+    }
+    close();
+  });
+
+  eventSource.addEventListener("complete", () => {
+    handlers.onComplete?.();
+    close();
+  });
+
+  eventSource.onerror = () => {
+    if (!isClosed) {
+      handlers.onError?.("Connection lost");
+      close();
+    }
+  };
+
+  function close() {
+    if (!isClosed) {
+      isClosed = true;
+      eventSource.close();
+    }
+  }
+
+  return {
+    close,
+    isConnected: () => !isClosed && eventSource.readyState === EventSource.OPEN,
+  };
+}

@@ -606,7 +606,7 @@ describe("Mission API", () => {
   });
 
   describe("Interview endpoints", () => {
-    it("should return 501 for unimplemented interview endpoints", async () => {
+    it("should return 400 when missionTitle is missing on interview start", async () => {
       const { app } = buildApp();
       const res = await request(
         app,
@@ -615,7 +615,47 @@ describe("Mission API", () => {
         JSON.stringify({}),
         { "content-type": "application/json" }
       );
-      expect(res.status).toBe(501);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("missionTitle");
+    });
+
+    it("should return 400 when sessionId is missing on interview respond", async () => {
+      const { app } = buildApp();
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/interview/respond",
+        JSON.stringify({}),
+        { "content-type": "application/json" }
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("sessionId");
+    });
+
+    it("should return 400 when sessionId is missing on interview cancel", async () => {
+      const { app } = buildApp();
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/interview/cancel",
+        JSON.stringify({}),
+        { "content-type": "application/json" }
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("sessionId");
+    });
+
+    it("should return 400 when sessionId is missing on create-mission", async () => {
+      const { app } = buildApp();
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/interview/create-mission",
+        JSON.stringify({}),
+        { "content-type": "application/json" }
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("sessionId");
     });
   });
 

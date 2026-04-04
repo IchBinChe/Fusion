@@ -16,8 +16,10 @@ import {
   Link,
   Unlink,
   Play,
+  Sparkles,
 } from "lucide-react";
 import type { ToastType } from "../hooks/useToast";
+import { MissionInterviewModal } from "./MissionInterviewModal";
 import type {
   Mission,
   MissionWithHierarchy,
@@ -177,6 +179,9 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
   // Link task modal state
   const [linkTaskFeatureId, setLinkTaskFeatureId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("");
+
+  // AI Interview modal
+  const [showInterviewModal, setShowInterviewModal] = useState(false);
 
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState<{ type: string; id: string } | null>(null);
@@ -1317,10 +1322,16 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
               )}
 
               {!isCreatingMission && (
-                <button className="mission-add-btn" onClick={handleCreateMission}>
-                  <Plus size={16} />
-                  New Mission
-                </button>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button className="mission-add-btn" onClick={() => setShowInterviewModal(true)}>
+                    <Sparkles size={16} />
+                    Plan with AI
+                  </button>
+                  <button className="mission-add-btn" onClick={handleCreateMission}>
+                    <Plus size={16} />
+                    New Mission
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -1398,6 +1409,16 @@ export function MissionManager({ isOpen, onClose, addToast, projectId, onSelectT
           </div>
         )}
       </div>
+
+      <MissionInterviewModal
+        isOpen={showInterviewModal}
+        onClose={() => setShowInterviewModal(false)}
+        onMissionCreated={() => {
+          loadMissions();
+          addToast("Mission created from AI interview", "success");
+        }}
+        projectId={projectId}
+      />
     </div>
   );
 }

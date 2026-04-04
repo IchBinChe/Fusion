@@ -1124,62 +1124,303 @@ export function createMissionRouter(store: TaskStore): Router {
   // Note: These are mounted at /api/missions/interview/* via the router
 
   /**
+   * Helper to resolve rootDir for the current request's project scope.
+   */
+  async function getRootDirForRequest(req: TypedRequest): Promise<string> {
+    const projectId = getProjectIdFromRequest(req);
+    const scopedStore = projectId ? await getOrCreateProjectStore(projectId) : store;
+    return scopedStore.getRootDir();
+  }
+
+  /**
    * POST /api/missions/interview/start
-   * Start a mission interview session
+   * Start a mission interview session with AI agent streaming.
+   * Body: { missionTitle: string }
+   * Returns: { sessionId: string }
    */
   router.post(
     "/interview/start",
     asyncHandler(async (req, res) => {
-      // Placeholder - will be implemented in Step 4
-      res.status(501).json({ error: "Interview system not yet implemented" });
+      const { missionTitle } = req.body;
+
+      if (!missionTitle || typeof missionTitle !== "string" || !missionTitle.trim()) {
+        res.status(400).json({ error: "missionTitle is required and must be a non-empty string" });
+        return;
+      }
+
+      if (missionTitle.length > 500) {
+        res.status(400).json({ error: "missionTitle must be 500 characters or less" });
+        return;
+      }
+
+      try {
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        const rootDir = await getRootDirForRequest(req);
+
+        const {
+          createMissionInterviewSession,
+          RateLimitError,
+        } = await import("./mission-interview.js");
+
+        const sessionId = await createMissionInterviewSession(ip, missionTitle.trim(), rootDir);
+        res.status(201).json({ sessionId });
+      } catch (err: any) {
+        if (err.name === "RateLimitError") {
+          res.status(429).json({ error: err.message });
+        } else {
+          res.status(500).json({ error: err.message || "Failed to start interview session" });
+        }
+      }
     })
   );
 
   /**
    * POST /api/missions/interview/respond
-   * Submit response to interview question
+   * Submit response to interview question.
+   * Body: { sessionId: string, responses: Record<string, unknown> }
    */
   router.post(
     "/interview/respond",
     asyncHandler(async (req, res) => {
-      // Placeholder - will be implemented in Step 4
-      res.status(501).json({ error: "Interview system not yet implemented" });
+      const { sessionId, responses } = req.body;
+
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      if (!responses || typeof responses !== "object") {
+        res.status(400).json({ error: "responses is required and must be an object" });
+        return;
+      }
+
+      try {
+        const {
+          submitMissionInterviewResponse,
+          SessionNotFoundError,
+          InvalidSessionStateError,
+        } = await import("./mission-interview.js");
+
+        const result = await submitMissionInterviewResponse(sessionId, responses);
+        res.json(result);
+      } catch (err: any) {
+        if (err.name === "SessionNotFoundError") {
+          res.status(404).json({ error: err.message });
+        } else if (err.name === "InvalidSessionStateError") {
+          res.status(400).json({ error: err.message });
+        } else {
+          res.status(500).json({ error: err.message || "Failed to process response" });
+        }
+      }
     })
   );
 
   /**
    * POST /api/missions/interview/cancel
-   * Cancel interview session
+   * Cancel and cleanup an interview session.
+   * Body: { sessionId: string }
    */
   router.post(
     "/interview/cancel",
     asyncHandler(async (req, res) => {
-      // Placeholder - will be implemented in Step 4
-      res.status(501).json({ error: "Interview system not yet implemented" });
+      const { sessionId } = req.body;
+
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      try {
+        const {
+          cancelMissionInterviewSession,
+          SessionNotFoundError,
+        } = await import("./mission-interview.js");
+
+        await cancelMissionInterviewSession(sessionId);
+        res.json({ success: true });
+      } catch (err: any) {
+        if (err.name === "SessionNotFoundError") {
+          res.status(404).json({ error: err.message });
+        } else {
+          res.status(500).json({ error: err.message || "Failed to cancel session" });
+        }
+      }
     })
   );
 
   /**
    * GET /api/missions/interview/:sessionId/stream
-   * SSE stream for interview updates
+   * SSE endpoint for real-time interview session updates.
+   * Streams thinking output, questions, summaries, and errors.
    */
   router.get(
     "/interview/:sessionId/stream",
     asyncHandler(async (req, res) => {
-      // Placeholder - will be implemented in Step 4/5
-      res.status(501).json({ error: "Interview streaming not yet implemented" });
+      const { sessionId } = req.params;
+
+      // Set SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Send initial connection confirmation
+      res.write(": connected\n\n");
+
+      try {
+        const {
+          missionInterviewStreamManager,
+          getMissionInterviewSession,
+        } = await import("./mission-interview.js");
+
+        // Verify session exists
+        const session = getMissionInterviewSession(sessionId);
+        if (!session) {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: "Session not found or expired" })}\n\n`);
+          res.end();
+          return;
+        }
+
+        // Subscribe to session events
+        const unsubscribe = missionInterviewStreamManager.subscribe(sessionId, (event) => {
+          try {
+            const data = (event as { data?: unknown }).data;
+            res.write(`event: ${event.type}\ndata: ${JSON.stringify(data ?? {})}\n\n`);
+
+            // End stream on complete or error
+            if (event.type === "complete" || event.type === "error") {
+              unsubscribe();
+              res.end();
+            }
+          } catch {
+            // Client disconnected
+            unsubscribe();
+          }
+        });
+
+        // Handle client disconnect
+        req.on("close", () => {
+          unsubscribe();
+        });
+
+        // Heartbeat every 30s
+        const heartbeat = setInterval(() => {
+          if (res.writableEnded) {
+            clearInterval(heartbeat);
+            return;
+          }
+          res.write(": heartbeat\n\n");
+        }, 30_000);
+
+        req.on("close", () => {
+          clearInterval(heartbeat);
+        });
+      } catch (err: any) {
+        res.write(`event: error\ndata: ${JSON.stringify({ message: err.message || "Stream error" })}\n\n`);
+        res.end();
+      }
     })
   );
 
   /**
    * POST /api/missions/interview/create-mission
-   * Create mission from completed interview
+   * Create mission with full hierarchy from completed interview.
+   * Body: { sessionId: string, summary?: MissionPlanSummary }
+   * Returns: MissionWithHierarchy
    */
   router.post(
     "/interview/create-mission",
     asyncHandler(async (req, res) => {
-      // Placeholder - will be implemented in Step 4
-      res.status(501).json({ error: "Interview system not yet implemented" });
+      const { sessionId, summary: editedSummary } = req.body;
+
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      try {
+        const {
+          getMissionInterviewSession,
+          getMissionInterviewSummary,
+          cleanupMissionInterviewSession,
+          SessionNotFoundError,
+        } = await import("./mission-interview.js");
+
+        const session = getMissionInterviewSession(sessionId);
+        if (!session) {
+          res.status(404).json({ error: `Interview session ${sessionId} not found or expired` });
+          return;
+        }
+
+        // Use edited summary if provided, otherwise use the session's generated summary
+        const summary = editedSummary || getMissionInterviewSummary(sessionId);
+        if (!summary || !Array.isArray(summary.milestones)) {
+          res.status(400).json({ error: "Interview session is not complete or summary is missing" });
+          return;
+        }
+
+        // Create the full mission hierarchy
+        const mission = missionStore.createMission({
+          title: summary.missionTitle || session.missionTitle,
+          description: summary.missionDescription,
+        });
+
+        // Update interview state to completed
+        missionStore.updateMission(mission.id, { interviewState: "completed" as InterviewState });
+
+        // Create milestones, slices, and features
+        // Verification criteria are appended to descriptions since the schema
+        // doesn't have dedicated verification fields yet.
+        for (const milestoneData of summary.milestones) {
+          let msDesc = milestoneData.description || "";
+          if (milestoneData.verification) {
+            msDesc += msDesc ? "\n\n" : "";
+            msDesc += `**Verification:** ${milestoneData.verification}`;
+          }
+          const milestone = missionStore.addMilestone(mission.id, {
+            title: milestoneData.title,
+            description: msDesc || undefined,
+          });
+
+          if (Array.isArray(milestoneData.slices)) {
+            for (const sliceData of milestoneData.slices) {
+              let slDesc = sliceData.description || "";
+              if (sliceData.verification) {
+                slDesc += slDesc ? "\n\n" : "";
+                slDesc += `**Verification:** ${sliceData.verification}`;
+              }
+              const slice = missionStore.addSlice(milestone.id, {
+                title: sliceData.title,
+                description: slDesc || undefined,
+              });
+
+              if (Array.isArray(sliceData.features)) {
+                for (const featureData of sliceData.features) {
+                  missionStore.addFeature(slice.id, {
+                    title: featureData.title,
+                    description: featureData.description,
+                    acceptanceCriteria: featureData.acceptanceCriteria,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // Cleanup the interview session
+        cleanupMissionInterviewSession(sessionId);
+
+        // Return the full hierarchy
+        const result = missionStore.getMissionWithHierarchy(mission.id);
+        res.status(201).json(result);
+      } catch (err: any) {
+        if (err.name === "SessionNotFoundError") {
+          res.status(404).json({ error: err.message });
+        } else {
+          res.status(500).json({ error: err.message || "Failed to create mission" });
+        }
+      }
     })
   );
 

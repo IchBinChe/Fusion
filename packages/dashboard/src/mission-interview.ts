@@ -2,13 +2,13 @@
  * Mission Interview Session Management
  *
  * Manages AI-guided interview sessions for mission specification.
- * Mirrors the planning session architecture but produces mission hierarchy
- * data (milestones, slices, features) instead of task summaries.
+ * Uses an AI agent to conduct back-and-forth conversations that
+ * produce structured mission plans (milestones, slices, features).
  *
- * Sessions are stored in-memory with TTL cleanup.
+ * Architecture mirrors planning.ts but targets the mission hierarchy.
  *
  * Features:
- * - Stubbed question flow (scope -> objectives -> dependencies -> summary)
+ * - AI agent integration with real-time streaming via SSE
  * - Rate limiting per IP
  * - Session expiration and cleanup
  * - SSE streaming via MissionInterviewStreamManager
@@ -17,6 +17,27 @@
 import type { PlanningQuestion } from "@fusion/core";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+
+// Dynamic import for @fusion/engine to avoid resolution issues in test environment
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports, @typescript-eslint/no-explicit-any
+type AgentResult = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createKbAgent: any;
+
+async function initEngine() {
+  if (!createKbAgent) {
+    try {
+      const engineModule = "@fusion/engine";
+      const engine = await import(/* @vite-ignore */ engineModule);
+      createKbAgent = engine.createKbAgent;
+    } catch {
+      // Allow failure in test environments
+      createKbAgent = undefined;
+    }
+  }
+}
+
+const engineReady = initEngine();
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -32,6 +53,57 @@ const MAX_SESSIONS_PER_IP_PER_HOUR = 5;
 /** Rate limiting window in milliseconds (1 hour) */
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
+/** Max number of retry attempts when AI returns unparseable output */
+const MAX_PARSE_RETRIES = 1;
+
+/** Mission interview system prompt */
+export const MISSION_INTERVIEW_SYSTEM_PROMPT = `You are a mission planning assistant for a project management system.
+
+Your job: help users transform high-level goals into structured mission plans with milestones, slices, and features — each with verification criteria.
+
+## Mission Hierarchy
+- Mission: The top-level objective (the user will provide this)
+- Milestone: A major phase or deliverable within the mission (e.g., "Foundation & Infrastructure", "Core Feature Development", "Polish & Release"). Each milestone has verification criteria that define how to confirm the phase is complete.
+- Slice: A focused work unit within a milestone that can be activated and worked on independently (e.g., "Auth system setup", "API endpoints", "UI components"). Each slice has verification criteria.
+- Feature: A specific deliverable within a slice, detailed enough to become a task (e.g., "JWT token refresh endpoint", "Password reset email template"). Each feature has acceptance criteria.
+
+## Conversation Flow
+1. The user describes their mission goal
+2. Ask clarifying questions to understand scope, constraints, technical context, user needs, and priorities
+3. Push back on vague objectives — ask for specifics
+4. Challenge unrealistic scope — suggest phasing
+5. Once you have enough information (typically 4-8 questions), produce the structured plan
+6. The plan should be thorough — break every milestone into slices, every slice into features
+
+## Question Types to Use
+- "text": Open-ended questions for detailed input
+- "single_select": When user must choose one option (e.g., priority, approach)
+- "multi_select": When multiple options can apply (e.g., features to include, platforms to support)
+- "confirm": Yes/No questions for quick decisions
+
+## Guidelines
+- Start with big-picture scope questions, then narrow into specifics
+- Ask about target users, key constraints, technical preferences, timeline
+- Each milestone should represent a meaningful phase boundary or checkpoint
+- Each slice should be independently shippable work
+- Features should be specific and actionable
+- ALWAYS include verification/acceptance criteria at every level:
+  - Milestone: "verification" field — how to confirm this phase is complete (e.g., "All API endpoints return correct responses, integration tests pass")
+  - Slice: "verification" field — how to confirm this work unit is done (e.g., "Auth flow works end-to-end from signup through login")
+  - Feature: "acceptanceCriteria" field — how to verify this specific deliverable (e.g., "JWT tokens expire after 1 hour and refresh correctly")
+- Suggest sensible defaults and push for specificity
+- Aim for 2-4 milestones, 1-3 slices per milestone, 2-5 features per slice
+- Keep the plan realistic and achievable
+
+## Response Format
+Always respond with valid JSON in one of these formats:
+
+For questions:
+{"type": "question", "data": {"id": "unique-id", "type": "text|single_select|multi_select|confirm", "question": "The question text", "description": "Helpful context", "options": [{"id": "opt1", "label": "Option 1", "description": "Details"}]}}
+
+For completion (when you have enough information):
+{"type": "complete", "data": {"missionTitle": "Refined mission title", "missionDescription": "Comprehensive mission description based on the conversation", "milestones": [{"title": "Milestone title", "description": "What this phase achieves", "verification": "How to confirm this milestone is complete", "slices": [{"title": "Slice title", "description": "What this work unit covers", "verification": "How to confirm this slice is done", "features": [{"title": "Feature title", "description": "What to build", "acceptanceCriteria": "How to verify this feature works"}]}]}]}}`;
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /** A feature within a slice in the generated plan */
@@ -45,6 +117,7 @@ export interface MissionPlanFeature {
 export interface MissionPlanSlice {
   title: string;
   description?: string;
+  verification?: string;
   features: MissionPlanFeature[];
 }
 
@@ -52,11 +125,14 @@ export interface MissionPlanSlice {
 export interface MissionPlanMilestone {
   title: string;
   description?: string;
+  verification?: string;
   slices: MissionPlanSlice[];
 }
 
 /** The complete mission plan summary produced by the interview */
 export interface MissionPlanSummary {
+  missionTitle?: string;
+  missionDescription?: string;
   milestones: MissionPlanMilestone[];
 }
 
@@ -85,6 +161,8 @@ interface MissionInterviewSession {
   history: Array<{ question: PlanningQuestion; response: unknown }>;
   currentQuestion?: PlanningQuestion;
   summary?: MissionPlanSummary;
+  agent?: AgentResult;
+  thinkingOutput: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -105,6 +183,9 @@ function cleanupExpiredSessions(): void {
   const now = Date.now();
   for (const [id, session] of sessions) {
     if (now - session.updatedAt.getTime() > SESSION_TTL_MS) {
+      if (session.agent) {
+        try { session.agent.session.dispose?.(); } catch { /* ignore */ }
+      }
       missionInterviewStreamManager.cleanupSession(id);
       sessions.delete(id);
     }
@@ -192,178 +273,364 @@ export function getRateLimitResetTime(ip: string): Date | null {
   return new Date(entry.firstRequestAt.getTime() + RATE_LIMIT_WINDOW_MS);
 }
 
-// ── Stubbed Question Generation ─────────────────────────────────────────────
+// ── JSON Parsing Utilities ─────────────────────────────────────────────────
 
-function generateFirstQuestion(missionTitle: string): PlanningQuestion {
-  return {
-    id: "q-scope",
-    type: "single_select",
-    question: `What is the scope of "${missionTitle}"?`,
-    description: "This helps determine how many milestones and slices the mission needs.",
-    options: [
-      { id: "small", label: "Small - 1 milestone, 1-2 slices", description: "Focused objective" },
-      { id: "medium", label: "Medium - 2-3 milestones, multiple slices", description: "Standard project" },
-      { id: "large", label: "Large - 3+ milestones, many slices", description: "Complex initiative" },
-    ],
-  };
+/**
+ * Extract the best JSON candidate from AI response text.
+ * Handles markdown-wrapped JSON, embedded prose, and multiple objects.
+ */
+function extractJsonCandidate(text: string): string | null {
+  if (!text || !text.trim()) return null;
+
+  // 1. Try markdown code blocks first
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch?.[1]) {
+    const candidate = codeBlockMatch[1].trim();
+    if (candidate.startsWith("{")) return candidate;
+  }
+
+  // 2. Find all top-level brace-delimited objects using balanced brace counting
+  const candidates: Array<{ text: string }> = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") {
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      for (let j = i; j < text.length; j++) {
+        const ch = text[j];
+        if (escape) { escape = false; continue; }
+        if (ch === "\\") { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === "{") depth++;
+        if (ch === "}") depth--;
+        if (depth === 0) {
+          const candidate = text.slice(i, j + 1).trim();
+          try {
+            JSON.parse(candidate);
+            candidates.push({ text: candidate });
+          } catch { /* not valid JSON */ }
+          break;
+        }
+      }
+    }
+  }
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.text.length - a.text.length);
+    return candidates[0].text;
+  }
+
+  // 3. Last resort: try the full trimmed text
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) return trimmed;
+
+  return null;
 }
 
-function generateNextQuestionOrSummary(session: MissionInterviewSession): MissionInterviewResponse {
-  const historyLength = session.history.length;
+/**
+ * Attempt to repair common JSON issues.
+ */
+function repairJson(text: string): string {
+  let repaired = text;
+  repaired = repaired.replace(/,\s*([}\]])/g, "$1");
 
-  if (historyLength < 2) {
-    return {
-      type: "question",
-      data: {
-        id: "q-objectives",
-        type: "text",
-        question: "What are the key objectives or deliverables for this mission?",
-        description: "Describe the main things that need to be built or achieved. Each objective may become a milestone.",
-      },
-    };
+  let openBraces = 0;
+  let openBrackets = 0;
+  let inString = false;
+  let escape = false;
+  for (const ch of repaired) {
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") openBraces++;
+    if (ch === "}") openBraces--;
+    if (ch === "[") openBrackets++;
+    if (ch === "]") openBrackets--;
   }
 
-  if (historyLength < 3) {
-    return {
-      type: "question",
-      data: {
-        id: "q-confirm",
-        type: "confirm",
-        question: "Are there dependencies between the milestones that require a specific ordering?",
-        description: "If yes, the milestones will be ordered sequentially. Otherwise they can be worked in parallel.",
-      },
-    };
+  if (inString) repaired += '"';
+
+  // Re-count after potential string fix
+  openBraces = 0;
+  openBrackets = 0;
+  inString = false;
+  escape = false;
+  for (const ch of repaired) {
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") openBraces++;
+    if (ch === "}") openBraces--;
+    if (ch === "[") openBrackets++;
+    if (ch === "]") openBrackets--;
   }
 
-  return { type: "complete", data: generateMissionPlanSummary(session) };
+  repaired += "]".repeat(Math.max(0, openBrackets));
+  repaired += "}".repeat(Math.max(0, openBraces));
+
+  return repaired;
 }
 
-function generateMissionPlanSummary(session: MissionInterviewSession): MissionPlanSummary {
-  const scopeResponse = session.history.find((h) => h.question.id === "q-scope")?.response as
-    | Record<string, unknown>
-    | undefined;
-  const scope = (scopeResponse?.["q-scope"] as string) || "medium";
+/**
+ * Parse AI agent response into a MissionInterviewResponse.
+ * Handles markdown wrapping, embedded prose, truncated JSON.
+ */
+export function parseMissionAgentResponse(text: string): MissionInterviewResponse {
+  const candidate = extractJsonCandidate(text);
 
-  const objectivesResponse = session.history.find((h) => h.question.id === "q-objectives")?.response as
-    | Record<string, unknown>
-    | undefined;
-  const objectives = (objectivesResponse?.["q-objectives"] as string) || "";
-
-  // Generate hierarchy based on scope
-  if (scope === "small") {
-    return {
-      milestones: [
-        {
-          title: `${session.missionTitle} - Core Implementation`,
-          description: objectives || undefined,
-          slices: [
-            {
-              title: "Implementation",
-              description: `Core implementation for ${session.missionTitle}`,
-              features: [
-                { title: "Core functionality", description: "Implement the main feature" },
-                { title: "Tests", description: "Add test coverage" },
-              ],
-            },
-          ],
-        },
-      ],
-    };
+  if (!candidate) {
+    console.error("[mission-interview] No JSON candidate found in agent response:", text.slice(0, 500));
+    throw new Error("AI returned no valid JSON. Please try again.");
   }
 
-  if (scope === "large") {
-    return {
-      milestones: [
-        {
-          title: "Foundation & Setup",
-          description: "Initial scaffolding and infrastructure",
-          slices: [
-            {
-              title: "Infrastructure",
-              features: [
-                { title: "Project scaffolding", description: "Set up project structure" },
-                { title: "Configuration", description: "Configure build and tooling" },
-              ],
-            },
-          ],
-        },
-        {
-          title: "Core Implementation",
-          description: objectives || "Main feature development",
-          slices: [
-            {
-              title: "Primary features",
-              features: [
-                { title: "Core feature 1", description: "First major deliverable" },
-                { title: "Core feature 2", description: "Second major deliverable" },
-              ],
-            },
-            {
-              title: "Secondary features",
-              features: [
-                { title: "Supporting feature", description: "Supporting functionality" },
-              ],
-            },
-          ],
-        },
-        {
-          title: "Polish & Release",
-          description: "Testing, documentation, and release preparation",
-          slices: [
-            {
-              title: "Quality assurance",
-              features: [
-                { title: "Integration tests", description: "End-to-end test coverage" },
-                { title: "Documentation", description: "User and developer documentation" },
-              ],
-            },
-          ],
-        },
-      ],
-    };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    try {
+      const repaired = repairJson(candidate);
+      parsed = JSON.parse(repaired);
+    } catch (repairErr) {
+      console.error("[mission-interview] Failed to parse agent response:", candidate.slice(0, 500));
+      throw new Error(
+        `Failed to parse AI response: ${repairErr instanceof Error ? repairErr.message : "Unknown error"}. Please try again.`
+      );
+    }
   }
 
-  // Medium (default)
-  return {
-    milestones: [
-      {
-        title: "Phase 1 - Setup & Core",
-        description: "Initial setup and core functionality",
-        slices: [
-          {
-            title: "Core implementation",
-            description: objectives || `Core work for ${session.missionTitle}`,
-            features: [
-              { title: "Core functionality", description: "Implement the main feature" },
-              { title: "Basic tests", description: "Add initial test coverage" },
-            ],
-          },
-        ],
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "type" in parsed &&
+    "data" in parsed
+  ) {
+    const typed = parsed as { type: string; data: unknown };
+    if (typed.type === "question" && typed.data !== null && typed.data !== undefined) {
+      return parsed as MissionInterviewResponse;
+    }
+    if (typed.type === "complete" && typed.data !== null && typeof typed.data === "object") {
+      const data = typed.data as Record<string, unknown>;
+      if (Array.isArray(data.milestones)) {
+        return parsed as MissionInterviewResponse;
+      }
+    }
+  }
+
+  console.error("[mission-interview] Invalid response structure:", JSON.stringify(parsed).slice(0, 500));
+  throw new Error("AI returned an invalid response structure. Please try again.");
+}
+
+// ── Response Formatting ────────────────────────────────────────────────────
+
+/**
+ * Format user response as a message for the AI agent.
+ */
+function formatResponseForAgent(
+  question: PlanningQuestion,
+  responses: Record<string, unknown>
+): string {
+  const responseValue = responses[question.id];
+
+  switch (question.type) {
+    case "text":
+      return `Question: ${question.question}\n\nAnswer: ${responseValue}`;
+    case "single_select":
+      if (typeof responseValue === "string") {
+        const option = question.options?.find((o) => o.id === responseValue);
+        return `Question: ${question.question}\n\nSelected: ${option?.label || responseValue}`;
+      }
+      return `Question: ${question.question}\n\nAnswer: ${responseValue}`;
+    case "multi_select":
+      if (Array.isArray(responseValue)) {
+        const selected = responseValue.map((id) => {
+          const option = question.options?.find((o) => o.id === id);
+          return option?.label || id;
+        });
+        return `Question: ${question.question}\n\nSelected: ${selected.join(", ")}`;
+      }
+      return `Question: ${question.question}\n\nAnswer: ${responseValue}`;
+    case "confirm":
+      return `Question: ${question.question}\n\nAnswer: ${responseValue === true ? "Yes" : "No"}`;
+    default:
+      return `Question: ${question.question}\n\nAnswer: ${JSON.stringify(responseValue)}`;
+  }
+}
+
+// ── AI Agent Integration ───────────────────────────────────────────────────
+
+/**
+ * Initialize the AI agent for a session and start the first turn.
+ */
+async function initializeAgent(session: MissionInterviewSession, rootDir: string): Promise<void> {
+  try {
+    await engineReady;
+
+    const agentResult = await createKbAgent({
+      cwd: rootDir,
+      systemPrompt: MISSION_INTERVIEW_SYSTEM_PROMPT,
+      tools: "readonly",
+      onThinking: (delta: string) => {
+        session.thinkingOutput += delta;
+        missionInterviewStreamManager.broadcast(session.id, {
+          type: "thinking",
+          data: delta,
+        });
       },
-      {
-        title: "Phase 2 - Integration & Delivery",
-        description: "Integration, polish, and delivery",
-        slices: [
-          {
-            title: "Integration",
-            features: [
-              { title: "Integration work", description: "Connect components together" },
-              { title: "Final tests & docs", description: "Complete test coverage and documentation" },
-            ],
-          },
-        ],
+      onText: (delta: string) => {
+        session.thinkingOutput += delta;
       },
-    ],
-  };
+    });
+
+    session.agent = agentResult;
+    session.updatedAt = new Date();
+
+    // Send initial message to get first question
+    await continueAgentConversation(
+      session,
+      `I want to plan a mission: "${session.missionTitle}". Interview me to understand what I need, then produce a structured plan.`
+    );
+  } catch (err) {
+    console.error(`[mission-interview] Agent initialization error for session ${session.id}:`, err);
+    missionInterviewStreamManager.broadcast(session.id, {
+      type: "error",
+      data: err instanceof Error ? err.message : "Failed to initialize AI agent",
+    });
+  }
+}
+
+/**
+ * Continue the AI conversation with a user message.
+ * Includes bounded recovery: one retry on parse failure.
+ */
+async function continueAgentConversation(session: MissionInterviewSession, message: string): Promise<void> {
+  if (!session.agent) {
+    throw new InvalidSessionStateError("AI agent not initialized");
+  }
+
+  try {
+    session.thinkingOutput = "";
+
+    await session.agent.session.prompt(message);
+
+    // Get the response text from the agent's state
+    interface AgentMessage {
+      role: string;
+      content?: string | Array<{ type: string; text: string }>;
+    }
+    const lastMessage = (session.agent.session.state.messages as AgentMessage[])
+      .filter((m: AgentMessage) => m.role === "assistant")
+      .pop();
+
+    let responseText = session.thinkingOutput;
+    if (lastMessage?.content) {
+      if (typeof lastMessage.content === "string") {
+        responseText = lastMessage.content;
+      } else if (Array.isArray(lastMessage.content)) {
+        responseText = lastMessage.content
+          .filter((c: { type: string; text: string }): c is { type: "text"; text: string } => c.type === "text")
+          .map((c: { type: string; text: string }) => c.text)
+          .join("");
+      }
+    }
+
+    // Parse with retry
+    let parsed: MissionInterviewResponse | undefined;
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= MAX_PARSE_RETRIES; attempt++) {
+      try {
+        parsed = parseMissionAgentResponse(responseText);
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+
+        if (attempt < MAX_PARSE_RETRIES) {
+          console.warn(
+            `[mission-interview] Parse attempt ${attempt + 1} failed for session ${session.id}, requesting reformat`
+          );
+          try {
+            session.thinkingOutput = "";
+            await session.agent.session.prompt(
+              "Your previous response could not be parsed as JSON. " +
+              'Please respond with ONLY a valid JSON object: either {"type":"question","data":{...}} ' +
+              'or {"type":"complete","data":{"missionTitle":"...","missionDescription":"...","milestones":[...]}}. ' +
+              "No markdown, no explanation, just the JSON."
+            );
+
+            const retryMessage = (session.agent.session.state.messages as AgentMessage[])
+              .filter((m: AgentMessage) => m.role === "assistant")
+              .pop();
+
+            let retryText = session.thinkingOutput;
+            if (retryMessage?.content) {
+              if (typeof retryMessage.content === "string") {
+                retryText = retryMessage.content;
+              } else if (Array.isArray(retryMessage.content)) {
+                retryText = retryMessage.content
+                  .filter((c: { type: string; text: string }): c is { type: "text"; text: string } => c.type === "text")
+                  .map((c: { type: string; text: string }) => c.text)
+                  .join("");
+              }
+            }
+            responseText = retryText;
+          } catch (retryErr) {
+            console.error(`[mission-interview] Retry prompt failed for session ${session.id}:`, retryErr);
+            break;
+          }
+        }
+      }
+    }
+
+    if (!parsed) {
+      const errorMsg = lastError?.message || "Failed to parse AI response";
+      console.error(`[mission-interview] All parse attempts exhausted for session ${session.id}:`, errorMsg);
+      missionInterviewStreamManager.broadcast(session.id, {
+        type: "error",
+        data: `${errorMsg} You can try responding again or start a new session.`,
+      });
+      return;
+    }
+
+    if (parsed.type === "question") {
+      session.currentQuestion = parsed.data;
+      session.updatedAt = new Date();
+      missionInterviewStreamManager.broadcast(session.id, {
+        type: "question",
+        data: parsed.data,
+      });
+    } else if (parsed.type === "complete") {
+      session.summary = parsed.data;
+      session.currentQuestion = undefined;
+      session.updatedAt = new Date();
+      missionInterviewStreamManager.broadcast(session.id, {
+        type: "summary",
+        data: parsed.data,
+      });
+      missionInterviewStreamManager.broadcast(session.id, { type: "complete" });
+    }
+  } catch (err) {
+    console.error(`[mission-interview] Agent conversation error for session ${session.id}:`, err);
+    missionInterviewStreamManager.broadcast(session.id, {
+      type: "error",
+      data: err instanceof Error ? err.message : "AI processing failed",
+    });
+  }
 }
 
 // ── Session Management ──────────────────────────────────────────────────────
 
+/**
+ * Create a new mission interview session with AI agent streaming.
+ * Returns sessionId immediately; client connects to SSE to receive events.
+ */
 export async function createMissionInterviewSession(
   ip: string,
-  missionId: string,
-  missionTitle: string
-): Promise<{ sessionId: string; firstQuestion: PlanningQuestion }> {
+  missionTitle: string,
+  rootDir: string
+): Promise<string> {
   if (!checkRateLimit(ip)) {
     const resetTime = getRateLimitResetTime(ip);
     throw new RateLimitError(
@@ -373,24 +640,36 @@ export async function createMissionInterviewSession(
   }
 
   const sessionId = randomUUID();
-  const firstQuestion = generateFirstQuestion(missionTitle);
 
   const session: MissionInterviewSession = {
     id: sessionId,
     ip,
-    missionId,
+    missionId: "",
     missionTitle,
     history: [],
-    currentQuestion: firstQuestion,
+    thinkingOutput: "",
     createdAt: new Date(),
     updatedAt: new Date(),
   };
 
   sessions.set(sessionId, session);
 
-  return { sessionId, firstQuestion };
+  // Initialize AI agent in background
+  initializeAgent(session, rootDir).catch((err) => {
+    console.error(`[mission-interview] Failed to initialize agent for session ${sessionId}:`, err);
+    missionInterviewStreamManager.broadcast(sessionId, {
+      type: "error",
+      data: err.message || "Failed to initialize AI agent",
+    });
+  });
+
+  return sessionId;
 }
 
+/**
+ * Submit a response to the current question.
+ * Supports AI agent mode with streaming.
+ */
 export async function submitMissionInterviewResponse(
   sessionId: string,
   responses: Record<string, unknown>
@@ -404,28 +683,48 @@ export async function submitMissionInterviewResponse(
     throw new InvalidSessionStateError("No active question in session");
   }
 
+  // Record the response
   session.history.push({
     question: session.currentQuestion,
     response: responses,
   });
 
-  const result = generateNextQuestionOrSummary(session);
+  // If AI agent is active, use it for next question
+  if (session.agent) {
+    const message = formatResponseForAgent(session.currentQuestion, responses);
+    await continueAgentConversation(session, message);
 
-  if (result.type === "question") {
-    session.currentQuestion = result.data;
-  } else {
-    session.summary = result.data;
-    session.currentQuestion = undefined;
+    if (session.summary) {
+      return { type: "complete", data: session.summary };
+    }
+    if (session.currentQuestion) {
+      return { type: "question", data: session.currentQuestion };
+    }
+    // Fallback — should not happen with a working agent
+    return {
+      type: "question",
+      data: {
+        id: "q-fallback",
+        type: "text",
+        question: "Could you tell me more about what you want to build?",
+        description: "The AI is processing your response. Please provide more details.",
+      },
+    };
   }
 
-  session.updatedAt = new Date();
-  return result;
+  // No agent — should not happen in normal flow
+  throw new InvalidSessionStateError("AI agent not available for this session");
 }
 
 export async function cancelMissionInterviewSession(sessionId: string): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session) {
     throw new SessionNotFoundError(`Mission interview session ${sessionId} not found or expired`);
+  }
+
+  if (session.agent) {
+    try { session.agent.session.dispose?.(); } catch { /* ignore */ }
+    session.agent = undefined;
   }
 
   missionInterviewStreamManager.cleanupSession(sessionId);
@@ -441,6 +740,10 @@ export function getMissionInterviewSummary(sessionId: string): MissionPlanSummar
 }
 
 export function cleanupMissionInterviewSession(sessionId: string): void {
+  const session = sessions.get(sessionId);
+  if (session?.agent) {
+    try { session.agent.session.dispose?.(); } catch { /* ignore */ }
+  }
   missionInterviewStreamManager.cleanupSession(sessionId);
   sessions.delete(sessionId);
 }
@@ -449,6 +752,11 @@ export function cleanupMissionInterviewSession(sessionId: string): void {
  * Reset all mission interview state. Used for testing only.
  */
 export function __resetMissionInterviewState(): void {
+  for (const [, session] of sessions) {
+    if (session.agent) {
+      try { session.agent.session.dispose?.(); } catch { /* ignore */ }
+    }
+  }
   sessions.clear();
   rateLimits.clear();
   missionInterviewStreamManager.removeAllListeners();

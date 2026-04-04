@@ -3417,6 +3417,56 @@ body {
   display: none;
 }
 
+/* Changed-files loading spinner */
+.changed-files-loading-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: changed-files-spin 0.6s linear infinite;
+}
+
+@keyframes changed-files-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Changed-files empty state */
+.changed-files-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-xl) var(--space-lg);
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.changed-files-empty-icon {
+  font-size: 24px;
+  opacity: 0.6;
+}
+
+/* Changed-files error state */
+.changed-files-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.changed-files-error-icon {
+  flex-shrink: 0;
+}
+
+/* Renamed file label */
+.changed-files-renamed {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* Mobile responsive for changed-files modal */
 @media (max-width: 768px) {
   .changed-files-modal .changed-files-layout {
@@ -3432,16 +3482,46 @@ body {
   .changed-files-sidebar.mobile.active {
     display: flex;
     flex: 1;
+    flex-direction: column;
     border-right: none;
     border-bottom: none;
     max-height: none;
     overflow-y: auto;
     padding: 0;
+    background: var(--surface);
   }
 
   .changed-files-sidebar.mobile.active .file-browser-list {
     flex: 1;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .changed-files-sidebar.mobile.active .gm-diff-loading,
+  .changed-files-sidebar.mobile.active .changed-files-loading {
+    margin: var(--space-lg);
+  }
+
+  .changed-files-sidebar.mobile.active .gm-diff-error,
+  .changed-files-sidebar.mobile.active .changed-files-error {
+    margin: var(--space-lg);
+  }
+
+  .changed-files-sidebar.mobile.active .file-browser-empty,
+  .changed-files-sidebar.mobile.active .changed-files-empty {
+    flex: 1;
+  }
+
+  /* Larger touch targets for file entries on mobile */
+  .changed-files-sidebar.mobile .changed-files-entry {
+    padding: 10px var(--space-md);
+    min-height: 44px;
+  }
+
+  /* Clearer active state on mobile */
+  .changed-files-sidebar.mobile .changed-files-entry.active {
+    background: var(--card-hover);
+    border-left: 3px solid var(--in-progress);
   }
 
   .changed-files-content.mobile {
@@ -3451,7 +3531,11 @@ body {
   .changed-files-content.mobile.active {
     display: flex;
     flex: 1;
+    flex-direction: column;
     padding: var(--space-sm);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
   }
 
   .changed-files-modal .file-browser-file-info {
@@ -3462,6 +3546,29 @@ body {
   .changed-files-modal .file-browser-file-info strong {
     font-size: 12px;
     word-break: break-all;
+  }
+
+  /* Diff viewer fills available space on mobile */
+  .changed-files-content.mobile.active .changed-files-diff-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .changed-files-content.mobile.active .gm-diff-viewer {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .changed-files-content.mobile.active .gm-diff-patch {
+    flex: 1;
+    max-height: none;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Back button styles for mobile */
@@ -13857,6 +13964,56 @@ html .column.drag-over * {
   display: block;
   padding: 0 8px;
   margin: 0 -8px;
+}
+
+/* Light theme diff highlighting overrides */
+[data-theme="light"] .gm-diff-patch .diff-add,
+[data-theme="light"] .changes-diff-patch .diff-add,
+[data-theme="light"] .gm-diff-patch [data-prefix="+"],
+[data-theme="light"] .changes-diff-patch [data-prefix="+"] {
+  color: #1a7f37;
+  background-color: rgba(26, 127, 55, 0.1);
+}
+
+[data-theme="light"] .gm-diff-patch .diff-del,
+[data-theme="light"] .changes-diff-patch .diff-del,
+[data-theme="light"] .gm-diff-patch [data-prefix="-"],
+[data-theme="light"] .changes-diff-patch [data-prefix="-"] {
+  color: #cf222e;
+  background-color: rgba(207, 34, 46, 0.1);
+}
+
+[data-theme="light"] .gm-diff-patch .diff-hunk,
+[data-theme="light"] .changes-diff-patch .diff-hunk,
+[data-theme="light"] .gm-diff-patch [data-prefix="@@"],
+[data-theme="light"] .changes-diff-patch [data-prefix="@@"] {
+  color: #0969da;
+}
+
+/* Light theme changed-files modal overrides */
+[data-theme="light"] .gm-diff-loading,
+[data-theme="light"] .changed-files-loading {
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .gm-diff-error,
+[data-theme="light"] .changed-files-error {
+  background: var(--surface);
+  color: var(--color-error);
+}
+
+[data-theme="light"] .gm-diff-stat {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .gm-diff-viewer {
+  background: var(--card);
+}
+
+[data-theme="light"] .gm-diff-patch {
+  color: var(--text);
 }
 
 /* === Project Selector === */

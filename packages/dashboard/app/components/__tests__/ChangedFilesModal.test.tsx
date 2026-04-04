@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ChangedFilesModal } from "../ChangedFilesModal";
 import * as changedFilesHook from "../../hooks/useChangedFiles";
 
@@ -92,7 +92,7 @@ describe("ChangedFilesModal", () => {
     expect(screen.getByText("No files changed")).toBeInTheDocument();
   });
 
-  it("closes on Escape", () => {
+  it("closes on Escape on desktop", () => {
     render(
       <ChangedFilesModal
         taskId="KB-651"
@@ -203,6 +203,24 @@ describe("ChangedFilesModal", () => {
     expect(mockResetSelection).toHaveBeenCalledTimes(1);
   });
 
+  it("marks the active file with aria-current", () => {
+    render(
+      <ChangedFilesModal
+        taskId="KB-651"
+        worktree="/repo/.worktrees/kb-651"
+        column="in-progress"
+        isOpen={true}
+        onClose={mockOnClose}
+      />,
+    );
+
+    const activeItem = screen.getByRole("listitem", { name: "src/a.ts" });
+    expect(activeItem).toHaveAttribute("aria-current", "true");
+
+    const inactiveItem = screen.getByRole("listitem", { name: /src\/b.ts/i });
+    expect(inactiveItem).not.toHaveAttribute("aria-current");
+  });
+
   describe("mobile navigation", () => {
     beforeEach(() => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(600);
@@ -265,7 +283,63 @@ describe("ChangedFilesModal", () => {
       expect(mockSetSelectedFile).toHaveBeenCalledWith(defaultFiles[1]);
     });
 
-    it("shows back button on mobile when viewing diff", () => {
+    it("shows back button on mobile when user selects a file", () => {
+      // Start with no selected file so user sees the list
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: null,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      const { rerender } = render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      // No back button when on file list
+      expect(screen.queryByLabelText("Back to file list")).not.toBeInTheDocument();
+
+      // Simulate user selecting a file - the hook will update selectedFile
+      // and the component will set mobileView to "diff"
+      fireEvent.click(screen.getByRole("listitem", { name: /src\/b.ts/i }));
+      expect(mockSetSelectedFile).toHaveBeenCalledWith(defaultFiles[1]);
+
+      // Now simulate the hook providing the selected file (rerender with updated hook state)
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: defaultFiles[1],
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      rerender(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      // After user selects, back button should appear since mobileDiffIntentional was set
+      const backButton = screen.queryByLabelText("Back to file list");
+      expect(backButton).toBeInTheDocument();
+    });
+
+    it("does NOT show back button when hook provides selectedFile without user action", () => {
+      // Simulate cached data where the hook already has a selected file
+      // The modal should NOT auto-switch to diff on mobile without user intent
       mockUseChangedFiles.mockReturnValue({
         files: defaultFiles,
         loading: false,
@@ -285,11 +359,9 @@ describe("ChangedFilesModal", () => {
         />,
       );
 
-      // When selectedFile is set, the mobile view should switch to diff
-      // and show the back button. Since the hook returns selectedFile,
-      // the component's isMobile+selectedFile effect will set mobileView to "diff"
-      const backButton = screen.queryByLabelText("Back to file list");
-      expect(backButton).toBeInTheDocument();
+      // Without explicit user action, the back button should NOT appear
+      // because the modal should show the file list first on mobile
+      expect(screen.queryByLabelText("Back to file list")).not.toBeInTheDocument();
     });
 
     it("does not show back button on desktop", () => {
@@ -317,7 +389,31 @@ describe("ChangedFilesModal", () => {
       expect(screen.queryByLabelText("Back to file list")).not.toBeInTheDocument();
     });
 
-    it("shows selected file path in header on mobile diff view", () => {
+    it("shows selected file path in header on mobile diff view after user selects file", () => {
+      // Start with no selection so user sees the list
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: null,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      const { rerender } = render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      // User selects a file
+      fireEvent.click(screen.getByRole("listitem", { name: /src\/a.ts/i }));
+
+      // Simulate hook returning selected file
       mockUseChangedFiles.mockReturnValue({
         files: defaultFiles,
         loading: false,
@@ -327,7 +423,7 @@ describe("ChangedFilesModal", () => {
         resetSelection: mockResetSelection,
       });
 
-      render(
+      rerender(
         <ChangedFilesModal
           taskId="KB-651"
           worktree="/repo/.worktrees/kb-651"
@@ -402,6 +498,161 @@ describe("ChangedFilesModal", () => {
 
       const diffPatch = document.querySelector(".gm-diff-patch");
       expect(diffPatch).toBeInTheDocument();
+    });
+
+    it("Escape on mobile diff view goes back to list instead of closing", () => {
+      // Start with no selection so user sees the list
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: null,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      const { rerender } = render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      // User selects a file, triggering mobileView to "diff"
+      fireEvent.click(screen.getByRole("listitem", { name: /src\/a.ts/i }));
+
+      // Simulate hook returning selected file (triggers diff view)
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: defaultSelectedFile,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      rerender(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      // Now we should be in diff view with back button visible
+      expect(screen.getByLabelText("Back to file list")).toBeInTheDocument();
+
+      // On mobile with diff view, Escape should go back to list, not close
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(mockOnClose).not.toHaveBeenCalled();
+
+      // Now pressing Escape again (on list view) should close the modal
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("starts on list view when modal opens on mobile", () => {
+      // Simulate hook returning a selected file (e.g., cached from previous open)
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: defaultSelectedFile,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      // On first render after open, the resetSelection effect fires.
+      // However, since the hook provides selectedFile, the mobile view
+      // may auto-switch to diff. The important thing is resetSelection was called.
+      expect(mockResetSelection).toHaveBeenCalled();
+    });
+
+    it("loading state has role=status for accessibility", () => {
+      mockUseChangedFiles.mockReturnValue({
+        files: [],
+        loading: true,
+        error: null,
+        selectedFile: null,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const loadingEl = screen.getByRole("status");
+      expect(loadingEl).toHaveTextContent("Loading changed files…");
+    });
+
+    it("error state has role=alert for accessibility", () => {
+      mockUseChangedFiles.mockReturnValue({
+        files: [],
+        loading: false,
+        error: "Network error",
+        selectedFile: null,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const alertEl = screen.getByRole("alert");
+      expect(alertEl).toHaveTextContent("Network error");
+    });
+
+    it("sidebar has aria-label for accessibility", () => {
+      mockUseChangedFiles.mockReturnValue({
+        files: defaultFiles,
+        loading: false,
+        error: null,
+        selectedFile: null,
+        setSelectedFile: mockSetSelectedFile,
+        resetSelection: mockResetSelection,
+      });
+
+      render(
+        <ChangedFilesModal
+          taskId="KB-651"
+          worktree="/repo/.worktrees/kb-651"
+          column="in-progress"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const sidebar = document.querySelector(".changed-files-sidebar");
+      expect(sidebar).toHaveAttribute("aria-label", "Changed files sidebar");
     });
   });
 

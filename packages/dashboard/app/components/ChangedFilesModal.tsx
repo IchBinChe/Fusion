@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   FileEdit,
   FileMinus,
@@ -79,6 +79,10 @@ export function ChangedFilesModal({
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "diff">("list");
 
+  // Track whether the user has manually navigated to the diff view on mobile.
+  // This prevents the resize-to-mobile effect from stealing navigation intent.
+  const mobileDiffIntentional = useRef(false);
+
   // Detect mobile viewport
   useEffect(() => {
     if (!isOpen) return;
@@ -93,11 +97,13 @@ export function ChangedFilesModal({
   }, [isOpen]);
 
   // When resizing from desktop to mobile with a file selected, show diff pane
+  // only if the user hasn't just opened the modal (which starts at the list).
   // When resizing from mobile to desktop, no special action needed (both panes visible)
   useEffect(() => {
     if (!isOpen || !isMobile) return;
-    // If we just became mobile and have a selected file, show diff
-    if (selectedFile) {
+    // Only auto-switch to diff on resize if the user is actively viewing a diff
+    // (not the initial open where resetSelection has just cleared selectedFile)
+    if (selectedFile && mobileDiffIntentional.current) {
       setMobileView("diff");
     }
   }, [isOpen, isMobile, selectedFile]);
@@ -110,10 +116,12 @@ export function ChangedFilesModal({
     }
   }, [isOpen, isMobile, loading, files, selectedFile, setSelectedFile]);
 
-  // Reset mobile view and selection when modal opens
+  // Reset mobile view and selection when modal opens.
+  // Always start on the file list so mobile users see changed files first.
   useEffect(() => {
     if (isOpen) {
       setMobileView("list");
+      mobileDiffIntentional.current = false;
       resetSelection();
     }
   }, [isOpen, resetSelection]);
@@ -123,17 +131,23 @@ export function ChangedFilesModal({
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onClose();
+        // On mobile diff view, Escape goes back to list first
+        if (isMobile && mobileView === "diff") {
+          setMobileView("list");
+        } else {
+          onClose();
+        }
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isMobile, mobileView]);
 
   const handleSelectFile = useCallback(
     (file: TaskFileDiff) => {
       setSelectedFile(file);
       if (isMobile) {
+        mobileDiffIntentional.current = true;
         setMobileView("diff");
       }
     },
@@ -191,16 +205,25 @@ export function ChangedFilesModal({
         </div>
 
         <div className="file-browser-body changed-files-layout">
-          <aside className={sidebarClasses}>
+          <aside className={sidebarClasses} aria-label="Changed files sidebar">
             {loading ? (
-              <div className="gm-diff-loading">Loading changed files…</div>
+              <div className="gm-diff-loading changed-files-loading" role="status">
+                <span className="changed-files-loading-spinner" aria-hidden="true" />
+                <span>Loading changed files…</span>
+              </div>
             ) : error ? (
-              <div className="gm-diff-error">{error}</div>
+              <div className="gm-diff-error changed-files-error" role="alert">
+                <span className="changed-files-error-icon" aria-hidden="true">⚠</span>
+                <span>{error}</span>
+              </div>
             ) : files.length === 0 ? (
-              <div className="file-browser-empty">No files changed</div>
+              <div className="file-browser-empty changed-files-empty">
+                <span className="changed-files-empty-icon" aria-hidden="true">📁</span>
+                <span>No files changed</span>
+              </div>
             ) : (
               <div className="file-browser-list" role="list" aria-label="Changed files list">
-                {files.map((file) => {
+                {files.map((file, index) => {
                   const active =
                     selectedFile?.path === file.path && selectedFile?.oldPath === file.oldPath;
                   return (
@@ -209,6 +232,7 @@ export function ChangedFilesModal({
                       type="button"
                       role="listitem"
                       aria-label={file.path}
+                      aria-current={active ? "true" : undefined}
                       className={`file-node file-node--file changed-files-entry ${active ? "active" : ""}`}
                       onClick={() => handleSelectFile(file)}
                     >
@@ -247,7 +271,7 @@ export function ChangedFilesModal({
                       {getStatusLabel(selectedFile.status)}
                     </span>
                     {selectedFile.oldPath ? (
-                      <span>Renamed from {selectedFile.oldPath}</span>
+                      <span className="changed-files-renamed">Renamed from {selectedFile.oldPath}</span>
                     ) : null}
                   </div>
                 </div>
@@ -259,7 +283,9 @@ export function ChangedFilesModal({
                 </div>
               </div>
             ) : !loading && !error && files.length > 0 ? (
-              <div className="file-browser-empty">Select a file to view changes</div>
+              <div className="file-browser-empty changed-files-empty">
+                Select a file to view changes
+              </div>
             ) : null}
           </section>
         </div>

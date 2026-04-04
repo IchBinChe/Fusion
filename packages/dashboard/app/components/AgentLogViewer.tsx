@@ -1,6 +1,6 @@
 import type { AgentLogEntry } from "@fusion/core";
 import { ProviderIcon } from "./ProviderIcon";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -49,10 +49,12 @@ interface AgentLogViewerProps {
  * Renders agent log entries in a scrollable, monospace container.
  * Displays entries in reverse chronological order (newest first).
  * Auto-scrolls to keep latest entries visible when streaming.
+ * Supports toggling between markdown-formatted and plain-text rendering.
  */
 export function AgentLogViewer({ entries, loading, executorModel, validatorModel }: AgentLogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previousEntryCountRef = useRef<number>(0);
+  const [renderMarkdown, setRenderMarkdown] = useState(true);
 
   // Auto-scroll to top when new entries arrive (since newest are first)
   useEffect(() => {
@@ -131,6 +133,7 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
           color: "var(--text-muted, #888)",
           overflow: "hidden",
           minWidth: 0,
+          alignItems: "center",
         }}
         data-testid="agent-log-model-header"
       >
@@ -159,6 +162,19 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
           ) : (
             <span className="model-badge-default">Using default</span>
           )}
+        </div>
+        {/* Markdown render toggle */}
+        <div style={{ marginLeft: "auto" }}>
+          <button
+            className="agent-log-mode-toggle"
+            onClick={() => setRenderMarkdown((prev) => !prev)}
+            aria-label={renderMarkdown ? "Switch to plain text mode" : "Switch to markdown mode"}
+            aria-pressed={renderMarkdown}
+            data-testid="agent-log-mode-toggle"
+            title={renderMarkdown ? "Show raw text" : "Show formatted markdown"}
+          >
+            {renderMarkdown ? "Markdown" : "Plain"}
+          </button>
         </div>
       </div>
       {reversedEntries.map((entry, i) => {
@@ -226,9 +242,13 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
               }}
             >
               {agentBadge}
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                {entry.text}
-              </ReactMarkdown>
+              {renderMarkdown ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {entry.text}
+                </ReactMarkdown>
+              ) : (
+                entry.text
+              )}
             </span>
           );
         }
@@ -297,9 +317,13 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
         return (
           <span key={i} className="agent-log-text">
             {agentBadge}
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-              {entry.text}
-            </ReactMarkdown>
+            {renderMarkdown ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {entry.text}
+              </ReactMarkdown>
+            ) : (
+              entry.text
+            )}
           </span>
         );
       })}

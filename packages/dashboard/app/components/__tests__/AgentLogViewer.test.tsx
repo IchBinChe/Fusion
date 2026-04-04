@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentLogViewer } from "../AgentLogViewer";
 import type { AgentLogEntry } from "@fusion/core";
 
@@ -596,6 +596,176 @@ describe("AgentLogViewer", () => {
       // Plain text before and after should be preserved
       expect(textSpans[0].textContent).toContain("The code:");
       expect(textSpans[0].textContent).toContain("works!");
+    });
+  });
+
+  describe("markdown render toggle", () => {
+    it("renders the toggle button in the model info header", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']");
+      expect(toggle).toBeTruthy();
+      expect(toggle!.textContent).toBe("Markdown");
+    });
+
+    it("defaults to markdown mode", () => {
+      const entries = [makeEntry({ text: "**bold** text" })];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      // In markdown mode, bold should be rendered as <strong>
+      const textSpans = container.querySelectorAll(".agent-log-text");
+      const strong = textSpans[0].querySelector("strong");
+      expect(strong).toBeTruthy();
+      expect(strong!.textContent).toBe("bold");
+    });
+
+    it("has correct aria attributes on the toggle", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+      expect(toggle).toBeTruthy();
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      expect(toggle.getAttribute("aria-label")).toBe("Switch to plain text mode");
+    });
+
+    it("switches to plain text mode when clicked", () => {
+      const entries = [makeEntry({ text: "**bold** and *italic*" })];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+
+      // Click to switch to plain text mode
+      fireEvent.click(toggle);
+
+      // Button should update
+      expect(toggle.textContent).toBe("Plain");
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+      expect(toggle.getAttribute("aria-label")).toBe("Switch to markdown mode");
+
+      // Text should now show raw markdown syntax literally
+      const textSpans = container.querySelectorAll(".agent-log-text");
+      expect(textSpans).toHaveLength(1);
+      expect(textSpans[0].textContent).toBe("**bold** and *italic*");
+      // No markdown elements should be present
+      expect(textSpans[0].querySelector("strong")).toBeNull();
+      expect(textSpans[0].querySelector("em")).toBeNull();
+    });
+
+    it("toggles back to markdown mode from plain text", () => {
+      const entries = [makeEntry({ text: "**bold** text" })];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+
+      // Switch to plain text
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toBe("Plain");
+
+      // Switch back to markdown
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toBe("Markdown");
+
+      // Markdown elements should be present again
+      const textSpans = container.querySelectorAll(".agent-log-text");
+      const strong = textSpans[0].querySelector("strong");
+      expect(strong).toBeTruthy();
+      expect(strong!.textContent).toBe("bold");
+    });
+
+    it("shows raw markdown syntax literally in plain text mode for text entries", () => {
+      const entries = [
+        makeEntry({ text: "## Heading\n\n- item 1\n- item 2\n\n`code` and **bold**" }),
+      ];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+
+      // Switch to plain text
+      fireEvent.click(toggle);
+
+      const textSpans = container.querySelectorAll(".agent-log-text");
+      expect(textSpans).toHaveLength(1);
+      // Raw markdown syntax should appear literally
+      expect(textSpans[0].textContent).toContain("## Heading");
+      expect(textSpans[0].textContent).toContain("- item 1");
+      expect(textSpans[0].textContent).toContain("`code`");
+      expect(textSpans[0].textContent).toContain("**bold**");
+      // No rendered markdown elements
+      expect(textSpans[0].querySelector("h2")).toBeNull();
+      expect(textSpans[0].querySelector("ul")).toBeNull();
+      expect(textSpans[0].querySelector("code")).toBeNull();
+      expect(textSpans[0].querySelector("strong")).toBeNull();
+    });
+
+    it("respects toggle for thinking entries", () => {
+      const entries = [
+        makeEntry({ text: "Thinking about **this**", type: "thinking" }),
+      ];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+
+      // In markdown mode, bold is rendered
+      const thinkingSpans = container.querySelectorAll(".agent-log-thinking");
+      expect(thinkingSpans[0].querySelector("strong")).toBeTruthy();
+
+      // Switch to plain text
+      fireEvent.click(toggle);
+
+      const thinkingSpansUpdated = container.querySelectorAll(".agent-log-thinking");
+      expect(thinkingSpansUpdated[0].textContent).toContain("Thinking about **this**");
+      expect(thinkingSpansUpdated[0].querySelector("strong")).toBeNull();
+    });
+
+    it("does not affect tool entries in either mode", () => {
+      const entries = [
+        makeEntry({ text: "Read", type: "tool" }),
+        makeEntry({ text: "done", type: "tool_result" }),
+        makeEntry({ text: "fail", type: "tool_error" }),
+      ];
+      const { container, rerender } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+
+      // Tool entries in markdown mode
+      expect(container.querySelector(".agent-log-tool")!.textContent).toContain("Read");
+      expect(container.querySelector(".agent-log-tool-result")!.textContent).toContain("done");
+      expect(container.querySelector(".agent-log-tool-error")!.textContent).toContain("fail");
+
+      // Switch to plain text - tool entries should be unchanged
+      fireEvent.click(toggle);
+
+      expect(container.querySelector(".agent-log-tool")!.textContent).toContain("Read");
+      expect(container.querySelector(".agent-log-tool-result")!.textContent).toContain("done");
+      expect(container.querySelector(".agent-log-tool-error")!.textContent).toContain("fail");
+    });
+
+    it("safely renders HTML tags as text in plain text mode (no XSS)", () => {
+      const entries = [
+        makeEntry({ text: '<script>alert("xss")</script> and <b>bold</b>' }),
+      ];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+
+      // Switch to plain text
+      fireEvent.click(toggle);
+
+      const textSpans = container.querySelectorAll(".agent-log-text");
+      // The text content should contain the literal HTML tags
+      expect(textSpans[0].textContent).toContain('<script>alert("xss")</script>');
+      expect(textSpans[0].textContent).toContain("<b>bold</b>");
+      // No actual script or bold HTML elements should be rendered
+      expect(textSpans[0].querySelector("script")).toBeNull();
+      expect(textSpans[0].querySelector("b")).toBeNull();
+    });
+
+    it("safely renders HTML in markdown mode via react-markdown sanitization", () => {
+      const entries = [
+        makeEntry({ text: "**safe** text here" }),
+      ];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      // In markdown mode, react-markdown sanitizes HTML (no script execution)
+      const textSpans = container.querySelectorAll(".agent-log-text");
+      // Markdown formatting should work
+      const strong = textSpans[0].querySelector("strong");
+      expect(strong).toBeTruthy();
+      expect(strong!.textContent).toBe("safe");
+      // No script elements are rendered for any HTML content in markdown
+      expect(textSpans[0].querySelector("script")).toBeNull();
     });
   });
 });

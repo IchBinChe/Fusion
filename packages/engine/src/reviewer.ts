@@ -14,7 +14,7 @@ import { AgentLogger } from "./agent-logger.js";
 import { reviewerLog } from "./logger.js";
 import { checkSessionError } from "./usage-limit-detector.js";
 
-const REVIEWER_SYSTEM_PROMPT = `You are an independent code and plan reviewer.
+export const REVIEWER_SYSTEM_PROMPT = `You are an independent code and plan reviewer.
 
 You provide quality assessment for task implementations. You have full read
 access to the codebase and can run commands to inspect code.
@@ -111,10 +111,29 @@ access to the codebase and can run commands to inspect code.
 - **Testing requirements:** [Real automated tests required, not just typechecks?]
 - **Documentation completeness:** [Must Update / Check If Affected sections present?]
 - **Sizing & review level:** [Size and review level appropriate for the work?]
+- **Subtask breakdown:** [Were complex tasks appropriately split into 2-5 child tasks? A task with 8+ implementation steps, affecting 3+ packages, should have been divided]
 
 ### Suggestions
 - [Optional improvements, not blocking]
 \`\`\`
+
+## Spec Review — Undersplit Task Detection
+
+When reviewing specs, actively assess whether the task should have been broken into subtasks:
+
+**Flag as REVISE if:**
+- A task has 8 or more implementation steps
+- A task affects 3+ different packages but wasn't split
+- A task has multiple clearly independent deliverables combined into one
+
+**How to flag:**
+Say explicitly: "This task should be broken into subtasks because [specific reason]."
+Recommend the number of child tasks (2-5) and what each should cover.
+
+**Do NOT flag if:**
+- Steps are sequential and tightly coupled (e.g., a pipeline where each step depends on the previous)
+- The task has 5-7 steps but they're all within a single module/package
+- Splitting would create coordination overhead that exceeds the benefit
 
 ## Plan Granularity
 

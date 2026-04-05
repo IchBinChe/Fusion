@@ -12,7 +12,7 @@ vi.mock("./pi.js", () => ({
   }),
 }));
 
-import { reviewStep } from "./reviewer.js";
+import { reviewStep, REVIEWER_SYSTEM_PROMPT } from "./reviewer.js";
 import { createKbAgent } from "./pi.js";
 
 const mockedCreateHaiAgent = vi.mocked(createKbAgent);
@@ -343,5 +343,21 @@ describe("reviewStep — validator model overrides", () => {
     const opts = mockedCreateHaiAgent.mock.calls[0][0];
     expect(opts.defaultProvider).toBe("openai");
     expect(opts.defaultModelId).toBe("gpt-4o");
+  });
+});
+
+describe("REVIEWER_SYSTEM_PROMPT", () => {
+  it("includes subtask breakdown criterion in spec review", () => {
+    expect(REVIEWER_SYSTEM_PROMPT).toContain("Subtask breakdown");
+    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+      "8+ implementation steps",
+    );
+  });
+
+  it("includes undersplit task detection guidance", () => {
+    expect(REVIEWER_SYSTEM_PROMPT).toContain("8 or more implementation steps");
+    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+      "3+ different packages but wasn't split",
+    );
   });
 });

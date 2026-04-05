@@ -196,8 +196,8 @@ describe("buildSpecificationPrompt", () => {
     );
 
     expect(prompt).toContain("## Subtask Consideration");
-    expect(prompt).toContain("Size M or L");
-    expect(prompt).toContain("Subtask creation is OPTIONAL");
+    expect(prompt).toContain("MORE THAN 7 implementation steps");
+    expect(prompt).toContain("GOOD TO SPLIT");
     expect(prompt).not.toContain("## Subtask Breakdown Requested");
   });
 
@@ -272,6 +272,21 @@ describe("TRIAGE_SYSTEM_PROMPT", () => {
     );
     expect(TRIAGE_SYSTEM_PROMPT).toContain(
       "Size S tasks should generally NOT be split",
+    );
+  });
+
+  it("includes explicit subtask breakdown thresholds", () => {
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("MORE THAN 7 implementation steps");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain(
+      "MORE THAN 3 different packages/modules",
+    );
+  });
+
+  it("includes anti-pattern warning for oversized tasks", () => {
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("ANTI-PATTERN");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("10+ steps");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain(
+      "Only keep a task as one unit if it genuinely has 5 or fewer focused steps",
     );
   });
 });

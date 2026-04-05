@@ -169,13 +169,22 @@ When the task includes \`breakIntoSubtasks: true\`, first decide whether it shou
 - If not splitting: proceed with a normal PROMPT.md specification.
 
 ## Proactive Subtask Breakdown for M/L Tasks
-For tasks you assess as Size M or L, proactively consider whether optional subtask breakdown would improve execution.
+For tasks you assess as Size M or L, proactively evaluate whether splitting into 2-5 child tasks would improve execution quality and reliability.
 
-- Even when \`breakIntoSubtasks\` is not set to \`true\`, you should evaluate whether splitting into 2-5 child tasks would improve work organization, handoff clarity, or parallel execution.
-- Treat this as a suggestion, not a requirement: only propose splitting when the work is meaningfully decomposable and the parent task would otherwise remain a coherent medium/large effort.
-- Keep explicit user intent first: when \`breakIntoSubtasks: true\`, follow the mandatory breakdown flow above.
-- Size S tasks should generally NOT be split because the overhead usually outweighs the benefit.
-- If you decide not to split an M/L task, proceed with a normal PROMPT.md specification.
+**Strongly recommend splitting when ANY of these apply:**
+- The task will require MORE THAN 7 implementation steps
+- The task affects MORE THAN 3 different packages/modules
+- Any single step would take more than 1-2 hours to complete
+- The task has multiple independent deliverables that could be developed in parallel
+
+**ANTI-PATTERN:** Avoid writing single tasks with 10+ steps. If you find yourself planning more than 7 steps, STOP and create 2-5 child tasks instead.
+
+**Splitting guidance:**
+- Even when \`breakIntoSubtasks\` is not set to \`true\`, apply these thresholds proactively
+- Keep explicit user intent first: when \`breakIntoSubtasks: true\`, follow the mandatory breakdown flow above
+- Size S tasks should generally NOT be split because the overhead usually outweighs the benefit
+- Only keep a task as one unit if it genuinely has 5 or fewer focused steps with a clear scope
+- If you decide not to split an M/L task, proceed with a normal PROMPT.md specification
 
 ## Triage tools
 You have these extra tools during triage:
@@ -1271,11 +1280,26 @@ The user has requested that this task be broken into smaller subtasks if it is c
 ## Subtask Consideration
 The user did not explicitly request subtask breakdown, so you should first assess the likely task size and complexity.
 
-- If the work appears to be Size M or L, consider whether optionally splitting it into 2-5 child tasks would improve organization, dependency clarity, or parallel execution.
-- Subtask creation is OPTIONAL in this case — only split when it provides a clear benefit.
+**Split into 2-5 child tasks when ANY of these apply:**
+- The task will require MORE THAN 7 implementation steps
+- The task affects MORE THAN 3 different packages/modules
+- Any single step would take more than 1-2 hours to complete
+- The task has multiple independent deliverables that could be developed in parallel
+
+**GOOD TO SPLIT:**
+- A task that would require 8+ implementation steps across multiple packages
+- A feature involving backend API changes, frontend UI, and database migrations
+- A refactor touching 4+ modules with different concerns
+
+**NOT NECESSARY TO SPLIT:**
+- A 3-step bug fix with clear scope
+- A single-file refactor with 4 focused steps
+- Adding a small feature to one module with 5 steps
+
+**How to decide:**
 - If you choose to split: use the \\\`task_create\\\` tool to create the child tasks, set dependencies where needed, and then stop without writing a PROMPT.md for the parent task.
-- If the work appears to be Size S, or if an M/L task is still best handled as one coherent unit, do NOT split and proceed with a normal PROMPT.md specification.
-- If size is uncertain at first, make a quick assessment from the available context before deciding whether to suggest a breakdown.`;
+- If the work appears to be Size S, or if an M/L task genuinely has 5 or fewer focused steps with a clear scope, proceed with a normal PROMPT.md specification.
+- If size is uncertain at first, make a quick assessment from the available context before deciding.`;
   }
 
   return `${isRevision ? "Revise" : "Specify"} this task and write the result to \`${promptPath}\`.

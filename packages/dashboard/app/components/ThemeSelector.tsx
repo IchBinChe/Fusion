@@ -38,6 +38,10 @@ const COLOR_THEMES: { value: ColorTheme; label: string; className: string }[] = 
   { value: "everforest", label: "Everforest", className: "theme-swatch-everforest" },
   { value: "rose-pine", label: "Rosé Pine", className: "theme-swatch-rose-pine" },
   { value: "kanagawa", label: "Kanagawa", className: "theme-swatch-kanagawa" },
+  { value: "night-owl", label: "Night Owl", className: "theme-swatch-night-owl" },
+  { value: "palenight", label: "Palenight", className: "theme-swatch-palenight" },
+  { value: "monokai-pro", label: "Monokai Pro", className: "theme-swatch-monokai-pro" },
+  { value: "slime", label: "Slime", className: "theme-swatch-slime" },
 ];
 
 /**

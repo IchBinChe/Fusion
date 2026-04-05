@@ -33,6 +33,10 @@ export const COLOR_THEMES = [
   "everforest",
   "rose-pine",
   "kanagawa",
+  "night-owl",
+  "palenight",
+  "monokai-pro",
+  "slime",
 ] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
 

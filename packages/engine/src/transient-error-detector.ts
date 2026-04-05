@@ -27,6 +27,7 @@ import { isUsageLimitError } from "./usage-limit-detector.js";
  * - Timeouts (ETIMEDOUT, timeout in connection context)
  * - Socket errors (socket hang up)
  * - Transport layer failures
+ * - AI provider abort errors (request was aborted — temporary streaming/API cancellations)
  */
 export const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
   // Proxy/gateway errors - indicate temporary routing issues
@@ -47,6 +48,10 @@ export const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
   // Timeout patterns (only when related to connections, not general timeouts)
   /timeout.*connection/i,
   /connection.*timeout/i,
+
+  // AI provider abort errors — temporary request cancellations (e.g., Anthropic streaming aborts)
+  // These occur when the provider's infrastructure drops an in-flight request.
+  /request was aborted/i,
 ];
 
 /**

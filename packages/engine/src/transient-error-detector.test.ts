@@ -78,6 +78,13 @@ describe("Transient Error Detector", () => {
       expect(isTransientError("timeout connection to server")).toBe(true);
     });
 
+    it("matches 'request was aborted' (AI provider abort errors)", () => {
+      expect(isTransientError("request was aborted")).toBe(true);
+      expect(isTransientError("Request was aborted")).toBe(true);
+      expect(isTransientError("REQUEST WAS ABORTED")).toBe(true);
+      expect(isTransientError("Error: request was aborted")).toBe(true);
+    });
+
     // Edge cases
     it("returns false for empty string", () => {
       expect(isTransientError("")).toBe(false);
@@ -122,6 +129,10 @@ describe("Transient Error Detector", () => {
       // "timeout" alone is not in the patterns (only connection timeouts)
       expect(isTransientError("timeout")).toBe(false);
       expect(isTransientError("Request timeout")).toBe(false);
+      // "abort" alone should not match — only "request was aborted" is transient
+      expect(isTransientError("abort")).toBe(false);
+      expect(isTransientError("Aborted")).toBe(false);
+      expect(isTransientError("The operation was aborted by user")).toBe(false);
     });
   });
 
@@ -139,6 +150,13 @@ describe("Transient Error Detector", () => {
       expect(classifyError("ECONNREFUSED")).toBe("transient");
       expect(classifyError("socket hang up")).toBe("transient");
       expect(classifyError("Connection refused")).toBe("transient");
+      expect(classifyError("request was aborted")).toBe("transient");
+    });
+
+    it("classifies 'Request was aborted' as 'transient', not 'usage-limit'", () => {
+      // Ensure abort errors are classified as transient, not usage-limit
+      expect(classifyError("Request was aborted")).toBe("transient");
+      expect(classifyError("REQUEST WAS ABORTED")).toBe("transient");
     });
 
     it("classifies all other errors as 'permanent'", () => {

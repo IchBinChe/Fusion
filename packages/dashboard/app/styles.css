@@ -91,8 +91,8 @@
 
   --triage: #d29922;
   --todo: #58a6ff;
-  --in-progress: #bc8cff;
-  --in-progress-rgb: 188, 140, 255;
+  --in-progress: #00e5ff;
+  --in-progress-rgb: 0, 229, 255;
   --in-review: #3fb950;
   --done: #8b949e;
 
@@ -8188,8 +8188,8 @@ html .column.drag-over * {
   /* Status colors (adjusted for light backgrounds) */
   --triage: #9a6700;
   --todo: #0969da;
-  --in-progress: #8250df;
-  --in-progress-rgb: 130, 80, 223;
+  --in-progress: #00bcd4;
+  --in-progress-rgb: 0, 188, 212;
   --in-review: #1a7f37;
   --done: #6e7781;
 
@@ -8436,8 +8436,8 @@ html .column.drag-over * {
 /* BERRY - Purple/pink tones */
 [data-color-theme="berry"] {
   --todo: #e040fb;
-  --in-progress: #ea80fc;
-  --in-progress-rgb: 234, 128, 252;
+  --in-progress: #00e5ff;
+  --in-progress-rgb: 0, 229, 255;
   --in-review: #b388ff;
   --triage: #ff4081;
   --done: #9575cd;
@@ -8456,8 +8456,8 @@ html .column.drag-over * {
 
 [data-color-theme="berry"][data-theme="light"] {
   --todo: #7b1fa2;
-  --in-progress: #8e24aa;
-  --in-progress-rgb: 142, 36, 170;
+  --in-progress: #00bcd4;
+  --in-progress-rgb: 0, 188, 212;
   --in-review: #9c27b0;
   --triage: #c2185b;
   --done: #673ab7;
@@ -9042,8 +9042,8 @@ html .column.drag-over * {
   --text-dim: #5c6370;
 
   --todo: #61afef;
-  --in-progress: #c678dd;
-  --in-progress-rgb: 198, 120, 221;
+  --in-progress: #00e5ff;
+  --in-progress-rgb: 0, 229, 255;
   --in-review: #98c379;
   --triage: #e5c07b;
   --done: #828997;
@@ -9137,8 +9137,8 @@ html .column.drag-over * {
   --text-dim: #6272a4;
 
   --todo: #8be9fd;
-  --in-progress: #bd93f9;
-  --in-progress-rgb: 189, 147, 249;
+  --in-progress: #00e5ff;
+  --in-progress-rgb: 0, 229, 255;
   --in-review: #50fa7b;
   --triage: #f1fa8c;
   --done: #6272a4;
@@ -9168,8 +9168,8 @@ html .column.drag-over * {
   --text-dim: #8888a0;
 
   --todo: #0097a7;
-  --in-progress: #7c4dff;
-  --in-progress-rgb: 124, 77, 255;
+  --in-progress: #00bcd4;
+  --in-progress-rgb: 0, 188, 212;
   --in-review: #2e8b57;
   --triage: #c98600;
   --done: #5a5a72;
@@ -9263,8 +9263,8 @@ html .column.drag-over * {
   --text-dim: #565f89;
 
   --todo: #7aa2f7;
-  --in-progress: #bb9af7;
-  --in-progress-rgb: 187, 154, 247;
+  --in-progress: #00e5ff;
+  --in-progress-rgb: 0, 229, 255;
   --in-review: #9ece6a;
   --triage: #e0af68;
   --done: #565f89;
@@ -9294,8 +9294,8 @@ html .column.drag-over * {
   --text-dim: #68709a;
 
   --todo: #3b5ea5;
-  --in-progress: #7755c0;
-  --in-progress-rgb: 119, 85, 192;
+  --in-progress: #00bcd4;
+  --in-progress-rgb: 0, 188, 212;
   --in-review: #48703e;
   --triage: #9a6b20;
   --done: #414868;

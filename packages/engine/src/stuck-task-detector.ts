@@ -66,6 +66,18 @@ export interface StuckTaskDetectorOptions {
    *  (caller is responsible for marking the task as terminally failed).
    *  Used by SelfHealingManager to enforce stuck kill budgets. */
   beforeRequeue?: (taskId: string) => Promise<boolean>;
+  /** Pre-kill callback invoked ONLY when reason is "loop".
+   *  Called BEFORE session.dispose() / moveTask("todo") so the caller can
+   *  attempt in-process recovery (e.g. compact-and-resume) without killing
+   *  the agent session.
+   *
+   *  Return `true` to signal "executor accepted ownership of recovery for this
+   *  run" — the detector will skip dispose/requeue and remove the task from
+   *  tracking (the caller is now responsible for the task's fate).
+   *  Return `false` to let the detector proceed with the normal kill/requeue path.
+   *
+   *  Errors in this callback fall through to the normal kill path (treated as `false`). */
+  onLoopDetected?: (event: StuckTaskEvent) => Promise<boolean>;
 }
 
 export class StuckTaskDetector {
@@ -74,6 +86,7 @@ export class StuckTaskDetector {
   private pollIntervalMs: number;
   private onStuck?: (event: StuckTaskEvent) => void;
   private beforeRequeue?: (taskId: string) => Promise<boolean>;
+  private onLoopDetected?: (event: StuckTaskEvent) => Promise<boolean>;
 
   constructor(
     private store: TaskStore,
@@ -82,6 +95,7 @@ export class StuckTaskDetector {
     this.pollIntervalMs = options.pollIntervalMs ?? 30_000;
     this.onStuck = options.onStuck;
     this.beforeRequeue = options.beforeRequeue;
+    this.onLoopDetected = options.onLoopDetected;
   }
 
   /**
@@ -283,6 +297,32 @@ export class StuckTaskDetector {
       activitySinceProgress,
       shouldRequeue,
     };
+
+    // ── Pre-kill loop interception ──────────────────────────────────
+    // When reason is "loop" and an onLoopDetected callback is registered,
+    // give the caller a chance to handle recovery in-process (e.g.
+    // compact-and-resume) before falling through to the kill/requeue path.
+    //
+    // If the callback returns true, the caller owns the task — we skip
+    // dispose/requeue and just untrack.  Errors fall through to normal kill.
+    if (reason === "loop" && this.onLoopDetected) {
+      try {
+        const handled = await this.onLoopDetected(event);
+        if (handled) {
+          stuckLog.log(
+            `${taskId} loop recovery accepted by onLoopDetected callback — ` +
+            `skipping kill/requeue (caller owns recovery)`,
+          );
+          // The caller is now responsible for the task; remove from tracking
+          // so we don't double-trigger.
+          this.tracked.delete(taskId);
+          return;
+        }
+      } catch (err) {
+        stuckLog.error(`onLoopDetected callback failed for ${taskId}:`, err);
+        // Fall through to normal kill path
+      }
+    }
 
     // Notify listeners before disposing the session so executor cleanup can
     // mark the abort as intentional before the disposed session unwinds.

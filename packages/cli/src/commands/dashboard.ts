@@ -577,6 +577,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     const executorRef: { current: TaskExecutor | null } = { current: null };
     const stuckTaskDetector = new StuckTaskDetector(store, {
       beforeRequeue: (taskId) => selfHealing.checkStuckBudget(taskId),
+      onLoopDetected: (event) => executorRef.current?.handleLoopDetected(event) ?? Promise.resolve(false),
       onStuck: (event) => {
         executorRef.current?.markStuckAborted(event.taskId, event.shouldRequeue);
         console.log(

@@ -808,4 +808,174 @@ describe("StuckTaskDetector", () => {
       vi.useRealTimers();
     });
   });
+
+  describe("onLoopDetected pre-kill callback", () => {
+    it("calls onLoopDetected before onStuck when reason is loop", async () => {
+      const callOrder: string[] = [];
+      const onLoopDetected = vi.fn(async () => { callOrder.push("onLoopDetected"); return false; });
+      const onStuck = vi.fn(() => { callOrder.push("onStuck"); });
+      const customDetector = new StuckTaskDetector(store, { onLoopDetected, onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // onLoopDetected should be called first
+      expect(onLoopDetected).toHaveBeenCalledTimes(1);
+      expect(onLoopDetected).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: "FN-001", reason: "loop" }),
+      );
+      expect(callOrder).toEqual(["onLoopDetected", "onStuck"]);
+
+      vi.useRealTimers();
+    });
+
+    it("skips kill/requeue when onLoopDetected returns true", async () => {
+      const onLoopDetected = vi.fn().mockResolvedValue(true);
+      const onStuck = vi.fn();
+      const customDetector = new StuckTaskDetector(store, { onLoopDetected, onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // onLoopDetected accepted recovery — no kill/requeue
+      expect(onLoopDetected).toHaveBeenCalledTimes(1);
+      expect(onStuck).not.toHaveBeenCalled();
+      expect(session.dispose).not.toHaveBeenCalled();
+      expect(customDetector.trackedCount).toBe(0); // untracked
+
+      vi.useRealTimers();
+    });
+
+    it("does NOT call onLoopDetected when reason is inactivity", async () => {
+      const onLoopDetected = vi.fn().mockResolvedValue(true);
+      const onStuck = vi.fn();
+      const customDetector = new StuckTaskDetector(store, { onLoopDetected, onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      // No activity — pure inactivity
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // onLoopDetected should NOT be called for inactivity
+      expect(onLoopDetected).not.toHaveBeenCalled();
+      // Normal kill path should still execute
+      expect(onStuck).toHaveBeenCalled();
+      expect(session.dispose).toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("falls through to normal kill when onLoopDetected returns false", async () => {
+      const onLoopDetected = vi.fn().mockResolvedValue(false);
+      const onStuck = vi.fn();
+      const customDetector = new StuckTaskDetector(store, { onLoopDetected, onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // Callback declined — normal kill path
+      expect(onLoopDetected).toHaveBeenCalledTimes(1);
+      expect(onStuck).toHaveBeenCalled();
+      expect(session.dispose).toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled(); // executor handles move
+
+      vi.useRealTimers();
+    });
+
+    it("falls through to normal kill when onLoopDetected throws", async () => {
+      const onLoopDetected = vi.fn().mockRejectedValue(new Error("callback exploded"));
+      const onStuck = vi.fn();
+      const customDetector = new StuckTaskDetector(store, { onLoopDetected, onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // Error in callback — normal kill path
+      expect(onLoopDetected).toHaveBeenCalledTimes(1);
+      expect(onStuck).toHaveBeenCalled();
+      expect(session.dispose).toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("does not call onLoopDetected when callback is not registered", async () => {
+      // No onLoopDetected callback — normal kill path
+      const onStuck = vi.fn();
+      const customDetector = new StuckTaskDetector(store, { onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // No callback registered — goes straight to onStuck + dispose
+      expect(onStuck).toHaveBeenCalled();
+      expect(session.dispose).toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("receives correct event payload with shouldRequeue from beforeRequeue", async () => {
+      const beforeRequeue = vi.fn().mockResolvedValue(false); // budget exhausted
+      const onLoopDetected = vi.fn().mockResolvedValue(true);
+      const customDetector = new StuckTaskDetector(store, { beforeRequeue, onLoopDetected });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      await customDetector.killAndRetry("FN-001", 60000);
+
+      // onLoopDetected should receive shouldRequeue=false from beforeRequeue
+      expect(onLoopDetected).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskId: "FN-001",
+          reason: "loop",
+          shouldRequeue: false,
+        }),
+      );
+
+      vi.useRealTimers();
+    });
+  });
 });

@@ -59,6 +59,56 @@ export function describeModel(session: AgentSession): string {
   return `${model.provider}/${model.id}`;
 }
 
+/**
+ * Default instructions used when calling `session.compact()` for loop recovery.
+ * These guide the compaction summary to preserve essential context while
+ * freeing up the context window for continued work.
+ */
+export const COMPACTION_FALLBACK_INSTRUCTIONS = [
+  "Summarize all completed steps concisely.",
+  "Preserve the current step number and any in-progress work details.",
+  "Keep references to key files, decisions, and error states.",
+  "Discard verbose tool output, repeated attempts, and exploration history.",
+].join(" ");
+
+/**
+ * Compact an agent session's context to free up the context window.
+ *
+ * Uses the SDK's native `session.compact()` method when available (the
+ * preferred path — it produces structured, LLM-generated summaries).
+ *
+ * @param session — The agent session to compact
+ * @param customInstructions — Optional instructions for the compaction summary.
+ *   When not provided, uses COMPACTION_FALLBACK_INSTRUCTIONS.
+ * @returns The compaction result with summary and token metrics, or null if
+ *   compaction was not available or failed.
+ */
+export async function compactSessionContext(
+  session: AgentSession,
+  customInstructions?: string,
+): Promise<{ summary: string; tokensBefore: number } | null> {
+  const instructions = customInstructions ?? COMPACTION_FALLBACK_INSTRUCTIONS;
+
+  // Check if session.compact is available (runtime capability detection)
+  if (typeof (session as any).compact !== "function") {
+    return null;
+  }
+
+  try {
+    const result = await (session as any).compact(instructions);
+    if (result && typeof result === "object") {
+      return {
+        summary: result.summary ?? "",
+        tokensBefore: result.tokensBefore ?? 0,
+      };
+    }
+    return null;
+  } catch {
+    // Compaction failed — return null so caller can fall through to kill/requeue
+    return null;
+  }
+}
+
 export interface AgentOptions {
   cwd: string;
   systemPrompt: string;

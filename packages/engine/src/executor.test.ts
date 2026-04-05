@@ -5,6 +5,13 @@ import { AgentSemaphore } from "./concurrency.js";
 vi.mock("./pi.js", () => ({
   createKbAgent: vi.fn(),
   describeModel: vi.fn().mockReturnValue("mock-provider/mock-model"),
+  compactSessionContext: vi.fn(async (session, instructions) => {
+    // Delegate to session.compact if available (supports loop recovery tests)
+    if (typeof (session as any).compact === "function") {
+      return (session as any).compact(instructions);
+    }
+    return null;
+  }),
   promptWithFallback: vi.fn(async (session, prompt, options) => {
     if (options === undefined) {
       await session.prompt(prompt);
@@ -79,6 +86,7 @@ import { WorktreePool } from "./worktree-pool.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
 import type { Column, Task, TaskDetail } from "@fusion/core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { StuckTaskDetector } from "./stuck-task-detector.js";
 
 const mockedCreateHaiAgent = vi.mocked(createKbAgent);
 const mockedSessionManager = vi.mocked(SessionManager);
@@ -6738,5 +6746,139 @@ describe("Real-time steering injection", () => {
     // Complete execution
     resolvePrompt!();
     await executePromise;
+  });
+});
+
+// ── Loop recovery (compact-and-resume) integration tests ────────────
+
+describe("TaskExecutor loop recovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function createMockSessionForLoopRecovery(overrides?: { compactResult?: any }) {
+    const defaultResult = {
+      summary: "Compacted conversation",
+      tokensBefore: 150000,
+    };
+    const compactRetVal = overrides && "compactResult" in overrides ? overrides.compactResult : defaultResult;
+    const compact = vi.fn(async () => compactRetVal);
+    const steer = vi.fn(async () => {});
+
+    return {
+      prompt: vi.fn(async () => {}),
+      dispose: vi.fn(),
+      subscribe: vi.fn(),
+      setThinkingLevel: vi.fn(),
+      steer,
+      compact,
+      sessionFile: "/tmp/test-session.json",
+      model: { provider: "mock", id: "mock-model", name: "Mock" },
+      sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+      state: {},
+    };
+  }
+
+  function setupExecutorWithActiveSession(mockSession: ReturnType<typeof createMockSessionForLoopRecovery>) {
+    const store = createMockStore();
+    (store.getSettings as any).mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test-root");
+
+    // Directly inject an active session (avoids full execute() chain)
+    (executor as any).activeSessions.set("FN-001", {
+      session: mockSession,
+      seenSteeringIds: new Set(),
+    });
+
+    return { store, executor, mockSession };
+  }
+
+  it("handleLoopDetected returns true and compacts session when active session exists", async () => {
+    const mockSession = createMockSessionForLoopRecovery();
+    const { store, executor } = setupExecutorWithActiveSession(mockSession);
+
+    const result = await executor.handleLoopDetected({
+      taskId: "FN-001",
+      reason: "loop",
+      noProgressMs: 600000,
+      inactivityMs: 0,
+      activitySinceProgress: 100,
+      shouldRequeue: true,
+    });
+
+    expect(result).toBe(true);
+    expect(mockSession.compact).toHaveBeenCalled();
+    expect(mockSession.steer).toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("compact-and-resume"),
+    );
+  });
+
+  it("handleLoopDetected returns false when no active session", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test-root");
+
+    // No session active (activeSessions is empty)
+    const result = await executor.handleLoopDetected({
+      taskId: "FN-001",
+      reason: "loop",
+      noProgressMs: 600000,
+      inactivityMs: 0,
+      activitySinceProgress: 100,
+      shouldRequeue: true,
+    });
+
+    expect(result).toBe(false);
+  });
+
+  it("handleLoopDetected returns false when attempt ceiling reached", async () => {
+    const mockSession = createMockSessionForLoopRecovery();
+    const { executor } = setupExecutorWithActiveSession(mockSession);
+
+    // First call succeeds
+    const result1 = await executor.handleLoopDetected({
+      taskId: "FN-001",
+      reason: "loop",
+      noProgressMs: 600000,
+      inactivityMs: 0,
+      activitySinceProgress: 100,
+      shouldRequeue: true,
+    });
+    expect(result1).toBe(true);
+
+    // Second call hits ceiling (max 1 attempt per execute() lifecycle)
+    const result2 = await executor.handleLoopDetected({
+      taskId: "FN-001",
+      reason: "loop",
+      noProgressMs: 600000,
+      inactivityMs: 0,
+      activitySinceProgress: 200,
+      shouldRequeue: true,
+    });
+    expect(result2).toBe(false);
+  });
+
+  it("handleLoopDetected returns false when compaction fails", async () => {
+    const mockSession = createMockSessionForLoopRecovery({ compactResult: null });
+    const { executor } = setupExecutorWithActiveSession(mockSession);
+
+    const result = await executor.handleLoopDetected({
+      taskId: "FN-001",
+      reason: "loop",
+      noProgressMs: 600000,
+      inactivityMs: 0,
+      activitySinceProgress: 100,
+      shouldRequeue: true,
+    });
+
+    expect(result).toBe(false);
   });
 });

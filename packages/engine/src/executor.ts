@@ -5,7 +5,7 @@ import type { TaskStore, Task, TaskDetail, StepStatus, Settings, WorkflowStep, M
 import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
 import { Type, type Static } from "@mariozechner/pi-ai";
-import { createKbAgent, describeModel, promptWithFallback } from "./pi.js";
+import { createKbAgent, describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
@@ -16,7 +16,8 @@ import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./u
 import { isTransientError } from "./transient-error-detector.js";
 import { withRateLimitRetry } from "./rate-limit-retry.js";
 import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./recovery-policy.js";
-import type { StuckTaskDetector } from "./stuck-task-detector.js";
+import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js";
+import { isContextLimitError } from "./context-limit-detector.js";
 
 // Re-export for backward compatibility (tests import from executor.ts)
 export { summarizeToolArgs } from "./agent-logger.js";
@@ -186,6 +187,10 @@ export class TaskExecutor {
   private depAborted = new Set<string>();
   /** Tasks killed by stuck task detector. Value = shouldRequeue (budget not exhausted). */
   private stuckAborted = new Map<string, boolean>();
+  /** In-memory loop recovery state per task. Keyed by taskId, not persisted.
+   *  Tracks compact-and-resume attempt count per execute() lifecycle.
+   *  Reset at execute() lifecycle end (finally block). */
+  private loopRecoveryState = new Map<string, { attempts: number; pending: boolean }>();
 
   /**
    * @param store — Task store instance (also used to listen for events)
@@ -685,6 +690,37 @@ export class TaskExecutor {
           // the error is stored on session.state.error instead of being thrown.
           checkSessionError(session);
 
+          // If loop recovery is pending (compact-and-resume was triggered by
+          // handleLoopDetected), consume the pending state and resume with a
+          // deterministic prompt. The session has already been compacted, so
+          // we just need to send a fresh prompt to continue execution.
+          const loopState = this.loopRecoveryState.get(task.id);
+          if (loopState?.pending) {
+            loopState.pending = false;
+            executorLog.log(`${task.id} consuming loop recovery — resuming with fresh context`);
+            await this.store.logEntry(task.id, "Resuming execution after context compaction — taking a different approach");
+
+            // Reset activity tracking so the detector doesn't immediately re-trigger
+            stuckDetector?.recordProgress(task.id);
+
+            const resumePrompt = [
+              "Your conversation was compacted because you were looping without making progress.",
+              "Review the current state of the worktree carefully:",
+              "1. Check `git log --oneline` to see what's already been committed",
+              "2. Read the files you were working on to understand current state",
+              "3. Review the PROMPT.md steps to see which are still pending",
+              "",
+              "Take a DIFFERENT approach from what you were doing before.",
+              "If the current step is complete, call task_update to mark it done and move to the next step.",
+              "If you're stuck on a problem, try a simpler or alternative solution.",
+              "",
+              "Continue the task from where you left off.",
+            ].join("\n");
+
+            await promptWithFallback(session, resumePrompt);
+            checkSessionError(session);
+          }
+
           // If dependency was added during execution, discard worktree and move to triage
           if (this.depAborted.has(task.id)) {
             this.depAborted.delete(task.id);
@@ -874,8 +910,52 @@ export class TaskExecutor {
         this.stuckAborted.delete(task.id);
         executorLog.log(`${task.id} terminated by stuck task detector — will ${stuckRequeue ? "retry" : "not retry (budget exhausted)"}`);
       } else {
-        // Check if the error is a usage-limit error and trigger global pause
-        if (this.options.usageLimitPauser && isUsageLimitError(err.message)) {
+        // Check if the error is a context-limit error and attempt compact-and-resume
+        // before falling through to the normal failure path. This catches context
+        // overflow errors from the LLM provider that occur during prompt execution.
+        const loopState = this.loopRecoveryState.get(task.id);
+        const loopAttempts = loopState?.attempts ?? 0;
+
+        if (isContextLimitError(err.message) && loopAttempts < 1) {
+          const activeEntry = this.activeSessions.get(task.id);
+          if (activeEntry) {
+            executorLog.log(`${task.id} context limit error — attempting compact-and-resume`);
+            await this.store.logEntry(task.id, `Context limit error — attempting compact-and-resume: ${err.message}`);
+
+            const compactResult = await compactSessionContext(activeEntry.session);
+            if (compactResult) {
+              this.loopRecoveryState.set(task.id, { attempts: loopAttempts + 1, pending: true });
+              executorLog.log(`${task.id} context compaction succeeded — resuming`);
+
+              try {
+                this.options.stuckTaskDetector?.recordProgress(task.id);
+                const resumePrompt = [
+                  "Your conversation hit the context window limit and has been compacted.",
+                  "Review the current state of the worktree and continue from where you left off.",
+                  "Check git log and current files to understand what's already been done.",
+                  "Take a different, more efficient approach if needed.",
+                  "",
+                  "Continue the task.",
+                ].join("\n");
+                await promptWithFallback(activeEntry.session, resumePrompt);
+                checkSessionError(activeEntry.session);
+
+                // Check for loop recovery pending from the compact-and-resume
+                const updatedState = this.loopRecoveryState.get(task.id);
+                if (updatedState?.pending) {
+                  updatedState.pending = false;
+                  await promptWithFallback(activeEntry.session, "Continue working on the remaining steps.");
+                  checkSessionError(activeEntry.session);
+                }
+              } catch (resumeErr: any) {
+                // Resume after context compaction failed — fall through to normal failure
+                executorLog.error(`${task.id} resume after context compaction failed: ${resumeErr.message}`);
+              }
+            } else {
+              executorLog.log(`${task.id} context compaction failed — falling through to normal failure`);
+            }
+          }
+        } else if (this.options.usageLimitPauser && isUsageLimitError(err.message)) {
           await this.options.usageLimitPauser.onUsageLimitHit("executor", task.id, err.message);
         } else if (isTransientError(err.message)) {
           // Transient network/infrastructure error — use bounded recovery policy
@@ -916,6 +996,10 @@ export class TaskExecutor {
       }
     } finally {
       this.executing.delete(task.id);
+
+      // Reset loop recovery state at end of execute() lifecycle.
+      // State is in-memory and per-run — should not persist across attempts.
+      this.loopRecoveryState.delete(task.id);
 
       // Requeue stuck-killed task AFTER this.executing is cleared.
       // This prevents the race where the scheduler re-dispatches the task
@@ -2150,6 +2234,72 @@ If issues are found that need attention, describe them clearly.`;
    */
   markStuckAborted(taskId: string, shouldRequeue: boolean = true): void {
     this.stuckAborted.set(taskId, shouldRequeue);
+  }
+
+  /**
+   * Handle a loop-detected event from the stuck task detector.
+   * Attempts an in-process compact-and-resume before falling back to kill/requeue.
+   *
+   * This method is the `onLoopDetected` callback wired through the dashboard.
+   * It:
+   * 1. Checks if the task has an active session
+   * 2. Rejects if the one-attempt ceiling has been reached
+   * 3. Calls `compactSessionContext()` to compact the conversation
+   * 4. Sets recovery-pending state so the execution flow can resume
+   *
+   * @returns true if the executor accepted recovery ownership (detector skips kill),
+   *   false if recovery should not be attempted (detector proceeds with kill/requeue)
+   */
+  async handleLoopDetected(event: StuckTaskEvent): Promise<boolean> {
+    const { taskId } = event;
+    const activeEntry = this.activeSessions.get(taskId);
+
+    // No active session — can't compact, let detector kill/requeue
+    if (!activeEntry) {
+      executorLog.log(`${taskId} loop detected but no active session — falling back to kill/requeue`);
+      return false;
+    }
+
+    // Check attempt ceiling (max 1 compact-and-resume per execute() lifecycle)
+    const state = this.loopRecoveryState.get(taskId);
+    if (state && state.attempts >= 1) {
+      executorLog.log(`${taskId} loop detected but compact ceiling reached — falling back to kill/requeue`);
+      return false;
+    }
+
+    // Attempt compaction
+    const attempt = (state?.attempts ?? 0) + 1;
+    executorLog.log(`${taskId} loop detected (attempt ${attempt}) — attempting compact-and-resume`);
+    await this.store.logEntry(taskId, `Loop detected (${event.activitySinceProgress} events since last progress) — attempting compact-and-resume (attempt ${attempt})`);
+
+    const compactResult = await compactSessionContext(activeEntry.session);
+    if (!compactResult) {
+      executorLog.log(`${taskId} compaction failed or unavailable — falling back to kill/requeue`);
+      await this.store.logEntry(taskId, "Context compaction failed or unavailable — falling back to kill/requeue");
+      return false;
+    }
+
+    executorLog.log(`${taskId} compaction succeeded (freed ${compactResult.tokensBefore} tokens) — setting recovery-pending`);
+    await this.store.logEntry(taskId, `Context compacted successfully — will resume with fresh context`);
+
+    // Mark recovery-pending so the execution flow can consume it
+    this.loopRecoveryState.set(taskId, { attempts: attempt, pending: true });
+
+    // Steer the session with a resume prompt to break the loop
+    try {
+      await activeEntry.session.steer(
+        "⚠️ Loop detected: you were repeating actions without making progress. " +
+        "The conversation has been compacted. Review the current state carefully, " +
+        "check what's already been done (git log, file contents), and take a different " +
+        "approach. Do NOT repeat the same actions. Advance to the next step if the " +
+        "current work is complete.",
+      );
+    } catch (err: any) {
+      executorLog.error(`${taskId} failed to steer after compaction: ${err.message}`);
+      // Recovery-pending is still set — the execution flow will handle it
+    }
+
+    return true;
   }
 
   getWorktreePath(taskId: string): string | undefined {

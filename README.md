@@ -858,6 +858,31 @@ Automatically resolves:
 ```
 Terminates and retries tasks with no agent activity for the specified duration (10 minutes in this example).
 
+The detector distinguishes between two stuck reasons:
+
+- **Inactivity** — no heartbeats at all (session appears dead). Immediately kills and re-queues.
+- **Loop** — agent is active but not making step progress despite lots of activity (e.g., context growth causing repetitive behavior). Triggers compact-and-resume before falling back to kill/requeue.
+
+**Loop Recovery (Compact-and-Resume):**
+
+When a loop is detected, the system attempts one in-process recovery before killing the agent:
+
+1. The stuck task detector calls the `onLoopDetected` callback before terminating the session
+2. The executor compacts the conversation context using `session.compact()` (or falls back to deterministic compaction instructions)
+3. After compaction, the agent receives a resume prompt asking it to review current state and take a different approach
+4. If the agent loops again after compaction, the second detection falls through to the normal kill/requeue path
+
+This one-attempt ceiling prevents recovery churn while giving the agent a chance to break out of context-growth loops. The recovery state is in-memory per `execute()` lifecycle — it does not persist across retries.
+
+**Context-Limit Recovery:**
+
+When an LLM provider returns a context-window overflow error (e.g., "prompt is too long", "exceeds the context window"), the executor catches it before the normal failure path:
+
+1. If no prior compact-and-resume attempt exists, the executor compacts the session and resumes with a fresh prompt
+2. If compaction fails or the ceiling has been reached, the error falls through to the normal failure/requeue path
+
+This handles the common case where long-running agent conversations grow beyond the model's context window.
+
 **Pause Behavior for In-Progress Tasks:**
 
 Pausing a task that is currently executing will immediately terminate the agent session and move the task back to `todo`. When the task is later unpaused, the scheduler immediately picks it up (event-driven, no poll-cycle delay) and resumes execution from where it left off (step progress is preserved). The task is never left stranded in `in-progress` after a pause - both the error-throwing and graceful session exit paths move it to `todo`. Paused tasks are never marked as `failed`.

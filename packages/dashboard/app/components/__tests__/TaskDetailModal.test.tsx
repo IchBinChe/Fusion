@@ -40,6 +40,9 @@ vi.mock("lucide-react", () => ({
   ChevronUp: () => null,
   ChevronDown: () => null,
   X: () => null,
+  CircleDot: () => null,
+  XCircle: () => null,
+  GitMerge: () => null,
 }));
 
 vi.mock("../../hooks/useAgentLogs", () => ({

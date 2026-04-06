@@ -109,12 +109,12 @@ describe("GitHubBadge", () => {
       const noReasonIssue: IssueInfo = { ...mockIssueInfo, state: "closed", stateReason: undefined };
       const { container } = render(<GitHubBadge issueInfo={noReasonIssue} />);
 
-      // Should not have any modifier class
+      // Should use --closed modifier class for default fallback
       const badge = container.querySelector(".card-github-badge");
       expect(badge).toBeDefined();
       expect(badge?.classList.contains("card-github-badge--open")).toBe(false);
       expect(badge?.classList.contains("card-github-badge--completed")).toBe(false);
-      expect(badge?.classList.contains("card-github-badge--closed")).toBe(false);
+      expect(badge?.classList.contains("card-github-badge--closed")).toBe(true);
     });
   });
 

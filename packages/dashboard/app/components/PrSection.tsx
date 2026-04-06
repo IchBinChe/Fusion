@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare } from "lucide-react";
+import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare, CircleDot, XCircle, GitMerge } from "lucide-react";
 import type { PrInfo } from "@fusion/core";
 import { createPr, refreshPrStatus, type PrRefreshResponse } from "../api";
 import type { ToastType } from "../hooks/useToast";
@@ -15,10 +15,10 @@ interface PrSectionProps {
   addToast: (message: string, type?: ToastType) => void;
 }
 
-const STATUS_COLORS = {
-  open: { bg: "rgba(63,185,80,0.15)", text: "#3fb950", icon: "🔵" },
-  closed: { bg: "rgba(218,54,51,0.15)", text: "#da3633", icon: "⚪" },
-  merged: { bg: "rgba(188,140,255,0.15)", text: "#bc8cff", icon: "🟣" },
+const STATUS_ICONS: Record<string, React.ReactNode> = {
+  open: <CircleDot size={16} />,
+  closed: <XCircle size={16} />,
+  merged: <GitMerge size={16} />,
 };
 
 export function PrSection({
@@ -161,7 +161,7 @@ export function PrSection({
   }
 
   // PR exists - show PR card
-  const statusStyle = STATUS_COLORS[prInfo.status];
+  const statusIcon = STATUS_ICONS[prInfo.status] ?? <CircleDot size={16} />;
   const blockingReasons = refreshState?.blockingReasons ?? [];
 
   return (
@@ -171,14 +171,12 @@ export function PrSection({
         Pull Request
       </h4>
       <div
-        className="pr-card pr-card--status"
-        style={{ background: statusStyle.bg }}
+        className={`pr-card pr-card--status-${prInfo.status}`}
       >
         <div className="pr-header">
-          <span className="pr-status-icon">{statusStyle.icon}</span>
+          <span className="pr-status-icon">{statusIcon}</span>
           <span
-            className="pr-status-badge"
-            style={{ background: statusStyle.bg, color: statusStyle.text }}
+            className={`pr-status-badge pr-status-badge--${prInfo.status}`}
           >
             {prInfo.status}
           </span>

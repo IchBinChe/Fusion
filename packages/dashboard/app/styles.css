@@ -114,6 +114,18 @@
   --ws-quality: #3b82f6;
   --ws-security: #ef4444;
 
+  /* Status background tokens (theme-aware via color-mix) */
+  --status-triage-bg: color-mix(in srgb, var(--triage) 15%, transparent);
+  --status-triage-bg-deep: color-mix(in srgb, var(--triage) 20%, transparent);
+  --status-todo-bg: color-mix(in srgb, var(--todo) 15%, transparent);
+  --status-in-progress-bg: color-mix(in srgb, var(--in-progress) 15%, transparent);
+  --status-in-review-bg: color-mix(in srgb, var(--in-review) 15%, transparent);
+  --status-done-bg: color-mix(in srgb, var(--done) 15%, transparent);
+  --status-archived-bg: color-mix(in srgb, var(--text-muted, #8b949e) 10%, transparent);
+  --status-done-bg-deep: color-mix(in srgb, var(--done) 20%, transparent);
+  --status-error-bg: color-mix(in srgb, var(--color-error-dark, #da3633) 15%, transparent);
+  --status-error-bg-deep: color-mix(in srgb, var(--color-error-dark, #da3633) 20%, transparent);
+
   /* Executor status bar state accents */
   --executor-status-error-bg: color-mix(in srgb, var(--color-error) 8%, transparent);
 
@@ -1049,19 +1061,54 @@ body {
 }
 
 .card-status-badge.failed {
-  background: rgba(218, 54, 51, 0.15);
+  background: var(--status-error-bg);
   color: var(--color-error-dark);
 }
 
 .card-status-badge.stuck {
-  background: rgba(210, 153, 34, 0.2);
+  background: var(--status-triage-bg-deep);
   color: var(--triage);
   animation: stuck-pulse 2s ease-in-out infinite;
 }
 
+.card-status-badge.paused {
+  background: var(--status-done-bg-deep);
+  color: var(--text-muted, #8b949e);
+}
+
+.card-status-badge.awaiting-approval {
+  background: var(--status-triage-bg-deep);
+  color: var(--triage);
+}
+
+.card-status-badge--triage {
+  background: var(--status-triage-bg);
+  color: var(--triage);
+}
+.card-status-badge--todo {
+  background: var(--status-todo-bg);
+  color: var(--todo);
+}
+.card-status-badge--in-progress {
+  background: var(--status-in-progress-bg);
+  color: var(--in-progress);
+}
+.card-status-badge--in-review {
+  background: var(--status-in-review-bg);
+  color: var(--in-review);
+}
+.card-status-badge--done {
+  background: var(--status-done-bg);
+  color: var(--done);
+}
+.card-status-badge--archived {
+  background: var(--status-archived-bg);
+  color: var(--text-muted, #8b949e);
+}
+
 .card.stuck {
   border-left: 3px solid var(--triage);
-  background: rgba(210, 153, 34, 0.06);
+  background: color-mix(in srgb, var(--triage) 6%, transparent);
 }
 
 @keyframes stuck-pulse {
@@ -3179,6 +3226,66 @@ body {
   font-size: 12px;
   font-weight: 500;
   text-transform: capitalize;
+}
+
+/* PR status badge theme-aware colors */
+.pr-status-badge--open {
+  background: var(--status-in-review-bg);
+  color: var(--in-review);
+}
+.pr-status-badge--closed {
+  background: var(--status-error-bg);
+  color: var(--color-error-dark);
+}
+.pr-status-badge--merged {
+  background: color-mix(in srgb, var(--in-progress) 15%, transparent);
+  color: var(--in-progress);
+}
+
+/* PR card status background */
+.pr-card--status-open {
+  background: var(--status-in-review-bg);
+}
+.pr-card--status-closed {
+  background: var(--status-error-bg);
+}
+.pr-card--status-merged {
+  background: color-mix(in srgb, var(--in-progress) 15%, transparent);
+}
+
+/* GitHub badge base styles */
+.card-github-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* GitHub badge theme-aware colors */
+.card-github-badge--open {
+  background: color-mix(in srgb, var(--in-review) 20%, transparent);
+  color: var(--in-review);
+}
+.card-github-badge--closed {
+  background: color-mix(in srgb, var(--color-error) 20%, transparent);
+  color: var(--color-error);
+}
+.card-github-badge--merged {
+  background: color-mix(in srgb, var(--in-progress) 20%, transparent);
+  color: var(--in-progress);
+}
+.card-github-badge--completed {
+  background: color-mix(in srgb, var(--in-progress) 20%, transparent);
+  color: var(--in-progress);
+}
+.card-github-badge--not-planned {
+  background: color-mix(in srgb, var(--text-muted, #8b949e) 15%, transparent);
+  color: var(--text-muted, #8b949e);
 }
 
 .pr-number {
@@ -8445,6 +8552,11 @@ html .column.drag-over * {
   --ws-teal: #0d9488;
   --ws-quality: #2563eb;
   --ws-security: #dc2626;
+
+  /* Status error colors for light mode */
+  --color-error-dark: #a40e26;
+  --status-error-bg: color-mix(in srgb, var(--color-error-dark, #a40e26) 15%, transparent);
+  --status-error-bg-deep: color-mix(in srgb, var(--color-error-dark, #a40e26) 20%, transparent);
 
   /* Logo accent for light mode */
   --logo-accent: var(--todo);

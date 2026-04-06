@@ -2977,10 +2977,11 @@ describe("TaskCard awaiting-approval state", () => {
     );
 
     const badge = screen.getByText("Awaiting Approval") as HTMLElement;
-    // The badge should use the triage amber color
-    expect(badge.style.color).toBe("var(--triage)");
-    // JSDOM may normalize rgba() with or without spaces, so normalize for comparison
-    expect(badge.style.background.replace(/\s+/g, "")).toBe("rgba(210,153,34,0.2)");
+    // The badge should use the awaiting-approval CSS class (no inline styles)
+    expect(badge.classList.contains("awaiting-approval")).toBe(true);
+    // Inline styles should not contain hardcoded colors
+    expect(badge.style.background).toBe("");
+    expect(badge.style.color).toBe("");
   });
 
   it("awaiting-approval card does NOT look like other states (no agent-active, failed, or paused)", () => {

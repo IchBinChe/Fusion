@@ -42,24 +42,6 @@ function abbreviateMissionTitle(title: string): string {
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const COLUMN_COLOR_MAP: Record<Column, string> = {
-  triage: "rgba(210,153,34,0.15)",
-  todo: "rgba(88,166,255,0.15)",
-  "in-progress": "rgba(188,140,255,0.15)",
-  "in-review": "rgba(63,185,80,0.15)",
-  done: "rgba(139,148,158,0.15)",
-  archived: "rgba(120,120,120,0.1)",
-};
-
-const COLUMN_TEXT_COLOR_MAP: Record<Column, string> = {
-  triage: "var(--triage)",
-  todo: "var(--todo)",
-  "in-progress": "var(--in-progress)",
-  "in-review": "var(--in-review)",
-  done: "var(--done)",
-  archived: "var(--text-secondary)",
-};
-
 const EDITABLE_COLUMNS: Set<Column> = new Set(["triage", "todo"]);
 
 const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "specifying"]);
@@ -635,21 +617,14 @@ function TaskCardComponent({
         <span className="card-id">{task.id}</span>
         {isPaused && (
           <span
-            className="card-status-badge"
-            style={{ background: "rgba(139,148,158,0.2)", color: "var(--text-secondary, #888)" }}
+            className="card-status-badge paused"
           >
             paused
           </span>
         )}
         {!isPaused && task.status && task.status !== "queued" && (
           <span
-            className={`card-status-badge${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(task.status) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
-            style={isAwaitingApproval
-              ? { background: "rgba(210,153,34,0.2)", color: "var(--triage)" }
-              : isFailed
-                ? { background: "rgba(218,54,51,0.15)", color: "#da3633" }
-                : { background: COLUMN_COLOR_MAP[task.column], color: COLUMN_TEXT_COLOR_MAP[task.column] }
-            }
+            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(task.status) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
             {isStuck ? "Stuck" : isAwaitingApproval ? "Awaiting Approval" : task.status}
           </span>
@@ -735,7 +710,7 @@ function TaskCardComponent({
                   className="card-progress-fill"
                   style={{
                     width: `${(completedSteps / totalSteps) * 100}%`,
-                    backgroundColor: COLUMN_TEXT_COLOR_MAP[task.column],
+                    backgroundColor: `var(--${task.column})`,
                   }}
                 />
               </div>

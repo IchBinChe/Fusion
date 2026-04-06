@@ -1,0 +1,326 @@
+import { describe, it, expect } from "vitest";
+import fs from "fs";
+import path from "path";
+
+/**
+ * Theme-safety regression tests for status color tokens across
+ * TaskCard, GitHubBadge, and PrSection components.
+ *
+ * These tests verify that hardcoded rgba/hex colors have been replaced
+ * with theme-aware CSS custom properties using color-mix(), ensuring
+ * correct rendering across all 31 color themes and both light/dark modes.
+ */
+
+describe("Status color CSS custom properties", () => {
+  const stylesPath = path.resolve(__dirname, "../styles.css");
+  let css: string;
+
+  beforeAll(() => {
+    css = fs.readFileSync(stylesPath, "utf-8");
+  });
+
+  it("defines --status-triage-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-triage-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--triage) 15%, transparent)");
+  });
+
+  it("defines --status-todo-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-todo-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--todo) 15%, transparent)");
+  });
+
+  it("defines --status-in-progress-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-in-progress-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--in-progress) 15%, transparent)");
+  });
+
+  it("defines --status-in-review-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-in-review-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--in-review) 15%, transparent)");
+  });
+
+  it("defines --status-done-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-done-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--done) 15%, transparent)");
+  });
+
+  it("defines --status-error-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-error-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--color-error-dark");
+  });
+
+  it("defines --status-archived-bg custom property in :root using color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--status-archived-bg");
+    expect(rootBlock).toContain("color-mix(in srgb, var(--text-muted");
+  });
+
+  it("defines light theme override for --status-error-bg", () => {
+    const lightBlock = extractLightThemeBlock(css);
+    expect(lightBlock).toContain("--status-error-bg");
+    expect(lightBlock).toContain("--status-error-bg-deep");
+  });
+});
+
+describe("TaskCard theme safety", () => {
+  const componentPath = path.resolve(__dirname, "../components/TaskCard.tsx");
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(componentPath, "utf-8");
+  });
+
+  it("does not contain COLUMN_COLOR_MAP with hardcoded rgba colors", () => {
+    expect(source).not.toContain("COLUMN_COLOR_MAP");
+    expect(source).not.toContain("rgba(210,153,34");
+    expect(source).not.toContain("rgba(88,166,255");
+    expect(source).not.toContain("rgba(188,140,255");
+    expect(source).not.toContain("rgba(63,185,80");
+    expect(source).not.toContain("rgba(139,148,158");
+    expect(source).not.toContain("rgba(120,120,120");
+  });
+
+  it("does not contain hardcoded paused badge color rgba(139,148,158,0.2)", () => {
+    expect(source).not.toContain("rgba(139,148,158");
+  });
+
+  it("does not contain hardcoded failed badge colors", () => {
+    expect(source).not.toContain("rgba(218,54,51");
+    expect(source).not.toContain("#da3633");
+  });
+
+  it("does not contain hardcoded awaiting-approval badge color", () => {
+    expect(source).not.toContain("rgba(210,153,34,0.2)");
+  });
+
+  it("uses CSS classes for status badges instead of inline styles", () => {
+    // Should use card-status-badge--${column} pattern
+    expect(source).toContain("card-status-badge--");
+    // Should use paused class
+    expect(source).toContain('"card-status-badge paused"');
+  });
+
+  it("does not contain hardcoded hex colors in inline styles", () => {
+    // No raw #rrggbb or #rgb hex values in the component source
+    const hexPattern = /"[^"]*#[0-9a-fA-F]{3,8}[^"]*"/g;
+    const matches = source.match(hexPattern);
+    expect(
+      matches,
+      `Found hardcoded hex colors in TaskCard.tsx: ${matches}`
+    ).toBeNull();
+  });
+});
+
+describe("GitHubBadge theme safety", () => {
+  const componentPath = path.resolve(__dirname, "../components/GitHubBadge.tsx");
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(componentPath, "utf-8");
+  });
+
+  it("does not contain COLORS object with hardcoded rgba values", () => {
+    expect(source).not.toContain("COLORS");
+    expect(source).not.toContain("rgba(63,185,80");
+    expect(source).not.toContain("rgba(218,54,51");
+    expect(source).not.toContain("rgba(188,140,255");
+    expect(source).not.toContain("rgba(248,81,73");
+    expect(source).not.toContain("rgba(139,148,158");
+  });
+
+  it("does not contain hardcoded hex colors", () => {
+    expect(source).not.toContain("#3fb950");
+    expect(source).not.toContain("#da3633");
+    expect(source).not.toContain("#bc8cff");
+    expect(source).not.toContain("#f85149");
+    expect(source).not.toContain("#8b949e");
+  });
+
+  it("does not use getPrColors or getIssueColors helpers", () => {
+    expect(source).not.toContain("getPrColors");
+    expect(source).not.toContain("getIssueColors");
+  });
+
+  it("does not use inline style props for badge coloring", () => {
+    // Should not have style={{ background: or style={{ color: in badge spans
+    expect(source).not.toMatch(/style=\{\{[^}]*background:/);
+    expect(source).not.toMatch(/style=\{\{[^}]*color:/);
+  });
+});
+
+describe("PrSection theme safety", () => {
+  const componentPath = path.resolve(__dirname, "../components/PrSection.tsx");
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(componentPath, "utf-8");
+  });
+
+  it("does not contain STATUS_COLORS with hardcoded rgba values", () => {
+    expect(source).not.toContain("STATUS_COLORS");
+    expect(source).not.toContain("rgba(63,185,80");
+    expect(source).not.toContain("rgba(218,54,51");
+    expect(source).not.toContain("rgba(188,140,255");
+  });
+
+  it("does not contain hardcoded hex colors", () => {
+    expect(source).not.toContain("#3fb950");
+    expect(source).not.toContain("#da3633");
+    expect(source).not.toContain("#bc8cff");
+  });
+
+  it("uses CSS modifier classes for PR status badges", () => {
+    expect(source).toContain("pr-status-badge--");
+    expect(source).toContain("pr-card--status-");
+  });
+});
+
+describe("CSS modifier classes for status colors", () => {
+  const stylesPath = path.resolve(__dirname, "../styles.css");
+  let css: string;
+
+  beforeAll(() => {
+    css = fs.readFileSync(stylesPath, "utf-8");
+  });
+
+  it("defines card-status-badge modifier classes for all columns", () => {
+    expect(css).toContain(".card-status-badge--triage");
+    expect(css).toContain(".card-status-badge--todo");
+    expect(css).toContain(".card-status-badge--in-progress");
+    expect(css).toContain(".card-status-badge--in-review");
+    expect(css).toContain(".card-status-badge--done");
+    expect(css).toContain(".card-status-badge--archived");
+  });
+
+  it("defines card-status-badge modifier classes for paused and awaiting-approval", () => {
+    expect(css).toContain(".card-status-badge.paused");
+    expect(css).toContain(".card-status-badge.awaiting-approval");
+  });
+
+  it("defines GitHub badge modifier classes", () => {
+    expect(css).toContain(".card-github-badge--open");
+    expect(css).toContain(".card-github-badge--closed");
+    expect(css).toContain(".card-github-badge--merged");
+    expect(css).toContain(".card-github-badge--completed");
+    expect(css).toContain(".card-github-badge--not-planned");
+  });
+
+  it("defines PR status badge modifier classes", () => {
+    expect(css).toContain(".pr-status-badge--open");
+    expect(css).toContain(".pr-status-badge--closed");
+    expect(css).toContain(".pr-status-badge--merged");
+  });
+
+  it("defines PR card status modifier classes", () => {
+    expect(css).toContain(".pr-card--status-open");
+    expect(css).toContain(".pr-card--status-closed");
+    expect(css).toContain(".pr-card--status-merged");
+  });
+
+  it("uses var() tokens in all status modifier classes", () => {
+    const modifierBlocks = [
+      ".card-status-badge--triage",
+      ".card-status-badge--todo",
+      ".card-status-badge--in-progress",
+      ".card-status-badge--in-review",
+      ".card-status-badge--done",
+    ];
+
+    for (const selector of modifierBlocks) {
+      const blockStart = css.indexOf(selector);
+      expect(blockStart, `Missing selector: ${selector}`).toBeGreaterThan(-1);
+
+      const block = css.slice(blockStart, blockStart + 300);
+      // Split at } to get just this block
+      const blockEnd = block.indexOf("}");
+      const blockContent = block.slice(0, blockEnd);
+
+      expect(
+        blockContent.includes("var(--"),
+        `${selector} should use var() tokens but got: ${blockContent}`
+      ).toBe(true);
+    }
+  });
+
+  it("card-status-badge.failed uses --status-error-bg token", () => {
+    const failedIdx = css.indexOf(".card-status-badge.failed");
+    expect(failedIdx).toBeGreaterThan(-1);
+    const block = css.slice(failedIdx, failedIdx + 200);
+    expect(block).toContain("var(--status-error-bg)");
+  });
+
+  it("card-status-badge.stuck uses --status-triage-bg-deep token", () => {
+    const stuckIdx = css.indexOf(".card-status-badge.stuck");
+    expect(stuckIdx).toBeGreaterThan(-1);
+    const block = css.slice(stuckIdx, stuckIdx + 200);
+    expect(block).toContain("var(--status-triage-bg-deep)");
+  });
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function extractRootBlock(css: string): string {
+  // Find the second :root block (the one with status tokens)
+  const rootRegex = /:root\s*\{/g;
+  let match;
+  let secondRootIdx = -1;
+  let count = 0;
+
+  while ((match = rootRegex.exec(css)) !== null) {
+    count++;
+    if (count === 2) {
+      secondRootIdx = match.index;
+      break;
+    }
+  }
+
+  if (secondRootIdx === -1) {
+    throw new Error("Could not find second :root block");
+  }
+
+  // Find the opening brace position
+  const openBraceIdx = secondRootIdx + css.slice(secondRootIdx).indexOf("{");
+
+  // Start depth at 1 since we're already inside the block
+  let depth = 1;
+  let end = openBraceIdx;
+  for (let i = openBraceIdx + 1; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    if (css[i] === "}") depth--;
+    if (depth === 0) {
+      end = i;
+      break;
+    }
+  }
+
+  return css.slice(secondRootIdx, end + 1);
+}
+
+function extractLightThemeBlock(css: string): string {
+  const startMatch = css.match(/\[data-theme="light"\]\s*\{/);
+  if (!startMatch) {
+    throw new Error("Could not find [data-theme=\"light\"] block");
+  }
+
+  const startIdx = startMatch.index!;
+  const openBraceIdx = startIdx + css.slice(startIdx).indexOf("{");
+
+  let depth = 1;
+  let end = openBraceIdx;
+  for (let i = openBraceIdx + 1; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    if (css[i] === "}") depth--;
+    if (depth === 0) {
+      end = i;
+      break;
+    }
+  }
+
+  return css.slice(startIdx, end + 1);
+}

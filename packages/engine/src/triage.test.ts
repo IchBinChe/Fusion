@@ -904,6 +904,198 @@ describe("taskCreate tool model inheritance", () => {
     }));
   });
 
+  describe("proactive subtask creation (task_create always available)", () => {
+    it("task_create tool is included in triage tools regardless of breakIntoSubtasks", () => {
+      const store = createMockStore();
+      const processor = new TriageProcessor(store, "/test/root");
+      const createdSubtasksRef = { current: [] };
+
+      const tools = (processor as any).createTriageTools({
+        parentTaskId: "FN-400",
+        allowTaskCreate: true,
+        createdSubtasksRef,
+      });
+
+      const toolNames = tools.map((t: any) => t.name);
+      expect(toolNames).toContain("task_create");
+      expect(toolNames).toContain("task_list");
+      expect(toolNames).toContain("task_get");
+      expect(tools).toHaveLength(3);
+    });
+
+    it("task_create tool succeeds and tracks created subtask", async () => {
+      const parentTask: Task = {
+        id: "FN-400",
+        description: "Large task without breakIntoSubtasks",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const createdSubtask: Task = {
+        id: "FN-401",
+        description: "Child task",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue(parentTask),
+        createTask: vi.fn().mockResolvedValue(createdSubtask),
+      });
+
+      const processor = new TriageProcessor(store, "/test/root");
+      const createdSubtasksRef = { current: [] };
+
+      const tools = (processor as any).createTriageTools({
+        parentTaskId: "FN-400",
+        allowTaskCreate: true,
+        createdSubtasksRef,
+      });
+
+      const taskCreateTool = tools.find((t: any) => t.name === "task_create");
+      const result = await taskCreateTool.execute("call-1", {
+        description: "Child task description",
+        title: "Child Task",
+        dependencies: [],
+      });
+
+      // Should NOT return an error about task creation being disabled
+      const text = result.content[0].text;
+      expect(text).not.toContain("ERROR");
+      expect(text).not.toContain("not enabled");
+      expect(text).toContain("Created child task FN-401");
+
+      // Subtask should be tracked in the ref
+      expect(createdSubtasksRef.current).toContain("FN-401");
+
+      // Should inherit parent model settings
+      expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        title: "Child Task",
+        description: "Child task description",
+      }));
+    });
+
+    it("closes parent after proactive split even when breakIntoSubtasks is undefined", async () => {
+      // Test that the post-session closure path doesn't gate on breakIntoSubtasks.
+      // Strategy: capture the customTools from createKbAgent, then have
+      // promptWithFallback invoke the task_create tool to simulate the agent
+      // proactively splitting an oversized task.
+      const task: Task = {
+        id: "FN-500",
+        description: "Oversized task without breakIntoSubtasks flag",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const childTask1: Task = {
+        id: "FN-501",
+        description: "Child part 1",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const childTask2: Task = {
+        id: "FN-502",
+        description: "Child part 2",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const taskDetail: TaskDetail = {
+        ...task,
+        prompt: "",
+        attachments: [],
+        // breakIntoSubtasks is explicitly undefined
+      };
+
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue(taskDetail),
+        createTask: vi.fn()
+          .mockResolvedValueOnce(childTask1)
+          .mockResolvedValueOnce(childTask2),
+      });
+
+      // Capture customTools from createKbAgent call
+      let capturedCustomTools: any[] = [];
+      const mockDispose = vi.fn();
+      mockCreateKbAgent.mockImplementation(async (opts: any) => {
+        capturedCustomTools = opts.customTools || [];
+        return {
+          session: {
+            prompt: vi.fn().mockResolvedValue(undefined),
+            dispose: mockDispose,
+            subscribe: vi.fn(),
+            sessionManager: {
+              getLeafId: vi.fn().mockReturnValue(null),
+              navigateTree: vi.fn(),
+            },
+          },
+        };
+      });
+
+      // Make promptWithFallback invoke the task_create tool twice to simulate
+      // the agent proactively splitting the oversized task
+      const { promptWithFallback } = await import("./pi.js");
+      (promptWithFallback as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async () => {
+          const taskCreateTool = capturedCustomTools.find(
+            (t: any) => t.name === "task_create",
+          );
+          expect(taskCreateTool).toBeDefined();
+          // Simulate agent creating two child tasks
+          await taskCreateTool.execute("call-1", {
+            description: "Child part 1",
+            title: "Part 1",
+            dependencies: [],
+          });
+          await taskCreateTool.execute("call-2", {
+            description: "Child part 2",
+            title: "Part 2",
+            dependencies: [],
+          });
+        },
+      );
+
+      const processor = new TriageProcessor(store, "/test/root", {
+        pollIntervalMs: 100_000,
+      });
+
+      await processor.specifyTask(task);
+
+      // The parent task should be deleted because subtasks were created,
+      // even though breakIntoSubtasks was NOT set
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-500",
+        expect.stringContaining("Converted into subtasks: FN-501, FN-502"),
+      );
+      expect(store.deleteTask).toHaveBeenCalledWith("FN-500");
+    });
+  });
+
   describe("bounded recovery retries for triage", () => {
     it("sets recoveryRetryCount and nextRecoveryAt on first transient error via specifyTask", async () => {
       const task = {

@@ -438,7 +438,7 @@ Fusion uses a hybrid storage architecture: structured metadata in **SQLite** wit
 
 The AI engine starts automatically with the dashboard. Three components run:
 
-- **TriageProcessor** — Watches triage column. Spawns an AI agent that reads the project, understands context, and writes a full `PROMPT.md` specification. Moves task to todo.
+- **TriageProcessor** — Watches triage column. Spawns an AI agent that reads the project, understands context, and writes a full `PROMPT.md` specification. When the reviewer flags a task as oversized (8+ steps, 3+ packages, multiple independent deliverables), the triage agent proactively splits it into 2–5 child tasks using `task_create` and closes the parent. Moves approved single tasks to todo.
 
 - **Scheduler** — Watches todo column. Resolves dependency graphs. Moves tasks to in-progress when deps are satisfied and concurrency allows (default: 2 concurrent). When `groupOverlappingFiles` is enabled, tasks whose file scopes overlap are serialized to prevent merge conflicts.
 

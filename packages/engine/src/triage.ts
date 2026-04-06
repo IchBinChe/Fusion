@@ -477,7 +477,7 @@ export class TriageProcessor {
         const customTools = [
           ...this.createTriageTools({
             parentTaskId: task.id,
-            allowTaskCreate: detail.breakIntoSubtasks === true,
+            allowTaskCreate: true,
             createdSubtasksRef,
           }),
           this.createReviewSpecTool(
@@ -579,7 +579,7 @@ export class TriageProcessor {
           // Re-raise errors that pi-coding-agent swallowed after exhausting retries.
           checkSessionError(session);
 
-          if (detail.breakIntoSubtasks && createdSubtasksRef.current.length > 0) {
+          if (createdSubtasksRef.current.length > 0) {
             const childTaskIds = createdSubtasksRef.current.join(", ");
             await this.store.logEntry(
               task.id,
@@ -882,25 +882,17 @@ export class TriageProcessor {
       label: "Create Child Task",
       description:
         "Create a child task (subtask) while breaking a larger task into smaller pieces. " +
-        "Use this when breakIntoSubtasks is enabled and the work can be split into 2-5 independently executable tasks. " +
+        "Use this when the work can be split into 2-5 independently executable tasks, " +
+        "either because the user requested subtask breakdown or because the task is " +
+        "oversized (8+ steps, 3+ packages, multiple independent deliverables). " +
         "The created task will be a child of the current task being triaged.",
       parameters: taskCreateParams,
       execute: async (
         _callId: string,
         params: Static<typeof taskCreateParams>,
       ) => {
-        if (!options.allowTaskCreate) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: "ERROR: Task creation is not enabled for this task. The user did not request subtask breakdown.",
-              },
-            ],
-            details: {},
-          };
-        }
-
+        // task_create is always available during triage to support both
+        // explicit breakIntoSubtasks and proactive splitting of oversized tasks.
         try {
           // Fetch parent task to inherit model settings
           let parentTask: Awaited<ReturnType<typeof store.getTask>> | undefined;
@@ -949,11 +941,7 @@ export class TriageProcessor {
       },
     };
 
-    const tools: ToolDefinition[] = [taskList, taskGet];
-    if (options.allowTaskCreate) {
-      tools.push(taskCreate);
-    }
-    return tools;
+    return [taskList, taskGet, taskCreate];
   }
 
   /**

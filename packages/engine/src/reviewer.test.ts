@@ -361,6 +361,18 @@ describe("REVIEWER_SYSTEM_PROMPT", () => {
     );
   });
 
+  it("instructs planner to use task_create for undersplit tasks", () => {
+    // The reviewer's REVISE feedback must explicitly direct the planner to
+    // create child tasks via task_create rather than just flagging the issue.
+    expect(REVIEWER_SYSTEM_PROMPT).toContain("task_create");
+    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+      "create 2–5 child tasks",
+    );
+    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+      "Do NOT write a parent PROMPT.md",
+    );
+  });
+
   it("includes user comment coverage criterion in spec review format", () => {
     expect(REVIEWER_SYSTEM_PROMPT).toContain("User comment coverage");
     expect(REVIEWER_SYSTEM_PROMPT).toContain("missing coverage is a blocking REVISE");

@@ -98,6 +98,10 @@ describe("ThemeSelector", () => {
     expect(screen.getByLabelText("Everforest theme")).toBeDefined();
     expect(screen.getByLabelText("Rosé Pine theme")).toBeDefined();
     expect(screen.getByLabelText("Kanagawa theme")).toBeDefined();
+    expect(screen.getByLabelText("Slate theme")).toBeDefined();
+    expect(screen.getByLabelText("Ash theme")).toBeDefined();
+    expect(screen.getByLabelText("Graphite theme")).toBeDefined();
+    expect(screen.getByLabelText("Silver theme")).toBeDefined();
   });
 
   it("marks current color theme as active", () => {
@@ -185,6 +189,30 @@ describe("ThemeSelector", () => {
 
     fireEvent.click(screen.getByLabelText("Kanagawa theme"));
     expect(onColorThemeChange).toHaveBeenCalledWith("kanagawa");
+  });
+
+  it("calls onColorThemeChange when grey color themes are clicked", () => {
+    const onColorThemeChange = vi.fn();
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="default"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={onColorThemeChange}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("Slate theme"));
+    expect(onColorThemeChange).toHaveBeenCalledWith("slate");
+
+    fireEvent.click(screen.getByLabelText("Ash theme"));
+    expect(onColorThemeChange).toHaveBeenCalledWith("ash");
+
+    fireEvent.click(screen.getByLabelText("Graphite theme"));
+    expect(onColorThemeChange).toHaveBeenCalledWith("graphite");
+
+    fireEvent.click(screen.getByLabelText("Silver theme"));
+    expect(onColorThemeChange).toHaveBeenCalledWith("silver");
   });
 
   it("displays Nord in preview when selected", () => {
@@ -302,6 +330,58 @@ describe("ThemeSelector", () => {
     );
 
     expect(screen.getByText(/Dark \/ Kanagawa/)).toBeDefined();
+  });
+
+  it("displays Slate in preview when selected", () => {
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="slate"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Dark \/ Slate/)).toBeDefined();
+  });
+
+  it("displays Ash in preview when selected", () => {
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="ash"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Dark \/ Ash/)).toBeDefined();
+  });
+
+  it("displays Graphite in preview when selected", () => {
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="graphite"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Dark \/ Graphite/)).toBeDefined();
+  });
+
+  it("displays Silver in preview when selected", () => {
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="silver"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Dark \/ Silver/)).toBeDefined();
   });
 
   it("displays light Catppuccin Mocha in preview when light mode", () => {

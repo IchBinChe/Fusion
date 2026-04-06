@@ -249,7 +249,7 @@ async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegis
 export async function createKbAgent(options: AgentOptions): Promise<AgentResult> {
   console.log(`[pi] createKbAgent called (cwd=${options.cwd}, tools=${options.tools}, provider=${options.defaultProvider}, model=${options.defaultModelId})`);
   const authStorage = AuthStorage.create();
-  const modelRegistry = new ModelRegistry(authStorage);
+  const modelRegistry = new ModelRegistry(authStorage, join(getAgentDir(), "models.json"));
   await registerExtensionProviders(options.cwd, modelRegistry);
 
   const tools =

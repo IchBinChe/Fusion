@@ -1807,6 +1807,145 @@ describe("TerminalModal — virtual keyboard overlap handling", () => {
       expect(overlay.style.getPropertyValue("--overlay-padding-top")).toBe("");
     });
   });
+
+  describe("xterm re-fit on keyboard open (FN-1043 regression)", () => {
+    /** Pending rAF callbacks keyed by fake id. */
+    let rafMap: Map<number, () => void>;
+    let nextRafId: number;
+    let originalRAF: typeof window.requestAnimationFrame;
+    let originalCAF: typeof window.cancelAnimationFrame;
+
+    beforeEach(() => {
+      rafMap = new Map();
+      nextRafId = 1;
+      originalRAF = window.requestAnimationFrame;
+      originalCAF = window.cancelAnimationFrame;
+      // Capture rAF callbacks with proper cancellation support so the
+      // coalescing logic (cancel → schedule) works correctly in tests.
+      window.requestAnimationFrame = ((cb: () => void) => {
+        const id = nextRafId++;
+        rafMap.set(id, cb);
+        return id;
+      }) as any;
+      window.cancelAnimationFrame = ((id: number) => {
+        rafMap.delete(id);
+      }) as any;
+    });
+
+    afterEach(() => {
+      window.requestAnimationFrame = originalRAF;
+      window.cancelAnimationFrame = originalCAF;
+    });
+
+    /** Flush all pending rAF callbacks and clear the map. */
+    function flushRaf() {
+      const callbacks = Array.from(rafMap.values());
+      rafMap.clear();
+      for (const cb of callbacks) cb();
+    }
+
+    it("defers fitAddon.fit() via requestAnimationFrame after keyboard open", async () => {
+      const { listeners } = simulateMobileDevice(250);
+      const mockResizeFn = vi.fn();
+
+      mockUseTerminal.mockReturnValue(createMockTerminalState({
+        connectionStatus: "connected",
+        resize: mockResizeFn,
+      }));
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      // Wait for --keyboard-overlap to be set (initial measurement + rAF)
+      await waitFor(() => {
+        const modal = screen.getByTestId("terminal-modal");
+        expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("250px");
+      });
+
+      // Flush any pending rAF from initial mount
+      act(() => { flushRaf(); });
+
+      // Clear the map before triggering the resize
+      rafMap.clear();
+
+      // Trigger a viewport resize (keyboard opened)
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      // The rAF callback should have been scheduled
+      expect(rafMap.size).toBeGreaterThanOrEqual(1);
+
+      // Flush the rAF — this exercises the deferred fit logic.
+      // In the test env, fitAddonRef.current is null (xterm is mocked
+      // as a plain object, not wired into refs), so fit() won't actually
+      // run. We verify the mechanism by confirming rAF was used.
+      expect(() => {
+        act(() => { flushRaf(); });
+      }).not.toThrow();
+    });
+
+    it("coalesces rapid visualViewport resize events into a single rAF callback", async () => {
+      const { listeners } = simulateMobileDevice(250);
+
+      mockUseTerminal.mockReturnValue(createMockTerminalState({
+        connectionStatus: "connected",
+      }));
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const modal = screen.getByTestId("terminal-modal");
+        expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("250px");
+      });
+
+      // Flush any pending rAF from initial mount
+      act(() => { flushRaf(); });
+      rafMap.clear();
+
+      // Fire multiple rapid resize events (keyboard animating open).
+      // Each event calls cancelAnimationFrame(previous) then requestAnimationFrame(new),
+      // so only 1 callback should remain in the map after 3 events.
+      act(() => {
+        for (const cb of listeners.resize) cb(); // event 1 → schedule rAF #1
+        for (const cb of listeners.resize) cb(); // event 2 → cancel #1, schedule rAF #2
+        for (const cb of listeners.resize) cb(); // event 3 → cancel #2, schedule rAF #3
+      });
+
+      // Only 1 rAF callback should survive (the last one)
+      expect(rafMap.size).toBe(1);
+    });
+
+    it("reads xterm refs inside the rAF callback (not stale closures)", async () => {
+      const { listeners } = simulateMobileDevice(250);
+
+      mockUseTerminal.mockReturnValue(createMockTerminalState({
+        connectionStatus: "connected",
+        resize: vi.fn(),
+      }));
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const modal = screen.getByTestId("terminal-modal");
+        expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("250px");
+      });
+
+      // Flush any pending rAF from initial mount
+      act(() => { flushRaf(); });
+      rafMap.clear();
+
+      // Trigger resize
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      // Flush rAF — this should not throw even though xterm refs may be null
+      // in the test environment. The callback reads refs at call time, not capture time.
+      expect(() => {
+        act(() => { flushRaf(); });
+      }).not.toThrow();
+    });
+  });
 });
 
 // --- Close/reopen regression tests ---

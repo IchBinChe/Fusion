@@ -80,6 +80,11 @@ describe("terminal mobile keyboard layout CSS contract", () => {
     expect(ruleBody).toContain(`max-height: ${viewportExpression}`);
   });
 
+  it("keyboard-open selector includes overflow: hidden to clip content during keyboard transition", () => {
+    const ruleBody = findKeyboardOpenRule();
+    expect(ruleBody).toContain("overflow: hidden");
+  });
+
   it("height and max-height use the identical expression", () => {
     const ruleBody = findKeyboardOpenRule();
 

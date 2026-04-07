@@ -8064,6 +8064,10 @@ body {
        inherited min-height or flex layout. */
     height: var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px)));
     max-height: var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px)));
+    /* Clip any content that exceeds the constrained height during
+       the keyboard-open transition so the terminal doesn't poke out
+       below the visible area while xterm re-fits. */
+    overflow: hidden;
   }
 }
 

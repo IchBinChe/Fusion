@@ -101,6 +101,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
   const hasInitialCommandRun = useRef<string | false>(false);
   const xtermInitializedRef = useRef<string | false>(false);
   const resizeRef = useRef<((cols: number, rows: number) => void) | null>(null);
+  /** Tracks a pending requestAnimationFrame for deferred xterm re-fit. */
+  const pendingFitRef = useRef<number | null>(null);
 
   // Bump open generation whenever the modal opens so the initialCommand
   // effect re-evaluates after a close/reopen cycle (deps may be identical).
@@ -133,18 +135,43 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
       // Re-fit xterm when viewport changes affect available height.
       // The keyboard opening/closing changes the modal's max-height via
       // CSS --keyboard-overlap, so xterm needs to recalculate rows/cols.
-      if (fitAddonRef.current && xtermRef.current) {
-        try {
-          const fitAddon = fitAddonRef.current as InstanceType<typeof import("@xterm/addon-fit").FitAddon>;
-          fitAddon.fit();
-          const { cols, rows } = xtermRef.current;
-          if (resizeRef.current) {
-            resizeRef.current(cols, rows);
-          }
-        } catch {
-          // Ignore fit errors during viewport transitions
-        }
+      //
+      // IMPORTANT: We must defer fitAddon.fit() until AFTER React has
+      // committed the state changes above (setKeyboardOverlap, setViewportHeight)
+      // and the browser has repainted the new modal dimensions. Without this
+      // deferral, fit() measures the OLD (pre-keyboard) container dimensions
+      // because React state updates are asynchronous — the inline style with
+      // the new --keyboard-overlap / --vv-height values hasn't been applied yet.
+      //
+      // requestAnimationFrame ensures we run after the next paint, at which
+      // point the DOM reflects the updated CSS variables and the modal has
+      // its correct constrained height.
+      //
+      // Coalesce rapid events (keyboard animating open) by cancelling any
+      // previously scheduled rAF before scheduling a new one.
+      if (pendingFitRef.current !== null) {
+        cancelAnimationFrame(pendingFitRef.current);
+        pendingFitRef.current = null;
       }
+      pendingFitRef.current = requestAnimationFrame(() => {
+        pendingFitRef.current = null;
+        // Read refs inside the callback to avoid stale closures
+        const currentFitAddon = fitAddonRef.current;
+        const currentXterm = xtermRef.current;
+        const currentResize = resizeRef.current;
+        if (currentFitAddon && currentXterm) {
+          try {
+            const fitAddon = currentFitAddon as InstanceType<typeof import("@xterm/addon-fit").FitAddon>;
+            fitAddon.fit();
+            const { cols, rows } = currentXterm;
+            if (currentResize) {
+              currentResize(cols, rows);
+            }
+          } catch {
+            // Ignore fit errors during viewport transitions
+          }
+        }
+      });
     };
 
     update(); // initial measurement
@@ -154,6 +181,11 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
+      // Cancel any pending deferred fit
+      if (pendingFitRef.current !== null) {
+        cancelAnimationFrame(pendingFitRef.current);
+        pendingFitRef.current = null;
+      }
       setKeyboardOverlap(0);
       setViewportHeight(null);
     };

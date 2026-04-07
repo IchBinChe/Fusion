@@ -59,7 +59,7 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -449,7 +449,7 @@ export class Database {
     }
 
     // Future migrations go here:
-    // if (version < 10) { this.applyMigration(10, () => { ... }); }
+    // if (version < 11) { this.applyMigration(11, () => { ... }); }
 
     if (version < 10) {
       this.applyMigration(10, () => {

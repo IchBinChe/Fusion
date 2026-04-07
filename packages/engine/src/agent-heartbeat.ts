@@ -10,12 +10,22 @@
  * - onTerminated: Called when an unresponsive agent is terminated
  */
 
-import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource } from "@fusion/core";
+import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig } from "@fusion/core";
+
+/** Resolved per-agent heartbeat config after validation and fallback */
+interface ResolvedHeartbeatConfig {
+  pollIntervalMs: number;
+  heartbeatTimeoutMs: number;
+  maxConcurrentRuns: number;
+}
 
 /** Options for HeartbeatMonitor constructor */
 export interface HeartbeatMonitorOptions {
   /** AgentStore instance for persistence */
   store: AgentStore;
+  /** Optional separate AgentStore reference for reading per-agent runtimeConfig.
+   *  If not provided, falls back to `store`. */
+  agentStore?: AgentStore;
   /** Polling interval in milliseconds (default: 30000) */
   pollIntervalMs?: number;
   /** Heartbeat timeout in milliseconds (default: 60000) */
@@ -67,6 +77,7 @@ interface TrackedAgent {
  */
 export class HeartbeatMonitor {
   private store: AgentStore;
+  private configStore: AgentStore;
   private pollIntervalMs: number;
   private heartbeatTimeoutMs: number;
   private maxConcurrentRuns: number;
@@ -83,6 +94,7 @@ export class HeartbeatMonitor {
 
   constructor(options: HeartbeatMonitorOptions) {
     this.store = options.store;
+    this.configStore = options.agentStore ?? options.store;
     this.pollIntervalMs = options.pollIntervalMs ?? 30000;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 60000;
     this.maxConcurrentRuns = options.maxConcurrentRuns ?? 1;
@@ -301,6 +313,8 @@ export class HeartbeatMonitor {
 
   /**
    * Check if an agent is healthy (heartbeat within timeout window).
+   * Uses per-agent heartbeatTimeoutMs from runtimeConfig if available,
+   * otherwise falls back to the monitor-level default.
    * @param agentId - The agent ID
    * @returns true if healthy, false if missed heartbeat or not tracked
    */
@@ -308,8 +322,9 @@ export class HeartbeatMonitor {
     const tracked = this.trackedAgents.get(agentId);
     if (!tracked) return false;
 
+    const config = this.getAgentConfig(agentId);
     const elapsed = Date.now() - tracked.lastSeen;
-    return elapsed < this.heartbeatTimeoutMs;
+    return elapsed < config.heartbeatTimeoutMs;
   }
 
   /**
@@ -333,13 +348,62 @@ export class HeartbeatMonitor {
   // Private methods
   // ─────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Get the resolved heartbeat configuration for an agent.
+   * Reads per-agent config from runtimeConfig with fallback to monitor defaults.
+   * @param agentId - The agent ID
+   * @returns Resolved config with validated values
+   */
+  getAgentHeartbeatConfig(agentId: string): ResolvedHeartbeatConfig {
+    return this.getAgentConfig(agentId);
+  }
+
+  /**
+   * Resolve per-agent heartbeat config from runtimeConfig with validation and fallbacks.
+   */
+  private getAgentConfig(agentId: string): ResolvedHeartbeatConfig {
+    // Defaults from monitor-level construction
+    const result: ResolvedHeartbeatConfig = {
+      pollIntervalMs: this.pollIntervalMs,
+      heartbeatTimeoutMs: this.heartbeatTimeoutMs,
+      maxConcurrentRuns: this.maxConcurrentRuns,
+    };
+
+    try {
+      // Synchronous read — AgentStore.getAgent is async, but we can't make this
+      // method async without changing the call chain. Instead, we'll resolve
+      // per-agent config on the checkMissedHeartbeats path (which is async).
+      // For synchronous callers (isAgentHealthy), we use a cached approach.
+      // For simplicity, we read from the store's underlying agent data.
+      const agent = this.configStore.getCachedAgent?.(agentId);
+      if (agent?.runtimeConfig) {
+        const rc = agent.runtimeConfig;
+
+        if (typeof rc.heartbeatIntervalMs === "number" && Number.isFinite(rc.heartbeatIntervalMs)) {
+          result.pollIntervalMs = Math.max(1000, rc.heartbeatIntervalMs);
+        }
+        if (typeof rc.heartbeatTimeoutMs === "number" && Number.isFinite(rc.heartbeatTimeoutMs)) {
+          result.heartbeatTimeoutMs = Math.max(5000, rc.heartbeatTimeoutMs);
+        }
+        if (typeof rc.maxConcurrentRuns === "number" && Number.isFinite(rc.maxConcurrentRuns)) {
+          result.maxConcurrentRuns = Math.max(1, Math.round(rc.maxConcurrentRuns));
+        }
+      }
+    } catch {
+      // If agent lookup fails, use monitor defaults
+    }
+
+    return result;
+  }
+
   private async checkMissedHeartbeats(): Promise<void> {
     const now = Date.now();
 
     for (const tracked of this.trackedAgents.values()) {
+      const config = this.getAgentConfig(tracked.agentId);
       const elapsed = now - tracked.lastSeen;
 
-      if (elapsed >= this.heartbeatTimeoutMs) {
+      if (elapsed >= config.heartbeatTimeoutMs) {
         // Missed heartbeat detected
         if (!tracked.missedHeartbeatReported) {
           tracked.missedHeartbeatReported = true;
@@ -347,7 +411,7 @@ export class HeartbeatMonitor {
         } else {
           // Already reported - check if we should terminate
           // Give 2x timeout for recovery before auto-terminate
-          if (elapsed >= this.heartbeatTimeoutMs * 2) {
+          if (elapsed >= config.heartbeatTimeoutMs * 2) {
             await this.terminateUnresponsive(tracked);
           }
         }

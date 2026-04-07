@@ -202,7 +202,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     }
     const lastHeartbeat = new Date(agent.lastHeartbeatAt).getTime();
     const elapsed = Date.now() - lastHeartbeat;
-    const timeoutMs = 60000;
+    const timeoutMs = (agent as any).runtimeConfig?.heartbeatTimeoutMs ?? 60000;
     if (elapsed > timeoutMs) {
       return { label: "Unresponsive", color: "var(--state-error-text, #f85149)" };
     }
@@ -768,15 +768,6 @@ interface AdvancedSettingField {
 /** Well-known advanced setting definitions backed by agent.metadata */
 const ADVANCED_SETTINGS: AdvancedSettingField[] = [
   {
-    key: "heartbeatIntervalMs",
-    label: "Heartbeat Interval (ms)",
-    type: "number",
-    placeholder: "30000",
-    hint: "How often the agent sends heartbeats (minimum 1000ms, default 30000ms)",
-    min: 1000,
-    max: 600000,
-  },
-  {
     key: "maxRetries",
     label: "Max Retries",
     type: "number",
@@ -870,6 +861,19 @@ function ConfigTab({
     return initial;
   });
 
+  // Heartbeat config state initialised from agent.runtimeConfig
+  const [heartbeatValues, setHeartbeatValues] = useState<Record<string, string>>(() => {
+    const rc = agent.runtimeConfig ?? {};
+    const initial: Record<string, string> = {};
+    if (rc.heartbeatIntervalMs !== undefined && rc.heartbeatIntervalMs !== null) {
+      initial.heartbeatIntervalMs = String(rc.heartbeatIntervalMs);
+    }
+    if (rc.heartbeatTimeoutMs !== undefined && rc.heartbeatTimeoutMs !== null) {
+      initial.heartbeatTimeoutMs = String(rc.heartbeatTimeoutMs);
+    }
+    return initial;
+  });
+
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [justSaved, setJustSaved] = useState(false);
@@ -881,6 +885,13 @@ function ConfigTab({
       const persisted = agent.metadata[field.key] !== undefined && agent.metadata[field.key] !== null
         ? String(agent.metadata[field.key])
         : "";
+      if (current !== persisted) return true;
+    }
+    // Check heartbeat values
+    const rc = agent.runtimeConfig ?? {};
+    for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs"] as const) {
+      const current = heartbeatValues[key]?.trim() ?? "";
+      const persisted = rc[key] !== undefined && rc[key] !== null ? String(rc[key]) : "";
       if (current !== persisted) return true;
     }
     return false;
@@ -899,9 +910,37 @@ function ConfigTab({
     }
   };
 
+  const handleHeartbeatFieldChange = (key: string, value: string) => {
+    setHeartbeatValues((prev) => ({ ...prev, [key]: value }));
+    setJustSaved(false);
+    if (errors[key]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
   const handleSave = async () => {
-    // Validate before save
+    // Validate advanced settings
     const validationErrors = validateAdvancedSettings(formValues);
+
+    // Validate heartbeat settings
+    for (const [key, config] of Object.entries({
+      heartbeatIntervalMs: { label: "Heartbeat Interval", min: 1000 },
+      heartbeatTimeoutMs: { label: "Heartbeat Timeout", min: 5000 },
+    })) {
+      const raw = heartbeatValues[key]?.trim();
+      if (!raw) continue;
+      const num = Number(raw);
+      if (Number.isNaN(num) || !Number.isFinite(num)) {
+        validationErrors[key] = `"${config.label}" must be a valid number`;
+      } else if (num < config.min) {
+        validationErrors[key] = `"${config.label}" must be at least ${config.min.toLocaleString()}`;
+      }
+    }
+
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       addToast("Please fix validation errors before saving", "error");
@@ -922,10 +961,21 @@ function ConfigTab({
       }
     }
 
+    // Build the runtimeConfig payload — only include non-empty values
+    const newRuntimeConfig: Record<string, unknown> = { ...agent.runtimeConfig };
+    for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs"] as const) {
+      const raw = heartbeatValues[key]?.trim();
+      if (!raw) {
+        delete newRuntimeConfig[key];
+      } else {
+        newRuntimeConfig[key] = Number(raw);
+      }
+    }
+
     setIsSaving(true);
     try {
-      await updateAgent(agent.id, { metadata: newMetadata }, projectId);
-      addToast("Advanced settings saved", "success");
+      await updateAgent(agent.id, { metadata: newMetadata, runtimeConfig: newRuntimeConfig }, projectId);
+      addToast("Settings saved", "success");
       setJustSaved(true);
       // Auto-hide the saved indicator after 3 seconds
       setTimeout(() => setJustSaved(false), 3000);
@@ -968,6 +1018,51 @@ function ConfigTab({
               <option value="custom">Custom</option>
             </select>
             <span className="config-hint">Role changes coming soon</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="config-section">
+        <h3>Heartbeat Settings</h3>
+        <p className="config-description">
+          Configure how this agent's heartbeat is monitored. Leave a field empty to use system defaults.
+        </p>
+
+        <div className="config-fields">
+          <div className="config-field">
+            <label htmlFor="hb-heartbeatIntervalMs">Heartbeat Interval (ms)</label>
+            <input
+              id="hb-heartbeatIntervalMs"
+              type="text"
+              inputMode="numeric"
+              className={cn("input", !!errors.heartbeatIntervalMs && "input--error")}
+              placeholder="30000"
+              value={heartbeatValues.heartbeatIntervalMs ?? ""}
+              onChange={(e) => handleHeartbeatFieldChange("heartbeatIntervalMs", e.target.value)}
+            />
+            {errors.heartbeatIntervalMs ? (
+              <span className="config-error">{errors.heartbeatIntervalMs}</span>
+            ) : (
+              <span className="config-hint">How often heartbeats are checked. Leave empty for system default (30000ms)</span>
+            )}
+          </div>
+
+          <div className="config-field">
+            <label htmlFor="hb-heartbeatTimeoutMs">Heartbeat Timeout (ms)</label>
+            <input
+              id="hb-heartbeatTimeoutMs"
+              type="text"
+              inputMode="numeric"
+              className={cn("input", !!errors.heartbeatTimeoutMs && "input--error")}
+              placeholder="60000"
+              value={heartbeatValues.heartbeatTimeoutMs ?? ""}
+              onChange={(e) => handleHeartbeatFieldChange("heartbeatTimeoutMs", e.target.value)}
+            />
+            {errors.heartbeatTimeoutMs ? (
+              <span className="config-error">{errors.heartbeatTimeoutMs}</span>
+            ) : (
+              <span className="config-hint">Time without heartbeat before agent is considered unresponsive. Leave empty for system default (60000ms)</span>
+            )}
           </div>
         </div>
       </div>

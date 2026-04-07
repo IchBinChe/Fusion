@@ -1455,7 +1455,7 @@ export interface Agent {
   icon?: string;
   /** Agent ID this agent reports to (org hierarchy) */
   reportsTo?: string;
-  /** Runtime configuration (maxTurns, thinkingLevel, etc.) */
+  /** Runtime configuration. Supports: AgentHeartbeatConfig keys (heartbeatIntervalMs, heartbeatTimeoutMs, maxConcurrentRuns) */
   runtimeConfig?: Record<string, unknown>;
   /** Why the agent was paused (error, manual, etc.) */
   pauseReason?: string;
@@ -1467,6 +1467,16 @@ export interface Agent {
   totalOutputTokens?: number;
   /** Last error message */
   lastError?: string;
+}
+
+/** Per-agent heartbeat configuration, stored in agent.runtimeConfig */
+export interface AgentHeartbeatConfig {
+  /** Polling interval in ms (default: 30000). Min: 1000 */
+  heartbeatIntervalMs?: number;
+  /** Heartbeat timeout in ms (default: 60000). Min: 5000 */
+  heartbeatTimeoutMs?: number;
+  /** Max concurrent heartbeat runs per agent (default: 1). Min: 1 */
+  maxConcurrentRuns?: number;
 }
 
 /** Extended agent information including heartbeat history */

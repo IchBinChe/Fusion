@@ -10,7 +10,7 @@
  */
 
 import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -730,6 +730,21 @@ export class AgentStore extends EventEmitter {
     const path = join(this.agentsDir, `${agentId}.json`);
     const content = await readFile(path, "utf-8");
     return JSON.parse(content) as AgentData;
+  }
+
+  /**
+   * Synchronously read an agent from disk (for use in synchronous hot paths).
+   * Returns null if the agent file does not exist or cannot be parsed.
+   * @param agentId - The agent ID
+   */
+  getCachedAgent(agentId: string): Agent | null {
+    try {
+      const path = join(this.agentsDir, `${agentId}.json`);
+      const content = readFileSync(path, "utf-8");
+      return this.parseAgent(JSON.parse(content) as AgentData);
+    } catch {
+      return null;
+    }
   }
 
   private parseAgent(data: AgentData): Agent {

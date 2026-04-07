@@ -27,6 +27,7 @@ describe("AgentDetailView", () => {
     role: AgentCapability;
     state: "idle" | "active" | "paused" | "terminated";
     taskId?: string;
+    runtimeConfig?: Record<string, unknown>;
   }> = {}): AgentDetail => ({
     id: "agent-001",
     name: "Test Agent",
@@ -37,6 +38,7 @@ describe("AgentDetailView", () => {
     updatedAt: "2024-01-01T00:00:00.000Z",
     lastHeartbeatAt: "2024-01-01T00:05:00.000Z",
     metadata: {},
+    runtimeConfig: overrides.runtimeConfig,
     heartbeatHistory: [],
     activeRun: {
       id: "run-001",
@@ -455,14 +457,17 @@ describe("AgentDetailView", () => {
       await navigateToSettings(user);
 
       await waitFor(() => {
+        // Heartbeat Settings section
         expect(screen.getByLabelText("Heartbeat Interval (ms)")).toBeInTheDocument();
+        expect(screen.getByLabelText("Heartbeat Timeout (ms)")).toBeInTheDocument();
+        // Advanced Settings section
         expect(screen.getByLabelText("Max Retries")).toBeInTheDocument();
         expect(screen.getByLabelText("Task Timeout (ms)")).toBeInTheDocument();
         expect(screen.getByLabelText("Log Level")).toBeInTheDocument();
       });
     });
 
-    it("shows empty fields when metadata has no advanced settings", async () => {
+    it("shows empty fields when metadata and runtimeConfig are empty", async () => {
       mockFetchAgent.mockResolvedValue(createMockAgent({ metadata: {} }));
 
       const user = userEvent.setup();
@@ -482,10 +487,13 @@ describe("AgentDetailView", () => {
       });
     });
 
-    it("pre-fills fields from agent metadata", async () => {
+    it("pre-fills heartbeat fields from agent runtimeConfig", async () => {
       mockFetchAgent.mockResolvedValue(createMockAgent({
-        metadata: {
+        runtimeConfig: {
           heartbeatIntervalMs: 15000,
+          heartbeatTimeoutMs: 120000,
+        },
+        metadata: {
           maxRetries: 5,
           logLevel: "debug",
         },
@@ -505,6 +513,9 @@ describe("AgentDetailView", () => {
       await waitFor(() => {
         const heartbeatInput = screen.getByLabelText("Heartbeat Interval (ms)") as HTMLInputElement;
         expect(heartbeatInput.value).toBe("15000");
+
+        const heartbeatTimeoutInput = screen.getByLabelText("Heartbeat Timeout (ms)") as HTMLInputElement;
+        expect(heartbeatTimeoutInput.value).toBe("120000");
 
         const retriesInput = screen.getByLabelText("Max Retries") as HTMLInputElement;
         expect(retriesInput.value).toBe("5");
@@ -595,15 +606,15 @@ describe("AgentDetailView", () => {
 
       await navigateToSettings(user);
 
-      const heartbeatInput = await screen.findByLabelText("Heartbeat Interval (ms)");
+      const heartbeatTimeoutInput = await screen.findByLabelText("Heartbeat Timeout (ms)");
 
-      await user.clear(heartbeatInput);
-      await user.type(heartbeatInput, "500");
+      await user.clear(heartbeatTimeoutInput);
+      await user.type(heartbeatTimeoutInput, "500");
 
       await user.click(screen.getByText("Save Settings"));
 
       await waitFor(() => {
-        expect(screen.getByText(/must be at least 1,000/)).toBeInTheDocument();
+        expect(screen.getByText(/must be at least 5,000/)).toBeInTheDocument();
       });
     });
 
@@ -631,7 +642,7 @@ describe("AgentDetailView", () => {
       });
     });
 
-    it("calls updateAgent with correct metadata on save", async () => {
+    it("calls updateAgent with correct metadata and runtimeConfig on save", async () => {
       const addToast = vi.fn();
       mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
 
@@ -656,12 +667,15 @@ describe("AgentDetailView", () => {
       await waitFor(() => {
         expect(mockUpdateAgent).toHaveBeenCalledWith(
           "agent-001",
-          { metadata: expect.objectContaining({ heartbeatIntervalMs: 15000 }) },
+          expect.objectContaining({
+            metadata: expect.any(Object),
+            runtimeConfig: expect.objectContaining({ heartbeatIntervalMs: 15000 }),
+          }),
           undefined,
         );
       });
 
-      expect(addToast).toHaveBeenCalledWith("Advanced settings saved", "success");
+      expect(addToast).toHaveBeenCalledWith("Settings saved", "success");
     });
 
     it("forwards projectId to updateAgent", async () => {
@@ -799,9 +813,9 @@ describe("AgentDetailView", () => {
       expect((logLevelSelect as HTMLSelectElement).value).toBe("debug");
     });
 
-    it("clears metadata key when field is cleared to empty", async () => {
+    it("clears runtimeConfig key when heartbeat field is cleared to empty", async () => {
       mockFetchAgent.mockResolvedValue(createMockAgent({
-        metadata: { heartbeatIntervalMs: 30000 },
+        runtimeConfig: { heartbeatIntervalMs: 30000 },
       }));
       mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
 
@@ -827,16 +841,17 @@ describe("AgentDetailView", () => {
         expect(mockUpdateAgent).toHaveBeenCalledWith(
           "agent-001",
           expect.objectContaining({
-            metadata: expect.not.objectContaining({ heartbeatIntervalMs: expect.anything() }),
+            runtimeConfig: expect.not.objectContaining({ heartbeatIntervalMs: expect.anything() }),
           }),
           undefined,
         );
       });
     });
 
-    it("persists existing non-advanced metadata keys during save", async () => {
+    it("persists existing non-advanced metadata keys and runtimeConfig during save", async () => {
       mockFetchAgent.mockResolvedValue(createMockAgent({
-        metadata: { customKey: "preserved", heartbeatIntervalMs: 30000 },
+        metadata: { customKey: "preserved" },
+        runtimeConfig: { heartbeatIntervalMs: 30000, otherConfig: "also-preserved" },
       }));
       mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
 
@@ -860,9 +875,10 @@ describe("AgentDetailView", () => {
 
       await waitFor(() => {
         const call = mockUpdateAgent.mock.calls[0];
-        const metadata = (call as any)[1].metadata;
-        expect(metadata.customKey).toBe("preserved");
-        expect(metadata.heartbeatIntervalMs).toBe(45000);
+        const payload = (call as any)[1];
+        expect(payload.metadata.customKey).toBe("preserved");
+        expect(payload.runtimeConfig.heartbeatIntervalMs).toBe(45000);
+        expect(payload.runtimeConfig.otherConfig).toBe("also-preserved");
       });
     });
   });

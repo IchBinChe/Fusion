@@ -634,6 +634,33 @@ spawn_agent({
 - **Cleanup:** `terminateAllChildren()` / `terminateChildAgent()` methods
 - **Settings:** `packages/core/src/types.ts` (`ProjectSettings` interface)
 
+## Per-Agent Heartbeat Configuration
+
+Each agent can override the global heartbeat monitoring settings via `runtimeConfig`. The `AgentHeartbeatConfig` interface (exported from `@fusion/core`) defines the available keys:
+
+| Key | Default | Min | Description |
+|-----|---------|-----|-------------|
+| `heartbeatIntervalMs` | 30000 | 1000 | How often heartbeats are checked |
+| `heartbeatTimeoutMs` | 60000 | 5000 | Time without heartbeat before agent is considered unresponsive |
+| `maxConcurrentRuns` | 1 | 1 | Max concurrent heartbeat runs per agent |
+
+### How It Works
+
+1. `HeartbeatMonitor` reads per-agent config from `AgentStore.getCachedAgent()` (synchronous file read)
+2. Values from `agent.runtimeConfig` are validated and clamped to minimums
+3. Missing or invalid values fall back to the monitor-level constructor defaults
+4. Both `isAgentHealthy()` and `checkMissedHeartbeats()` use the per-agent timeout
+5. The dashboard health status indicator reads `runtimeConfig.heartbeatTimeoutMs` for display
+
+### Dashboard Configuration
+
+The agent detail ConfigTab includes a "Heartbeat Settings" section where users can configure interval and timeout per agent. Values are stored in `agent.runtimeConfig` and persisted via `PATCH /api/agents/:id` with `runtimeConfig` in the request body.
+
+### API
+
+- `HeartbeatMonitor.getAgentHeartbeatConfig(agentId)` — Returns the resolved config for an agent
+- `AgentStore.getCachedAgent(agentId)` — Synchronous agent read for hot paths
+
 ## Dashboard Task Creation
 
 The dashboard provides two UI surfaces for creating tasks:

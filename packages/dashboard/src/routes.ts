@@ -7004,14 +7004,14 @@ Output ONLY the prompt text (no markdown, no explanations).`;
    */
   router.patch("/agents/:id", async (req, res) => {
     try {
-      const { name, role, metadata } = req.body;
+      const { name, role, metadata, runtimeConfig } = req.body;
 
       const scopedStore = await getScopedStore(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
-      const agent = await agentStore.updateAgent(req.params.id, { name, role, metadata });
+      const agent = await agentStore.updateAgent(req.params.id, { name, role, metadata, runtimeConfig });
       res.json(agent);
     } catch (err: any) {
       if (err.message?.includes("not found")) {

@@ -213,6 +213,7 @@ export class InProcessRuntime
 
         this.heartbeatMonitor = new HeartbeatMonitor({
           store: this.agentStore,
+          agentStore: this.agentStore, // enables per-agent config resolution
           onMissed: (agentId) => {
             runtimeLog.warn(`Agent ${agentId} missed heartbeat`);
           },

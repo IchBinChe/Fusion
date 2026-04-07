@@ -1410,6 +1410,8 @@ describe("PATCH /tasks/:id", () => {
       modelId: null,
       validatorModelProvider: null,
       validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
     });
     expect(res.body.dependencies).toEqual(["FN-002"]);
   });
@@ -1432,6 +1434,8 @@ describe("PATCH /tasks/:id", () => {
       modelId: null,
       validatorModelProvider: null,
       validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
     });
   });
 
@@ -1464,6 +1468,8 @@ describe("PATCH /tasks/:id", () => {
       modelId: "claude-sonnet-4-5",
       validatorModelProvider: "openai",
       validatorModelId: "gpt-4o",
+      planningModelProvider: null,
+      planningModelId: null,
     });
   });
 
@@ -1514,6 +1520,90 @@ describe("PATCH /tasks/:id", () => {
       modelId: null,
       validatorModelProvider: null,
       validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
+    });
+  });
+
+  it("forwards planning model override fields to store.updateTask", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      planningModelProvider: "google",
+      planningModelId: "gemini-2.5-pro",
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      planningModelProvider: "google",
+      planningModelId: "gemini-2.5-pro",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      title: undefined,
+      description: undefined,
+      prompt: undefined,
+      dependencies: undefined,
+      enabledWorkflowSteps: undefined,
+      modelProvider: null,
+      modelId: null,
+      validatorModelProvider: null,
+      validatorModelId: null,
+      planningModelProvider: "google",
+      planningModelId: "gemini-2.5-pro",
+    });
+  });
+
+  it("returns 400 for invalid planningModelProvider type", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      planningModelProvider: 123,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("planningModelProvider must be a string");
+  });
+
+  it("returns 400 for invalid planningModelId type", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      planningModelId: true,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("planningModelId must be a string");
+  });
+
+  it("accepts null to clear planning model fields", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      planningModelProvider: undefined,
+      planningModelId: undefined,
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      planningModelProvider: null,
+      planningModelId: null,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      title: undefined,
+      description: undefined,
+      prompt: undefined,
+      dependencies: undefined,
+      enabledWorkflowSteps: undefined,
+      modelProvider: null,
+      modelId: null,
+      validatorModelProvider: null,
+      validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
     });
   });
 
@@ -1540,6 +1630,8 @@ describe("PATCH /tasks/:id", () => {
       modelId: null,
       validatorModelProvider: null,
       validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
     });
   });
 

@@ -31,6 +31,8 @@ export interface TaskFormProps {
   onExecutorModelChange: (value: string) => void;
   validatorModel: string;
   onValidatorModelChange: (value: string) => void;
+  planningModel?: string;
+  onPlanningModelChange?: (value: string) => void;
   presetMode: "default" | "preset" | "custom";
   onPresetModeChange: (mode: "default" | "preset" | "custom") => void;
   selectedPresetId: string;
@@ -71,6 +73,8 @@ export function TaskForm({
   onExecutorModelChange,
   validatorModel,
   onValidatorModelChange,
+  planningModel,
+  onPlanningModelChange,
   presetMode,
   onPresetModeChange,
   selectedPresetId,
@@ -641,6 +645,27 @@ export function TaskForm({
                 onToggleModelFavorite={handleToggleModelFavorite}
               />
             </div>
+            {onPlanningModelChange && (
+              <div className="model-select-row">
+                <label htmlFor="planning-model" className="model-select-label">Planning</label>
+                <CustomModelDropdown
+                  id="planning-model"
+                  label="Planning Model"
+                  value={planningModel || ""}
+                  onChange={(value) => {
+                    onPresetModeChange("custom");
+                    onSelectedPresetIdChange("");
+                    onPlanningModelChange(value);
+                  }}
+                  models={availableModels}
+                  disabled={disabled || presetMode === "preset"}
+                  favoriteProviders={favoriteProviders}
+                  onToggleFavorite={handleToggleFavorite}
+                  favoriteModels={favoriteModels}
+                  onToggleModelFavorite={handleToggleModelFavorite}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

@@ -34,6 +34,13 @@ function getValidatorSelection(task: Task | TaskDetail): ModelSelection {
   };
 }
 
+function getPlanningSelection(task: Task | TaskDetail): ModelSelection {
+  return {
+    provider: normalizeModelField(task.planningModelProvider),
+    modelId: normalizeModelField(task.planningModelId),
+  };
+}
+
 function parseModelValue(value: string): ModelSelection {
   if (!value) {
     return { provider: undefined, modelId: undefined };
@@ -56,8 +63,13 @@ function selectionsEqual(a: ModelSelection, b: ModelSelection): boolean {
   return a.provider === b.provider && a.modelId === b.modelId;
 }
 
-function getSuccessToastMessage(target: "executor" | "validator", selection: ModelSelection): string {
-  const label = target === "executor" ? "Executor" : "Validator";
+function getSuccessToastMessage(target: "executor" | "validator" | "planning", selection: ModelSelection): string {
+  const labels: Record<string, string> = {
+    executor: "Executor",
+    validator: "Validator",
+    planning: "Planning",
+  };
+  const label = labels[target] || target;
 
   if (!selection.provider || !selection.modelId) {
     return `${label} model set to default`;
@@ -77,7 +89,9 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
   const [savedExecutor, setSavedExecutor] = useState<ModelSelection>(() => getExecutorSelection(task));
   const [selectedValidator, setSelectedValidator] = useState<ModelSelection>(() => getValidatorSelection(task));
   const [savedValidator, setSavedValidator] = useState<ModelSelection>(() => getValidatorSelection(task));
-  const [savingTarget, setSavingTarget] = useState<"executor" | "validator" | null>(null);
+  const [selectedPlanning, setSelectedPlanning] = useState<ModelSelection>(() => getPlanningSelection(task));
+  const [savedPlanning, setSavedPlanning] = useState<ModelSelection>(() => getPlanningSelection(task));
+  const [savingTarget, setSavingTarget] = useState<"executor" | "validator" | "planning" | null>(null);
 
   const activeTaskIdRef = useRef(task.id);
 
@@ -142,23 +156,28 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
 
     const nextExecutor = getExecutorSelection(task);
     const nextValidator = getValidatorSelection(task);
+    const nextPlanning = getPlanningSelection(task);
 
     setSelectedExecutor(nextExecutor);
     setSavedExecutor(nextExecutor);
     setSelectedValidator(nextValidator);
     setSavedValidator(nextValidator);
+    setSelectedPlanning(nextPlanning);
+    setSavedPlanning(nextPlanning);
     setSavingTarget(null);
-  }, [task.id, task.modelProvider, task.modelId, task.validatorModelProvider, task.validatorModelId]);
+  }, [task.id, task.modelProvider, task.modelId, task.validatorModelProvider, task.validatorModelId, task.planningModelProvider, task.planningModelId]);
 
   const executorValue = useMemo(() => getDropdownValue(selectedExecutor), [selectedExecutor]);
   const validatorValue = useMemo(() => getDropdownValue(selectedValidator), [selectedValidator]);
+  const planningValue = useMemo(() => getDropdownValue(selectedPlanning), [selectedPlanning]);
   const isSaving = savingTarget !== null;
 
   const saveSelection = useCallback(
-    async (target: "executor" | "validator", nextSelection: ModelSelection) => {
+    async (target: "executor" | "validator" | "planning", nextSelection: ModelSelection) => {
       const requestTaskId = task.id;
       const previousSavedExecutor = savedExecutor;
       const previousSavedValidator = savedValidator;
+      const previousSavedPlanning = savedPlanning;
 
       setSavingTarget(target);
 
@@ -176,6 +195,12 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
           validatorModelId: target === "validator"
             ? nextSelection.modelId ?? null
             : previousSavedValidator.modelId ?? null,
+          planningModelProvider: target === "planning"
+            ? nextSelection.provider ?? null
+            : previousSavedPlanning.provider ?? null,
+          planningModelId: target === "planning"
+            ? nextSelection.modelId ?? null
+            : previousSavedPlanning.modelId ?? null,
         });
 
         if (activeTaskIdRef.current !== requestTaskId) {
@@ -184,17 +209,23 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
 
         const nextSavedExecutor = getExecutorSelection(updatedTask);
         const nextSavedValidator = getValidatorSelection(updatedTask);
+        const nextSavedPlanning = getPlanningSelection(updatedTask);
 
         setSavedExecutor(nextSavedExecutor);
         setSelectedExecutor(nextSavedExecutor);
         setSavedValidator(nextSavedValidator);
         setSelectedValidator(nextSavedValidator);
+        setSavedPlanning(nextSavedPlanning);
+        setSelectedPlanning(nextSavedPlanning);
+
+        const targetSelections: Record<string, ModelSelection> = {
+          executor: nextSavedExecutor,
+          validator: nextSavedValidator,
+          planning: nextSavedPlanning,
+        };
 
         addToast(
-          getSuccessToastMessage(
-            target,
-            target === "executor" ? nextSavedExecutor : nextSavedValidator,
-          ),
+          getSuccessToastMessage(target, targetSelections[target]),
           "success",
         );
       } catch (err: any) {
@@ -204,8 +235,10 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
 
         if (target === "executor") {
           setSelectedExecutor(previousSavedExecutor);
-        } else {
+        } else if (target === "validator") {
           setSelectedValidator(previousSavedValidator);
+        } else {
+          setSelectedPlanning(previousSavedPlanning);
         }
 
         addToast(err.message || "Failed to save model settings", "error");
@@ -215,7 +248,7 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
         }
       }
     },
-    [task.id, savedExecutor, savedValidator, addToast],
+    [task.id, savedExecutor, savedValidator, savedPlanning, addToast],
   );
 
   const handleExecutorChange = useCallback(
@@ -246,8 +279,23 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
     [savedValidator, saveSelection],
   );
 
+  const handlePlanningChange = useCallback(
+    (value: string) => {
+      const nextSelection = parseModelValue(value);
+      setSelectedPlanning(nextSelection);
+
+      if (selectionsEqual(nextSelection, savedPlanning)) {
+        return;
+      }
+
+      void saveSelection("planning", nextSelection);
+    },
+    [savedPlanning, saveSelection],
+  );
+
   const executorUsingDefault = !savedExecutor.provider && !savedExecutor.modelId;
   const validatorUsingDefault = !savedValidator.provider && !savedValidator.modelId;
+  const planningUsingDefault = !savedPlanning.provider && !savedPlanning.modelId;
 
   return (
     <div className="model-selector-tab">
@@ -342,8 +390,36 @@ export function ModelSelectorTab({ task, addToast }: ModelSelectorTabProps) {
             <small>The AI model used to review code and plans for this task.</small>
           </div>
 
+          <div className="form-group">
+            <label htmlFor="planningModel">Planning Model</label>
+            <div className="model-selector-current">
+              {planningUsingDefault ? (
+                <span className="model-badge model-badge-default">Using default</span>
+              ) : (
+                <span className="model-badge model-badge-custom">
+                  {savedPlanning.provider && <ProviderIcon provider={savedPlanning.provider} size="sm" />}
+                  {savedPlanning.provider}/{savedPlanning.modelId}
+                </span>
+              )}
+            </div>
+            <CustomModelDropdown
+              id="planningModel"
+              label="Planning Model"
+              value={planningValue}
+              onChange={handlePlanningChange}
+              models={availableModels}
+              disabled={isSaving}
+              placeholder="Select planning model…"
+              favoriteProviders={favoriteProviders}
+              onToggleFavorite={handleToggleFavorite}
+              favoriteModels={favoriteModels}
+              onToggleModelFavorite={handleToggleModelFavorite}
+            />
+            <small>The AI model used for task specification (triage phase).</small>
+          </div>
+
           <div className="model-selector-status">
-            {executorUsingDefault && validatorUsingDefault
+            {executorUsingDefault && validatorUsingDefault && planningUsingDefault
               ? "Using global default models."
               : "Model settings are up to date."}
           </div>

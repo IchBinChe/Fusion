@@ -229,6 +229,7 @@ export function TaskDetailModal({
   const [editDependencies, setEditDependencies] = useState<string[]>(task.dependencies || []);
   const [editExecutorModel, setEditExecutorModel] = useState("");
   const [editValidatorModel, setEditValidatorModel] = useState("");
+  const [editPlanningModel, setEditPlanningModel] = useState("");
   const [editPresetMode, setEditPresetMode] = useState<"default" | "preset" | "custom">("default");
   const [editSelectedPresetId, setEditSelectedPresetId] = useState("");
   const [editSelectedWorkflowSteps, setEditSelectedWorkflowSteps] = useState<string[]>(task.enabledWorkflowSteps || []);
@@ -319,9 +320,11 @@ export function TaskDetailModal({
     // Populate model overrides from task
     const execModel = task.modelProvider && task.modelId ? `${task.modelProvider}/${task.modelId}` : "";
     const valModel = task.validatorModelProvider && task.validatorModelId ? `${task.validatorModelProvider}/${task.validatorModelId}` : "";
+    const planModel = task.planningModelProvider && task.planningModelId ? `${task.planningModelProvider}/${task.planningModelId}` : "";
     setEditExecutorModel(execModel);
     setEditValidatorModel(valModel);
-    setEditPresetMode(execModel || valModel ? "custom" : "default");
+    setEditPlanningModel(planModel);
+    setEditPresetMode(execModel || valModel || planModel ? "custom" : "default");
     setEditSelectedPresetId("");
     setEditSelectedWorkflowSteps(task.enabledWorkflowSteps || []);
     setEditPendingImages([]);
@@ -342,6 +345,7 @@ export function TaskDetailModal({
       // Build update payload with all changed fields
       const executorSlashIdx = editExecutorModel.indexOf("/");
       const validatorSlashIdx = editValidatorModel.indexOf("/");
+      const planningSlashIdx = editPlanningModel.indexOf("/");
 
       const updates: Parameters<typeof updateTask>[1] = {
         title: editTitle.trim() || undefined,
@@ -352,6 +356,8 @@ export function TaskDetailModal({
         modelId: editExecutorModel && executorSlashIdx !== -1 ? editExecutorModel.slice(executorSlashIdx + 1) : null,
         validatorModelProvider: editValidatorModel && validatorSlashIdx !== -1 ? editValidatorModel.slice(0, validatorSlashIdx) : null,
         validatorModelId: editValidatorModel && validatorSlashIdx !== -1 ? editValidatorModel.slice(validatorSlashIdx + 1) : null,
+        planningModelProvider: editPlanningModel && planningSlashIdx !== -1 ? editPlanningModel.slice(0, planningSlashIdx) : null,
+        planningModelId: editPlanningModel && planningSlashIdx !== -1 ? editPlanningModel.slice(planningSlashIdx + 1) : null,
       };
 
       await updateTask(task.id, updates, projectId);
@@ -384,7 +390,7 @@ export function TaskDetailModal({
         setIsSaving(false);
       }
     }
-  }, [task.id, editTitle, editDescription, editDependencies, editExecutorModel, editValidatorModel, editSelectedWorkflowSteps, editPendingImages, addToast, projectId]);
+  }, [task.id, editTitle, editDescription, editDependencies, editExecutorModel, editValidatorModel, editPlanningModel, editSelectedWorkflowSteps, editPendingImages, addToast, projectId]);
 
   // Handle keyboard shortcuts for edit mode
   const handleEditKeyDown = useCallback((e: KeyboardEvent) => {
@@ -796,6 +802,8 @@ export function TaskDetailModal({
                 onExecutorModelChange={setEditExecutorModel}
                 validatorModel={editValidatorModel}
                 onValidatorModelChange={setEditValidatorModel}
+                planningModel={editPlanningModel}
+                onPlanningModelChange={setEditPlanningModel}
                 presetMode={editPresetMode}
                 onPresetModeChange={setEditPresetMode}
                 selectedPresetId={editSelectedPresetId}

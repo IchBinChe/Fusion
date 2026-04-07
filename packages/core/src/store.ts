@@ -174,6 +174,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       modelId: row.modelId || undefined,
       validatorModelProvider: row.validatorModelProvider || undefined,
       validatorModelId: row.validatorModelId || undefined,
+      planningModelProvider: row.planningModelProvider || undefined,
+      planningModelId: row.planningModelId || undefined,
       mergeRetries: row.mergeRetries ?? undefined,
       stuckKillCount: row.stuckKillCount ?? undefined,
       recoveryRetryCount: row.recoveryRetryCount ?? undefined,
@@ -225,15 +227,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       INSERT OR REPLACE INTO tasks (
         id, title, description, "column", status, size, reviewLevel, currentStep,
         worktree, blockedBy, paused, baseBranch, branch, baseCommitSha, modelPresetId, modelProvider,
-        modelId, validatorModelProvider, validatorModelId, mergeRetries,
+        modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         stuckKillCount, recoveryRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, createdAt, updatedAt, columnMovedAt,
         dependencies, steps, log, attachments, steeringComments,
         comments, workflowStepResults, prInfo, issueInfo, mergeDetails,
         breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `).run(
       task.id,
@@ -255,6 +257,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.modelId ?? null,
       task.validatorModelProvider ?? null,
       task.validatorModelId ?? null,
+      task.planningModelProvider ?? null,
+      task.planningModelId ?? null,
       task.mergeRetries ?? null,
       task.stuckKillCount ?? 0,
       task.recoveryRetryCount ?? null,
@@ -808,6 +812,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       modelId: input.modelId,
       validatorModelProvider: input.validatorModelProvider,
       validatorModelId: input.validatorModelId,
+      planningModelProvider: input.planningModelProvider,
+      planningModelId: input.planningModelId,
       steps: [],
       currentStep: 0,
       log: [{ timestamp: now, action: "Task created" }],
@@ -1095,7 +1101,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; blockedBy?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; stuckKillCount?: number | null; recoveryRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; blockedBy?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; stuckKillCount?: number | null; recoveryRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
       // Validate that task doesn't depend on itself
@@ -1202,6 +1208,16 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.validatorModelId = undefined;
       } else if (updates.validatorModelId !== undefined) {
         task.validatorModelId = updates.validatorModelId;
+      }
+      if (updates.planningModelProvider === null) {
+        task.planningModelProvider = undefined;
+      } else if (updates.planningModelProvider !== undefined) {
+        task.planningModelProvider = updates.planningModelProvider;
+      }
+      if (updates.planningModelId === null) {
+        task.planningModelId = undefined;
+      } else if (updates.planningModelId !== undefined) {
+        task.planningModelId = updates.planningModelId;
       }
       if (updates.error === null) {
         task.error = undefined;
@@ -1821,6 +1837,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           modelId: task.modelId,
           validatorModelProvider: task.validatorModelProvider,
           validatorModelId: task.validatorModelId,
+          planningModelProvider: task.planningModelProvider,
+          planningModelId: task.planningModelId,
           breakIntoSubtasks: task.breakIntoSubtasks,
           paused: task.paused,
           baseBranch: task.baseBranch,
@@ -2709,6 +2727,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       modelId: entry.modelId,
       validatorModelProvider: entry.validatorModelProvider,
       validatorModelId: entry.validatorModelId,
+      planningModelProvider: entry.planningModelProvider,
+      planningModelId: entry.planningModelId,
       breakIntoSubtasks: entry.breakIntoSubtasks,
       modifiedFiles: entry.modifiedFiles,
       // Intentionally NOT restoring: worktree, status, blockedBy, paused, baseBranch, baseCommitSha, error, comments

@@ -1103,6 +1103,7 @@ The kb dashboard allows overriding the global AI model selection on a per-task b
 Each task can optionally specify:
 - **Executor Model**: The AI model used to implement the task (executor agent)
 - **Validator Model**: The AI model used to review code and plans (reviewer agent)
+- **Planning Model**: The AI model used for task specification (triage agent)
 
 When not specified, tasks use the global default settings (`defaultProvider`/`defaultModelId`).
 
@@ -1122,7 +1123,9 @@ Per-task model overrides are stored in the task's `task.json`:
   "modelProvider": "anthropic",
   "modelId": "claude-sonnet-4-5",
   "validatorModelProvider": "openai",
-  "validatorModelId": "gpt-4o"
+  "validatorModelId": "gpt-4o",
+  "planningModelProvider": "google",
+  "planningModelId": "gemini-2.5-pro"
 }
 ```
 
@@ -1132,10 +1135,10 @@ To clear overrides, select "Use default" for both fields and save.
 
 - **Executor**: When both `modelProvider` and `modelId` are set on a task, the executor uses those instead of global settings when creating the agent session.
 - **Reviewer**: When both `validatorModelProvider` and `validatorModelId` are set, the reviewer uses those instead of global settings. The validator model is passed via `ReviewOptions` to `reviewStep()`.
+- **Planning**: When both `planningModelProvider` and `planningModelId` are set, the triage agent uses those instead of global settings for task specification.
 
 ### Limitations
 
-- **Planning Model**: Task specification (triage) uses the global `planningProvider`/`planningModelId` settings — there is no per-task override for planning
 - Both provider and modelId must be set together; partial configuration falls back to defaults
 
 ## Model Settings Hierarchy
@@ -1143,9 +1146,10 @@ To clear overrides, select "Use default" for both fields and save.
 The system uses the following precedence for model selection:
 
 **For Task Specification (Triage):**
-1. Global `planningProvider`/`planningModelId` (if both set)
-2. Global `defaultProvider`/`defaultModelId` (if both set)
-3. Automatic model resolution (fallback)
+1. Per-task `planningModelProvider`/`planningModelId` (if both set)
+2. Global `planningProvider`/`planningModelId` (if both set)
+3. Global `defaultProvider`/`defaultModelId` (if both set)
+4. Automatic model resolution (fallback)
 
 **For Task Execution (Executor):**
 1. Per-task `modelProvider`/`modelId` (if both set)
@@ -1182,7 +1186,7 @@ Each line in `archive.jsonl` is a JSON object containing:
 - `attachments` (metadata only, no file content)
 - `log` (task log entries)
 - `createdAt`, `updatedAt`, `columnMovedAt`, `archivedAt`
-- Model overrides: `modelProvider`, `modelId`, `validatorModelProvider`, `validatorModelId`
+- Model overrides: `modelProvider`, `modelId`, `validatorModelProvider`, `validatorModelId`, `planningModelProvider`, `planningModelId`
 
 **Explicitly excluded:** `agent.log` content (can be large, not needed for restoration)
 

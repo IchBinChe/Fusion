@@ -59,7 +59,7 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -141,6 +141,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   modelId TEXT,
   validatorModelProvider TEXT,
   validatorModelId TEXT,
+  planningModelProvider TEXT,
+  planningModelId TEXT,
   mergeRetries INTEGER,
   recoveryRetryCount INTEGER,
   nextRecoveryAt TEXT,
@@ -449,13 +451,20 @@ export class Database {
     }
 
     // Future migrations go here:
-    // if (version < 11) { this.applyMigration(11, () => { ... }); }
+    // if (version < 12) { this.applyMigration(12, () => { ... }); }
 
     if (version < 10) {
       this.applyMigration(10, () => {
         this.addColumnIfMissing("missions", "autopilotEnabled", "INTEGER DEFAULT 0");
         this.addColumnIfMissing("missions", "autopilotState", "TEXT DEFAULT 'inactive'");
         this.addColumnIfMissing("missions", "lastAutopilotActivityAt", "TEXT");
+      });
+    }
+
+    if (version < 11) {
+      this.applyMigration(11, () => {
+        this.addColumnIfMissing("tasks", "planningModelProvider", "TEXT");
+        this.addColumnIfMissing("tasks", "planningModelId", "TEXT");
       });
     }
   }

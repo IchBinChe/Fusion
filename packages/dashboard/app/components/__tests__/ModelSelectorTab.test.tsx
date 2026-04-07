@@ -81,6 +81,25 @@ describe("ModelSelectorTab", () => {
     ) ?? screen.getAllByText("Use default")[0];
   }
 
+  /** Helper to build expected updateTask call with all model fields */
+  function expectedModelCall(overrides: {
+    modelProvider?: string | null;
+    modelId?: string | null;
+    validatorModelProvider?: string | null;
+    validatorModelId?: string | null;
+    planningModelProvider?: string | null;
+    planningModelId?: string | null;
+  } = {}) {
+    return {
+      modelProvider: overrides.modelProvider ?? null,
+      modelId: overrides.modelId ?? null,
+      validatorModelProvider: overrides.validatorModelProvider ?? null,
+      validatorModelId: overrides.validatorModelId ?? null,
+      planningModelProvider: overrides.planningModelProvider ?? null,
+      planningModelId: overrides.planningModelId ?? null,
+    };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetchModels.mockResolvedValue(MOCK_MODELS_RESPONSE);
@@ -103,6 +122,7 @@ describe("ModelSelectorTab", () => {
     await waitForSelectors();
 
     expect(screen.getByLabelText("Validator Model")).toBeInTheDocument();
+    expect(screen.getByLabelText("Planning Model")).toBeInTheDocument();
     expect(screen.queryByText("Save")).not.toBeInTheDocument();
     expect(screen.queryByText("Reset")).not.toBeInTheDocument();
   });
@@ -117,6 +137,9 @@ describe("ModelSelectorTab", () => {
 
     const validatorSection = getSection("Validator Model");
     expect(within(validatorSection!).getByText("Using default")).toBeInTheDocument();
+
+    const planningSection = getSection("Planning Model");
+    expect(within(planningSection!).getByText("Using default")).toBeInTheDocument();
   });
 
   it("shows current custom model when overrides are set", async () => {
@@ -214,23 +237,21 @@ describe("ModelSelectorTab", () => {
     await selectOption("Executor Model", "Claude Sonnet 4.5");
 
     await waitFor(() => {
-      expect(mockUpdateTask).toHaveBeenNthCalledWith(1, "FN-001", {
+      expect(mockUpdateTask).toHaveBeenNthCalledWith(1, "FN-001", expectedModelCall({
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        validatorModelProvider: null,
-        validatorModelId: null,
-      });
+      }));
     });
 
     await selectOption("Validator Model", "GPT-4o");
 
     await waitFor(() => {
-      expect(mockUpdateTask).toHaveBeenNthCalledWith(2, "FN-001", {
+      expect(mockUpdateTask).toHaveBeenNthCalledWith(2, "FN-001", expectedModelCall({
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
         validatorModelProvider: "openai",
         validatorModelId: "gpt-4o",
-      });
+      }));
     });
   });
 
@@ -251,12 +272,12 @@ describe("ModelSelectorTab", () => {
     await selectOption("Executor Model", "Claude Sonnet 4.5");
 
     await waitFor(() => {
-      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
+      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall({
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
         validatorModelProvider: "openai",
         validatorModelId: "gpt-4o",
-      });
+      }));
     });
   });
 
@@ -280,12 +301,7 @@ describe("ModelSelectorTab", () => {
     await user.click(getUseDefaultOption());
 
     await waitFor(() => {
-      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
-        modelProvider: null,
-        modelId: null,
-        validatorModelProvider: null,
-        validatorModelId: null,
-      });
+      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall());
     });
   });
 
@@ -306,12 +322,12 @@ describe("ModelSelectorTab", () => {
     await selectOption("Validator Model", "GPT-4o");
 
     await waitFor(() => {
-      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
+      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall({
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
         validatorModelProvider: "openai",
         validatorModelId: "gpt-4o",
-      });
+      }));
     });
   });
 
@@ -335,12 +351,7 @@ describe("ModelSelectorTab", () => {
     await user.click(getUseDefaultOption());
 
     await waitFor(() => {
-      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
-        modelProvider: null,
-        modelId: null,
-        validatorModelProvider: null,
-        validatorModelId: null,
-      });
+      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall());
     });
   });
 
@@ -366,7 +377,7 @@ describe("ModelSelectorTab", () => {
     });
   });
 
-  it("disables both selectors while saving", async () => {
+  it("disables all selectors while saving", async () => {
     const user = userEvent.setup();
     let resolveUpdate: ((value: Task) => void) | undefined;
     mockUpdateTask.mockImplementation(
@@ -385,6 +396,7 @@ describe("ModelSelectorTab", () => {
     await waitFor(() => {
       expect(getSelector("Executor Model")).toBeDisabled();
       expect(getSelector("Validator Model")).toBeDisabled();
+      expect(getSelector("Planning Model")).toBeDisabled();
     });
 
     resolveUpdate?.({
@@ -396,6 +408,7 @@ describe("ModelSelectorTab", () => {
     await waitFor(() => {
       expect(getSelector("Executor Model")).not.toBeDisabled();
       expect(getSelector("Validator Model")).not.toBeDisabled();
+      expect(getSelector("Planning Model")).not.toBeDisabled();
     });
   });
 
@@ -658,12 +671,10 @@ describe("ModelSelectorTab", () => {
         expect(screen.queryByPlaceholderText("Filter models…")).not.toBeInTheDocument();
       });
 
-      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
+      expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall({
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        validatorModelProvider: null,
-        validatorModelId: null,
-      });
+      }));
     });
 
     it("Use default option is always visible", async () => {
@@ -708,12 +719,151 @@ describe("ModelSelectorTab", () => {
       await user.click(screen.getByText("GPT-4o"));
 
       await waitFor(() => {
-        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", {
+        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall({
           modelProvider: "openai",
           modelId: "gpt-4o",
-          validatorModelProvider: null,
-          validatorModelId: null,
-        });
+        }));
+      });
+    });
+  });
+
+  describe("Planning model selector", () => {
+    it("renders planning model dropdown", async () => {
+      render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      expect(screen.getByLabelText("Planning Model")).toBeInTheDocument();
+    });
+
+    it("shows 'Using default' badge when no planning model override is set", async () => {
+      render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      const planningSection = getSection("Planning Model");
+      expect(within(planningSection!).getByText("Using default")).toBeInTheDocument();
+    });
+
+    it("shows custom badge when planning model override is set", async () => {
+      const taskWithPlanning = {
+        ...FAKE_TASK,
+        planningModelProvider: "google",
+        planningModelId: "gemini-2.5-pro",
+      };
+
+      render(<ModelSelectorTab task={taskWithPlanning} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      const planningSection = getSection("Planning Model");
+      const badge = within(planningSection!).getByText("google/gemini-2.5-pro", { selector: ".model-badge-custom" });
+      expect(badge).toBeInTheDocument();
+    });
+
+    it("auto-saves planning model selection correctly", async () => {
+      render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+      await selectOption("Planning Model", "Claude Sonnet 4.5");
+
+      await waitFor(() => {
+        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall({
+          planningModelProvider: "anthropic",
+          planningModelId: "claude-sonnet-4-5",
+        }));
+      });
+    });
+
+    it("clears planning model override with 'Use default'", async () => {
+      const taskWithPlanning = {
+        ...FAKE_TASK,
+        planningModelProvider: "anthropic",
+        planningModelId: "claude-sonnet-4-5",
+      };
+      mockUpdateTask.mockImplementation(async (_id: string, updates: Record<string, unknown>) => ({
+        ...taskWithPlanning,
+        ...updates,
+      }));
+
+      const user = userEvent.setup();
+      render(<ModelSelectorTab task={taskWithPlanning} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      await user.click(getSelector("Planning Model"));
+      await user.click(getUseDefaultOption());
+
+      await waitFor(() => {
+        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall());
+      });
+    });
+
+    it("preserves executor and validator overrides when saving planning model", async () => {
+      const taskWithModels = {
+        ...FAKE_TASK,
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+        validatorModelProvider: "openai",
+        validatorModelId: "gpt-4o",
+      };
+      mockUpdateTask.mockImplementation(async (_id: string, updates: Record<string, unknown>) => ({
+        ...taskWithModels,
+        ...updates,
+      }));
+
+      render(<ModelSelectorTab task={taskWithModels} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+      await selectOption("Planning Model", "Claude Opus 4");
+
+      await waitFor(() => {
+        expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expectedModelCall({
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          validatorModelProvider: "openai",
+          validatorModelId: "gpt-4o",
+          planningModelProvider: "anthropic",
+          planningModelId: "claude-opus-4",
+        }));
+      });
+    });
+
+    it("shows planning model success toast with correct model name", async () => {
+      render(<ModelSelectorTab task={FAKE_TASK} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+      await selectOption("Planning Model", "GPT-4o");
+
+      await waitFor(() => {
+        expect(mockAddToast).toHaveBeenCalledWith(
+          "Planning model set to openai/gpt-4o",
+          "success",
+        );
+      });
+    });
+
+    it("shows 'set to default' toast when clearing planning model override", async () => {
+      const taskWithPlanning = {
+        ...FAKE_TASK,
+        planningModelProvider: "anthropic",
+        planningModelId: "claude-sonnet-4-5",
+      };
+      mockUpdateTask.mockImplementation(async (_id: string, updates: Record<string, unknown>) => ({
+        ...taskWithPlanning,
+        ...updates,
+      }));
+
+      const user = userEvent.setup();
+      render(<ModelSelectorTab task={taskWithPlanning} addToast={mockAddToast} />);
+
+      await waitForSelectors();
+
+      await user.click(getSelector("Planning Model"));
+      await user.click(getUseDefaultOption());
+
+      await waitFor(() => {
+        expect(mockAddToast).toHaveBeenCalledWith("Planning model set to default", "success");
       });
     });
   });

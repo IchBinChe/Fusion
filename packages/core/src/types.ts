@@ -542,6 +542,14 @@ export interface Task {
    *  Must be set together with `validatorModelProvider`. When both validator model
    *  fields are undefined, the reviewer uses global settings defaults. */
   validatorModelId?: string;
+  /** AI model provider override for the planning/triage agent.
+   *  Must be set together with `planningModelId`. When both planning model fields
+   *  are undefined, the triage agent uses global settings defaults. */
+  planningModelProvider?: string;
+  /** AI model ID override for the planning/triage agent.
+   *  Must be set together with `planningModelProvider`. When both planning model
+   *  fields are undefined, the triage agent uses global settings defaults. */
+  planningModelId?: string;
   /** IDs of workflow steps enabled for this task, run after implementation completes */
   enabledWorkflowSteps?: string[];
   /** Results from workflow step executions (populated after task implementation) */
@@ -608,6 +616,14 @@ export interface TaskCreateInput {
    *  Must be set together with `validatorModelProvider`. When both validator model
    *  fields are undefined, the reviewer uses global settings defaults. */
   validatorModelId?: string;
+  /** AI model provider override for the planning/triage agent.
+   *  Must be set together with `planningModelId`. When both planning model fields
+   *  are undefined, the triage agent uses global settings defaults. */
+  planningModelProvider?: string;
+  /** AI model ID override for the planning/triage agent.
+   *  Must be set together with `planningModelProvider`. When both planning model
+   *  fields are undefined, the triage agent uses global settings defaults. */
+  planningModelId?: string;
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
   /** When true, trigger AI title summarization if description is long and no title provided */
@@ -1193,6 +1209,9 @@ export interface ArchivedTaskEntry {
   modelId?: string;
   validatorModelProvider?: string;
   validatorModelId?: string;
+  /** Optional: planning model override for triage agent */
+  planningModelProvider?: string;
+  planningModelId?: string;
   /** Optional: other metadata to preserve */
   breakIntoSubtasks?: boolean;
   paused?: boolean;

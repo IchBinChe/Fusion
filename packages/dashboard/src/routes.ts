@@ -2546,7 +2546,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
-      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId } = req.body;
+      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId } = req.body;
 
       // Validate model fields are strings or undefined/null
       const validateModelField = (value: unknown, name: string): string | null | undefined => {
@@ -2561,6 +2561,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const validatedModelId = validateModelField(modelId, "modelId");
       const validatedValidatorModelProvider = validateModelField(validatorModelProvider, "validatorModelProvider");
       const validatedValidatorModelId = validateModelField(validatorModelId, "validatorModelId");
+      const validatedPlanningModelProvider = validateModelField(planningModelProvider, "planningModelProvider");
+      const validatedPlanningModelId = validateModelField(planningModelId, "planningModelId");
 
       if (enabledWorkflowSteps !== undefined) {
         if (!Array.isArray(enabledWorkflowSteps) || !enabledWorkflowSteps.every((id: unknown) => typeof id === "string")) {
@@ -2578,6 +2580,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         modelId: validatedModelId,
         validatorModelProvider: validatedValidatorModelProvider,
         validatorModelId: validatedValidatorModelId,
+        planningModelProvider: validatedPlanningModelProvider,
+        planningModelId: validatedPlanningModelId,
       });
       res.json(task);
     } catch (err: any) {

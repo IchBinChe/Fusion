@@ -2,6 +2,12 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Terminal, Play, Settings, Loader2, ChevronDown } from "lucide-react";
 import { fetchScripts } from "../api";
 
+interface DropdownPosition {
+  top: number;
+  left: number;
+  width: number;
+}
+
 export interface QuickScriptsDropdownProps {
   onOpenScripts: () => void;
   onRunScript: (name: string, command: string) => void;
@@ -30,9 +36,76 @@ export function QuickScriptsDropdown({
   const [scripts, setScripts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const getEffectiveViewport = useCallback(() => {
+    const vv = window.visualViewport;
+    if (vv && vv.width > 0 && vv.height > 0) {
+      return {
+        width: vv.width,
+        height: vv.height,
+        offsetTop: vv.offsetTop,
+        offsetLeft: vv.offsetLeft,
+      };
+    }
+
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetTop: 0,
+      offsetLeft: 0,
+    };
+  }, []);
+
+  const updateDropdownPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const menu = menuRef.current;
+    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
+    const horizontalPadding = 16;
+    const verticalPadding = 16;
+    const gap = 6;
+
+    const measuredWidth = menu?.offsetWidth || Math.max(rect.width, 260);
+    const width = Math.min(
+      measuredWidth,
+      Math.max(viewportWidth - horizontalPadding * 2, 160),
+    );
+
+    const measuredHeight = menu?.offsetHeight || 280;
+    const constrainedHeight = Math.min(
+      measuredHeight,
+      Math.max(viewportHeight - verticalPadding * 2, 160),
+    );
+
+    const triggerTop = rect.top - offsetTop;
+    const triggerBottom = rect.bottom - offsetTop;
+    const triggerLeft = rect.left - offsetLeft;
+
+    const spaceBelow = viewportHeight - triggerBottom;
+    const spaceAbove = triggerTop;
+
+    const openUpward = spaceBelow < constrainedHeight && spaceAbove > spaceBelow;
+
+    const left = Math.min(
+      Math.max(triggerLeft, horizontalPadding),
+      viewportWidth - horizontalPadding - width,
+    ) + offsetLeft;
+
+    const top = openUpward
+      ? Math.max(verticalPadding + offsetTop, triggerTop - constrainedHeight - gap + offsetTop)
+      : Math.min(
+          triggerBottom + gap + offsetTop,
+          viewportHeight + offsetTop - verticalPadding - constrainedHeight,
+        );
+
+    setDropdownPosition({ top, left, width });
+  }, [getEffectiveViewport]);
 
   // Script entries sorted alphabetically
   const scriptEntries = useMemo(() => {
@@ -112,9 +185,48 @@ export function QuickScriptsDropdown({
     if (isOpen) {
       setHighlightedIndex(-1);
       // Focus menu for keyboard navigation
-      setTimeout(() => menuRef.current?.focus(), 0);
+      const timeoutId = window.setTimeout(() => menuRef.current?.focus(), 0);
+      return () => window.clearTimeout(timeoutId);
     }
+
+    setDropdownPosition(null);
   }, [isOpen]);
+
+  // Position dropdown when opening and whenever content size changes.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const rafId = requestAnimationFrame(() => {
+      updateDropdownPosition();
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [isOpen, loading, scriptEntries.length, showFooter, updateDropdownPosition]);
+
+  // Keep dropdown anchored on viewport and container changes.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleReposition = () => updateDropdownPosition();
+
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", handleReposition);
+      vv.addEventListener("scroll", handleReposition);
+    }
+
+    return () => {
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+      if (vv) {
+        vv.removeEventListener("resize", handleReposition);
+        vv.removeEventListener("scroll", handleReposition);
+      }
+    };
+  }, [isOpen, updateDropdownPosition]);
 
   // Handle keyboard navigation within dropdown
   const handleDropdownKeyDown = useCallback(
@@ -208,6 +320,17 @@ export function QuickScriptsDropdown({
           aria-label="Scripts"
           onKeyDown={handleDropdownKeyDown}
           data-testid="quick-scripts-dropdown"
+          style={
+            dropdownPosition
+              ? {
+                  position: "fixed",
+                  top: `${dropdownPosition.top}px`,
+                  left: `${dropdownPosition.left}px`,
+                  width: `${dropdownPosition.width}px`,
+                  right: "auto",
+                }
+              : undefined
+          }
         >
           {loading ? (
             <div className="quick-scripts-dropdown__loading" data-testid="quick-scripts-loading">

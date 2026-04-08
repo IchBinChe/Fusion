@@ -65,6 +65,15 @@ interface DialogState {
 
 const INITIAL_DIALOG: DialogState = { type: null, entry: null, entryFullPath: "" };
 
+const LONG_PRESS_FEEDBACK_MS = 200;
+const LONG_PRESS_DURATION_MS = 500;
+const TOUCH_MOVE_THRESHOLD = 10;
+
+interface TouchPoint {
+  x: number;
+  y: number;
+}
+
 // ── Context Menu Component ──────────────────────────────────────────────
 
 interface ContextMenuItem {
@@ -90,19 +99,29 @@ function FileContextMenu({ x, y, entry, onAction, onClose }: FileContextMenuProp
   useEffect(() => {
     const menu = menuRef.current;
     if (!menu) return;
+
     const rect = menu.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const viewportWidth = vv?.width && vv.width > 0 ? vv.width : window.innerWidth;
+    const viewportHeight = vv?.height && vv.height > 0 ? vv.height : window.innerHeight;
+    const offsetLeft = vv?.offsetLeft ?? 0;
+    const offsetTop = vv?.offsetTop ?? 0;
+
     const pad = 8;
-    let ax = x;
-    let ay = y;
-    if (ax + rect.width > window.innerWidth - pad) {
-      ax = window.innerWidth - pad - rect.width;
+    let ax = x - offsetLeft;
+    let ay = y - offsetTop;
+
+    if (ax + rect.width > viewportWidth - pad) {
+      ax = viewportWidth - pad - rect.width;
     }
-    if (ay + rect.height > window.innerHeight - pad) {
-      ay = window.innerHeight - pad - rect.height;
+    if (ay + rect.height > viewportHeight - pad) {
+      ay = viewportHeight - pad - rect.height;
     }
+
     if (ax < pad) ax = pad;
     if (ay < pad) ay = pad;
-    setAdjustedPos({ x: ax, y: ay });
+
+    setAdjustedPos({ x: ax + offsetLeft, y: ay + offsetTop });
   }, [x, y]);
 
   // Close on Escape
@@ -291,21 +310,113 @@ export function FileBrowser({
   const [dialog, setDialog] = useState<DialogState>(INITIAL_DIALOG);
   const [operationLoading, setOperationLoading] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [isLongPressing, setIsLongPressing] = useState(false);
+  const [longPressTargetPath, setLongPressTargetPath] = useState<string | null>(null);
+
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressFeedbackTimerRef = useRef<number | null>(null);
+  const touchStartRef = useRef<TouchPoint | null>(null);
+  const touchOpenHandledRef = useRef(false);
+
+  const clearLongPressTimers = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (longPressFeedbackTimerRef.current !== null) {
+      window.clearTimeout(longPressFeedbackTimerRef.current);
+      longPressFeedbackTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelLongPress = useCallback(() => {
+    clearLongPressTimers();
+    touchStartRef.current = null;
+    setIsLongPressing(false);
+    setLongPressTargetPath(null);
+  }, [clearLongPressTimers]);
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimers();
+    };
+  }, [clearLongPressTimers]);
+
+  const openContextMenuAt = useCallback((x: number, y: number, entry: FileNode, fullPath: string) => {
+    setContextMenu({
+      visible: true,
+      x,
+      y,
+      entry,
+      entryFullPath: fullPath,
+    });
+  }, []);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent, entry: FileNode, fullPath: string) => {
+    if (e.touches.length !== 1) return;
+
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    cancelLongPress();
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+
+    longPressFeedbackTimerRef.current = window.setTimeout(() => {
+      setIsLongPressing(true);
+      setLongPressTargetPath(fullPath);
+    }, LONG_PRESS_FEEDBACK_MS);
+
+    longPressTimerRef.current = window.setTimeout(() => {
+      const point = touchStartRef.current;
+      if (!point) return;
+
+      touchOpenHandledRef.current = true;
+      setIsLongPressing(false);
+      setLongPressTargetPath(null);
+      clearLongPressTimers();
+
+      openContextMenuAt(point.x, point.y, entry, fullPath);
+    }, LONG_PRESS_DURATION_MS);
+  }, [cancelLongPress, clearLongPressTimers, openContextMenuAt]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    const touch = e.touches[0];
+    if (!start || !touch) return;
+
+    if (
+      Math.abs(touch.clientX - start.x) > TOUCH_MOVE_THRESHOLD ||
+      Math.abs(touch.clientY - start.y) > TOUCH_MOVE_THRESHOLD
+    ) {
+      cancelLongPress();
+    }
+  }, [cancelLongPress]);
+
+  const handleTouchEnd = useCallback(() => {
+    cancelLongPress();
+  }, [cancelLongPress]);
 
   // Close context menu on scroll within the file browser
   useEffect(() => {
     if (!contextMenu.visible) return;
     const browserList = document.querySelector(".file-browser-list");
-    const handleClose = () => setContextMenu(INITIAL_CONTEXT_MENU);
+    const handleClose = () => {
+      touchOpenHandledRef.current = false;
+      cancelLongPress();
+      setContextMenu(INITIAL_CONTEXT_MENU);
+    };
     browserList?.addEventListener("scroll", handleClose);
     return () => browserList?.removeEventListener("scroll", handleClose);
-  }, [contextMenu.visible]);
+  }, [cancelLongPress, contextMenu.visible]);
 
   // Close context menu on click outside or Escape
   useEffect(() => {
     if (!contextMenu.visible) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setContextMenu(INITIAL_CONTEXT_MENU);
+      if (e.key === "Escape") {
+        touchOpenHandledRef.current = false;
+        setContextMenu(INITIAL_CONTEXT_MENU);
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -314,17 +425,15 @@ export function FileBrowser({
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileNode) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      entry,
-      entryFullPath: entryPath(currentPath, entry.name),
-    });
-  }, [currentPath]);
+    cancelLongPress();
+    touchOpenHandledRef.current = false;
+    openContextMenuAt(e.clientX, e.clientY, entry, entryPath(currentPath, entry.name));
+  }, [cancelLongPress, currentPath, openContextMenuAt]);
 
   const handleContextAction = useCallback((action: string) => {
     if (!contextMenu.entry) return;
+
+    touchOpenHandledRef.current = false;
 
     const entry = contextMenu.entry;
     const fullPath = contextMenu.entryFullPath;
@@ -391,6 +500,21 @@ export function FileBrowser({
     setOperationError(null);
   }, []);
 
+  const handleFileNodeClick = useCallback((entry: FileNode, fullPath: string) => {
+    if (touchOpenHandledRef.current) {
+      touchOpenHandledRef.current = false;
+      return;
+    }
+
+    if (contextMenu.visible) return;
+
+    if (entry.type === "directory") {
+      onNavigate(fullPath);
+    } else {
+      onSelectFile(fullPath);
+    }
+  }, [contextMenu.visible, onNavigate, onSelectFile]);
+
   if (loading) {
     return (
       <div className="file-browser-loading">
@@ -436,36 +560,38 @@ export function FileBrowser({
         {entries.length === 0 ? (
           <div className="file-browser-empty">(empty directory)</div>
         ) : (
-          entries.map((entry) => (
-            <div
-              key={entry.name}
-              className={`file-node file-node--${entry.type}`}
-              onClick={() => {
-                if (contextMenu.visible) return;
-                if (entry.type === "directory") {
-                  onNavigate(currentPath === "." ? entry.name : `${currentPath}/${entry.name}`);
-                } else {
-                  onSelectFile(currentPath === "." ? entry.name : `${currentPath}/${entry.name}`);
-                }
-              }}
-              onContextMenu={(e) => handleContextMenu(e, entry)}
-            >
-              <div className="file-node-icon">
-                {entry.type === "directory" ? (
-                  <Folder size={16} />
-                ) : (
-                  <File size={16} />
+          entries.map((entry) => {
+            const fullPath = entryPath(currentPath, entry.name);
+            const isLongPressTarget = isLongPressing && longPressTargetPath === fullPath;
+
+            return (
+              <div
+                key={entry.name}
+                className={`file-node file-node--${entry.type} ${isLongPressTarget ? "file-node--long-pressing" : ""}`}
+                onClick={() => handleFileNodeClick(entry, fullPath)}
+                onContextMenu={(e) => handleContextMenu(e, entry)}
+                onTouchStart={(e) => handleTouchStart(e, entry, fullPath)}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+              >
+                <div className="file-node-icon">
+                  {entry.type === "directory" ? (
+                    <Folder size={16} />
+                  ) : (
+                    <File size={16} />
+                  )}
+                </div>
+                <div className="file-node-name">{entry.name}</div>
+                {entry.type === "file" && entry.size !== undefined && (
+                  <div className="file-node-size">{formatBytes(entry.size)}</div>
+                )}
+                {entry.mtime && (
+                  <div className="file-node-time">{formatTime(entry.mtime)}</div>
                 )}
               </div>
-              <div className="file-node-name">{entry.name}</div>
-              {entry.type === "file" && entry.size !== undefined && (
-                <div className="file-node-size">{formatBytes(entry.size)}</div>
-              )}
-              {entry.mtime && (
-                <div className="file-node-time">{formatTime(entry.mtime)}</div>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -476,7 +602,10 @@ export function FileBrowser({
           y={contextMenu.y}
           entry={contextMenu.entry}
           onAction={handleContextAction}
-          onClose={() => setContextMenu(INITIAL_CONTEXT_MENU)}
+          onClose={() => {
+            touchOpenHandledRef.current = false;
+            setContextMenu(INITIAL_CONTEXT_MENU);
+          }}
         />
       )}
 

@@ -132,6 +132,25 @@ The dashboard stylesheet defines a shared mobile foundation in `app/styles.css` 
   - Text-entry controls (`input`, `select`, `textarea`) use **16px font-size** on mobile to prevent iOS Safari auto-zoom.
 - **Safe-area pattern (notched devices / Capacitor webview):** use `env(safe-area-inset-top|right|bottom|left, 0px)` for root/layout containers (for example `#root`, `.header`, `.modal`, `.board`) so content avoids status bars and home indicators.
 
+### Mobile Dropdown & Touch
+Mobile dropdown behavior follows a consistent viewport-aware anchoring pattern so menus stay usable in narrow viewports and virtual-keyboard scenarios.
+
+- **Portal dropdown positioning pattern** (QuickEntry model menu, refine menu, QuickScripts):
+  - Compute trigger coordinates with `getBoundingClientRect()`.
+  - Resolve viewport dimensions using `window.visualViewport` when available (fallback to `window.innerWidth/innerHeight`).
+  - Compare available space above vs. below the trigger and open upward when space below is insufficient.
+  - Clamp horizontal placement to viewport padding and clamp menu height to available space.
+  - Recalculate while open on `resize`, capture-phase `scroll`, and `visualViewport` `resize`/`scroll`.
+- **FileBrowser touch context menu pattern**:
+  - Keep desktop/right-click support via `onContextMenu`.
+  - Add long-press for touch (`500ms`) with a separate early feedback timer (`200ms`) that applies `.file-node--long-pressing`.
+  - Cancel long-press on touch move beyond a 10px threshold or on touch end/cancel.
+  - Guard click-through after long-press so context-menu opening does not also trigger file selection/navigation.
+  - Clamp context menu placement using visual viewport offsets for virtual-keyboard-safe positioning.
+- **Momentum scrolling convention**:
+  - For scrollable dropdown lists and modal content containers, apply `-webkit-overflow-scrolling: touch` to preserve iOS momentum scrolling.
+  - Use base selectors for reusable scroll lists (for example: `.dep-dropdown`, `.model-combobox-list`, `.quick-scripts-dropdown__list`, `.file-browser-list`) and reinforce modal surfaces in the main mobile media query (`@media (max-width: 768px)`).
+
 ### Executor Status Bar
 A persistent footer status bar at the bottom of the dashboard displays real-time executor statistics in project view. The status bar provides immediate visibility into the engine's state without opening modals or hovering over badges.
 

@@ -111,7 +111,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuPortalRef = useRef<HTMLDivElement>(null);
   const agentPickerRef = useRef<HTMLDivElement>(null);
-  const [modelMenuPosition, setModelMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [modelMenuPosition, setModelMenuPosition] = useState<{ top: number; left: number; width: number; maxHeight?: number } | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -516,6 +516,25 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     );
   }, []);
 
+  const getEffectiveViewport = useCallback(() => {
+    const vv = window.visualViewport;
+    if (vv && vv.width > 0 && vv.height > 0) {
+      return {
+        width: vv.width,
+        height: vv.height,
+        offsetTop: vv.offsetTop,
+        offsetLeft: vv.offsetLeft,
+      };
+    }
+
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetTop: 0,
+      offsetLeft: 0,
+    };
+  }, []);
+
   const updateActionsMenuPosition = useCallback(() => {
     const trigger = actionsMenuRef.current?.querySelector(".quick-entry-actions-trigger") as HTMLElement | null;
     if (!trigger) return;
@@ -563,44 +582,97 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     if (!trigger) return;
 
     const rect = trigger.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const isMobile = viewportWidth <= 640;
+    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
+    const horizontalPadding = 16;
+    const verticalPadding = 16;
+    const gap = 4;
+    const isMobile = viewportWidth <= 768;
 
-    if (isMobile) {
-      // On mobile: use a wider menu that fills most of the viewport (32px side margins)
-      const mobileWidth = Math.min(viewportWidth - 32, 360);
-      const left = Math.max((viewportWidth - mobileWidth) / 2, 16);
-      setModelMenuPosition({
-        top: rect.bottom + 4,
-        left,
-        width: mobileWidth,
-      });
-    } else {
-      setModelMenuPosition({
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: Math.max(rect.width, 240),
-      });
-    }
-  }, []);
+    const preferredHeight = isMobile
+      ? Math.min(viewportHeight * 0.6, 360)
+      : Math.min(viewportHeight * 0.5, 360);
+
+    const preferredWidth = isMobile
+      ? Math.min(viewportWidth - horizontalPadding * 2, 360)
+      : Math.max(rect.width, 240);
+
+    const width = Math.min(
+      preferredWidth,
+      Math.max(viewportWidth - horizontalPadding * 2, 200),
+    );
+
+    const triggerTop = rect.top - offsetTop;
+    const triggerBottom = rect.bottom - offsetTop;
+    const triggerLeft = rect.left - offsetLeft;
+
+    const spaceBelow = viewportHeight - triggerBottom;
+    const spaceAbove = triggerTop;
+    const availableBelow = Math.max(spaceBelow - verticalPadding - gap, 160);
+    const availableAbove = Math.max(spaceAbove - verticalPadding - gap, 160);
+    const openUpward = spaceBelow < preferredHeight && spaceAbove > spaceBelow;
+
+    const maxHeight = Math.max(
+      Math.min(openUpward ? availableAbove : availableBelow, preferredHeight),
+      160,
+    );
+
+    const left = Math.min(
+      Math.max(triggerLeft, horizontalPadding),
+      viewportWidth - horizontalPadding - width,
+    ) + offsetLeft;
+
+    const top = openUpward
+      ? Math.max(verticalPadding + offsetTop, triggerTop - maxHeight - gap + offsetTop)
+      : Math.min(
+          triggerBottom + gap + offsetTop,
+          viewportHeight + offsetTop - verticalPadding - maxHeight,
+        );
+
+    setModelMenuPosition({
+      top,
+      left,
+      width,
+      maxHeight,
+    });
+  }, [getEffectiveViewport]);
 
   const updateRefineMenuPosition = useCallback(() => {
     const trigger = refineMenuRef.current?.querySelector(".refine-button") as HTMLElement | null;
     if (!trigger) return;
 
     const rect = trigger.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const isMobile = viewportWidth <= 640;
+    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
+    const horizontalPadding = 8;
+    const verticalPadding = 12;
+    const gap = 4;
+    const expectedMenuHeight = Math.min(200, Math.max(viewportHeight - verticalPadding * 2, 160));
+    const menuWidth = Math.min(200, viewportWidth - horizontalPadding * 2);
 
-    // Ensure the menu doesn't overflow off the right edge on small screens
-    const menuWidth = Math.min(200, viewportWidth - 16);
-    const left = Math.min(rect.left, viewportWidth - menuWidth - 8);
+    const triggerTop = rect.top - offsetTop;
+    const triggerBottom = rect.bottom - offsetTop;
+    const triggerLeft = rect.left - offsetLeft;
+
+    const spaceBelow = viewportHeight - triggerBottom;
+    const spaceAbove = triggerTop;
+    const openUpward = spaceBelow < expectedMenuHeight && spaceAbove > spaceBelow;
+
+    const left = Math.min(
+      Math.max(triggerLeft, horizontalPadding),
+      viewportWidth - horizontalPadding - menuWidth,
+    ) + offsetLeft;
+
+    const top = openUpward
+      ? Math.max(verticalPadding + offsetTop, triggerTop - expectedMenuHeight - gap + offsetTop)
+      : Math.min(
+          triggerBottom + gap + offsetTop,
+          viewportHeight + offsetTop - verticalPadding - expectedMenuHeight,
+        );
 
     setRefineMenuPosition({
-      top: rect.bottom + 4,
+      top,
       left,
     });
-  }, []);
+  }, [getEffectiveViewport]);
 
   // Keep actions menu portal anchored during scroll/resize
   useEffect(() => {
@@ -626,9 +698,19 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     window.addEventListener("resize", handleReposition);
     window.addEventListener("scroll", handleReposition, true);
 
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", handleReposition);
+      vv.addEventListener("scroll", handleReposition);
+    }
+
     return () => {
       window.removeEventListener("resize", handleReposition);
       window.removeEventListener("scroll", handleReposition, true);
+      if (vv) {
+        vv.removeEventListener("resize", handleReposition);
+        vv.removeEventListener("scroll", handleReposition);
+      }
     };
   }, [isModelMenuOpen, updateModelMenuPosition]);
 
@@ -641,9 +723,19 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     window.addEventListener("resize", handleReposition);
     window.addEventListener("scroll", handleReposition, true);
 
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", handleReposition);
+      vv.addEventListener("scroll", handleReposition);
+    }
+
     return () => {
       window.removeEventListener("resize", handleReposition);
       window.removeEventListener("scroll", handleReposition, true);
+      if (vv) {
+        vv.removeEventListener("resize", handleReposition);
+        vv.removeEventListener("scroll", handleReposition);
+      }
     };
   }, [isRefineMenuOpen, updateRefineMenuPosition]);
 
@@ -1163,6 +1255,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 top: `${modelMenuPosition.top}px`,
                 left: `${modelMenuPosition.left}px`,
                 width: `${modelMenuPosition.width}px`,
+                maxHeight: modelMenuPosition.maxHeight ? `${modelMenuPosition.maxHeight}px` : undefined,
+                overflowY: modelMenuPosition.maxHeight ? "auto" : undefined,
               }}
             >
               {activeModelSubmenu === null ? (

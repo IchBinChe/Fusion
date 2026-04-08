@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { FileBrowser } from "../FileBrowser";
 import type { FileNode } from "../../api";
 
@@ -71,10 +73,19 @@ function renderFileBrowser(overrides: Partial<typeof defaultProps> = {}) {
   return render(<FileBrowser {...props} />);
 }
 
-function contextMenuClick(entryName: string) {
+function contextMenuClick(entryName: string, coords: { x: number; y: number } = { x: 200, y: 300 }) {
   const entry = screen.getByText(entryName).closest(".file-node");
   if (!entry) throw new Error(`Entry not found: ${entryName}`);
-  fireEvent.contextMenu(entry, { clientX: 200, clientY: 300 });
+  fireEvent.contextMenu(entry, { clientX: coords.x, clientY: coords.y });
+}
+
+function touchStart(entryName: string, coords: { x: number; y: number } = { x: 200, y: 300 }) {
+  const entry = screen.getByText(entryName).closest(".file-node");
+  if (!entry) throw new Error(`Entry not found: ${entryName}`);
+  fireEvent.touchStart(entry, {
+    touches: [{ clientX: coords.x, clientY: coords.y }],
+  });
+  return entry;
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -82,6 +93,22 @@ function contextMenuClick(entryName: string) {
 describe("FileBrowser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 1024,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 768,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
   });
 
   afterEach(() => {
@@ -171,6 +198,78 @@ describe("FileBrowser", () => {
     expect(screen.getByRole("menu")).toBeDefined();
   });
 
+  it("opens context menu on long-press for a file entry", () => {
+    vi.useFakeTimers();
+    const onSelectFile = vi.fn();
+    renderFileBrowser({ onSelectFile });
+
+    touchStart("readme.md", { x: 120, y: 180 });
+    act(() => {
+      vi.advanceTimersByTime(220);
+    });
+
+    const fileNode = screen.getByText("readme.md").closest(".file-node");
+    expect(fileNode?.classList.contains("file-node--long-pressing")).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(screen.getByRole("menu")).toBeDefined();
+    expect(onSelectFile).not.toHaveBeenCalled();
+
+    fireEvent.touchEnd(fileNode!);
+  });
+
+  it("opens context menu on long-press for a directory entry", () => {
+    vi.useFakeTimers();
+    const onNavigate = vi.fn();
+    renderFileBrowser({ onNavigate });
+
+    const dirNode = touchStart("src", { x: 160, y: 210 });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(screen.getByRole("menu")).toBeDefined();
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.touchEnd(dirNode);
+  });
+
+  it("cancels long-press when touch moves beyond threshold", () => {
+    vi.useFakeTimers();
+    renderFileBrowser();
+
+    const fileNode = touchStart("readme.md", { x: 100, y: 100 });
+    fireEvent.touchMove(fileNode, {
+      touches: [{ clientX: 120, clientY: 120 }],
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(700);
+    });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(fileNode.classList.contains("file-node--long-pressing")).toBe(false);
+  });
+
+  it("keeps single-tap selection behavior on touch devices", () => {
+    vi.useFakeTimers();
+    const onSelectFile = vi.fn();
+    renderFileBrowser({ onSelectFile });
+
+    const fileNode = touchStart("readme.md", { x: 120, y: 160 });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    fireEvent.touchEnd(fileNode);
+    fireEvent.click(fileNode);
+
+    expect(onSelectFile).toHaveBeenCalledWith("readme.md");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   // ── Context Menu Items for Files ────────────────────────────────────
 
   it("shows file context menu with Download option (not Download as ZIP)", () => {
@@ -215,6 +314,64 @@ describe("FileBrowser", () => {
     expect(overlay).not.toBeNull();
     fireEvent.click(overlay!);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("clamps context menu position within visual viewport bounds", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 640,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      writable: true,
+      value: {
+        width: 320,
+        height: 480,
+        offsetTop: 20,
+        offsetLeft: 10,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+
+    const nativeGetRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      if (this.classList?.contains("file-browser-context-menu")) {
+        return {
+          x: 0,
+          y: 0,
+          width: 180,
+          height: 220,
+          top: 0,
+          right: 180,
+          bottom: 220,
+          left: 0,
+          toJSON: () => ({}),
+        };
+      }
+      return nativeGetRect.call(this);
+    });
+
+    renderFileBrowser();
+    contextMenuClick("readme.md", { x: 400, y: 500 });
+
+    const menu = await screen.findByRole("menu");
+
+    await waitFor(() => {
+      expect(menu).toHaveStyle({ left: "142px", top: "272px" });
+    });
+  });
+
+  it("defines 44px mobile touch targets for context menu items", () => {
+    const cssPath = resolve(process.cwd(), "app/styles.css");
+    const css = readFileSync(cssPath, "utf8");
+    expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*\.file-browser-context-menu__item\s*\{[\s\S]*min-height:\s*44px;/);
   });
 
   // ── Download Actions ────────────────────────────────────────────────

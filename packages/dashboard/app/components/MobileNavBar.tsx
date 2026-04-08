@@ -5,6 +5,7 @@ import {
   Clock,
   Folder,
   GitBranch,
+  Grid3X3,
   LayoutGrid,
   Lightbulb,
   Mail,
@@ -44,6 +45,7 @@ export interface MobileNavBarProps {
   onOpenUsage?: () => void;
   onRunScript?: (name: string, command: string) => void;
   projectId?: string;
+  onViewAllProjects?: () => void;
 }
 
 function GitHubLogo({ size = 20 }: { size?: number }) {
@@ -84,6 +86,7 @@ export function MobileNavBar({
   onResumePlanning,
   activePlanningSessionCount = 0,
   onOpenUsage,
+  onViewAllProjects,
 }: MobileNavBarProps) {
   const mode = useViewportMode();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -295,6 +298,16 @@ export function MobileNavBar({
             >
               <Activity />
               <span>Usage</span>
+            </button>
+
+            <button
+              type="button"
+              className="mobile-more-item"
+              data-testid="mobile-more-item-projects"
+              onClick={() => handleMoreAction(onViewAllProjects)}
+            >
+              <Grid3X3 />
+              <span>Projects</span>
             </button>
 
             <div className="mobile-more-separator" />

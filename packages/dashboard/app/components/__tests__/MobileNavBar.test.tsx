@@ -40,6 +40,7 @@ const createDefaultProps = () => ({
   onResumePlanning: vi.fn(),
   activePlanningSessionCount: 0,
   onOpenUsage: vi.fn(),
+  onViewAllProjects: vi.fn(),
   onRunScript: vi.fn(),
   projectId: "proj_1",
 });
@@ -125,6 +126,7 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-schedules")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-github")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-usage")).toBeDefined();
+    expect(screen.getByTestId("mobile-more-item-projects")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
   });
 
@@ -137,6 +139,17 @@ describe("MobileNavBar", () => {
 
     expect(container.querySelector(".mobile-more-sheet")).toBeNull();
     expect(props.onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it("calls onViewAllProjects from the Projects more-sheet item", () => {
+    const props = createDefaultProps();
+    const { container } = render(<MobileNavBar {...props} />);
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    fireEvent.click(screen.getByTestId("mobile-more-item-projects"));
+
+    expect(container.querySelector(".mobile-more-sheet")).toBeNull();
+    expect(props.onViewAllProjects).toHaveBeenCalledOnce();
   });
 
   it("closes sheet on backdrop click", () => {

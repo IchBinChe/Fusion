@@ -734,10 +734,6 @@ function SummaryView({
     summary.suggestedDependencies
   );
 
-  const handleSizeChange = (size: "S" | "M" | "L") => {
-    onSummaryChange({ ...summary, suggestedSize: size });
-  };
-
   const handleDependencyToggle = (taskId: string) => {
     const newDeps = selectedDependencies.includes(taskId)
       ? selectedDependencies.filter((id) => id !== taskId)
@@ -777,21 +773,21 @@ function SummaryView({
 
           <div className="form-group">
             <label>Suggested Size</label>
-            <div className="planning-size-selector">
-              {(["S", "M", "L"] as const).map((size) => (
-                <button
-                  key={size}
-                  type="button"
-                  className={`planning-size-btn ${summary.suggestedSize === size ? "selected" : ""}`}
-                  onClick={() => handleSizeChange(size)}
-                >
-                  {size}
-                  <span className="planning-size-label">
-                    {size === "S" ? "Small" : size === "M" ? "Medium" : "Large"}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <select
+              className="planning-size-select"
+              value={summary.suggestedSize}
+              onChange={(event) =>
+                onSummaryChange({
+                  ...summary,
+                  suggestedSize: event.target.value as "S" | "M" | "L",
+                })
+              }
+              disabled={isLoading}
+            >
+              <option value="S">S (Small)</option>
+              <option value="M">M (Medium)</option>
+              <option value="L">L (Large)</option>
+            </select>
           </div>
 
           {tasks.length > 0 && (
@@ -1138,19 +1134,20 @@ function BreakdownView({
 
                 <div className="form-group">
                   <label>Size</label>
-                  <div className="planning-size-selector">
-                    {(["S", "M", "L"] as const).map((size) => (
-                      <button
-                        key={size}
-                        type="button"
-                        className={`planning-size-btn ${subtask.suggestedSize === size ? "selected" : ""}`}
-                        onClick={() => updateSubtask(subtask.id, { suggestedSize: size })}
-                        disabled={isLoading}
-                      >
-                        {size}
-                      </button>
-                    ))}
-                  </div>
+                  <select
+                    className="planning-size-select"
+                    value={subtask.suggestedSize}
+                    onChange={(event) =>
+                      updateSubtask(subtask.id, {
+                        suggestedSize: event.target.value as "S" | "M" | "L",
+                      })
+                    }
+                    disabled={isLoading}
+                  >
+                    <option value="S">S</option>
+                    <option value="M">M</option>
+                    <option value="L">L</option>
+                  </select>
                 </div>
 
                 <div className="form-group">

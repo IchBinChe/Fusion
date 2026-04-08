@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { PlanningModeModal } from "./PlanningModeModal";
 import { TaskDetailModal } from "./TaskDetailModal";
 import type { Task, TaskDetail, PlanningQuestion, PlanningSummary, MergeResult } from "@fusion/core";
@@ -11,6 +11,9 @@ const mockConnectPlanningStream = vi.fn();
 const mockRespondToPlanning = vi.fn();
 const mockCancelPlanning = vi.fn();
 const mockCreateTaskFromPlanning = vi.fn();
+const mockStartPlanningBreakdown = vi.fn();
+const mockCreateTasksFromPlanning = vi.fn();
+const mockFetchAiSession = vi.fn();
 const mockUploadAttachment = vi.fn();
 const mockDeleteAttachment = vi.fn();
 const mockUpdateTask = vi.fn();
@@ -29,6 +32,9 @@ vi.mock("../api", () => ({
   respondToPlanning: (...args: any[]) => mockRespondToPlanning(...args),
   cancelPlanning: (...args: any[]) => mockCancelPlanning(...args),
   createTaskFromPlanning: (...args: any[]) => mockCreateTaskFromPlanning(...args),
+  startPlanningBreakdown: (...args: any[]) => mockStartPlanningBreakdown(...args),
+  createTasksFromPlanning: (...args: any[]) => mockCreateTasksFromPlanning(...args),
+  fetchAiSession: (...args: any[]) => mockFetchAiSession(...args),
   uploadAttachment: (...args: any[]) => mockUploadAttachment(...args),
   deleteAttachment: (...args: any[]) => mockDeleteAttachment(...args),
   updateTask: (...args: any[]) => mockUpdateTask(...args),
@@ -108,7 +114,9 @@ describe("PlanningModeModal", () => {
     
     // Default mock for streaming
     mockStartPlanningStreaming.mockResolvedValue({ sessionId: "session-123" });
-    
+    mockStartPlanningBreakdown.mockResolvedValue({ sessionId: "session-123", subtasks: [] });
+    mockFetchAiSession.mockResolvedValue(null);
+
     // Default: simulate receiving a question after a brief delay
     mockConnectPlanningStream.mockImplementation((_sessionId: string, _projectId: string | undefined, handlers: any) => {
       setTimeout(() => {
@@ -419,6 +427,48 @@ describe("PlanningModeModal", () => {
       expect(container.querySelector(".planning-summary .planning-deps-list")).not.toBeNull();
     });
 
+    it("renders and updates summary size dropdown", async () => {
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        setTimeout(() => {
+          handlers.onSummary?.(mockSummary);
+        }, 10);
+
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Planning Complete!")).toBeDefined();
+      });
+
+      const sizeSelect = screen.getByRole("combobox") as HTMLSelectElement;
+      expect(sizeSelect.value).toBe("M");
+      expect(Array.from(sizeSelect.options).map((option) => option.textContent)).toEqual([
+        "S (Small)",
+        "M (Medium)",
+        "L (Large)",
+      ]);
+
+      fireEvent.change(sizeSelect, { target: { value: "L" } });
+      expect(sizeSelect.value).toBe("L");
+    });
+
     it("creates task from summary", async () => {
       const createdTask: Task = {
         id: "FN-042",
@@ -470,6 +520,82 @@ describe("PlanningModeModal", () => {
         expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith("session-123", undefined);
         expect(mockOnTaskCreated).toHaveBeenCalledWith(createdTask);
       });
+    });
+  });
+
+  describe("Breakdown view", () => {
+    it("renders and updates subtask size dropdown", async () => {
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        setTimeout(() => {
+          handlers.onSummary?.(mockSummary);
+        }, 10);
+
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      mockStartPlanningBreakdown.mockResolvedValue({
+        sessionId: "session-123",
+        subtasks: [
+          {
+            id: "subtask-1",
+            title: "Design auth schema",
+            description: "Design the auth data model",
+            suggestedSize: "M",
+            dependsOn: [],
+          },
+          {
+            id: "subtask-2",
+            title: "Implement auth endpoints",
+            description: "Create login/signup endpoints",
+            suggestedSize: "S",
+            dependsOn: ["subtask-1"],
+          },
+        ],
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Planning Complete!")).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByText("Break into Tasks"));
+
+      await waitFor(() => {
+        expect(mockStartPlanningBreakdown).toHaveBeenCalledWith("session-123", undefined);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Tasks")).toBeDefined();
+      });
+
+      const firstSubtask = screen.getByTestId("subtask-item-0");
+      const sizeSelect = within(firstSubtask).getByRole("combobox") as HTMLSelectElement;
+
+      expect(sizeSelect.value).toBe("M");
+      expect(Array.from(sizeSelect.options).map((option) => option.textContent)).toEqual([
+        "S",
+        "M",
+        "L",
+      ]);
+
+      fireEvent.change(sizeSelect, { target: { value: "L" } });
+      expect(sizeSelect.value).toBe("L");
     });
   });
 

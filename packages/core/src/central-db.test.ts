@@ -39,7 +39,7 @@ describe("CentralDatabase", () => {
 
     it("should initialize schema version", () => {
       db.init();
-      expect(db.getSchemaVersion()).toBe(1);
+      expect(db.getSchemaVersion()).toBe(2);
     });
 
     it("should seed lastModified on init", () => {
@@ -62,6 +62,26 @@ describe("CentralDatabase", () => {
       expect(row?.queuedCount).toBe(0);
     });
 
+    it("should apply nodes defaults when optional values are omitted", () => {
+      db.init();
+      const now = new Date().toISOString();
+
+      db.prepare(
+        "INSERT INTO nodes (id, name, type, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)",
+      ).run("node_test", "local-test", "local", now, now);
+
+      const row = db.prepare("SELECT status, maxConcurrent FROM nodes WHERE id = ?").get("node_test") as
+        | {
+            status: string;
+            maxConcurrent: number;
+          }
+        | undefined;
+
+      expect(row).toBeDefined();
+      expect(row?.status).toBe("offline");
+      expect(row?.maxConcurrent).toBe(2);
+    });
+
     it("should create all required tables", () => {
       db.init();
       const tables = db
@@ -72,7 +92,18 @@ describe("CentralDatabase", () => {
       expect(tableNames).toContain("projectHealth");
       expect(tableNames).toContain("centralActivityLog");
       expect(tableNames).toContain("globalConcurrency");
+      expect(tableNames).toContain("nodes");
       expect(tableNames).toContain("__meta");
+    });
+
+    it("should include nodeId column on projects table", () => {
+      db.init();
+
+      const columns = db.prepare("PRAGMA table_info(projects)").all() as Array<{
+        name: string;
+      }>;
+      const columnNames = columns.map((column) => column.name);
+      expect(columnNames).toContain("nodeId");
     });
 
     it("should create required indexes", () => {
@@ -86,6 +117,8 @@ describe("CentralDatabase", () => {
       expect(indexNames).toContain("idxActivityLogTimestamp");
       expect(indexNames).toContain("idxActivityLogType");
       expect(indexNames).toContain("idxActivityLogProjectId");
+      expect(indexNames).toContain("idxNodesStatus");
+      expect(indexNames).toContain("idxNodesType");
     });
   });
 

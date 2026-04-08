@@ -41,6 +41,9 @@ import type {
   ProjectStatus,
   ActivityEventType,
   ProjectSettings,
+  AgentCapability,
+  NodeConfig,
+  NodeStatus,
 } from "./types.js";
 import { CentralDatabase, toJson, toJsonNullable, fromJson } from "./central-db.js";
 import { resolveGlobalDir } from "./global-settings.js";
@@ -58,6 +61,14 @@ export interface CentralCoreEvents {
   "project:health:changed": [health: ProjectHealth];
   /** Emitted when a new activity is logged */
   "activity:logged": [entry: CentralActivityLogEntry];
+  /** Emitted when a node is registered */
+  "node:registered": [node: NodeConfig];
+  /** Emitted when a node is unregistered */
+  "node:unregistered": [nodeId: string];
+  /** Emitted when node metadata is updated */
+  "node:updated": [node: NodeConfig];
+  /** Emitted when node health status changes */
+  "node:health:changed": [node: NodeConfig];
   /** Emitted when global concurrency state changes */
   "concurrency:changed": [state: GlobalConcurrencyState];
 }
@@ -98,6 +109,24 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     }
 
     this.initialized = true;
+
+    const existingLocal = this.db
+      .prepare("SELECT id FROM nodes WHERE type = 'local' LIMIT 1")
+      .get() as { id: string } | undefined;
+
+    if (!existingLocal) {
+      const concurrency = this.db
+        .prepare("SELECT globalMaxConcurrent FROM globalConcurrency WHERE id = 1")
+        .get() as { globalMaxConcurrent: number } | undefined;
+      const maxConcurrent = concurrency?.globalMaxConcurrent ?? 2;
+
+      const localNode = await this.registerNode({
+        name: "local",
+        type: "local",
+        maxConcurrent,
+      });
+      await this.updateNode(localNode.id, { status: "online" });
+    }
   }
 
   /**
@@ -237,6 +266,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
           createdAt: string;
           updatedAt: string;
           lastActivityAt: string | null;
+          nodeId: string | null;
           settings: string | null;
         }
       | undefined;
@@ -265,6 +295,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
           createdAt: string;
           updatedAt: string;
           lastActivityAt: string | null;
+          nodeId: string | null;
           settings: string | null;
         }
       | undefined;
@@ -291,6 +322,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
       createdAt: string;
       updatedAt: string;
       lastActivityAt: string | null;
+      nodeId: string | null;
       settings: string | null;
     }>;
 
@@ -333,6 +365,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
         isolationMode = ?,
         updatedAt = ?,
         lastActivityAt = ?,
+        nodeId = ?,
         settings = ?
        WHERE id = ?`
     ).run(
@@ -342,6 +375,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
       updated.isolationMode,
       updated.updatedAt,
       updated.lastActivityAt ?? null,
+      updated.nodeId ?? null,
       toJsonNullable(updated.settings),
       id
     );
@@ -398,6 +432,349 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     }
 
     return reconciled;
+  }
+
+  // ── Node Registry API ───────────────────────────────────────────────────
+
+  /**
+   * Register a new runtime node.
+   *
+   * @param input — Node registration input
+   * @returns The registered node
+   * @throws Error if constraints are violated or name already exists
+   */
+  async registerNode(input: {
+    name: string;
+    type: "local" | "remote";
+    url?: string;
+    apiKey?: string;
+    capabilities?: AgentCapability[];
+    maxConcurrent?: number;
+  }): Promise<NodeConfig> {
+    this.ensureInitialized();
+
+    const name = input.name.trim();
+    if (!name) {
+      throw new Error("Node name is required");
+    }
+
+    const existingByName = await this.getNodeByName(name);
+    if (existingByName) {
+      throw new Error(`Node already exists with name: ${name}`);
+    }
+
+    const normalizedUrl = input.url?.trim();
+    if (input.type === "remote" && !normalizedUrl) {
+      throw new Error("Remote nodes must include a url");
+    }
+    if (input.type === "local" && (normalizedUrl || input.apiKey)) {
+      throw new Error("Local nodes must not include url or apiKey");
+    }
+
+    const maxConcurrent = input.maxConcurrent ?? 2;
+    if (!Number.isFinite(maxConcurrent) || maxConcurrent < 1) {
+      throw new Error(`Node maxConcurrent must be >= 1: ${maxConcurrent}`);
+    }
+
+    const now = new Date().toISOString();
+    const node: NodeConfig = {
+      id: `node_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      name,
+      type: input.type,
+      url: normalizedUrl || undefined,
+      apiKey: input.apiKey || undefined,
+      status: "offline",
+      capabilities: input.capabilities,
+      maxConcurrent,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db!.prepare(
+      `INSERT INTO nodes (id, name, type, url, apiKey, status, capabilities, maxConcurrent, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      node.id,
+      node.name,
+      node.type,
+      node.url ?? null,
+      node.apiKey ?? null,
+      node.status,
+      toJsonNullable(node.capabilities),
+      node.maxConcurrent,
+      node.createdAt,
+      node.updatedAt
+    );
+
+    this.db!.bumpLastModified();
+    this.emit("node:registered", node);
+    return node;
+  }
+
+  /**
+   * Unregister a runtime node.
+   *
+   * Idempotent. Projects assigned to this node are automatically unassigned.
+   *
+   * @param id — Node ID to unregister
+   */
+  async unregisterNode(id: string): Promise<void> {
+    this.ensureInitialized();
+
+    const node = await this.getNode(id);
+    if (!node) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    this.db!.transaction(() => {
+      this.db!.prepare("UPDATE projects SET nodeId = NULL, updatedAt = ? WHERE nodeId = ?").run(now, id);
+      this.db!.prepare("DELETE FROM nodes WHERE id = ?").run(id);
+    });
+
+    this.db!.bumpLastModified();
+    this.emit("node:unregistered", id);
+  }
+
+  /**
+   * Get a node by ID.
+   */
+  async getNode(id: string): Promise<NodeConfig | undefined> {
+    this.ensureInitialized();
+
+    const row = this.db!.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as
+      | {
+          id: string;
+          name: string;
+          type: string;
+          url: string | null;
+          apiKey: string | null;
+          status: string;
+          capabilities: string | null;
+          maxConcurrent: number;
+          createdAt: string;
+          updatedAt: string;
+        }
+      | undefined;
+
+    if (!row) return undefined;
+    return this.rowToNode(row);
+  }
+
+  /**
+   * Get a node by unique name.
+   */
+  async getNodeByName(name: string): Promise<NodeConfig | undefined> {
+    this.ensureInitialized();
+
+    const row = this.db!.prepare("SELECT * FROM nodes WHERE name = ?").get(name) as
+      | {
+          id: string;
+          name: string;
+          type: string;
+          url: string | null;
+          apiKey: string | null;
+          status: string;
+          capabilities: string | null;
+          maxConcurrent: number;
+          createdAt: string;
+          updatedAt: string;
+        }
+      | undefined;
+
+    if (!row) return undefined;
+    return this.rowToNode(row);
+  }
+
+  /**
+   * List all nodes ordered by name.
+   */
+  async listNodes(): Promise<NodeConfig[]> {
+    this.ensureInitialized();
+
+    const rows = this.db!.prepare("SELECT * FROM nodes ORDER BY name").all() as Array<{
+      id: string;
+      name: string;
+      type: string;
+      url: string | null;
+      apiKey: string | null;
+      status: string;
+      capabilities: string | null;
+      maxConcurrent: number;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+
+    return rows.map((row) => this.rowToNode(row));
+  }
+
+  /**
+   * Update node metadata.
+   */
+  async updateNode(
+    id: string,
+    updates: Partial<Omit<NodeConfig, "id" | "createdAt">>
+  ): Promise<NodeConfig> {
+    this.ensureInitialized();
+
+    const node = await this.getNode(id);
+    if (!node) {
+      throw new Error(`Node not found: ${id}`);
+    }
+
+    const now = new Date().toISOString();
+    const updated: NodeConfig = {
+      ...node,
+      ...updates,
+      id,
+      createdAt: node.createdAt,
+      updatedAt: now,
+    };
+
+    if (!Number.isFinite(updated.maxConcurrent) || updated.maxConcurrent < 1) {
+      throw new Error(`Node maxConcurrent must be >= 1: ${updated.maxConcurrent}`);
+    }
+
+    if (updated.type === "remote" && !updated.url) {
+      throw new Error("Remote nodes must include a url");
+    }
+    if (updated.type === "local" && (updated.url || updated.apiKey)) {
+      throw new Error("Local nodes must not include url or apiKey");
+    }
+
+    this.db!.prepare(
+      `UPDATE nodes SET
+        name = ?,
+        type = ?,
+        url = ?,
+        apiKey = ?,
+        status = ?,
+        capabilities = ?,
+        maxConcurrent = ?,
+        updatedAt = ?
+       WHERE id = ?`
+    ).run(
+      updated.name,
+      updated.type,
+      updated.url ?? null,
+      updated.apiKey ?? null,
+      updated.status,
+      toJsonNullable(updated.capabilities),
+      updated.maxConcurrent,
+      updated.updatedAt,
+      id
+    );
+
+    this.db!.bumpLastModified();
+    this.emit("node:updated", updated);
+    return updated;
+  }
+
+  /**
+   * Check node health and update stored status.
+   */
+  async checkNodeHealth(id: string): Promise<NodeStatus> {
+    this.ensureInitialized();
+
+    const node = await this.getNode(id);
+    if (!node) {
+      throw new Error(`Node not found: ${id}`);
+    }
+
+    let nextStatus: NodeStatus;
+
+    if (node.type === "local") {
+      nextStatus = "online";
+    } else if (!node.url) {
+      nextStatus = "error";
+    } else {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
+
+      try {
+        const healthUrl = new URL("/api/health", node.url).toString();
+        const response = await fetch(healthUrl, {
+          method: "GET",
+          headers: node.apiKey ? { Authorization: `Bearer ${node.apiKey}` } : undefined,
+          signal: controller.signal,
+        });
+        nextStatus = response.ok ? "online" : "offline";
+      } catch {
+        nextStatus = "error";
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    if (nextStatus !== node.status) {
+      const now = new Date().toISOString();
+      const updated: NodeConfig = {
+        ...node,
+        status: nextStatus,
+        updatedAt: now,
+      };
+
+      this.db!
+        .prepare("UPDATE nodes SET status = ?, updatedAt = ? WHERE id = ?")
+        .run(nextStatus, now, id);
+      this.db!.bumpLastModified();
+      this.emit("node:health:changed", updated);
+    }
+
+    return nextStatus;
+  }
+
+  /**
+   * Assign a project to a node.
+   */
+  async assignProjectToNode(projectId: string, nodeId: string): Promise<RegisteredProject> {
+    this.ensureInitialized();
+
+    const project = await this.getProject(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+
+    const node = await this.getNode(nodeId);
+    if (!node) {
+      throw new Error(`Node not found: ${nodeId}`);
+    }
+
+    const now = new Date().toISOString();
+    this.db!.prepare("UPDATE projects SET nodeId = ?, updatedAt = ? WHERE id = ?").run(node.id, now, projectId);
+    this.db!.bumpLastModified();
+
+    const updated: RegisteredProject = {
+      ...project,
+      nodeId: node.id,
+      updatedAt: now,
+    };
+    this.emit("project:updated", updated);
+    return updated;
+  }
+
+  /**
+   * Unassign a project from any node.
+   */
+  async unassignProjectFromNode(projectId: string): Promise<RegisteredProject> {
+    this.ensureInitialized();
+
+    const project = await this.getProject(projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+
+    const now = new Date().toISOString();
+    this.db!.prepare("UPDATE projects SET nodeId = NULL, updatedAt = ? WHERE id = ?").run(now, projectId);
+    this.db!.bumpLastModified();
+
+    const updated: RegisteredProject = {
+      ...project,
+      nodeId: undefined,
+      updatedAt: now,
+    };
+    this.emit("project:updated", updated);
+    return updated;
   }
 
   // ── Project Health API ──────────────────────────────────────────────────
@@ -928,6 +1305,7 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
     createdAt: string;
     updatedAt: string;
     lastActivityAt: string | null;
+    nodeId: string | null;
     settings: string | null;
   }): RegisteredProject {
     return {
@@ -939,7 +1317,34 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       lastActivityAt: row.lastActivityAt ?? undefined,
+      nodeId: row.nodeId ?? undefined,
       settings: fromJson<ProjectSettings>(row.settings),
+    };
+  }
+
+  private rowToNode(row: {
+    id: string;
+    name: string;
+    type: string;
+    url: string | null;
+    apiKey: string | null;
+    status: string;
+    capabilities: string | null;
+    maxConcurrent: number;
+    createdAt: string;
+    updatedAt: string;
+  }): NodeConfig {
+    return {
+      id: row.id,
+      name: row.name,
+      type: row.type as NodeConfig["type"],
+      url: row.url ?? undefined,
+      apiKey: row.apiKey ?? undefined,
+      status: row.status as NodeStatus,
+      capabilities: fromJson<AgentCapability[]>(row.capabilities),
+      maxConcurrent: row.maxConcurrent,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 

@@ -42,6 +42,30 @@ describe("CentralCore", () => {
       expect(central.isInitialized()).toBe(true);
     });
 
+    it("should create a default online local node on init", async () => {
+      await central.init();
+
+      const nodes = await central.listNodes();
+      const localNodes = nodes.filter((node) => node.type === "local");
+      expect(localNodes).toHaveLength(1);
+      expect(localNodes[0].name).toBe("local");
+      expect(localNodes[0].status).toBe("online");
+      expect(localNodes[0].maxConcurrent).toBe(4);
+    });
+
+    it("should not create duplicate default local nodes across re-initialization", async () => {
+      await central.init();
+      await central.close();
+
+      central = new CentralCore(tempDir);
+      await central.init();
+
+      const nodes = await central.listNodes();
+      const localNodes = nodes.filter((node) => node.type === "local");
+      expect(localNodes).toHaveLength(1);
+      expect(localNodes[0].name).toBe("local");
+    });
+
     it("should close and clean up", async () => {
       await central.init();
       await central.close();
@@ -531,6 +555,175 @@ describe("CentralCore", () => {
     it("should return empty array when no projects exist", async () => {
       const reconciled = await central.reconcileProjectStatuses();
       expect(reconciled).toEqual([]);
+    });
+  });
+
+  describe("node management", () => {
+    beforeEach(async () => {
+      await central.init();
+    });
+
+    it("should register and retrieve a node", async () => {
+      const node = await central.registerNode({
+        name: "executor-node-a",
+        type: "local",
+        maxConcurrent: 3,
+      });
+
+      expect(node.id).toMatch(/^node_[a-f0-9]+$/);
+      expect(node.name).toBe("executor-node-a");
+      expect(node.type).toBe("local");
+      expect(node.status).toBe("offline");
+      expect(node.maxConcurrent).toBe(3);
+
+      const fetched = await central.getNode(node.id);
+      expect(fetched).toEqual(node);
+
+      const byName = await central.getNodeByName("executor-node-a");
+      expect(byName?.id).toBe(node.id);
+    });
+
+    it("should reject duplicate node names", async () => {
+      await central.registerNode({ name: "dup-node", type: "local" });
+
+      await expect(
+        central.registerNode({ name: "dup-node", type: "local" }),
+      ).rejects.toThrow("already exists");
+    });
+
+    it("should validate node type constraints on register", async () => {
+      await expect(
+        central.registerNode({ name: "remote-missing-url", type: "remote" }),
+      ).rejects.toThrow("must include a url");
+
+      await expect(
+        central.registerNode({
+          name: "local-with-url",
+          type: "local",
+          url: "https://example.com",
+        }),
+      ).rejects.toThrow("must not include url or apiKey");
+
+      await expect(
+        central.registerNode({
+          name: "local-with-key",
+          type: "local",
+          apiKey: "abc",
+        }),
+      ).rejects.toThrow("must not include url or apiKey");
+    });
+
+    it("should update nodes and enforce type constraints", async () => {
+      const remote = await central.registerNode({
+        name: "remote-node",
+        type: "remote",
+        url: "https://node.example.com",
+        apiKey: "secret",
+      });
+
+      const updated = await central.updateNode(remote.id, {
+        status: "connecting",
+        maxConcurrent: 4,
+      });
+
+      expect(updated.status).toBe("connecting");
+      expect(updated.maxConcurrent).toBe(4);
+
+      await expect(
+        central.updateNode(remote.id, {
+          type: "local",
+        }),
+      ).rejects.toThrow("must not include url or apiKey");
+    });
+
+    it("should list nodes ordered by name", async () => {
+      await central.registerNode({ name: "z-node", type: "local" });
+      await central.registerNode({ name: "a-node", type: "local" });
+
+      const nodes = await central.listNodes();
+      const names = nodes.map((node) => node.name);
+      expect(names).toContain("a-node");
+      expect(names).toContain("z-node");
+      expect(names.indexOf("a-node")).toBeLessThan(names.indexOf("z-node"));
+    });
+
+    it("should assign and unassign projects to nodes", async () => {
+      const projectPath = join(tempDir, "node-assignment");
+      mkdirSync(projectPath);
+      projectPaths.push(projectPath);
+
+      const project = await central.registerProject({
+        name: "Node Assignment",
+        path: projectPath,
+      });
+      const node = await central.registerNode({ name: "assign-node", type: "local" });
+
+      const assigned = await central.assignProjectToNode(project.id, node.id);
+      expect(assigned.nodeId).toBe(node.id);
+      expect((await central.getProject(project.id))?.nodeId).toBe(node.id);
+
+      const unassigned = await central.unassignProjectFromNode(project.id);
+      expect(unassigned.nodeId).toBeUndefined();
+      expect((await central.getProject(project.id))?.nodeId).toBeUndefined();
+    });
+
+    it("should throw when assigning to unknown project or node", async () => {
+      const node = await central.registerNode({ name: "assignment-target", type: "local" });
+
+      await expect(central.assignProjectToNode("proj_missing", node.id)).rejects.toThrow("Project not found");
+
+      const projectPath = join(tempDir, "node-assignment-errors");
+      mkdirSync(projectPath);
+      projectPaths.push(projectPath);
+
+      const project = await central.registerProject({
+        name: "Node Assignment Errors",
+        path: projectPath,
+      });
+
+      await expect(central.assignProjectToNode(project.id, "node_missing")).rejects.toThrow("Node not found");
+      await expect(central.unassignProjectFromNode("proj_missing")).rejects.toThrow("Project not found");
+    });
+
+    it("should unassign projects when a node is unregistered", async () => {
+      const projectPath = join(tempDir, "node-unregister");
+      mkdirSync(projectPath);
+      projectPaths.push(projectPath);
+
+      const project = await central.registerProject({
+        name: "Node Unregister",
+        path: projectPath,
+      });
+      const node = await central.registerNode({ name: "ephemeral-node", type: "local" });
+
+      await central.assignProjectToNode(project.id, node.id);
+      await central.unregisterNode(node.id);
+
+      expect(await central.getNode(node.id)).toBeUndefined();
+      expect((await central.getProject(project.id))?.nodeId).toBeUndefined();
+    });
+
+    it("should be idempotent when unregistering missing nodes", async () => {
+      await expect(central.unregisterNode("node_missing")).resolves.toBeUndefined();
+    });
+
+    it("should check local node health and emit node:health:changed", async () => {
+      const node = await central.registerNode({ name: "local-health", type: "local" });
+
+      let emittedNodeId: string | undefined;
+      let emittedStatus: string | undefined;
+      central.on("node:health:changed", (updated) => {
+        emittedNodeId = updated.id;
+        emittedStatus = updated.status;
+      });
+
+      const status = await central.checkNodeHealth(node.id);
+      expect(status).toBe("online");
+
+      const stored = await central.getNode(node.id);
+      expect(stored?.status).toBe("online");
+      expect(emittedNodeId).toBe(node.id);
+      expect(emittedStatus).toBe("online");
     });
   });
 

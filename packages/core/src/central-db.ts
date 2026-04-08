@@ -23,7 +23,7 @@ export { toJson, toJsonNullable, fromJson };
 
 // ── Schema Definition ───────────────────────────────────────────────────
 
-const CENTRAL_SCHEMA_VERSION = 1;
+const CENTRAL_SCHEMA_VERSION = 2;
 
 const CENTRAL_SCHEMA_SQL = `
 -- Projects table (project registry)
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS projects (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   lastActivityAt TEXT,
+  nodeId TEXT,
   settings TEXT  -- JSON ProjectSettings snapshot
 );
 CREATE INDEX IF NOT EXISTS idxProjectsPath ON projects(path);
@@ -86,11 +87,44 @@ CREATE TABLE IF NOT EXISTS globalConcurrency (
 INSERT OR IGNORE INTO globalConcurrency (id, globalMaxConcurrent, currentlyActive, queuedCount) 
 VALUES (1, 4, 0, 0);
 
+-- Nodes table (runtime hosts for project execution)
+CREATE TABLE IF NOT EXISTS nodes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL CHECK (type IN ('local', 'remote')),
+  url TEXT,
+  apiKey TEXT,
+  status TEXT NOT NULL DEFAULT 'offline',
+  capabilities TEXT,
+  maxConcurrent INTEGER NOT NULL DEFAULT 2,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idxNodesStatus ON nodes(status);
+CREATE INDEX IF NOT EXISTS idxNodesType ON nodes(type);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS __meta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+`;
+
+const CENTRAL_SCHEMA_V2_MIGRATION_SQL = `
+CREATE TABLE IF NOT EXISTS nodes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL CHECK (type IN ('local', 'remote')),
+  url TEXT,
+  apiKey TEXT,
+  status TEXT NOT NULL DEFAULT 'offline',
+  capabilities TEXT,
+  maxConcurrent INTEGER NOT NULL DEFAULT 2,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idxNodesStatus ON nodes(status);
+CREATE INDEX IF NOT EXISTS idxNodesType ON nodes(type);
 `;
 
 // ── Central Database Class ────────────────────────────────────────────────
@@ -126,13 +160,30 @@ export class CentralDatabase {
   init(): void {
     this.db.exec(CENTRAL_SCHEMA_SQL);
 
-    // Seed schemaVersion and lastModified idempotently
-    this.db.exec(
-      `INSERT OR IGNORE INTO __meta (key, value) VALUES ('schemaVersion', '${CENTRAL_SCHEMA_VERSION}')`,
-    );
+    const currentVersion = this.getSchemaVersion();
+    if (currentVersion < 2) {
+      this.db.exec(CENTRAL_SCHEMA_V2_MIGRATION_SQL);
+      if (!this.hasColumn("projects", "nodeId")) {
+        this.db.exec("ALTER TABLE projects ADD COLUMN nodeId TEXT");
+      }
+      this.db
+        .prepare("INSERT INTO __meta (key, value) VALUES ('schemaVersion', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(String(CENTRAL_SCHEMA_VERSION));
+    } else {
+      this.db.exec(
+        `INSERT OR IGNORE INTO __meta (key, value) VALUES ('schemaVersion', '${CENTRAL_SCHEMA_VERSION}')`,
+      );
+    }
+
+    // Seed lastModified idempotently
     this.db.exec(
       `INSERT OR IGNORE INTO __meta (key, value) VALUES ('lastModified', '${Date.now()}')`,
     );
+  }
+
+  private hasColumn(table: string, column: string): boolean {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    return rows.some((row) => row.name === column);
   }
 
   /**

@@ -1247,6 +1247,33 @@ export type IsolationMode = "in-process" | "child-process";
 /** Project status in the central registry */
 export type ProjectStatus = "active" | "paused" | "errored" | "initializing";
 
+/** Node connectivity/health status in the central registry */
+export type NodeStatus = "online" | "offline" | "connecting" | "error";
+
+/** A runtime node that can host project execution (local machine or remote host) */
+export interface NodeConfig {
+  /** Unique node ID (e.g., "node_abc123") */
+  id: string;
+  /** Display name (unique across all nodes) */
+  name: string;
+  /** Node type */
+  type: "local" | "remote";
+  /** Base URL for remote nodes. Undefined for local nodes. */
+  url?: string;
+  /** API key used for authenticating requests to remote nodes. */
+  apiKey?: string;
+  /** Current node status */
+  status: NodeStatus;
+  /** Optional capabilities available on this node */
+  capabilities?: AgentCapability[];
+  /** Maximum concurrent tasks/runtimes this node can host */
+  maxConcurrent: number;
+  /** ISO-8601 timestamp of creation */
+  createdAt: string;
+  /** ISO-8601 timestamp of last update */
+  updatedAt: string;
+}
+
 /** A project registered in the central database */
 export interface RegisteredProject {
   /** Unique project ID (e.g., "proj_abc123") */
@@ -1259,6 +1286,8 @@ export interface RegisteredProject {
   status: ProjectStatus;
   /** Execution isolation mode */
   isolationMode: IsolationMode;
+  /** Optional runtime node assignment */
+  nodeId?: string;
   /** ISO-8601 timestamp of creation */
   createdAt: string;
   /** ISO-8601 timestamp of last update */

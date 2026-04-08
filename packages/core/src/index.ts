@@ -128,18 +128,20 @@ export type { MissionStoreEvents, MissionSummary } from "./mission-store.js";
 export { CentralCore } from "./central-core.js";
 export type { CentralCoreEvents } from "./central-core.js";
 export { CentralDatabase, createCentralDatabase } from "./central-db.js";
-export type { 
-  RegisteredProject, 
+export type {
+  CentralActivityLogEntry,
+  GlobalConcurrencyState,
+  IsolationMode,
+  MigrationOptions,
+  NodeConfig,
+  NodeStatus,
+  ProjectHealth,
   /** @deprecated Use RegisteredProject instead */
   ProjectInfo,
-  IsolationMode, 
-  ProjectStatus, 
-  ProjectHealth, 
-  CentralActivityLogEntry, 
-  GlobalConcurrencyState,
-  MigrationOptions,
-  SetupState,
+  ProjectStatus,
+  RegisteredProject,
   SetupCompletionResult,
+  SetupState,
 } from "./types.js";
 
 // ── Migration and First-Run Experience ────────────────────────────────

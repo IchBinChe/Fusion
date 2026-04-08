@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CentralCore } from "./central-core.js";
+import { NodeDiscovery } from "./node-discovery.js";
 import { NodeConnection, type ConnectionResult } from "./node-connection.js";
 import * as systemMetrics from "./system-metrics.js";
 import type {
@@ -11,6 +12,8 @@ import type {
   CentralActivityLogEntry,
   GlobalConcurrencyState,
   SystemMetrics,
+  DiscoveryConfig,
+  DiscoveredNode,
 } from "./types.js";
 
 describe("CentralCore", () => {
@@ -872,6 +875,136 @@ describe("CentralCore", () => {
       expect(registerSpy).not.toHaveBeenCalled();
       expect(healthSpy).not.toHaveBeenCalled();
       expect(emittedResult).toEqual(connectionResult);
+    });
+
+    it("should start and stop discovery lifecycle", async () => {
+      const startSpy = vi.spyOn(NodeDiscovery.prototype, "start").mockImplementation(() => {});
+      const stopSpy = vi.spyOn(NodeDiscovery.prototype, "stop").mockImplementation(() => {});
+      const config: DiscoveryConfig = {
+        broadcast: true,
+        listen: true,
+        serviceType: "_fusion._tcp",
+        port: 4040,
+        staleTimeoutMs: 300_000,
+      };
+
+      const discovery = await central.startDiscovery(config);
+      const local = (await central.listNodes()).find((node) => node.type === "local");
+
+      expect(discovery).toBeInstanceOf(NodeDiscovery);
+      expect(startSpy).toHaveBeenCalledWith(local?.id, local?.name);
+      expect(central.isDiscoveryActive()).toBe(true);
+      expect(central.getDiscoveryConfig()).toEqual(config);
+
+      central.stopDiscovery();
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(central.isDiscoveryActive()).toBe(false);
+      expect(central.getDiscoveryConfig()).toBeNull();
+    });
+
+    it("should forward discovery events and track discovered nodes", async () => {
+      vi.spyOn(NodeDiscovery.prototype, "start").mockImplementation(() => {});
+      await central.startDiscovery({
+        broadcast: false,
+        listen: true,
+        serviceType: "_fusion._tcp",
+        port: 4040,
+        staleTimeoutMs: 300_000,
+      });
+
+      const discovery = (central as unknown as { nodeDiscovery: NodeDiscovery | null }).nodeDiscovery;
+      expect(discovery).toBeTruthy();
+
+      const discovered: DiscoveredNode = {
+        name: "mesh-peer",
+        host: "192.168.0.42",
+        port: 4040,
+        nodeType: "remote",
+        nodeId: "node_remote",
+        discoveredAt: "2026-04-01T12:00:00.000Z",
+        lastSeenAt: "2026-04-01T12:00:00.000Z",
+      };
+
+      let eventPayload: DiscoveredNode | undefined;
+      central.on("discovery:node:found", (node) => {
+        eventPayload = node;
+      });
+
+      discovery!.emit("node:discovered", discovered);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(eventPayload).toEqual(discovered);
+      expect(central.getDiscoveredNodes()).toEqual([discovered]);
+
+      const updated = {
+        ...discovered,
+        lastSeenAt: "2026-04-01T12:01:00.000Z",
+      };
+      discovery!.emit("node:updated", updated);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(central.getDiscoveredNodes()).toEqual([updated]);
+
+      let lostName: string | undefined;
+      central.on("discovery:node:lost", (name) => {
+        lostName = name;
+      });
+
+      discovery!.emit("node:lost", discovered.name);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(lostName).toBe(discovered.name);
+      expect(central.getDiscoveredNodes()).toEqual([]);
+    });
+
+    it("should set registered nodes online/offline from discovery events", async () => {
+      vi.spyOn(NodeDiscovery.prototype, "start").mockImplementation(() => {});
+      const remote = await central.registerNode({
+        name: "remote-peer",
+        type: "remote",
+        url: "http://remote-peer:4040",
+      });
+
+      await central.startDiscovery({
+        broadcast: false,
+        listen: true,
+        serviceType: "_fusion._tcp",
+        port: 4040,
+        staleTimeoutMs: 300_000,
+      });
+
+      const discovery = (central as unknown as { nodeDiscovery: NodeDiscovery | null }).nodeDiscovery;
+      expect(discovery).toBeTruthy();
+
+      discovery!.emit("node:discovered", {
+        name: "remote-peer",
+        host: "192.168.0.22",
+        port: 4040,
+        nodeType: "remote",
+        nodeId: "node_remote_peer",
+        discoveredAt: "2026-04-01T12:00:00.000Z",
+        lastSeenAt: "2026-04-01T12:00:00.000Z",
+      } satisfies DiscoveredNode);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect((await central.getNode(remote.id))?.status).toBe("online");
+      expect(central.getDiscoveredNodes()).toEqual([]);
+
+      discovery!.emit("node:lost", "remote-peer");
+      await Promise.resolve();
+      await Promise.resolve();
+      expect((await central.getNode(remote.id))?.status).toBe("offline");
+    });
+
+    it("should return empty discovered node list when discovery is inactive", () => {
+      expect(central.isDiscoveryActive()).toBe(false);
+      expect(central.getDiscoveredNodes()).toEqual([]);
+      expect(central.getDiscoveryConfig()).toBeNull();
     });
 
     it("should update node metrics and emit node:metrics:updated", async () => {

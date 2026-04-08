@@ -23,6 +23,7 @@ import type {
   ParticipantType,
   NodeConfig,
   NodeStatus,
+  DiscoveryConfig,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary, PlanningResponse } from "@fusion/core";
 import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, AutomationStep } from "@fusion/core";
@@ -2446,6 +2447,17 @@ export interface NodeInfo {
   updatedAt: NodeConfig["updatedAt"];
 }
 
+/** Node discovered over local network mDNS/DNS-SD */
+export interface DiscoveredNodeInfo {
+  name: string;
+  host: string;
+  port: number;
+  nodeType: "local" | "remote";
+  nodeId?: string;
+  discoveredAt: string;
+  lastSeenAt: string;
+}
+
 /** Input for creating a new node */
 export interface NodeCreateInput {
   name: string;
@@ -2545,6 +2557,49 @@ export function fetchProjects(): Promise<ProjectInfo[]> {
 /** Fetch all registered nodes */
 export function fetchNodes(): Promise<NodeInfo[]> {
   return api<NodeInfo[]>("/nodes");
+}
+
+/** Fetch discovery runtime status and active config. */
+export function fetchDiscoveryStatus(): Promise<{ active: boolean; config: DiscoveryConfig | null }> {
+  return api<{ active: boolean; config: DiscoveryConfig | null }>("/discovery/status");
+}
+
+/** Start local-network discovery service. */
+export function startDiscovery(input?: {
+  broadcast?: boolean;
+  listen?: boolean;
+  port?: number;
+}): Promise<{ success: boolean; config: DiscoveryConfig }> {
+  return api<{ success: boolean; config: DiscoveryConfig }>("/discovery/start", {
+    method: "POST",
+    body: JSON.stringify(input ?? {}),
+  });
+}
+
+/** Stop local-network discovery service. */
+export function stopDiscovery(): Promise<{ success: boolean }> {
+  return api<{ success: boolean }>("/discovery/stop", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+/** Fetch currently discovered nodes from mDNS/DNS-SD. */
+export function fetchDiscoveredNodes(): Promise<DiscoveredNodeInfo[]> {
+  return api<DiscoveredNodeInfo[]>("/discovery/nodes");
+}
+
+/** Register a discovered node into the central node registry. */
+export function connectDiscoveredNode(input: {
+  name: string;
+  host: string;
+  port: number;
+  apiKey?: string;
+}): Promise<NodeInfo> {
+  return api<NodeInfo>("/discovery/connect", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 /** Register a new node */

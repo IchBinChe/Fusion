@@ -1397,6 +1397,48 @@ export type ProjectStatus = "active" | "paused" | "errored" | "initializing";
 /** Node connectivity/health status in the central registry */
 export type NodeStatus = "online" | "offline" | "connecting" | "error";
 
+/** A node discovered on the local network via mDNS/DNS-SD */
+export interface DiscoveredNode {
+  /** Node name from the mDNS service instance name */
+  name: string;
+  /** Host address (IP address) */
+  host: string;
+  /** Port the Fusion dashboard is running on */
+  port: number;
+  /** Node type from TXT record */
+  nodeType: "local" | "remote";
+  /** Node ID from TXT record (if the node has registered itself) */
+  nodeId?: string;
+  /** When this node was first discovered */
+  discoveredAt: string;
+  /** When this node was last seen (updated on each mDNS response) */
+  lastSeenAt: string;
+}
+
+/** Configuration for network node discovery */
+export interface DiscoveryConfig {
+  /** Whether to broadcast this node's presence on the network */
+  broadcast: boolean;
+  /** Whether to listen for other nodes on the network */
+  listen: boolean;
+  /** mDNS service type name (default: "_fusion._tcp") */
+  serviceType: string;
+  /** Port to advertise (defaults to the dashboard port) */
+  port: number;
+  /**
+   * How long (ms) to remember a discovered node after last seeing it.
+   * Default: 300000 (5 minutes).
+   */
+  staleTimeoutMs: number;
+}
+
+export type NodeDiscoveryEvent =
+  | { type: "node:discovered"; node: DiscoveredNode }
+  | { type: "node:updated"; node: DiscoveredNode }
+  | { type: "node:lost"; name: string }
+  | { type: "discovery:started" }
+  | { type: "discovery:stopped" };
+
 /** Host-level resource and uptime metrics reported by a node. */
 export interface SystemMetrics {
   /** CPU utilization percentage (0-100). */

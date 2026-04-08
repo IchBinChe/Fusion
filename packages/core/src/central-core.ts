@@ -47,10 +47,13 @@ import type {
   SystemMetrics,
   NodeMeshState,
   PeerNode,
+  DiscoveryConfig,
+  DiscoveredNode,
 } from "./types.js";
 import { CentralDatabase, toJson, toJsonNullable, fromJson } from "./central-db.js";
 import { resolveGlobalDir } from "./global-settings.js";
 import { NodeConnection } from "./node-connection.js";
+import { NodeDiscovery } from "./node-discovery.js";
 import { collectSystemMetrics } from "./system-metrics.js";
 import type { ConnectionOptions, ConnectionResult } from "./node-connection.js";
 
@@ -85,6 +88,14 @@ export interface CentralCoreEvents {
   "mesh:state:changed": [payload: { nodeId: string; state: NodeMeshState }];
   /** Emitted after a remote node connection test completes */
   "node:connection:test": [result: ConnectionResult];
+  /** Emitted when network discovery starts */
+  "discovery:started": [config: DiscoveryConfig];
+  /** Emitted when network discovery stops */
+  "discovery:stopped": [];
+  /** Emitted when a node is discovered via mDNS */
+  "discovery:node:found": [node: DiscoveredNode];
+  /** Emitted when a discovered node is lost */
+  "discovery:node:lost": [name: string];
   /** Emitted when global concurrency state changes */
   "concurrency:changed": [state: GlobalConcurrencyState];
 }
@@ -95,6 +106,27 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
   private db: CentralDatabase | null = null;
   private readonly globalDir: string;
   private initialized = false;
+  private nodeDiscovery: NodeDiscovery | null = null;
+  private discoveryConfig: DiscoveryConfig | null = null;
+  private readonly discoveredNodes = new Map<string, DiscoveredNode>();
+
+  private readonly onDiscoveryNodeDiscovered = (node: DiscoveredNode): void => {
+    void this.handleDiscoveryNodeDiscovered(node).catch((error) => {
+      console.warn("[central-core] Failed to process discovered node", error);
+    });
+  };
+
+  private readonly onDiscoveryNodeUpdated = (node: DiscoveredNode): void => {
+    void this.handleDiscoveryNodeUpdated(node).catch((error) => {
+      console.warn("[central-core] Failed to process discovery node update", error);
+    });
+  };
+
+  private readonly onDiscoveryNodeLost = (name: string): void => {
+    void this.handleDiscoveryNodeLost(name).catch((error) => {
+      console.warn("[central-core] Failed to process discovery node loss", error);
+    });
+  };
 
   /**
    * Create a CentralCore instance.
@@ -150,6 +182,10 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
    * Closes database connections and releases resources.
    */
   async close(): Promise<void> {
+    if (this.nodeDiscovery) {
+      this.stopDiscovery();
+    }
+
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -1032,6 +1068,84 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
   }
 
   /**
+   * Start mDNS/DNS-SD node discovery for this process.
+   */
+  async startDiscovery(config: DiscoveryConfig): Promise<NodeDiscovery> {
+    this.ensureInitialized();
+
+    if (this.nodeDiscovery) {
+      return this.nodeDiscovery;
+    }
+
+    const localNode = (await this.listNodes()).find((node) => node.type === "local");
+    if (!localNode) {
+      throw new Error("Local node not found");
+    }
+
+    this.discoveryConfig = {
+      ...config,
+    };
+    this.discoveredNodes.clear();
+
+    const discovery = new NodeDiscovery(this.discoveryConfig);
+    this.nodeDiscovery = discovery;
+
+    discovery.on("node:discovered", this.onDiscoveryNodeDiscovered);
+    discovery.on("node:updated", this.onDiscoveryNodeUpdated);
+    discovery.on("node:lost", this.onDiscoveryNodeLost);
+
+    discovery.start(localNode.id, localNode.name);
+    this.emit("discovery:started", this.discoveryConfig);
+
+    return discovery;
+  }
+
+  /**
+   * Stop mDNS/DNS-SD node discovery.
+   */
+  stopDiscovery(): void {
+    if (!this.nodeDiscovery) {
+      return;
+    }
+
+    const discovery = this.nodeDiscovery;
+    discovery.off("node:discovered", this.onDiscoveryNodeDiscovered);
+    discovery.off("node:updated", this.onDiscoveryNodeUpdated);
+    discovery.off("node:lost", this.onDiscoveryNodeLost);
+    discovery.stop();
+
+    this.nodeDiscovery = null;
+    this.discoveryConfig = null;
+    this.discoveredNodes.clear();
+    this.emit("discovery:stopped");
+  }
+
+  /**
+   * List currently discovered nodes.
+   */
+  getDiscoveredNodes(): DiscoveredNode[] {
+    return Array.from(this.discoveredNodes.values());
+  }
+
+  /**
+   * Return whether discovery is currently active.
+   */
+  isDiscoveryActive(): boolean {
+    return this.nodeDiscovery !== null;
+  }
+
+  /**
+   * Return active discovery config (if started).
+   */
+  getDiscoveryConfig(): DiscoveryConfig | null {
+    if (!this.discoveryConfig) {
+      return null;
+    }
+
+    return { ...this.discoveryConfig };
+  }
+
+  /**
    * Assign a project to a node.
    */
   async assignProjectToNode(projectId: string, nodeId: string): Promise<RegisteredProject> {
@@ -1596,6 +1710,41 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
   }
 
   // ── Private Helpers ─────────────────────────────────────────────────────
+
+  private async handleDiscoveryNodeDiscovered(node: DiscoveredNode): Promise<void> {
+    const existingNode = await this.getNodeByName(node.name);
+
+    if (!existingNode) {
+      this.discoveredNodes.set(node.name, node);
+    } else {
+      this.discoveredNodes.delete(node.name);
+
+      if (existingNode.status === "offline") {
+        await this.updateNode(existingNode.id, { status: "online" });
+      }
+    }
+
+    this.emit("discovery:node:found", node);
+  }
+
+  private async handleDiscoveryNodeUpdated(node: DiscoveredNode): Promise<void> {
+    if (!this.discoveredNodes.has(node.name)) {
+      return;
+    }
+
+    this.discoveredNodes.set(node.name, node);
+  }
+
+  private async handleDiscoveryNodeLost(name: string): Promise<void> {
+    this.discoveredNodes.delete(name);
+
+    const existingNode = await this.getNodeByName(name);
+    if (existingNode && existingNode.status !== "offline") {
+      await this.updateNode(existingNode.id, { status: "offline" });
+    }
+
+    this.emit("discovery:node:lost", name);
+  }
 
   private ensureInitialized(): void {
     if (!this.initialized || !this.db) {

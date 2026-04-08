@@ -141,6 +141,7 @@ export { CentralCore } from "./central-core.js";
 export type { CentralCoreEvents } from "./central-core.js";
 export { CentralDatabase, createCentralDatabase } from "./central-db.js";
 export { NodeConnection } from "./node-connection.js";
+export { NodeDiscovery } from "./node-discovery.js";
 export { collectSystemMetrics } from "./system-metrics.js";
 export type {
   ConnectionErrorType,
@@ -158,6 +159,9 @@ export type {
   NodeConfig,
   NodeMeshState,
   NodeStatus,
+  NodeDiscoveryEvent,
+  DiscoveryConfig,
+  DiscoveredNode,
   PeerNode,
   ProjectHealth,
   /** @deprecated Use RegisteredProject instead */

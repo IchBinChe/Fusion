@@ -1553,6 +1553,8 @@ export function SettingsModal({
                     border: "1px solid var(--border)",
                     borderRadius: "var(--radius)",
                     overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
                   }}
                 >
                   <FileEditor

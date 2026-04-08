@@ -33,6 +33,10 @@ The AI engine uses [pi](https://github.com/badlogic/pi-mono) under the hood:
 
 Fusion reuses your existing pi authentication.
 
+### Mobile
+
+For Capacitor + PWA workflow, see [MOBILE.md](./MOBILE.md).
+
 ## Workflow
 
 ```mermaid

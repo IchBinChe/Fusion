@@ -21,6 +21,32 @@ export default defineConfig({
   build: {
     outDir: "../dist/client",
     emptyOutDir: true,
+    target: "es2022",
+    cssCodeSplit: true,
+    sourcemap: false,
+    assetsInlineLimit: 4096,
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/[name]-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
+        manualChunks: (id) => {
+          if (id.includes("/node_modules/react/") || id.includes("/node_modules/react-dom/")) {
+            return "vendor-react";
+          }
+
+          if (id.includes("/node_modules/@xterm/xterm/")) {
+            return "vendor-xterm";
+          }
+
+          if (id.includes("/node_modules/@codemirror/")) {
+            return "vendor-codemirror";
+          }
+
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     proxy: {

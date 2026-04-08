@@ -6,7 +6,7 @@
     "moduleResolution": "bundler",
     "module": "ESNext",
     "noEmit": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom", "node"]
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node", "vite/client"]
   },
   "include": ["app/**/*"],
   "exclude": ["app/**/*.test.ts", "app/**/*.test.tsx"]

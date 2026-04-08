@@ -399,41 +399,39 @@ Capacitor wraps the existing Fusion dashboard web build into native iOS and Andr
 
 ```bash
 pnpm install
-pnpm --filter @fusion/dashboard mobile:prepare
+pnpm mobile:build
 ```
 
-`mobile:prepare` runs `build:client` and then `cap:sync`, copying `dist/client` assets into native platform projects.
+`mobile:build` builds `@fusion/dashboard` and syncs web assets into the `@fusion/mobile` Capacitor project.
 
 ### Running / Opening Native Projects
 
 ```bash
-pnpm --filter @fusion/dashboard cap:open:ios
-pnpm --filter @fusion/dashboard cap:open:android
+pnpm mobile:ios
+pnpm mobile:android
 ```
 
-You can also run directly:
+### Development with Live Reload
 
 ```bash
-pnpm --filter @fusion/dashboard cap:run:ios
-pnpm --filter @fusion/dashboard cap:run:android
+pnpm mobile:dev:ios
+pnpm mobile:dev:android
 ```
 
-### Development with a Live Backend
+The live-reload helper sets `FUSION_LIVE_RELOAD=true` automatically and defaults `FUSION_SERVER_URL` to `http://localhost:5173`.
 
-Set `FUSION_BACKEND_URL` before sync/run commands so the mobile shell connects to a running Fusion backend (default dashboard backend port is `4040`):
-
-```bash
-FUSION_BACKEND_URL=http://YOUR_IP:4040 pnpm --filter @fusion/dashboard cap:sync
-```
+For the full workflow (CI pipeline, PWA details, troubleshooting), see [`../../MOBILE.md`](../../MOBILE.md).
 
 ### Mobile Scripts
 
-- `cap:sync`
-- `cap:open:ios`
-- `cap:open:android`
-- `cap:run:ios`
-- `cap:run:android`
-- `mobile:prepare`
+Workspace (`package.json`):
+
+- `mobile:build`
+- `mobile:ios`
+- `mobile:android`
+- `mobile:dev:ios`
+- `mobile:dev:android`
+- `mobile:sync`
 
 ## Development
 

@@ -19,7 +19,13 @@
     "typecheck": "pnpm -r typecheck",
     "changeset": "changeset",
     "version": "changeset version",
-    "release:version": "changeset version"
+    "release:version": "changeset version",
+    "mobile:build": "pnpm --filter @fusion/dashboard build && pnpm --filter @fusion/mobile cap sync",
+    "mobile:ios": "pnpm mobile:build && pnpm --filter @fusion/mobile cap open ios",
+    "mobile:android": "pnpm mobile:build && pnpm --filter @fusion/mobile cap open android",
+    "mobile:dev:ios": "pnpm --filter @fusion/mobile dev:ios",
+    "mobile:dev:android": "pnpm --filter @fusion/mobile dev:android",
+    "mobile:sync": "pnpm --filter @fusion/mobile cap sync"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

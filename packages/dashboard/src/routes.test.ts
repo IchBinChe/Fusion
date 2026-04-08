@@ -16,7 +16,10 @@ import type { TaskDetail } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { __resetBatchImportRateLimiter, __setCreateKbAgentForRefine } from "./routes.js";
 import { __resetPlanningState, __setCreateKbAgent, planningStreamManager } from "./planning.js";
+import * as planningModule from "./planning.js";
 import { __resetSubtaskBreakdownState, subtaskStreamManager } from "./subtask-breakdown.js";
+import * as subtaskBreakdownModule from "./subtask-breakdown.js";
+import * as projectStoreResolver from "./project-store-resolver.js";
 import * as terminalServiceModule from "./terminal-service.js";
 import { get as performGet, request as performRequest } from "./test-request.js";
 
@@ -4230,6 +4233,278 @@ describe("POST /github/issues/batch-import", () => {
       "Imported from GitHub",
       "https://github.com/owner/repo/issues/1"
     );
+  });
+});
+
+describe("projectId store scoping regressions", () => {
+  const projectId = "proj-scoped";
+  let defaultStore: TaskStore;
+  let scopedStore: TaskStore;
+
+  beforeEach(() => {
+    __resetBatchImportRateLimiter();
+    __resetPlanningState();
+    __resetSubtaskBreakdownState();
+    mockIsGhAuthenticated.mockReturnValue(true);
+
+    defaultStore = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([]),
+      createTask: vi.fn(),
+      updateTask: vi.fn(),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn(),
+      deleteTask: vi.fn(),
+      getRootDir: vi.fn().mockReturnValue("/fake/default"),
+    });
+
+    scopedStore = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([]),
+      createTask: vi.fn(),
+      updateTask: vi.fn().mockImplementation(async (id: string, patch: Record<string, unknown>) => ({
+        ...FAKE_TASK_DETAIL,
+        id,
+        column: "triage",
+        ...patch,
+      })),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue({
+        ...FAKE_TASK_DETAIL,
+        id: "FN-PARENT",
+        column: "triage",
+      }),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      getRootDir: vi.fn().mockReturnValue("/fake/scoped"),
+    });
+
+    vi.spyOn(projectStoreResolver, "getOrCreateProjectStore").mockResolvedValue(scopedStore);
+  });
+
+  afterEach(() => {
+    __setCreateKbAgent(undefined as any);
+    vi.restoreAllMocks();
+  });
+
+  function buildApp(options?: Parameters<typeof createApiRoutes>[1]) {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(defaultStore, options));
+    return app;
+  }
+
+  it("routes github issue import mutations to scoped store when projectId is provided", async () => {
+    vi.spyOn(GitHubClient.prototype, "getIssue").mockResolvedValue({
+      number: 1,
+      title: "Scoped issue",
+      body: "Body",
+      html_url: "https://github.com/owner/repo/issues/1",
+      state: "open",
+    });
+    (scopedStore.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-SCOPE-1",
+      column: "triage",
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/github/issues/import",
+      JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1, projectId }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(projectStoreResolver.getOrCreateProjectStore).toHaveBeenCalledWith(projectId);
+    expect(scopedStore.createTask).toHaveBeenCalledTimes(1);
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
+
+  it("routes github batch-import mutations to scoped store when projectId is provided", async () => {
+    vi.spyOn(GitHubClient.prototype, "fetchThrottled")
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          number: 1,
+          title: "One",
+          body: "Body one",
+          html_url: "https://github.com/owner/repo/issues/1",
+        },
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          number: 2,
+          title: "Two",
+          body: "Body two",
+          html_url: "https://github.com/owner/repo/issues/2",
+        },
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>);
+
+    (scopedStore.createTask as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...FAKE_TASK_DETAIL, id: "FN-SCOPE-2", column: "triage" })
+      .mockResolvedValueOnce({ ...FAKE_TASK_DETAIL, id: "FN-SCOPE-3", column: "triage" });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/github/issues/batch-import",
+      JSON.stringify({ owner: "owner", repo: "repo", issueNumbers: [1, 2], delayMs: 1, projectId }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(scopedStore.createTask).toHaveBeenCalledTimes(2);
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
+
+  it("routes github pull import mutations to scoped store when projectId is provided", async () => {
+    vi.spyOn(GitHubClient.prototype, "getPullRequest").mockResolvedValue({
+      number: 9,
+      title: "Scoped pull",
+      body: "PR body",
+      html_url: "https://github.com/owner/repo/pull/9",
+      headBranch: "feature/branch",
+      baseBranch: "main",
+      state: "open",
+    });
+
+    (scopedStore.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-SCOPE-4",
+      column: "triage",
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/github/pulls/import",
+      JSON.stringify({ owner: "owner", repo: "repo", prNumber: 9, projectId }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(scopedStore.createTask).toHaveBeenCalledTimes(1);
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
+
+  it("routes planning create-task mutations to scoped store when projectId is provided", async () => {
+    vi.spyOn(planningModule, "getSession").mockReturnValue({
+      id: "plan-session-1",
+      initialPlan: "Scoped initial plan",
+      history: [],
+      thinkingOutput: "",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+    vi.spyOn(planningModule, "getSummary").mockReturnValue({
+      title: "Scoped planned task",
+      description: "Create task in scoped project",
+      suggestedSize: "M",
+      suggestedDependencies: [],
+      keyDeliverables: [],
+    });
+    vi.spyOn(planningModule, "cleanupSession").mockImplementation(() => {});
+
+    (scopedStore.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-SCOPE-5",
+      column: "triage",
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/planning/create-task",
+      JSON.stringify({ sessionId: "plan-session-1", projectId }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(scopedStore.createTask).toHaveBeenCalledTimes(1);
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
+
+  it("routes planning create-tasks mutations to scoped store when projectId is provided", async () => {
+    vi.spyOn(planningModule, "getSession").mockReturnValue({
+      id: "plan-session-2",
+      initialPlan: "Scoped multi task plan",
+      history: [],
+      summary: {
+        title: "Plan",
+        description: "Plan description",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Deliverable 1", "Deliverable 2"],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+    vi.spyOn(planningModule, "formatInterviewQA").mockReturnValue("Q: Scope\nA: Medium");
+    vi.spyOn(planningModule, "cleanupSession").mockImplementation(() => {});
+
+    (scopedStore.createTask as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...FAKE_TASK_DETAIL, id: "FN-SCOPE-6", column: "triage" })
+      .mockResolvedValueOnce({ ...FAKE_TASK_DETAIL, id: "FN-SCOPE-7", column: "triage" });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/planning/create-tasks",
+      JSON.stringify({
+        planningSessionId: "plan-session-2",
+        projectId,
+        subtasks: [
+          { id: "sub-1", title: "First scoped task", description: "First", suggestedSize: "S", dependsOn: [] },
+          { id: "sub-2", title: "Second scoped task", description: "Second", suggestedSize: "M", dependsOn: ["sub-1"] },
+        ],
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(scopedStore.createTask).toHaveBeenCalledTimes(2);
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
+
+  it("routes subtask create-tasks mutations to scoped store when projectId is provided", async () => {
+    vi.spyOn(subtaskBreakdownModule, "getSubtaskSession").mockReturnValue({
+      sessionId: "subtask-session-1",
+      initialDescription: "Break down scoped work",
+      subtasks: [],
+      status: "complete",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      thinkingOutput: "",
+    } as any);
+    vi.spyOn(subtaskBreakdownModule, "cleanupSubtaskSession").mockImplementation(() => {});
+
+    (scopedStore.createTask as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...FAKE_TASK_DETAIL, id: "FN-SCOPE-8", column: "triage" })
+      .mockResolvedValueOnce({ ...FAKE_TASK_DETAIL, id: "FN-SCOPE-9", column: "triage" });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/subtasks/create-tasks",
+      JSON.stringify({
+        sessionId: "subtask-session-1",
+        projectId,
+        parentTaskId: "FN-PARENT",
+        subtasks: [
+          { tempId: "temp-1", title: "Scoped subtask one", description: "One", size: "S", dependsOn: [] },
+          { tempId: "temp-2", title: "Scoped subtask two", description: "Two", size: "M", dependsOn: ["temp-1"] },
+        ],
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(scopedStore.getTask).toHaveBeenCalledWith("FN-PARENT");
+    expect(defaultStore.getTask).not.toHaveBeenCalled();
+    expect(scopedStore.createTask).toHaveBeenCalledTimes(2);
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+    expect(scopedStore.deleteTask).toHaveBeenCalledWith("FN-PARENT");
+    expect(defaultStore.deleteTask).not.toHaveBeenCalled();
   });
 });
 

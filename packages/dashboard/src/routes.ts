@@ -3628,6 +3628,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       const client = new GitHubClient();
+      const scopedStore = await getScopedStore(req);
 
       let issue: {
         number: number;
@@ -3665,7 +3666,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       // Check if already imported
-      const existingTasks = await store.listTasks();
+      const existingTasks = await scopedStore.listTasks();
       const sourceUrl = issue.html_url;
       for (const existingTask of existingTasks) {
         if (existingTask.description.includes(sourceUrl)) {
@@ -3682,7 +3683,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const body = issue.body?.trim() || "(no description)";
       const description = `${body}\n\nSource: ${sourceUrl}`;
 
-      const task = await store.createTask({
+      const task = await scopedStore.createTask({
         title: title || undefined,
         description,
         column: "triage",
@@ -3690,7 +3691,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       });
 
       // Log the import action
-      await store.logEntry(task.id, "Imported from GitHub", sourceUrl);
+      await scopedStore.logEntry(task.id, "Imported from GitHub", sourceUrl);
 
       res.status(201).json(task);
     } catch (err: any) {
@@ -3778,9 +3779,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       const token = process.env.GITHUB_TOKEN;
       const githubClient = new GitHubClient(token);
+      const scopedStore = await getScopedStore(req);
 
       // Get existing tasks to check for duplicates
-      const existingTasks = await store.listTasks();
+      const existingTasks = await scopedStore.listTasks();
 
       // Process issues sequentially with throttling
       const results: Array<{
@@ -3845,7 +3847,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         const description = `${body}\n\nSource: ${sourceUrl}`;
 
         try {
-          const task = await store.createTask({
+          const task = await scopedStore.createTask({
             title: title || undefined,
             description,
             column: "triage",
@@ -3853,7 +3855,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           });
 
           // Log the import action
-          await store.logEntry(task.id, "Imported from GitHub", sourceUrl);
+          await scopedStore.logEntry(task.id, "Imported from GitHub", sourceUrl);
 
           results.push({
             issueNumber,
@@ -3964,6 +3966,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       const client = new GitHubClient();
+      const scopedStore = await getScopedStore(req);
 
       let pr: {
         number: number;
@@ -4001,7 +4004,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       // Check if already imported
-      const existingTasks = await store.listTasks();
+      const existingTasks = await scopedStore.listTasks();
       const sourceUrl = pr.html_url;
       for (const existingTask of existingTasks) {
         if (existingTask.description.includes(sourceUrl)) {
@@ -4018,7 +4021,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const body = pr.body?.trim() || "(no description)";
       const description = `Review and address any issues in this pull request.\n\nPR: ${sourceUrl}\nBranch: ${pr.headBranch} → ${pr.baseBranch}\n\n${body}`;
 
-      const task = await store.createTask({
+      const task = await scopedStore.createTask({
         title: title || undefined,
         description,
         column: "triage",
@@ -4026,7 +4029,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       });
 
       // Log the import action
-      await store.logEntry(task.id, "Imported PR from GitHub", sourceUrl);
+      await scopedStore.logEntry(task.id, "Imported PR from GitHub", sourceUrl);
 
       res.status(201).json(task);
     } catch (err: any) {
@@ -5403,8 +5406,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      const scopedStore = await getScopedStore(req);
       const { createSubtaskSession } = await import("./subtask-breakdown.js");
-      const session = await createSubtaskSession(description, store, store.getRootDir());
+      const session = await createSubtaskSession(description, scopedStore, scopedStore.getRootDir());
       res.status(201).json({ sessionId: session.sessionId });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to start subtask breakdown" });
@@ -5535,6 +5539,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      const scopedStore = await getScopedStore(req);
       const { getSubtaskSession, cleanupSubtaskSession } = await import("./subtask-breakdown.js");
       const session = getSubtaskSession(sessionId);
       if (!session) {
@@ -5546,7 +5551,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       let parentTask: Awaited<ReturnType<typeof store.getTask>> | undefined;
       if (typeof parentTaskId === "string" && parentTaskId.trim()) {
         try {
-          parentTask = await store.getTask(parentTaskId);
+          parentTask = await scopedStore.getTask(parentTaskId);
         } catch {
           // Parent task not found or error - proceed without inheritance
           parentTask = undefined;
@@ -5562,7 +5567,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           return;
         }
 
-        const task = await store.createTask({
+        const task = await scopedStore.createTask({
           title: item.title.trim(),
           description: typeof item.description === "string" ? item.description.trim() : item.title.trim(),
           column: "triage",
@@ -5578,7 +5583,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         createdTasks.push(task);
 
         if (item.size === "S" || item.size === "M" || item.size === "L") {
-          await store.updateTask(task.id, { size: item.size });
+          await scopedStore.updateTask(task.id, { size: item.size });
         }
       }
 
@@ -5590,17 +5595,17 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           : [];
 
         if (resolvedDependencies.length > 0) {
-          const updated = await store.updateTask(created.id, { dependencies: resolvedDependencies });
+          const updated = await scopedStore.updateTask(created.id, { dependencies: resolvedDependencies });
           createdTasks[index] = updated;
         }
 
-        await store.logEntry(created.id, "Created via subtask breakdown", `Source: ${session.initialDescription.slice(0, 200)}`);
+        await scopedStore.logEntry(created.id, "Created via subtask breakdown", `Source: ${session.initialDescription.slice(0, 200)}`);
       }
 
       let parentTaskClosed = false;
       if (typeof parentTaskId === "string" && parentTaskId.trim()) {
         try {
-          await store.deleteTask(parentTaskId);
+          await scopedStore.deleteTask(parentTaskId);
           parentTaskClosed = true;
         } catch {
           parentTaskClosed = false;
@@ -5654,11 +5659,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      const scopedStore = await getScopedStore(req);
       const ip = req.ip || req.socket.remoteAddress || "unknown";
-      const rootDir = store.getRootDir();
+      const rootDir = scopedStore.getRootDir();
 
       const { createSession, RateLimitError } = await import("./planning.js");
-      const result = await createSession(ip, initialPlan, store, rootDir);
+      const result = await createSession(ip, initialPlan, scopedStore, rootDir);
       res.status(201).json(result);
     } catch (err: any) {
       if (err.name === "RateLimitError") {
@@ -5702,8 +5708,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      const scopedStore = await getScopedStore(req);
       const ip = req.ip || req.socket.remoteAddress || "unknown";
-      const rootDir = store.getRootDir();
+      const rootDir = scopedStore.getRootDir();
 
       const { createSessionWithAgent, RateLimitError } = await import("./planning.js");
       const sessionId = await createSessionWithAgent(
@@ -5798,6 +5805,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      const scopedStore = await getScopedStore(req);
       const { getSession, getSummary, cleanupSession } = await import("./planning.js");
 
       const session = getSession(sessionId);
@@ -5885,7 +5893,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       // Create the task
-      const task = await store.createTask({
+      const task = await scopedStore.createTask({
         title: summary.title,
         description: summary.description,
         column: "triage",
@@ -5894,11 +5902,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       // Update task with suggested size if provided
       if (summary.suggestedSize) {
-        await store.updateTask(task.id, { size: summary.suggestedSize });
+        await scopedStore.updateTask(task.id, { size: summary.suggestedSize });
       }
 
       // Log the planning mode creation
-      await store.logEntry(task.id, "Created via Planning Mode", `Initial plan: ${(initialPlan ?? "").slice(0, 200)}`);
+      await scopedStore.logEntry(task.id, "Created via Planning Mode", `Initial plan: ${(initialPlan ?? "").slice(0, 200)}`);
 
       // Cleanup the session
       if (usedPersistedFallback) {
@@ -5984,6 +5992,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
+      const scopedStore = await getScopedStore(req);
       const { getSession, cleanupSession, formatInterviewQA } = await import("./planning.js");
 
       const session = getSession(planningSessionId);
@@ -6015,7 +6024,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       // Create tasks
       for (const item of subtasks) {
-        const task = await store.createTask({
+        const task = await scopedStore.createTask({
           title: item.title.trim(),
           description: typeof item.description === "string" ? item.description.trim() : item.title.trim(),
           column: "triage",
@@ -6026,7 +6035,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         createdTasks.push(task);
 
         if (item.suggestedSize === "S" || item.suggestedSize === "M" || item.suggestedSize === "L") {
-          await store.updateTask(task.id, { size: item.suggestedSize });
+          await scopedStore.updateTask(task.id, { size: item.suggestedSize });
         }
       }
 
@@ -6039,11 +6048,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           : [];
 
         if (resolvedDependencies.length > 0) {
-          const updated = await store.updateTask(created.id, { dependencies: resolvedDependencies });
+          const updated = await scopedStore.updateTask(created.id, { dependencies: resolvedDependencies });
           createdTasks[index] = updated;
         }
 
-        await store.logEntry(created.id, "Created via Planning Mode (multi-task)", logDetails);
+        await scopedStore.logEntry(created.id, "Created via Planning Mode (multi-task)", logDetails);
       }
 
       // Cleanup the planning session

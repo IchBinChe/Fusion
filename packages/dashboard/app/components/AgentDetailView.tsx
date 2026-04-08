@@ -84,19 +84,30 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [isStreaming, setIsStreaming] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const addToastRef = useRef(addToast);
+  const agentRef = useRef<AgentDetail | null>(null);
+
+  onCloseRef.current = onClose;
+  addToastRef.current = addToast;
+  agentRef.current = agent;
 
   const loadAgent = useCallback(async () => {
-    setIsLoading(true);
+    const showLoadingSpinner = agentRef.current === null;
+    if (showLoadingSpinner) {
+      setIsLoading(true);
+    }
+
     try {
       const data = await fetchAgent(agentId, projectId);
       setAgent(data);
     } catch (err: any) {
-      addToast(`Failed to load agent: ${err.message}`, "error");
-      onClose();
+      addToastRef.current(`Failed to load agent: ${err.message}`, "error");
+      onCloseRef.current();
     } finally {
       setIsLoading(false);
     }
-  }, [agentId, addToast, onClose, projectId]);
+  }, [agentId, projectId]);
 
   const loadLogs = useCallback(async () => {
     // Agent logs are tied to tasks, not agents directly.

@@ -272,6 +272,73 @@ describe("AgentDetailView", () => {
     });
   });
 
+  it("does not refetch or show loading spinner when onClose/addToast callback identities change", async () => {
+    const initialOnClose = vi.fn();
+    const initialAddToast = vi.fn();
+
+    const { rerender } = render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={initialOnClose}
+        addToast={initialAddToast}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Test Agent" })).toBeInTheDocument();
+    });
+    expect(mockFetchAgent).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />,
+    );
+
+    expect(mockFetchAgent).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Loading agent...")).not.toBeInTheDocument();
+  });
+
+  it("refreshes agent data without showing full-screen loading spinner after initial load", async () => {
+    const user = userEvent.setup();
+    let resolveRefresh: ((value: AgentDetail) => void) | undefined;
+
+    mockFetchAgent
+      .mockImplementationOnce(async () => createMockAgent())
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Test Agent" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTitle("Refresh"));
+
+    await waitFor(() => {
+      expect(mockFetchAgent).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText("Loading agent...")).not.toBeInTheDocument();
+
+    resolveRefresh?.(createMockAgent({ updatedAt: "2024-01-01T00:10:00.000Z" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Test Agent" })).toBeInTheDocument();
+    });
+  });
+
   it("displays role badge", async () => {
     render(
       <AgentDetailView

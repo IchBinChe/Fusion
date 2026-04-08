@@ -343,6 +343,14 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
     }
   };
 
+  const handleCloseDetail = useCallback(() => {
+    setSelectedAgentId(null);
+  }, []);
+
+  const handleChildClick = useCallback((childId: string) => {
+    setSelectedAgentId(childId);
+  }, []);
+
   const handleRunHeartbeat = async (agentId: string, agentName: string) => {
     try {
       await startAgentRun(agentId, projectId, { source: "on_demand", triggerDetail: "Triggered from dashboard" });
@@ -942,9 +950,9 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
         <AgentDetailView
           agentId={selectedAgentId}
           projectId={projectId}
-          onClose={() => setSelectedAgentId(null)}
+          onClose={handleCloseDetail}
           addToast={addToast}
-          onChildClick={(childId) => setSelectedAgentId(childId)}
+          onChildClick={handleChildClick}
         />
       )}
 

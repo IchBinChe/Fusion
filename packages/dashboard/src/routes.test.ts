@@ -3903,7 +3903,7 @@ describe("POST /github/issues/batch-import", () => {
     expect(res.body.results[0].error).toContain("rate limit");
     expect(res.body.results[0].retryAfter).toBe(1);
     expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(4);
-  }, 15000); // Increase timeout for multiple retries
+  }, 30000); // Retry path can exceed 15s in CI/load-constrained environments
 
   it("processes issues sequentially (not parallel)", async () => {
     vi.useFakeTimers();

@@ -376,4 +376,86 @@ describe("MailboxModal", () => {
       expect(mockFetchInbox).toHaveBeenCalledWith({ limit: 50 }, "proj-1");
     });
   });
+
+  describe("mobile layout CSS regressions", () => {
+    it("defines mailbox base flex layout for modal and content containers", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const cssPath = path.resolve(__dirname, "../../styles.css");
+      const css = fs.readFileSync(cssPath, "utf-8");
+
+      const modalBlockMatch = css.match(/\.mailbox-modal\s*\{([^}]*)\}/);
+      expect(modalBlockMatch).toBeTruthy();
+      const modalBlock = modalBlockMatch![1];
+      expect(modalBlock).toContain("display: flex;");
+      expect(modalBlock).toContain("flex-direction: column;");
+
+      const contentBlockMatch = css.match(/\.mailbox-content\s*\{([^}]*)\}/);
+      expect(contentBlockMatch).toBeTruthy();
+      const contentBlock = contentBlockMatch![1];
+      expect(contentBlock).toContain("flex: 1;");
+      expect(contentBlock).toContain("min-height: 0;");
+    });
+
+    it("keeps mobile mailbox overrides in the dedicated media-query section", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const cssPath = path.resolve(__dirname, "../../styles.css");
+      const css = fs.readFileSync(cssPath, "utf-8");
+
+      const sectionStart = css.indexOf("/* ── Mailbox — Mobile");
+      expect(sectionStart).toBeGreaterThan(-1);
+
+      const sectionEnd = css.indexOf("/* ── Message Composer", sectionStart);
+      expect(sectionEnd).toBeGreaterThan(sectionStart);
+
+      const mailboxMobileSection = css.slice(sectionStart, sectionEnd);
+
+      expect(mailboxMobileSection).toContain("@media (max-width: 768px)");
+      expect(mailboxMobileSection).toContain(".mailbox-header");
+      expect(mailboxMobileSection).toContain("flex-wrap: wrap;");
+      expect(mailboxMobileSection).toContain(".mailbox-title");
+      expect(mailboxMobileSection).toContain("flex-shrink: 0;");
+      expect(mailboxMobileSection).toContain(".mailbox-header-actions");
+      expect(mailboxMobileSection).toContain("overflow-x: auto;");
+      expect(mailboxMobileSection).toContain("-webkit-overflow-scrolling: touch;");
+      expect(mailboxMobileSection).toContain("scrollbar-width: none;");
+      expect(mailboxMobileSection).toContain(".mailbox-tabs::-webkit-scrollbar");
+      expect(mailboxMobileSection).toContain("display: none;");
+      expect(mailboxMobileSection).toContain(".mailbox-tab");
+      expect(mailboxMobileSection).toContain("padding: 8px 12px;");
+      expect(mailboxMobileSection).toContain("max-height: calc(100dvh - 120px);");
+      expect(mailboxMobileSection).toContain(".mailbox-message-detail-header");
+      expect(mailboxMobileSection).toContain("flex-direction: column;");
+      expect(mailboxMobileSection).toContain("align-items: flex-start;");
+      expect(mailboxMobileSection).toContain(".mailbox-message-detail-actions");
+      expect(mailboxMobileSection).toContain(".mailbox-message-participants");
+      expect(mailboxMobileSection).toContain("gap: 8px;");
+      expect(mailboxMobileSection).toContain(".mailbox-conversation-msg");
+      expect(mailboxMobileSection).toContain("padding: 8px 10px;");
+      expect(mailboxMobileSection).toContain(".mailbox-agent-select");
+      expect(mailboxMobileSection).toContain("max-width: 100%;");
+      expect(mailboxMobileSection).toContain(".mailbox-compose-fab");
+      expect(mailboxMobileSection).toContain("bottom: 16px;");
+      expect(mailboxMobileSection).toContain("right: 16px;");
+      expect(mailboxMobileSection).toContain(".mailbox-empty");
+      expect(mailboxMobileSection).toContain("padding: 32px 12px;");
+    });
+
+    it("renders detail-view structural hooks targeted by mobile overrides", async () => {
+      const { container } = render(<MailboxModal {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+
+      await waitFor(() => {
+        expect(container.querySelector(".mailbox-message-detail-header")).toBeTruthy();
+        expect(container.querySelector(".mailbox-message-detail-actions")).toBeTruthy();
+        expect(container.querySelector(".mailbox-message-participants")).toBeTruthy();
+      });
+    });
+  });
 });

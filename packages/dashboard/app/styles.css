@@ -21154,6 +21154,8 @@ html .column.drag-over * {
 
 .mailbox-modal {
   max-height: 80vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .mailbox-header {
@@ -21237,6 +21239,8 @@ html .column.drag-over * {
 }
 
 .mailbox-content {
+  flex: 1;
+  min-height: 0;
   padding: 16px;
   overflow-y: auto;
   max-height: calc(80vh - 140px);
@@ -21553,6 +21557,77 @@ html .column.drag-over * {
 
 .mailbox-skeleton-line--long {
   width: 80%;
+}
+
+/* ── Mailbox — Mobile (≤ 768px) ───────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .mailbox-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .mailbox-title {
+    flex-shrink: 0;
+  }
+
+  .mailbox-header-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .mailbox-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0 12px;
+  }
+
+  .mailbox-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mailbox-tab {
+    flex-shrink: 0;
+    padding: 8px 12px;
+  }
+
+  .mailbox-content {
+    padding: 12px;
+    max-height: calc(100dvh - 120px);
+  }
+
+  .mailbox-message-detail-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .mailbox-message-detail-actions {
+    flex-wrap: wrap;
+  }
+
+  .mailbox-message-participants {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .mailbox-conversation-msg {
+    padding: 8px 10px;
+  }
+
+  .mailbox-agent-select {
+    max-width: 100%;
+  }
+
+  .mailbox-compose-fab {
+    bottom: 16px;
+    right: 16px;
+  }
+
+  .mailbox-empty {
+    padding: 32px 12px;
+  }
 }
 
 /* ── Message Composer ──────────────────────────────────────────────── */

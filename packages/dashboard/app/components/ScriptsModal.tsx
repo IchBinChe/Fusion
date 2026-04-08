@@ -185,7 +185,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
           </button>
         </div>
 
-        <div className="modal-body" style={{ padding: "16px", maxHeight: "70vh", overflowY: "auto" }}>
+        <div className="modal-body scripts-modal-body">
           {loading ? (
             <div style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>
               <Loader2 size={24} className="spin" style={{ margin: "0 auto 8px", display: "block" }} />
@@ -193,7 +193,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
             </div>
           ) : isEditingAny ? (
             /* Form for create/edit */
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="scripts-modal-form" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div>
                 <label
                   htmlFor="script-name"
@@ -274,7 +274,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
                 />
               </div>
 
-              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <div className="scripts-modal-form-actions" style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                 <button
                   className="btn btn-secondary"
                   onClick={handleCancel}
@@ -306,6 +306,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
             /* List view */
             <>
               <div
+                className="scripts-modal-list-header"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -348,7 +349,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
                   </div>
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div className="scripts-modal-list" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   {scriptEntries.map((script) => (
                     <div
                       key={script.name}
@@ -362,6 +363,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
                       }}
                     >
                       <div
+                        className="script-card-header"
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
@@ -402,6 +404,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
                           </div>
                         </div>
                         <div
+                          className="script-card-actions"
                           style={{
                             display: "flex",
                             gap: "4px",
@@ -436,7 +439,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
                             <Plus size={14} style={{ transform: "rotate(45deg)" }} />
                           </button>
                           {deleteConfirmName === script.name ? (
-                            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                            <div className="script-delete-confirm" style={{ display: "flex", gap: "4px", alignItems: "center" }}>
                               <button
                                 className="btn-icon"
                                 onClick={() => handleDelete(script.name)}

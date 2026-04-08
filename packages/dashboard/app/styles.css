@@ -13122,6 +13122,16 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
     border-radius: 0;
   }
 
+  .changes-diff-header-title {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .changes-diff-header-actions {
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
   .changes-diff-body {
     flex-direction: column;
   }
@@ -13136,6 +13146,14 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 
   .changes-diff-file-list {
     padding: 4px 0;
+  }
+
+  .changes-diff-file-item {
+    min-height: 44px;
+  }
+
+  .changes-diff-content {
+    overflow-x: auto;
   }
 }
 
@@ -15961,6 +15979,69 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   margin-bottom: 6px;
 }
 
+@media (max-width: 768px) {
+  .wfm-body {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
+
+  .wfm-tab-row {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .wfm-tab-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .wfm-tab-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .wfm-step-card-top {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .wfm-step-card-actions {
+    flex-wrap: wrap;
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .wfm-step-card-desc {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .wfm-template-inner {
+    flex-direction: column;
+  }
+
+  .wfm-mode-selector {
+    flex-wrap: wrap;
+  }
+
+  .wfm-form-actions {
+    flex-direction: column;
+  }
+
+  .wfm-form-actions .btn {
+    width: 100%;
+  }
+
+  .wfm-footer {
+    padding: 12px 14px;
+  }
+}
+
 .new-task-modal .form-group small {
   display: block;
   margin-top: var(--space-sm);
@@ -16036,6 +16117,63 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   font-size: 13px;
   color: var(--text-muted);
   text-align: right;
+}
+
+/* === Scripts Modal === */
+.scripts-modal {
+  display: flex;
+  flex-direction: column;
+}
+
+.scripts-modal-body {
+  padding: 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+  .scripts-modal-body {
+    max-height: none;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .scripts-modal-list-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .scripts-modal-list-header .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .scripts-modal-form-actions {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .scripts-modal-form-actions .btn {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .script-card-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .script-card-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+
+  .script-delete-confirm {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 
 /* ── Scheduled Tasks ──────────────────────────────────────────────── */
@@ -16567,6 +16705,24 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   margin-top: var(--space-lg);
 }
 
+@media (max-width: 768px) {
+  .schedule-modal-content {
+    max-height: none;
+    padding: var(--space-md) 14px;
+  }
+
+  .schedule-card-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .schedule-card-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 /* ── Activity Log Modal ─────────────────────────────────────────── */
 
 .activity-log-modal {
@@ -17043,6 +17199,7 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 
   /* Entries: allow content to wrap freely */
   .activity-log-entry {
+    min-height: 44px;
     gap: var(--space-sm);
     padding: var(--space-sm);
   }
@@ -20026,6 +20183,45 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   cursor: not-allowed;
 }
 
+@media (max-width: 768px) {
+  .setup-wizard-modal {
+    max-width: 100%;
+    border-radius: 0;
+  }
+
+  .setup-wizard-header {
+    padding: var(--space-md) var(--space-md) 0;
+  }
+
+  .setup-wizard-title {
+    font-size: 18px;
+  }
+
+  .setup-wizard-content {
+    padding: var(--space-md);
+  }
+
+  .setup-wizard-isolation-options {
+    gap: var(--space-xs);
+  }
+
+  .setup-wizard-isolation-option {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .setup-wizard-footer {
+    padding: 0 var(--space-md) var(--space-md);
+  }
+
+  .setup-wizard-footer .btn-primary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .setup-wizard-complete {
+    padding: var(--space-lg) 0;
+  }
+}
 
 /* ================================================================
    Mission Manager — redesigned modal, list, detail, and panels
@@ -21605,6 +21801,62 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+@media (max-width: 768px) {
+  .model-onboarding-modal {
+    max-width: 100%;
+    width: 100%;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .model-onboarding-header {
+    padding: 14px 14px 10px;
+  }
+
+  .model-onboarding-steps {
+    padding: 12px 14px;
+  }
+
+  .model-onboarding-step-connector {
+    width: 20px;
+    margin: 0 6px;
+  }
+
+  .model-onboarding-content {
+    padding: 14px;
+  }
+
+  .onboarding-provider-row {
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .onboarding-apikey-input {
+    width: 100%;
+  }
+
+  .onboarding-apikey-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .onboarding-apikey-input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .model-onboarding-footer {
+    padding: 12px 14px;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .model-onboarding-footer .btn-primary {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 /* =========================================================================

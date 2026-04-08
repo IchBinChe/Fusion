@@ -6,7 +6,6 @@ import type { Task, Column } from "@fusion/core";
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
   Sparkles: () => null,
-  Globe: () => null,
   ChevronUp: () => null,
   ChevronDown: () => null,
   X: () => null,
@@ -134,11 +133,11 @@ describe("TaskForm", () => {
     });
   });
 
-  it("renders workflow step checkboxes with browser verification", () => {
+  it("does not render a hardcoded browser verification checkbox", () => {
     renderTaskForm();
 
-    expect(screen.getByTestId("browser-verification-checkbox")).toBeTruthy();
-    expect(screen.getByText("Browser Verification")).toBeTruthy();
+    expect(screen.queryByTestId("browser-verification-checkbox")).toBeNull();
+    expect(screen.queryByText("Browser Verification")).toBeNull();
   });
 
   it("in create mode: shows Plan and Subtask buttons", () => {
@@ -206,17 +205,7 @@ describe("TaskForm", () => {
     expect(container.querySelector(".inline-create-previews")).toBeTruthy();
   });
 
-  it("calls onWorkflowStepsChange when browser verification is toggled", () => {
-    const onWorkflowStepsChange = vi.fn();
-    renderTaskForm({ onWorkflowStepsChange });
-
-    const checkbox = screen.getByTestId("browser-verification-checkbox").querySelector('input[type="checkbox"]') as HTMLInputElement;
-    fireEvent.click(checkbox);
-
-    expect(onWorkflowStepsChange).toHaveBeenCalledWith(["browser-verification"]);
-  });
-
-  it("shows browser verification checkbox as checked when selectedWorkflowSteps has resolved WS step ID", async () => {
+  it("calls onWorkflowStepsChange when a fetched workflow step is toggled", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
       {
@@ -225,38 +214,6 @@ describe("TaskForm", () => {
         description: "Verify in browser",
         prompt: "Run browser verification",
         templateId: "browser-verification",
-        enabled: true,
-        createdAt: "",
-        updatedAt: "",
-      },
-    ]);
-
-    renderTaskForm({ selectedWorkflowSteps: ["WS-005"] });
-
-    await waitFor(() => {
-      const checkbox = screen.getByTestId("browser-verification-checkbox").querySelector('input[type="checkbox"]') as HTMLInputElement;
-      expect(checkbox.checked).toBe(true);
-    });
-  });
-
-  it("removes resolved WS step IDs when browser verification is unchecked", async () => {
-    const { fetchWorkflowSteps } = await import("../../api");
-    vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      {
-        id: "WS-005",
-        name: "Browser Verification",
-        description: "Verify in browser",
-        prompt: "Run browser verification",
-        templateId: "browser-verification",
-        enabled: true,
-        createdAt: "",
-        updatedAt: "",
-      },
-      {
-        id: "WS-001",
-        name: "QA Check",
-        description: "Run tests",
-        prompt: "Run tests",
         enabled: true,
         createdAt: "",
         updatedAt: "",
@@ -264,62 +221,16 @@ describe("TaskForm", () => {
     ]);
 
     const onWorkflowStepsChange = vi.fn();
-    renderTaskForm({
-      selectedWorkflowSteps: ["WS-001", "WS-005"],
-      onWorkflowStepsChange,
-    });
-
-    const checkbox = screen.getByTestId("browser-verification-checkbox").querySelector('input[type="checkbox"]') as HTMLInputElement;
+    renderTaskForm({ onWorkflowStepsChange });
 
     await waitFor(() => {
-      expect(checkbox.checked).toBe(true);
+      expect(screen.getByTestId("workflow-step-checkbox-WS-005")).toBeTruthy();
     });
 
+    const checkbox = screen.getByTestId("workflow-step-checkbox-WS-005").querySelector('input[type="checkbox"]') as HTMLInputElement;
     fireEvent.click(checkbox);
 
-    expect(onWorkflowStepsChange).toHaveBeenCalledWith(["WS-001"]);
-  });
-
-  it("normalizes resolved WS step IDs to browser-verification when checkbox is checked", async () => {
-    const { fetchWorkflowSteps } = await import("../../api");
-    vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
-      {
-        id: "WS-005",
-        name: "Browser Verification",
-        description: "Verify in browser",
-        prompt: "Run browser verification",
-        templateId: "browser-verification",
-        enabled: true,
-        createdAt: "",
-        updatedAt: "",
-      },
-      {
-        id: "WS-001",
-        name: "QA Check",
-        description: "Run tests",
-        prompt: "Run tests",
-        enabled: true,
-        createdAt: "",
-        updatedAt: "",
-      },
-    ]);
-
-    const onWorkflowStepsChange = vi.fn();
-    renderTaskForm({
-      selectedWorkflowSteps: ["WS-001", "WS-005"],
-      onWorkflowStepsChange,
-    });
-
-    const checkbox = screen.getByTestId("browser-verification-checkbox").querySelector('input[type="checkbox"]') as HTMLInputElement;
-
-    await waitFor(() => {
-      expect(checkbox.checked).toBe(true);
-    });
-
-    checkbox.checked = false;
-    fireEvent.click(checkbox);
-
-    expect(onWorkflowStepsChange).toHaveBeenCalledWith(["WS-001", "browser-verification"]);
+    expect(onWorkflowStepsChange).toHaveBeenCalledWith(["WS-005"]);
   });
 
   it("disables all inputs when disabled prop is true", () => {
@@ -654,7 +565,7 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
   });
 
   it("does not show reorder controls when only one step is selected", () => {
-    renderTaskForm({ selectedWorkflowSteps: ["browser-verification"] });
+    renderTaskForm({ selectedWorkflowSteps: ["WS-001"] });
     expect(screen.queryByTestId("workflow-step-order")).toBeNull();
   });
 
@@ -781,23 +692,22 @@ describe("TaskForm workflow step reordering (FN-836)", () => {
     expect(onWorkflowStepsChange).toHaveBeenCalledWith(["WS-002"]);
   });
 
-  it("shows browser-verification step name in reorder list", async () => {
+  it("falls back to raw step ID in reorder list when metadata is missing", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
       { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, createdAt: "", updatedAt: "" },
     ]);
 
-    renderTaskForm({ selectedWorkflowSteps: ["WS-001", "browser-verification"] });
+    renderTaskForm({ selectedWorkflowSteps: ["WS-001", "WS-999"] });
 
     await waitFor(() => {
       expect(screen.getByTestId("workflow-step-order")).toBeTruthy();
     });
 
-    // browser-verification should show its friendly name in the reorder list
     const orderItem1 = screen.getByTestId("workflow-step-order-item-WS-001");
-    const orderItem2 = screen.getByTestId("workflow-step-order-item-browser-verification");
+    const orderItem2 = screen.getByTestId("workflow-step-order-item-WS-999");
     expect(orderItem1.textContent).toContain("QA Check");
-    expect(orderItem2.textContent).toContain("Browser Verification");
+    expect(orderItem2.textContent).toContain("WS-999");
   });
 
   it("preserves order when adding a new step via checkbox after reorder", async () => {

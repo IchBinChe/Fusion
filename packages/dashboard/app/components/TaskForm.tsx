@@ -4,7 +4,7 @@ import type { ToastType } from "../hooks/useToast";
 import { fetchModels, fetchSettings, fetchWorkflowSteps, refineText, getRefineErrorMessage, updateGlobalSettings, type RefinementType, type ModelInfo } from "../api";
 import { applyPresetToSelection, getRecommendedPresetForSize } from "../utils/modelPresets";
 import { CustomModelDropdown } from "./CustomModelDropdown";
-import { Sparkles, Globe, ChevronUp, ChevronDown, X } from "lucide-react";
+import { Sparkles, ChevronUp, ChevronDown, X } from "lucide-react";
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
@@ -346,22 +346,11 @@ export function TaskForm({
     onWorkflowStepsChange(selectedWorkflowSteps.filter((id) => id !== stepId));
   }, [selectedWorkflowSteps, onWorkflowStepsChange]);
 
-  // Build a lookup for step names (includes both fetched steps and built-in browser-verification)
+  // Build a lookup for step names.
   const workflowStepLookup = new Map<string, { name: string; description: string }>();
   for (const step of workflowSteps) {
     workflowStepLookup.set(step.id, { name: step.name, description: step.description });
   }
-  workflowStepLookup.set("browser-verification", {
-    name: "Browser Verification",
-    description: "Verify web application functionality using browser automation (agent-browser)",
-  });
-
-  const browserVerificationResolvedIds = workflowSteps
-    .filter((step) => step.templateId === "browser-verification")
-    .map((step) => step.id);
-  const isBrowserVerificationSelected =
-    selectedWorkflowSteps.includes("browser-verification") ||
-    browserVerificationResolvedIds.some((id) => selectedWorkflowSteps.includes(id));
 
   const availableDeps = tasks
     .filter((t) => !dependencies.includes(t.id))
@@ -752,39 +741,6 @@ export function TaskForm({
               </div>
             </label>
           ))}
-          <label
-            key="browser-verification"
-            className="checkbox-label"
-            style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}
-            data-testid="browser-verification-checkbox"
-          >
-            <input
-              type="checkbox"
-              checked={isBrowserVerificationSelected}
-              onChange={(e) => {
-                const filteredSteps = selectedWorkflowSteps.filter(
-                  (id) => id !== "browser-verification" && !browserVerificationResolvedIds.includes(id),
-                );
-
-                onWorkflowStepsChange(
-                  e.target.checked
-                    ? [...filteredSteps, "browser-verification"]
-                    : filteredSteps,
-                );
-              }}
-              disabled={disabled}
-              style={{ marginTop: "2px" }}
-            />
-            <div>
-              <span style={{ fontWeight: 500, fontSize: "13px" }}>
-                <Globe size={14} style={{ verticalAlign: "middle", marginRight: "4px" }} />
-                Browser Verification
-              </span>
-              <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
-                Verify web application functionality using browser automation (agent-browser)
-              </div>
-            </div>
-          </label>
         </div>
 
         {/* Selected steps — execution order with reorder controls */}

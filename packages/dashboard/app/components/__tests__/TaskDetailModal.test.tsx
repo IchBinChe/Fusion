@@ -3651,7 +3651,6 @@ describe("TaskDetailModal", () => {
       // Model configuration and workflow steps should be present via TaskForm
       expect(screen.getByText(/Model Configuration/i)).toBeTruthy();
       expect(screen.getByText(/Workflow Steps/i)).toBeTruthy();
-      expect(screen.getByTestId("browser-verification-checkbox")).toBeTruthy();
     });
 
     it("save sends all changed fields via updateTask", async () => {

@@ -54,6 +54,13 @@ export interface SelfHealingOptions {
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
 const ORPHANED_EXECUTION_RECOVERY_GRACE_MS = 60_000;
+/**
+ * Longer grace period for tasks that still have a worktree on disk.
+ * This avoids racing with `executor.resumeOrphaned()` which runs on
+ * engine startup and may legitimately re-execute these tasks.
+ * 5 minutes is well past any startup window.
+ */
+const ORPHANED_WITH_WORKTREE_GRACE_MS = 300_000;
 
 export class SelfHealingManager {
   // ── Auto-unpause state ──────────────────────────────────────────────
@@ -392,14 +399,17 @@ export class SelfHealingManager {
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const now = Date.now();
 
-      const orphaned = tasks.filter((t) =>
-        t.column === "in-progress" &&
-        !t.paused &&
-        !executingIds.has(t.id) &&
-        !isTaskWorkComplete(t) &&
-        (!t.worktree || !existsSync(t.worktree)) &&
-        now - new Date(t.updatedAt).getTime() >= ORPHANED_EXECUTION_RECOVERY_GRACE_MS,
-      );
+      const orphaned = tasks.filter((t) => {
+        if (t.column !== "in-progress" || t.paused || executingIds.has(t.id) || isTaskWorkComplete(t)) {
+          return false;
+        }
+        const staleness = now - new Date(t.updatedAt).getTime();
+        // Tasks with an existing worktree get a longer grace period to avoid
+        // racing with executor.resumeOrphaned() on engine startup.
+        const hasWorktree = t.worktree && existsSync(t.worktree);
+        const graceMs = hasWorktree ? ORPHANED_WITH_WORKTREE_GRACE_MS : ORPHANED_EXECUTION_RECOVERY_GRACE_MS;
+        return staleness >= graceMs;
+      });
 
       if (orphaned.length === 0) return 0;
 
@@ -408,6 +418,11 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of orphaned) {
         try {
+          const hadWorktree = task.worktree && existsSync(task.worktree);
+          const reason = hadWorktree
+            ? "worktree exists but no active session"
+            : "missing worktree/session";
+
           await this.store.updateTask(task.id, {
             status: "stuck-killed",
             worktree: null,
@@ -415,7 +430,7 @@ export class SelfHealingManager {
           });
           await this.store.logEntry(
             task.id,
-            "Auto-recovered orphaned executor task — missing worktree/session, moved back to todo",
+            `Auto-recovered orphaned executor task — ${reason}, moved back to todo`,
           );
           await this.store.moveTask(task.id, "todo");
           recovered++;

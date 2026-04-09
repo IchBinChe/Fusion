@@ -4,6 +4,16 @@ vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
 }));
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: vi.fn(actual.existsSync),
+    readdirSync: vi.fn(actual.readdirSync),
+    statSync: vi.fn(actual.statSync),
+  };
+});
+
 vi.mock("./worktree-pool.js", () => ({
   WorktreePool: vi.fn(),
   scanIdleWorktrees: vi.fn().mockResolvedValue([]),
@@ -15,6 +25,7 @@ import { SelfHealingManager } from "./self-healing.js";
 import type { TaskStore, Settings, Task } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { scanOrphanedBranches } from "./worktree-pool.js";
 
 const mockedExecSync = vi.mocked(execSync);
@@ -789,6 +800,84 @@ describe("SelfHealingManager", () => {
       ]);
 
       vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      const result = await managerWithRecovery.recoverOrphanedExecutions();
+
+      expect(result).toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
+    it("recovers tasks with existing worktree but no active session after grace period", async () => {
+      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
+      const mockedExistsSync = vi.mocked(existsSync);
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: getExecuting,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-210",
+          column: "in-progress",
+          paused: false,
+          worktree: "/tmp/test-project/.worktrees/active-tree",
+          steps: [{ status: "done" }, { status: "in-progress" }, { status: "pending" }],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      // Worktree directory exists on disk
+      mockedExistsSync.mockImplementation((p) =>
+        p === "/tmp/test-project/.worktrees/active-tree" ? true : false,
+      );
+
+      // 10 minutes past — well beyond the 5-minute grace period
+      vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+
+      const result = await managerWithRecovery.recoverOrphanedExecutions();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-210", {
+        status: "stuck-killed",
+        worktree: null,
+        branch: null,
+      });
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-210",
+        expect.stringContaining("worktree exists but no active session"),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-210", "todo");
+
+      managerWithRecovery.stop();
+    });
+
+    it("skips tasks with existing worktree within the extended grace period", async () => {
+      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
+      const mockedExistsSync = vi.mocked(existsSync);
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: getExecuting,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-211",
+          column: "in-progress",
+          paused: false,
+          worktree: "/tmp/test-project/.worktrees/active-tree",
+          steps: [{ status: "in-progress" }],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      mockedExistsSync.mockImplementation((p) =>
+        p === "/tmp/test-project/.worktrees/active-tree" ? true : false,
+      );
+
+      // Only 2 minutes past — within the 5-minute grace period for existing worktrees
+      vi.setSystemTime(new Date("2026-01-01T00:02:00.000Z"));
 
       const result = await managerWithRecovery.recoverOrphanedExecutions();
 

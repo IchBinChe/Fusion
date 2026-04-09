@@ -4,7 +4,7 @@ import type { ToastType } from "../hooks/useToast";
 import type { Task, TaskCreateInput, Settings } from "@fusion/core";
 import type { ModelInfo, RefinementType, Agent } from "../api";
 import { fetchModels, fetchSettings, refineText, getRefineErrorMessage, updateGlobalSettings, fetchAgents, uploadAttachment } from "../api";
-import { Link, Paperclip, Brain, Lightbulb, ListTree, Sparkles, Save, MoreHorizontal, ChevronDown, ChevronUp, ChevronRight, Bot } from "lucide-react";
+import { Link, Paperclip, Brain, Lightbulb, ListTree, Sparkles, Save, ChevronDown, ChevronUp, ChevronRight, Bot } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
 
@@ -106,8 +106,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [agents, setAgents] = useState<Agent[]>([]);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [agentsLoading, setAgentsLoading] = useState(false);
-  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
-  const [actionsMenuPosition, setActionsMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [activeModelSubmenu, setActiveModelSubmenu] = useState<"plan" | "executor" | "validator" | null>(null);
   const [executorProvider, setExecutorProvider] = useState<string | undefined>(undefined);
@@ -116,9 +114,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [validatorModelId, setValidatorModelId] = useState<string | undefined>(undefined);
   const [planningProvider, setPlanningProvider] = useState<string | undefined>(undefined);
   const [planningModelId, setPlanningModelId] = useState<string | undefined>(undefined);
-  const actionsMenuRef = useRef<HTMLDivElement>(null);
-  const actionsMenuPortalRef = useRef<HTMLDivElement>(null);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const modelMenuPortalRef = useRef<HTMLDivElement>(null);
   const agentPickerRef = useRef<HTMLDivElement>(null);
   const [modelMenuPosition, setModelMenuPosition] = useState<{ top: number; left: number; width: number; maxHeight?: number } | null>(null);
@@ -209,7 +205,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     : selectedModelCount > 0
       ? `${selectedModelCount} model${selectedModelCount === 1 ? "" : "s"}`
       : "Models";
-  const actionSelectionCount = dependencies.length + selectedModelCount + pendingImages.length + (selectedAgentId ? 1 : 0);
 
   const getModelBadgeLabel = useCallback(
     (provider?: string, modelId?: string) => {
@@ -307,34 +302,13 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isRefineMenuOpen]);
 
-  // Close actions menu when clicking outside
-  useEffect(() => {
-    if (!isActionsMenuOpen) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
-      const clickedInsideTrigger = actionsMenuRef.current?.contains(target);
-      const clickedInsidePortal = actionsMenuPortalRef.current?.contains(target);
-      // Also check for clicks inside CustomModelDropdown's portaled dropdown
-      const clickedInsideCombobox = (target instanceof Element) && (target.closest?.(".model-combobox-dropdown--portal") != null);
-
-      if (!clickedInsideTrigger && !clickedInsidePortal && !clickedInsideCombobox) {
-        setIsActionsMenuOpen(false);
-        setActionsMenuPosition(null);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isActionsMenuOpen]);
-
   // Close model menu when clicking outside
   useEffect(() => {
     if (!isModelMenuOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      const clickedInsideTrigger = modelMenuRef.current?.contains(target);
+      const clickedInsideTrigger = modelTriggerRef.current?.contains(target);
       const clickedInsidePortal = modelMenuPortalRef.current?.contains(target);
       // Also check for clicks inside CustomModelDropdown's portaled dropdown
       const clickedInsideCombobox = (target instanceof Element) && (target.closest?.(".model-combobox-dropdown--portal") != null);
@@ -381,8 +355,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     setPlanningModelId(undefined);
     setSelectedPresetId(undefined);
     setShowDeps(false);
-    setIsActionsMenuOpen(false);
-    setActionsMenuPosition(null);
     setIsModelMenuOpen(false);
     setModelMenuPosition(null);
     setActiveModelSubmenu(null);
@@ -507,12 +479,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         handleSubmit();
       } else if (e.key === "Escape") {
         e.preventDefault();
-        // Close actions menu first if open
-        if (isActionsMenuOpen) {
-          setIsActionsMenuOpen(false);
-          setActionsMenuPosition(null);
-          return;
-        }
         // Close model submenu first if open
         if (activeModelSubmenu) {
           setActiveModelSubmenu(null);
@@ -524,14 +490,16 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           setModelMenuPosition(null);
           return;
         }
-        if (showAgentPicker) {
-          setShowAgentPicker(false);
+        if (showDeps) {
+          setShowDeps(false);
           return;
         }
-        // Close dependency or refine popover if open
-        if (showDeps || isRefineMenuOpen) {
-          setShowDeps(false);
+        if (isRefineMenuOpen) {
           setIsRefineMenuOpen(false);
+          return;
+        }
+        if (showAgentPicker) {
+          setShowAgentPicker(false);
           return;
         }
         // Clear non-empty input on Escape and clear localStorage
@@ -558,7 +526,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       isExpanded,
       showDeps,
       showAgentPicker,
-      isActionsMenuOpen,
       isModelMenuOpen,
       activeModelSubmenu,
       isRefineMenuOpen,
@@ -607,50 +574,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     };
   }, []);
 
-  const updateActionsMenuPosition = useCallback(() => {
-    const trigger = actionsMenuRef.current?.querySelector(".quick-entry-actions-trigger") as HTMLElement | null;
-    if (!trigger) return;
-
-    const rect = trigger.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const isMobile = viewportWidth <= 640;
-
-    if (isMobile) {
-      const mobileWidth = Math.min(viewportWidth - 32, 320);
-      const left = Math.max((viewportWidth - mobileWidth) / 2, 16);
-      setActionsMenuPosition({
-        top: rect.bottom + 4,
-        left,
-        width: mobileWidth,
-      });
-    } else {
-      setActionsMenuPosition({
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: Math.max(rect.width, 200),
-      });
-    }
-  }, []);
-
-  const toggleActionsMenu = useCallback(() => {
-    setIsActionsMenuOpen((prev) => {
-      const next = !prev;
-      if (next) {
-        setShowDeps(false);
-        setShowAgentPicker(false);
-        setIsModelMenuOpen(false);
-        setModelMenuPosition(null);
-        setActiveModelSubmenu(null);
-        updateActionsMenuPosition();
-      } else {
-        setActionsMenuPosition(null);
-      }
-      return next;
-    });
-  }, [updateActionsMenuPosition]);
-
   const updateModelMenuPosition = useCallback(() => {
-    const trigger = modelMenuRef.current?.querySelector(".quick-entry-actions-trigger") as HTMLElement | null;
+    const trigger = modelTriggerRef.current;
     if (!trigger) return;
 
     const rect = trigger.getBoundingClientRect();
@@ -745,21 +670,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       left,
     });
   }, [getEffectiveViewport]);
-
-  // Keep actions menu portal anchored during scroll/resize
-  useEffect(() => {
-    if (!isActionsMenuOpen) return;
-
-    const handleReposition = () => updateActionsMenuPosition();
-
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
-
-    return () => {
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
-    };
-  }, [isActionsMenuOpen, updateActionsMenuPosition]);
 
   // Keep model menu portal anchored during scroll/resize
   useEffect(() => {
@@ -1025,7 +935,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         hidden={!showExpandedControls}
         aria-hidden={!showExpandedControls}
       >
-        {/* Plan, Subtask, Refine — consolidated action buttons */}
+        {/* All quick-create actions behind single disclosure toggle */}
         {showExpandedControls && !isSubmitting && (
           <div className="quick-entry-actions" data-testid="quick-entry-actions">
             <button
@@ -1122,6 +1032,167 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 portalRoot,
               )}
             </div>
+
+            <div className="dep-trigger-wrap">
+              <button
+                type="button"
+                className="btn btn-sm dep-trigger"
+                data-testid="quick-entry-deps"
+                onClick={() => {
+                  setShowDeps((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setIsModelMenuOpen(false);
+                      setModelMenuPosition(null);
+                      setActiveModelSubmenu(null);
+                      setShowAgentPicker(false);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <Link size={12} style={{ verticalAlign: "middle" }} />
+                {dependencies.length > 0 ? `${dependencies.length} deps` : "Deps"}
+              </button>
+              {showDeps && (() => {
+                const term = depSearch.toLowerCase();
+                const filtered = (term
+                  ? tasks.filter((t) =>
+                      t.id.toLowerCase().includes(term) ||
+                      (t.title && t.title.toLowerCase().includes(term)) ||
+                      (t.description && t.description.toLowerCase().includes(term))
+                    )
+                  : [...tasks]
+                ).sort((a, b) => {
+                  const cmp = b.createdAt.localeCompare(a.createdAt);
+                  if (cmp !== 0) return cmp;
+                  const aNum = parseInt(a.id.slice(a.id.lastIndexOf("-") + 1), 10) || 0;
+                  const bNum = parseInt(b.id.slice(b.id.lastIndexOf("-") + 1), 10) || 0;
+                  return bNum - aNum;
+                });
+                return (
+                  <div className="dep-dropdown" onMouseDown={(e) => e.preventDefault()}>
+                    <input
+                      className="dep-dropdown-search"
+                      placeholder="Search tasks…"
+                      autoFocus
+                      value={depSearch}
+                      onChange={(e) => setDepSearch(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    {filtered.length === 0 ? (
+                      <div className="dep-dropdown-empty">No existing tasks</div>
+                    ) : (
+                      filtered.map((t) => (
+                        <div
+                          key={t.id}
+                          className={`dep-dropdown-item${dependencies.includes(t.id) ? " selected" : ""}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => toggleDep(t.id)}
+                        >
+                          <span className="dep-dropdown-id">{t.id}</span>
+                          <span className="dep-dropdown-title">{truncate(t.title || t.description || t.id, 30)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-sm"
+              data-testid="quick-entry-attach"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip size={12} style={{ verticalAlign: "middle" }} />
+              {pendingImages.length > 0 ? `Attach (${pendingImages.length})` : "Attach"}
+            </button>
+
+            <button
+              ref={modelTriggerRef}
+              type="button"
+              className="btn btn-sm"
+              data-testid="quick-entry-models"
+              onClick={() => {
+                setShowDeps(false);
+                setShowAgentPicker(false);
+                setActiveModelSubmenu(null);
+                setIsModelMenuOpen(true);
+                updateModelMenuPosition();
+              }}
+            >
+              <Brain size={12} style={{ verticalAlign: "middle" }} />
+              {modelMenuLabel}
+            </button>
+
+            <div className="agent-trigger-wrap" ref={agentPickerRef}>
+              <button
+                type="button"
+                className="btn btn-sm dep-trigger"
+                onClick={() => {
+                  if (showAgentPicker) {
+                    setShowAgentPicker(false);
+                  } else {
+                    void loadAgents();
+                  }
+                }}
+                data-testid="quick-entry-agent-button"
+              >
+                <Bot size={12} style={{ verticalAlign: "middle" }} />
+                {selectedAgentLabel ? ` ${selectedAgentLabel}` : " Agent"}
+              </button>
+              {showAgentPicker && (
+                <div className="dep-dropdown agent-picker-dropdown" onMouseDown={(e) => e.preventDefault()}>
+                  <div className="dep-dropdown-search-header">Select agent</div>
+                  {agentsLoading && <div className="dep-dropdown-empty">Loading agents...</div>}
+                  {!agentsLoading && agents.filter((a) => a.state !== "terminated").map((a) => (
+                    <div
+                      key={a.id}
+                      className={`dep-dropdown-item${selectedAgentId === a.id ? " selected" : ""}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setSelectedAgentId(a.id === selectedAgentId ? null : a.id);
+                        setShowAgentPicker(false);
+                      }}
+                    >
+                      <Bot size={12} style={{ marginRight: 6 }} />
+                      <span className="dep-dropdown-id">{a.role}</span>
+                      <span className="dep-dropdown-title">{a.name}</span>
+                    </div>
+                  ))}
+                  {!agentsLoading && agents.filter((a) => a.state !== "terminated").length === 0 && (
+                    <div className="dep-dropdown-empty">No agents available</div>
+                  )}
+                  {selectedAgentId && (
+                    <div
+                      className="dep-dropdown-item"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setSelectedAgentId(null);
+                        setShowAgentPicker(false);
+                      }}
+                    >
+                      <span className="dep-dropdown-title">Clear selection</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-task-create btn-sm"
+              onClick={handleSaveClick}
+              onMouseDown={(e) => e.preventDefault()}
+              disabled={!description.trim() || isSubmitting}
+              data-testid="quick-entry-save"
+              title="Create task"
+            >
+              <Save size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
+              Save
+            </button>
           </div>
         )}
         {pendingImages.length > 0 && (
@@ -1143,213 +1214,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             ))}
           </div>
         )}
-        <div className="quick-entry-controls-left">
-          <div
-            className="quick-entry-actions-wrap dep-trigger-wrap"
-            ref={(node) => {
-              actionsMenuRef.current = node;
-              modelMenuRef.current = node;
-            }}
-          >
-            <button
-              type="button"
-              className="btn btn-sm quick-entry-actions-trigger"
-              onClick={toggleActionsMenu}
-              aria-expanded={isActionsMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Advanced creation options"
-              data-testid="quick-entry-actions-trigger"
-            >
-              <MoreHorizontal size={12} style={{ verticalAlign: "middle" }} />
-              {actionSelectionCount > 0 && (
-                <span className="quick-entry-actions-badge" data-testid="quick-entry-actions-badge">
-                  {actionSelectionCount}
-                </span>
-              )}
-            </button>
-
-            {isActionsMenuOpen && portalRoot && actionsMenuPosition && createPortal(
-              <div
-                ref={actionsMenuPortalRef}
-                className="actions-dropdown actions-dropdown--portal"
-                onMouseDown={(e) => e.preventDefault()}
-                style={{
-                  position: "fixed",
-                  top: `${actionsMenuPosition.top}px`,
-                  left: `${actionsMenuPosition.left}px`,
-                  width: `${actionsMenuPosition.width}px`,
-                }}
-              >
-                <div className="actions-dropdown-items">
-                  <button
-                    type="button"
-                    className="btn btn-sm dep-trigger"
-                    data-testid="quick-entry-actions-deps"
-                    onClick={() => {
-                      setIsActionsMenuOpen(false);
-                      setActionsMenuPosition(null);
-                      setIsModelMenuOpen(false);
-                      setModelMenuPosition(null);
-                      setActiveModelSubmenu(null);
-                      setShowAgentPicker(false);
-                      setShowDeps(true);
-                    }}
-                  >
-                    <Link size={12} style={{ verticalAlign: "middle" }} />
-                    {dependencies.length > 0 ? `${dependencies.length} deps` : "Deps"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    data-testid="quick-entry-actions-attach"
-                    onClick={() => {
-                      setIsActionsMenuOpen(false);
-                      setActionsMenuPosition(null);
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    <Paperclip size={12} style={{ verticalAlign: "middle" }} />
-                    {pendingImages.length > 0 ? `Attach (${pendingImages.length})` : "Attach"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    data-testid="quick-entry-actions-models"
-                    onClick={() => {
-                      setIsActionsMenuOpen(false);
-                      setActionsMenuPosition(null);
-                      setShowDeps(false);
-                      setShowAgentPicker(false);
-                      setActiveModelSubmenu(null);
-                      setIsModelMenuOpen(true);
-                      updateModelMenuPosition();
-                    }}
-                  >
-                    <Brain size={12} style={{ verticalAlign: "middle" }} />
-                    {modelMenuLabel}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-task-create btn-sm"
-                    onClick={() => {
-                      handleSaveClick();
-                      setIsActionsMenuOpen(false);
-                      setActionsMenuPosition(null);
-                    }}
-                    onMouseDown={(e) => e.preventDefault()}
-                    disabled={!description.trim() || isSubmitting}
-                    data-testid="quick-entry-actions-save"
-                    title="Create task"
-                  >
-                    <Save size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                    Save
-                  </button>
-                </div>
-              </div>,
-              portalRoot,
-            )}
-
-            {showDeps && (() => {
-              const term = depSearch.toLowerCase();
-              const filtered = (term
-                ? tasks.filter((t) =>
-                    t.id.toLowerCase().includes(term) ||
-                    (t.title && t.title.toLowerCase().includes(term)) ||
-                    (t.description && t.description.toLowerCase().includes(term))
-                  )
-                : [...tasks]
-              ).sort((a, b) => {
-                const cmp = b.createdAt.localeCompare(a.createdAt);
-                if (cmp !== 0) return cmp;
-                const aNum = parseInt(a.id.slice(a.id.lastIndexOf("-") + 1), 10) || 0;
-                const bNum = parseInt(b.id.slice(b.id.lastIndexOf("-") + 1), 10) || 0;
-                return bNum - aNum;
-              });
-              return (
-                <div className="dep-dropdown" onMouseDown={(e) => e.preventDefault()}>
-                  <input
-                    className="dep-dropdown-search"
-                    placeholder="Search tasks…"
-                    autoFocus
-                    value={depSearch}
-                    onChange={(e) => setDepSearch(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  {filtered.length === 0 ? (
-                    <div className="dep-dropdown-empty">No existing tasks</div>
-                  ) : (
-                    filtered.map((t) => (
-                      <div
-                        key={t.id}
-                        className={`dep-dropdown-item${dependencies.includes(t.id) ? " selected" : ""}`}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => toggleDep(t.id)}
-                      >
-                        <span className="dep-dropdown-id">{t.id}</span>
-                        <span className="dep-dropdown-title">{truncate(t.title || t.description || t.id, 30)}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-
-          <div className="agent-trigger-wrap" ref={agentPickerRef}>
-            <button
-              type="button"
-              className="btn btn-sm dep-trigger"
-              onClick={() => {
-                if (showAgentPicker) {
-                  setShowAgentPicker(false);
-                } else {
-                  void loadAgents();
-                }
-              }}
-              data-testid="quick-entry-agent-button"
-            >
-              <Bot size={12} style={{ verticalAlign: "middle" }} />
-              {selectedAgentLabel ? ` ${selectedAgentLabel}` : " Agent"}
-            </button>
-            {showAgentPicker && (
-              <div className="dep-dropdown agent-picker-dropdown" onMouseDown={(e) => e.preventDefault()}>
-                <div className="dep-dropdown-search-header">Select agent</div>
-                {agentsLoading && <div className="dep-dropdown-empty">Loading agents...</div>}
-                {!agentsLoading && agents.filter((a) => a.state !== "terminated").map((a) => (
-                  <div
-                    key={a.id}
-                    className={`dep-dropdown-item${selectedAgentId === a.id ? " selected" : ""}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setSelectedAgentId(a.id === selectedAgentId ? null : a.id);
-                      setShowAgentPicker(false);
-                    }}
-                  >
-                    <Bot size={12} style={{ marginRight: 6 }} />
-                    <span className="dep-dropdown-id">{a.role}</span>
-                    <span className="dep-dropdown-title">{a.name}</span>
-                  </div>
-                ))}
-                {!agentsLoading && agents.filter((a) => a.state !== "terminated").length === 0 && (
-                  <div className="dep-dropdown-empty">No agents available</div>
-                )}
-                {selectedAgentId && (
-                  <div
-                    className="dep-dropdown-item"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setSelectedAgentId(null);
-                      setShowAgentPicker(false);
-                    }}
-                  >
-                    <span className="dep-dropdown-title">Clear selection</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {isModelMenuOpen && portalRoot && modelMenuPosition && createPortal(
+        {isModelMenuOpen && portalRoot && modelMenuPosition && createPortal(
             <div
               ref={modelMenuPortalRef}
               className="model-nested-menu model-nested-menu--portal"
@@ -1491,7 +1356,5 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           Enter to create · Esc to cancel
         </div>
       </div>
-
-    </div>
   );
 }

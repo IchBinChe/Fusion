@@ -1495,7 +1495,7 @@ describe("ListView Quick Entry", () => {
     expect(tableContainer?.contains(quickEntry)).toBe(true);
   });
 
-  it("shows model selector action when QuickEntryBox is expanded and actions dropdown is open", async () => {
+  it("shows model selector control when QuickEntryBox is expanded", async () => {
     const mockOnQuickCreate = vi.fn().mockResolvedValue(undefined);
     renderListView({ onQuickCreate: mockOnQuickCreate });
 
@@ -1504,15 +1504,12 @@ describe("ListView Quick Entry", () => {
     const toggleButton = screen.getByTestId("quick-entry-toggle");
     fireEvent.click(toggleButton);
 
-    const actionsTrigger = await screen.findByTestId("quick-entry-actions-trigger");
-    fireEvent.click(actionsTrigger);
-
-    const modelAction = await screen.findByTestId("quick-entry-actions-models");
+    const modelAction = await screen.findByTestId("quick-entry-models");
     expect(modelAction).toBeDefined();
     expect(document.getElementById("quick-entry-controls")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("shows dependency selector action when QuickEntryBox is expanded and actions dropdown is open", async () => {
+  it("shows dependency selector control when QuickEntryBox is expanded", async () => {
     const mockOnQuickCreate = vi.fn().mockResolvedValue(undefined);
     renderListView({ onQuickCreate: mockOnQuickCreate });
 
@@ -1521,10 +1518,7 @@ describe("ListView Quick Entry", () => {
     const toggleButton = screen.getByTestId("quick-entry-toggle");
     fireEvent.click(toggleButton);
 
-    const actionsTrigger = await screen.findByTestId("quick-entry-actions-trigger");
-    fireEvent.click(actionsTrigger);
-
-    const depsAction = await screen.findByTestId("quick-entry-actions-deps");
+    const depsAction = await screen.findByTestId("quick-entry-deps");
     expect(depsAction).toBeDefined();
     expect(document.getElementById("quick-entry-controls")?.hasAttribute("hidden")).toBe(false);
   });
@@ -2115,14 +2109,11 @@ describe("ListView - Bulk Selection", () => {
       />
     );
 
-    // Expand the QuickEntryBox and open the model menu through actions
+    // Expand the QuickEntryBox and open the model menu
     const toggleButton = screen.getByTestId("quick-entry-toggle");
     fireEvent.click(toggleButton);
 
-    const actionsTrigger = await screen.findByTestId("quick-entry-actions-trigger");
-    fireEvent.click(actionsTrigger);
-
-    const modelsAction = await screen.findByTestId("quick-entry-actions-models");
+    const modelsAction = await screen.findByTestId("quick-entry-models");
     fireEvent.click(modelsAction);
 
     const menu = await screen.findByTestId("model-nested-menu");

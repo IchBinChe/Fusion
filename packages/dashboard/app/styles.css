@@ -15241,7 +15241,7 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 /* Quick Entry Box expanded controls */
 .quick-entry-controls {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-sm);
   margin-top: var(--space-sm);
@@ -15250,20 +15250,13 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   flex-wrap: wrap;
 }
 
-/* Consolidated action buttons (Plan, Subtask, Refine) inside disclosure panel */
+/* Consolidated action buttons in disclosure panel */
 .quick-entry-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.quick-entry-controls-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
   flex: 1 1 auto;
-  flex-wrap: wrap;
 }
 
 .quick-entry-model-wrap {
@@ -15298,66 +15291,6 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 .quick-entry-model-trigger {
   font-size: 12px;
   padding: 3px 8px;
-}
-
-/* Actions dropdown — wraps Deps/Models/Save behind a single trigger */
-.quick-entry-actions-wrap {
-  position: relative;
-}
-
-.quick-entry-actions-trigger {
-  font-size: 12px;
-  padding: 3px 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 30px;
-  gap: 4px;
-  position: relative;
-}
-
-.quick-entry-actions-badge {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--todo);
-  color: var(--bg);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-  text-align: center;
-}
-
-.actions-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  z-index: 100;
-  min-width: 200px;
-  overflow: hidden;
-}
-
-.actions-dropdown--portal {
-  position: fixed;
-  margin-top: 0;
-  z-index: 1000;
-}
-
-.actions-dropdown-items {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: 8px;
-  flex-wrap: wrap;
 }
 
 /* Nested model menu (replaces ModelSelectionModal in quick entry) */
@@ -15499,10 +15432,6 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
     gap: 10px;
   }
 
-  .quick-entry-controls-left {
-    width: 100%;
-  }
-
   .quick-entry-hint {
     margin-left: 0;
     width: 100%;
@@ -15578,10 +15507,6 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
-  }
-
-  .quick-entry-controls-left {
-    width: 100%;
   }
 
   .quick-entry-hint {
@@ -26039,11 +25964,6 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 
 /* === Quick Entry Mobile Touch + Overflow Fixes (FN-1140) === */
 @media (max-width: 768px) {
-  .quick-entry-actions-trigger {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
   .quick-entry-actions .btn {
     min-height: 44px;
   }

@@ -109,7 +109,6 @@ vi.mock("lucide-react", () => ({
   ListTree: () => null,
   Sparkles: () => null,
   Save: () => null,
-  MoreHorizontal: () => null,
   X: () => null,
   ChevronDown: () => null,
   ChevronUp: () => null,
@@ -184,23 +183,16 @@ function expandQuickEntry() {
   fireEvent.click(toggleButton);
 }
 
-function openActionsMenu() {
-  fireEvent.click(screen.getByTestId("quick-entry-actions-trigger"));
+function openDepsMenu() {
+  fireEvent.click(screen.getByTestId("quick-entry-deps"));
 }
 
-function openDepsFromActions() {
-  openActionsMenu();
-  fireEvent.click(screen.getByTestId("quick-entry-actions-deps"));
+function openModelMenu() {
+  fireEvent.click(screen.getByTestId("quick-entry-models"));
 }
 
-function openModelsFromActions() {
-  openActionsMenu();
-  fireEvent.click(screen.getByTestId("quick-entry-actions-models"));
-}
-
-function clickSaveFromActions() {
-  openActionsMenu();
-  fireEvent.click(screen.getByTestId("quick-entry-actions-save"));
+function clickSave() {
+  fireEvent.click(screen.getByTestId("quick-entry-save"));
 }
 
 describe("QuickEntryBox", () => {
@@ -558,7 +550,7 @@ describe("QuickEntryBox", () => {
   });
 
   describe("Rich creation features", () => {
-    it("shows actions trigger when expanded", () => {
+    it("shows inline deps/models/save controls when expanded", () => {
       renderQuickEntryBox({});
 
       // Initially, controls region is collapsed/hidden
@@ -569,11 +561,12 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
       fireEvent.change(textarea, { target: { value: "Task with deps" } });
 
-      // Advanced controls are behind the actions trigger
-      expect(screen.getByTestId("quick-entry-actions-trigger")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-deps")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-models")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
     });
 
-    it("shows actions menu items when actions trigger is clicked", () => {
+    it("shows deps/models/save controls directly when expanded", () => {
       renderQuickEntryBox({});
 
       // Initially, controls region is collapsed/hidden
@@ -584,11 +577,9 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
       fireEvent.change(textarea, { target: { value: "Task with models" } });
 
-      openActionsMenu();
-
-      expect(screen.getByTestId("quick-entry-actions-deps")).toBeTruthy();
-      expect(screen.getByTestId("quick-entry-actions-models")).toBeTruthy();
-      expect(screen.getByTestId("quick-entry-actions-save")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-deps")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-models")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
     });
 
     it("shows Plan and Subtask buttons when expanded", () => {
@@ -613,7 +604,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with deps" } });
-      openDepsFromActions();
+      openDepsMenu();
 
       // Dropdown should be visible with search input
       expect(document.querySelector(".dep-dropdown")).toBeTruthy();
@@ -631,7 +622,7 @@ describe("QuickEntryBox", () => {
       expect(screen.queryByTestId("model-nested-menu")).toBeNull();
 
       // Click the models button
-      openModelsFromActions();
+      openModelMenu();
 
       // Menu should now be visible
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
@@ -643,7 +634,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
 
       expect(screen.getByTestId("model-menu-plan")).toBeTruthy();
       expect(screen.getByTestId("model-menu-executor")).toBeTruthy();
@@ -656,7 +647,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-executor"));
 
       // Submenu should show the dropdown for executor
@@ -671,7 +662,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-plan"));
 
       expect(screen.getByTestId("custom-model-dropdown-plan model")).toBeTruthy();
@@ -683,7 +674,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-validator"));
 
       expect(screen.getByTestId("custom-model-dropdown-validator model")).toBeTruthy();
@@ -695,7 +686,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-executor"));
 
       // Click back
@@ -713,7 +704,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-executor"));
 
       // Should be in submenu — back button visible
@@ -736,7 +727,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-plan"));
 
       // Select a model via mocked dropdown
@@ -759,7 +750,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-validator"));
 
       // Select a model via mocked dropdown
@@ -780,7 +771,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with models" } });
-      openModelsFromActions();
+      openModelMenu();
       fireEvent.click(screen.getByTestId("model-menu-plan"));
 
       // Select then clear model
@@ -802,7 +793,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with deps" } });
-      openDepsFromActions();
+      openDepsMenu();
 
       // Click on a task to select it
       const taskItem = document.querySelector(".dep-dropdown-item");
@@ -944,7 +935,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with model" } });
-      openModelsFromActions();
+      openModelMenu();
 
       // Menu should be open
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
@@ -978,7 +969,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with menu" } });
-      openModelsFromActions();
+      openModelMenu();
 
       // Menu should be open
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
@@ -993,44 +984,37 @@ describe("QuickEntryBox", () => {
       expect((textarea as HTMLTextAreaElement).value).toBe("Task with menu");
     });
 
-    it("Escape hierarchy: actions menu → model submenu → model menu → deps popover → input clear", () => {
+    it("Escape hierarchy: model submenu → model menu → deps popover → input clear", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Hierarchy test" } });
 
-      openActionsMenu();
-      expect(screen.getByTestId("quick-entry-actions-deps")).toBeTruthy();
-
-      // Escape 1: close actions menu first
-      fireEvent.keyDown(textarea, { key: "Escape" });
-      expect(screen.queryByTestId("quick-entry-actions-deps")).toBeNull();
-
-      // Re-open via actions and go to model submenu
-      openModelsFromActions();
+      // Open model menu and go to a submenu
+      openModelMenu();
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
       fireEvent.click(screen.getByTestId("model-menu-executor"));
       expect(screen.getByTestId("model-submenu-back")).toBeTruthy();
 
-      // Escape 2: close submenu → back to model menu top level
+      // Escape 1: close submenu → back to model menu top level
       fireEvent.keyDown(textarea, { key: "Escape" });
       expect(screen.queryByTestId("model-submenu-back")).toBeNull();
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
 
-      // Escape 3: close model menu
+      // Escape 2: close model menu
       fireEvent.keyDown(textarea, { key: "Escape" });
       expect(screen.queryByTestId("model-nested-menu")).toBeNull();
 
-      // Open deps popover via actions
-      openDepsFromActions();
+      // Open deps popover
+      openDepsMenu();
       expect(document.querySelector(".dep-dropdown")).toBeTruthy();
 
-      // Escape 4: close deps popover
+      // Escape 3: close deps popover
       fireEvent.keyDown(textarea, { key: "Escape" });
       expect(document.querySelector(".dep-dropdown")).toBeNull();
 
-      // Escape 5: clear input and collapse
+      // Escape 4: clear input and collapse
       fireEvent.keyDown(textarea, { key: "Escape" });
       expect((textarea as HTMLTextAreaElement).value).toBe("");
       expect(textarea.classList.contains("quick-entry-input--expanded")).toBe(false);
@@ -1059,130 +1043,12 @@ describe("QuickEntryBox", () => {
     });
   });
 
-  describe("Actions dropdown behavior (FN-1088)", () => {
-    it("clicking Deps in actions closes actions menu and opens dep dropdown", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
-      fireEvent.change(textarea, { target: { value: "Task with deps" } });
-
-      openDepsFromActions();
-
-      expect(screen.queryByTestId("quick-entry-actions-deps")).toBeNull();
-      expect(document.querySelector(".dep-dropdown")).toBeTruthy();
-    });
-
-    it("clicking Models in actions closes actions menu and opens model menu", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
-      fireEvent.change(textarea, { target: { value: "Task with models" } });
-
-      openModelsFromActions();
-
-      expect(screen.queryByTestId("quick-entry-actions-models")).toBeNull();
-      expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
-    });
-
-    it("Escape closes actions menu first", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
-
-      fireEvent.change(textarea, { target: { value: "Escape test" } });
-      openActionsMenu();
-      expect(screen.getByTestId("quick-entry-actions-save")).toBeTruthy();
-
-      fireEvent.keyDown(textarea, { key: "Escape" });
-
-      expect(screen.queryByTestId("quick-entry-actions-save")).toBeNull();
-      expect((textarea as HTMLTextAreaElement).value).toBe("Escape test");
-    });
-
-    it("clicking outside actions menu closes it without side effects", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
-
-      fireEvent.change(textarea, { target: { value: "Outside click test" } });
-      openActionsMenu();
-      expect(screen.getByTestId("quick-entry-actions-deps")).toBeTruthy();
-
-      const outsideElement = document.createElement("div");
-      document.body.appendChild(outsideElement);
-      try {
-        fireEvent.mouseDown(outsideElement);
-      } finally {
-        document.body.removeChild(outsideElement);
-      }
-
-      expect(screen.queryByTestId("quick-entry-actions-deps")).toBeNull();
-      expect((textarea as HTMLTextAreaElement).value).toBe("Outside click test");
-      expect(document.querySelector(".dep-dropdown")).toBeNull();
-      expect(screen.queryByTestId("model-nested-menu")).toBeNull();
-    });
-
-    it("shows badge count when deps and model overrides are selected", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
-
-      fireEvent.change(textarea, { target: { value: "Badge test" } });
-
-      openDepsFromActions();
-      const firstDep = document.querySelector(".dep-dropdown-item");
-      expect(firstDep).toBeTruthy();
-      fireEvent.click(firstDep!);
-
-      openModelsFromActions();
-      fireEvent.click(screen.getByTestId("model-menu-executor"));
-      fireEvent.click(screen.getByTestId("dropdown-select-executor model"));
-      fireEvent.keyDown(textarea, { key: "Escape" });
-      fireEvent.keyDown(textarea, { key: "Escape" });
-
-      expect(screen.getByTestId("quick-entry-actions-badge").textContent).toBe("2");
-    });
-
-    it("hides badge when no deps or model overrides are selected", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-
-      expect(screen.queryByTestId("quick-entry-actions-badge")).toBeNull();
-    });
-
-    it("dependency selections persist when actions menu closes via outside click", () => {
-      renderQuickEntryBox({});
-      expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
-      fireEvent.change(textarea, { target: { value: "Dependency persistence" } });
-
-      openDepsFromActions();
-      const firstDep = document.querySelector(".dep-dropdown-item");
-      expect(firstDep).toBeTruthy();
-      fireEvent.click(firstDep!);
-      expect(document.querySelector(".dep-dropdown-item.selected")).toBeTruthy();
-
-      openActionsMenu();
-      const outsideElement = document.createElement("div");
-      document.body.appendChild(outsideElement);
-      try {
-        fireEvent.mouseDown(outsideElement);
-      } finally {
-        document.body.removeChild(outsideElement);
-      }
-
-      openDepsFromActions();
-      expect(document.querySelector(".dep-dropdown-item.selected")).toBeTruthy();
-    });
-  });
-
   describe("image attachments", () => {
-    it("shows Attach in the actions dropdown", () => {
+    it("shows Attach as an inline control when expanded", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openActionsMenu();
-      expect(screen.getByTestId("quick-entry-actions-attach")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-entry-attach")).toBeInTheDocument();
     });
 
     it("clicking Attach triggers the hidden file input", () => {
@@ -1192,8 +1058,7 @@ describe("QuickEntryBox", () => {
       const fileInput = screen.getByTestId("quick-entry-file-input") as HTMLInputElement;
       const clickSpy = vi.spyOn(fileInput, "click");
 
-      openActionsMenu();
-      fireEvent.click(screen.getByTestId("quick-entry-actions-attach"));
+      fireEvent.click(screen.getByTestId("quick-entry-attach"));
 
       expect(clickSpy).toHaveBeenCalled();
     });
@@ -1261,7 +1126,7 @@ describe("QuickEntryBox", () => {
       expect(uploadAttachment).not.toHaveBeenCalled();
     });
 
-    it("includes pending image count in the actions badge", () => {
+    it("shows pending image count in the inline Attach label", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
@@ -1269,7 +1134,7 @@ describe("QuickEntryBox", () => {
       const file = new File(["badge"], "badge.png", { type: "image/png" });
       fireEvent.change(fileInput, { target: { files: [file] } });
 
-      expect(screen.getByTestId("quick-entry-actions-badge").textContent).toBe("1");
+      expect(screen.getByTestId("quick-entry-attach").textContent).toContain("Attach (1)");
     });
 
     it("resetForm clears pending images and revokes object URLs", async () => {
@@ -1538,7 +1403,7 @@ describe("QuickEntryBox", () => {
 
       // Type something and open dropdown
       fireEvent.change(textarea, { target: { value: "Task with dropdown" } });
-      openDepsFromActions();
+      openDepsMenu();
 
       // localStorage should have the value
       expect(localStorage.getItem(QUICK_ENTRY_STORAGE_KEY)).toBe("Task with dropdown");
@@ -1788,22 +1653,18 @@ describe("QuickEntryBox", () => {
   });
 
   describe("Save action", () => {
-    it("shows save action in the actions dropdown", () => {
+    it("shows save action inline when expanded", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
       fireEvent.change(textarea, { target: { value: "Task to save" } });
-
-      openActionsMenu();
-      expect(screen.getByTestId("quick-entry-actions-save")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
     });
 
     it("save action is disabled when textarea is empty", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
-
-      openActionsMenu();
-      const saveButton = screen.getByTestId("quick-entry-actions-save") as HTMLButtonElement;
+      const saveButton = screen.getByTestId("quick-entry-save") as HTMLButtonElement;
       expect(saveButton.disabled).toBe(true);
     });
 
@@ -1818,7 +1679,7 @@ describe("QuickEntryBox", () => {
         expect(localStorage.getItem(QUICK_ENTRY_STORAGE_KEY)).toBe("Draft task description");
       });
 
-      clickSaveFromActions();
+      clickSave();
 
       await waitFor(() => {
         expect(props.onCreate).toHaveBeenCalled();
@@ -1833,7 +1694,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task to save" } });
-      clickSaveFromActions();
+      clickSave();
 
       await waitFor(() => {
         expect(props.onCreate).toHaveBeenCalledWith(
@@ -1851,9 +1712,8 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task to save" } });
-      openActionsMenu();
 
-      const saveButton = screen.getByTestId("quick-entry-actions-save");
+      const saveButton = screen.getByTestId("quick-entry-save");
       expect(saveButton.className).toContain("btn-task-create");
       expect(saveButton.getAttribute("title")).toBe("Create task");
     });
@@ -1864,13 +1724,12 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task to save" } });
-      openActionsMenu();
 
-      const saveButton = screen.getByTestId("quick-entry-actions-save");
+      const saveButton = screen.getByTestId("quick-entry-save");
       fireEvent.mouseDown(saveButton);
       fireEvent.blur(textarea);
 
-      expect(screen.getByTestId("quick-entry-actions-save")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
     });
   });
 
@@ -1886,7 +1745,7 @@ describe("QuickEntryBox", () => {
       expect(screen.getByTestId("quick-entry-toggle")).toBeTruthy();
     });
 
-    it("shows actions trigger and direct Plan/Subtask/Refine controls after expand", () => {
+    it("shows inline controls after expand", () => {
       renderQuickEntryBox({});
 
       expect(document.getElementById("quick-entry-controls")?.hasAttribute("hidden")).toBe(true);
@@ -1894,10 +1753,12 @@ describe("QuickEntryBox", () => {
       expandQuickEntry();
 
       expect(document.getElementById("quick-entry-controls")?.hasAttribute("hidden")).toBe(false);
-      expect(screen.getByTestId("quick-entry-actions-trigger")).toBeTruthy();
       expect(screen.getByTestId("plan-button")).toBeTruthy();
       expect(screen.getByTestId("subtask-button")).toBeTruthy();
       expect(screen.getByTestId("refine-button")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-deps")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-models")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
     });
 
     it("hides controls again after collapsing via toggle", () => {
@@ -1905,7 +1766,6 @@ describe("QuickEntryBox", () => {
 
       expandQuickEntry();
       expect(document.getElementById("quick-entry-controls")?.hasAttribute("hidden")).toBe(false);
-      expect(screen.getByTestId("quick-entry-actions-trigger")).toBeTruthy();
 
       expandQuickEntry();
 
@@ -1931,21 +1791,15 @@ describe("QuickEntryBox", () => {
       expect(screen.queryByTestId("quick-entry-actions")).toBeNull();
     });
 
-    it("renders advanced controls only inside the actions dropdown", () => {
+    it("renders advanced controls inline in the expanded actions row", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
       fireEvent.change(textarea, { target: { value: "Task text" } });
 
-      expect(screen.queryByTestId("quick-entry-actions-deps")).toBeNull();
-      expect(screen.queryByTestId("quick-entry-actions-models")).toBeNull();
-      expect(screen.queryByTestId("quick-entry-actions-save")).toBeNull();
-
-      openActionsMenu();
-
-      expect(screen.getByTestId("quick-entry-actions-deps")).toBeTruthy();
-      expect(screen.getByTestId("quick-entry-actions-models")).toBeTruthy();
-      expect(screen.getByTestId("quick-entry-actions-save")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-deps")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-models")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
     });
 
     it("Plan button disabled state still works in actions area", () => {
@@ -1959,7 +1813,7 @@ describe("QuickEntryBox", () => {
       expect((screen.getByTestId("plan-button") as HTMLButtonElement).disabled).toBe(false);
     });
 
-    it("shows Plan/Subtask/Refine together with the actions trigger when disclosure is expanded", () => {
+    it("keeps all task creation controls together when disclosure is expanded", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
@@ -1971,12 +1825,16 @@ describe("QuickEntryBox", () => {
       expect(screen.getByTestId("plan-button")).toBeTruthy();
       expect(screen.getByTestId("subtask-button")).toBeTruthy();
       expect(screen.getByTestId("refine-button")).toBeTruthy();
-      expect(screen.getByTestId("quick-entry-actions-trigger")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-deps")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-models")).toBeTruthy();
+      expect(screen.getByTestId("quick-entry-save")).toBeTruthy();
 
       expect(controlsPanel?.contains(screen.getByTestId("plan-button"))).toBe(true);
       expect(controlsPanel?.contains(screen.getByTestId("subtask-button"))).toBe(true);
       expect(controlsPanel?.contains(screen.getByTestId("refine-button"))).toBe(true);
-      expect(controlsPanel?.contains(screen.getByTestId("quick-entry-actions-trigger"))).toBe(true);
+      expect(controlsPanel?.contains(screen.getByTestId("quick-entry-deps"))).toBe(true);
+      expect(controlsPanel?.contains(screen.getByTestId("quick-entry-models"))).toBe(true);
+      expect(controlsPanel?.contains(screen.getByTestId("quick-entry-save"))).toBe(true);
     });
   });
 
@@ -2001,7 +1859,7 @@ describe("QuickEntryBox", () => {
       expandQuickEntry();
 
       // Open model menu
-      openModelsFromActions();
+      openModelMenu();
 
       await waitFor(() => {
         expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
@@ -2033,7 +1891,7 @@ describe("QuickEntryBox", () => {
       expandQuickEntry();
 
       // Open model menu and select an executor via submenu
-      openModelsFromActions();
+      openModelMenu();
 
       await waitFor(() => {
         expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
@@ -2086,7 +1944,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
 
       const menu = screen.getByTestId("model-nested-menu");
       expect(menu).toBeTruthy();
@@ -2104,7 +1962,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
 
       const menu = screen.getByTestId("model-nested-menu");
       expect(menu).toBeTruthy();
@@ -2121,7 +1979,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
 
       // Navigate to executor submenu (shows CustomModelDropdown mock)
@@ -2154,7 +2012,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
       expect(menu).toBeTruthy();
 
@@ -2171,7 +2029,7 @@ describe("QuickEntryBox", () => {
       const textarea = screen.getByTestId("quick-entry-input");
 
       fireEvent.change(textarea, { target: { value: "Task with menu" } });
-      openModelsFromActions();
+      openModelMenu();
       expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
 
       // Click on an element outside both the trigger and the portal
@@ -2191,7 +2049,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
       const initialTop = menu.style.top;
 
@@ -2212,7 +2070,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
 
       // On mobile, width should be viewport width minus padding (375 - 32 = 343)
@@ -2226,7 +2084,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
 
       // Left should be clamped to at least 16px (horizontal padding)
@@ -2241,7 +2099,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
 
       const menuLeft = parseFloat(menu.style.left);
@@ -2258,7 +2116,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
 
       const menuWidth = parseFloat(menu.style.width);
@@ -2273,7 +2131,7 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      openModelsFromActions();
+      openModelMenu();
       const menu = screen.getByTestId("model-nested-menu");
 
       // Desktop width
@@ -2292,15 +2150,16 @@ describe("QuickEntryBox", () => {
   });
 
   describe("QuickEntryBox Mobile", () => {
-    it("keeps actions trigger touch-target classes on mobile", () => {
+    it("keeps inline deps/models controls in touch-target button classes on mobile", () => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
 
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      const actionsTrigger = screen.getByTestId("quick-entry-actions-trigger");
-      expect(actionsTrigger.className).toContain("quick-entry-actions-trigger");
-      expect(actionsTrigger.className).toContain("btn");
+      const depsButton = screen.getByTestId("quick-entry-deps");
+      const modelsButton = screen.getByTestId("quick-entry-models");
+      expect(depsButton.className).toContain("btn");
+      expect(modelsButton.className).toContain("btn");
     });
 
     it("keeps Plan, Subtask, and Refine buttons in touch-target button classes", () => {
@@ -2320,7 +2179,7 @@ describe("QuickEntryBox", () => {
 
       renderQuickEntryBox({});
       expandQuickEntry();
-      openModelsFromActions();
+      openModelMenu();
 
       const menu = screen.getByTestId("model-nested-menu");
       const menuLeft = parseFloat(menu.style.left);
@@ -2336,7 +2195,7 @@ describe("QuickEntryBox", () => {
 
       renderQuickEntryBox({});
       expandQuickEntry();
-      openDepsFromActions();
+      openDepsMenu();
 
       const depDropdown = document.querySelector(".dep-dropdown") as HTMLElement;
       expect(depDropdown).toBeTruthy();
@@ -2346,7 +2205,7 @@ describe("QuickEntryBox", () => {
       expect(rect.right).toBeLessThanOrEqual(viewportWidth);
     });
 
-    it("responds to clicks for toggle, plan, subtask, refine, and actions trigger", async () => {
+    it("responds to clicks for toggle, plan, subtask, refine, and deps", async () => {
       const onPlanningMode = vi.fn();
       const onSubtaskBreakdown = vi.fn();
 
@@ -2381,8 +2240,8 @@ describe("QuickEntryBox", () => {
       });
 
       ensureExpanded();
-      fireEvent.click(screen.getByTestId("quick-entry-actions-trigger"));
-      expect(screen.getByTestId("quick-entry-actions-deps")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("quick-entry-deps"));
+      expect(document.querySelector(".dep-dropdown")).toBeInTheDocument();
     });
   });
 

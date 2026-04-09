@@ -61,12 +61,13 @@ describe("usage", () => {
 
       const providers = await fetchAllProviderUsage();
 
-      expect(providers).toHaveLength(5);
+      expect(providers).toHaveLength(6);
       expect(providers.map((p) => p.name)).toContain("Claude");
       expect(providers.map((p) => p.name)).toContain("Codex");
       expect(providers.map((p) => p.name)).toContain("Gemini");
       expect(providers.map((p) => p.name)).toContain("Minimax");
       expect(providers.map((p) => p.name)).toContain("Zai");
+      expect(providers.map((p) => p.name)).toContain("Kimi");
 
       // All should be no-auth status
       for (const p of providers) {
@@ -101,7 +102,7 @@ describe("usage", () => {
 
       // Should be different array reference
       expect(second).not.toBe(first);
-      expect(second).toHaveLength(5);
+      expect(second).toHaveLength(6);
     });
   });
 
@@ -2824,6 +2825,214 @@ describe("usage", () => {
       // remains_time is 0, so resetMs is undefined (no active reset timer)
       expect(minimax.windows[0].resetMs).toBeUndefined();
       expect(minimax.windows[0].pace).toBeUndefined();
+    });
+  });
+
+  describe("Kimi provider", () => {
+    it("detects no auth when pi auth.json doesn't exist", async () => {
+      mockReadFileSync.mockImplementation(() => {
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi");
+
+      expect(kimi).toBeDefined();
+      expect(kimi!.status).toBe("no-auth");
+      expect(kimi!.error).toContain("No Kimi credentials");
+    });
+
+    it("detects no auth when kimi-coding entry has no key", async () => {
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            "kimi-coding": { type: "api_key" /* missing key */ },
+          });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi");
+
+      expect(kimi!.status).toBe("no-auth");
+      expect(kimi!.error).toContain("No Kimi credentials");
+    });
+
+    it("detects no auth when kimi-coding entry is missing entirely", async () => {
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({ /* no kimi-coding key */ });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi");
+
+      expect(kimi!.status).toBe("no-auth");
+      expect(kimi!.error).toContain("No Kimi credentials");
+    });
+
+    it("parses usage data from API response with windows array", async () => {
+      const now = Date.now();
+      const mockResponse = {
+        data: {
+          windows: [
+            {
+              label: "Coding",
+              used: 150,
+              total: 500,
+              reset_time: now + 3 * 60 * 60 * 1000,
+            },
+            {
+              label: "MCP",
+              used: 80,
+              total: 200,
+              remaining: 120,
+              reset_time: now + 24 * 60 * 60 * 1000,
+            },
+          ],
+          plan: "pro",
+        },
+      };
+
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            "kimi-coding": { type: "api_key", key: "test-api-key" },
+          });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const mockReq = {
+        on: vi.fn(),
+        write: vi.fn(),
+        end: vi.fn(),
+      };
+
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") {
+              handler(Buffer.from(JSON.stringify(mockResponse)));
+            }
+            if (event === "end") {
+              handler();
+            }
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi")!;
+
+      expect(kimi.status).toBe("ok");
+      expect(kimi.plan).toBe("Pro");
+      expect(kimi.windows).toHaveLength(2);
+
+      const codingWindow = kimi.windows.find((w) => w.label === "Coding")!;
+      expect(codingWindow).toBeDefined();
+      // used=150, total=500 → 150/500*100 = 30%
+      expect(codingWindow.percentUsed).toBe(30);
+      expect(codingWindow.percentLeft).toBe(70);
+      expect(codingWindow.resetText).toContain("resets in");
+    });
+
+    it("returns error on 401 response", async () => {
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            "kimi-coding": { type: "api_key", key: "bad-key" },
+          });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 401,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"error": "unauthorized"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi")!;
+
+      expect(kimi.status).toBe("error");
+      expect(kimi.error).toContain("Auth expired");
+    });
+
+    it("extracts plan information from response", async () => {
+      const mockResponse = {
+        data: {
+          used: 100,
+          total: 500,
+          reset_time: Date.now() + 60 * 60 * 1000,
+          level: "enterprise",
+        },
+      };
+
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            "kimi-coding": { type: "api_key", key: "test-api-key" },
+          });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from(JSON.stringify(mockResponse)));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi")!;
+
+      expect(kimi.status).toBe("ok");
+      expect(kimi.plan).toBe("Enterprise");
+      expect(kimi.windows).toHaveLength(1);
+      expect(kimi.windows[0].label).toBe("Coding Plan");
     });
   });
 

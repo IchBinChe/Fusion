@@ -131,6 +131,32 @@ function ZaiIcon({ size, color, label = "Z.ai" }: { size: number; color: string;
   );
 }
 
+// Kimi / Moonshot AI logo — crescent moon with star
+function KimiIcon({ size, color, label = "Kimi" }: { size: number; color: string; label?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      data-testid="kimi-icon"
+      aria-label={label}
+    >
+      {/* Crescent moon */}
+      <path
+        d="M12 3C7.03 3 3 7.03 3 12s4.03 9 9 9c1.66 0 3.22-.45 4.57-1.23C14.76 17.82 13 15 13 12c0-3.87 3.13-7 7-7 1.66 0 3.22.45 4.57 1.23-1.27 1.97-3.35 3.22-5.57 3.22C14.76 9.45 13 12 13 12c0 3.87-3.13 7-7 7-1.66 0-3.22-.45-4.57-1.23C3.24 19.97 5.32 21 7.54 21 11.24 21 13 17.97 13 14c0-1.1.9-2 2-2s2 .9 2 2c0 2.97-1.76 6-5.46 6-1.66 0-3.22-.45-4.57-1.23C8.68 20.72 10.21 21 11.76 21 16.97 21 21 16.97 21 12c0-4.97-4.03-9-9-9z"
+        fill={color}
+      />
+      {/* Star sparkle */}
+      <path
+        d="M19.5 4.5l-1 1.5 2 .5-.5 2 1.5-1-1-1.5.5-2z"
+        fill={color}
+      />
+    </svg>
+  );
+}
+
 const providerConfig: Record<
   string,
   { component: typeof AnthropicIcon; color: string; label?: string }
@@ -143,6 +169,7 @@ const providerConfig: Record<
   ollama: { component: OllamaIcon, color: "#fff" }, // white
   minimax: { component: MiniMaxIcon, color: "#E73562" }, // pink/red
   zai: { component: ZaiIcon, color: "#1A6DFF" }, // blue
+  kimi: { component: KimiIcon, color: "#6C5CE7" }, // purple
 };
 
 export function ProviderIcon({ provider, size = "sm" }: ProviderIconProps) {

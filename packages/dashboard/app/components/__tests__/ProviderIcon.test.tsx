@@ -236,4 +236,31 @@ describe("ProviderIcon", () => {
     const wrapper = screen.getByTestId("zai-icon").parentElement;
     expect(wrapper).toHaveAttribute("data-provider", "zai");
   });
+
+  it("renders Kimi brand icon for kimi provider", () => {
+    render(<ProviderIcon provider="kimi" />);
+    expect(screen.getByTestId("kimi-icon")).toBeInTheDocument();
+    expect(screen.getByLabelText("Kimi")).toBeInTheDocument();
+  });
+
+  it("applies provider-specific color for kimi", () => {
+    render(<ProviderIcon provider="kimi" />);
+    const icon = screen.getByTestId("kimi-icon").parentElement;
+    expect(icon).toHaveStyle({ color: "#6C5CE7" });
+  });
+
+  it("passes correct color to SVG fill for kimi", () => {
+    render(<ProviderIcon provider="kimi" />);
+    const svg = screen.getByTestId("kimi-icon");
+    const paths = svg.querySelectorAll("path");
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths[0]).toHaveAttribute("fill", "#6C5CE7");
+  });
+
+  it("normalizes Kimi (capitalized) to kimi", () => {
+    render(<ProviderIcon provider="Kimi" />);
+    expect(screen.getByTestId("kimi-icon")).toBeInTheDocument();
+    const wrapper = screen.getByTestId("kimi-icon").parentElement;
+    expect(wrapper).toHaveAttribute("data-provider", "kimi");
+  });
 });

@@ -1369,6 +1369,161 @@ async function fetchZaiUsage(): Promise<ProviderUsage> {
   return usage;
 }
 
+// ── Kimi (Moonshot AI) fetcher ───────────────────────────────────────────
+
+async function fetchKimiUsage(): Promise<ProviderUsage> {
+  const usage: ProviderUsage = {
+    name: "Kimi",
+    icon: "🌙",
+    status: "no-auth",
+    windows: [],
+  };
+
+  // Load Kimi API key from pi's auth storage
+  const apiKey = readPiAuthKey("kimi-coding");
+  if (!apiKey) {
+    usage.error = "No Kimi credentials — add API key to pi";
+    return usage;
+  }
+
+  try {
+    const res = await httpsRequest("https://api.moonshot.cn/v1/coding-plan/usage", {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      usage.status = "error";
+      usage.error = "Auth expired — check your Kimi API key";
+      return usage;
+    }
+
+    if (res.status !== 200) {
+      usage.status = "error";
+      usage.error = `HTTP ${res.status}: ${res.body.slice(0, 200)}`;
+      return usage;
+    }
+
+    usage.status = "ok";
+    const data = JSON.parse(res.body);
+
+    // Defensive parsing: try known field names
+    let windows: any[] = [];
+
+    if (Array.isArray(data?.data?.windows)) {
+      windows = data.data.windows;
+    } else if (Array.isArray(data?.windows)) {
+      windows = data.windows;
+    } else if (Array.isArray(data?.data)) {
+      // data.data itself may be the windows array
+      windows = data.data;
+    }
+
+    if (windows.length > 0) {
+      for (const window of windows) {
+        const label: string = window.label || window.name || window.type || "Usage";
+        const total: number = window.total ?? window.limit ?? 0;
+        const remaining: number = window.remaining ?? window.left ?? 0;
+        const used: number = window.used ?? Math.max(0, total - remaining);
+
+        let percentUsed = 0;
+        if (total > 0) {
+          percentUsed = (used / total) * 100;
+        } else if (remaining >= 0) {
+          // Fall back: remaining/limit based calculation
+          const limit = window.limit ?? 0;
+          if (limit > 0) {
+            percentUsed = (1 - remaining / limit) * 100;
+          }
+        }
+
+        let resetText: string | null = null;
+        let resetMs: number | undefined;
+        let resetAt: string | undefined;
+        let windowDurationMs: number | undefined;
+
+        const resetTime: number | undefined = window.reset_time ?? window.resets_at;
+        if (resetTime && resetTime > 0) {
+          // reset_time may be epoch ms or an ISO string
+          const resetDate = typeof resetTime === "number" ? new Date(resetTime) : new Date(resetTime);
+          resetMs = Math.max(0, resetDate.getTime() - Date.now());
+          resetText = resetMs > 0 ? `resets in ${formatDuration(resetMs)}` : "resetting now";
+          resetAt = resetDate.toISOString();
+          // Infer window duration if not provided
+          if (!window.windowDurationMs && windowDurationMs === undefined) {
+            windowDurationMs = resetMs > 0 ? resetMs * 2 : undefined; // rough estimate
+          }
+        }
+
+        usage.windows.push({
+          label,
+          percentUsed: Math.min(100, Math.max(0, percentUsed)),
+          percentLeft: Math.min(100, Math.max(0, 100 - percentUsed)),
+          resetText,
+          resetMs,
+          resetAt,
+          windowDurationMs,
+        });
+      }
+    } else {
+      // Single-usage response (data.used / data.total)
+      const total: number = data?.data?.total ?? data?.total ?? 0;
+      const used: number = data?.data?.used ?? data?.used ?? 0;
+      const remaining: number = data?.data?.remaining ?? data?.remaining ?? Math.max(0, total - used);
+
+      let percentUsed = 0;
+      if (total > 0) {
+        percentUsed = (used / total) * 100;
+      } else if (remaining >= 0) {
+        const limit = data?.data?.limit ?? data?.limit ?? 0;
+        if (limit > 0) {
+          percentUsed = (1 - remaining / limit) * 100;
+        }
+      }
+
+      let resetText: string | null = null;
+      let resetMs: number | undefined;
+      let resetAt: string | undefined;
+      let windowDurationMs: number | undefined;
+
+      const resetTime: number | undefined = data?.data?.reset_time ?? data?.data?.resets_at ?? data?.reset_time ?? data?.resets_at;
+      if (resetTime && resetTime > 0) {
+        const resetDate = typeof resetTime === "number" ? new Date(resetTime) : new Date(resetTime);
+        resetMs = Math.max(0, resetDate.getTime() - Date.now());
+        resetText = resetMs > 0 ? `resets in ${formatDuration(resetMs)}` : "resetting now";
+        resetAt = resetDate.toISOString();
+        windowDurationMs = resetMs > 0 ? resetMs * 2 : undefined;
+      }
+
+      if (total > 0 || remaining >= 0) {
+        usage.windows.push({
+          label: "Coding Plan",
+          percentUsed: Math.min(100, Math.max(0, percentUsed)),
+          percentLeft: Math.min(100, Math.max(0, 100 - percentUsed)),
+          resetText,
+          resetMs,
+          resetAt,
+          windowDurationMs,
+        });
+      }
+    }
+
+    // Extract plan information
+    const planValue: string | undefined = data?.data?.plan ?? data?.data?.level ?? data?.plan ?? data?.level;
+    if (planValue) {
+      usage.plan = planValue.charAt(0).toUpperCase() + planValue.slice(1);
+    }
+  } catch (e: any) {
+    usage.status = "error";
+    usage.error = e.message || "Failed to fetch";
+  }
+
+  return usage;
+}
+
 // ── Main export ────────────────────────────────────────────────────────────
 
 /**
@@ -1436,6 +1591,7 @@ export async function fetchAllProviderUsage(_authStorage?: AuthStorageLike): Pro
     withTimeout(fetchGeminiUsage(), "Gemini"),
     withTimeout(fetchMinimaxUsage(), "Minimax"),
     withTimeout(fetchZaiUsage(), "Zai"),
+    withTimeout(fetchKimiUsage(), "Kimi"),
   ]);
 
   const providers: ProviderUsage[] = [];

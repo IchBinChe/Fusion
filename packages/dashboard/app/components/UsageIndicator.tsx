@@ -235,6 +235,9 @@ function getProviderIconKey(providerName: string): string {
   if (normalized.includes('zai') || normalized.includes('zhipu')) {
     return 'zai';
   }
+  if (normalized.includes('kimi')) {
+    return 'kimi';
+  }
   
   // Return the original name as fallback (ProviderIcon will show a default icon)
   return providerName;

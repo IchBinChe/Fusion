@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, InboxTask } from "./types.js";
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, GLOBAL_SETTINGS_KEYS, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { GlobalSettingsStore } from "./global-settings.js";
 import { Database, toJson, toJsonNullable, fromJson } from "./db.js";
@@ -1173,6 +1173,83 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     return sorted.slice(offset, offset + Math.max(0, limit));
+  }
+
+  async selectNextTaskForAgent(agentId: string): Promise<InboxTask | null> {
+    const tasks = await this.listTasks();
+    if (tasks.length === 0) {
+      return null;
+    }
+
+    const tasksById = new Map(tasks.map((task) => [task.id, task]));
+    const isCheckoutAware = "checkoutTask" in this && typeof (this as any).checkoutTask === "function";
+    const isDoneLike = (task: Task | undefined) => task?.column === "done" || task?.column === "archived";
+    const sortByOldestColumnMove = (a: Task, b: Task) => {
+      const aSortAt = a.columnMovedAt ?? a.createdAt;
+      const bSortAt = b.columnMovedAt ?? b.createdAt;
+      return aSortAt.localeCompare(bSortAt);
+    };
+
+    const assignedTasks = tasks.filter((task) => task.assignedAgentId === agentId);
+
+    const inProgress = assignedTasks.filter((task) => task.column === "in-progress").sort(sortByOldestColumnMove);
+    if (inProgress.length > 0) {
+      return {
+        task: inProgress[0],
+        priority: "in_progress",
+        reason: "Resuming in-progress task assigned to this agent",
+      };
+    }
+
+    const todoCandidates = assignedTasks.filter((task) => task.column === "todo" && task.paused !== true);
+
+    const readyTodo = todoCandidates
+      .filter((task) => {
+        if (isCheckoutAware && task.checkedOutBy && task.checkedOutBy !== agentId) {
+          return false;
+        }
+        return this.areAllDependenciesDone(task.dependencies, tasksById);
+      })
+      .sort(sortByOldestColumnMove);
+
+    if (readyTodo.length > 0) {
+      return {
+        task: readyTodo[0],
+        priority: "todo",
+        reason: "Selecting oldest ready todo task assigned to this agent",
+      };
+    }
+
+    const actionableBlocked = todoCandidates
+      .filter((task) => {
+        if (isCheckoutAware && task.checkedOutBy && task.checkedOutBy !== agentId) {
+          return false;
+        }
+
+        if (this.areAllDependenciesDone(task.dependencies, tasksById)) {
+          return false;
+        }
+
+        return task.dependencies.some((dependencyId) => isDoneLike(tasksById.get(dependencyId)));
+      })
+      .sort(sortByOldestColumnMove);
+
+    if (actionableBlocked.length > 0) {
+      return {
+        task: actionableBlocked[0],
+        priority: "blocked",
+        reason: "Selecting partially actionable blocked task assigned to this agent",
+      };
+    }
+
+    return null;
+  }
+
+  private areAllDependenciesDone(dependencies: string[], tasksById: Map<string, Task>): boolean {
+    return dependencies.every((dependencyId) => {
+      const dependency = tasksById.get(dependencyId);
+      return dependency?.column === "done" || dependency?.column === "archived";
+    });
   }
 
   async moveTask(id: string, toColumn: Column): Promise<Task> {

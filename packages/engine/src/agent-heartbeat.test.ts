@@ -960,8 +960,12 @@ describe("HeartbeatMonitor", () => {
       };
     }
 
+    type MockTaskStoreOverrides = Partial<TaskStore> & {
+      checkoutTask?: (taskId: string, agentId: string) => Promise<unknown>;
+    };
+
     // Helper: create a basic mock task store
-    function createMockTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
+    function createMockTaskStore(overrides: MockTaskStoreOverrides = {}): TaskStore {
       return {
         getTask: vi.fn().mockResolvedValue({
           id: "FN-001",
@@ -976,6 +980,7 @@ describe("HeartbeatMonitor", () => {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         } as unknown as TaskDetail),
+        selectNextTaskForAgent: vi.fn().mockResolvedValue(null),
         createTask: vi.fn().mockResolvedValue({
           id: "FN-002",
           description: "Created task",
@@ -1010,6 +1015,10 @@ describe("HeartbeatMonitor", () => {
         updateAgentState: vi.fn().mockResolvedValue(undefined),
         updateAgent: vi.fn().mockResolvedValue(undefined),
         getAgent: vi.fn().mockResolvedValue(mockAgent),
+        assignTask: vi.fn().mockImplementation(async (_agentId: string, taskId: string | undefined) => {
+          mockAgent.taskId = taskId;
+          return mockAgent;
+        }),
         startHeartbeatRun: vi.fn().mockResolvedValue({
           id: "run-001",
           agentId: "agent-001",
@@ -1113,6 +1122,187 @@ describe("HeartbeatMonitor", () => {
         expect(result).toBeDefined();
         expect(result.status).toBe("completed");
         expect(result.resultJson).toEqual({ reason: "task_not_found", taskId: "FN-MISSING" });
+      });
+    });
+
+    describe("executeHeartbeat - inbox selection", () => {
+      const makeInboxSelection = (taskId: string, priority: "in_progress" | "todo" | "blocked" = "todo") => {
+        const now = new Date().toISOString();
+        return {
+          task: {
+            id: taskId,
+            description: `Inbox task ${taskId}`,
+            column: priority === "in_progress" ? "in-progress" : "todo",
+            dependencies: [],
+            steps: [],
+            currentStep: 0,
+            log: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+          priority,
+          reason: `selected:${priority}`,
+        } as any;
+      };
+
+      it("when agent has no taskId, inbox selects a todo task and assigns it", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined });
+        const selectNextTaskForAgent = vi.fn().mockResolvedValue(makeInboxSelection("FN-INBOX", "todo"));
+        mockTaskStore = createMockTaskStore({
+          selectNextTaskForAgent,
+          getTask: vi.fn().mockResolvedValue({
+            id: "FN-INBOX",
+            title: "Inbox Task",
+            description: "Inbox-selected task",
+            prompt: "",
+            steps: [],
+            column: "todo",
+            dependencies: [],
+            log: [],
+            attachments: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as unknown as TaskDetail),
+        });
+
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+        expect(selectNextTaskForAgent).toHaveBeenCalledWith("agent-001");
+        expect(store.assignTask).toHaveBeenCalledWith("agent-001", "FN-INBOX");
+        expect(mockTaskStore.getTask).toHaveBeenCalledWith("FN-INBOX");
+      });
+
+      it("explicit taskId override takes precedence over inbox selection", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined });
+        const selectNextTaskForAgent = vi.fn().mockResolvedValue(makeInboxSelection("FN-INBOX", "todo"));
+        mockTaskStore = createMockTaskStore({ selectNextTaskForAgent });
+
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        await monitor.executeHeartbeat({
+          agentId: "agent-001",
+          source: "on_demand",
+          taskId: "FN-EXPLICIT",
+        });
+
+        expect(selectNextTaskForAgent).not.toHaveBeenCalled();
+        expect(mockTaskStore.getTask).toHaveBeenCalledWith("FN-EXPLICIT");
+      });
+
+      it("agent's existing taskId takes precedence over inbox selection", async () => {
+        const store = createStoreWithAgentForExec({ taskId: "FN-EXISTING" });
+        const selectNextTaskForAgent = vi.fn().mockResolvedValue(makeInboxSelection("FN-INBOX", "todo"));
+        mockTaskStore = createMockTaskStore({ selectNextTaskForAgent });
+
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+        expect(selectNextTaskForAgent).not.toHaveBeenCalled();
+        expect(mockTaskStore.getTask).toHaveBeenCalledWith("FN-EXISTING");
+      });
+
+      it("when inbox returns null, heartbeat completes with no_assignment", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined });
+        const selectNextTaskForAgent = vi.fn().mockResolvedValue(null);
+        mockTaskStore = createMockTaskStore({ selectNextTaskForAgent });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+        expect(selectNextTaskForAgent).toHaveBeenCalledWith("agent-001");
+        expect(result.resultJson).toEqual({ reason: "no_assignment" });
+      });
+
+      it("records inbox selection metadata in resultJson", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined });
+        mockTaskStore = createMockTaskStore({
+          selectNextTaskForAgent: vi.fn().mockResolvedValue(makeInboxSelection("FN-INBOX", "todo")),
+          getTask: vi.fn().mockResolvedValue({
+            id: "FN-INBOX",
+            title: "Inbox Task",
+            description: "Inbox-selected task",
+            prompt: "",
+            steps: [],
+            column: "todo",
+            dependencies: [],
+            log: [],
+            attachments: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as unknown as TaskDetail),
+        });
+
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+        expect(result.resultJson).toEqual(expect.objectContaining({
+          reason: "inbox_selected",
+          priority: "todo",
+          taskId: "FN-INBOX",
+        }));
+      });
+
+      it("supports in-progress inbox selections before todo", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined });
+        mockTaskStore = createMockTaskStore({
+          selectNextTaskForAgent: vi.fn().mockResolvedValue(makeInboxSelection("FN-RESUME", "in_progress")),
+          getTask: vi.fn().mockResolvedValue({
+            id: "FN-RESUME",
+            title: "Resume task",
+            description: "Resume in-progress work",
+            prompt: "",
+            steps: [],
+            column: "in-progress",
+            dependencies: [],
+            log: [],
+            attachments: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as unknown as TaskDetail),
+        });
+
+        const mockSession = createMockAgentSession();
+        mockedCreateKbAgent.mockResolvedValue({ session: mockSession as any });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+        expect(mockTaskStore.getTask).toHaveBeenCalledWith("FN-RESUME");
+        expect(result.resultJson).toEqual(expect.objectContaining({
+          reason: "inbox_selected",
+          priority: "in_progress",
+          taskId: "FN-RESUME",
+        }));
+      });
+
+      it("gracefully skips inbox selection when checkoutTask throws", async () => {
+        const store = createStoreWithAgentForExec({ taskId: undefined });
+        const selectNextTaskForAgent = vi.fn().mockResolvedValue(makeInboxSelection("FN-CHECKOUT", "todo"));
+        const checkoutTask = vi.fn().mockRejectedValue(new Error("Task is already checked out"));
+        mockTaskStore = createMockTaskStore({
+          selectNextTaskForAgent,
+          checkoutTask: checkoutTask as any,
+        });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+        expect(selectNextTaskForAgent).toHaveBeenCalledWith("agent-001");
+        expect(checkoutTask).toHaveBeenCalledWith("FN-CHECKOUT", "agent-001");
+        expect(result.resultJson).toEqual({ reason: "no_assignment" });
+        expect(mockedCreateKbAgent).not.toHaveBeenCalled();
       });
     });
 

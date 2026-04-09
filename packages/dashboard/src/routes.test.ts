@@ -2117,6 +2117,7 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
       getFusionDir: vi.fn().mockReturnValue(fusionDir),
       updateTask: vi.fn(),
       listTasks: vi.fn().mockResolvedValue([]),
+      selectNextTaskForAgent: vi.fn().mockResolvedValue(null),
     } as any);
   }, 30_000);
 
@@ -2200,6 +2201,48 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("Agent not found");
     expect(store.listTasks).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("POST /api/agents/:id/inbox returns next selection when work exists", async () => {
+    const inboxTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-500",
+      assignedAgentId: agentId,
+    };
+
+    (store.selectNextTaskForAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task: inboxTask,
+      priority: "todo",
+      reason: "Selecting oldest ready todo task assigned to this agent",
+    });
+
+    const res = await REQUEST(buildApp(), "POST", `/api/agents/${agentId}/inbox`);
+
+    expect(res.status).toBe(200);
+    expect(store.selectNextTaskForAgent).toHaveBeenCalledWith(agentId);
+    expect(res.body).toEqual({
+      task: expect.objectContaining({ id: "FN-500" }),
+      priority: "todo",
+      reason: "Selecting oldest ready todo task assigned to this agent",
+    });
+  }, 30_000);
+
+  it("POST /api/agents/:id/inbox returns task:null when no work exists", async () => {
+    (store.selectNextTaskForAgent as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const res = await REQUEST(buildApp(), "POST", `/api/agents/${agentId}/inbox`);
+
+    expect(res.status).toBe(200);
+    expect(store.selectNextTaskForAgent).toHaveBeenCalledWith(agentId);
+    expect(res.body).toEqual({ task: null });
+  }, 30_000);
+
+  it("POST /api/agents/:id/inbox returns 404 for missing agent", async () => {
+    const res = await REQUEST(buildApp(), "POST", "/api/agents/agent-missing/inbox");
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("Agent not found");
+    expect(store.selectNextTaskForAgent).not.toHaveBeenCalled();
   }, 30_000);
 });
 

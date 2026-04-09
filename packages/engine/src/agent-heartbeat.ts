@@ -17,7 +17,7 @@
  * - onTerminated: Called when an unresponsive agent is terminated
  */
 
-import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent } from "@fusion/core";
+import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent, InboxTask } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import { createTaskCreateTool, createTaskLogTool, taskCreateParams } from "./agent-tools.js";
@@ -656,8 +656,38 @@ export class HeartbeatMonitor {
           return (await this.store.getRunDetail(agentId, run.id))!;
         }
 
-        // Resolve task assignment
-        const taskId = explicitTaskId ?? agent.taskId;
+        // Resolve task assignment (explicit override → existing assignment → inbox-lite selection)
+        let taskId = explicitTaskId ?? agent.taskId;
+        let inboxSelection: InboxTask | null = null;
+
+        if (!taskId) {
+          inboxSelection = await taskStore.selectNextTaskForAgent(agentId);
+          if (inboxSelection) {
+            taskId = inboxSelection.task.id;
+            heartbeatLog.log(`Inbox selected task ${taskId} (priority: ${inboxSelection.priority}) for agent ${agentId}`);
+
+            // Persist assignment to AgentStore so subsequent runs retain linkage.
+            if (agent.taskId !== taskId) {
+              await this.store.assignTask(agentId, taskId);
+            }
+
+            // FN-1253 compatibility: if checkout API is available on TaskStore,
+            // try to claim the lease. On conflict, skip this task gracefully.
+            const checkoutTask = (taskStore as TaskStore & {
+              checkoutTask?: (taskId: string, agentId: string) => Promise<unknown>;
+            }).checkoutTask;
+            if (typeof checkoutTask === "function") {
+              try {
+                await checkoutTask.call(taskStore, taskId, agentId);
+              } catch {
+                heartbeatLog.log(`Task ${taskId} already checked out — skipping`);
+                taskId = undefined;
+                inboxSelection = null;
+              }
+            }
+          }
+        }
+
         if (taskId && run.contextSnapshot?.taskId !== taskId) {
           const updatedRun: AgentHeartbeatRun = {
             ...run,
@@ -822,10 +852,20 @@ export class HeartbeatMonitor {
           await flushAgentLogger();
 
           // Complete run successfully
+          const completionResultJson: Record<string, unknown> = {
+            summary: heartbeatSummary,
+            toolCallCount,
+          };
+          if (inboxSelection) {
+            completionResultJson.reason = "inbox_selected";
+            completionResultJson.priority = inboxSelection.priority;
+            completionResultJson.taskId = taskId;
+          }
+
           await this.completeRun(agentId, run.id, {
             status: "completed",
             usageJson: { inputTokens: 0, outputTokens: estimatedOutputTokens, cachedTokens: 0 },
-            resultJson: { summary: heartbeatSummary, toolCallCount },
+            resultJson: completionResultJson,
             stdoutExcerpt: stdoutExcerpt || undefined,
           });
 

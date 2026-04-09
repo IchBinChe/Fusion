@@ -682,6 +682,13 @@ export interface TaskDetail extends Task {
   prompt: string;
 }
 
+/** A task candidate from the inbox-lite work selection, with metadata about why it was selected. */
+export interface InboxTask {
+  task: Task;
+  priority: "in_progress" | "todo" | "blocked";
+  reason: string;
+}
+
 export interface TaskCreateInput {
   title?: string;
   description: string;

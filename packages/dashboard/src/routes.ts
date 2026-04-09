@@ -8690,6 +8690,45 @@ Output ONLY the prompt text (no markdown, no explanations).`;
   });
 
   /**
+   * POST /api/agents/:id/inbox
+   * Select the next inbox-lite task candidate for an agent.
+   *
+   * Returns `{ task, priority, reason }` when work is available,
+   * or `{ task: null }` when no matching work is found.
+   */
+  router.post("/agents/:id/inbox", async (req, res) => {
+    try {
+      const scopedStore = await getScopedStore(req);
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const agentId = req.params.id;
+      const agent = await agentStore.getAgent(agentId);
+      if (!agent) {
+        throw notFound("Agent not found");
+      }
+
+      const selection = await scopedStore.selectNextTaskForAgent(agentId);
+      if (!selection) {
+        res.json({ task: null });
+        return;
+      }
+
+      res.json({
+        task: selection.task,
+        priority: selection.priority,
+        reason: selection.reason,
+      });
+    } catch (err: any) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
    * POST /api/agents/:id/heartbeat
    * Record a heartbeat for an agent.
    * Body: { status?: "ok"|"missed"|"recovered", triggerExecution?: boolean }

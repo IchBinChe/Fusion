@@ -216,6 +216,135 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("selectNextTaskForAgent", () => {
+    it("returns null when no tasks exist", async () => {
+      await expect(store.selectNextTaskForAgent("agent-1")).resolves.toBeNull();
+    });
+
+    it("returns in-progress task assigned to the agent", async () => {
+      const inProgress = await store.createTask({
+        description: "In-progress task",
+        column: "in-progress",
+        assignedAgentId: "agent-1",
+      });
+
+      const selected = await store.selectNextTaskForAgent("agent-1");
+
+      expect(selected?.task.id).toBe(inProgress.id);
+      expect(selected?.priority).toBe("in_progress");
+    });
+
+    it("prefers in-progress over todo when both exist for the agent", async () => {
+      await store.createTask({
+        description: "Ready todo task",
+        column: "todo",
+        assignedAgentId: "agent-1",
+      });
+      const inProgress = await store.createTask({
+        description: "In-progress task",
+        column: "in-progress",
+        assignedAgentId: "agent-1",
+      });
+
+      const selected = await store.selectNextTaskForAgent("agent-1");
+
+      expect(selected?.task.id).toBe(inProgress.id);
+      expect(selected?.priority).toBe("in_progress");
+    });
+
+    it("returns todo task with all dependencies done", async () => {
+      const dep = await store.createTask({ description: "Done dep", column: "done" });
+      const readyTodo = await store.createTask({
+        description: "Ready todo",
+        column: "todo",
+        assignedAgentId: "agent-1",
+        dependencies: [dep.id],
+      });
+
+      const selected = await store.selectNextTaskForAgent("agent-1");
+
+      expect(selected?.task.id).toBe(readyTodo.id);
+      expect(selected?.priority).toBe("todo");
+    });
+
+    it("skips todo task with unresolved dependencies that are not actionable", async () => {
+      const dep = await store.createTask({ description: "Unresolved dep", column: "todo" });
+      await store.createTask({
+        description: "Blocked todo",
+        column: "todo",
+        assignedAgentId: "agent-1",
+        dependencies: [dep.id],
+      });
+
+      await expect(store.selectNextTaskForAgent("agent-1")).resolves.toBeNull();
+    });
+
+    it("returns blocked task with partially done dependencies when no higher-priority tasks exist", async () => {
+      const doneDep = await store.createTask({ description: "Done dep", column: "done" });
+      const blockedDep = await store.createTask({ description: "Blocked dep", column: "todo" });
+      const partiallyActionable = await store.createTask({
+        description: "Partially actionable todo",
+        column: "todo",
+        assignedAgentId: "agent-1",
+        dependencies: [doneDep.id, blockedDep.id],
+      });
+
+      const selected = await store.selectNextTaskForAgent("agent-1");
+
+      expect(selected?.task.id).toBe(partiallyActionable.id);
+      expect(selected?.priority).toBe("blocked");
+    });
+
+    it("skips paused tasks", async () => {
+      const pausedTodo = await store.createTask({
+        description: "Paused todo",
+        column: "todo",
+        assignedAgentId: "agent-1",
+      });
+      await store.updateTask(pausedTodo.id, { paused: true });
+
+      await expect(store.selectNextTaskForAgent("agent-1")).resolves.toBeNull();
+    });
+
+    it("skips tasks assigned to a different agent", async () => {
+      await store.createTask({
+        description: "Other agent task",
+        column: "todo",
+        assignedAgentId: "agent-2",
+      });
+
+      await expect(store.selectNextTaskForAgent("agent-1")).resolves.toBeNull();
+    });
+
+    it("resolves FIFO ordering within the same priority tier", async () => {
+      const older = await store.createTask({
+        description: "Older ready todo",
+        column: "todo",
+        assignedAgentId: "agent-1",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await store.createTask({
+        description: "Newer ready todo",
+        column: "todo",
+        assignedAgentId: "agent-1",
+      });
+
+      const selected = await store.selectNextTaskForAgent("agent-1");
+
+      expect(selected?.task.id).toBe(older.id);
+      expect(selected?.priority).toBe("todo");
+    });
+
+    it("returns null when no tasks are assigned to the queried agent", async () => {
+      await store.createTask({
+        description: "Unassigned todo",
+        column: "todo",
+      });
+
+      await expect(store.selectNextTaskForAgent("agent-without-tasks")).resolves.toBeNull();
+    });
+  });
+
   // ── Lock serialization test ──────────────────────────────────────
 
   describe("write lock serialization", () => {

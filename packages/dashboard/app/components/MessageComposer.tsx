@@ -19,6 +19,8 @@ interface MessageComposerProps {
   onCancel: () => void;
   /** Toast notification callback */
   addToast?: (msg: string, type?: "success" | "error") => void;
+  /** Loading state for agents (shows placeholder) */
+  isLoadingAgents?: boolean;
 }
 
 const MAX_CONTENT_LENGTH = 2000;
@@ -32,6 +34,7 @@ export function MessageComposer({
   onSend,
   onCancel,
   addToast,
+  isLoadingAgents = false,
 }: MessageComposerProps) {
   const [toId, setToId] = useState(recipient?.id ?? "");
   const [toType, setToType] = useState<ParticipantType>(recipient?.type ?? "agent");
@@ -94,32 +97,23 @@ export function MessageComposer({
             <label className="message-composer-label" htmlFor="message-recipient">
               To:
             </label>
-            {agents.length > 0 ? (
-              <select
-                id="message-recipient"
-                className="message-composer-select"
-                value={toId}
-                onChange={(e) => handleAgentSelect(e.target.value)}
-                data-testid="message-composer-recipient"
-              >
-                <option value="">Select agent…</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name || agent.id}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                id="message-recipient"
-                className="message-composer-input"
-                type="text"
-                placeholder="Recipient ID"
-                value={toId}
-                onChange={(e) => setToId(e.target.value)}
-                data-testid="message-composer-recipient"
-              />
-            )}
+            <select
+              id="message-recipient"
+              className="message-composer-select"
+              value={toId}
+              onChange={(e) => handleAgentSelect(e.target.value)}
+              disabled={isLoadingAgents || agents.length === 0}
+              data-testid="message-composer-recipient"
+            >
+              <option value="">
+                {isLoadingAgents ? "Loading agents…" : agents.length === 0 ? "No agents available" : "Select agent…"}
+              </option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name || agent.id}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 

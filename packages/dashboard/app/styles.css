@@ -26563,8 +26563,7 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   flex-shrink: 0;
 }
 
-.message-composer-select,
-.message-composer-input {
+.message-composer-select {
   flex: 1;
   padding: 8px 12px;
   border: 1px solid var(--border);

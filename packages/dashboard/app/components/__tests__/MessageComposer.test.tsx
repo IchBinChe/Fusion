@@ -69,10 +69,22 @@ describe("MessageComposer", () => {
     expect(select.tagName).toBe("SELECT");
   });
 
-  it("shows text input when no agents provided", () => {
+  it("disables recipient select when agents list is empty", () => {
     render(<MessageComposer {...defaultProps} />);
-    const input = screen.getByTestId("message-composer-recipient");
-    expect(input.tagName).toBe("INPUT");
+    const select = screen.getByTestId("message-composer-recipient");
+    expect(select).toBeDefined();
+    expect(select.tagName).toBe("SELECT");
+    expect(select.hasAttribute("disabled")).toBe(true);
+    expect(select.textContent).toContain("No agents available");
+  });
+
+  it("shows loading state in recipient select", () => {
+    render(<MessageComposer {...defaultProps} isLoadingAgents={true} />);
+    const select = screen.getByTestId("message-composer-recipient");
+    expect(select).toBeDefined();
+    expect(select.tagName).toBe("SELECT");
+    expect(select.hasAttribute("disabled")).toBe(true);
+    expect(select.textContent).toContain("Loading agents…");
   });
 
   it("disables send button when content is empty", () => {

@@ -172,6 +172,101 @@ describe("FileBrowserModal", () => {
     });
   });
 
+  it("close button is visible on mobile after selecting a file with a long path", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: 375,
+    });
+
+    // Provide a file with a long path name
+    const longFileName = "packages/dashboard/app/components/SomeVeryLongComponentName.tsx";
+    mockUseWorkspaceFileBrowser.mockReturnValue({
+      ...defaultBrowserState,
+      entries: [
+        { name: longFileName, type: "file" as const, size: 2048, mtime: "2024-01-01" },
+      ],
+    });
+
+    const { container } = render(
+      <FileBrowserModal
+        initialWorkspace="project"
+        isOpen={true}
+        onClose={mockOnClose}
+      />,
+    );
+
+    fireEvent(window, new Event("resize"));
+
+    // Select the long-named file
+    fireEvent.click(screen.getByText(longFileName));
+
+    // Verify the file path appears in the header
+    await waitFor(() => {
+      const pathEl = container.querySelector(".file-browser-header-path");
+      expect(pathEl).toBeInTheDocument();
+      expect(pathEl?.textContent).toBe(longFileName);
+    });
+
+    const closeButton = container.querySelector("button.modal-close");
+    expect(closeButton).toBeInTheDocument();
+    expect(closeButton).toBeVisible();
+
+    // Clicking the close button should trigger onClose
+    fireEvent.click(closeButton!);
+    await waitFor(() => {
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("long file path is truncated on mobile", async () => {
+    // Read CSS file directly to verify the overflow/ellipsis rules
+    // (JSDOM doesn't apply stylesheets, so computed style checks won't work)
+    const { readFileSync } = await import("fs");
+    const { resolve } = await import("path");
+    const cssPath = resolve(__dirname, "../styles.css");
+    const cssContent = readFileSync(cssPath, "utf-8");
+
+    // Extract mobile media query blocks
+    function extractMobileMediaBlocks(content: string): string {
+      const blocks: string[] = [];
+      const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+      let match;
+
+      while ((match = regex.exec(content)) !== null) {
+        const startIdx = match.index + match[0].length;
+        let braceCount = 1;
+        let endIdx = startIdx;
+
+        while (braceCount > 0 && endIdx < content.length) {
+          if (content[endIdx] === "{") braceCount += 1;
+          if (content[endIdx] === "}") braceCount -= 1;
+          endIdx += 1;
+        }
+
+        if (braceCount === 0) {
+          blocks.push(content.slice(startIdx, endIdx - 1));
+        }
+      }
+
+      return blocks.join("\n");
+    }
+
+    const mobileBlock = extractMobileMediaBlocks(cssContent);
+
+    // Find the file-browser-header-path rule within mobile blocks
+    const pathMatch = mobileBlock.match(
+      /\.file-browser-header-path\s*\{([^}]*)\}/,
+    );
+    expect(pathMatch).not.toBeNull();
+
+    const pathRules = pathMatch![1];
+    expect(pathRules).toContain("text-overflow: ellipsis");
+    expect(pathRules).toContain("white-space: nowrap");
+    expect(pathRules).toContain("overflow: hidden");
+    expect(pathRules).toContain("max-width: 50vw");
+  });
+
   it("closes on Escape and saves on Cmd+S", () => {
     mockUseWorkspaceFileEditor.mockReturnValue({
       ...defaultEditorState,

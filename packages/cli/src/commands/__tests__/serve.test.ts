@@ -298,6 +298,17 @@ vi.mock("@fusion/engine", () => ({
   SelfHealingManager: mocks.selfHealingCtor,
   MissionAutopilot: mocks.missionAutopilotCtor,
   createAiPromptExecutor: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue("ok")),
+  HeartbeatMonitor: vi.fn().mockImplementation(() => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+    executeHeartbeat: vi.fn().mockResolvedValue({ id: "run-1" }),
+  })),
+  HeartbeatTriggerScheduler: vi.fn().mockImplementation(() => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+    registerAgent: vi.fn(),
+    getRegisteredAgents: vi.fn().mockReturnValue([]),
+  })),
 }));
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({

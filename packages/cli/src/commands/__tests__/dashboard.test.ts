@@ -123,6 +123,17 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     scanIdleWorktrees: vi.fn().mockResolvedValue([]),
     cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
     createAiPromptExecutor: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue("mock AI response")),
+    HeartbeatMonitor: vi.fn().mockImplementation(() => ({
+      start: vi.fn(),
+      stop: vi.fn(),
+      executeHeartbeat: vi.fn().mockResolvedValue({ id: "run-1" }),
+    })),
+    HeartbeatTriggerScheduler: vi.fn().mockImplementation(() => ({
+      start: vi.fn(),
+      stop: vi.fn(),
+      registerAgent: vi.fn(),
+      getRegisteredAgents: vi.fn().mockReturnValue([]),
+    })),
   };
 });
 

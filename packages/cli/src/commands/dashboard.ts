@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { TaskStore, AutomationStore, CentralCore, AgentStore, getTaskMergeBlocker } from "@fusion/core";
 import type { Settings, TaskDetail, PrInfo } from "@fusion/core";
 import { createServer, GitHubClient } from "@fusion/dashboard";
-import { TriageProcessor, TaskExecutor, Scheduler, AgentSemaphore, WorktreePool, aiMergeTask, UsageLimitPauser, PRIORITY_MERGE, scanIdleWorktrees, cleanupOrphanedWorktrees, NtfyNotifier, PrMonitor, PrCommentHandler, CronRunner, StuckTaskDetector, SelfHealingManager, MissionAutopilot, createAiPromptExecutor } from "@fusion/engine";
+import { TriageProcessor, TaskExecutor, Scheduler, AgentSemaphore, WorktreePool, aiMergeTask, UsageLimitPauser, PRIORITY_MERGE, scanIdleWorktrees, cleanupOrphanedWorktrees, NtfyNotifier, PrMonitor, PrCommentHandler, CronRunner, StuckTaskDetector, SelfHealingManager, MissionAutopilot, createAiPromptExecutor, HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "@fusion/engine";
 import { AuthStorage, DefaultPackageManager, ModelRegistry, SettingsManager, discoverAndLoadExtensions, getAgentDir, createExtensionRuntime } from "@mariozechner/pi-coding-agent";
 
 /**
@@ -308,6 +308,77 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   //
   const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
   await agentStore.init();
+
+  // ── HeartbeatMonitor: runtime monitoring and execution for agents ───
+  //
+  // Provides the Paperclip-style heartbeat execution engine:
+  //   wake → check inbox → work → exit
+  //
+  // Enables agent execution runs triggered by timers, assignments, or manual API calls.
+  // Passed to createServer to enable the dashboard's heartbeat routes.
+  //
+  let heartbeatMonitor: HeartbeatMonitor | undefined;
+  let triggerScheduler: HeartbeatTriggerScheduler | undefined;
+  try {
+    heartbeatMonitor = new HeartbeatMonitor({
+      store: agentStore,
+      agentStore: agentStore, // enables per-agent config resolution
+      taskStore: store,
+      rootDir: cwd,
+      onMissed: (agentId) => {
+        console.log(`[engine] Agent ${agentId} missed heartbeat`);
+      },
+      onTerminated: (agentId) => {
+        console.log(`[engine] Agent ${agentId} terminated (unresponsive)`);
+      },
+    });
+    heartbeatMonitor.start();
+
+    // HeartbeatTriggerScheduler manages timer and assignment-based triggers
+    triggerScheduler = new HeartbeatTriggerScheduler(
+      agentStore,
+      async (agentId, source, context: WakeContext) => {
+        if (!heartbeatMonitor) return;
+        await heartbeatMonitor.executeHeartbeat({
+          agentId,
+          source,
+          triggerDetail: context.triggerDetail,
+          taskId: typeof context.taskId === "string" ? context.taskId : undefined,
+          triggeringCommentIds: Array.isArray(context.triggeringCommentIds)
+            ? context.triggeringCommentIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+            : undefined,
+          triggeringCommentType:
+            context.triggeringCommentType === "steering"
+            || context.triggeringCommentType === "task"
+            || context.triggeringCommentType === "pr"
+              ? context.triggeringCommentType
+              : undefined,
+          contextSnapshot: { ...context },
+        });
+      },
+      store,
+    );
+    triggerScheduler.start();
+
+    // Register existing agents that have heartbeat config
+    const agents = await agentStore.listAgents();
+    for (const agent of agents) {
+      const rc = agent.runtimeConfig;
+      if (rc && (rc.heartbeatIntervalMs || rc.enabled !== undefined || rc.maxConcurrentRuns)) {
+        triggerScheduler.registerAgent(agent.id, {
+          heartbeatIntervalMs: rc.heartbeatIntervalMs as number | undefined,
+          enabled: rc.enabled as boolean | undefined,
+          maxConcurrentRuns: rc.maxConcurrentRuns as number | undefined,
+        });
+      }
+    }
+    if (agents.length > 0) {
+      console.log(`[engine] Registered ${triggerScheduler.getRegisteredAgents().length} agents for heartbeat triggers`);
+    }
+  } catch (err) {
+    // Non-fatal — agent monitoring is optional
+    console.log(`[engine] HeartbeatMonitor initialization failed (continuing without agent monitoring):`, err);
+  }
 
   // ── NtfyNotifier: push notifications for task completion and failures ─
   //
@@ -691,6 +762,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     modelRegistry,
     automationStore,
     missionAutopilot,
+    heartbeatMonitor,
   });
 
   function dispose(): void {
@@ -821,15 +893,22 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       }
     }
 
+    // ── Always sync semaphore limit on any settings change ────────────
+    // Without this, changing maxConcurrent in the dashboard has no effect
+    // on the semaphore until an unpause transition or merge retry fires.
+    registerHandler(store, "settings:updated", ({ settings: s }) => {
+      if (s.maxConcurrent !== undefined) {
+        cachedMaxConcurrent = s.maxConcurrent;
+      }
+    });
+
     // ── Immediate unpause: resume orphans + merge sweep ─────────────
     // When globalPause transitions from true → false, immediately:
-    // 1. Refresh cachedMaxConcurrent so the semaphore picks up live changes
-    // 2. Resume orphaned in-progress tasks whose agents were killed by pause
-    // 3. Sweep the merge queue for in-review tasks that need merging
+    // 1. Resume orphaned in-progress tasks whose agents were killed by pause
+    // 2. Sweep the merge queue for in-review tasks that need merging
     registerHandler(store, "settings:updated", async ({ settings: s, previous: prev }) => {
       if (prev.globalPause && !s.globalPause) {
         console.log("[engine] Global unpause — resuming agentic activity");
-        cachedMaxConcurrent = s.maxConcurrent ?? cachedMaxConcurrent;
 
         executor.resumeOrphaned().catch((err) =>
           console.error("[engine] Failed to resume orphaned tasks on unpause:", err),
@@ -854,7 +933,6 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     registerHandler(store, "settings:updated", async ({ settings: s, previous: prev }) => {
       if (prev.enginePaused && !s.enginePaused) {
         console.log("[engine] Engine unpaused — resuming agentic activity");
-        cachedMaxConcurrent = s.maxConcurrent ?? cachedMaxConcurrent;
 
         executor.resumeOrphaned().catch((err) =>
           console.error("[engine] Failed to resume orphaned tasks on engine unpause:", err),
@@ -919,6 +997,9 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
     const shutdown = () => {
       dispose();
+      // Stop heartbeat components first (they reference agentStore)
+      if (triggerScheduler) triggerScheduler.stop();
+      if (heartbeatMonitor) heartbeatMonitor.stop();
       selfHealing.stop();
       stuckTaskDetector.stop();
       missionAutopilot.stop();
@@ -937,6 +1018,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   if (opts.dev) {
     const devShutdown = () => {
       dispose();
+      if (triggerScheduler) triggerScheduler.stop();
+      if (heartbeatMonitor) heartbeatMonitor.stop();
       notifier.stop();
       store.close();
       process.exit(0);

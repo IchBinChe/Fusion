@@ -96,21 +96,26 @@ describe("WorkflowResultsTab", () => {
     // Passed badge
     const passedBadge = screen.getByTestId("workflow-result-badge-WS-001");
     expect(passedBadge).toHaveTextContent("Passed");
-    expect(passedBadge).toHaveStyle({ backgroundColor: "var(--color-success, #3fb950)" });
+    expect(passedBadge).toHaveClass("workflow-result-badge");
+    expect(passedBadge).toHaveClass("workflow-result-badge--passed");
 
     // Failed badge
     const failedBadge = screen.getByTestId("workflow-result-badge-WS-002");
     expect(failedBadge).toHaveTextContent("Failed");
-    expect(failedBadge).toHaveStyle({ backgroundColor: "var(--color-error, #f85149)" });
+    expect(failedBadge).toHaveClass("workflow-result-badge");
+    expect(failedBadge).toHaveClass("workflow-result-badge--failed");
 
     // Skipped badge
     const skippedBadge = screen.getByTestId("workflow-result-badge-WS-003");
     expect(skippedBadge).toHaveTextContent("Skipped");
+    expect(skippedBadge).toHaveClass("workflow-result-badge");
+    expect(skippedBadge).toHaveClass("workflow-result-badge--skipped");
 
     // Pending badge
     const pendingBadge = screen.getByTestId("workflow-result-badge-WS-004");
     expect(pendingBadge).toHaveTextContent("Running…");
-    expect(pendingBadge).toHaveStyle({ backgroundColor: "var(--todo, #58a6ff)" });
+    expect(pendingBadge).toHaveClass("workflow-result-badge");
+    expect(pendingBadge).toHaveClass("workflow-result-badge--pending");
   });
 
   it("shows output content when toggle is clicked to expand", () => {
@@ -554,6 +559,96 @@ describe("WorkflowResultsTab", () => {
       await waitFor(() => {
         expect(mockedFetchWorkflowSteps).toHaveBeenCalledWith("proj-123");
       });
+    });
+  });
+
+  describe("theming contract", () => {
+    it("uses CSS classes for phase badges instead of inline styles", () => {
+      render(
+        <WorkflowResultsTab
+          taskId="FN-001"
+          results={[
+            {
+              workflowStepId: "WS-001",
+              workflowStepName: "Pre-merge Step",
+              phase: "pre-merge",
+              status: "passed",
+            },
+            {
+              workflowStepId: "WS-002",
+              workflowStepName: "Post-merge Step",
+              phase: "post-merge",
+              status: "passed",
+            },
+          ]}
+        />,
+      );
+
+      // Pre-merge phase badge should use CSS class
+      const preMergeBadge = screen.getByTestId("workflow-result-phase-WS-001");
+      expect(preMergeBadge).toHaveClass("phase-badge");
+      expect(preMergeBadge).toHaveClass("phase-badge--pre-merge");
+      // Check that there are no rgba() values in inline styles
+      expect(preMergeBadge.getAttribute("style") || "").not.toMatch(/rgba\(/);
+
+      // Post-merge phase badge should use CSS class
+      const postMergeBadge = screen.getByTestId("workflow-result-phase-WS-002");
+      expect(postMergeBadge).toHaveClass("phase-badge");
+      expect(postMergeBadge).toHaveClass("phase-badge--post-merge");
+      expect(postMergeBadge.getAttribute("style") || "").not.toMatch(/rgba\(/);
+    });
+
+    it("uses CSS classes for status badges instead of inline styles", () => {
+      render(<WorkflowResultsTab taskId="FN-001" results={mockResults} />);
+
+      const passedBadge = screen.getByTestId("workflow-result-badge-WS-001");
+      const failedBadge = screen.getByTestId("workflow-result-badge-WS-002");
+      const skippedBadge = screen.getByTestId("workflow-result-badge-WS-003");
+      const pendingBadge = screen.getByTestId("workflow-result-badge-WS-004");
+
+      // All badges should have CSS class-based styling
+      expect(passedBadge).toHaveClass("workflow-result-badge--passed");
+      expect(failedBadge).toHaveClass("workflow-result-badge--failed");
+      expect(skippedBadge).toHaveClass("workflow-result-badge--skipped");
+      expect(pendingBadge).toHaveClass("workflow-result-badge--pending");
+
+      // No inline background color styles with rgba values
+      const passedStyle = passedBadge.getAttribute("style") || "";
+      const failedStyle = failedBadge.getAttribute("style") || "";
+      expect(passedStyle).not.toMatch(/rgba\(/);
+      expect(failedStyle).not.toMatch(/rgba\(/);
+    });
+
+    it("prevents reintroduction of hardcoded phase colors in component source", () => {
+      // Read the component source file
+      const fs = require("fs");
+      const path = require("path");
+      const componentPath = path.join(__dirname, "WorkflowResultsTab.tsx");
+      const componentSource = fs.readFileSync(componentPath, "utf-8");
+
+      // These hardcoded color patterns should NOT appear in the component
+      // (they were the old inline style values)
+      const forbiddenPatterns = [
+        /rgba\(59,\s*130,\s*246,\s*0\.15\)/, // pre-merge background
+        /rgba\(139,\s*92,\s*246,\s*0\.15\)/, // post-merge background
+        /#[38]b82f6/, // pre-merge text (partial match for #3b82f6 or #8b5cf6)
+        /#[89]b5cf6/, // post-merge text (partial match for #8b5cf6)
+      ];
+
+      for (const pattern of forbiddenPatterns) {
+        expect(componentSource).not.toMatch(pattern);
+      }
+    });
+
+    it("prevents reintroduction of getStatusColor function with hardcoded colors", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const componentPath = path.join(__dirname, "WorkflowResultsTab.tsx");
+      const componentSource = fs.readFileSync(componentPath, "utf-8");
+
+      // The getStatusColor function should not exist (removed to use CSS classes)
+      expect(componentSource).not.toMatch(/function getStatusColor/);
+      expect(componentSource).not.toMatch(/getStatusColor\(/);
     });
   });
 });

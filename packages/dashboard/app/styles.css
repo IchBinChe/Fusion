@@ -20797,6 +20797,45 @@ html .column.drag-over * {
   letter-spacing: 0.5px;
 }
 
+/* Status modifier classes for workflow result badges */
+.workflow-result-badge--passed {
+  background-color: var(--color-success, #3fb950);
+  color: #fff;
+}
+
+.workflow-result-badge--failed {
+  background-color: var(--color-error, #f85149);
+  color: #fff;
+}
+
+.workflow-result-badge--skipped {
+  background-color: var(--text-dim, #484f58);
+  color: var(--text-muted, #8b949e);
+}
+
+.workflow-result-badge--pending {
+  background-color: var(--todo, #58a6ff);
+  color: #fff;
+}
+
+/* Phase badge base and modifier classes */
+.phase-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.phase-badge--pre-merge {
+  background-color: color-mix(in srgb, var(--ws-pre-merge, #3b82f6) 15%, transparent);
+  color: var(--ws-pre-merge, #3b82f6);
+}
+
+.phase-badge--post-merge {
+  background-color: color-mix(in srgb, var(--ws-post-merge, #0ea58c) 15%, transparent);
+  color: var(--ws-post-merge, #0ea58c);
+}
+
 .workflow-result-meta {
   display: flex;
   gap: var(--space-sm, 8px);

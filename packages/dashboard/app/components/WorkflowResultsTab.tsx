@@ -21,21 +21,6 @@ interface WorkflowStepOption {
   icon?: ReactNode;
 }
 
-function getStatusColor(status: WorkflowStepResult["status"]): string {
-  switch (status) {
-    case "passed":
-      return "var(--color-success, #3fb950)";
-    case "failed":
-      return "var(--color-error, #f85149)";
-    case "skipped":
-      return "var(--text-dim, #484f58)";
-    case "pending":
-      return "var(--todo, #58a6ff)";
-    default:
-      return "var(--text-dim, #484f58)";
-  }
-}
-
 function getStatusLabel(status: WorkflowStepResult["status"]): string {
   switch (status) {
     case "passed":
@@ -77,16 +62,10 @@ function getOutputPreview(output: string): string {
 }
 
 function phaseBadge(phase: "pre-merge" | "post-merge", id: string, prefix: string): ReactNode {
+  const phaseClass = phase === "post-merge" ? "phase-badge--post-merge" : "phase-badge--pre-merge";
   return (
     <span
-      style={{
-        marginLeft: "6px",
-        fontSize: "11px",
-        padding: "1px 6px",
-        borderRadius: "4px",
-        background: phase === "post-merge" ? "rgba(139, 92, 246, 0.15)" : "rgba(59, 130, 246, 0.15)",
-        color: phase === "post-merge" ? "#8b5cf6" : "#3b82f6",
-      }}
+      className={`phase-badge ${phaseClass}`}
       data-testid={`${prefix}-${id}`}
     >
       {phase === "post-merge" ? "Post-merge" : "Pre-merge"}
@@ -352,10 +331,6 @@ export function WorkflowResultsTab({
                 </div>
                 <span
                   className={`workflow-result-badge workflow-result-badge--${result.status}`}
-                  style={{
-                    backgroundColor: getStatusColor(result.status),
-                    color: result.status === "skipped" ? "var(--text-muted)" : "#fff",
-                  }}
                   data-testid={`workflow-result-badge-${result.workflowStepId}`}
                 >
                   {getStatusLabel(result.status)}

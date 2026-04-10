@@ -3361,8 +3361,65 @@ describe("usage", () => {
       expect(requestedPaths).toEqual(["/v1/coding_plan/usage", "/v1/coding-plan/usage"]);
     });
 
-    it("returns error when both endpoints return 404", async () => {
-      // Regression test: when both endpoints return 404, should return error
+    it("returns sanitized error when both endpoints return 404 url.not_found", async () => {
+      // Regression test: when both endpoints return 404 with url.not_found error,
+      // the error message should be sanitized (no raw JSON leaked to users)
+      const requestedPaths: string[] = [];
+
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            "kimi-coding": { type: "api_key", key: "test-api-key" },
+          });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      // Real production payload shape with url.not_found error
+      const urlNotFoundPayload = JSON.stringify({
+        code: 5,
+        error: "url.not_found",
+        message: "没找到对象",
+        type: "invalid_request",
+      });
+
+      mockRequest.mockImplementation((options: any, callback: any) => {
+        const pathname = new URL(`https://${options.hostname}${options.path}`).pathname;
+        requestedPaths.push(pathname);
+
+        const mockRes = {
+          statusCode: 404,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from(urlNotFoundPayload));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi")!;
+
+      expect(kimi.status).toBe("error");
+      // Error message should be sanitized — no raw JSON content
+      expect(kimi.error).not.toContain(urlNotFoundPayload);
+      expect(kimi.error).not.toContain("code");
+      expect(kimi.error).not.toContain("url.not_found");
+      expect(kimi.error).not.toContain("没找到对象");
+      // Should contain a clean, actionable message
+      expect(kimi.error).toContain("Usage endpoint unavailable");
+      // Should attempt both endpoints
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage", "/v1/coding-plan/usage"]);
+    });
+
+    it("returns raw error for other 404 body content (not url.not_found)", async () => {
+      // Regression test: when both endpoints return 404 with non-url.not_found body,
+      // the error should still include the raw body for debugging
       const requestedPaths: string[] = [];
 
       mockReadFileSync.mockImplementation((filePath: string) => {

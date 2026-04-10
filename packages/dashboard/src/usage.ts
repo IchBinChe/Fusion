@@ -1482,8 +1482,16 @@ async function fetchKimiUsage(): Promise<ProviderUsage> {
       if (res.status === 404) {
         if (isLastEndpoint) {
           // Last endpoint also returned 404 — return error
+          // Sanitize known endpoint-not-found errors to avoid leaking raw JSON to users.
+          // The "url.not_found" error indicates the usage endpoint doesn't exist for this account.
+          const isEndpointNotFound = res.body.includes('"error":"url.not_found"') ||
+            res.body.includes('"error":"url_not_found"');
           usage.status = "error";
-          usage.error = `HTTP 404: ${res.body.slice(0, 200)}`;
+          if (isEndpointNotFound) {
+            usage.error = "Usage endpoint unavailable — Kimi coding plan may not be active on this account";
+          } else {
+            usage.error = `HTTP 404: ${res.body.slice(0, 200)}`;
+          }
           return usage;
         }
         // Try next endpoint

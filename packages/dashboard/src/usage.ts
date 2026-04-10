@@ -1430,9 +1430,11 @@ async function fetchZaiUsage(): Promise<ProviderUsage> {
 // ── Kimi (Moonshot AI) fetcher ───────────────────────────────────────────
 
 // Kimi API endpoints (Moonshot domain)
+// NOTE: Underscore endpoint is first — this is the Codexbar-validated working endpoint.
+// Hyphen variant is kept as fallback for older accounts/API versions that may still use it.
 const KIMI_ENDPOINTS = [
-  "https://api.moonshot.cn/v1/coding-plan/usage", // hyphen
-  "https://api.moonshot.cn/v1/coding_plan/usage", // underscore
+  "https://api.moonshot.cn/v1/coding_plan/usage", // underscore (primary, Codexbar-validated)
+  "https://api.moonshot.cn/v1/coding-plan/usage", // hyphen (legacy fallback)
 ];
 
 /**

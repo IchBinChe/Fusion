@@ -3038,7 +3038,7 @@ describe("usage", () => {
   });
 
   describe("endpoint fallback", () => {
-    it("falls back to underscore endpoint when hyphen endpoint returns 404 url.not_found", async () => {
+    it("falls back to hyphen endpoint when underscore endpoint returns 404 url.not_found", async () => {
       const requestedPaths: string[] = [];
 
       mockReadFileSync.mockImplementation((filePath: string) => {
@@ -3069,8 +3069,8 @@ describe("usage", () => {
         let statusCode = 200;
         let responseBody = mockResponse;
 
-        if (pathname === "/v1/coding-plan/usage") {
-          // First endpoint returns 404 with url.not_found
+        if (pathname === "/v1/coding_plan/usage") {
+          // First endpoint (underscore) returns 404 with url.not_found
           statusCode = 404;
           responseBody = { error: "url.not_found" };
         }
@@ -3093,8 +3093,69 @@ describe("usage", () => {
       expect(kimi.status).toBe("ok");
       expect(kimi.windows).toHaveLength(1);
       expect(kimi.windows[0].percentUsed).toBe(25);
-      // Should have tried both endpoints
-      expect(requestedPaths).toEqual(["/v1/coding-plan/usage", "/v1/coding_plan/usage"]);
+      // Should have tried both endpoints: underscore first, then hyphen fallback
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage", "/v1/coding-plan/usage"]);
+    });
+
+    it("falls back when first endpoint returns 404 url.not_found with extra fields", async () => {
+      // This tests the real failure payload shape from production:
+      // {"code":5,"error":"url.not_found","message":"没找到对象",...}
+      const requestedPaths: string[] = [];
+
+      mockReadFileSync.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            "kimi-coding": { type: "api_key", key: "test-api-key" },
+          });
+        }
+        throw new Error("File not found");
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const mockResponse = {
+        data: {
+          total: 100,
+          used: 25,
+          remaining: 75,
+          reset_time: Date.now() + 3600000,
+        },
+      };
+
+      mockRequest.mockImplementation((options: any, callback: any) => {
+        const pathname = new URL(`https://${options.hostname}${options.path}`).pathname;
+        requestedPaths.push(pathname);
+
+        let statusCode = 200;
+        let responseBody = mockResponse;
+
+        if (pathname === "/v1/coding_plan/usage") {
+          // First endpoint returns 404 with real production payload shape (extra fields)
+          statusCode = 404;
+          responseBody = { code: 5, error: "url.not_found", message: "没找到对象", type: "invalid_request" };
+        }
+
+        const mockRes = {
+          statusCode,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from(JSON.stringify(responseBody)));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const kimi = providers.find((p) => p.name === "Kimi")!;
+
+      expect(kimi.status).toBe("ok");
+      expect(kimi.windows).toHaveLength(1);
+      expect(kimi.windows[0].percentUsed).toBe(25);
+      // Should fall back to hyphen endpoint when underscore returns url.not_found with extra fields
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage", "/v1/coding-plan/usage"]);
     });
 
     it("does not attempt fallback on 401 auth error", async () => {
@@ -3134,7 +3195,7 @@ describe("usage", () => {
       expect(kimi.status).toBe("error");
       expect(kimi.error).toContain("Auth expired");
       // Only first endpoint should be attempted (no fallback for auth errors)
-      expect(requestedPaths).toEqual(["/v1/coding-plan/usage"]);
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage"]);
     });
 
     it("does not attempt fallback on 403 auth error", async () => {
@@ -3174,7 +3235,7 @@ describe("usage", () => {
       expect(kimi.status).toBe("error");
       expect(kimi.error).toContain("Auth expired");
       // Only first endpoint should be attempted (no fallback for auth errors)
-      expect(requestedPaths).toEqual(["/v1/coding-plan/usage"]);
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage"]);
     });
 
     it("returns error without fallback when first endpoint returns 404 without url.not_found", async () => {
@@ -3215,7 +3276,7 @@ describe("usage", () => {
       expect(kimi.status).toBe("error");
       expect(kimi.error).toContain("HTTP 404");
       // Should NOT attempt fallback because error is not url.not_found
-      expect(requestedPaths).toEqual(["/v1/coding-plan/usage"]);
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage"]);
     });
 
     it("succeeds with single endpoint when first endpoint works", async () => {
@@ -3264,8 +3325,8 @@ describe("usage", () => {
       expect(kimi.status).toBe("ok");
       expect(kimi.windows).toHaveLength(1);
       expect(kimi.windows[0].percentUsed).toBe(50);
-      // Should only request first endpoint
-      expect(requestedPaths).toEqual(["/v1/coding-plan/usage"]);
+      // Should only request first endpoint (underscore)
+      expect(requestedPaths).toEqual(["/v1/coding_plan/usage"]);
     });
   });
 

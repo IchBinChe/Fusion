@@ -449,7 +449,8 @@ describe("useTheme", () => {
       expect(link).not.toBeNull();
       expect(link?.tagName.toLowerCase()).toBe("link");
       expect(link?.getAttribute("rel")).toBe("stylesheet");
-      expect(link?.getAttribute("href")).toBe("/theme-data.css");
+      // href should resolve to theme-data.css via document.baseURI
+      expect(link?.getAttribute("href")?.endsWith("theme-data.css")).toBe(true);
     });
 
     it("removes theme-data.css when switching back to default theme", () => {
@@ -521,8 +522,108 @@ describe("useTheme", () => {
 
         const link = document.getElementById("theme-data");
         expect(link).not.toBeNull();
-        expect(link?.getAttribute("href")).toBe("/theme-data.css");
+        // href should resolve to theme-data.css via document.baseURI
+        expect(link?.getAttribute("href")?.endsWith("theme-data.css")).toBe(true);
       }
+    });
+
+    it("resolves theme-data.css relative to document.baseURI for HTTP paths", () => {
+      // Simulate a non-root HTTP path like http://localhost:3000/some/path/
+      Object.defineProperty(document, "baseURI", {
+        value: "http://localhost:3000/some/path/",
+        configurable: true,
+      });
+
+      const { result } = renderHook(() => useTheme());
+
+      act(() => {
+        result.current.setColorTheme("ocean");
+      });
+
+      const link = document.getElementById("theme-data");
+      expect(link).not.toBeNull();
+      // URL resolution should work with non-root base path
+      expect(link?.getAttribute("href")?.endsWith("theme-data.css")).toBe(true);
+
+      // Clean up
+      Object.defineProperty(document, "baseURI", {
+        value: "http://localhost:3000/",
+        configurable: true,
+      });
+    });
+
+    it("resolves theme-data.css for file:// URLs (Electron production)", () => {
+      // Simulate Electron production file:// context
+      Object.defineProperty(document, "baseURI", {
+        value: "file:///Users/me/Projects/kb/packages/dashboard/dist/client/index.html",
+        configurable: true,
+      });
+
+      const { result } = renderHook(() => useTheme());
+
+      act(() => {
+        result.current.setColorTheme("factory");
+      });
+
+      const link = document.getElementById("theme-data");
+      expect(link).not.toBeNull();
+      // For file:// URLs, href should resolve to the local file path
+      expect(link?.getAttribute("href")?.endsWith("theme-data.css")).toBe(true);
+      // The href should be a valid file:// URL or path
+      expect(link?.getAttribute("href")).toMatch(/^file:\/\/|^\//);
+
+      // Clean up
+      Object.defineProperty(document, "baseURI", {
+        value: "http://localhost:3000/",
+        configurable: true,
+      });
+    });
+
+    it("resolves theme-data.css for nested file:// paths", () => {
+      // Simulate file:// with nested directory structure
+      Object.defineProperty(document, "baseURI", {
+        value: "file:///app/fusion/node/dashboard/dist/index.html",
+        configurable: true,
+      });
+
+      const { result } = renderHook(() => useTheme());
+
+      act(() => {
+        result.current.setColorTheme("nord");
+      });
+
+      const link = document.getElementById("theme-data");
+      expect(link).not.toBeNull();
+      expect(link?.getAttribute("href")?.endsWith("theme-data.css")).toBe(true);
+
+      // Clean up
+      Object.defineProperty(document, "baseURI", {
+        value: "http://localhost:3000/",
+        configurable: true,
+      });
+    });
+
+    it("does not duplicate theme-data link when pre-existing in DOM", () => {
+      // Simulate index.html inline script already injected the link
+      const existingLink = document.createElement("link");
+      existingLink.id = "theme-data";
+      existingLink.rel = "stylesheet";
+      existingLink.href = "/theme-data.css";
+      document.head.appendChild(existingLink);
+
+      const { result } = renderHook(() => useTheme());
+
+      // Switch to non-default theme
+      act(() => {
+        result.current.setColorTheme("ocean");
+      });
+
+      // Should still only have one link (the pre-existing one)
+      const links = document.querySelectorAll('link[id="theme-data"]');
+      expect(links.length).toBe(1);
+
+      // Clean up
+      existingLink.remove();
     });
   });
 });

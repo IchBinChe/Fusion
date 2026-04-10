@@ -472,6 +472,15 @@ To add a new color theme:
 
 **Note:** Theme variable blocks are stored in a separate `theme-data.css` file for optimized loading. This file is only loaded when a non-default color theme is active, reducing the initial payload for users with the default theme.
 
+### Dynamic Stylesheet Loading
+
+The `theme-data.css` file is loaded dynamically using `document.baseURI` for path resolution, which ensures correct behavior across all runtime contexts:
+
+- **HTTP/HTTPS serving** (development server, production web deployment): Uses standard root-relative path resolution (`/theme-data.css`)
+- **Electron file:// context** (desktop production): Derives the path relative to the HTML file's directory
+
+This approach avoids hardcoded absolute paths that would break in different deployment contexts. Both the pre-hydration inline script in `index.html` and the runtime hook (`useTheme.ts`) use the same path resolution strategy.
+
 ### Theme-Driven Logo and Task-Creation CTAs
 
 The Fusion logo and all task-creation action buttons (including the "+ New Task" and "Save" buttons in board view, list view, and inline creation surfaces) are fully tokenized and respond to the active color theme. This ensures branding and task-creation affordances stay visually consistent across all 12 color themes and both light/dark modes.

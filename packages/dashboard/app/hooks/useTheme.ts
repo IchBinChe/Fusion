@@ -6,6 +6,45 @@ const THEME_MODE_STORAGE_KEY = "kb-dashboard-theme-mode";
 const COLOR_THEME_STORAGE_KEY = "kb-dashboard-color-theme";
 const VALID_COLOR_THEMES = [...COLOR_THEMES] satisfies ColorTheme[];
 const THEME_DATA_ID = "theme-data";
+const THEME_DATA_FILENAME = "theme-data.css";
+
+/**
+ * Get the resolved URL for theme-data.css.
+ *
+ * This function handles both HTTP/HTTPS origins and Electron file:// contexts.
+ * Using document.baseURI ensures the stylesheet path resolves correctly regardless
+ * of whether the app is served over HTTP or loaded from a file:// URL.
+ *
+ * For file:// URLs, the path is derived relative to the HTML file's directory.
+ * For HTTP/HTTPS URLs, the path resolves to the server root.
+ */
+function getThemeDataUrl(): string {
+  // Get base URL from document.baseURI (most reliable across contexts)
+  // Falls back to document.location.href if baseURI is unavailable
+  const base = document.baseURI || (typeof document.location !== "undefined" ? document.location.href : "");
+
+  if (!base) {
+    // Fallback to absolute path if no base available
+    return `/${THEME_DATA_FILENAME}`;
+  }
+
+  // Handle file:// URLs specially - derive path relative to HTML file directory
+  if (base.startsWith("file://")) {
+    // Extract directory from file:// path (e.g., file:///path/to/app/index.html → /path/to/app/)
+    const pathMatch = base.match(/^file:\/\/[^\/]*(\/.*?)?\/[^\/]*$/);
+    if (pathMatch && pathMatch[1]) {
+      // base ends with filename, use the directory portion
+      const dirPath = pathMatch[1];
+      return `${base.substring(0, 7)}${dirPath}${THEME_DATA_FILENAME}`;
+    }
+    // Fallback: just use the base without the filename
+    return base.replace(/\/[^\/]+$/, `/${THEME_DATA_FILENAME}`);
+  }
+
+  // For HTTP/HTTPS URLs, resolve relative to server root
+  const url = new URL(`/${THEME_DATA_FILENAME}`, base);
+  return url.href;
+}
 
 // Check if we're in a browser environment
 const isBrowser = typeof window !== "undefined";
@@ -101,7 +140,7 @@ function loadThemeDataStylesheet(): void {
 
   const link = document.createElement("link");
   link.rel = "stylesheet";
-  link.href = "/theme-data.css";
+  link.href = getThemeDataUrl();
   link.id = THEME_DATA_ID;
   document.head.appendChild(link);
 }

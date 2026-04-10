@@ -26,10 +26,26 @@
           document.documentElement.setAttribute('data-theme', effectiveMode);
           document.documentElement.setAttribute('data-color-theme', colorTheme);
           // Load theme-data.css for non-default themes to prevent flash
+          // Use path-safe resolution that works in both HTTP and file:// contexts
           if (colorTheme !== 'default') {
+            var themeDataUrl;
+            var base = document.baseURI || (document.location && document.location.href) || '';
+            if (base.indexOf('file://') === 0) {
+              // For file:// URLs, derive path relative to the HTML file directory
+              var pathMatch = base.match(/^file:\/\/[^\/]*(\/.*?)?\/[^\/]*$/);
+              if (pathMatch && pathMatch[1]) {
+                var dirPath = pathMatch[1];
+                themeDataUrl = base.substring(0, 7) + dirPath + 'theme-data.css';
+              } else {
+                themeDataUrl = base.replace(/\/[^\/]+$/, '/theme-data.css');
+              }
+            } else {
+              // For HTTP/HTTPS URLs, use URL resolution
+              themeDataUrl = new URL('/theme-data.css', base).href;
+            }
             var link = document.createElement('link');
             link.rel = 'stylesheet';
-            link.href = '/theme-data.css';
+            link.href = themeDataUrl;
             link.id = 'theme-data';
             document.head.appendChild(link);
           }

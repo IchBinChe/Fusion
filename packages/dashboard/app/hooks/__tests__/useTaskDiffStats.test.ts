@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { useTaskDiffStats, __test_clearDiffStatsCache } from "../useTaskDiffStats";
 import * as api from "../../api";
 
@@ -449,6 +449,314 @@ describe("useTaskDiffStats", () => {
       // Should fetch fresh value
       expect(second.current.stats).toEqual({ filesChanged: 99, additions: 999, deletions: 99 });
       expect(mockFetchTaskDiff).toHaveBeenCalled();
+    });
+  });
+
+  describe("stepVersion", () => {
+    beforeEach(() => {
+      __test_clearDiffStatsCache();
+      mockFetchTaskDiff.mockClear();
+    });
+
+    it("re-fetches when stepVersion changes", async () => {
+      // Initial fetch
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 1, additions: 5, deletions: 1 },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ stepVersion }) => useTaskDiffStats(
+          "FN-STEP",
+          "done",
+          "abc1234",
+          undefined,
+          { stepVersion },
+        ),
+        { initialProps: { stepVersion: 1 as number | string } },
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toEqual({ filesChanged: 1, additions: 5, deletions: 1 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Change stepVersion - should trigger re-fetch
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 3, additions: 10, deletions: 2 },
+      });
+
+      rerender({ stepVersion: 2 as number | string });
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats).toEqual({ filesChanged: 3, additions: 10, deletions: 2 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+    });
+
+    it("caches stats separately per stepVersion", async () => {
+      // Initial fetch with stepVersion 1
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 5, additions: 20, deletions: 3 },
+      });
+
+      const { result: first } = renderHook(() =>
+        useTaskDiffStats("FN-STEP-CACHE", "done", "abc1234", undefined, { stepVersion: "v1" }),
+      );
+
+      await waitFor(() => expect(first.current.loading).toBe(false));
+      expect(first.current.stats).toEqual({ filesChanged: 5, additions: 20, deletions: 3 });
+
+      // Same task, different stepVersion - should fetch separately
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 10, additions: 50, deletions: 8 },
+      });
+
+      const { result: second } = renderHook(() =>
+        useTaskDiffStats("FN-STEP-CACHE", "done", "abc1234", undefined, { stepVersion: "v2" }),
+      );
+
+      await waitFor(() => expect(second.current.loading).toBe(false));
+      expect(second.current.stats).toEqual({ filesChanged: 10, additions: 50, deletions: 8 });
+
+      // Both should have been fetched
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+
+      // Cache should have both entries
+      mockFetchTaskDiff.mockClear();
+
+      const { result: cached1 } = renderHook(() =>
+        useTaskDiffStats("FN-STEP-CACHE", "done", "abc1234", undefined, { stepVersion: "v1" }),
+      );
+      const { result: cached2 } = renderHook(() =>
+        useTaskDiffStats("FN-STEP-CACHE", "done", "abc1234", undefined, { stepVersion: "v2" }),
+      );
+
+      expect(cached1.current.stats).toEqual({ filesChanged: 5, additions: 20, deletions: 3 });
+      expect(cached2.current.stats).toEqual({ filesChanged: 10, additions: 50, deletions: 8 });
+      expect(mockFetchTaskDiff).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("polling", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      __test_clearDiffStatsCache();
+      mockFetchTaskDiff.mockClear();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sets up polling interval for in-progress column", async () => {
+      mockFetchTaskDiff.mockResolvedValue({
+        files: [],
+        stats: { filesChanged: 1, additions: 5, deletions: 1 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats(
+          "FN-POLL-IP",
+          "in-progress",
+          undefined,
+          undefined,
+          { worktree: "/repo/.worktrees/fn-poll-ip", pollIntervalMs: 30_000 },
+        ),
+      );
+
+      // Initial fetch
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats).toEqual({ filesChanged: 1, additions: 5, deletions: 1 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Advance timer by 30 seconds (poll interval)
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+
+      // Advance timer again
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(3);
+    });
+
+    it("sets up polling interval for in-review column", async () => {
+      mockFetchTaskDiff.mockResolvedValue({
+        files: [],
+        stats: { filesChanged: 2, additions: 10, deletions: 2 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats(
+          "FN-POLL-IR",
+          "in-review",
+          undefined,
+          undefined,
+          { worktree: "/repo/.worktrees/fn-poll-ir", pollIntervalMs: 30_000 },
+        ),
+      );
+
+      // Initial fetch
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats).toEqual({ filesChanged: 2, additions: 10, deletions: 2 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Advance timer by 30 seconds
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not poll for done column", async () => {
+      mockFetchTaskDiff.mockResolvedValue({
+        files: [],
+        stats: { filesChanged: 3, additions: 15, deletions: 3 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats(
+          "FN-POLL-DONE",
+          "done",
+          "abc1234",
+          undefined,
+          { pollIntervalMs: 30_000 },
+        ),
+      );
+
+      // Initial fetch
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats).toEqual({ filesChanged: 3, additions: 15, deletions: 3 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Advance timer significantly (would trigger poll if done column was active)
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      // Should NOT have refetched for done column
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+    });
+
+    it("cleans up interval on unmount", async () => {
+      mockFetchTaskDiff.mockResolvedValue({
+        files: [],
+        stats: { filesChanged: 1, additions: 5, deletions: 1 },
+      });
+
+      const { result, unmount } = renderHook(() =>
+        useTaskDiffStats(
+          "FN-POLL-UNMOUNT",
+          "in-progress",
+          undefined,
+          undefined,
+          { worktree: "/repo/.worktrees/fn-poll-unmount", pollIntervalMs: 30_000 },
+        ),
+      );
+
+      // Initial fetch
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Unmount the hook (this should clear the interval)
+      unmount();
+
+      // Advance timer past the poll interval
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      // No additional fetches should have occurred after unmount
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+    });
+
+    it("forceRefresh bypasses cache on poll", async () => {
+      // Pre-populate cache with a value
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 5, additions: 25, deletions: 5 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats(
+          "FN-POLL-FORCE",
+          "in-progress",
+          undefined,
+          undefined,
+          { worktree: "/repo/.worktrees/fn-poll-force", pollIntervalMs: 30_000 },
+        ),
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(result.current.stats).toEqual({ filesChanged: 5, additions: 25, deletions: 5 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Update mock to return different value
+      mockFetchTaskDiff.mockResolvedValueOnce({
+        files: [],
+        stats: { filesChanged: 10, additions: 50, deletions: 10 },
+      });
+
+      // Advance timer - should force refresh and bypass cache
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+
+      expect(result.current.stats).toEqual({ filesChanged: 10, additions: 50, deletions: 10 });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+    });
+
+    it("polls with custom interval", async () => {
+      mockFetchTaskDiff.mockResolvedValue({
+        files: [],
+        stats: { filesChanged: 1, additions: 5, deletions: 1 },
+      });
+
+      const { result } = renderHook(() =>
+        useTaskDiffStats(
+          "FN-POLL-CUSTOM",
+          "in-progress",
+          undefined,
+          undefined,
+          { worktree: "/repo/.worktrees/fn-poll-custom", pollIntervalMs: 10_000 },
+        ),
+      );
+
+      // Initial fetch
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(1);
+
+      // Advance by 10 seconds (custom interval)
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(2);
+
+      // Advance by another 10 seconds
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(mockFetchTaskDiff).toHaveBeenCalledTimes(3);
     });
   });
 });

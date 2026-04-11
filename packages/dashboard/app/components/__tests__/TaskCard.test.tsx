@@ -3711,4 +3711,105 @@ describe("TaskCard send-back functionality", () => {
     // Dropdown should be closed
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  describe("useTaskDiffStats integration", () => {
+    beforeEach(() => {
+      mockUseTaskDiffStats.mockClear();
+      mockUseTaskDiffStats.mockReturnValue({ stats: null, loading: false });
+    });
+
+    it("passes stepVersion and pollIntervalMs for in-progress tasks", () => {
+      const task = createTask({
+        column: "in-progress",
+        steps: [
+          { name: "Step 1", status: "pending" },
+          { name: "Step 2", status: "done" },
+        ],
+        worktree: "/repo/.worktrees/fn-001",
+      });
+
+      render(<TaskCard task={task} onOpenDetail={vi.fn()} addToast={vi.fn()} />);
+
+      // Verify useTaskDiffStats was called
+      expect(mockUseTaskDiffStats).toHaveBeenCalled();
+
+      // Get the options argument (5th argument)
+      const callArgs = mockUseTaskDiffStats.mock.calls[0];
+      const options = callArgs[4] as Record<string, unknown>;
+
+      // Should pass stepVersion for in-progress
+      expect(options.stepVersion).toBe("Step 1:pending|Step 2:done");
+
+      // Should pass pollIntervalMs for in-progress
+      expect(options.pollIntervalMs).toBe(30_000);
+    });
+
+    it("passes stepVersion and pollIntervalMs for in-review tasks", () => {
+      const task = createTask({
+        column: "in-review",
+        steps: [{ name: "Verify", status: "in-progress" }],
+        worktree: "/repo/.worktrees/fn-001",
+      });
+
+      render(<TaskCard task={task} onOpenDetail={vi.fn()} addToast={vi.fn()} />);
+
+      const callArgs = mockUseTaskDiffStats.mock.calls[0];
+      const options = callArgs[4] as Record<string, unknown>;
+
+      expect(options.stepVersion).toBe("Verify:in-progress");
+      expect(options.pollIntervalMs).toBe(30_000);
+    });
+
+    it("does not pass stepVersion or pollIntervalMs for done tasks", () => {
+      const task = createTask({
+        column: "done",
+        steps: [{ name: "Step 1", status: "done" }],
+        mergeDetails: { commitSha: "abc123" },
+      });
+
+      render(<TaskCard task={task} onOpenDetail={vi.fn()} addToast={vi.fn()} />);
+
+      const callArgs = mockUseTaskDiffStats.mock.calls[0];
+      const options = callArgs[4] as Record<string, unknown>;
+
+      // done tasks should not have stepVersion or pollIntervalMs
+      expect(options.stepVersion).toBeUndefined();
+      expect(options.pollIntervalMs).toBeUndefined();
+    });
+
+    it("updates stepVersion when step status changes on in-progress task", () => {
+      const onOpenDetail = vi.fn();
+      const addToast = vi.fn();
+
+      const task1 = createTask({
+        column: "in-progress",
+        steps: [{ name: "Step 1", status: "pending" }],
+        worktree: "/repo/.worktrees/fn-001",
+      });
+
+      const { rerender } = render(
+        <TaskCard task={task1} onOpenDetail={onOpenDetail} addToast={addToast} />,
+      );
+
+      // First call should have the initial stepVersion
+      const firstCallArgs = mockUseTaskDiffStats.mock.calls[0];
+      const firstOptions = firstCallArgs[4] as Record<string, unknown>;
+      expect(firstOptions.stepVersion).toBe("Step 1:pending");
+
+      // Update task with changed step
+      mockUseTaskDiffStats.mockClear();
+      const task2 = createTask({
+        column: "in-progress",
+        steps: [{ name: "Step 1", status: "done" }],
+        worktree: "/repo/.worktrees/fn-001",
+      });
+
+      rerender(<TaskCard task={task2} onOpenDetail={onOpenDetail} addToast={addToast} />);
+
+      // Second call should have updated stepVersion
+      const secondCallArgs = mockUseTaskDiffStats.mock.calls[0];
+      const secondOptions = secondCallArgs[4] as Record<string, unknown>;
+      expect(secondOptions.stepVersion).toBe("Step 1:done");
+    });
+  });
 });

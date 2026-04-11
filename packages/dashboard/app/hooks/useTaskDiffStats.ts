@@ -17,6 +17,10 @@ interface UseTaskDiffStatsOptions {
   enabled?: boolean;
   /** Worktree path for active task columns. */
   worktree?: string;
+  /** Version identifier that changes when steps update. Forces cache invalidation when changed. */
+  stepVersion?: number | string;
+  /** Poll interval in ms for active columns (in-progress, in-review). Forces re-fetch bypassing cache. */
+  pollIntervalMs?: number;
 }
 
 /**
@@ -27,12 +31,12 @@ interface UseTaskDiffStatsOptions {
 const diffStatsCache = new Map<string, { stats: DiffStats; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000; // 30 seconds
 
-function getCacheKey(taskId: string, projectId?: string, worktree?: string): string {
-  return `${taskId}:${projectId ?? ""}:${worktree ?? ""}`;
+function getCacheKey(taskId: string, projectId?: string, worktree?: string, stepVersion?: string): string {
+  return `${taskId}:${projectId ?? ""}:${worktree ?? ""}:${stepVersion ?? ""}`;
 }
 
-function getCachedStats(taskId: string, projectId?: string, worktree?: string): DiffStats | null {
-  const key = getCacheKey(taskId, projectId, worktree);
+function getCachedStats(taskId: string, projectId?: string, worktree?: string, stepVersion?: string): DiffStats | null {
+  const key = getCacheKey(taskId, projectId, worktree, stepVersion);
   const entry = diffStatsCache.get(key);
 
   if (!entry) return null;
@@ -46,8 +50,8 @@ function getCachedStats(taskId: string, projectId?: string, worktree?: string): 
   return entry.stats;
 }
 
-function setCachedStats(taskId: string, projectId: string | undefined, worktree: string | undefined, stats: DiffStats): void {
-  const key = getCacheKey(taskId, projectId, worktree);
+function setCachedStats(taskId: string, projectId: string | undefined, worktree: string | undefined, stepVersion: string | undefined, stats: DiffStats): void {
+  const key = getCacheKey(taskId, projectId, worktree, stepVersion);
   diffStatsCache.set(key, {
     stats,
     expiresAt: Date.now() + CACHE_TTL_MS,
@@ -85,6 +89,8 @@ export function useTaskDiffStats(
 ): UseTaskDiffStatsResult {
   const enabled = options.enabled ?? true;
   const worktree = options.worktree;
+  const stepVersion = options.stepVersion;
+  const pollIntervalMs = options.pollIntervalMs;
   const [stats, setStats] = useState<DiffStats | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -105,25 +111,30 @@ export function useTaskDiffStats(
       return;
     }
 
-    // Check cache first - return immediately without loading flicker
     const activeWorktree = shouldFetchActiveTask ? worktree : undefined;
-    const cached = getCachedStats(taskId, projectId, activeWorktree);
-    if (cached) {
-      setStats(cached);
-      setLoading(false);
-      return;
-    }
-
+    const stepVersionStr = stepVersion !== undefined ? String(stepVersion) : undefined;
     let cancelled = false;
 
-    async function load() {
+    async function load(forceRefresh = false) {
+      // Check cache first - return immediately without loading flicker (unless force refresh)
+      if (!forceRefresh) {
+        const cached = getCachedStats(taskId, projectId, activeWorktree, stepVersionStr);
+        if (cached) {
+          if (!cancelled) {
+            setStats(cached);
+            setLoading(false);
+          }
+          return;
+        }
+      }
+
       setLoading(true);
       try {
         const data = await fetchTaskDiff(taskId, activeWorktree, projectId);
         if (!cancelled) {
           setStats(data.stats);
           // Store in cache
-          setCachedStats(taskId, projectId, activeWorktree, data.stats);
+          setCachedStats(taskId, projectId, activeWorktree, stepVersionStr, data.stats);
         }
       } catch {
         if (!cancelled) {
@@ -136,12 +147,25 @@ export function useTaskDiffStats(
       }
     }
 
+    // Initial fetch
     void load();
+
+    // Set up polling for active columns
+    let timer: ReturnType<typeof setInterval> | undefined;
+    if (pollIntervalMs && shouldFetchActiveTask) {
+      timer = setInterval(() => {
+        // Force refresh on poll - bypass cache
+        void load(true);
+      }, pollIntervalMs);
+    }
 
     return () => {
       cancelled = true;
+      if (timer) {
+        clearInterval(timer);
+      }
     };
-  }, [taskId, column, commitSha, projectId, enabled, worktree]);
+  }, [taskId, column, commitSha, projectId, enabled, worktree, stepVersion, pollIntervalMs]);
 
   return { stats, loading };
 }

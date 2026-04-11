@@ -491,13 +491,25 @@ function TaskCardComponent({
 
   const liveBadgeData = badgeUpdates.get(task.id);
 
+  // Compute step version for diff stats refresh when steps change
+  const isActiveColumn = task.column === "in-progress" || task.column === "in-review";
+  const stepVersion = useMemo(
+    () => task.steps.map((s) => `${s.name}:${s.status}`).join("|"),
+    [task.steps],
+  );
+
   // Viewport-gated diff stats fetching - only fetch when card is visible
   const { stats: diffStats } = useTaskDiffStats(
     task.id,
     task.column,
     task.mergeDetails?.commitSha,
     projectId,
-    { enabled: isInViewport, worktree: task.worktree },
+    {
+      enabled: isInViewport,
+      worktree: task.worktree,
+      stepVersion: isActiveColumn ? stepVersion : undefined,
+      pollIntervalMs: isActiveColumn ? 30_000 : undefined,
+    },
   );
 
   // Get fresh batch data if available

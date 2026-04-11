@@ -57,6 +57,12 @@
               if (existingLink.href !== themeDataUrl) {
                 existingLink.href = themeDataUrl;
               }
+              // Move existing link to end of <head> for CSS cascade correctness.
+              // This ensures color-theme rules take precedence over base token
+              // redefinitions in subsequent stylesheets.
+              if (existingLink.parentNode === document.head && document.head.lastChild !== existingLink) {
+                document.head.appendChild(existingLink);
+              }
             } else {
               // No existing link - create one
               var link = document.createElement('link');

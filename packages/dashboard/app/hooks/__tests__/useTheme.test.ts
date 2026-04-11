@@ -890,8 +890,7 @@ describe("useTheme", () => {
       // The correct implementation produces file:///app/theme-data.css
       // These regexes catch the malformed pattern
       expect(href).not.toMatch(/apptheme-data\.css$/);
-      expect(href).not.toMatch(/theme-data\.css$/ && !/\/theme-data\.css$/.test(href || ""));
-      // Verify it's actually a valid file URL
+      // Verify it's actually a valid file URL (no concatenation bug)
       expect(href).toMatch(/^file:\/\/.*\/theme-data\.css$/);
 
       // Clean up
@@ -899,6 +898,221 @@ describe("useTheme", () => {
         value: "http://localhost:3000/",
         configurable: true,
       });
+    });
+
+    it("moves pre-existing theme-data link to end of head for correct cascade", () => {
+      // Regression test: When index.html pre-hydration script injects #theme-data early,
+      // the runtime hook must move it to the end of <head> so color-theme rules
+      // take precedence over base token redefinitions in later stylesheets.
+      //
+      // CSS cascade failure mode:
+      // 1. Pre-hydration script injects <link id="theme-data"> early in <head>
+      // 2. styles.css loads and re-defines :root tokens, overriding color-theme rules
+      // 3. Dark color themes appear broken because base tokens win the cascade
+      //
+      // The fix: after href reconciliation, append the existing link to end of head
+      // so its rules are evaluated after all other stylesheets.
+
+      // Clear any existing elements that might interfere
+      document.head.innerHTML = "";
+
+      // Set up base styles that would normally load after theme-data in real HTML
+      const baseStyles = document.createElement("style");
+      baseStyles.id = "base-styles";
+      baseStyles.textContent = `
+        :root { --bg: #0d1117; --surface: #161b22; }
+        [data-theme="light"] { --bg: #ffffff; --surface: #f6f8fa; }
+      `;
+      document.head.appendChild(baseStyles);
+
+      // Inject theme-data link BEFORE base-styles (simulating pre-hydration injecting early)
+      const earlyLink = document.createElement("link");
+      earlyLink.id = "theme-data";
+      earlyLink.rel = "stylesheet";
+      earlyLink.href = "/theme-data.css";
+      document.head.insertBefore(earlyLink, baseStyles);
+
+      // Verify theme-data is early and base styles are after it
+      const headChildren = Array.from(document.head.children);
+      const themeDataIndex = headChildren.findIndex((el) => el.id === "theme-data");
+      const baseStylesIndex = headChildren.findIndex((el) => el.id === "base-styles");
+      expect(themeDataIndex).toBe(0);
+      expect(baseStylesIndex).toBe(1);
+
+      // Now switch to a non-default color theme via runtime hook
+      const { result } = renderHook(() => useTheme());
+
+      act(() => {
+        result.current.setColorTheme("ocean");
+      });
+
+      // After runtime hook runs, theme-data link should be MOVED to end of head
+      const updatedHeadChildren = Array.from(document.head.children);
+      const newThemeDataIndex = updatedHeadChildren.findIndex((el) => el.id === "theme-data");
+      const newBaseStylesIndex = updatedHeadChildren.findIndex((el) => el.id === "base-styles");
+      expect(newThemeDataIndex).toBeGreaterThan(newBaseStylesIndex);
+
+      // Still only one #theme-data link
+      const links = document.querySelectorAll('link[id="theme-data"]');
+      expect(links.length).toBe(1);
+    });
+
+    it("dark mode color theme precedence is protected by link reordering", async () => {
+      // This test verifies the specific dark-mode cascade failure scenario:
+      // - Dark mode + non-default color theme
+      // - Pre-existing #theme-data link from pre-hydration
+      // - Base styles that redefine tokens after theme-data
+      //
+      // The color theme rules must win over base token redefinitions.
+
+      localStorageMock[THEME_MODE_STORAGE_KEY] = "dark";
+      localStorageMock[COLOR_THEME_STORAGE_KEY] = "ocean";
+
+      // Mock fetch to resolve so isHydrating becomes false and useEffect runs
+      mockFetchGlobalSettings.mockResolvedValue({
+        themeMode: "dark",
+        colorTheme: "ocean",
+      });
+
+      // Clear any existing elements that might interfere
+      document.head.innerHTML = "";
+
+      // Simulate the HTML structure with theme-data injected early by pre-hydration
+      const baseStyles = document.createElement("style");
+      baseStyles.id = "base-styles";
+      baseStyles.textContent = `
+        :root {
+          --bg: #0d1117;
+          --surface: #161b22;
+          --card: #21262d;
+        }
+      `;
+      document.head.appendChild(baseStyles);
+
+      // Pre-existing theme-data link (from pre-hydration)
+      const existingLink = document.createElement("link");
+      existingLink.id = "theme-data";
+      existingLink.rel = "stylesheet";
+      existingLink.href = "/theme-data.css";
+      // Insert before base-styles to simulate pre-hydration injecting early
+      document.head.insertBefore(existingLink, baseStyles);
+
+      // Verify pre-conditions: theme-data at index 0, base-styles at index 1
+      const children = Array.from(document.head.children);
+      const themeDataIdx = children.findIndex((el) => el.id === "theme-data");
+      const baseIdx = children.findIndex((el) => el.id === "base-styles");
+      expect(themeDataIdx).toBe(0);
+      expect(baseIdx).toBe(1);
+
+      // Run the hook
+      const { result } = renderHook(() => useTheme());
+
+      // Wait for hydration AND the theme-data loading useEffect to complete.
+      // The theme-data loading useEffect runs after colorTheme state updates,
+      // so we need to wait for the link to actually move.
+      await waitFor(() => {
+        expect(result.current.colorTheme).toBe("ocean");
+      });
+
+      // Wait for the link to be moved to end of head (separate useEffect)
+      await waitFor(() => {
+        const updatedChildren = Array.from(document.head.children);
+        const newThemeDataIdx = updatedChildren.findIndex((el) => el.id === "theme-data");
+        const newBaseIdx = updatedChildren.findIndex((el) => el.id === "base-styles");
+        expect(newThemeDataIdx).toBeGreaterThan(newBaseIdx);
+      });
+
+      // Only one #theme-data link should exist
+      const links = document.querySelectorAll('link[id="theme-data"]');
+      expect(links.length).toBe(1);
+
+      // Dark mode attribute should be set
+      expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+      expect(document.documentElement.getAttribute("data-color-theme")).toBe("ocean");
+    });
+
+    it("light mode still works correctly with pre-existing theme-data link", async () => {
+      // Regression test: ensure the link-reordering fix doesn't break light mode
+      localStorageMock[THEME_MODE_STORAGE_KEY] = "light";
+      localStorageMock[COLOR_THEME_STORAGE_KEY] = "factory";
+
+      // Mock fetch to resolve so isHydrating becomes false and useEffect runs
+      mockFetchGlobalSettings.mockResolvedValue({
+        themeMode: "light",
+        colorTheme: "factory",
+      });
+
+      // Clear any existing elements that might interfere
+      document.head.innerHTML = "";
+
+      // Set up base styles that would load after theme-data
+      const baseStyles = document.createElement("style");
+      baseStyles.id = "base-styles";
+      baseStyles.textContent = `
+        :root { --bg: #0d1117; }
+        [data-theme="light"] { --bg: #ffffff; }
+      `;
+      document.head.appendChild(baseStyles);
+
+      // Pre-existing theme-data link from pre-hydration (early in head)
+      const existingLink = document.createElement("link");
+      existingLink.id = "theme-data";
+      existingLink.rel = "stylesheet";
+      existingLink.href = "/theme-data.css";
+      document.head.insertBefore(existingLink, baseStyles);
+
+      const { result } = renderHook(() => useTheme());
+
+      // Wait for hydration AND the theme-data loading useEffect to complete.
+      // The theme-data loading useEffect runs after colorTheme state updates,
+      // so we need to wait for the link to actually move.
+      await waitFor(() => {
+        expect(result.current.colorTheme).toBe("factory");
+      });
+
+      // Wait for the link to be moved to end of head (separate useEffect)
+      await waitFor(() => {
+        const updatedChildren = Array.from(document.head.children);
+        const newThemeDataIdx = updatedChildren.findIndex((el) => el.id === "theme-data");
+        const newBaseIdx = updatedChildren.findIndex((el) => el.id === "base-styles");
+        expect(newThemeDataIdx).toBeGreaterThan(newBaseIdx);
+      });
+
+      // Verify light mode works
+      expect(result.current.themeMode).toBe("light");
+      expect(result.current.colorTheme).toBe("factory");
+      expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+      expect(document.documentElement.getAttribute("data-color-theme")).toBe("factory");
+
+      // Only one #theme-data link
+      const links = document.querySelectorAll('link[id="theme-data"]');
+      expect(links.length).toBe(1);
+    });
+
+    it("only one theme-data link exists after multiple theme changes", () => {
+      // Ensure link reordering doesn't create duplicates
+      const { result } = renderHook(() => useTheme());
+
+      // Clear any existing elements
+      document.head.innerHTML = "";
+
+      // Pre-existing link
+      const existingLink = document.createElement("link");
+      existingLink.id = "theme-data";
+      existingLink.rel = "stylesheet";
+      existingLink.href = "/theme-data.css";
+      document.head.appendChild(existingLink);
+
+      // Multiple theme changes
+      act(() => result.current.setColorTheme("ocean"));
+      act(() => result.current.setColorTheme("forest"));
+      act(() => result.current.setColorTheme("nord"));
+      act(() => result.current.setColorTheme("default"));
+      act(() => result.current.setColorTheme("dracula"));
+
+      // Should still only have one #theme-data link
+      const links = document.querySelectorAll('link[id="theme-data"]');
+      expect(links.length).toBe(1);
     });
   });
 });

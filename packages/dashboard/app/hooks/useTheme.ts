@@ -38,7 +38,7 @@ function getThemeDataUrl(): string {
     return base.slice(0, -1) + `/${THEME_DATA_FILENAME}`;
   } else {
     // Filename path: replace last segment with "/theme-data.css"
-    return base.replace(/\/[^\/]+$/, `/${THEME_DATA_FILENAME}`);
+    return base.replace(/\/[^/]+$/, `/${THEME_DATA_FILENAME}`);
   }
 }
 
@@ -129,7 +129,14 @@ function applyThemeAttributes(themeMode: ThemeMode, colorTheme: ColorTheme, syst
 /**
  * Load theme-data.css for non-default themes.
  * Safely handles existing links by checking href and updating if stale.
- * This ensures correct URL resolution when baseURI changes between renders.
+ * After href reconciliation, existing links are moved to the end of <head>
+ * to ensure color-theme CSS rules take precedence over base token
+ * redefinitions in subsequent stylesheets (CSS cascade correctness).
+ *
+ * This is critical for dark mode: if #theme-data is injected early by
+ * pre-hydration scripts but styles.css loads later and redefines base
+ * tokens, those redefinitions win the cascade unless theme-data is
+ * repositioned to come after them.
  */
 function loadThemeDataStylesheet(): void {
   if (!isBrowser) return;
@@ -142,7 +149,14 @@ function loadThemeDataStylesheet(): void {
     if (existingLink.href !== expectedHref) {
       existingLink.href = expectedHref;
     }
-    // If href matches, link is already correct - nothing to do
+    // Move existing link to end of <head> for CSS cascade correctness.
+    // This ensures color-theme rules (which use [data-color-theme="..."] selectors)
+    // are evaluated AFTER any subsequent stylesheets that might redefine base tokens.
+    // Without this, dark color themes can appear broken because base token
+    // redefinitions win the cascade over color-theme rules.
+    if (existingLink.parentNode === document.head && document.head.lastChild !== existingLink) {
+      document.head.appendChild(existingLink);
+    }
     return;
   }
 

@@ -392,6 +392,18 @@ Built-in prompt templates are available for common roles:
 
 Assign templates per role with the `agentPrompts` project setting, and add custom templates for team-specific behavior. You can also set per-agent custom instructions in the dashboard.
 
+### Fine-Grained Prompt Overrides
+
+The **Prompts** section in the Settings modal (dashboard) allows you to customize specific segments of AI agent prompts without replacing entire role templates. This enables surgical customization of prompt sections like:
+
+- Executor welcome, guardrails, spawning instructions, completion criteria
+- Triage welcome and context
+- Reviewer verdict criteria
+- Merger conflict resolution instructions
+- Agent generation and workflow step prompts
+
+Each prompt shows its built-in description, allows text editing, and provides a Reset button to restore the default. Overrides are stored in the project settings and fall back to built-in defaults when cleared.
+
 ### Agent Controls (CLI)
 
 ```bash
@@ -661,6 +673,7 @@ Project settings override global settings. Configure in the dashboard under **Se
 | `recycleWorktrees` | Project | false | Pool and reuse worktrees for efficiency |
 | `groupOverlappingFiles` | Project | false | Serialize tasks with shared file scopes |
 | `agentPrompts` | Project | - | Role-based prompt templates and assignments |
+| `promptOverrides` | Project | - | Fine-grained prompt segment overrides |
 | `autoSummarizeTitles` | Project | false | Auto-generate titles for untitled tasks |
 | `autoBackupEnabled` | Project | false | Enable automatic database backups |
 | `autoBackupSchedule` | Project | `0 2 * * *` | Cron expression for backup schedule |

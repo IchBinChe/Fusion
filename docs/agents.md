@@ -162,6 +162,42 @@ This separation means:
 
 When no assignment is configured, Fusion falls back to built-in defaults.
 
+## Fine-Grained Prompt Overrides (`promptOverrides`)
+
+The **Prompts** section in the Settings modal provides a user-friendly interface for customizing specific segments of agent prompts. Unlike `agentPrompts` which replaces entire role templates, `promptOverrides` allows surgical customization of individual prompt sections.
+
+### Supported Override Keys
+
+| Key | Agent Role | Description |
+|-----|-----------|-------------|
+| `executor-welcome` | executor | Introductory section for the executor agent |
+| `executor-guardrails` | executor | Behavioral guardrails and constraints |
+| `executor-spawning` | executor | Instructions for spawning child agents |
+| `executor-completion` | executor | Completion criteria and signaling |
+| `triage-welcome` | triage | Introductory section for the triage/specification agent |
+| `triage-context` | triage | Context-gathering instructions |
+| `reviewer-verdict` | reviewer | Verdict criteria and format |
+| `merger-conflicts` | merger | Merge conflict resolution instructions |
+| `agent-generation-system` | — | System prompt for AI-assisted agent specification generation |
+| `workflow-step-refine` | — | System prompt for refining workflow step descriptions |
+
+### How It Works
+
+1. Navigate to **Settings → Prompts** in the dashboard
+2. Each prompt shows its name, key, description, and current value
+3. Edit the textarea to create a custom override
+4. Click **Reset** to restore the built-in default
+
+### Clearing Overrides
+
+To clear a specific override, click the **Reset** button in the UI. This sends `null` for that prompt key, deleting the override from settings and reverting to the built-in default.
+
+### Relationship with `agentPrompts`
+
+- `agentPrompts` replaces entire role templates
+- `promptOverrides` customizes individual segments within any template
+- Both can be used together — `promptOverrides` applies to the segment even within a custom role template
+
 ## Inter-Agent Messaging
 
 Messaging is available in dashboard mailbox UI and CLI.

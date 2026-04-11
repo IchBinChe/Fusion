@@ -93,4 +93,23 @@ describe("mobile-nav-bar.css", () => {
     expect(mobileMediaBlock).toContain(".project-content--with-mobile-nav");
     expect(cssContent).toContain(".project-content--with-footer.project-content--with-mobile-nav");
   });
+
+  it("mobile-more-sheet uses additive safe-area padding (not max) to prevent Settings clipping", () => {
+    // FN-1545: The mobile More sheet bottom padding must ADD safe-area inset to the
+    // base padding, not use max() which could collapse spacing on devices with large insets.
+    // This ensures the Settings item at the bottom is fully reachable on real mobile viewports.
+    const block = extractRuleBlock(cssContent, ".mobile-more-sheet");
+    // Must contain calc() with + operator for additive safe-area handling
+    expect(block).toMatch(/padding-bottom:\s*calc\([^)]+\s*\+\s*env\(safe-area-inset-bottom/);
+    // Must NOT use max() which would replace rather than add
+    expect(block).not.toContain("max(16px, env(safe-area-inset-bottom");
+  });
+
+  it("mobile-more-sheet has scrollable content to reach Settings on short viewports", () => {
+    const block = extractRuleBlock(cssContent, ".mobile-more-sheet");
+    // Must be scrollable so users can scroll to the last item (Settings)
+    expect(block).toContain("overflow-y: auto");
+    // Must have max-height to constrain but allow scrolling
+    expect(block).toMatch(/max-height:\s*\d+vh/);
+  });
 });

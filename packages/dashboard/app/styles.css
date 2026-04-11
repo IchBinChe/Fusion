@@ -25993,7 +25993,9 @@ html .column.drag-over * {
   border-top-left-radius: var(--radius-lg, 12px);
   border-top-right-radius: var(--radius-lg, 12px);
   padding: 16px 0;
-  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  /* Additive safe-area: base padding + device safe-area inset ensures last item
+     (Settings) is reachable on real mobile viewports including iOS home indicator. */
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   max-height: 70vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;

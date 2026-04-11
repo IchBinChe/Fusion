@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Bot, X } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, PrInfo, Settings, AgentLogEntry, Agent } from "@fusion/core";
@@ -292,6 +292,12 @@ export function TaskDetailModal({
   const [isSaving, setIsSaving] = useState(false);
   const mountedRef = useRef(false);
 
+  // Split-menu dropdown state for footer actions
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const moveMenuRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+
   // Track mount state to avoid setting state on unmounted component
   useEffect(() => {
     mountedRef.current = true;
@@ -388,6 +394,45 @@ export function TaskDetailModal({
   useEffect(() => {
     setShowAgentPicker(false);
   }, [task.id]);
+
+  // Close footer dropdown menus on outside click
+  useEffect(() => {
+    const hasOpenMenu = showMoveMenu || showActionsMenu;
+    if (!hasOpenMenu) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const inMoveMenu = moveMenuRef.current?.contains(target);
+      const inActionsMenu = actionsMenuRef.current?.contains(target);
+
+      if (!inMoveMenu && showMoveMenu) {
+        setShowMoveMenu(false);
+      }
+      if (!inActionsMenu && showActionsMenu) {
+        setShowActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showMoveMenu, showActionsMenu]);
+
+  // Close footer dropdown menus on Escape key (before modal Escape handler)
+  useEffect(() => {
+    const hasOpenMenu = showMoveMenu || showActionsMenu;
+    if (!hasOpenMenu) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation(); // Prevent modal from closing
+        if (showMoveMenu) setShowMoveMenu(false);
+        if (showActionsMenu) setShowActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showMoveMenu, showActionsMenu]);
 
   // Reset spec edit state when task changes
   useEffect(() => {
@@ -644,6 +689,28 @@ export function TaskDetailModal({
     setShowRefineModal(true);
     setRefineFeedback("");
   }, []);
+
+  // Helper to close dropdown menus after action
+  const closeMenus = useCallback(() => {
+    setShowMoveMenu(false);
+    setShowActionsMenu(false);
+  }, []);
+
+  // Menu item click handlers that close menus after action
+  const handleMoveMenuItemClick = useCallback((column: Column) => {
+    closeMenus();
+    handleMove(column);
+  }, [closeMenus]);
+
+  const handleActionsMenuItemClick = useCallback((action: () => void) => {
+    closeMenus();
+    action();
+  }, [closeMenus]);
+
+  const handleMergeMenuItemClick = useCallback(() => {
+    closeMenus();
+    handleMerge();
+  }, [closeMenus]);
 
   const handleCloseRefineModal = useCallback(() => {
     setShowRefineModal(false);
@@ -1469,71 +1536,192 @@ export function TaskDetailModal({
             </>
           ) : (
             <>
-          <button className="btn btn-danger btn-sm" onClick={handleDelete}>
-            Delete
-          </button>
-          {onDuplicateTask && (
-            <button className="btn btn-sm" onClick={handleDuplicate}>
-              Duplicate
-            </button>
-          )}
-          {(task.column === "done" || task.column === "in-review") && (
-            <button className="btn btn-sm" onClick={handleOpenRefineModal}>
-              Refine
-            </button>
-          )}
-          {task.column !== "triage" && (
-            <button className="btn btn-sm" onClick={handleRespecify}>
-              Respecify
-            </button>
-          )}
-          {(task.status === "failed" || task.status === "stuck-killed") && onRetryTask && (
-            <button className="btn btn-warning btn-sm" onClick={handleRetry}>
-              Retry
-            </button>
-          )}
-          {task.column !== "done" && (
-            <button className="btn btn-sm" onClick={handleTogglePause}>
-              {task.paused ? "Unpause" : "Pause"}
-            </button>
-          )}
-          {/* Approve/Reject Plan buttons for tasks awaiting approval */}
-          {task.column === "triage" && task.status === "awaiting-approval" && workingTask.prompt && (
-            <>
-              <button className="btn btn-primary btn-sm" onClick={handleApprovePlan}>
-                Approve Plan
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={handleRejectPlan}>
-                Reject Plan
-              </button>
-            </>
-          )}
-          <div className="modal-actions-spacer" />
-          {task.column === "in-review" ? (
-            <>
-              <button className="btn btn-sm" onClick={() => handleMove("todo")}>
-                Move to Todo
-              </button>
-              <button className="btn btn-sm" onClick={() => handleMove("in-progress")}>
-                Back to In Progress
-              </button>
-              {prAutomationLabel ? (
-                <button className="btn btn-primary btn-sm" disabled>
-                  {prAutomationLabel}
-                </button>
-              ) : (
-                <button className="btn btn-primary btn-sm" onClick={handleMerge}>
-                  Merge &amp; Close
-                </button>
+              {/* Approve/Reject Plan buttons for tasks awaiting approval — always visible */}
+              {task.column === "triage" && task.status === "awaiting-approval" && workingTask.prompt && (
+                <>
+                  <button className="btn btn-primary btn-sm" onClick={handleApprovePlan}>
+                    Approve Plan
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={handleRejectPlan}>
+                    Reject Plan
+                  </button>
+                </>
               )}
-            </>
-          ) : (
-            transitions.map((col) => (
-              <button key={col} className="btn btn-sm" onClick={() => handleMove(col)}>
-                Move to {COLUMN_LABELS[col]}
-              </button>
-            ))
-          )}
+
+              {/* Actions dropdown — less common operations */}
+              {(task.column !== "triage" || task.status === "awaiting-approval") && (
+                <div className="detail-actions-dropdown" ref={actionsMenuRef}>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setShowActionsMenu((prev) => !prev);
+                      setShowMoveMenu(false);
+                    }}
+                    aria-haspopup="menu"
+                    aria-expanded={showActionsMenu}
+                  >
+                    Actions
+                    <ChevronDown size={12} />
+                  </button>
+                  {showActionsMenu && (
+                    <div className="detail-actions-menu" role="menu">
+                      {/* Delete — destructive, always first */}
+                      <button
+                        className="detail-actions-menu-item detail-actions-menu-item-danger"
+                        role="menuitem"
+                        onClick={() => handleActionsMenuItemClick(handleDelete)}
+                      >
+                        Delete
+                      </button>
+
+                      {/* Duplicate */}
+                      {onDuplicateTask && (
+                        <button
+                          className="detail-actions-menu-item"
+                          role="menuitem"
+                          onClick={() => handleActionsMenuItemClick(handleDuplicate)}
+                        >
+                          Duplicate
+                        </button>
+                      )}
+
+                      {/* Refine */}
+                      {(task.column === "done" || task.column === "in-review") && (
+                        <button
+                          className="detail-actions-menu-item"
+                          role="menuitem"
+                          onClick={() => handleActionsMenuItemClick(handleOpenRefineModal)}
+                        >
+                          Refine
+                        </button>
+                      )}
+
+                      {/* Respecify */}
+                      {task.column !== "triage" && (
+                        <button
+                          className="detail-actions-menu-item"
+                          role="menuitem"
+                          onClick={() => handleActionsMenuItemClick(handleRespecify)}
+                        >
+                          Respecify
+                        </button>
+                      )}
+
+                      {/* Retry */}
+                      {(task.status === "failed" || task.status === "stuck-killed") && onRetryTask && (
+                        <button
+                          className="detail-actions-menu-item"
+                          role="menuitem"
+                          onClick={() => handleActionsMenuItemClick(handleRetry)}
+                        >
+                          Retry
+                        </button>
+                      )}
+
+                      {/* Pause/Unpause */}
+                      {task.column !== "done" && (
+                        <button
+                          className="detail-actions-menu-item"
+                          role="menuitem"
+                          onClick={() => handleActionsMenuItemClick(handleTogglePause)}
+                        >
+                          {task.paused ? "Unpause" : "Pause"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="modal-actions-spacer" />
+
+              {/* Move dropdown — column transitions and merge actions */}
+              <div className="detail-move-dropdown" ref={moveMenuRef}>
+                {task.column === "in-review" ? (
+                  /* In-review: show merge controls inline with Move dropdown for secondary moves */
+                  <>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => {
+                        setShowMoveMenu((prev) => !prev);
+                        setShowActionsMenu(false);
+                      }}
+                      aria-haspopup="menu"
+                      aria-expanded={showMoveMenu}
+                    >
+                      Move
+                      <ChevronDown size={12} />
+                    </button>
+                    {prAutomationLabel ? (
+                      <button className="btn btn-primary btn-sm" disabled>
+                        {prAutomationLabel}
+                      </button>
+                    ) : (
+                      <button className="btn btn-primary btn-sm" onClick={handleMergeMenuItemClick}>
+                        Merge &amp; Close
+                      </button>
+                    )}
+                    {showMoveMenu && (
+                      <div className="detail-move-menu" role="menu">
+                        <button
+                          className="detail-move-menu-item"
+                          role="menuitem"
+                          onClick={() => handleMoveMenuItemClick("todo")}
+                        >
+                          Move to Todo
+                        </button>
+                        <button
+                          className="detail-move-menu-item"
+                          role="menuitem"
+                          onClick={() => handleMoveMenuItemClick("in-progress")}
+                        >
+                          Back to In Progress
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Other columns: primary action is the first transition, dropdown for more */
+                  <>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleMoveMenuItemClick(transitions[0])}
+                      disabled={transitions.length === 0}
+                    >
+                      Move to {transitions.length > 0 ? COLUMN_LABELS[transitions[0]] : ""}
+                    </button>
+                    {transitions.length > 1 && (
+                      <>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => {
+                            setShowMoveMenu((prev) => !prev);
+                            setShowActionsMenu(false);
+                          }}
+                          aria-haspopup="menu"
+                          aria-expanded={showMoveMenu}
+                        >
+                          <ChevronDown size={12} />
+                        </button>
+                        {showMoveMenu && (
+                          <div className="detail-move-menu" role="menu">
+                            {transitions.map((col) => (
+                              <button
+                                key={col}
+                                className="detail-move-menu-item"
+                                role="menuitem"
+                                onClick={() => handleMoveMenuItemClick(col)}
+                              >
+                                Move to {COLUMN_LABELS[col]}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>

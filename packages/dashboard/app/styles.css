@@ -4040,6 +4040,60 @@ body {
   flex: 1;
 }
 
+/* Detail modal split-menu dropdowns */
+.detail-actions-dropdown,
+.detail-move-dropdown {
+  position: relative;
+}
+
+.detail-actions-menu,
+.detail-move-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  min-width: 140px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.detail-actions-menu-item,
+.detail-move-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.detail-actions-menu-item:hover,
+.detail-move-menu-item:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.detail-actions-menu-item:focus,
+.detail-move-menu-item:focus {
+  outline: none;
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.detail-actions-menu-item-danger {
+  color: var(--color-error, #dc3545);
+}
+
+.detail-actions-menu-item-danger:hover {
+  background: rgba(220, 53, 69, 0.08);
+}
+
 .detail-refine-overlay {
   position: absolute;
   inset: 0;
@@ -6461,6 +6515,12 @@ body {
 
   .modal-actions .btn {
     min-width: 0;
+  }
+
+  /* Mobile dropdown menus — position above action bar */
+  .detail-actions-menu,
+  .detail-move-menu {
+    bottom: calc(100% + 4px);
   }
 
   .modal-header {

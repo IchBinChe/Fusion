@@ -168,7 +168,7 @@ describe("TaskDetailModal", () => {
     expect(screen.getByText("Comments")).toBeTruthy();
   });
 
-  it("renders Retry button when task status is 'failed'", () => {
+  it("renders Retry button when task status is 'failed' (in Actions dropdown)", () => {
     render(
       <TaskDetailModal
         task={makeTask({ status: "failed" })}
@@ -182,7 +182,11 @@ describe("TaskDetailModal", () => {
       />,
     );
 
-    expect(screen.getByText("Retry")).toBeTruthy();
+    // Open Actions dropdown to see Retry
+    const actionsBtn = screen.getByRole("button", { name: /actions/i });
+    fireEvent.click(actionsBtn);
+
+    expect(screen.getByRole("menuitem", { name: "Retry" })).toBeTruthy();
   });
 
   it("does NOT render Retry button when task status is not 'failed'", () => {
@@ -199,7 +203,10 @@ describe("TaskDetailModal", () => {
       />,
     );
 
-    expect(screen.queryByText("Retry")).toBeNull();
+    // No Retry should be visible in the Actions dropdown
+    const actionsBtn = screen.getByRole("button", { name: /actions/i });
+    fireEvent.click(actionsBtn);
+    expect(screen.queryByRole("menuitem", { name: "Retry" })).toBeNull();
   });
 
   it("does NOT render Retry button when onRetryTask is not provided", () => {
@@ -219,7 +226,7 @@ describe("TaskDetailModal", () => {
   });
 
   describe("retry action uniqueness for in-review failed tasks", () => {
-    it("shows exactly one Retry button when task is in-review AND failed", () => {
+    it("shows exactly one Retry button when task is in-review AND failed (in Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "in-review", status: "failed" })}
@@ -233,12 +240,15 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Should have exactly one Retry button (not two)
-      const retryButtons = screen.getAllByText("Retry");
+      // Open Actions dropdown and check for exactly one Retry
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      const retryButtons = screen.getAllByRole("menuitem", { name: "Retry" });
       expect(retryButtons).toHaveLength(1);
     });
 
-    it("shows exactly one Retry button when task is in-review AND stuck-killed", () => {
+    it("shows exactly one Retry button when task is in-review AND stuck-killed (in Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "in-review", status: "stuck-killed" })}
@@ -252,12 +262,15 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Should have exactly one Retry button (not two)
-      const retryButtons = screen.getAllByText("Retry");
+      // Open Actions dropdown and check for exactly one Retry
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      const retryButtons = screen.getAllByRole("menuitem", { name: "Retry" });
       expect(retryButtons).toHaveLength(1);
     });
 
-    it("shows 'Move to Todo' as distinct label for in-review tasks (not 'Retry')", () => {
+    it("shows 'Move to Todo' in Move dropdown for in-review tasks (not 'Retry')", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "in-review" })}
@@ -270,12 +283,21 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Should show "Move to Todo" button, not "Retry"
-      expect(screen.getByText("Move to Todo")).toBeTruthy();
-      expect(screen.queryByText("Retry")).toBeNull();
+      // Should show "Move" button that opens dropdown
+      const moveBtn = screen.getByRole("button", { name: /move/i });
+      expect(moveBtn).toBeTruthy();
+
+      // Open Move dropdown to see "Move to Todo"
+      fireEvent.click(moveBtn);
+      expect(screen.getByRole("menuitem", { name: "Move to Todo" })).toBeTruthy();
+
+      // No Retry in Actions dropdown
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+      expect(screen.queryByRole("menuitem", { name: "Retry" })).toBeNull();
     });
 
-    it("in-review failed task shows both 'Retry' and 'Move to Todo' actions with distinct labels", () => {
+    it("in-review failed task shows both 'Retry' (in Actions) and 'Move to Todo' (in Move dropdown)", async () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "in-review", status: "failed" })}
@@ -289,12 +311,21 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Retry button from failed status
-      expect(screen.getByText("Retry")).toBeTruthy();
-      // Move to Todo from in-review column (distinct from Retry)
-      expect(screen.getByText("Move to Todo")).toBeTruthy();
+      // Open Actions dropdown and check Retry
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      await act(async () => {
+        fireEvent.click(actionsBtn);
+      });
+      expect(screen.getByRole("menuitem", { name: "Retry" })).toBeTruthy();
       // Total count: exactly one Retry
-      expect(screen.getAllByText("Retry")).toHaveLength(1);
+      expect(screen.getAllByRole("menuitem", { name: "Retry" })).toHaveLength(1);
+
+      // Open Move dropdown and check Move to Todo
+      const moveBtn = screen.getByRole("button", { name: /move/i });
+      await act(async () => {
+        fireEvent.click(moveBtn);
+      });
+      expect(screen.getByRole("menuitem", { name: "Move to Todo" })).toBeTruthy();
     });
   });
 
@@ -1988,7 +2019,7 @@ describe("TaskDetailModal", () => {
       expect(body).toBeTruthy();
     });
 
-    it("modal-actions contains Delete and Pause buttons for non-done tasks", () => {
+    it("modal-actions contains Delete and Pause buttons for non-done tasks (via Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "in-progress" as Column })}
@@ -2001,8 +2032,13 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByText("Delete")).toBeTruthy();
-      expect(screen.getByText("Pause")).toBeTruthy();
+      // Actions are now in a dropdown - open it first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      // Now the dropdown items should be visible
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Pause" })).toBeTruthy();
     });
 
     it("in-review modal-actions contains Merge & Close and Back to In Progress buttons", () => {
@@ -2019,7 +2055,11 @@ describe("TaskDetailModal", () => {
       );
 
       expect(screen.getByText("Merge & Close")).toBeTruthy();
-      expect(screen.getByText("Back to In Progress")).toBeTruthy();
+
+      // Back to In Progress is now in the Move dropdown
+      const moveBtn = screen.getByRole("button", { name: /move/i });
+      fireEvent.click(moveBtn);
+      expect(screen.getByRole("menuitem", { name: "Back to In Progress" })).toBeTruthy();
     });
 
     it("shows PR automation waiting label instead of Merge & Close when awaiting PR checks", () => {
@@ -2968,7 +3008,7 @@ describe("TaskDetailModal", () => {
   });
 
   describe("Duplicate button", () => {
-    it("renders Duplicate button in modal actions when onDuplicateTask is provided", () => {
+    it("renders Duplicate button in modal actions when onDuplicateTask is provided (in Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask()}
@@ -2982,7 +3022,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByText("Duplicate")).toBeTruthy();
+      // Open Actions dropdown to see Duplicate
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      expect(screen.getByRole("menuitem", { name: "Duplicate" })).toBeTruthy();
     });
 
     it("does NOT render Duplicate button when onDuplicateTask is not provided", () => {
@@ -2998,7 +3042,10 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.queryByText("Duplicate")).toBeNull();
+      // Open Actions dropdown - Duplicate should not be there
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+      expect(screen.queryByRole("menuitem", { name: "Duplicate" })).toBeNull();
     });
 
     it("clicking Duplicate shows confirmation dialog", () => {
@@ -3018,7 +3065,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Duplicate"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
 
       expect(window.confirm).toHaveBeenCalledWith(
         "Duplicate FN-001? This will create a new task in Triage with the same description and prompt."
@@ -3047,7 +3098,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Duplicate"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
 
       await waitFor(() => {
         expect(mockDuplicate).toHaveBeenCalledWith("FN-001");
@@ -3077,7 +3132,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Duplicate"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
 
       await waitFor(() => {
         expect(addToast).toHaveBeenCalledWith("Duplicated FN-001 → FN-002", "success");
@@ -3105,7 +3164,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Duplicate"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
 
       expect(mockDuplicate).not.toHaveBeenCalled();
 
@@ -3132,7 +3195,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Duplicate"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate" }));
 
       await waitFor(() => {
         expect(addToast).toHaveBeenCalledWith("Duplicate failed", "error");
@@ -3143,7 +3210,7 @@ describe("TaskDetailModal", () => {
   });
 
   describe("Refinement button", () => {
-    it("renders Refine button for 'done' column tasks", () => {
+    it("renders Refine button for 'done' column tasks (in Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "done" })}
@@ -3156,10 +3223,14 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByText("Refine")).toBeTruthy();
+      // Open Actions dropdown to see Refine
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      expect(screen.getByRole("menuitem", { name: "Refine" })).toBeTruthy();
     });
 
-    it("renders Refine button for 'in-review' column tasks", () => {
+    it("renders Refine button for 'in-review' column tasks (in Actions dropdown)", () => {
       render(
         <TaskDetailModal
           task={makeTask({ column: "in-review" })}
@@ -3172,7 +3243,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByText("Refine")).toBeTruthy();
+      // Open Actions dropdown to see Refine
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      expect(screen.getByRole("menuitem", { name: "Refine" })).toBeTruthy();
     });
 
     it("does NOT render Refine button for 'triage' column tasks", () => {
@@ -3188,6 +3263,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
+      // No Refine button visible for triage tasks (no Actions dropdown)
       expect(screen.queryByText("Refine")).toBeNull();
     });
 
@@ -3204,7 +3280,10 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.queryByText("Refine")).toBeNull();
+      // Open Actions dropdown - Refine should not be there
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+      expect(screen.queryByRole("menuitem", { name: "Refine" })).toBeNull();
     });
 
     it("does NOT render Refine button for 'in-progress' column tasks", () => {
@@ -3220,7 +3299,10 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.queryByText("Refine")).toBeNull();
+      // Open Actions dropdown - Refine should not be there
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+      expect(screen.queryByRole("menuitem", { name: "Refine" })).toBeNull();
     });
 
     it("clicking Refine opens the refinement modal", () => {
@@ -3236,7 +3318,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       expect(screen.getByText("Refine", { selector: "h3" })).toBeTruthy();
       expect(screen.getByPlaceholderText("Enter your feedback here...")).toBeTruthy();
@@ -3255,7 +3341,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       expect(screen.getByText("0/2000 characters")).toBeTruthy();
     });
@@ -3273,7 +3363,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       const textarea = screen.getByPlaceholderText("Enter your feedback here...");
       await act(async () => {
@@ -3296,7 +3390,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       const submitButton = screen.getByText("Create Refinement Task");
       expect(submitButton.hasAttribute("disabled")).toBe(true);
@@ -3315,7 +3413,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       const textarea = screen.getByPlaceholderText("Enter your feedback here...");
       await act(async () => {
@@ -3341,7 +3443,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
       fireEvent.click(screen.getByText("Cancel"));
 
       // Modal should be closed, but detail modal stays open (onClose not called)
@@ -3364,7 +3470,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       // Try to submit with empty text (manually trigger submit since button is disabled)
       const { refineTask } = await import("../../api");
@@ -3392,7 +3502,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       const textarea = screen.getByPlaceholderText("Enter your feedback here...");
       fireEvent.change(textarea, { target: { value: "Need to add more tests" } });
@@ -3424,7 +3538,12 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      // Click Refine from the dropdown
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       const textarea = screen.getByPlaceholderText("Enter your feedback here...");
       fireEvent.change(textarea, { target: { value: "Need to add more tests" } });
@@ -3449,7 +3568,12 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      // Click Refine from the dropdown
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       // The submit button should be inside .detail-refine-input-group (the input area)
       const inputGroup = container.querySelector(".detail-refine-input-group");
@@ -3477,7 +3601,12 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      // Click Refine from the dropdown
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       // Submit button starts disabled (no feedback)
       const submitButton = screen.getByText("Create Refinement Task");
@@ -3505,7 +3634,12 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Refine"));
+      // Open Actions dropdown first
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      // Click Refine from the dropdown
+      fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
 
       const inputGroup = container.querySelector(".detail-refine-input-group")!;
       expect(inputGroup.querySelector(".detail-refine-char-count")).toBeTruthy();
@@ -4077,7 +4211,7 @@ describe("TaskDetailModal", () => {
     it("shows normal modal actions (not edit actions) when not editing", () => {
       const { container } = render(
         <TaskDetailModal
-          task={makeTask({ id: "FN-001", column: "triage", title: "Test task" })}
+          task={makeTask({ id: "FN-001", column: "todo", title: "Test task" })}
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -4095,8 +4229,9 @@ describe("TaskDetailModal", () => {
       const buttonTexts = Array.from(footerButtons).map((b) => b.textContent);
       expect(buttonTexts).not.toContain("Save");
       expect(buttonTexts).not.toContain("Cancel");
-      // Should contain standard actions like Delete
-      expect(buttonTexts).toContain("Delete");
+      // Should contain Actions dropdown and Move primary action
+      expect(buttonTexts).toContain("Actions");
+      expect(buttonTexts.some((t) => t?.includes("Move to"))).toBe(true);
     });
   });
 

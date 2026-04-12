@@ -79,6 +79,7 @@ import {
   extractFileScope,
   validateDiffScope,
   shouldSyncDependenciesForMerge,
+  summarizeVerificationOutput,
   type ConflictCategory,
 } from "./merger.js";
 import { createKbAgent } from "./pi.js";
@@ -2263,6 +2264,14 @@ describe("aiMergeTask — deterministic merge verification", () => {
       expect.stringContaining("Deterministic test verification failed"),
       "VerificationError",
     );
+
+    // Verify log entry contains summary (not raw output) with engine logs reference
+    const logCalls = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls;
+    const verificationFailCall = logCalls.find((call: any[]) =>
+      typeof call[1] === "string" && call[1].includes("[verification] test command failed"),
+    );
+    expect(verificationFailCall).toBeTruthy();
+    expect(verificationFailCall![1]).toContain("full output available in engine logs");
   });
 
   it("does not fail verification when verbose test output exceeds buffer after exit 0", async () => {
@@ -3563,5 +3572,65 @@ describe("aiMergeTask — context limit recovery with truncation", () => {
 
     // Compaction should NOT have been called for non-context errors
     expect(vi.mocked(compactSessionContext)).not.toHaveBeenCalled();
+  });
+});
+
+describe("summarizeVerificationOutput", () => {
+  it("extracts vitest-style test summary with failure names", () => {
+    const output = [
+      "some setup output...",
+      "FAIL src/utils.test.ts",
+      "  ✗ should validate input",
+      "  ✗ should handle edge case",
+      "Tests: 2 failed, 48 passed, 50 total",
+    ].join("\n");
+    const result = summarizeVerificationOutput(output, "test");
+    expect(result).toContain("Tests: 2 failed, 48 passed, 50 total");
+    expect(result).toContain("should validate input");
+    expect(result).toContain("full output available in engine logs");
+  });
+
+  it("limits failure names to 5 with overflow indicator", () => {
+    // Build output with 7 FAIL lines
+    const output = [
+      "FAIL test1",
+      "FAIL test2",
+      "FAIL test3",
+      "FAIL test4",
+      "FAIL test5",
+      "FAIL test6",
+      "FAIL test7",
+      "Tests: 7 failed, 0 passed, 7 total",
+    ].join("\n");
+    const result = summarizeVerificationOutput(output, "test");
+    expect(result).toContain("test5");
+    expect(result).toContain("... and 2 more failures");
+    expect(result).not.toContain("test6");
+  });
+
+  it("falls back to first 500 chars for unstructured output", () => {
+    const output = "A".repeat(1000);
+    const result = summarizeVerificationOutput(output, "build");
+    expect(result.length).toBeLessThan(600);
+    expect(result).toContain("full output available in engine logs");
+  });
+
+  it("returns generic message for empty output", () => {
+    const result = summarizeVerificationOutput("", "test");
+    expect(result).toContain("no output");
+    expect(result).toContain("full output available in engine logs");
+  });
+
+  it("deduplicates identical failure names", () => {
+    const output = [
+      "FAIL src/a.test.ts",
+      "FAIL src/a.test.ts",  // duplicate
+      "FAIL src/b.test.ts",
+      "Tests: 3 failed, 0 passed",
+    ].join("\n");
+    const result = summarizeVerificationOutput(output, "test");
+    // Should contain only unique names (src/a.test.ts once, src/b.test.ts)
+    const bulletMatches = result.match(/• /g);
+    expect(bulletMatches?.length).toBe(2);
   });
 });

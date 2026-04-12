@@ -90,6 +90,154 @@ function truncateVerificationOutput(output: string): string {
   return `... output truncated to last ${VERIFICATION_LOG_MAX_CHARS} characters ...\n${output.slice(-VERIFICATION_LOG_MAX_CHARS)}`;
 }
 
+/**
+ * Summarize test/build verification failure output into a concise message.
+ * Extracts test counts and failure names from common test runner formats,
+ * falls back to truncated output for unstructured output.
+ */
+export function summarizeVerificationOutput(output: string, type: "test" | "build"): string {
+  const lines = output.split("\n");
+  let summaryLine: string | null = null;
+  const failureNames = new Set<string>();
+
+  // 1. Extract summary line
+  for (const line of lines) {
+    // vitest/jest: "Tests: 2 failed, 48 passed, 50 total"
+    const testsMatch = line.match(/^Tests:\s*(\d+)\s+failed,\s*(\d+)\s+passed(?:,\s*(\d+)\s+total)?/i);
+    if (testsMatch) {
+      const failed = testsMatch[1];
+      const passed = testsMatch[2];
+      const total = testsMatch[3] ? `, ${testsMatch[3]} total` : "";
+      summaryLine = `Tests: ${failed} failed, ${passed} passed${total}`;
+      break;
+    }
+
+    // Generic: "X tests failed, Y passed, Z total"
+    const genericMatch = line.match(/^(\d+)\s+tests?\s+failed,\s*(\d+)\s+passed,\s*(\d+)\s+total/i);
+    if (genericMatch) {
+      summaryLine = `${genericMatch[1]} tests failed, ${genericMatch[2]} passed, ${genericMatch[3]} total`;
+      break;
+    }
+
+    // Various runners: "X failing" / "X failures" / "X failed"
+    const failCountMatch = line.match(/^(\d+)\s+(failings?|failures?|failed)/i);
+    if (failCountMatch) {
+      summaryLine = `${failCountMatch[1]} ${failCountMatch[2]}`;
+      break;
+    }
+  }
+
+  // 2. Extract failure names (up to 5 unique names)
+  // Priority: markers (✗, ●, -) provide descriptive names, FAIL lines provide file context
+  // Process markers first (they give actual test names), then FAIL lines (file context)
+  const markerLines: string[] = [];
+  const failLines: string[] = [];
+
+  for (const line of lines) {
+    // FAIL <file> — vitest file-level failure header (at start of line)
+    const failMatch = line.match(/^(FAIL)\s+(.+)/);
+    if (failMatch) {
+      failLines.push(failMatch[2].trim());
+      continue;
+    }
+
+    // Trim leading whitespace for marker detection (vitest indents failure details)
+    const trimmedLine = line.trimStart();
+
+    // Unicode cross markers: ✗ or ✕ or × (possibly indented)
+    const crossMatch = trimmedLine.match(/^[✗✕×]\s*(.+)/);
+    if (crossMatch) {
+      markerLines.push(crossMatch[1].trim());
+      continue;
+    }
+
+    // Jest failure bullet: ● (possibly indented)
+    const bulletMatch = trimmedLine.match(/^●\s*(.+)/);
+    if (bulletMatch) {
+      markerLines.push(bulletMatch[1].trim());
+      continue;
+    }
+
+    // Jest/Mocha indented test name: - MyTest › should do something (indented)
+    const dashMatch = trimmedLine.match(/^-\s+(\S[\s\S]*?)$/);
+    if (dashMatch) {
+      const potential = dashMatch[1].trim();
+      // Only include lines that look like test names (contain common test patterns)
+      if (/[\s›>]|(should|cannot|does|doesn|to|not|throws)/i.test(potential)) {
+        markerLines.push(potential);
+      }
+      continue;
+    }
+
+    // AssertionError — generic assertion failures (possibly indented)
+    const assertionMatch = trimmedLine.match(/^(AssertionError|AssertionError:.*)$/i);
+    if (assertionMatch) {
+      markerLines.push(assertionMatch[1]);
+    }
+  }
+
+  // Add marker names first (higher priority - they give actual test names)
+  for (const name of markerLines) {
+    const truncated = name.length > 120 ? name.slice(0, 120) : name;
+    failureNames.add(truncated);
+  }
+
+  // Fill remaining slots with FAIL file names (lower priority - just file context)
+  for (const name of failLines) {
+    const truncated = name.length > 120 ? name.slice(0, 120) : name;
+    failureNames.add(truncated);
+  }
+
+  // 3. Build the summary string
+  const footer = "(full output available in engine logs)";
+  const parts: string[] = [];
+
+  if (summaryLine) {
+    parts.push(summaryLine);
+  }
+
+  if (failureNames.size > 0) {
+    const names = Array.from(failureNames);
+    if (names.length <= 5) {
+      for (const name of names) {
+        parts.push(`  • ${name}`);
+      }
+    } else {
+      // Show first 5 and note overflow
+      for (let i = 0; i < 5; i++) {
+        parts.push(`  • ${names[i]}`);
+      }
+      parts.push(`  • ... and ${names.length - 5} more failures`);
+    }
+  }
+
+  if (parts.length > 0) {
+    parts.push(footer);
+    return parts.join("\n");
+  }
+
+  // 4. Fallback — no structured data found
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return `Verification command failed with no output\n${footer}`;
+  }
+
+  if (trimmed.length <= 500) {
+    return `${trimmed}\n${footer}`;
+  }
+
+  // Truncate at last space or newline boundary
+  let cutoff = 500;
+  for (let i = 500; i < trimmed.length; i++) {
+    if (trimmed[i] === " " || trimmed[i] === "\n") {
+      cutoff = i;
+      break;
+    }
+  }
+
+  return `${trimmed.slice(0, cutoff)}...\n${footer}`;
+}
+
 function truncateWorkflowScriptOutput(output: string): string {
   if (output.length <= WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS) return output;
   return `... output truncated to last ${WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS} characters ...\n${output.slice(-WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS)}`;
@@ -369,11 +517,12 @@ async function runVerificationCommand(
 
     // Keep command output out of process logs. The bounded excerpt is stored on
     // the task for diagnostics without dumping test output to the engine stdout.
-    const summary = truncateVerificationOutput(result.stderr || result.stdout || error.message || "Unknown error");
+    const output = result.stderr || result.stdout || error.message || "Unknown error";
+    const summary = summarizeVerificationOutput(output, type);
     mergerLog.error(`${taskId}: ${type} command failed (exit ${result.exitCode}); output captured in task log`);
     await store.logEntry(
       taskId,
-      `[verification] ${type} command failed (exit ${result.exitCode}): ${summary.trim()}`,
+      `[verification] ${type} command failed (exit ${result.exitCode}):\n${summary}`,
     );
   }
 

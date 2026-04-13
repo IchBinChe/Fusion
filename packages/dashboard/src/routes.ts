@@ -2496,21 +2496,37 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
   });
 
-  // Retry failed or stuck-killed task
+  // Retry failed, stuck-killed, or stranded triage/specification task
   router.post("/tasks/:id/retry", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
       const task = await scopedStore.getTask(req.params.id);
-      if (task.status !== "failed" && task.status !== "stuck-killed") {
+      const retrySpecification =
+        task.column === "triage" &&
+        (task.status === "specifying" || task.status === "needs-respecify" || (task.stuckKillCount ?? 0) > 0);
+      if (task.status !== "failed" && task.status !== "stuck-killed" && !retrySpecification) {
         throw badRequest(`Task is not in a retryable state (current status: ${task.status || 'none'})`);
       }
       await scopedStore.updateTask(req.params.id, {
-        status: null,
+        status: retrySpecification ? "needs-respecify" : null,
         error: null,
         worktree: null,
         branch: null,
         stuckKillCount: 0,
+        recoveryRetryCount: null,
+        nextRecoveryAt: null,
       });
+
+      if (retrySpecification) {
+        const { rm } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const promptPath = join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md");
+        await rm(promptPath, { force: true });
+        await scopedStore.logEntry(req.params.id, "Retry requested from dashboard (specification retry budget reset)");
+        const updated = await scopedStore.getTask(req.params.id);
+        res.json(updated);
+        return;
+      }
 
       // Reset steps if the branch has no unique commits (work was lost with worktree)
       const completedSteps = task.steps.filter(
@@ -3401,6 +3417,13 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       // Move to triage for re-specification (only valid for todo/in-progress)
       const updated = await scopedStore.moveTask(task.id, "triage");
 
+      // Remove the existing spec so re-specification starts from the task
+      // description and feedback rather than revising stale PROMPT.md content.
+      const { rm } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const promptPath = join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md");
+      await rm(promptPath, { force: true });
+
       // Update status to indicate needs re-specification
       await scopedStore.updateTask(task.id, { status: "needs-respecify" });
 
@@ -3435,6 +3458,13 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       // Move to triage for re-specification
       const updated = await scopedStore.moveTask(task.id, "triage");
+
+      // Remove the existing spec so rebuilds produce a fresh PROMPT.md instead
+      // of asking triage to revise whatever was already on disk.
+      const { rm } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const promptPath = join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md");
+      await rm(promptPath, { force: true });
 
       // Update status to indicate needs re-specification
       await scopedStore.updateTask(task.id, { status: "needs-respecify" });

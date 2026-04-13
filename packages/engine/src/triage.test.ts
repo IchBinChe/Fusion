@@ -165,6 +165,26 @@ describe("buildSpecificationPrompt", () => {
     expect(prompt).toContain("revising an existing task specification");
   });
 
+  it("generates fresh re-specification prompt when only feedback is provided", () => {
+    const feedback = "Start fresh and avoid the stale bootstrap assumption";
+
+    const prompt = buildSpecificationPrompt(
+      baseTask,
+      ".fusion/tasks/KB-001/PROMPT.md",
+      undefined,
+      [],
+      undefined,
+      feedback,
+    );
+
+    expect(prompt).toContain("Re-specify this task");
+    expect(prompt).toContain("Re-specification Instructions");
+    expect(prompt).toContain("fresh replacement specification");
+    expect(prompt).toContain(feedback);
+    expect(prompt).not.toContain("Existing Specification");
+    expect(prompt).toContain("without carrying forward stale assumptions");
+  });
+
   it("includes attachments when provided", () => {
     const attachments = [
       {

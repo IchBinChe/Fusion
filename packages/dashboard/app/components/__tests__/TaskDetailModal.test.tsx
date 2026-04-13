@@ -270,6 +270,27 @@ describe("TaskDetailModal", () => {
       expect(retryButtons).toHaveLength(1);
     });
 
+    it("shows Retry for a stranded specifying triage task", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ column: "triage", status: "specifying", stuckKillCount: 6 })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          onRetryTask={noopRetry}
+          addToast={noop}
+        />,
+      );
+
+      const actionsBtn = screen.getByRole("button", { name: /actions/i });
+      fireEvent.click(actionsBtn);
+
+      const retryButtons = screen.getAllByRole("menuitem", { name: "Retry" });
+      expect(retryButtons).toHaveLength(1);
+    });
+
     it("shows 'Move to Todo' in Move dropdown for in-review tasks (not 'Retry')", () => {
       render(
         <TaskDetailModal

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } 
 import express from "express";
 import http from "node:http";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -1296,6 +1296,8 @@ describe("POST /tasks/:id/retry", () => {
       worktree: null,
       branch: null,
       stuckKillCount: 0,
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
@@ -1330,6 +1332,8 @@ describe("POST /tasks/:id/retry", () => {
       worktree: null,
       branch: null,
       stuckKillCount: 0,
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
@@ -1352,9 +1356,66 @@ describe("POST /tasks/:id/retry", () => {
       worktree: null,
       branch: null,
       stuckKillCount: 0,
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
     expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (stuck kill budget reset)");
+  });
+
+  it("retries a stranded specifying triage task in triage and removes stale prompt", async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "kb-task-retry-spec-"));
+    const taskDir = join(tempRoot, ".fusion", "tasks", "FN-001");
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, "PROMPT.md"), "# stale spec\n");
+
+    const specifyingTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage" as const,
+      status: "specifying",
+      stuckKillCount: 6,
+      recoveryRetryCount: 2,
+      nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const retriedTask = {
+      ...specifyingTask,
+      status: "needs-respecify",
+      stuckKillCount: 0,
+      recoveryRetryCount: undefined,
+      nextRecoveryAt: undefined,
+    };
+
+    (store.getTask as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(specifyingTask)
+      .mockResolvedValueOnce(retriedTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(retriedTask);
+    (store.getRootDir as ReturnType<typeof vi.fn>).mockReturnValue(tempRoot);
+
+    try {
+      const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+        "Content-Type": "application/json",
+      });
+
+      expect(res.status).toBe(200);
+      expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+        status: "needs-respecify",
+        error: null,
+        worktree: null,
+        branch: null,
+        stuckKillCount: 0,
+        recoveryRetryCount: null,
+        nextRecoveryAt: null,
+      });
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "KB-001",
+        "Retry requested from dashboard (specification retry budget reset)",
+      );
+      expect(res.body.status).toBe("needs-respecify");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -5763,27 +5824,37 @@ describe("POST /tasks/:id/spec/revise", () => {
   it("requests spec revision and moves task from todo to triage", async () => {
     const todoTask = { ...FAKE_TASK_DETAIL, column: "todo" as const };
     const movedTask = { ...FAKE_TASK_DETAIL, column: "triage" as const };
+    const tempRoot = mkdtempSync(join(tmpdir(), "kb-spec-revise-"));
+    const taskDir = join(tempRoot, ".fusion", "tasks", "FN-001");
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, "PROMPT.md"), "# stale spec\n");
 
     (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(todoTask);
     (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
     (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+    (store.getRootDir as ReturnType<typeof vi.fn>).mockReturnValue(tempRoot);
 
-    const res = await REQUEST(
-      buildApp(),
-      "POST",
-      "/api/tasks/KB-001/spec/revise",
-      JSON.stringify({ feedback: "Please add more details about error handling" }),
-      { "Content-Type": "application/json" }
-    );
+    try {
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/tasks/KB-001/spec/revise",
+        JSON.stringify({ feedback: "Please add more details about error handling" }),
+        { "Content-Type": "application/json" }
+      );
 
-    expect(res.status).toBe(200);
-    expect(store.logEntry).toHaveBeenCalledWith(
-      "FN-001",
-      "AI spec revision requested",
-      "Please add more details about error handling"
-    );
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage");
-    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-respecify" });
+      expect(res.status).toBe(200);
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-001",
+        "AI spec revision requested",
+        "Please add more details about error handling"
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage");
+      expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-respecify" });
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("requests spec revision and moves task from in-progress to triage", async () => {
@@ -5973,20 +6044,30 @@ describe("POST /tasks/:id/spec/rebuild", () => {
   it("rebuilds spec and moves task from todo to triage", async () => {
     const todoTask = { ...FAKE_TASK_DETAIL, column: "todo" as const };
     const movedTask = { ...FAKE_TASK_DETAIL, column: "triage" as const };
+    const tempRoot = mkdtempSync(join(tmpdir(), "kb-spec-rebuild-"));
+    const taskDir = join(tempRoot, ".fusion", "tasks", "FN-001");
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, "PROMPT.md"), "# stale spec\n");
 
     (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(todoTask);
     (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
     (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+    (store.getRootDir as ReturnType<typeof vi.fn>).mockReturnValue(tempRoot);
 
-    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/spec/rebuild");
+    try {
+      const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/spec/rebuild");
 
-    expect(res.status).toBe(200);
-    expect(store.logEntry).toHaveBeenCalledWith(
-      "FN-001",
-      "Specification rebuild requested by user"
-    );
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage");
-    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-respecify" });
+      expect(res.status).toBe(200);
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-001",
+        "Specification rebuild requested by user"
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage");
+      expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-respecify" });
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("rebuilds spec and moves task from in-progress to triage", async () => {

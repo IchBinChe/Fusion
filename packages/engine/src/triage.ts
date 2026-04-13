@@ -652,9 +652,6 @@ export class TriageProcessor {
           let feedback: string | undefined;
 
           if (isRespecify) {
-            // Get the existing prompt content
-            existingPrompt = detail.prompt;
-
             // Extract feedback from the most recent "AI spec revision requested" log entry
             const revisionLogEntry = [...task.log]
               .reverse()
@@ -1375,7 +1372,9 @@ export function buildSpecificationPrompt(
   existingPrompt?: string,
   feedback?: string,
 ): string {
-  const isRevision = existingPrompt && feedback;
+  const hasFeedback = Boolean(feedback?.trim());
+  const isRevision = Boolean(existingPrompt && hasFeedback);
+  const isFreshRespecification = Boolean(!existingPrompt && hasFeedback);
 
   let commandsSection = "";
   if (settings?.testCommand || settings?.buildCommand) {
@@ -1457,6 +1456,18 @@ ${existingPrompt}
 ${feedback}
 
 Please revise the specification above to address this feedback. Write the complete revised PROMPT.md to \`${promptPath}\`.`;
+  } else if (isFreshRespecification) {
+    revisionSection = `
+
+## Re-specification Instructions
+You are creating a fresh replacement specification based on user feedback.
+
+**Important:** Do not reuse stale PROMPT.md content. Start from the current task description, inspect the codebase, and write a complete new specification that addresses the feedback below.
+
+## User Feedback
+${feedback}
+
+Please write the complete fresh PROMPT.md to \`${promptPath}\`.`;
   }
 
   let subtaskSection = "";
@@ -1507,7 +1518,7 @@ The user did not explicitly request subtask breakdown, so you should first asses
 - If size is uncertain at first, make a quick assessment from the available context before deciding.`;
   }
 
-  return `${isRevision ? "Revise" : "Specify"} this task and write the result to \`${promptPath}\`.
+  return `${isRevision ? "Revise" : isFreshRespecification ? "Re-specify" : "Specify"} this task and write the result to \`${promptPath}\`.
 
 ## Task
 - **ID:** ${task.id}
@@ -1517,7 +1528,7 @@ ${task.breakIntoSubtasks ? "- **Break into subtasks:** Yes (user requested)" : "
 ${task.dependencies.length > 0 ? `- **Dependencies:** ${task.dependencies.join(", ")}` : ""}${revisionSection}${subtaskSection}
 
 ## Instructions
-${isRevision ? "1. Review the existing specification and user feedback carefully\n2. Revise the PROMPT.md to address the feedback while maintaining the structure\n3. Ensure the specification is detailed enough for an AI agent to execute" : "1. Read the project structure to understand context (package.json, source files, etc.)\n2. Write a complete PROMPT.md specification to the given path following the format in your system prompt\n3. The specification must be detailed enough for an autonomous AI agent to implement without asking questions\n4. Name actual files, functions, and patterns from the codebase — be specific"}
+${isRevision ? "1. Review the existing specification and user feedback carefully\n2. Revise the PROMPT.md to address the feedback while maintaining the structure\n3. Ensure the specification is detailed enough for an AI agent to execute" : isFreshRespecification ? "1. Read the project structure to understand context (package.json, source files, etc.)\n2. Write a fresh complete PROMPT.md specification to the given path following the format in your system prompt\n3. Address the user feedback without carrying forward stale assumptions from the old spec\n4. Name actual files, functions, and patterns from the codebase — be specific" : "1. Read the project structure to understand context (package.json, source files, etc.)\n2. Write a complete PROMPT.md specification to the given path following the format in your system prompt\n3. The specification must be detailed enough for an autonomous AI agent to implement without asking questions\n4. Name actual files, functions, and patterns from the codebase — be specific"}
 
 Use the write tool to write the specification file.${commandsSection}${memorySection}${attachmentsSection}${userCommentsSection}`;
 }

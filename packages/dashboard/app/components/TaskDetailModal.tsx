@@ -253,6 +253,14 @@ export function TaskDetailModal({
   // Derive a working task that always has all available fields.
   // Falls back to the optimistic Task while loading, uses fullDetail once loaded.
   const workingTask: TaskDetail = fullDetail ?? { ...task, prompt: "" } as TaskDetail;
+  const canRetryTask =
+    task.status === "failed" ||
+    task.status === "stuck-killed" ||
+    task.status === "specifying" ||
+    task.status === "needs-respecify" ||
+    (task.stuckKillCount ?? 0) > 0 ||
+    (task.recoveryRetryCount ?? 0) > 0 ||
+    Boolean(task.nextRecoveryAt);
 
   // Sync activeTab when the caller changes initialTab (e.g. opening a different tab)
   useEffect(() => {
@@ -1564,7 +1572,7 @@ export function TaskDetailModal({
               )}
 
               {/* Actions dropdown — less common operations */}
-              {(task.column !== "triage" || task.status === "awaiting-approval") && (
+              {(task.column !== "triage" || task.status === "awaiting-approval" || canRetryTask) && (
                 <div className="detail-actions-dropdown" ref={actionsMenuRef}>
                   <button
                     className="btn btn-sm"
@@ -1623,7 +1631,7 @@ export function TaskDetailModal({
                       )}
 
                       {/* Retry */}
-                      {(task.status === "failed" || task.status === "stuck-killed") && onRetryTask && (
+                      {canRetryTask && onRetryTask && (
                         <button
                           className="detail-actions-menu-item"
                           role="menuitem"

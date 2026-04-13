@@ -7,6 +7,7 @@ import { AgentStore } from "../agent-store.js";
 describe("AgentStore — instructions bundle", () => {
   let testDir: string;
   let store: AgentStore;
+  const createdAgentIds: string[] = [];
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "agent-instructions-bundle-test-"));
@@ -15,7 +16,23 @@ describe("AgentStore — instructions bundle", () => {
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    // Teardown order: entity cleanup first, then filesystem
+    // Delete all created agents explicitly
+    for (const agentId of createdAgentIds) {
+      try {
+        await store.deleteAgent(agentId);
+      } catch {
+        // Ignore cleanup errors for already-removed entities
+      }
+    }
+    createdAgentIds.length = 0;
+
+    // Filesystem cleanup last
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   it("persists bundleConfig through create + load roundtrip", async () => {
@@ -28,6 +45,7 @@ describe("AgentStore — instructions bundle", () => {
         files: ["AGENTS.md", "STYLE.md"],
       },
     });
+    createdAgentIds.push(created.id);
 
     expect(created.bundleConfig).toEqual({
       mode: "managed",
@@ -41,11 +59,13 @@ describe("AgentStore — instructions bundle", () => {
 
   it("getInstructionsDir returns the managed bundle directory path", async () => {
     const agent = await store.createAgent({ name: "dir-agent", role: "executor" });
+    createdAgentIds.push(agent.id);
     expect(store.getInstructionsDir(agent.id)).toBe(join(testDir, "agents", `${agent.id}-instructions`));
   });
 
   it("listBundleFiles returns empty for missing directory and sorted .md files only", async () => {
     const agent = await store.createAgent({ name: "list-agent", role: "executor" });
+    createdAgentIds.push(agent.id);
 
     expect(await store.listBundleFiles(agent.id)).toEqual([]);
 
@@ -61,6 +81,7 @@ describe("AgentStore — instructions bundle", () => {
 
   it("readBundleFile reads content and rejects missing/traversal paths", async () => {
     const agent = await store.createAgent({ name: "read-agent", role: "executor" });
+    createdAgentIds.push(agent.id);
 
     await store.writeBundleFile(agent.id, "AGENTS.md", "Hello bundle");
     await expect(store.readBundleFile(agent.id, "AGENTS.md")).resolves.toBe("Hello bundle");
@@ -71,6 +92,7 @@ describe("AgentStore — instructions bundle", () => {
 
   it("writeBundleFile creates directories, overwrites, validates paths, and enforces max file count", async () => {
     const agent = await store.createAgent({ name: "write-agent", role: "executor" });
+    createdAgentIds.push(agent.id);
     const dir = store.getInstructionsDir(agent.id);
 
     await store.writeBundleFile(agent.id, "AGENTS.md", "first");
@@ -93,6 +115,7 @@ describe("AgentStore — instructions bundle", () => {
 
   it("deleteBundleFile removes files and throws when missing", async () => {
     const agent = await store.createAgent({ name: "delete-agent", role: "executor" });
+    createdAgentIds.push(agent.id);
     const filePath = join(store.getInstructionsDir(agent.id), "AGENTS.md");
 
     await store.writeBundleFile(agent.id, "AGENTS.md", "to-delete");
@@ -104,6 +127,7 @@ describe("AgentStore — instructions bundle", () => {
 
   it("setBundleConfig validates input and creates managed directory", async () => {
     const agent = await store.createAgent({ name: "config-agent", role: "executor" });
+    createdAgentIds.push(agent.id);
 
     const managed = await store.setBundleConfig(agent.id, {
       mode: "managed",
@@ -143,6 +167,7 @@ describe("AgentStore — instructions bundle", () => {
       role: "executor",
       instructionsText: "Legacy text content",
     });
+    createdAgentIds.push(agent.id);
 
     const migrated = await store.migrateLegacyInstructions(agent.id);
 
@@ -166,6 +191,7 @@ describe("AgentStore — instructions bundle", () => {
       role: "executor",
       instructionsPath: sourcePath,
     });
+    createdAgentIds.push(agent.id);
 
     const migrated = await store.migrateLegacyInstructions(agent.id);
 
@@ -189,6 +215,7 @@ describe("AgentStore — instructions bundle", () => {
       instructionsText: "Primary inline content",
       instructionsPath: sourcePath,
     });
+    createdAgentIds.push(agent.id);
 
     const migrated = await store.migrateLegacyInstructions(agent.id);
 
@@ -215,6 +242,7 @@ describe("AgentStore — instructions bundle", () => {
       },
       instructionsText: "should-stay",
     });
+    createdAgentIds.push(agent.id);
 
     const migrated = await store.migrateLegacyInstructions(agent.id);
 
@@ -231,6 +259,7 @@ describe("AgentStore — instructions bundle", () => {
       name: "no-legacy",
       role: "executor",
     });
+    createdAgentIds.push(agent.id);
 
     const migrated = await store.migrateLegacyInstructions(agent.id);
 

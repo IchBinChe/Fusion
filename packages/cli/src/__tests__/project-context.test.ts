@@ -22,6 +22,7 @@ describe("project-context", () => {
   let homeDir: string;
   let central: CentralCore;
   const originalHome = process.env.HOME;
+  const createdProjectIds: string[] = [];
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-test-"));
@@ -32,8 +33,26 @@ describe("project-context", () => {
   });
 
   afterEach(async () => {
-    await central.close();
+    // Teardown order: entity cleanup first, then infrastructure, then filesystem
+    // Unregister all tracked projects first
+    for (const projectId of createdProjectIds) {
+      try {
+        await central.unregisterProject(projectId);
+      } catch {
+        // Ignore cleanup errors for already-removed entities
+      }
+    }
+    createdProjectIds.length = 0;
+
+    // Close CentralCore before filesystem cleanup
+    try {
+      await central.close();
+    } catch {
+      // Ignore close errors
+    }
     clearStoreCache();
+
+    // Filesystem cleanup last
     try {
       rmSync(tempDir, { recursive: true, force: true });
       rmSync(homeDir, { recursive: true, force: true });
@@ -61,6 +80,7 @@ describe("project-context", () => {
         name: "my-project",
         path: resolve(projectPath),
       });
+      createdProjectIds.push(project.id);
 
       const found = await detectProjectFromCwd(projectPath, central);
 
@@ -78,6 +98,7 @@ describe("project-context", () => {
         name: "my-project",
         path: resolve(projectPath),
       });
+      createdProjectIds.push(project.id);
 
       const found = await detectProjectFromCwd(subDir, central);
 

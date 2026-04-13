@@ -30,9 +30,30 @@ describe("CentralCore Integration", () => {
   });
 
   afterAll(async () => {
-    // Cleanup
-    await central.close();
-    rmSync(tempDir, { recursive: true, force: true });
+    // Teardown order: entity cleanup first, then infrastructure, then filesystem
+    // Unregister all tracked projects first (not just a subset from assertions)
+    for (const project of projects) {
+      try {
+        await central.unregisterProject(project.id);
+      } catch {
+        // Ignore cleanup errors for already-removed entities
+      }
+    }
+    projects.length = 0;
+
+    // Close CentralCore before filesystem cleanup
+    try {
+      await central.close();
+    } catch {
+      // Ignore close errors
+    }
+
+    // Filesystem cleanup last
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   it("should register multiple projects", async () => {

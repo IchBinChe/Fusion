@@ -7,6 +7,7 @@ import { AgentStore } from "../agent-store.js";
 describe("AgentStore — instructions fields", () => {
   let testDir: string;
   let store: AgentStore;
+  const createdAgentIds: string[] = [];
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "agent-instructions-test-"));
@@ -15,7 +16,23 @@ describe("AgentStore — instructions fields", () => {
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    // Teardown order: entity cleanup first, then filesystem
+    // Delete all created agents explicitly
+    for (const agentId of createdAgentIds) {
+      try {
+        await store.deleteAgent(agentId);
+      } catch {
+        // Ignore cleanup errors for already-removed entities
+      }
+    }
+    createdAgentIds.length = 0;
+
+    // Filesystem cleanup last
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   it("creates an agent with instructionsText", async () => {
@@ -24,6 +41,7 @@ describe("AgentStore — instructions fields", () => {
       role: "executor",
       instructionsText: "Always use TypeScript strict mode.",
     });
+    createdAgentIds.push(agent.id);
 
     expect(agent.instructionsText).toBe("Always use TypeScript strict mode.");
     expect(agent.instructionsPath).toBeUndefined();
@@ -35,6 +53,7 @@ describe("AgentStore — instructions fields", () => {
       role: "executor",
       instructionsPath: ".fusion/agents/custom.md",
     });
+    createdAgentIds.push(agent.id);
 
     expect(agent.instructionsPath).toBe(".fusion/agents/custom.md");
     expect(agent.instructionsText).toBeUndefined();
@@ -47,6 +66,7 @@ describe("AgentStore — instructions fields", () => {
       instructionsText: "Check for security issues.",
       instructionsPath: ".fusion/agents/reviewer.md",
     });
+    createdAgentIds.push(agent.id);
 
     expect(agent.instructionsText).toBe("Check for security issues.");
     expect(agent.instructionsPath).toBe(".fusion/agents/reviewer.md");
@@ -57,6 +77,7 @@ describe("AgentStore — instructions fields", () => {
       name: "test-agent",
       role: "executor",
     });
+    createdAgentIds.push(agent.id);
 
     expect(agent.instructionsText).toBeUndefined();
     expect(agent.instructionsPath).toBeUndefined();
@@ -68,6 +89,7 @@ describe("AgentStore — instructions fields", () => {
       role: "executor",
       instructionsText: "Always write tests.",
     });
+    createdAgentIds.push(created.id);
 
     const loaded = await store.getAgent(created.id);
     expect(loaded).not.toBeNull();
@@ -80,6 +102,7 @@ describe("AgentStore — instructions fields", () => {
       role: "executor",
       instructionsPath: ".fusion/agents/instructions.md",
     });
+    createdAgentIds.push(created.id);
 
     const loaded = await store.getAgent(created.id);
     expect(loaded).not.toBeNull();
@@ -91,6 +114,7 @@ describe("AgentStore — instructions fields", () => {
       name: "test-agent",
       role: "executor",
     });
+    createdAgentIds.push(agent.id);
 
     const updated = await store.updateAgent(agent.id, {
       instructionsText: "Use functional programming patterns.",
@@ -104,6 +128,7 @@ describe("AgentStore — instructions fields", () => {
       name: "test-agent",
       role: "executor",
     });
+    createdAgentIds.push(agent.id);
 
     const updated = await store.updateAgent(agent.id, {
       instructionsPath: ".fusion/agents/new-instructions.md",
@@ -118,6 +143,7 @@ describe("AgentStore — instructions fields", () => {
       role: "executor",
       instructionsText: "Some instructions",
     });
+    createdAgentIds.push(agent.id);
 
     const updated = await store.updateAgent(agent.id, {
       instructionsText: "",
@@ -133,6 +159,7 @@ describe("AgentStore — instructions fields", () => {
       role: "executor",
       instructionsPath: ".fusion/agents/old.md",
     });
+    createdAgentIds.push(agent.id);
 
     const updated = await store.updateAgent(agent.id, {
       instructionsPath: "",
@@ -148,6 +175,7 @@ describe("AgentStore — instructions fields", () => {
       instructionsText: "Old text",
       instructionsPath: "old.md",
     });
+    createdAgentIds.push(agent.id);
 
     const updated = await store.updateAgent(agent.id, {
       instructionsText: "New text",
@@ -170,6 +198,7 @@ describe("AgentStore — instructions fields", () => {
       title: "My Executor",
       instructionsText: "Initial",
     });
+    createdAgentIds.push(agent.id);
 
     const updated = await store.updateAgent(agent.id, {
       instructionsText: "Updated",
@@ -188,6 +217,7 @@ describe("AgentStore — instructions fields", () => {
       instructionsText: "Cached instructions",
       instructionsPath: ".fusion/cached.md",
     });
+    createdAgentIds.push(agent.id);
 
     const cached = store.getCachedAgent(agent.id);
     expect(cached).not.toBeNull();

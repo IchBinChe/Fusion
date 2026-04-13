@@ -221,6 +221,7 @@ export function createMissionRouter(
     recoverActiveMissions(): Promise<{ recoveredCount: number }>;
     isRunning(): boolean;
   },
+  engineManager?: import("@fusion/engine").ProjectEngineManager,
 ): Router {
   const router = Router();
   const requestContext = new AsyncLocalStorage<ReturnType<TaskStore["getMissionStore"]>>();
@@ -352,6 +353,23 @@ export function createMissionRouter(
   }
 
   /**
+   * Helper to resolve project context for the current request.
+   * When engineManager is available and the request targets a known project,
+   * returns the engine's TaskStore so callers share the same in-memory state.
+   */
+  async function getProjectContext(req: Request) {
+    const projectId = getProjectIdFromRequest(req);
+    if (projectId && engineManager) {
+      const engine = engineManager.getEngine(projectId);
+      if (engine) {
+        return { store: engine.getTaskStore(), engine, projectId };
+      }
+    }
+    const scopedStore = await getScopedStoreForRequest(req);
+    return { store: scopedStore, engine: undefined, projectId };
+  }
+
+  /**
    * POST /api/missions/interview/start
    * Start a mission interview session with AI agent streaming.
    * Body: { missionTitle: string, modelProvider?: string, modelId?: string }
@@ -385,7 +403,7 @@ export function createMissionRouter(
 
       try {
         const ip = req.ip || req.socket.remoteAddress || "unknown";
-        const scopedStore = await getScopedStoreForRequest(req);
+        const { store: scopedStore } = await getProjectContext(req);
         const rootDir = scopedStore.getRootDir();
         const settings = await scopedStore.getSettings();
 
@@ -442,7 +460,7 @@ export function createMissionRouter(
       }
 
       try {
-        const scopedStore = await getScopedStoreForRequest(req);
+        const { store: scopedStore } = await getProjectContext(req);
         const rootDir = scopedStore.getRootDir();
         const settings = await scopedStore.getSettings();
 
@@ -497,7 +515,7 @@ export function createMissionRouter(
       }
 
       try {
-        const scopedStore = await getScopedStoreForRequest(req);
+        const { store: scopedStore } = await getProjectContext(req);
         const rootDir = scopedStore.getRootDir();
         const settings = await scopedStore.getSettings();
 

@@ -20,8 +20,7 @@ import {
 } from "@fusion/core";
 import type { AutomationRunResult, ScheduledTask } from "@fusion/core";
 import { createServer, GitHubClient } from "@fusion/dashboard";
-import { ProjectEngine } from "@fusion/engine";
-import type { ProjectEngineOptions, ProjectRuntimeConfig } from "@fusion/engine";
+import { ProjectEngineManager } from "@fusion/engine";
 import {
   AuthStorage,
   DefaultPackageManager,
@@ -228,19 +227,11 @@ export async function runServe(
     // Central DB unavailable or project not registered — backward compatible
   }
 
-  // ── ProjectEngine: core engine subsystems ────────────────────────────
+  // ── ProjectEngineManager: uniform engine lifecycle for all projects ──
   //
-  // ProjectEngine composes InProcessRuntime with higher-level subsystems:
-  //   - TaskStore, Scheduler, TaskExecutor, TriageProcessor (via InProcessRuntime)
-  //   - WorktreePool + rehydration (via InProcessRuntime)
-  //   - AgentSemaphore (via InProcessRuntime)
-  //   - StuckTaskDetector + SelfHealingManager (via InProcessRuntime)
-  //   - MissionAutopilot + MissionExecutionLoop (via InProcessRuntime)
-  //   - PrMonitor + PrCommentHandler (via ProjectEngine)
-  //   - NtfyNotifier (via ProjectEngine)
-  //   - CronRunner + AutomationStore (via ProjectEngine)
-  //   - Auto-merge queue with conflict retry (via ProjectEngine)
-  //   - 5 settings event listeners (via ProjectEngine)
+  // Every registered project gets an identical ProjectEngine with the
+  // full subsystem set (Scheduler, Triage, Executor, auto-merge, PR
+  // monitor, notifier, cron, settings listeners). No project is special.
   //
   const githubClient = new GitHubClient(process.env.GITHUB_TOKEN);
 
@@ -291,34 +282,34 @@ export async function runServe(
     }
   };
 
-  const engineOptions: ProjectEngineOptions = {
-    projectId: ntfyProjectId,
+  if (!sharedCentralCore) {
+    sharedCentralCore = new CentralCore();
+    try {
+      await sharedCentralCore.init();
+    } catch {
+      // Non-fatal — engine uses fallback defaults
+    }
+  }
+
+  const engineManager = new ProjectEngineManager(sharedCentralCore, {
     getMergeStrategy,
-    processPullRequestMerge: (store, wd, taskId) =>
-      processPullRequestMergeTask(store, wd, taskId, githubClient, getTaskMergeBlocker),
+    processPullRequestMerge: (s, wd, taskId) =>
+      processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
     getTaskMergeBlocker,
     onInsightRunProcessed: onMemoryInsightRunProcessed as any,
-  };
+  });
 
-  const runtimeConfig: ProjectRuntimeConfig = {
-    projectId: ntfyProjectId ?? cwd,
-    workingDirectory: cwd,
-    isolationMode: "in-process",
-    // maxConcurrent/maxWorktrees are read from settings inside InProcessRuntime
-    // via CentralCore; use safe defaults here.
-    maxConcurrent: 4,
-    maxWorktrees: 10,
-  };
+  // Start engines for all registered projects eagerly
+  await engineManager.startAll();
 
-  const engine = new ProjectEngine(
-    runtimeConfig,
-    sharedCentralCore ?? new CentralCore(),
-    engineOptions,
-  );
-
-  await engine.start();
-
-  const store = engine.getTaskStore();
+  // Get the cwd project's engine and store for the HTTP layer.
+  // serve.ts needs a store for plugin setup, diagnostics, and the server.
+  const cwdEngine = ntfyProjectId ? engineManager.getEngine(ntfyProjectId) : undefined;
+  if (!cwdEngine) {
+    console.error("[serve] No engine started for the current project — exiting");
+    process.exit(1);
+  }
+  const store = cwdEngine.getTaskStore();
 
   // InProcessRuntime does not call store.watch() — do it here so SSE events
   // and file-watcher triggers are active for the HTTP layer.
@@ -357,15 +348,11 @@ export async function runServe(
     taskStore: store,
   });
 
-  // Get heartbeat components from the runtime (initialized by InProcessRuntime)
-  const heartbeatMonitor = engine.getRuntime().getHeartbeatMonitor();
-
-  // Get mission components from the runtime (initialized by InProcessRuntime)
-  const missionAutopilot = engine.getRuntime().getMissionAutopilot();
-  const missionExecutionLoop = engine.getRuntime().getMissionExecutionLoop();
-
-  // Get automation store from the engine (initialized by ProjectEngine)
-  const automationStore = engine.getAutomationStore();
+  // Get subsystems from the cwd engine for the HTTP layer
+  const heartbeatMonitor = cwdEngine.getRuntime().getHeartbeatMonitor();
+  const missionAutopilot = cwdEngine.getRuntime().getMissionAutopilot();
+  const missionExecutionLoop = cwdEngine.getRuntime().getMissionExecutionLoop();
+  const automationStore = cwdEngine.getAutomationStore();
 
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
@@ -497,7 +484,9 @@ export async function runServe(
   const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry);
 
   const app = createServer(store, {
-    onMerge: (taskId) => engine.onMerge(taskId),
+    engine: cwdEngine,
+    engineManager,
+    onMerge: (taskId) => cwdEngine.onMerge(taskId),
     authStorage: dashboardAuthStorage,
     modelRegistry,
     automationStore,
@@ -514,6 +503,7 @@ export async function runServe(
     pluginStore,
     pluginLoader,
     pluginRunner: pluginLoader,
+    onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
     headless: true,
   });
 
@@ -592,11 +582,8 @@ export async function runServe(
       // Ignore errors getting handle types
     }
 
-    // Stop the engine (stops all subsystems: runtime, notifier, cronRunner, etc.)
-    await engine.stop().catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[serve] Engine stop error: ${message}`);
-    });
+    // Stop all project engines uniformly
+    await engineManager.stopAll();
 
     if (centralCore && localNodeId) {
       try {

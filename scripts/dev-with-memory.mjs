@@ -27,6 +27,6 @@ if (args.length === 0) {
   });
 } else {
   // Forward all arguments (e.g., "dashboard", "task list", etc.)
-  const cmd = spawn("pnpm", ["build", "&&", "tsx", "packages/cli/src/bin.ts", ...args], { stdio: "inherit", shell: true });
+  const cmd = spawn("pnpm", ["build", "&&", "pnpm", "exec", "tsx", "packages/cli/src/bin.ts", ...args], { stdio: "inherit", shell: true });
   cmd.on("close", (c) => process.exit(c ?? 1));
 }

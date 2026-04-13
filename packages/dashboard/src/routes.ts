@@ -1771,6 +1771,35 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     return getOrCreateProjectStore(projectId);
   }
 
+  interface ProjectContext {
+    store: TaskStore;
+    engine: import("@fusion/engine").ProjectEngine | undefined;
+    projectId: string | undefined;
+  }
+
+  async function getProjectContext(req: Request): Promise<ProjectContext> {
+    const projectId = getProjectIdFromRequest(req);
+    const engineManager = options?.engineManager;
+
+    if (projectId && engineManager) {
+      let engine = engineManager.getEngine(projectId);
+      if (!engine) {
+        try {
+          engine = await engineManager.ensureEngine(projectId);
+        } catch {
+          // Engine start failed — fall through to store-only path
+        }
+      }
+      if (engine) {
+        return { store: engine.getTaskStore(), engine, projectId };
+      }
+    }
+
+    // Fallback: use getScopedStore (for dev mode or when engineManager not available)
+    const scopedStore = await getScopedStore(req);
+    return { store: scopedStore, engine: undefined, projectId };
+  }
+
   if (process.env.FUSION_DEBUG_PLANNING_ROUTES === "1") {
     const planningRoutes = [
       "POST /planning/start",
@@ -1879,7 +1908,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Scheduler config (includes persisted settings — only needs maxConcurrent/maxWorktrees)
   router.get("/config", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettingsFast();
       res.json({
         maxConcurrent: settings.maxConcurrent ?? options?.maxConcurrent ?? 2,
@@ -1887,7 +1916,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         rootDir: scopedStore.getRootDir(),
       });
     } catch {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       res.json({ maxConcurrent: options?.maxConcurrent ?? 2, maxWorktrees: 4, rootDir: scopedStore.getRootDir() });
     }
   });
@@ -1895,7 +1924,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Settings CRUD
   router.get("/settings", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettingsFast();
       // Inject server-side configuration flags
       res.json({
@@ -1912,7 +1941,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.put("/settings", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore, engine } = await getProjectContext(req);
       // Strip server-owned fields that should never be persisted to config.json.
       // These are computed server-side and injected only on GET /settings.
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1943,9 +1972,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const settings = await scopedStore.updateSettings(clientSettings);
       
       // Sync backup automation schedule when backup settings change
-      if (options?.automationStore) {
+      const automationStoreForProject = engine?.getAutomationStore() ?? options?.automationStore;
+      if (automationStoreForProject) {
         try {
-          await syncBackupAutomation(options.automationStore, settings);
+          await syncBackupAutomation(automationStoreForProject, settings);
         } catch (err) {
           // Log but don't fail the settings update if automation sync fails
           console.error("Failed to sync backup automation:", err);
@@ -1973,7 +2003,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/memory", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const memory = await readProjectFile(scopedStore, MEMORY_FILE_PATH);
       res.json({ content: memory.content });
     } catch (err: any) {
@@ -2000,7 +2030,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("content must be a string");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       await writeProjectFile(scopedStore, MEMORY_FILE_PATH, content);
       res.json({ success: true });
     } catch (err: any) {
@@ -2019,7 +2049,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/memory/backend", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       const capabilities = getMemoryBackendCapabilities(settings);
       const availableBackends = listMemoryBackendTypes();
@@ -2085,7 +2115,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/settings/scopes", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const scopes = await scopedStore.getSettingsByScope();
       res.json(scopes);
     } catch (err: any) {
@@ -2103,7 +2133,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/settings/test-ntfy", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
 
       // Validate ntfy is enabled
@@ -2154,7 +2184,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/settings/export", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const scopeParam = req.query.scope as string | undefined;
       const scope = scopeParam === "global" || scopeParam === "project" || scopeParam === "both"
         ? scopeParam
@@ -2178,7 +2208,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/settings/import", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { data, scope = "both", merge = true } = req.body;
 
       // Validate the import data
@@ -2222,7 +2252,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/executor/stats", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       
       // Get the most recent activity timestamp from the activity log
@@ -2258,7 +2288,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/backups", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { createBackupManager } = await import("@fusion/core");
       const settings = await scopedStore.getSettings();
       const manager = createBackupManager(scopedStore["kbDir"], settings);
@@ -2286,7 +2316,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/backups", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { runBackupCommand } = await import("@fusion/core");
       const settings = await scopedStore.getSettings();
       const result = await runBackupCommand(scopedStore["kbDir"], settings);
@@ -2315,7 +2345,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // List all tasks
   router.get("/tasks", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const limit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
       const offset = typeof req.query.offset === "string" ? Number.parseInt(req.query.offset, 10) : undefined;
       const q = typeof req.query.q === "string" ? req.query.q.trim() : undefined;
@@ -2350,7 +2380,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Create task
   router.post("/tasks", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const {
         title,
         description,
@@ -2465,7 +2495,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Move task to column
   router.post("/tasks/:id/move", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { column } = req.body;
       if (!column || !COLUMNS.includes(column as Column)) {
         throw badRequest(`Invalid column. Must be one of: ${COLUMNS.join(", ")}`);
@@ -2485,8 +2515,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Uses AI merge handler if provided, falls back to store.mergeTask
   router.post("/tasks/:id/merge", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
-      const merge = options?.onMerge ?? ((id: string) => scopedStore.mergeTask(id));
+      const { store: scopedStore, engine } = await getProjectContext(req);
+      const merge = engine
+        ? (id: string) => engine.onMerge(id)
+        : options?.onMerge ?? ((id: string) => scopedStore.mergeTask(id));
       const result = await merge(req.params.id);
       res.json(result);
     } catch (err: any) {
@@ -2503,7 +2535,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Retry failed, stuck-killed, or stranded triage/specification task
   router.post("/tasks/:id/retry", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       const retrySpecification =
         task.column === "triage" &&
@@ -2580,7 +2612,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Duplicate task
   router.post("/tasks/:id/duplicate", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const newTask = await scopedStore.duplicateTask(req.params.id);
       res.status(201).json(newTask);
     } catch (err: any) {
@@ -2595,7 +2627,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Create refinement task from a completed or in-review task
   router.post("/tasks/:id/refine", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { feedback } = req.body;
       if (!feedback || typeof feedback !== "string") {
         throw badRequest("feedback is required and must be a string");
@@ -2624,7 +2656,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Archive task (done → archived)
   router.post("/tasks/:id/archive", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.archiveTask(req.params.id);
       res.json(task);
     } catch (err: any) {
@@ -2639,7 +2671,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Unarchive task (archived → done)
   router.post("/tasks/:id/unarchive", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.unarchiveTask(req.params.id);
       res.json(task);
     } catch (err: any) {
@@ -2654,7 +2686,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Archive all done tasks
   router.post("/tasks/archive-all-done", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const archived = await scopedStore.archiveAllDone();
       res.json({ archived });
     } catch (err: any) {
@@ -2673,7 +2705,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/tasks/batch-update-models", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { taskIds, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId } = req.body;
 
       // Validate taskIds
@@ -2811,7 +2843,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Upload attachment
   router.post("/tasks/:id/attachments", upload.single("file"), async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       if (!req.file) {
         throw badRequest("No file provided");
       }
@@ -2834,7 +2866,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Download attachment
   router.get("/tasks/:id/attachments/:filename", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { path, mimeType } = await scopedStore.getAttachment(req.params.id, req.params.filename);
       res.setHeader("Content-Type", mimeType);
       createReadStream(path).pipe(res);
@@ -2853,7 +2885,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Delete attachment
   router.delete("/tasks/:id/attachments/:filename", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.deleteAttachment(req.params.id, req.params.filename);
       res.json(task);
     } catch (err: any) {
@@ -2873,7 +2905,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // The 500-entry cap (MAX_LOG_ENTRIES) is a client-side whole-list limit.
   router.get("/tasks/:id/logs", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const limit = typeof req.query.limit === "string"
         ? Number.parseInt(req.query.limit, 10)
         : undefined;
@@ -2942,7 +2974,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.get("/tasks/:id/session-files", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       if (!task.worktree || !nodeFs.existsSync(task.worktree)) {
         res.json([]);
@@ -3017,7 +3049,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/workflow-results", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       res.json(task.workflowStepResults || []);
     } catch (err: any) {
@@ -3035,7 +3067,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Get single task with prompt content
   router.get("/tasks/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       res.json(task);
     } catch (err: any) {
@@ -3056,7 +3088,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Pause task
   router.post("/tasks/:id/pause", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.pauseTask(req.params.id, true);
       res.json(task);
     } catch (err: any) {
@@ -3070,7 +3102,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Unpause task
   router.post("/tasks/:id/unpause", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.pauseTask(req.params.id, false);
       res.json(task);
     } catch (err: any) {
@@ -3084,7 +3116,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Approve plan for a task in awaiting-approval status
   router.post("/tasks/:id/approve-plan", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       // Verify task is in triage column with awaiting-approval status
@@ -3115,7 +3147,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Reject plan for a task in awaiting-approval status
   router.post("/tasks/:id/reject-plan", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       // Verify task is in triage column with awaiting-approval status
@@ -3151,7 +3183,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.get("/tasks/:id/comments", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       res.json(task.comments || []);
     } catch (err: any) {
@@ -3165,7 +3197,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.post("/tasks/:id/comments", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { text, author } = req.body;
       if (!text || typeof text !== "string") {
         throw badRequest("text is required and must be a string");
@@ -3201,7 +3233,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.patch("/tasks/:id/comments/:commentId", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { text } = req.body;
       if (!text || typeof text !== "string") {
         throw badRequest("text is required and must be a string");
@@ -3224,7 +3256,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   router.delete("/tasks/:id/comments/:commentId", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.deleteTaskComment(req.params.id, req.params.commentId);
       res.json(task);
     } catch (err: any) {
@@ -3246,7 +3278,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // GET /tasks/:id/documents — List all documents for a task
   router.get("/tasks/:id/documents", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const documents = await scopedStore.getTaskDocuments(req.params.id);
       res.json(documents);
     } catch (err: any) {
@@ -3261,7 +3293,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // GET /tasks/:id/documents/:key — Get latest revision of a specific document
   router.get("/tasks/:id/documents/:key", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const document = await scopedStore.getTaskDocument(req.params.id, req.params.key);
       if (!document) {
         throw new ApiError(404, "Document not found");
@@ -3279,7 +3311,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // GET /tasks/:id/documents/:key/revisions — List all revisions for a document
   router.get("/tasks/:id/documents/:key/revisions", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const revisions = await scopedStore.getTaskDocumentRevisions(req.params.id, req.params.key);
       res.json(revisions);
     } catch (err: any) {
@@ -3294,7 +3326,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // PUT /tasks/:id/documents/:key — Create or update a document (optimistic revision)
   router.put("/tasks/:id/documents/:key", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       // Validate key format
       if (!DOCUMENT_KEY_REGEX.test(req.params.key)) {
@@ -3346,7 +3378,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // DELETE /tasks/:id/documents/:key — Delete a document and all its revisions
   router.delete("/tasks/:id/documents/:key", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       await scopedStore.deleteTaskDocument(req.params.id, req.params.key);
       res.status(204).send();
     } catch (err: any) {
@@ -3361,7 +3393,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Add steering comment to task
   router.post("/tasks/:id/steer", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { text } = req.body;
       if (!text || typeof text !== "string") {
         throw badRequest("text is required and must be a string");
@@ -3395,7 +3427,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Request AI revision of task spec
   router.post("/tasks/:id/spec/revise", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { feedback } = req.body;
       if (!feedback || typeof feedback !== "string") {
         throw badRequest("feedback is required and must be a string");
@@ -3446,7 +3478,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Rebuild task spec without feedback
   router.post("/tasks/:id/spec/rebuild", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       // Get current task state
       const task = await scopedStore.getTask(req.params.id);
@@ -3488,7 +3520,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Update task
   router.patch("/tasks/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId } = req.body;
 
       // Validate model fields are strings or undefined/null
@@ -3556,7 +3588,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("agentId must be a non-empty string or null");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -3595,7 +3627,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("userId must be a non-empty string or null");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       // When assigning a user, also clear the awaiting-user-review status
       // so the task can proceed to merge
@@ -3625,7 +3657,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Accept review - clear assignee and awaiting-user-review status, keep in in-review
   router.post("/tasks/:id/accept-review", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       // Clear assignee and status to allow auto-merge to proceed
       const task = await scopedStore.updateTask(req.params.id, {
@@ -3648,7 +3680,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Return task to agent - clear assignee and status, move to todo
   router.post("/tasks/:id/return-to-agent", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       // Clear assignee and status, move to todo so scheduler re-dispatches
       await scopedStore.updateTask(req.params.id, {
@@ -3677,7 +3709,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("agentId is required");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({
         rootDir: scopedStore.getFusionDir(),
@@ -3714,7 +3746,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("agentId is required");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({
         rootDir: scopedStore.getFusionDir(),
@@ -3741,7 +3773,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Force release checkout lease for a task
   router.post("/tasks/:id/force-release", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({
         rootDir: scopedStore.getFusionDir(),
@@ -3765,7 +3797,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Get checkout lease state for a task
   router.get("/tasks/:id/checkout", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       if (!task) {
         throw notFound("Task not found");
@@ -3786,7 +3818,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Delete task
   router.delete("/tasks/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.deleteTask(req.params.id);
       res.json(task);
     } catch (err: any) {
@@ -3804,7 +3836,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/remotes", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       const remotes = getGitHubRemotes(rootDir);
       res.json(remotes);
@@ -3823,7 +3855,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/remotes/detailed", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -3845,7 +3877,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/remotes", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       const { name, url } = req.body;
       if (!name || typeof name !== "string") {
@@ -3887,7 +3919,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/git/remotes/:name", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -3916,7 +3948,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.patch("/git/remotes/:name", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -3951,7 +3983,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.put("/git/remotes/:name/url", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -3984,7 +4016,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/status", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4009,7 +4041,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/commits", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4032,7 +4064,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/commits/:hash/diff", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4062,7 +4094,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/commits/ahead", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4086,7 +4118,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/remotes/:name/commits", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4155,7 +4187,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/branches", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4178,7 +4210,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/branches/:name/commits", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4205,7 +4237,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/worktrees", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4231,7 +4263,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/branches", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4262,7 +4294,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/branches/:name/checkout", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4291,7 +4323,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/git/branches/:name", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4323,7 +4355,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/fetch", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4351,7 +4383,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/pull", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4377,7 +4409,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/push", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4406,7 +4438,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/stashes", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4428,7 +4460,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/stashes", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4455,7 +4487,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/stashes/:index/apply", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4481,7 +4513,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/git/stashes/:index", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4506,7 +4538,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/diff", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4527,7 +4559,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/git/changes", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4549,7 +4581,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/stage", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4575,7 +4607,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/unstage", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4601,7 +4633,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/commit", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4631,7 +4663,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/git/discard", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       if (!isGitRepo(rootDir)) {
         throw badRequest("Not a git repository");
@@ -4729,7 +4761,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       const client = new GitHubClient();
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       let issue: {
         number: number;
@@ -4871,7 +4903,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       const token = process.env.GITHUB_TOKEN;
       const githubClient = new GitHubClient(token);
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       // Get existing tasks to check for duplicates
       const existingTasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
@@ -5055,7 +5087,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       }
 
       const client = new GitHubClient();
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
 
       let pr: {
         number: number;
@@ -5137,7 +5169,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/tasks/:id/pr/create", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { title, body, base } = req.body;
 
       if (!title || typeof title !== "string") {
@@ -5323,7 +5355,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
 
     // Find all matching tasks by badge URL (use project-scoped store if projectId is provided)
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const tasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
     const matchingTasks: Array<{ id: string; resourceType: "pr" | "issue"; current: unknown }> = [];
 
@@ -5390,7 +5422,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/pr/status", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       if (!task.prInfo) {
@@ -5433,7 +5465,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/tasks/:id/pr/refresh", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       if (!task.prInfo) {
@@ -5518,7 +5550,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/issue/status", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       if (!task.issueInfo) {
@@ -5557,7 +5589,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/tasks/:id/issue/refresh", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       if (!task.issueInfo) {
@@ -5635,7 +5667,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/github/batch/status", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { taskIds } = (req.body ?? {}) as import("@fusion/core").BatchStatusRequest;
       if (!Array.isArray(taskIds)) {
         throw badRequest("taskIds must be an array");
@@ -5861,7 +5893,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("command exceeds maximum length of 4096 characters");
       }
       
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       const result = terminalSessionManager.createSession(command, rootDir);
       
@@ -6016,7 +6048,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.post("/terminal/sessions", async (req, res) => {
     try {
       const { cwd, cols, rows } = req.body;
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const terminalService = getTerminalService(scopedStore.getRootDir());
 
       const result = await terminalService.createSession({
@@ -6056,7 +6088,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/terminal/sessions", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const terminalService = getTerminalService(scopedStore.getRootDir());
       const sessions = terminalService.getAllSessions();
 
@@ -6085,7 +6117,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.delete("/terminal/sessions/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const terminalService = getTerminalService(scopedStore.getRootDir());
 
       const killed = terminalService.killSession(id);
@@ -6119,7 +6151,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/files", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { path: subPath } = req.query;
       const result = await listFiles(scopedStore, req.params.id, typeof subPath === "string" ? subPath : undefined);
       res.json(result);
@@ -6146,7 +6178,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/files/{*filepath}", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const filePath = Array.isArray(req.params.filepath) ? req.params.filepath[0] : req.params.filepath ?? "";
       const result = await readFile(scopedStore, req.params.id, filePath);
       res.json(result);
@@ -6176,7 +6208,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/tasks/:id/files/{*filepath}", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const filePath = Array.isArray(req.params.filepath) ? req.params.filepath[0] : req.params.filepath ?? "";
       const { content } = req.body;
       
@@ -6212,7 +6244,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/workspaces", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const tasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
       res.json({
         project: scopedStore.getRootDir(),
@@ -6240,7 +6272,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/files", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { path: subPath, workspace } = req.query;
       const workspaceId = typeof workspace === "string" && workspace.length > 0 ? workspace : "project";
       const result = await listWorkspaceFiles(scopedStore, workspaceId, typeof subPath === "string" ? subPath : undefined);
@@ -6269,7 +6301,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/files/{*filepath}", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const filePath = Array.isArray(req.params.filepath) ? req.params.filepath[0] : req.params.filepath ?? "";
       const workspace = typeof req.query.workspace === "string" && req.query.workspace.length > 0
         ? req.query.workspace
@@ -6320,7 +6352,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/files/{*filepath}/copy", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { filePath, workspace } = extractFileParams(req);
       const { destination } = req.body;
 
@@ -6356,7 +6388,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/files/{*filepath}/move", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { filePath, workspace } = extractFileParams(req);
       const { destination } = req.body;
 
@@ -6393,7 +6425,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/files/{*filepath}/delete", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { filePath, workspace } = extractFileParams(req);
       const result = await deleteWorkspaceFile(scopedStore, workspace, filePath);
       res.json(result);
@@ -6422,7 +6454,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/files/{*filepath}/rename", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { filePath, workspace } = extractFileParams(req);
       const { newName } = req.body;
 
@@ -6457,7 +6489,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/files/{*filepath}/download", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { filePath, workspace } = extractFileParams(req);
       const { absolutePath, stats, fileName } = await getWorkspaceFileForDownload(scopedStore, workspace, filePath);
 
@@ -6493,7 +6525,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/files/{*filepath}/download-zip", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { filePath, workspace } = extractFileParams(req);
       const { absolutePath, dirName } = await getWorkspaceFolderForZip(scopedStore, workspace, filePath);
 
@@ -6537,7 +6569,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/files/{*filepath}", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const filePath = Array.isArray(req.params.filepath) ? req.params.filepath[0] : req.params.filepath ?? "";
       const { content } = req.body;
       const workspace = typeof req.query.workspace === "string" && req.query.workspace.length > 0
@@ -6581,9 +6613,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("description must be 1000 characters or less");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore, projectId } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
-      const projectId = getProjectIdFromRequest(req);
       const { createSubtaskSession } = await import("./subtask-breakdown.js");
       const session = await createSubtaskSession(
         description,
@@ -6726,7 +6757,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("subtasks must be a non-empty array");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { getSubtaskSession, cleanupSubtaskSession } = await import("./subtask-breakdown.js");
       const session = getSubtaskSession(sessionId);
       if (!session) {
@@ -6858,7 +6889,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       const { retrySubtaskSession } = await import("./subtask-breakdown.js");
       await retrySubtaskSession(sessionId, scopedStore.getRootDir(), settings.promptOverrides);
@@ -6895,7 +6926,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("initialPlan must be 500 characters or less");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       const ip = req.ip || req.socket.remoteAddress || "unknown";
       const rootDir = scopedStore.getRootDir();
@@ -6950,7 +6981,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("planningModelId must be a string when provided");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       const ip = req.ip || req.socket.remoteAddress || "unknown";
       const rootDir = scopedStore.getRootDir();
@@ -7005,7 +7036,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       const { submitResponse, SessionNotFoundError: _SessionNotFoundError, InvalidSessionStateError: _InvalidSessionStateError } = await import("./planning.js");
       const result = await submitResponse(
@@ -7048,7 +7079,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       const { retrySession } = await import("./planning.js");
       await retrySession(sessionId, scopedStore.getRootDir(), settings.promptOverrides);
@@ -7119,7 +7150,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("sessionId is required");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { getSession, getSummary, cleanupSession } = await import("./planning.js");
 
       const session = getSession(sessionId);
@@ -7300,7 +7331,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("subtasks must be a non-empty array");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { getSession, cleanupSession, formatInterviewQA } = await import("./planning.js");
 
       const session = getSession(planningSessionId);
@@ -7938,7 +7969,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const ip = req.ip || req.socket.remoteAddress || "unknown";
 
       // Get scoped store and settings for prompt overrides
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       const settings = await scopedStore.getSettings();
 
@@ -8009,7 +8040,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { description, provider, modelId } = req.body;
       const ip = req.ip || req.socket.remoteAddress || "unknown";
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
 
       const {
@@ -8660,7 +8691,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/activity", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const limitParam = req.query.limit;
       const sinceParam = req.query.since;
       const typeParam = req.query.type;
@@ -8704,7 +8735,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/activity", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       await scopedStore.clearActivityLog();
       res.json({ success: true });
     } catch (err: any) {
@@ -8724,7 +8755,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/workflow-steps", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const steps = await scopedStore.listWorkflowSteps();
       res.json(steps);
     } catch (err: any) {
@@ -8743,7 +8774,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/workflow-steps", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { name, description, mode, phase, prompt, toolMode, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
 
       if (!name || typeof name !== "string" || !name.trim()) {
@@ -8832,7 +8863,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.patch("/workflow-steps/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { name, description, mode, phase, prompt, toolMode, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
 
       const updates: Record<string, unknown> = {};
@@ -8938,7 +8969,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/workflow-steps/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       await scopedStore.deleteWorkflowStep(req.params.id);
       res.status(204).send();
     } catch (err: any) {
@@ -8961,7 +8992,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/workflow-steps/:id/refine", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const step = await scopedStore.getWorkflowStep(req.params.id);
       if (!step) {
         throw notFound(`Workflow step '${req.params.id}' not found`);
@@ -9056,7 +9087,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/workflow-step-templates/:id/create", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { WORKFLOW_STEP_TEMPLATES } = await import("@fusion/core");
       const template = WORKFLOW_STEP_TEMPLATES.find((t) => t.id === req.params.id);
 
@@ -9098,7 +9129,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/scripts/:name/run", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const scriptName = Array.isArray(req.params.name) ? req.params.name[0] : req.params.name;
 
       if (!scriptName) {
@@ -9197,7 +9228,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         filter.role = req.query.role;
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -9344,7 +9375,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         }
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -9407,7 +9438,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("outputDir must be a string");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore, exportAgentsToDirectory } = await import("@fusion/core");
 
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
@@ -9594,7 +9625,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         AgentCompaniesParseError: _AgentCompaniesParseError,
       } = await import("@fusion/core");
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
@@ -9918,7 +9949,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/stats", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -9953,7 +9984,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/org-tree", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -9975,7 +10006,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/resolve/:shortname", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10000,7 +10031,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10155,7 +10186,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         updates.bundleConfig = body.bundleConfig ?? undefined;
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10182,7 +10213,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/access", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore, computeAccessState } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10228,7 +10259,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         }
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
@@ -10260,7 +10291,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10288,7 +10319,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/soul", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10322,7 +10353,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("soul must be at most 10,000 characters");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10346,7 +10377,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/memory", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10380,7 +10411,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("memory must be at most 50,000 characters");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10410,7 +10441,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("state is required");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10437,7 +10468,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/agents/:id", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10463,7 +10494,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/config-revisions", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10495,7 +10526,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/config-revisions/:revisionId", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10525,7 +10556,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/agents/:id/config-revisions/:revisionId/rollback", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10557,7 +10588,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/budget", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10587,7 +10618,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/agents/:id/budget/reset", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10623,7 +10654,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("label must be a string");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10653,7 +10684,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/keys", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10678,7 +10709,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/agents/:id/keys/:keyId", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10703,7 +10734,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/tasks", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10732,7 +10763,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/agents/:id/inbox", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10774,7 +10805,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { status = "ok", triggerExecution } = req.body;
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10817,7 +10848,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 50;
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10839,7 +10870,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/runs", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -10921,7 +10952,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       if (hasHeartbeatExecutor && heartbeatMonitor) {
         // Check for existing active run
-        const scopedStore = await getScopedStore(req);
+        const { store: scopedStore } = await getProjectContext(req);
 
         // Guard: heartbeatMonitor is bound to a specific project root directory.
         // Reject when the scoped store belongs to a different project.
@@ -10952,7 +10983,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         res.status(201).json(run);
       } else {
         // Fallback: record-only behavior without HeartbeatMonitor
-        const scopedStore = await getScopedStore(req);
+        const { store: scopedStore } = await getProjectContext(req);
         const { AgentStore } = await import("@fusion/core");
         const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
         await agentStore.init();
@@ -10991,7 +11022,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/agents/:id/runs/stop", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11047,7 +11078,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/runs/:runId", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11078,7 +11109,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/runs/:runId/logs", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11122,7 +11153,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/runs/:runId/mutations", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11163,7 +11194,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/runs/:runId/audit", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11247,7 +11278,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/runs/:runId/timeline", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11383,7 +11414,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/chain-of-command", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11411,7 +11442,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   const getAgentEmployeesHandler = async (req: Request, res: Response) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11457,7 +11488,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/reflections/latest", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore, ReflectionStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: scopedStore.getFusionDir() });
@@ -11497,7 +11528,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/reflections", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore, ReflectionStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: scopedStore.getFusionDir() });
@@ -11537,7 +11568,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/agents/:id/reflections", async (req, res) => {
     try {
-      const taskStore = await getScopedStore(req);
+      const { store: taskStore } = await getProjectContext(req);
       const { AgentStore, ReflectionStore } = await import("@fusion/core");
       const { AgentReflectionService } = await import("@fusion/engine");
       const agentStore = new AgentStore({ rootDir: taskStore.getRootDir() });
@@ -11583,7 +11614,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/performance", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore, ReflectionStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: scopedStore.getFusionDir() });
@@ -11623,7 +11654,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/reflection-context", async (req, res) => {
     try {
-      const taskStore = await getScopedStore(req);
+      const { store: taskStore } = await getProjectContext(req);
       const { AgentStore, ReflectionStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: taskStore.getRootDir() });
       const reflectionStore = new ReflectionStore({ rootDir: taskStore.getRootDir() });
@@ -11683,7 +11714,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/ratings", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11715,7 +11746,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/agents/:id/ratings", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11762,7 +11793,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/agents/:id/ratings/summary", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11788,7 +11819,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/agents/:id/ratings/:ratingId", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { AgentStore } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
@@ -11862,7 +11893,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("sessionId is required");
       }
 
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
       const settings = await scopedStore.getSettings();
 
@@ -11923,7 +11954,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   // ── Mission Routes ─────────────────────────────────────────────────────────
   // Mount mission routes at /api/missions
-  router.use("/missions", createMissionRouter(store, options?.missionAutopilot, aiSessionStore, options?.missionExecutionLoop));
+  router.use("/missions", createMissionRouter(store, options?.missionAutopilot, aiSessionStore, options?.missionExecutionLoop, options?.engineManager));
 
   // ── Plugin Routes ─────────────────────────────────────────────────────────
   // Plugin management endpoints with projectId scoping support.
@@ -11936,7 +11967,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Query: { projectId?: string, enabled?: boolean }
    */
   router.get("/plugins", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
 
     const filter: { enabled?: boolean } = {};
@@ -11954,7 +11985,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Query: { projectId?: string }
    */
   router.get("/plugins/:id", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
     const id = req.params.id as string;
 
@@ -11978,7 +12009,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Returns 201 on success, 400 for validation errors, 409 for conflicts.
    */
   router.post("/plugins", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
 
     if (!req.body || typeof req.body !== "object") {
@@ -12099,7 +12130,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Body: { projectId?: string }
    */
   router.post("/plugins/:id/enable", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
     const id = req.params.id as string;
 
@@ -12129,7 +12160,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Body: { projectId?: string }
    */
   router.post("/plugins/:id/disable", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
     const id = req.params.id as string;
 
@@ -12152,7 +12183,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Body: { settings: Record<string, unknown>, projectId?: string }
    */
   router.patch("/plugins/:id/settings", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
     const id = req.params.id as string;
 
@@ -12187,7 +12218,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Query: { projectId?: string }
    */
   router.delete("/plugins/:id", async (req: Request, res: Response) => {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const pluginStore = scopedStore.getPluginStore();
     const id = req.params.id as string;
 
@@ -13567,7 +13598,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/diff", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       if (!task) {
         throw notFound("Task not found");
@@ -13768,7 +13799,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/tasks/:id/file-diffs", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
       // Done tasks: diff from the squash commit's first parent.
@@ -13975,7 +14006,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.get("/scripts", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
       res.json(settings.scripts ?? {});
     } catch (err: any) {
@@ -13994,7 +14025,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.post("/scripts", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { name, command } = req.body;
       
       if (!name || typeof name !== "string" || !name.trim()) {
@@ -14026,7 +14057,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    */
   router.delete("/scripts/:name", async (req, res) => {
     try {
-      const scopedStore = await getScopedStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const { name } = req.params;
       const settings = await scopedStore.getSettings();
       const scripts = { ...(settings.scripts ?? {}) };
@@ -14047,7 +14078,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   const messageStoreCache = new Map<string, MessageStore>();
 
   async function getMessageStore(req: Request): Promise<MessageStore> {
-    const scopedStore = await getScopedStore(req);
+    const { store: scopedStore } = await getProjectContext(req);
     const rootDir = scopedStore.getRootDir();
     let msgStore = messageStoreCache.get(rootDir);
     if (!msgStore) {

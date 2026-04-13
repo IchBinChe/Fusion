@@ -105,6 +105,12 @@ const mocks = vi.hoisted(() => {
       init: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+      getProject: vi.fn().mockImplementation((id: string) =>
+        Promise.resolve({ id, name: `Project ${id}`, path: `/repo/${id}`, status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
+      ),
+      listProjects: vi.fn().mockResolvedValue([
+        { id: "project-1", name: "Test Project", path: "/repo", status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      ]),
       listNodes: vi.fn().mockResolvedValue([
         { id: "node-local", name: "local", type: "local", status: "offline" },
       ]),
@@ -459,6 +465,33 @@ vi.mock("@fusion/dashboard", () => ({
 
 vi.mock("@fusion/engine", () => ({
   ProjectEngine: mocks.projectEngineCtor,
+  ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, options: any) => {
+    const engines = new Map<string, any>();
+    return {
+      startAll: vi.fn(async () => {
+        const projects = await centralCore.listProjects();
+        for (const project of projects) {
+          const engine = mocks.projectEngineCtor(
+            { projectId: project.id, workingDirectory: project.path, isolationMode: "in-process", maxConcurrent: 4, maxWorktrees: 10 },
+            centralCore,
+            { ...options, projectId: project.id },
+          );
+          await engine.start();
+          engines.set(project.id, engine);
+        }
+      }),
+      getEngine: vi.fn((id: string) => engines.get(id)),
+      getAllEngines: vi.fn(() => engines),
+      getStore: vi.fn((id: string) => engines.get(id)?.getTaskStore()),
+      has: vi.fn((id: string) => engines.has(id)),
+      ensureEngine: vi.fn(async (id: string) => engines.get(id)),
+      stopAll: vi.fn(async () => {
+        for (const engine of engines.values()) await engine.stop();
+        engines.clear();
+      }),
+      onProjectAccessed: vi.fn(),
+    };
+  }),
   TriageProcessor: mocks.triageCtor,
   TaskExecutor: mocks.executorCtor,
   Scheduler: mocks.schedulerCtor,

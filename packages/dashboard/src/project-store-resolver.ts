@@ -133,3 +133,18 @@ export function evictAllProjectStores(): void {
     evictProjectStore(projectId);
   }
 }
+
+/**
+ * Invalidate the global settings cache in all cached project stores.
+ *
+ * Each project-specific TaskStore holds its own GlobalSettingsStore with an
+ * in-memory cache. When global settings are updated via the main store (e.g.,
+ * PUT /settings/global), the file on disk is updated but the per-project
+ * caches remain stale. Calling this function forces the next getSettings()
+ * call in each project store to re-read from disk.
+ */
+export function invalidateAllGlobalSettingsCaches(): void {
+  for (const store of storeCache.values()) {
+    store.getGlobalSettingsStore().invalidateCache();
+  }
+}

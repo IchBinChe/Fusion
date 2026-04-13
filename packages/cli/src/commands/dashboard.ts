@@ -1,8 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { TaskStore, AutomationStore, CentralCore, AgentStore, PluginStore, PluginLoader, getTaskMergeBlocker } from "@fusion/core";
 import { createServer, GitHubClient } from "@fusion/dashboard";
-import { aiMergeTask, MissionAutopilot, MissionExecutionLoop, HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext, ProjectEngine, type ProjectEngineOptions } from "@fusion/engine";
-import type { ProjectRuntimeConfig } from "@fusion/engine";
+import { aiMergeTask, MissionAutopilot, MissionExecutionLoop, HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext, ProjectEngineManager } from "@fusion/engine";
 import { AuthStorage, DefaultPackageManager, ModelRegistry, discoverAndLoadExtensions, getAgentDir, createExtensionRuntime } from "@mariozechner/pi-coding-agent";
 import {
   getMergeStrategy,
@@ -326,7 +325,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // In non-dev mode: replaced by engine.onMerge() after ProjectEngine starts
   // (semaphore-gated via the engine's InProcessRuntime).
   //
-  let onMergeImpl = (taskId: string) =>
+  const onMergeImpl = (taskId: string) =>
     aiMergeTask(store, cwd, taskId, {
       agentStore,
       onAgentText: (delta) => process.stdout.write(delta),
@@ -339,8 +338,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // Created inline for dev mode (engine doesn't start in dev mode).
   // In non-dev mode, the engine is passed to createServer which derives these.
   //
-  let missionAutopilotImpl: MissionAutopilot | undefined = new MissionAutopilot(store, store.getMissionStore());
-  let missionExecutionLoopImpl: MissionExecutionLoop | undefined = new MissionExecutionLoop({
+  const missionAutopilotImpl: MissionAutopilot | undefined = new MissionAutopilot(store, store.getMissionStore());
+  const missionExecutionLoopImpl: MissionExecutionLoop | undefined = new MissionExecutionLoop({
     taskStore: store,
     missionStore: store.getMissionStore(),
     missionAutopilot: {
@@ -473,52 +472,13 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
   // Start the AI engine (unless in dev mode)
   if (!opts.dev) {
-    // ── ProjectEngine: core AI engine subsystems ────────────────────────
+    // ── ProjectEngineManager: uniform engine lifecycle for all projects ──
     //
-    // ProjectEngine composes InProcessRuntime with higher-level subsystems:
-    //   - TaskStore (via externalTaskStore — reuses dashboard's store)
-    //   - Scheduler, TaskExecutor, TriageProcessor (via InProcessRuntime)
-    //   - WorktreePool + rehydration (via InProcessRuntime)
-    //   - AgentSemaphore (via InProcessRuntime — manages its own semaphore)
-    //   - StuckTaskDetector + SelfHealingManager (via InProcessRuntime)
-    //   - MissionAutopilot + MissionExecutionLoop (via InProcessRuntime)
-    //   - PrMonitor + PrCommentHandler (via ProjectEngine)
-    //   - NtfyNotifier (via ProjectEngine)
-    //   - CronRunner + AutomationStore (via ProjectEngine, separate from UI automationStore)
-    //   - Auto-merge queue with richer conflict/verification logic (via ProjectEngine)
-    //   - 5 settings event listeners (via ProjectEngine)
+    // Every registered project gets an identical ProjectEngine with the
+    // full subsystem set (Scheduler, Triage, Executor, auto-merge, PR
+    // monitor, notifier, cron, settings listeners). No project is special.
     //
     const githubClient = new GitHubClient();
-
-    const engineOptions: ProjectEngineOptions = {
-      externalTaskStore: store,
-      getMergeStrategy,
-      processPullRequestMerge: (s, wd, taskId) =>
-        processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
-      getTaskMergeBlocker,
-    };
-
-    // Resolve project ID from CentralCore for engine
-    let engineProjectId: string | undefined;
-    try {
-      const central = new CentralCore();
-      await central.init();
-      const registered = await central.getProjectByPath(cwd).catch(() => null);
-      await central.close().catch(() => {});
-      if (registered) engineProjectId = registered.id;
-    } catch {
-      // Central DB unavailable — engine will run without project registration
-    }
-
-    const runtimeConfig: ProjectRuntimeConfig = {
-      projectId: engineProjectId ?? cwd,
-      workingDirectory: cwd,
-      isolationMode: "in-process",
-      // maxConcurrent/maxWorktrees are read from settings inside InProcessRuntime
-      // via CentralCore; use safe defaults here.
-      maxConcurrent: 4,
-      maxWorktrees: 10,
-    };
 
     const centralCoreForEngine = new CentralCore();
     try {
@@ -527,89 +487,54 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       // Non-fatal — engine uses fallback concurrency defaults
     }
 
-    // Engine is created here but started lazily on first access (see onProjectFirstAccessed below).
-    const engine = new ProjectEngine(runtimeConfig, centralCoreForEngine, engineOptions);
-    let primaryEngineStarting = false;
+    const engineManager = new ProjectEngineManager(centralCoreForEngine, {
+      getMergeStrategy,
+      processPullRequestMerge: (s, wd, taskId) =>
+        processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
+      getTaskMergeBlocker,
+    });
 
-    // ── Per-project engine manager ───────────────────────────────────────
-    //
-    // The dashboard can serve any number of registered projects via
-    // ?projectId= query params on API/SSE routes. Each project needs its
-    // own engine (Scheduler, TriageProcessor, TaskExecutor) to triage and
-    // execute tasks. All projects — including the primary — start their
-    // engine lazily on first access, reusing the same CentralCore.
-    //
-    // All projects use ProjectEngine (full subsystem set including
-    // auto-merge, PR monitor, settings listeners, etc.).
-    //
-    const secondaryEngines = new Map<string, ProjectEngine>();
+    // Start engines for all registered projects eagerly
+    await engineManager.startAll();
+
+    // Resolve the cwd project's engine for the dashboard's HTTP layer defaults.
+    // The engine for the cwd project provides onMerge, automationStore, etc.
+    // for requests that arrive without ?projectId=. This is transitional —
+    // Phase 5 removes this fallback entirely.
+    let cwdEngine: ReturnType<typeof engineManager.getEngine>;
+    try {
+      const registered = await centralCoreForEngine.getProjectByPath(cwd).catch(() => null);
+      if (registered) {
+        cwdEngine = engineManager.getEngine(registered.id);
+      }
+    } catch {
+      // cwd not registered — no engine defaults for HTTP layer
+    }
+
+    // Get the trigger scheduler from any running engine
+    for (const engine of engineManager.getAllEngines().values()) {
+      const ts = engine.getHeartbeatTriggerScheduler();
+      if (ts) {
+        triggerScheduler = ts;
+        break;
+      }
+    }
+
     disposeCallbacks.push(async () => {
-      const stops = Array.from(secondaryEngines.values()).map((e) =>
-        e.stop().catch(() => {}),
-      );
-      await Promise.all(stops);
-      await engine.stop().catch(() => {});
+      await engineManager.stopAll();
       await centralCoreForEngine.close().catch(() => {});
     });
 
-    const onProjectFirstAccessed = (projectId: string): void => {
-      // Fire-and-forget: start engine for this project on first access
-      (async () => {
-        if (projectId === runtimeConfig.projectId) {
-          // Primary project: start via ProjectEngine (full subsystem set)
-          if (primaryEngineStarting) return;
-          primaryEngineStarting = true;
-          await engine.start();
-          triggerScheduler = engine.getHeartbeatTriggerScheduler();
-          console.log(`[dashboard] Started engine for primary project (${projectId})`);
-        } else {
-          // Non-primary projects: also use ProjectEngine for full subsystem
-          // support (auto-merge, PR monitor, settings listeners, etc.)
-          if (secondaryEngines.has(projectId)) return; // already running
-          const project = await centralCoreForEngine.getProject(projectId);
-          if (!project) return;
-
-          const secondaryConfig: ProjectRuntimeConfig = {
-            projectId: project.id,
-            workingDirectory: project.path,
-            isolationMode: (project.isolationMode as "in-process" | "child-process") ?? "in-process",
-            maxConcurrent: (project.settings as Record<string, unknown> | undefined)?.maxConcurrent as number ?? 4,
-            maxWorktrees: (project.settings as Record<string, unknown> | undefined)?.maxWorktrees as number ?? 10,
-          };
-
-          const secondaryOptions: ProjectEngineOptions = {
-            getMergeStrategy,
-            processPullRequestMerge: (s, wd, taskId) =>
-              processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
-            getTaskMergeBlocker,
-          };
-
-          const secondaryEngine = new ProjectEngine(
-            secondaryConfig,
-            centralCoreForEngine,
-            secondaryOptions,
-          );
-          secondaryEngines.set(projectId, secondaryEngine);
-          await secondaryEngine.start();
-          console.log(`[dashboard] Started engine for project ${project.name} (${projectId})`);
-        }
-      })().catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[dashboard] Failed to start engine for project ${projectId}: ${message}`);
-      });
-    };
-
-    // Pass engine to createServer — it derives onMerge, automationStore,
-    // missionAutopilot, missionExecutionLoop, and heartbeatMonitor automatically.
     app = createServer(store, {
-      engine,
+      engine: cwdEngine,
+      engineManager,
       authStorage: dashboardAuthStorage,
       modelRegistry,
       automationStore,
       pluginStore,
       pluginLoader,
       pluginRunner: pluginLoader,
-      onProjectFirstAccessed,
+      onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
     });
 
     const shutdown = async (signal: NodeJS.Signals) => {
@@ -638,21 +563,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       dispose();
       stopDiagnosticInterval();
 
-      // Stop all secondary project engines
-      for (const [id, secondaryEngine] of secondaryEngines) {
-        await secondaryEngine.stop().catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          console.warn(`[dashboard] Secondary engine ${id} stop error: ${message}`);
-        });
-      }
-
-      // Stop engine (stops all subsystems: InProcessRuntime + ProjectEngine auxiliaries,
-      // including HeartbeatMonitor, TriggerScheduler, NtfyNotifier, MissionAutopilot, etc.)
-      await engine.stop().catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[dashboard] Engine stop error: ${message}`);
-      });
-
+      // Stop all project engines uniformly
+      await engineManager.stopAll();
       await centralCoreForEngine.close().catch(() => {});
 
       store.close();

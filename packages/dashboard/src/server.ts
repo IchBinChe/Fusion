@@ -68,8 +68,12 @@ process.on("beforeExit", () => {
 export interface ServerOptions {
   /** Optional ProjectEngine — when provided, subsystems (onMerge, automationStore,
    *  missionAutopilot, missionExecutionLoop, heartbeatMonitor) are derived from it.
-   *  Explicit options still override engine-derived values. */
+   *  Explicit options still override engine-derived values.
+   *  @deprecated Use engineManager instead for multi-project support. */
   engine?: import("@fusion/engine").ProjectEngine;
+  /** ProjectEngineManager for uniform multi-project engine lifecycle.
+   *  When provided, the server can resolve per-project engines for route handlers. */
+  engineManager?: import("@fusion/engine").ProjectEngineManager;
   /** Custom merge handler — when provided, used instead of store.mergeTask */
   onMerge?: (taskId: string) => Promise<MergeResult>;
   /** When true, run API/websocket server only (skip frontend static assets + SPA fallback) */
@@ -281,15 +285,24 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   // Rate limiting — stricter limit on SSE connections
   app.get("/api/events", rateLimit(RATE_LIMITS.sse), async (req, res) => {
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+    const engineManager = options?.engineManager;
+
     if (!projectId) {
       createSSE(store, store.getMissionStore(), aiSessionStore, store.getPluginStore())(req, res);
       return;
     }
 
     try {
-      // Use the shared project-store resolver so SSE listeners attach to
-      // the same EventEmitter used by project-scoped task API routes.
-      const scopedStore = await getOrCreateProjectStore(projectId);
+      // Prefer the engine's store when available — this ensures SSE listeners
+      // attach to the same EventEmitter instance that the engine writes to,
+      // rather than a separate store created by getOrCreateProjectStore.
+      let scopedStore: TaskStore;
+      if (engineManager) {
+        const engine = engineManager.getEngine(projectId);
+        scopedStore = engine?.getTaskStore() ?? await getOrCreateProjectStore(projectId);
+      } else {
+        scopedStore = await getOrCreateProjectStore(projectId);
+      }
       createSSE(scopedStore, scopedStore.getMissionStore(), aiSessionStore, scopedStore.getPluginStore(), {
         projectId,
       })(req, res);

@@ -60,6 +60,12 @@ vi.mock("@fusion/core", () => ({
     init: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+    getProject: vi.fn().mockImplementation((id: string) =>
+      Promise.resolve({ id, name: `Project ${id}`, path: process.cwd(), status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
+    ),
+    listProjects: vi.fn().mockResolvedValue([
+      { id: "project-1", name: "Test Project", path: process.cwd(), status: "active", isolationMode: "in-process", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    ]),
   })),
   AutomationStore: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
@@ -156,6 +162,45 @@ vi.mock("@fusion/engine", async (importOriginal) => {
       getWorkingDirectory: vi.fn().mockReturnValue("/tmp/test"),
       onMerge: vi.fn().mockResolvedValue({ merged: true }),
     })),
+    ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, _options: any) => {
+      const engines = new Map<string, any>();
+      // Create mock engines that match the ProjectEngine mock shape above.
+      const createMockEngine = () => ({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getTaskStore: vi.fn().mockImplementation(() => makeMockStore()),
+        getRuntime: vi.fn().mockReturnValue({
+          getHeartbeatMonitor: vi.fn().mockReturnValue(undefined),
+          getMissionAutopilot: vi.fn().mockReturnValue(undefined),
+          getMissionExecutionLoop: vi.fn().mockReturnValue(undefined),
+        }),
+        getAutomationStore: vi.fn().mockReturnValue(undefined),
+        getHeartbeatMonitor: vi.fn().mockReturnValue(undefined),
+        getHeartbeatTriggerScheduler: vi.fn().mockReturnValue(undefined),
+        getWorkingDirectory: vi.fn().mockReturnValue("/tmp/test"),
+        onMerge: vi.fn().mockResolvedValue({ merged: true }),
+      });
+      return {
+        startAll: vi.fn(async () => {
+          const projects = await centralCore.listProjects();
+          for (const project of projects) {
+            const engine = createMockEngine();
+            await engine.start();
+            engines.set(project.id, engine);
+          }
+        }),
+        getEngine: vi.fn((id: string) => engines.get(id)),
+        getAllEngines: vi.fn(() => engines),
+        getStore: vi.fn((id: string) => engines.get(id)?.getTaskStore()),
+        has: vi.fn((id: string) => engines.has(id)),
+        ensureEngine: vi.fn(async (id: string) => engines.get(id)),
+        stopAll: vi.fn(async () => {
+          for (const engine of engines.values()) await engine.stop();
+          engines.clear();
+        }),
+        onProjectAccessed: vi.fn(),
+      };
+    }),
     MissionAutopilot: vi.fn().mockImplementation(() => ({
       start: vi.fn(),
       stop: vi.fn(),
@@ -422,17 +467,17 @@ describe("runDashboard — non-dev mode engine wiring", () => {
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
   });
 
-  it("passes engine to createServer (non-dev mode)", async () => {
+  it("passes engineManager to createServer (non-dev mode)", async () => {
     const { createServer } = await import("@fusion/dashboard");
-    const { ProjectEngine } = await import("@fusion/engine");
+    const { ProjectEngineManager } = await import("@fusion/engine");
 
     await runDashboard(0, {});
 
-    expect(ProjectEngine).toHaveBeenCalledTimes(1);
+    expect(ProjectEngineManager).toHaveBeenCalledTimes(1);
     expect(createServer).toHaveBeenCalledTimes(1);
     const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(serverOpts).toHaveProperty("engine");
-    expect(serverOpts.engine).toBeDefined();
+    expect(serverOpts).toHaveProperty("engineManager");
+    expect(serverOpts.engineManager).toBeDefined();
   });
 });
 
@@ -503,12 +548,14 @@ describe("runDashboard — per-project engine manager (multi-project)", () => {
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
   });
 
-  it("creates a ProjectEngine in non-dev mode", async () => {
-    const { ProjectEngine } = await import("@fusion/engine");
+  it("creates a ProjectEngineManager and calls startAll in non-dev mode", async () => {
+    const { ProjectEngineManager } = await import("@fusion/engine");
 
     await runDashboard(0, {});
 
-    expect(ProjectEngine).toHaveBeenCalledTimes(1);
+    expect(ProjectEngineManager).toHaveBeenCalledTimes(1);
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    expect(managerInstance.startAll).toHaveBeenCalledTimes(1);
   });
 
   it("passes onProjectFirstAccessed callback to createServer", async () => {
@@ -521,105 +568,30 @@ describe("runDashboard — per-project engine manager (multi-project)", () => {
     expect(serverOpts.onProjectFirstAccessed).toBeTypeOf("function");
   });
 
-  it("onProjectFirstAccessed starts a secondary ProjectEngine for a new project", async () => {
+  it("onProjectFirstAccessed delegates to engineManager.onProjectAccessed", async () => {
     const { createServer } = await import("@fusion/dashboard");
-    const { ProjectEngine } = await import("@fusion/engine");
-    const { CentralCore } = await import("@fusion/core");
-
-    const mockProject = {
-      id: "proj_other",
-      path: "/other/project",
-      name: "Other Project",
-      isolationMode: "in-process",
-      settings: { maxConcurrent: 2, maxWorktrees: 4 },
-    };
-
-    (CentralCore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      init: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
-      getProject: vi.fn().mockImplementation((id: string) =>
-        id === "proj_other" ? Promise.resolve(mockProject) : Promise.resolve(null),
-      ),
-    }));
+    const { ProjectEngineManager } = await import("@fusion/engine");
 
     await runDashboard(0, {});
 
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
     const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
     const cb: (id: string) => void = serverOpts.onProjectFirstAccessed;
 
-    cb("proj_other");
-    await new Promise((r) => setTimeout(r, 0));
+    cb("proj_new");
 
-    expect(ProjectEngine).toHaveBeenCalledTimes(2);
-    const secondaryConfig = (ProjectEngine as ReturnType<typeof vi.fn>).mock.calls[1][0];
-    expect(secondaryConfig).toEqual(
-      expect.objectContaining({
-        projectId: "proj_other",
-        workingDirectory: "/other/project",
-        isolationMode: "in-process",
-        maxConcurrent: 2,
-        maxWorktrees: 4,
-      }),
-    );
-    const secondaryInstance = (ProjectEngine as ReturnType<typeof vi.fn>).mock.results[1]?.value;
-    expect(secondaryInstance.start).toHaveBeenCalledTimes(1);
+    expect(managerInstance.onProjectAccessed).toHaveBeenCalledWith("proj_new");
   });
 
-  it("onProjectFirstAccessed skips unknown projects", async () => {
+  it("passes engineManager to createServer", async () => {
     const { createServer } = await import("@fusion/dashboard");
-    const { ProjectEngine } = await import("@fusion/engine");
-    const { CentralCore } = await import("@fusion/core");
-
-    (CentralCore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      init: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
-      getProject: vi.fn().mockResolvedValue(null),
-    }));
+    const { ProjectEngineManager } = await import("@fusion/engine");
 
     await runDashboard(0, {});
 
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
     const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    const cb: (id: string) => void = serverOpts.onProjectFirstAccessed;
-
-    cb("proj_unknown");
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(ProjectEngine).toHaveBeenCalledTimes(1);
-  });
-
-  it("onProjectFirstAccessed skips if a secondary engine already exists for that project", async () => {
-    const { createServer } = await import("@fusion/dashboard");
-    const { ProjectEngine } = await import("@fusion/engine");
-    const { CentralCore } = await import("@fusion/core");
-
-    const mockProject = {
-      id: "proj_dupe",
-      path: "/dupe",
-      name: "Dupe",
-      isolationMode: "in-process",
-      settings: {},
-    };
-
-    (CentralCore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      init: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
-      getProject: vi.fn().mockResolvedValue(mockProject),
-    }));
-
-    await runDashboard(0, {});
-
-    const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    const cb: (id: string) => void = serverOpts.onProjectFirstAccessed;
-
-    cb("proj_dupe");
-    await new Promise((r) => setTimeout(r, 0));
-    cb("proj_dupe");
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(ProjectEngine).toHaveBeenCalledTimes(2);
+    expect(serverOpts.engineManager).toBe(managerInstance);
   });
 
   it("does not create ProjectEngine in dev mode", async () => {

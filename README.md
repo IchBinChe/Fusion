@@ -269,8 +269,8 @@ fn mission activate-slice <slice-id>        # Manually activate a pending slice
 ```bash
 fn agent stop <id>                          # Stop a running agent
 fn agent start <id>                         # Start/resume a stopped agent
-fn agent import <file> [--dry-run] [--skip-existing]
-                                            # Import agents from a companies.sh manifest
+fn agent import <source> [--dry-run] [--skip-existing]
+                                            # Import agents from companies.sh packages
 fn agent mailbox <id>                       # View one agent's mailbox
 
 fn message inbox                            # List inbox messages
@@ -415,9 +415,54 @@ Each prompt shows its built-in description, allows text editing, and provides a 
 ```bash
 fn agent stop <id>
 fn agent start <id>
-fn agent import <file> [--dry-run] [--skip-existing]
+fn agent import <source> [--dry-run] [--skip-existing]
 fn agent mailbox <id>
 ```
+
+### Agent Import
+
+Fusion can import agents from [companies.sh](https://companies.sh) packages. The importer supports:
+
+- **Single manifest import** — Import a single `AGENTS.md` file as an independent agent
+- **Team package import** — Import a full companies.sh package with `COMPANY.md`, `TEAM.md`, and `AGENTS.md` files
+- **Archive import** — Import from `.tar.gz`, `.tgz`, or `.zip` archives
+
+#### Team Hierarchy
+
+When importing a companies.sh package with team structure, Fusion preserves the manager/report hierarchy:
+
+- Team managers are imported with their defined capabilities and instructions
+- Reports are linked to their manager via the `reportsTo` field using Fusion agent IDs
+- The import summary shows team count and hierarchy links
+
+#### CLI Usage
+
+```bash
+# Import a single agent manifest
+fn agent import ./path/to/AGENTS.md
+
+# Import a full companies.sh package
+fn agent import ./path/to/companies-package/
+
+# Import from archive
+fn agent import ./path/to/package.tar.gz
+
+# Preview without creating
+fn agent import ./path/to/package/ --dry-run
+
+# Skip agents that already exist
+fn agent import ./path/to/package/ --skip-existing
+```
+
+#### Dashboard Import
+
+The Agents view provides a directory picker for importing companies.sh packages:
+
+1. Click **Import** in the Agents view header
+2. Select **Import from Directory** or paste a manifest directly
+3. Choose a companies.sh package folder or single manifest
+4. Preview the import with company/team metadata
+5. Confirm to create agents with hierarchy
 
 ### Per-Agent Heartbeat Configuration
 

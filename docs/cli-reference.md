@@ -219,11 +219,47 @@ Agent runtime operations.
 fn agent stop AGENT-001
 fn agent start AGENT-001
 fn agent mailbox AGENT-001
-fn agent import ./companies-manifest.yaml --dry-run
+fn agent import <source> [--dry-run] [--skip-existing]
 fn agent export ./output-dir --company-name "My Company" --company-slug my-company
 ```
 
 Subcommands: `stop`, `start`, `mailbox`, `import`, `export`.
+
+### `fn agent import`
+
+Import agents from [companies.sh](https://companies.sh) packages. Supports single manifest files, team packages, and archives.
+
+**Source formats:**
+- Single `AGENTS.md` manifest file
+- Companies.sh package directory with `COMPANY.md`, `TEAM.md`, and `AGENTS.md`
+- Archive files (`.tar.gz`, `.tgz`, `.zip`)
+
+**Options:**
+| Option | Description |
+|---|---|
+| `--dry-run` | Preview import without creating agents |
+| `--skip-existing` | Skip agents with names that already exist in Fusion |
+
+**Team hierarchy:**
+When importing a companies.sh package with team structure, the importer preserves manager/report relationships. Agents are linked using Fusion agent IDs (not manifest paths).
+
+**Examples:**
+```bash
+# Import a single agent manifest
+fn agent import ./ceo/AGENTS.md
+
+# Import a full companies.sh package
+fn agent import ./my-company/
+
+# Import from archive
+fn agent import ./package.tar.gz
+
+# Preview without creating
+fn agent import ./package/ --dry-run
+
+# Skip existing agents
+fn agent import ./package/ --skip-existing
+```
 
 ---
 

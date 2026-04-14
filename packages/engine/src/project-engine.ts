@@ -683,6 +683,20 @@ export class ProjectEngine {
       if (!settings.autoMerge) return;
 
       const tasks = await store.listTasks({ column: "in-review" });
+
+      // Clear stale "merging"/"merging-pr" statuses left by a prior crash.
+      // No merge is actually running at startup, so any task still marked
+      // as merging is a leftover from a previous engine lifecycle.
+      const staleStatuses = new Set(["merging", "merging-pr"]);
+      for (const t of tasks) {
+        if (t.status && staleStatuses.has(t.status)) {
+          runtimeLog.log(`Startup sweep: clearing stale '${t.status}' status on ${t.id}`);
+          await store.updateTask(t.id, { status: null });
+          // Update in-memory object so canMergeTask sees the cleared status
+          (t as any).status = null;
+        }
+      }
+
       const eligible = tasks.filter((t) => this.canMergeTask(t as any));
       if (eligible.length > 0) {
         runtimeLog.log(`Auto-merge startup sweep: enqueueing ${eligible.length} task(s)`);

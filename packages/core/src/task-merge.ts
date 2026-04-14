@@ -4,6 +4,8 @@ const BLOCKING_TASK_STATUSES = new Set([
   "failed",
   "awaiting-inspection",
   "awaiting-user-review",
+  "merging",
+  "merging-pr",
 ]);
 
 const NON_TERMINAL_STEP_STATUSES = new Set([

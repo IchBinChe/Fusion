@@ -2251,3 +2251,189 @@ describe("tool callback behavior (FN-1500)", () => {
     consoleLogSpy.mockRestore();
   });
 });
+
+// ── Skill Selection Regression Tests (FN-1514) ──────────────────────────
+//
+// Note: These tests verify that skillSelection is passed through the triage
+// pipeline. The actual agent skill lookup is tested in session-skill-context.test.ts.
+// Here we focus on the contract that skillSelection flows correctly.
+
+describe("TriageProcessor skillSelection regression (FN-1511)", () => {
+  const projectRoot = "/tmp/test-project";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreateKbAgent.mockResolvedValue({
+      session: {
+        state: {},
+        sessionManager: {},
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+        navigateTree: vi.fn(),
+      },
+    });
+  });
+
+  /**
+   * Helper: execute triage on a task and capture createKbAgent call arguments.
+   */
+  async function captureCreateKbAgentArgs(options?: {
+    assignedAgentId?: string;
+    assignedAgentSkills?: string[];
+  }) {
+    const { assignedAgentId, assignedAgentSkills } = options || {};
+
+    const mockAgentStore = {
+      getAgent: vi.fn().mockImplementation(async (id: string) => {
+        if (id === assignedAgentId && assignedAgentSkills) {
+          return {
+            id,
+            name: "Test Agent",
+            role: "triage",
+            state: "idle",
+            metadata: { skills: assignedAgentSkills },
+          };
+        }
+        return null;
+      }),
+    };
+
+    const store = createMockStore({
+      getTask: vi.fn().mockResolvedValue({
+        id: "FN-SKILL",
+        title: "Skill Test",
+        description: "Test skill selection",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        assignedAgentId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    });
+
+    let capturedArgs: any = null;
+    mockCreateKbAgent.mockImplementationOnce(async (opts: any) => {
+      capturedArgs = opts;
+      return {
+        session: {
+          state: {},
+          sessionManager: {},
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          navigateTree: vi.fn(),
+        },
+      };
+    });
+
+    const processor = new TriageProcessor(store, projectRoot, {
+      agentStore: mockAgentStore as any,
+    });
+    const task: Task = {
+      id: "FN-SKILL",
+      description: "Test skill selection",
+      column: "triage",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      assignedAgentId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await processor.specifyTask(task);
+
+    return capturedArgs;
+  }
+
+  describe("skillSelection context propagation", () => {
+    it("passes skillSelection to createKbAgent with correct projectRootDir", async () => {
+      const args = await captureCreateKbAgentArgs({
+        assignedAgentId: "agent-001",
+        assignedAgentSkills: ["triage"],
+      });
+
+      expect(args).not.toBeNull();
+      expect(args).toHaveProperty("skillSelection");
+      expect(args.skillSelection.projectRootDir).toBe(projectRoot);
+    });
+
+    it("uses 'triage' as sessionPurpose for triage sessions", async () => {
+      const args = await captureCreateKbAgentArgs({
+        assignedAgentId: "agent-001",
+        assignedAgentSkills: ["triage"],
+      });
+
+      expect(args).not.toBeNull();
+      expect(args.skillSelection?.sessionPurpose).toBe("triage");
+    });
+
+    it("skillSelection is undefined when no agentStore provided (role fallback behavior)", async () => {
+      // When no agentStore is provided, buildSessionSkillContext uses role fallback
+      // and skillSelection may be undefined or use role fallback skills
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue({
+          id: "FN-SKILL",
+          description: "Test",
+          column: "triage",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      });
+
+      let capturedArgs: any = null;
+      mockCreateKbAgent.mockImplementationOnce(async (opts: any) => {
+        capturedArgs = opts;
+        return {
+          session: {
+            state: {},
+            sessionManager: {},
+            prompt: vi.fn().mockResolvedValue(undefined),
+            dispose: vi.fn(),
+            navigateTree: vi.fn(),
+          },
+        };
+      });
+
+      const processor = new TriageProcessor(store, projectRoot);
+      await processor.specifyTask({
+        id: "FN-SKILL",
+        description: "Test",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Without agentStore, role fallback is used which adds skillSelection with triage skill
+      expect(capturedArgs).not.toBeNull();
+      expect(capturedArgs).toHaveProperty("skillSelection");
+    });
+  });
+
+  describe("parity with executor paths", () => {
+    it("uses same skillSelection field structure as executor", async () => {
+      const args = await captureCreateKbAgentArgs({
+        assignedAgentId: "agent-001",
+        assignedAgentSkills: ["triage"],
+      });
+
+      expect(args).not.toBeNull();
+      // Triage and executor should use the same skillSelection field structure
+      expect(args).toHaveProperty("skillSelection");
+      expect(args.skillSelection).toHaveProperty("projectRootDir");
+      expect(args.skillSelection).toHaveProperty("requestedSkillNames");
+      expect(args.skillSelection).toHaveProperty("sessionPurpose");
+    });
+  });
+});

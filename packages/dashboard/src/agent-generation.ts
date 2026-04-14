@@ -15,9 +15,9 @@
 import { randomUUID } from "node:crypto";
 
 // Dynamic import for @fusion/core to get prompt override resolution
- 
-type PromptOverrideMap = Record<string, string | undefined>;
- 
+
+type PromptOverrideMap = Record<string, string | null>;
+
 type ResolvePromptFn = (key: string, overrides?: PromptOverrideMap) => string;
 let resolvePrompt: ResolvePromptFn = () => "";
 let promptCatalogReady = false;
@@ -414,7 +414,7 @@ export function parseGenerationResponse(text: string): AgentGenerationSpec {
  *
  * @param ip - Client IP for rate limiting
  * @param roleDescription - The user's description of the desired agent role
- * @returns Session object (without spec — call generateAgentSpec to populate)
+ * @returns Session object (without spec - call generateAgentSpec to populate)
  */
 export async function startAgentGeneration(
   ip: string,

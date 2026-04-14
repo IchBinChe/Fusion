@@ -116,15 +116,15 @@ export function __setCreateKbAgentForRefine(mock: typeof createKbAgentForRefine)
 }
 
 // Default system prompt for workflow step refinement (fallback when overrides unavailable)
- 
-let resolveWorkflowStepRefinePrompt: (key: string, overrides?: Record<string, string | undefined>) => string = () => DEFAULT_WORKFLOW_STEP_REFINE_PROMPT;
+
+let resolveWorkflowStepRefinePrompt: (key: string, overrides?: Record<string, string | null>) => string = () => DEFAULT_WORKFLOW_STEP_REFINE_PROMPT;
 let promptOverridesReady = false;
 
 async function initPromptOverrides() {
   if (promptOverridesReady) return;
   try {
     const core = await import("@fusion/core");
-    resolveWorkflowStepRefinePrompt = (key: string, overrides?: Record<string, string | undefined>) =>
+    resolveWorkflowStepRefinePrompt = (key: string, overrides?: Record<string, string | null>) =>
       core.resolvePrompt(key as keyof typeof core.PROMPT_KEY_CATALOG, overrides);
     promptOverridesReady = true;
   } catch {

@@ -2104,10 +2104,10 @@ export function SettingsModal({
                 }));
               }}
               promptOverrides={form.promptOverrides}
-              onPromptOverridesChange={(promptOverrides: Record<PromptKey, string | null> | undefined) => {
+              onPromptOverridesChange={(overrides) => {
                 setForm((f) => ({
                   ...f,
-                  promptOverrides,
+                  promptOverrides: overrides,
                 }));
               }}
             />

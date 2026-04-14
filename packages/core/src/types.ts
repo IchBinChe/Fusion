@@ -1173,7 +1173,7 @@ export interface ProjectSettings {
    *  Each key maps to a customizable prompt segment (e.g., "executor-welcome",
    *  "triage-context"). When a key is present with a non-empty value, that
    *  override replaces the default prompt segment. Missing or empty values
-   *  fall back to the default prompt content.
+   *  fall back to the default prompt content. Null values delete the key.
    *
    *  This is separate from `agentPrompts` which controls full role templates.
    *  `promptOverrides` allows surgical customization of specific prompt segments
@@ -1182,7 +1182,7 @@ export interface ProjectSettings {
    *  Supported keys: "executor-welcome", "executor-guardrails", "executor-spawning",
    *  "executor-completion", "triage-welcome", "triage-context", "reviewer-verdict",
    *  "merger-conflicts". */
-  promptOverrides?: Record<string, string>;
+  promptOverrides?: Record<string, string | null>;
   /** Enable/disable agent self-reflection workflows. Default: false. */
   reflectionEnabled?: boolean;
   /** How often periodic reflections occur in milliseconds. Default: 3_600_000 (1 hour). */

@@ -303,10 +303,9 @@ export function AgentPromptsManager({
   // Handle prompt override change
   const handlePromptOverrideChange = useCallback(
     (key: PromptKey, value: string) => {
-      onPromptOverridesChange({
-        ...promptOverrides,
-        [key]: value || null,
-      });
+      const newOverrides = { ...promptOverrides } as Record<PromptKey, string | null>;
+      newOverrides[key] = value || null;
+      onPromptOverridesChange(newOverrides);
     },
     [promptOverrides, onPromptOverridesChange],
   );
@@ -314,10 +313,9 @@ export function AgentPromptsManager({
   // Handle reset (set to null) for a prompt override
   const handleResetOverride = useCallback(
     (key: PromptKey) => {
-      onPromptOverridesChange({
-        ...promptOverrides,
-        [key]: null,
-      });
+      const newOverrides = { ...promptOverrides } as Record<PromptKey, string | null>;
+      newOverrides[key] = null;
+      onPromptOverridesChange(newOverrides);
     },
     [promptOverrides, onPromptOverridesChange],
   );

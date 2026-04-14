@@ -457,9 +457,10 @@ export type PromptOverrideEntry = string | undefined;
 
 /**
  * Collection of prompt overrides keyed by PromptKey.
- * Stored in project settings as `promptOverrides: Record<PromptKey, string>`.
+ * Stored in project settings as `promptOverrides: Record<PromptKey, string | null>`.
+ * Null values are interpreted as "delete this override".
  */
-export type PromptOverrideMap = Partial<Record<PromptKey, string>>;
+export type PromptOverrideMap = Partial<Record<PromptKey, string | null>>;
 
 // ---------------------------------------------------------------------------
 // Resolver Functions
@@ -492,8 +493,8 @@ export function resolvePrompt(
   // Check for a valid override
   if (overrides && key in overrides) {
     const override = overrides[key];
-    // Non-empty string is a valid override
-    if (override !== undefined && override !== "") {
+    // Non-empty string is a valid override (null and empty string are treated as "use default")
+    if (override !== undefined && override !== null && override !== "") {
       return override;
     }
   }

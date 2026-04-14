@@ -206,22 +206,21 @@ export function resolveSessionSkills(context: SkillSelectionContext): SkillSelec
   }
 
   // Build allowed set from patterns
-  const allowedSet = new Set<string>();
-  const excludedPatterns: string[] = [];
+  // Last entry wins for duplicate paths: we track the "final decision" per path
+  const finalDecisions = new Map<string, boolean>(); // true = allowed, false = excluded
 
   for (const pattern of skillPatterns) {
     const path = normalizePattern(pattern);
-    if (isExclusionPattern(pattern)) {
-      excludedPatterns.push(path);
-      allowedSet.delete(path); // Remove from allowed set if previously added
-    } else {
-      allowedSet.add(path);
-    }
+    const isExclusion = isExclusionPattern(pattern);
+    finalDecisions.set(path, !isExclusion);
   }
 
-  // Apply exclusion patterns last (they override inclusions)
-  for (const excluded of excludedPatterns) {
-    allowedSet.delete(excluded);
+  // Build allowed set from final decisions
+  const allowedSet = new Set<string>();
+  for (const [path, allowed] of finalDecisions) {
+    if (allowed) {
+      allowedSet.add(path);
+    }
   }
 
   // Determine if filtering is active
@@ -303,23 +302,38 @@ export function createSkillsOverrideFromSelection(
       return base;
     }
 
-    // Filter skills to only those in the allowed set
-    const filteredSkills = base.skills.filter((skill) => {
-      // Match by filePath (the skill's absolute file path)
-      return allowedSkillPaths.has(skill.filePath);
-    });
+    // Determine the effective filter criteria
+    // When requestedSkillNames is provided without patterns, filter by name
+    // When patterns are provided, filter by file path
+    const hasPatterns = allowedSkillPaths.size > 0;
+    const hasRequestedNames = Boolean(requestedSkillNames && requestedSkillNames.length > 0);
+
+    // Filter skills
+    let filteredSkills: Skill[];
+    if (hasRequestedNames) {
+      // Filter by requested names (case-insensitive match)
+      const requestedNamesLower = new Set(requestedSkillNames!.map((n) => n.toLowerCase()));
+      filteredSkills = base.skills.filter((skill) => requestedNamesLower.has(skill.name.toLowerCase()));
+    } else if (hasPatterns) {
+      // Filter by file path
+      filteredSkills = base.skills.filter((skill) => allowedSkillPaths.has(skill.filePath));
+    } else {
+      // No filter criteria - this shouldn't happen if filterActive is true
+      filteredSkills = base.skills;
+    }
 
     // Build diagnostics for missing skills
     const newDiagnostics: ResourceDiagnostic[] = [];
 
     // Check for configured patterns that don't match any discovered skill
     // Note: At this point, we have access to base.skills for validation
+    const purpose = sessionPurpose ? ` [${sessionPurpose}]` : "";
     for (const allowedPath of allowedSkillPaths) {
       const hasMatch = base.skills.some((skill) => skill.filePath === allowedPath);
       if (!hasMatch) {
         newDiagnostics.push({
           type: "warning",
-          message: `Configured skill pattern '${allowedPath}' not found in discovered skills`,
+          message: `Configured skill pattern '${allowedPath}' not found in discovered skills${purpose}`,
           path: allowedPath,
         });
       }

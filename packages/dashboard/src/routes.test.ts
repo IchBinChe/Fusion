@@ -8202,6 +8202,588 @@ describe("Planning Mode Routes", () => {
     });
 });
 
+/**
+ * Saturated-slot regression coverage for utility AI routes.
+ * These tests prove that planning, subtask, and interview routes remain executable
+ * when the task-lane is saturated (maxConcurrent = 0).
+ *
+ * UTILITY PATH contract: These routes are on the heartbeat control-plane lane
+ * and must NOT be gated on task-lane saturation (maxConcurrent, semaphore, queue depth).
+ *
+ * See .fusion/memory.md "Heartbeat Control-Plane Lane (FN-1487)"
+ */
+describe("Saturated-slot regression: utility AI routes", () => {
+  /**
+   * Helper to create a store with saturated settings (maxConcurrent = 0).
+   * This simulates the task-lane being fully saturated.
+   */
+  function createSaturatedStore(overrides: Partial<TaskStore> = {}): TaskStore {
+    return createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 0, // SATURATED: zero task slots available
+        promptOverrides: {},
+      }),
+      getSettingsFast: vi.fn().mockResolvedValue({
+        maxConcurrent: 0,
+      }),
+      ...overrides,
+    } as Partial<TaskStore>);
+  }
+
+  /**
+   * Helper to create an app with saturated settings and optional aiSessionStore.
+   */
+  function buildSaturatedApp(options: { aiSessionStore?: any } = {}) {
+    const store = createSaturatedStore();
+    const app = express();
+    app.use(express.json());
+    const routeOptions = options.aiSessionStore ? { aiSessionStore: options.aiSessionStore } : undefined;
+    app.use("/api", createApiRoutes(store, routeOptions as any));
+    return { app, store };
+  }
+
+  /**
+   * Setup a mock agent for planning session tests.
+   */
+  function setupSaturatedPlanningMockAgent() {
+    const questionResponses = [
+      JSON.stringify({
+        type: "question",
+        data: {
+          id: "q-scope",
+          type: "single_select",
+          question: "What is the scope?",
+          description: "Choose scope.",
+          options: [
+            { id: "small", label: "Small" },
+            { id: "medium", label: "Medium" },
+            { id: "large", label: "Large" },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "question",
+        data: {
+          id: "q-req",
+          type: "text",
+          question: "Requirements?",
+        },
+      }),
+      JSON.stringify({
+        type: "complete",
+        data: {
+          title: "Saturated Plan",
+          description: "A plan created under saturation",
+          suggestedSize: "M",
+          suggestedDependencies: [],
+          keyDeliverables: ["Item 1", "Item 2"],
+        },
+      }),
+    ];
+
+    const messages: Array<{ role: string; content: string }> = [];
+    let callIndex = 0;
+    const mockAgent = {
+      session: {
+        state: { messages },
+        prompt: vi.fn(async (msg: string) => {
+          messages.push({ role: "user", content: msg });
+          const response = questionResponses[callIndex++] ?? questionResponses[questionResponses.length - 1];
+          messages.push({ role: "assistant", content: response });
+        }),
+        dispose: vi.fn(),
+      },
+    };
+    __setCreateKbAgent(async () => mockAgent);
+  }
+
+  describe("POST /api/planning/start — utility lane independence", () => {
+    beforeEach(() => {
+      __resetPlanningState();
+      setupSaturatedPlanningMockAgent();
+    });
+
+    afterEach(() => {
+      __setCreateKbAgent(undefined as any);
+    });
+
+    it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
+      const { app } = buildSaturatedApp();
+
+      const res = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/start",
+        JSON.stringify({ initialPlan: "Plan a feature under saturated task-lane" }),
+        { "Content-Type": "application/json" },
+      );
+
+      // UTILITY PATH: Planning start must NOT be gated on maxConcurrent
+      expect(res.status).toBe(201);
+      expect(res.body.sessionId).toBeDefined();
+      expect(res.body.firstQuestion).toBeDefined();
+    });
+  });
+
+  describe("POST /api/planning/start-streaming — utility lane independence", () => {
+    beforeEach(() => {
+      __resetPlanningState();
+    });
+
+    afterEach(() => {
+      __setCreateKbAgent(undefined as any);
+    });
+
+    it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
+      // Mock agent for streaming
+      const messages: Array<{ role: string; content: string }> = [];
+      const mockAgent = {
+        session: {
+          state: { messages },
+          prompt: vi.fn(async (msg: string) => {
+            messages.push({ role: "user", content: msg });
+            messages.push({
+              role: "assistant",
+              content: JSON.stringify({
+                type: "question",
+                data: { id: "q-scope", type: "text", question: "What to plan?" },
+              }),
+            });
+          }),
+          dispose: vi.fn(),
+        },
+      };
+      __setCreateKbAgent(async () => mockAgent);
+
+      const { app } = buildSaturatedApp();
+
+      const res = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/start-streaming",
+        JSON.stringify({ initialPlan: "Streaming plan under saturation" }),
+        { "Content-Type": "application/json" },
+      );
+
+      // UTILITY PATH: Planning streaming must NOT be gated on maxConcurrent
+      expect(res.status).toBe(201);
+      expect(res.body.sessionId).toBeDefined();
+    });
+  });
+
+  describe("POST /api/planning/respond — utility lane independence", () => {
+    beforeEach(() => {
+      __resetPlanningState();
+      setupSaturatedPlanningMockAgent();
+    });
+
+    afterEach(() => {
+      __setCreateKbAgent(undefined as any);
+    });
+
+    it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
+      const { app } = buildSaturatedApp();
+
+      // First create a session
+      const startRes = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/start",
+        JSON.stringify({ initialPlan: "Test respond under saturation" }),
+        { "Content-Type": "application/json" },
+      );
+      expect(startRes.status).toBe(201);
+      const sessionId = startRes.body.sessionId;
+
+      // Submit response - must NOT be blocked by maxConcurrent
+      const res = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/respond",
+        JSON.stringify({ sessionId, responses: { scope: "medium" } }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.type).toBe("question");
+    });
+
+    it("preserves lock-conflict 409 semantics when task-lane is saturated", async () => {
+      // Create mock aiSessionStore that returns conflict on acquire
+      const mockAiSessionStore = {
+        acquireLock: vi.fn().mockReturnValue({ acquired: false, currentHolder: "tab-a" }),
+        releaseLock: vi.fn(),
+      };
+
+      const { app } = buildSaturatedApp({ aiSessionStore: mockAiSessionStore });
+
+      // Create session
+      const startRes = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/start",
+        JSON.stringify({ initialPlan: "Test respond lock under saturation" }),
+        { "Content-Type": "application/json" },
+      );
+      expect(startRes.status).toBe(201);
+      const sessionId = startRes.body.sessionId;
+
+      // Respond with conflicting tabId - mock returns conflict
+      const conflictRes = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/respond",
+        JSON.stringify({ sessionId, responses: { scope: "medium" }, tabId: "tab-b" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.body).toEqual({
+        error: "Session locked by another tab",
+        lockedByTab: "tab-a",
+      });
+    });
+  });
+
+  describe("POST /api/planning/:sessionId/retry — utility lane independence", () => {
+    it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
+      const retrySpy = vi.spyOn(planningModule, "retrySession").mockResolvedValue();
+      const { app } = buildSaturatedApp();
+
+      const res = await REQUEST(app, "POST", "/api/planning/session-sat-retry/retry");
+
+      // UTILITY PATH: Planning retry must NOT be gated on maxConcurrent
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, sessionId: "session-sat-retry" });
+      expect(retrySpy).toHaveBeenCalled();
+    });
+
+    it("preserves lock-conflict 409 semantics when task-lane is saturated", async () => {
+      // Create mock that returns conflict
+      const mockAiSessionStore = {
+        acquireLock: vi.fn().mockReturnValue({ acquired: false, currentHolder: "tab-x" }),
+        releaseLock: vi.fn(),
+      };
+
+      const { app } = buildSaturatedApp({ aiSessionStore: mockAiSessionStore });
+
+      const conflictRes = await REQUEST(
+        app,
+        "POST",
+        "/api/planning/session-locked-retry/retry",
+        JSON.stringify({ tabId: "tab-y" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.body).toEqual({
+        error: "Session locked by another tab",
+        lockedByTab: "tab-x",
+      });
+    });
+  });
+
+  describe("POST /api/subtasks/start-streaming — utility lane independence", () => {
+    it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
+      // Mock the subtask breakdown module to return proper format
+      const mockCreateSubtaskSession = vi.fn().mockResolvedValue({ sessionId: "subtask-sat-session" });
+      vi.spyOn(subtaskBreakdownModule, "createSubtaskSession").mockImplementation(mockCreateSubtaskSession);
+
+      try {
+        const { app } = buildSaturatedApp();
+
+        const res = await REQUEST(
+          app,
+          "POST",
+          "/api/subtasks/start-streaming",
+          JSON.stringify({ description: "Break into subtasks under saturation" }),
+          { "Content-Type": "application/json" },
+        );
+
+        // UTILITY PATH: Subtask start must NOT be gated on maxConcurrent
+        expect(res.status).toBe(201);
+        expect(res.body.sessionId).toBeDefined();
+        expect(mockCreateSubtaskSession).toHaveBeenCalled();
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+  });
+
+  describe("POST /api/subtasks/:sessionId/retry — utility lane independence", () => {
+    it("executes successfully when task-lane is saturated (maxConcurrent=0)", async () => {
+      const retrySpy = vi.spyOn(subtaskBreakdownModule, "retrySubtaskSession").mockResolvedValue();
+      const { app } = buildSaturatedApp();
+
+      const res = await REQUEST(app, "POST", "/api/subtasks/session-sat-retry/retry");
+
+      // UTILITY PATH: Subtask retry must NOT be gated on maxConcurrent
+      expect(res.status).toBe(200);
+      expect(retrySpy).toHaveBeenCalled();
+    });
+
+    it("preserves lock-conflict 409 semantics when task-lane is saturated", async () => {
+      // Create mock that returns conflict
+      const mockAiSessionStore = {
+        acquireLock: vi.fn().mockReturnValue({ acquired: false, currentHolder: "tab-locked" }),
+        releaseLock: vi.fn(),
+      };
+
+      const { app } = buildSaturatedApp({ aiSessionStore: mockAiSessionStore });
+
+      const conflictRes = await REQUEST(
+        app,
+        "POST",
+        "/api/subtasks/subtask-locked-retry/retry",
+        JSON.stringify({ tabId: "tab-conflict" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.body).toEqual({
+        error: "Session locked by another tab",
+        lockedByTab: "tab-locked",
+      });
+    });
+  });
+});
+
+/**
+ * Saturated-slot regression coverage for heartbeat wake routes.
+ * These tests prove that comment-triggered and steering-triggered heartbeat wake
+ * paths remain executable when the task-lane is saturated.
+ *
+ * UTILITY PATH contract: Wake delegation (heartbeatMonitor.executeHeartbeat) is on
+ * the heartbeat control-plane lane and must NOT be gated on task-lane saturation.
+ *
+ * See .fusion/memory.md "Heartbeat Control-Plane Lane (FN-1487)"
+ */
+describe("Saturated-slot regression: heartbeat wake routes", () => {
+  /**
+   * Helper to create a store with saturated settings (maxConcurrent = 0).
+   */
+  function createSaturatedStore(overrides: Partial<TaskStore> = {}): TaskStore {
+    return createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 0, // SATURATED: zero task slots available
+        promptOverrides: {},
+      }),
+      getSettingsFast: vi.fn().mockResolvedValue({
+        maxConcurrent: 0,
+      }),
+      ...overrides,
+    } as Partial<TaskStore>);
+  }
+
+  describe("POST /api/tasks/:id/comments — utility lane independence", () => {
+    it("triggers heartbeat wake for assigned agent when task-lane is saturated", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "kb-routes-sat-comment-"));
+      const fusionDir = join(tempDir, ".fusion");
+      mkdirSync(fusionDir, { recursive: true });
+
+      try {
+        const { AgentStore } = await import("@fusion/core");
+        const agentStore = new AgentStore({ rootDir: fusionDir });
+        await agentStore.init();
+        const agent = await agentStore.createAgent({ name: "Saturated Wake Agent", role: "executor" });
+        await agentStore.updateAgent(agent.id, {
+          runtimeConfig: { messageResponseMode: "immediate" },
+        });
+
+        const heartbeatMonitor = {
+          executeHeartbeat: vi.fn().mockResolvedValue({ id: "run-sat-1" }),
+        };
+
+        const updatedTask = {
+          ...FAKE_TASK_DETAIL,
+          id: "KB-SAT-001",
+          assignedAgentId: agent.id,
+          comments: [{ id: "comment-sat-1", text: "Hello", author: "user", createdAt: "2026-01-01T00:00:00.000Z" }],
+        };
+
+        const store = createSaturatedStore({
+          addTaskComment: vi.fn().mockResolvedValue(updatedTask),
+          getFusionDir: vi.fn().mockReturnValue(fusionDir),
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use("/api", createApiRoutes(store, { heartbeatMonitor } as any));
+
+        const res = await REQUEST(
+          app,
+          "POST",
+          "/api/tasks/KB-SAT-001/comments",
+          JSON.stringify({ text: "Hello" }),
+          { "Content-Type": "application/json" },
+        );
+
+        expect(res.status).toBe(200);
+        // UTILITY PATH: Wake must NOT be blocked by maxConcurrent=0
+        await vi.waitFor(() => {
+          expect(heartbeatMonitor.executeHeartbeat).toHaveBeenCalledWith(expect.objectContaining({
+            agentId: agent.id,
+            source: "on_demand",
+            taskId: "KB-SAT-001",
+            triggeringCommentIds: ["comment-sat-1"],
+            triggeringCommentType: "task",
+          }));
+        }, { timeout: 1000 });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves active-run conflict 409 semantics when task-lane is saturated", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "kb-routes-sat-active-run-"));
+      const fusionDir = join(tempDir, ".fusion");
+      mkdirSync(fusionDir, { recursive: true });
+
+      try {
+        const { AgentStore } = await import("@fusion/core");
+        const agentStore = new AgentStore({ rootDir: fusionDir });
+        await agentStore.init();
+        const agent = await agentStore.createAgent({ name: "Active Run Agent", role: "executor" });
+        await agentStore.updateAgent(agent.id, {
+          runtimeConfig: { messageResponseMode: "immediate" },
+        });
+        // Start an active run (simulates existing heartbeat)
+        await agentStore.startHeartbeatRun(agent.id);
+
+        const heartbeatMonitor = {
+          executeHeartbeat: vi.fn().mockResolvedValue({ id: "run-sat-2" }),
+        };
+
+        const updatedTask = {
+          ...FAKE_TASK_DETAIL,
+          id: "KB-SAT-002",
+          assignedAgentId: agent.id,
+          comments: [{ id: "comment-sat-2", text: "Hello", author: "user", createdAt: "2026-01-01T00:00:00.000Z" }],
+        };
+
+        const store = createSaturatedStore({
+          addTaskComment: vi.fn().mockResolvedValue(updatedTask),
+          getFusionDir: vi.fn().mockReturnValue(fusionDir),
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use("/api", createApiRoutes(store, { heartbeatMonitor } as any));
+
+        const res = await REQUEST(
+          app,
+          "POST",
+          "/api/tasks/KB-SAT-002/comments",
+          JSON.stringify({ text: "Hello" }),
+          { "Content-Type": "application/json" },
+        );
+
+        expect(res.status).toBe(200);
+        // Active run conflict must still work under saturation
+        await vi.waitFor(() => {
+          expect(heartbeatMonitor.executeHeartbeat).not.toHaveBeenCalled();
+        }, { timeout: 1000 });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("POST /api/agents/:id/runs — utility lane independence", () => {
+    it("accepts triggering comment wake fields when task-lane is saturated", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "kb-routes-sat-agent-runs-"));
+      const fusionDir = join(tempDir, ".fusion");
+      mkdirSync(fusionDir, { recursive: true });
+
+      try {
+        const { AgentStore } = await import("@fusion/core");
+        const agentStore = new AgentStore({ rootDir: fusionDir });
+        await agentStore.init();
+        const agent = await agentStore.createAgent({
+          name: "Saturated Run Agent",
+          role: "executor",
+        });
+
+        const store = createSaturatedStore({
+          getFusionDir: vi.fn().mockReturnValue(fusionDir),
+        } as any);
+
+        const app = express();
+        app.use(express.json());
+        app.use("/api", createApiRoutes(store));
+
+        const res = await REQUEST(
+          app,
+          "POST",
+          `/api/agents/${agent.id}/runs`,
+          JSON.stringify({
+            source: "on_demand",
+            triggerDetail: "task-comment",
+            taskId: "FN-SAT-001",
+            triggeringCommentIds: ["c-sat-1", "c-sat-2"],
+            triggeringCommentType: "task",
+          }),
+          { "Content-Type": "application/json" },
+        );
+
+        // UTILITY PATH: Agent run creation must NOT be blocked by maxConcurrent=0
+        expect(res.status).toBe(201);
+        expect(res.body.contextSnapshot).toMatchObject({
+          wakeReason: "on_demand",
+          triggerDetail: "task-comment",
+          taskId: "FN-SAT-001",
+          triggeringCommentIds: ["c-sat-1", "c-sat-2"],
+          triggeringCommentType: "task",
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves validation 400 for invalid triggeringCommentIds when task-lane is saturated", async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "kb-routes-sat-validation-"));
+      const fusionDir = join(tempDir, ".fusion");
+      mkdirSync(fusionDir, { recursive: true });
+
+      try {
+        const { AgentStore } = await import("@fusion/core");
+        const agentStore = new AgentStore({ rootDir: fusionDir });
+        await agentStore.init();
+        const agent = await agentStore.createAgent({
+          name: "Validation Agent",
+          role: "executor",
+        });
+
+        const store = createSaturatedStore({
+          getFusionDir: vi.fn().mockReturnValue(fusionDir),
+        } as any);
+
+        const app = express();
+        app.use(express.json());
+        app.use("/api", createApiRoutes(store));
+
+        // Invalid: triggeringCommentIds is a string, not array
+        const res = await REQUEST(
+          app,
+          "POST",
+          `/api/agents/${agent.id}/runs`,
+          JSON.stringify({
+            source: "on_demand",
+            triggeringCommentIds: "not-an-array",
+          }),
+          { "Content-Type": "application/json" },
+        );
+
+        // Validation must still work under saturation
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("triggeringCommentIds must be an array");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
 describe("DELETE /api/ai-sessions/cleanup", () => {
   let store: TaskStore;
 

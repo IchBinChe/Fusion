@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { definePlugin } from "./index.js";
 import type { FusionPlugin } from "../../core/src/plugin-types.js";
-import { validatePluginManifest } from "../../core/src/plugin-types.js";
 import type { TaskStore } from "../../core/src/store.js";
+import { validatePluginManifest } from "../../core/src/plugin-types.js";
 
 let validateFn: typeof validatePluginManifest;
 

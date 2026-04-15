@@ -5,7 +5,6 @@ import { mkdtemp } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
 import { execFile } from "node:child_process";
-import { execSync } from "node:child_process";
 import { resolve, sep, join } from "node:path";
 import { tmpdir } from "node:os";
 import * as nodeFs from "node:fs";
@@ -2639,16 +2638,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (completedSteps.length > 0) {
         const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
         try {
-          const { execSync } = await import("node:child_process");
           const rootDir = scopedStore.getRootDir();
-          const mergeBase = execSync(
-            `git merge-base "${branchName}" HEAD 2>/dev/null`,
-            { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
-          ).trim();
-          const branchHead = execSync(
-            `git rev-parse "${branchName}" 2>/dev/null`,
-            { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
-          ).trim();
+          const mergeBase = (await runGitCommand(["merge-base", branchName, "HEAD"], rootDir, 5000)).trim();
+          const branchHead = (await runGitCommand(["rev-parse", branchName], rootDir, 5000)).trim();
 
           if (mergeBase === branchHead) {
             for (let i = 0; i < task.steps.length; i++) {

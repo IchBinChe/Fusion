@@ -164,6 +164,16 @@ export function SettingsModal({
   const [importMerge, setImportMerge] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Memory backend status - called at component top level to comply with React Rules of Hooks
+  const {
+    currentBackend: memoryCurrentBackend,
+    capabilities: memoryCapabilities,
+    availableBackends: memoryAvailableBackends,
+    loading: memoryBackendLoading,
+    error: memoryBackendError,
+    refresh: refreshMemoryBackend,
+  } = useMemoryBackendStatus({ projectId });
+
   useEffect(() => {
     // Load both merged and scoped settings to enable inheritance detection
     Promise.all([fetchSettings(projectId), fetchSettingsByScope(projectId)])
@@ -1907,15 +1917,20 @@ export function SettingsModal({
           </>
         );
       case "memory": {
-        // Fetch backend status when memory section is active
+        // Use memory backend status from top-level hook call
         const {
           currentBackend,
           capabilities,
           availableBackends,
           loading: backendLoading,
           error: backendError,
-          refresh: refreshBackendStatus,
-        } = useMemoryBackendStatus({ projectId });
+        } = {
+          currentBackend: memoryCurrentBackend,
+          capabilities: memoryCapabilities,
+          availableBackends: memoryAvailableBackends,
+          loading: memoryBackendLoading,
+          error: memoryBackendError,
+        };
 
         // Determine if editing is allowed
         const isMemoryEnabled = form.memoryEnabled !== false;

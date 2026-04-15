@@ -32,6 +32,7 @@ export interface UseQuickChatReturn {
   sendMessage: (content: string) => Promise<void>;
   switchSession: (agentId: string) => Promise<void>;
   loadMessages: () => Promise<void>;
+  reloadMessages: () => Promise<void>;
 }
 
 /**
@@ -114,11 +115,23 @@ export function useQuickChat(
     }
   }, [activeSession, loadMessages]);
 
+  // Reload messages from server (for same-agent revisit)
+  const reloadMessages = useCallback(async () => {
+    if (!activeSession) return;
+    setMessagesLoading(true);
+    try {
+      const data = await fetchChatMessages(activeSession.id, { limit: 50 }, projectId);
+      setMessages(data.messages.reverse());
+    } catch (err) {
+      console.error("[useQuickChat] Failed to reload messages:", err);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [activeSession, projectId]);
+
   // Switch to a different agent's session
   const switchSession = useCallback(
     async (agentId: string) => {
-      if (agentId === currentAgentIdRef.current) return;
-
       // Close any existing stream
       if (streamRef.current) {
         streamRef.current.close();
@@ -130,10 +143,17 @@ export function useQuickChat(
       setStreamingThinking("");
       setIsStreaming(false);
 
-      // Initialize session for new agent
+      if (agentId === currentAgentIdRef.current) {
+        // Same agent — just reload messages from server
+        await reloadMessages();
+        return;
+      }
+
+      // New agent — initialize session
+      currentAgentIdRef.current = agentId;
       await initializeSession(agentId);
     },
-    [initializeSession],
+    [initializeSession, reloadMessages],
   );
 
   // Send a message using SSE streaming
@@ -232,5 +252,6 @@ export function useQuickChat(
     sendMessage,
     switchSession,
     loadMessages,
+    reloadMessages,
   };
 }

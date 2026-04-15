@@ -317,6 +317,7 @@ export class ChatManager {
 
     let agentResult: AgentResult | undefined;
     let accumulatedThinking = "";
+    let accumulatedText = "";
 
     try {
       // Ensure engine is loaded
@@ -345,6 +346,7 @@ export class ChatManager {
           });
         },
         onText: (delta: string) => {
+          accumulatedText += delta;
           chatStreamManager.broadcast(sessionId, {
             type: "text",
             data: delta,
@@ -376,10 +378,13 @@ export class ChatManager {
         }
       }
 
+      // Use accumulated text from streaming (most reliable) with extraction fallback
+      const finalResponseText = accumulatedText || responseText;
+
       // Persist assistant message
       const assistantMessage = this.chatStore.addMessage(sessionId, {
         role: "assistant",
-        content: responseText,
+        content: finalResponseText,
         thinkingOutput: accumulatedThinking || undefined,
       });
 

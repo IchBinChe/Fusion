@@ -121,6 +121,61 @@ describe("useChat", () => {
     });
   });
 
+  it("loads BOTH user and assistant messages when selecting a session", async () => {
+    // This test verifies the fix for FN-1857: Chat assistant messages not persisted
+    // after navigating away. The selectSession should fetch ALL messages from the server,
+    // including both user and assistant messages.
+    const session = makeSession({ id: "session-001", agentId: "agent-001" });
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+
+    // Simulate a conversation with multiple user and assistant messages
+    // Note: The hook calls reverse() on the messages array, so we provide them in reverse order
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        makeMessage({ id: "msg-004", sessionId: "session-001", role: "assistant", content: "Second answer" }),
+        makeMessage({ id: "msg-003", sessionId: "session-001", role: "user", content: "Second question" }),
+        makeMessage({ id: "msg-002", sessionId: "session-001", role: "assistant", content: "First answer" }),
+        makeMessage({ id: "msg-001", sessionId: "session-001", role: "user", content: "First question" }),
+      ],
+    });
+
+    const { result } = renderHook(() => useChat());
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(4);
+    });
+
+    // Verify all messages are loaded in correct order
+    expect(result.current.messages[0]).toMatchObject({
+      id: "msg-001",
+      role: "user",
+      content: "First question",
+    });
+    expect(result.current.messages[1]).toMatchObject({
+      id: "msg-002",
+      role: "assistant",
+      content: "First answer",
+    });
+    expect(result.current.messages[2]).toMatchObject({
+      id: "msg-003",
+      role: "user",
+      content: "Second question",
+    });
+    expect(result.current.messages[3]).toMatchObject({
+      id: "msg-004",
+      role: "assistant",
+      content: "Second answer",
+    });
+  });
+
   it("creates a new session and selects it", async () => {
     const newSession = makeSession({ id: "session-new", agentId: "agent-001", title: "Test Chat" });
     mockCreateChatSession.mockResolvedValueOnce({ session: newSession });

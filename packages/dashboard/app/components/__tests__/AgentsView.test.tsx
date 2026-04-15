@@ -16,6 +16,7 @@ vi.mock("../../api", () => ({
   startAgentRun: vi.fn(),
   fetchOrgTree: vi.fn(),
   fetchModels: vi.fn().mockResolvedValue({ models: [] }),
+  fetchDiscoveredSkills: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../AgentDetailView", () => ({

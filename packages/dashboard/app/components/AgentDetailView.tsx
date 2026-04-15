@@ -12,6 +12,7 @@ import type { AgentLogEntry, Task } from "@fusion/core";
 import { AgentLogViewer } from "./AgentLogViewer";
 import { AgentReflectionsTab } from "./AgentReflectionsTab";
 import { getAgentHealthStatus } from "../utils/agentHealth";
+import { SkillMultiselect } from "./SkillMultiselect";
 
 /**
  * Simple className utility - joins class names conditionally
@@ -652,6 +653,20 @@ function DashboardTab({
           <div className="info-item">
             <span className="info-label">Role</span>
             <span className="info-value">{agent.role}</span>
+          </div>
+          <div className="info-item">
+            <span className="info-label">Skills</span>
+            <span className="info-value">
+              {Array.isArray(agent.metadata?.skills) && (agent.metadata.skills as string[]).length > 0 ? (
+                <div className="skill-badge-row">
+                  {(agent.metadata.skills as string[]).map((skillId: string) => (
+                    <span key={skillId} className="skill-badge">{skillId}</span>
+                  ))}
+                </div>
+              ) : (
+                "—"
+              )}
+            </span>
           </div>
           <div className="info-item">
             <span className="info-label">State</span>
@@ -2285,6 +2300,11 @@ function ConfigTab({
   const [bundleExternalPath, setBundleExternalPath] = useState(agent.bundleConfig?.externalPath ?? "");
   const [bundleFiles, setBundleFiles] = useState<string[]>(agent.bundleConfig?.files ?? []);
 
+  // Skills state initialized from agent.metadata.skills
+  const [selectedSkills, setSelectedSkills] = useState<string[]>(
+    Array.isArray(agent.metadata?.skills) ? agent.metadata.skills as string[] : []
+  );
+
   // Budget status for progress bar display
   const [budgetStatus, setBudgetStatus] = useState<AgentBudgetStatus | null>(null);
   const [isResettingBudget, setIsResettingBudget] = useState(false);
@@ -2359,6 +2379,10 @@ function ConfigTab({
       ? String(Number(persistedBc.usageThreshold) * 100)
       : "";
     if (currentThreshold !== persistedThreshold) return true;
+
+    // Check skills
+    const persistedSkills = Array.isArray(agent.metadata?.skills) ? agent.metadata.skills as string[] : [];
+    if (JSON.stringify(selectedSkills) !== JSON.stringify(persistedSkills)) return true;
 
     return false;
   })();
@@ -2486,6 +2510,13 @@ function ConfigTab({
       } else {
         newMetadata[field.key] = raw;
       }
+    }
+
+    // Handle skills in metadata
+    if (selectedSkills.length > 0) {
+      newMetadata.skills = selectedSkills;
+    } else {
+      delete newMetadata.skills;
     }
 
     // Build the runtimeConfig payload — only include non-empty values
@@ -2641,6 +2672,25 @@ function ConfigTab({
               placeholder="e.g. agent-001"
               value={reportsToValue}
               onChange={(e) => setReportsToValue(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="config-section">
+        <h3>Skills</h3>
+        <p className="config-description">
+          Assign skills to this agent for specialized behavior.
+        </p>
+
+        <div className="config-fields">
+          <div className="config-field">
+            <SkillMultiselect
+              id="agent-skills"
+              label="Skills"
+              value={selectedSkills}
+              onChange={setSelectedSkills}
+              projectId={projectId}
             />
           </div>
         </div>

@@ -26,6 +26,7 @@ vi.mock("../../api", () => ({
   resetAgentBudget: vi.fn(),
   fetchWorkspaceFileContent: vi.fn(),
   saveWorkspaceFileContent: vi.fn(),
+  fetchDiscoveredSkills: vi.fn(),
 }));
 
 vi.mock("../AgentLogViewer", () => ({
@@ -36,7 +37,18 @@ vi.mock("../AgentLogViewer", () => ({
   ),
 }));
 
-import { fetchAgent, updateAgent, updateAgentState, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, fetchWorkspaceFileContent, saveWorkspaceFileContent } from "../../api";
+// Mock SkillMultiselect
+vi.mock("../SkillMultiselect", () => ({
+  SkillMultiselect: ({ value, onChange, id }: { value: string[]; onChange: (v: string[]) => void; id?: string }) => (
+    <div data-testid="skill-multiselect">
+      <span data-testid="skill-multiselect-value">{JSON.stringify(value)}</span>
+      <button data-testid="add-skill-test" onClick={() => onChange([...value, "test-skill"])}>Add Test Skill</button>
+      <button data-testid="remove-skill-test" onClick={() => onChange(value.filter(s => s !== "test-skill"))}>Remove Test Skill</button>
+    </div>
+  ),
+}));
+
+import { fetchAgent, updateAgent, updateAgentState, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchDiscoveredSkills } from "../../api";
 
 const mockFetchAgent = vi.mocked(fetchAgent);
 const mockUpdateAgent = vi.mocked(updateAgent);
@@ -52,6 +64,12 @@ const mockResetAgentBudget = vi.mocked(resetAgentBudget);
 const mockUpdateAgentInstructions = vi.mocked(updateAgentInstructions);
 const mockFetchWorkspaceFileContent = vi.mocked(fetchWorkspaceFileContent);
 const mockSaveWorkspaceFileContent = vi.mocked(saveWorkspaceFileContent);
+const mockFetchDiscoveredSkills = vi.mocked(fetchDiscoveredSkills);
+
+const MOCK_SKILLS = [
+  { id: "skill-1", name: "Skill One", path: "/path/skill-1", relativePath: "skills/skill-1", enabled: true, metadata: { source: "*", scope: "user" as const, origin: "top-level" as const } },
+  { id: "skill-2", name: "Skill Two", path: "/path/skill-2", relativePath: "skills/skill-2", enabled: true, metadata: { source: "*", scope: "user" as const, origin: "top-level" as const } },
+];
 
 describe("AgentDetailView", () => {
   const createMockAgent = (overrides: Partial<{
@@ -124,6 +142,8 @@ describe("AgentDetailView", () => {
     mockFetchWorkspaceFileContent.mockResolvedValue({ content: "", mtime: "2024-01-01T00:00:00.000Z", size: 0 });
     mockSaveWorkspaceFileContent.mockResolvedValue({ success: true, mtime: "2024-01-01T00:00:00.000Z", size: 0 });
     mockUpdateAgentInstructions.mockResolvedValue({} as any);
+    // Default: return skills
+    mockFetchDiscoveredSkills.mockResolvedValue(MOCK_SKILLS);
   });
 
   it("shows loading state initially", () => {
@@ -2415,6 +2435,191 @@ describe("AgentDetailView", () => {
           }),
           "proj_456",
         );
+      });
+    });
+  });
+
+  // ── Skills ─────────────────────────────────────────────────────────────────
+
+  describe("Skills", () => {
+    it("renders skill badges in Dashboard tab when agent has skills", async () => {
+      const agentWithSkills = createMockAgent({
+        metadata: { skills: ["skill-1", "skill-2"] },
+      });
+      mockFetchAgent.mockResolvedValue(agentWithSkills);
+
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByText("skill-1")).toBeTruthy();
+        expect(screen.getAllByText("skill-2")).toBeTruthy();
+      });
+    });
+
+    it("shows dash when agent has no skills in Dashboard tab", async () => {
+      const agentWithNoSkills = createMockAgent({
+        metadata: {},
+      });
+      mockFetchAgent.mockResolvedValue(agentWithNoSkills);
+
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Skills")).toBeInTheDocument();
+        // Should show dash when no skills
+        const skillsLabel = screen.getByText("Skills");
+        const parent = skillsLabel.closest(".info-item");
+        expect(parent?.textContent).toContain("—");
+      });
+    });
+
+    it("shows SkillMultiselect in Config tab", async () => {
+      const user = userEvent.setup();
+      const agentWithSkills = createMockAgent({
+        metadata: { skills: ["skill-1"] },
+      });
+      mockFetchAgent.mockResolvedValue(agentWithSkills);
+
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      // Navigate to Settings tab
+      await waitFor(() => {
+        expect(screen.getByText("Settings")).toBeInTheDocument();
+      });
+      await user.click(screen.getByText("Settings"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("skill-multiselect")).toBeInTheDocument();
+      });
+
+      // Should show pre-selected skill
+      expect(screen.getByTestId("skill-multiselect-value").textContent).toContain("skill-1");
+    });
+
+    it("pre-fills skills from agent metadata in Config tab", async () => {
+      const agentWithSkills = createMockAgent({
+        metadata: { skills: ["skill-1", "skill-2"] },
+      });
+      mockFetchAgent.mockResolvedValue(agentWithSkills);
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Settings")).toBeInTheDocument();
+      });
+      await user.click(screen.getByText("Settings"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("skill-multiselect")).toBeInTheDocument();
+      });
+
+      // Should have both skills pre-selected
+      expect(screen.getByTestId("skill-multiselect-value").textContent).toContain("skill-1");
+      expect(screen.getByTestId("skill-multiselect-value").textContent).toContain("skill-2");
+    });
+
+    it("includes skills in metadata when saving Config tab", async () => {
+      const agentWithSkills = createMockAgent({
+        metadata: { skills: ["skill-1"] },
+      });
+      mockFetchAgent.mockResolvedValue(agentWithSkills);
+      mockUpdateAgent.mockResolvedValue(createMockAgent({ metadata: { skills: ["skill-1", "new-skill"] } }) as any);
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Settings")).toBeInTheDocument();
+      });
+      await user.click(screen.getByText("Settings"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("skill-multiselect")).toBeInTheDocument();
+      });
+
+      // Add a skill
+      await user.click(screen.getByTestId("add-skill-test"));
+
+      // Save settings
+      await user.click(screen.getByText("Save Settings"));
+
+      await waitFor(() => {
+        expect(mockUpdateAgent).toHaveBeenCalledWith(
+          "agent-001",
+          expect.objectContaining({
+            metadata: expect.objectContaining({
+              skills: ["skill-1", "test-skill"],
+            }),
+          }),
+          undefined,
+        );
+      });
+    });
+
+    it("enables Save Settings when skills change", async () => {
+      const agentWithSkills = createMockAgent({
+        metadata: { skills: [] },
+      });
+      mockFetchAgent.mockResolvedValue(agentWithSkills);
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Settings")).toBeInTheDocument();
+      });
+      await user.click(screen.getByText("Settings"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("skill-multiselect")).toBeInTheDocument();
+      });
+
+      // Initially no changes
+      expect(screen.getByText("Save Settings")).toBeDisabled();
+
+      // Add a skill
+      await user.click(screen.getByTestId("add-skill-test"));
+
+      // Save button should now be enabled
+      await waitFor(() => {
+        expect(screen.getByText("Save Settings")).not.toBeDisabled();
       });
     });
   });

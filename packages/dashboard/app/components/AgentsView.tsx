@@ -47,6 +47,7 @@ function AgentTreeNode({
   getChildCount,
   getHealthStatus,
   getRoleIcon,
+  getSkillBadges,
 }: {
   node: AgentNode;
   onSelect: (id: string) => void;
@@ -55,6 +56,7 @@ function AgentTreeNode({
   getChildCount: (id: string) => number;
   getHealthStatus: (agent: Agent) => { label: string; icon: JSX.Element; color: string };
   getRoleIcon: (role: AgentCapability) => string;
+  getSkillBadges: (agent: Agent) => string[];
 }) {
   const { agent, children, depth } = node;
   const childCount = getChildCount(agent.id);
@@ -104,6 +106,16 @@ function AgentTreeNode({
           {childCount > 0 && (
             <span className="agent-tree__count text-secondary">({childCount})</span>
           )}
+          {/* Tree view: up to 1 skill badge */}
+          {(() => {
+            const skills = getSkillBadges(agent);
+            if (skills.length === 0) return null;
+            return (
+              <span className="agent-tree__skill" title={skills.join(", ")}>
+                {skills[0]}{skills.length > 1 && ` +${skills.length - 1}`}
+              </span>
+            );
+          })()}
         </div>
       </div>
       {expanded && children.length > 0 && (
@@ -118,6 +130,7 @@ function AgentTreeNode({
               getChildCount={getChildCount}
               getHealthStatus={getHealthStatus}
               getRoleIcon={getRoleIcon}
+              getSkillBadges={getSkillBadges}
             />
           ))}
         </div>
@@ -131,11 +144,13 @@ function OrgChartNode({
   onSelect,
   getHealthStatus,
   getRoleIcon,
+  getSkillBadges,
 }: {
   node: OrgTreeNode;
   onSelect: (id: string) => void;
   getHealthStatus: (agent: Agent) => { label: string; icon: JSX.Element; color: string };
   getRoleIcon: (role: AgentCapability) => string;
+  getSkillBadges: (agent: Agent) => string[];
 }) {
   const { agent, children } = node;
   const health = getHealthStatus(agent);
@@ -169,6 +184,21 @@ function OrgChartNode({
             {health.icon}
             <span className="text-secondary">{health.label}</span>
           </span>
+          {/* Org chart: up to 2 skill badges */}
+          {(() => {
+            const skills = getSkillBadges(agent);
+            if (skills.length === 0) return null;
+            const displaySkills = skills.slice(0, 2);
+            const extraCount = skills.length - 2;
+            return (
+              <>
+                {displaySkills.map((skillId) => (
+                  <span key={skillId} className="org-chart-node__skill">{skillId}</span>
+                ))}
+                {extraCount > 0 && <span className="org-chart-node__skill">+{extraCount}</span>}
+              </>
+            );
+          })()}
         </div>
       </div>
       {children.length > 0 && (
@@ -180,6 +210,7 @@ function OrgChartNode({
               onSelect={onSelect}
               getHealthStatus={getHealthStatus}
               getRoleIcon={getRoleIcon}
+              getSkillBadges={getSkillBadges}
             />
           ))}
         </div>
@@ -406,6 +437,14 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
   const getRoleLabel = (role: AgentCapability) => AGENT_ROLES.find(r => r.value === role)?.label ?? role;
   const getRoleIcon = (role: AgentCapability) => AGENT_ROLES.find(r => r.value === role)?.icon ?? "🤖";
 
+  /** Get skill badges from agent metadata */
+  const getSkillBadges = (agent: Agent): string[] => {
+    if (Array.isArray(agent.metadata?.skills)) {
+      return agent.metadata.skills as string[];
+    }
+    return [];
+  };
+
   // Use centralized health status utility for consistent labels across all views
   const getHealthStatus = (agent: Agent): { label: string; icon: JSX.Element; color: string } => {
     return getAgentHealthStatus(agent);
@@ -547,6 +586,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                   getChildCount={(id) => hierarchy.getChildren(id).length}
                   getHealthStatus={getHealthStatus}
                   getRoleIcon={getRoleIcon}
+                  getSkillBadges={getSkillBadges}
                 />
               ))
             )}
@@ -572,6 +612,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                   onSelect={setSelectedAgentId}
                   getHealthStatus={getHealthStatus}
                   getRoleIcon={getRoleIcon}
+                  getSkillBadges={getSkillBadges}
                 />
               ))
             )}
@@ -618,6 +659,21 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                       {agent.name}
                     </div>
                     <div className="agent-board-id">{agent.id}</div>
+                    {/* Board view: up to 1 skill badge */}
+                    {(() => {
+                      const skills = getSkillBadges(agent);
+                      if (skills.length === 0) return null;
+                      const displaySkills = skills.slice(0, 1);
+                      const extraCount = skills.length - 1;
+                      return (
+                        <div className="agent-board-skills">
+                          {displaySkills.map((skillId) => (
+                            <span key={skillId} className="skill-badge-sm">{skillId}</span>
+                          ))}
+                          {extraCount > 0 && <span className="skill-badge-sm skill-badge-extra">+{extraCount}</span>}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="agent-board-actions">
                     {agent.state === "idle" && (
@@ -817,6 +873,21 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                       <span className="badge text-secondary">
                         {getRoleLabel(agent.role)}
                       </span>
+                      {/* List view: up to 2 skill badges */}
+                      {(() => {
+                        const skills = getSkillBadges(agent);
+                        if (skills.length === 0) return null;
+                        const displaySkills = skills.slice(0, 2);
+                        const extraCount = skills.length - 2;
+                        return (
+                          <>
+                            {displaySkills.map((skillId) => (
+                              <span key={skillId} className="badge badge-skill">{skillId}</span>
+                            ))}
+                            {extraCount > 0 && <span className="badge badge-skill">+{extraCount}</span>}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 

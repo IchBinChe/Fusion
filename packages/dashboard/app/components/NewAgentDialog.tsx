@@ -5,6 +5,7 @@ import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentGenerationModal } from "./AgentGenerationModal";
 import { AGENT_PRESETS, type AgentPreset } from "./agent-presets";
+import { SkillMultiselect } from "./SkillMultiselect";
 
 export interface NewAgentDialogProps {
   isOpen: boolean;
@@ -51,6 +52,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
     maxTurns: 1000,
   });
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isGenerationModalOpen, setIsGenerationModalOpen] = useState(false);
@@ -169,6 +171,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
     setMemory("");
     setRuntimeConfig({ model: "", thinkingLevel: "off", maxTurns: 1000 });
     setSelectedPresetId(null);
+    setSelectedSkills([]);
     setError(null);
     setIsGenerationModalOpen(false);
     onClose();
@@ -194,6 +197,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
         ...(soul.trim() ? { soul: soul.trim() } : {}),
         ...(memory.trim() ? { memory: memory.trim() } : {}),
         ...(Object.keys(runtimeCfg).length > 0 ? { runtimeConfig: runtimeCfg } : {}),
+        ...(selectedSkills.length > 0 ? { metadata: { skills: selectedSkills } } : {}),
       }, projectId);
       handleClose();
       onCreated();
@@ -419,6 +423,18 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
                   onChange={e => setRuntimeConfig(c => ({ ...c, maxTurns: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
                 />
               </div>
+              <div className="agent-dialog-field">
+                <SkillMultiselect
+                  id="agent-skills"
+                  label="Skills"
+                  value={selectedSkills}
+                  onChange={setSelectedSkills}
+                  projectId={projectId}
+                />
+                <p className="agent-dialog-optional agent-dialog-skills-hint">
+                  Optional skills to assign to this agent
+                </p>
+              </div>
             </div>
           )}
 
@@ -497,6 +513,12 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId }: NewAge
                   <span className="agent-dialog-summary-row-label">Max Turns</span>
                   <span>{runtimeConfig.maxTurns}</span>
                 </div>
+                {selectedSkills.length > 0 && (
+                  <div className="agent-dialog-summary-row">
+                    <span className="agent-dialog-summary-row-label">Skills</span>
+                    <span>{selectedSkills.length} skill{selectedSkills.length !== 1 ? "s" : ""} selected</span>
+                  </div>
+                )}
               </div>
               {error && (
                 <p className="agent-dialog-error">{error}</p>

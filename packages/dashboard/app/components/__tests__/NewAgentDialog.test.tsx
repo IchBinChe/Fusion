@@ -9,6 +9,19 @@ vi.mock("../../api", () => ({
   createAgent: vi.fn(),
   fetchModels: vi.fn(),
   updateGlobalSettings: vi.fn(),
+  fetchDiscoveredSkills: vi.fn(),
+}));
+
+// Mock SkillMultiselect
+vi.mock("../SkillMultiselect", () => ({
+  SkillMultiselect: ({ value, onChange, id }: { value: string[]; onChange: (v: string[]) => void; id?: string }) => (
+    <div data-testid="skill-multiselect">
+      <span data-testid="skill-multiselect-value">{JSON.stringify(value)}</span>
+      <button data-testid="add-skill-1" onClick={() => onChange([...value, "skill-1"])}>Add Skill 1</button>
+      <button data-testid="add-skill-2" onClick={() => onChange([...value, "skill-2"])}>Add Skill 2</button>
+      <button data-testid="remove-skill-1" onClick={() => onChange(value.filter(s => s !== "skill-1"))}>Remove Skill 1</button>
+    </div>
+  ),
 }));
 
 // Mock CustomModelDropdown to simplify interaction testing
@@ -93,6 +106,7 @@ vi.mock("../AgentGenerationModal", () => ({
 const mockCreateAgent = vi.mocked(apiModule.createAgent);
 const mockFetchModels = vi.mocked(apiModule.fetchModels);
 const mockUpdateGlobalSettings = vi.mocked(apiModule.updateGlobalSettings);
+const mockFetchDiscoveredSkills = vi.mocked(apiModule.fetchDiscoveredSkills);
 
 const MOCK_MODELS_RESPONSE = {
   models: [
@@ -103,6 +117,11 @@ const MOCK_MODELS_RESPONSE = {
   favoriteModels: ["anthropic/claude-sonnet-4-5"],
 };
 
+const MOCK_SKILLS_RESPONSE = [
+  { id: "skill-1", name: "Skill One", path: "/path/skill-1", relativePath: "skills/skill-1", enabled: true, metadata: { source: "*", scope: "user" as const, origin: "top-level" as const } },
+  { id: "skill-2", name: "Skill Two", path: "/path/skill-2", relativePath: "skills/skill-2", enabled: true, metadata: { source: "*", scope: "user" as const, origin: "top-level" as const } },
+];
+
 describe("NewAgentDialog", () => {
   const mockOnClose = vi.fn();
   const mockOnCreated = vi.fn();
@@ -112,6 +131,7 @@ describe("NewAgentDialog", () => {
     mockFetchModels.mockResolvedValue(MOCK_MODELS_RESPONSE);
     mockCreateAgent.mockResolvedValue({} as any);
     mockUpdateGlobalSettings.mockResolvedValue({});
+    mockFetchDiscoveredSkills.mockResolvedValue(MOCK_SKILLS_RESPONSE);
   });
 
   describe("modal visibility", () => {
@@ -1132,6 +1152,100 @@ describe("NewAgentDialog", () => {
 
       // The toggle should have been attempted
       expect(mockUpdateGlobalSettings).toHaveBeenCalled();
+    });
+  });
+
+  describe("skill selection", () => {
+    it("renders SkillMultiselect in Step 1", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      // Navigate to step 1
+      const nameInput = screen.getByLabelText(/Name/);
+      await user.type(nameInput, "Test Agent");
+      await user.click(screen.getByText("Next"));
+
+      // SkillMultiselect should be visible in step 1
+      expect(screen.getByTestId("skill-multiselect")).toBeTruthy();
+    });
+
+    it("shows selected skills in summary on step 2", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      // Navigate to step 1 and add a skill
+      const nameInput = screen.getByLabelText(/Name/);
+      await user.type(nameInput, "Test Agent");
+      await user.click(screen.getByText("Next"));
+
+      // Add a skill using the mocked button
+      await user.click(screen.getByTestId("add-skill-1"));
+
+      // Navigate to step 2
+      await user.click(screen.getByText("Next"));
+
+      // Summary should show skill count
+      expect(screen.getByText(/1 skill/)).toBeTruthy();
+    });
+
+    it("includes metadata.skills in createAgent call when skills are selected", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      // Navigate to step 1
+      const nameInput = screen.getByLabelText(/Name/);
+      await user.type(nameInput, "Test Agent");
+      await user.click(screen.getByText("Next"));
+
+      // Add skills
+      await user.click(screen.getByTestId("add-skill-1"));
+      await user.click(screen.getByTestId("add-skill-2"));
+
+      // Navigate to step 2 and create
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Create"));
+
+      await waitFor(() => {
+        expect(mockCreateAgent).toHaveBeenCalledOnce();
+      });
+
+      const createCall = mockCreateAgent.mock.calls[0][0];
+      expect(createCall.metadata).toEqual({ skills: ["skill-1", "skill-2"] });
+    });
+
+    it("does not include metadata when no skills are selected", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog isOpen={true} onClose={mockOnClose} onCreated={mockOnCreated} />,
+      );
+
+      await waitFor(() => expect(mockFetchModels).toHaveBeenCalledOnce());
+
+      // Navigate through steps without adding skills
+      const nameInput = screen.getByLabelText(/Name/);
+      await user.type(nameInput, "Test Agent");
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Next"));
+      await user.click(screen.getByText("Create"));
+
+      await waitFor(() => {
+        expect(mockCreateAgent).toHaveBeenCalledOnce();
+      });
+
+      const createCall = mockCreateAgent.mock.calls[0][0];
+      expect(createCall.metadata).toBeUndefined();
     });
   });
 });

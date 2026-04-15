@@ -2988,15 +2988,35 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Get historical agent logs for a task.
   // Per-entry text and detail fields are returned in full — no truncation.
   // The 500-entry cap (MAX_LOG_ENTRIES) is a client-side whole-list limit.
+  // When offset query param is provided, includes X-Total-Count and X-Has-More headers for pagination.
   router.get("/tasks/:id/logs", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const limit = typeof req.query.limit === "string"
         ? Number.parseInt(req.query.limit, 10)
         : undefined;
-      const logs = await scopedStore.getAgentLogs(req.params.id, limit !== undefined && Number.isFinite(limit)
-        ? { limit }
-        : undefined);
+      const offset = typeof req.query.offset === "string"
+        ? Number.parseInt(req.query.offset, 10)
+        : undefined;
+
+      // Only include options object when we have explicit parameters
+      const options: { limit?: number; offset?: number } | undefined =
+        limit !== undefined && Number.isFinite(limit)
+          ? { limit, ...(offset !== undefined && Number.isFinite(offset) ? { offset } : {}) }
+          : undefined;
+
+      const logs = await scopedStore.getAgentLogs(req.params.id, options);
+
+      // Include pagination headers when offset is explicitly provided (even if 0)
+      // This enables the frontend to know total count and whether more entries exist
+      if (offset !== undefined && Number.isFinite(offset)) {
+        const total = await scopedStore.getAgentLogCount(req.params.id);
+        res.setHeader("X-Total-Count", String(total));
+
+        const hasMore = total > (offset + logs.length);
+        res.setHeader("X-Has-More", hasMore ? "true" : "false");
+      }
+
       res.json(logs);
     } catch (err: any) {
       if (err instanceof ApiError) {

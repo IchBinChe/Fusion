@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { AgentLogEntry } from "@fusion/core";
-import { fetchAgentLogs } from "../api";
+import { fetchAgentLogsWithMeta } from "../api";
 
 export const MAX_LOG_ENTRIES = 500;
+const INITIAL_LOAD_LIMIT = 100;
 
 /**
  * Cap the total number of log entries to `MAX_LOG_ENTRIES`.
@@ -21,7 +22,11 @@ function capLogEntries(entries: AgentLogEntry[]): AgentLogEntry[] {
 export interface TaskLogState {
   entries: AgentLogEntry[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  total: number | null;
   clear: () => void;
+  loadMore: () => Promise<void>;
 }
 
 export type LogStateMap = Record<string, TaskLogState>;
@@ -29,18 +34,21 @@ export type LogStateMap = Record<string, TaskLogState>;
 interface InitState {
   entries: AgentLogEntry[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  total: number | null;
 }
 
 /**
  * Hook that manages agent log fetching and live SSE streaming for multiple tasks.
  *
- * Features project-context isolation to prevent cross-project log bleed:
- * - Uses `{projectId, taskId}` identity for state isolation
- * - Clears all state immediately on project switch
- * - Rejects late fetch responses and SSE events from previous contexts
+ * Features:
+ * - **Pagination**: Initial load fetches 100 entries per task. Use `loadMore()` to fetch older entries per task.
+ * - **Project-context isolation**: Prevents cross-project log bleed via context versioning.
+ * - **Live streaming**: SSE events append new entries to the end of each task's list.
  *
  * For each task ID in the provided array:
- * 1. Fetches recent historical logs via GET /api/tasks/:id/logs?limit=500
+ * 1. Fetches recent historical logs via GET /api/tasks/:id/logs?limit=100
  * 2. Opens an EventSource to /api/tasks/:id/logs/stream for live updates
  * 3. Merges historical + live entries in order
  *
@@ -56,6 +64,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
   const initializingRef = useRef<Set<string>>(new Set());
   const cancelledRef = useRef<Record<string, boolean>>({});
   const pendingLiveEntriesRef = useRef<Record<string, AgentLogEntry[]>>({});
+  const loadingMoreRef = useRef<Record<string, boolean>>({});
 
   // Track project context version to detect stale events after project switches.
   // Incremented whenever projectId changes, invalidating any in-flight SSE handlers.
@@ -79,6 +88,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
     initializingRef.current.clear();
     cancelledRef.current = {};
     pendingLiveEntriesRef.current = {};
+    loadingMoreRef.current = {};
 
     // Clear all state immediately to prevent stale data visibility
     setStateMap({});
@@ -98,6 +108,63 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
       });
     };
   }, []);
+
+  // Create loadMore function for a specific task
+  const createLoadMoreFn = useCallback((taskId: string, currentEntries: AgentLogEntry[]) => {
+    return async () => {
+      if (loadingMoreRef.current[taskId]) return;
+      if (!projectContextVersionRef.current) return;
+
+      const contextVersionAtStart = projectContextVersionRef.current;
+      loadingMoreRef.current[taskId] = true;
+
+      // Update loading state
+      setStateMap((prev) => {
+        const current = prev[taskId];
+        if (!current) return prev;
+        return { ...prev, [taskId]: { ...current, loadingMore: true } };
+      });
+
+      try {
+        const result = await fetchAgentLogsWithMeta(taskId, projectId, {
+          limit: INITIAL_LOAD_LIMIT,
+          offset: currentEntries.length,
+        });
+
+        // Reject stale response
+        if (cancelledRef.current[taskId] ||
+            projectContextVersionRef.current !== contextVersionAtStart) {
+          return;
+        }
+
+        // Prepend older entries to the existing list
+        setStateMap((prev) => {
+          const current = prev[taskId];
+          if (!current) return prev;
+          const combined = [...current.entries, ...result.entries];
+          return {
+            ...prev,
+            [taskId]: {
+              ...current,
+              entries: capLogEntries(combined),
+              hasMore: result.hasMore,
+              total: result.total,
+              loadingMore: false,
+            },
+          };
+        });
+      } catch {
+        // Silently fail on load more errors
+        setStateMap((prev) => {
+          const current = prev[taskId];
+          if (!current) return prev;
+          return { ...prev, [taskId]: { ...current, loadingMore: false } };
+        });
+      } finally {
+        loadingMoreRef.current[taskId] = false;
+      }
+    };
+  }, [projectId]);
 
   // Stable comparison of task IDs and projectId to prevent effect re-runs on every render
   const taskIdsKey = taskIds.join(",");
@@ -127,7 +194,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
         const updates: Record<string, InitState> = {};
         for (const taskId of newTaskIds) {
           if (!prev[taskId]) {
-            updates[taskId] = { entries: [], loading: true };
+            updates[taskId] = { entries: [], loading: true, loadingMore: false, hasMore: false, total: null };
           }
         }
         if (Object.keys(updates).length === 0) return prev;
@@ -145,6 +212,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
         initializing.delete(taskId);
         delete cancelled[taskId];
         delete pendingLiveEntriesRef.current[taskId];
+        delete loadingMoreRef.current[taskId];
         removedTaskIds.push(taskId);
       }
     }
@@ -176,6 +244,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
         cancelled[taskId] = true;
         initializing.delete(taskId);
         delete pendingLiveEntriesRef.current[taskId];
+        delete loadingMoreRef.current[taskId];
       }
     }
 
@@ -212,7 +281,11 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
             if (!current) return prev;
             return {
               ...prev,
-              [taskId]: { ...current, entries: capLogEntries([...current.entries, entry]) },
+              [taskId]: {
+                ...current,
+                entries: capLogEntries([...current.entries, entry]),
+                total: current.total !== null ? current.total + 1 : null,
+              },
             };
           });
         } catch {
@@ -235,9 +308,9 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
       es.addEventListener("agent:log", handleAgentLog);
       es.addEventListener("error", handleError);
 
-      // Fetch historical logs with projectId
-      void fetchAgentLogs(taskId, projectId, { limit: MAX_LOG_ENTRIES })
-        .then((historical) => {
+      // Fetch historical logs with projectId using pagination
+      void fetchAgentLogsWithMeta(taskId, projectId, { limit: INITIAL_LOAD_LIMIT })
+        .then((result) => {
           // Reject stale response from previous context
           if (cancelled[taskId] ||
               projectContextVersionRef.current !== contextVersionAtStart) {
@@ -249,8 +322,10 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
             ...prev,
             [taskId]: {
               ...prev[taskId],
-              entries: capLogEntries([...historical, ...pendingLive]),
+              entries: capLogEntries([...result.entries, ...pendingLive]),
               loading: false,
+              hasMore: result.hasMore,
+              total: result.total,
             },
           }));
         })
@@ -264,7 +339,13 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
           const pendingLive = pendingLiveEntriesRef.current[taskId] ?? [];
           setStateMap((prev) => ({
             ...prev,
-            [taskId]: { ...prev[taskId], entries: capLogEntries(pendingLive), loading: false },
+            [taskId]: {
+              ...prev[taskId],
+              entries: capLogEntries(pendingLive),
+              loading: false,
+              hasMore: false,
+              total: null,
+            },
           }));
         })
         .finally(() => {
@@ -278,7 +359,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
 
     // Cleanup on effect re-run or unmount
     return () => {
-      // Only close connections for tasks that were removed (not in current taskIds)
+      // Only close connections for tasks that were removed (not-in current taskIds)
       for (const taskId of initialTaskIds) {
         if (!currentIds.has(taskId)) {
           cancelledRef.current[taskId] = true;
@@ -310,6 +391,7 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
       initializingRef.current.clear();
       cancelledRef.current = {};
       pendingLiveEntriesRef.current = {};
+      loadingMoreRef.current = {};
     };
   }, []);
 
@@ -317,10 +399,15 @@ export function useMultiAgentLogs(taskIds: string[], projectId?: string): LogSta
   const result: LogStateMap = {};
   for (const taskId of taskIds) {
     const state = stateMap[taskId];
+    const entries = state?.entries ?? [];
     result[taskId] = {
-      entries: state?.entries ?? [],
+      entries,
       loading: state?.loading ?? true,
+      loadingMore: state?.loadingMore ?? false,
+      hasMore: state?.hasMore ?? false,
+      total: state?.total ?? null,
       clear: createClearFn(taskId),
+      loadMore: createLoadMoreFn(taskId, entries),
     };
   }
 

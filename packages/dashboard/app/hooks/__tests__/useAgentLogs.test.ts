@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { MAX_LOG_ENTRIES, useAgentLogs } from "../useAgentLogs";
-import { fetchAgentLogs } from "../../api";
+import { fetchAgentLogsWithMeta } from "../../api";
 
 // Mock the api module
 vi.mock("../../api", () => ({
-  fetchAgentLogs: vi.fn().mockResolvedValue([]),
+  fetchAgentLogsWithMeta: vi.fn().mockResolvedValue({ entries: [], total: 0, hasMore: false }),
 }));
 
-const mockFetchAgentLogs = vi.mocked(fetchAgentLogs);
+const mockFetchAgentLogsWithMeta = vi.mocked(fetchAgentLogsWithMeta);
 
 // Mock EventSource
 class MockEventSource {
@@ -41,10 +41,12 @@ class MockEventSource {
 
 const originalEventSource = globalThis.EventSource;
 
+const INITIAL_LOAD_LIMIT = 100;
+
 beforeEach(() => {
   MockEventSource.instances = [];
   (globalThis as any).EventSource = MockEventSource;
-  mockFetchAgentLogs.mockReset().mockResolvedValue([]);
+  mockFetchAgentLogsWithMeta.mockReset().mockResolvedValue({ entries: [], total: 0, hasMore: false });
 });
 
 afterEach(() => {
@@ -55,7 +57,7 @@ describe("useAgentLogs", () => {
   it("does not fetch or connect when enabled=false", () => {
     const { result } = renderHook(() => useAgentLogs("FN-001", false));
 
-    expect(mockFetchAgentLogs).not.toHaveBeenCalled();
+    expect(mockFetchAgentLogsWithMeta).not.toHaveBeenCalled();
     expect(MockEventSource.instances).toHaveLength(0);
     expect(result.current.entries).toEqual([]);
   });
@@ -64,7 +66,11 @@ describe("useAgentLogs", () => {
     const historicalLogs = [
       { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "old", type: "text" as const },
     ];
-    mockFetchAgentLogs.mockResolvedValueOnce(historicalLogs);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({
+      entries: historicalLogs,
+      total: historicalLogs.length,
+      hasMore: false,
+    });
 
     const { result } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -72,15 +78,34 @@ describe("useAgentLogs", () => {
       expect(result.current.entries).toEqual(historicalLogs);
     });
 
-    expect(mockFetchAgentLogs).toHaveBeenCalledWith("FN-001", undefined, { limit: 500 });
+    expect(mockFetchAgentLogsWithMeta).toHaveBeenCalledWith("FN-001", undefined, { limit: INITIAL_LOAD_LIMIT });
     expect(MockEventSource.instances).toHaveLength(1);
     expect(MockEventSource.instances[0].url).toBe("/api/tasks/FN-001/logs/stream");
   });
 
+  it("sets hasMore and total from API response", async () => {
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({
+      entries: [],
+      total: 150,
+      hasMore: true,
+    });
+
+    const { result } = renderHook(() => useAgentLogs("FN-001", true));
+
+    await waitFor(() => {
+      expect(result.current.total).toBe(150);
+      expect(result.current.hasMore).toBe(true);
+    });
+  });
+
   it("appends live SSE entries to historical entries", async () => {
-    mockFetchAgentLogs.mockResolvedValueOnce([
-      { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "old", type: "text" as const },
-    ]);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({
+      entries: [
+        { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "old", type: "text" as const },
+      ],
+      total: 2,
+      hasMore: false,
+    });
 
     const { result } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -103,7 +128,7 @@ describe("useAgentLogs", () => {
   });
 
   it("closes SSE when enabled changes to false", async () => {
-    mockFetchAgentLogs.mockResolvedValueOnce([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: 0, hasMore: false });
 
     const { rerender } = renderHook(
       ({ enabled }) => useAgentLogs("FN-001", enabled),
@@ -122,7 +147,7 @@ describe("useAgentLogs", () => {
   });
 
   it("closes SSE on unmount", async () => {
-    mockFetchAgentLogs.mockResolvedValueOnce([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: 0, hasMore: false });
 
     const { unmount } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -144,7 +169,11 @@ describe("useAgentLogs", () => {
       text: `entry-${index}`,
       type: "text" as const,
     }));
-    mockFetchAgentLogs.mockResolvedValueOnce(historicalLogs);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({
+      entries: historicalLogs,
+      total: historicalLogs.length,
+      hasMore: false,
+    });
 
     const { result } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -157,7 +186,7 @@ describe("useAgentLogs", () => {
   });
 
   it("truncates live SSE entries to the most recent entries", async () => {
-    mockFetchAgentLogs.mockResolvedValueOnce([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: MAX_LOG_ENTRIES + 20, hasMore: false });
 
     const { result } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -188,17 +217,21 @@ describe("useAgentLogs", () => {
   it("does not fetch when taskId is null", () => {
     renderHook(() => useAgentLogs(null, true));
 
-    expect(mockFetchAgentLogs).not.toHaveBeenCalled();
+    expect(mockFetchAgentLogsWithMeta).not.toHaveBeenCalled();
     expect(MockEventSource.instances).toHaveLength(0);
   });
 
   it("preserves long text and detail in historical log entries without truncation", async () => {
     const longText = "A".repeat(5000);
     const longDetail = "B".repeat(5000);
-    mockFetchAgentLogs.mockResolvedValueOnce([
-      { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: longText, type: "text" as const },
-      { timestamp: "2026-01-01T00:00:01Z", taskId: "FN-001", text: "Read", type: "tool" as const, detail: longDetail },
-    ]);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({
+      entries: [
+        { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: longText, type: "text" as const },
+        { timestamp: "2026-01-01T00:00:01Z", taskId: "FN-001", text: "Read", type: "tool" as const, detail: longDetail },
+      ],
+      total: 2,
+      hasMore: false,
+    });
 
     const { result } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -213,7 +246,7 @@ describe("useAgentLogs", () => {
   });
 
   it("preserves long text and detail in live SSE entries without truncation", async () => {
-    mockFetchAgentLogs.mockResolvedValueOnce([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: 1, hasMore: false });
 
     const { result } = renderHook(() => useAgentLogs("FN-001", true));
 
@@ -244,9 +277,67 @@ describe("useAgentLogs", () => {
     expect(result.current.entries[0].detail!.length).toBe(5000);
   });
 
+  describe("loadMore", () => {
+    it("loadMore fetches older entries and prepends them", async () => {
+      const initialLogs = [
+        { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "newer", type: "text" as const },
+      ];
+      const olderLogs = [
+        { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "older", type: "text" as const },
+      ];
+
+      mockFetchAgentLogsWithMeta
+        .mockResolvedValueOnce({ entries: initialLogs, total: 2, hasMore: true })
+        .mockResolvedValueOnce({ entries: olderLogs, total: 2, hasMore: false });
+
+      const { result } = renderHook(() => useAgentLogs("FN-001", true));
+
+      await waitFor(() => {
+        expect(result.current.entries).toHaveLength(1);
+        expect(result.current.hasMore).toBe(true);
+      });
+
+      // Call loadMore
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      // Should now have 2 entries: initial + older
+      expect(result.current.entries).toHaveLength(2);
+      expect(result.current.entries[0].text).toBe("newer");
+      expect(result.current.entries[1].text).toBe("older");
+      expect(result.current.hasMore).toBe(false);
+    });
+
+    it("loadMore does not trigger when already loading more", async () => {
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 200, hasMore: true });
+
+      const { result } = renderHook(() => useAgentLogs("FN-001", true));
+
+      await waitFor(() => {
+        expect(result.current.hasMore).toBe(true);
+      });
+
+      // Start loading more
+      const loadMorePromise = act(async () => {
+        await result.current.loadMore();
+      });
+
+      // While loading, try to load more again - should be ignored
+      act(() => {
+        result.current.loadMore();
+      });
+
+      await loadMorePromise;
+
+      // Initial call + loadMore call (2 total), ignoring re-render calls
+      expect(mockFetchAgentLogsWithMeta.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   describe("projectId support", () => {
     it("includes projectId in EventSource URL when provided", async () => {
-      mockFetchAgentLogs.mockResolvedValueOnce([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: 0, hasMore: false });
 
       renderHook(() => useAgentLogs("FN-001", true, "proj-123"));
 
@@ -256,18 +347,18 @@ describe("useAgentLogs", () => {
       });
     });
 
-    it("includes projectId in fetchAgentLogs call when provided", async () => {
-      mockFetchAgentLogs.mockResolvedValueOnce([]);
+    it("includes projectId in fetchAgentLogsWithMeta call when provided", async () => {
+      mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: 0, hasMore: false });
 
       renderHook(() => useAgentLogs("FN-001", true, "proj-123"));
 
       await waitFor(() => {
-        expect(mockFetchAgentLogs).toHaveBeenCalledWith("FN-001", "proj-123", { limit: 500 });
+        expect(mockFetchAgentLogsWithMeta).toHaveBeenCalledWith("FN-001", "proj-123", { limit: INITIAL_LOAD_LIMIT });
       });
     });
 
     it("does not include projectId in URL when not provided", async () => {
-      mockFetchAgentLogs.mockResolvedValueOnce([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValueOnce({ entries: [], total: 0, hasMore: false });
 
       renderHook(() => useAgentLogs("FN-001", true));
 
@@ -279,18 +370,22 @@ describe("useAgentLogs", () => {
 
     it("clears entries immediately when projectId changes", async () => {
       // Set up mock to return different values based on projectId
-      mockFetchAgentLogs.mockImplementation((_taskId: string, projectId?: string) => {
+      mockFetchAgentLogsWithMeta.mockImplementation((_taskId: string, projectId?: string) => {
         if (projectId === "proj-A") {
-          return Promise.resolve([
-            { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "proj-A-log", type: "text" as const },
-          ]);
+          return Promise.resolve({
+            entries: [{ timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "proj-A-log", type: "text" as const }],
+            total: 1,
+            hasMore: false,
+          });
         }
         if (projectId === "proj-B") {
-          return Promise.resolve([
-            { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "proj-B-log", type: "text" as const },
-          ]);
+          return Promise.resolve({
+            entries: [{ timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "proj-B-log", type: "text" as const }],
+            total: 1,
+            hasMore: false,
+          });
         }
-        return Promise.resolve([]);
+        return Promise.resolve({ entries: [], total: 0, hasMore: false });
       });
 
       // Create a hook that switches project
@@ -322,7 +417,7 @@ describe("useAgentLogs", () => {
 
     it("rejects stale SSE events after project switch", async () => {
       // Initial render with proj-A
-      mockFetchAgentLogs.mockResolvedValue([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       const { result, rerender } = renderHook(
         ({ projectId }) => useAgentLogs("FN-001", true, projectId),
@@ -366,7 +461,7 @@ describe("useAgentLogs", () => {
     });
 
     it("creates new connection with new projectId on project switch", async () => {
-      mockFetchAgentLogs.mockResolvedValue([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       const { rerender } = renderHook(
         ({ projectId }) => useAgentLogs("FN-001", true, projectId),

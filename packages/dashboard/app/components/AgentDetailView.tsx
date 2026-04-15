@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight, BarChart3, Star, BookOpen
 } from "lucide-react";
 import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus } from "../api";
-import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogs, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent } from "../api";
+import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry, Task } from "@fusion/core";
 import { AgentLogViewer } from "./AgentLogViewer";
@@ -134,14 +134,14 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     // If the agent is working on a task, we could show task logs.
     if (agent?.taskId) {
       try {
-        const data = await fetchAgentLogs(agent.taskId, currentProjectId);
+        const result = await fetchAgentLogsWithMeta(agent.taskId, currentProjectId, { limit: 100 });
         // Reject stale response: check context version and current IDs
         if (contextVersionRef.current !== contextVersionAtCapture ||
             agentId !== currentAgentId ||
             projectId !== currentProjectId) {
           return;
         }
-        setLogs(data);
+        setLogs(result.entries);
       } catch (err: any) {
         // Reject stale error: check context version and current IDs
         if (contextVersionRef.current !== contextVersionAtCapture ||

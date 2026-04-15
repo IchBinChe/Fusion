@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { AgentLogEntry } from "@fusion/core";
-import { fetchAgentLogs } from "../api";
+import { fetchAgentLogsWithMeta } from "../api";
 
 export const MAX_LOG_ENTRIES = 500;
+const INITIAL_LOAD_LIMIT = 100;
 
 /**
  * Cap the total number of log entries to `MAX_LOG_ENTRIES`.
@@ -21,23 +22,33 @@ function capLogEntries(entries: AgentLogEntry[]): AgentLogEntry[] {
 /**
  * Hook that manages agent log fetching and live SSE streaming for a task.
  *
- * Features project-context isolation to prevent cross-project log bleed:
- * - Treats `{projectId, taskId}` as a context key
- * - Clears entries immediately on context change (project or task switch)
- * - Rejects late fetch responses from previous contexts
- * - Rejects stale SSE events from previous EventSource instances
+ * Features:
+ * - **Pagination**: Initial load fetches 100 entries. Use `loadMore()` to fetch older entries.
+ * - **Project-context isolation**: Prevents cross-project log bleed via context versioning.
+ * - **Live streaming**: SSE events append new entries to the end of the list.
+ *
+ * **Pagination semantics**:
+ * - Entries are returned in chronological order (oldest first) from the API
+ * - Entries are stored in chronological order
+ * - The UI displays newest first by reversing the array
+ * - `loadMore()` fetches the next 100 older entries and prepends them
  *
  * When `enabled` is true:
- * 1. Fetches recent historical logs via GET /api/tasks/:id/logs?limit=500
+ * 1. Fetches recent historical logs via GET /api/tasks/:id/logs?limit=100
  * 2. Opens an EventSource to /api/tasks/:id/logs/stream for live updates
  * 3. Merges historical + live entries in order
  *
  * When `enabled` becomes false or the component unmounts, the EventSource
  * is closed to avoid unnecessary SSE connections.
+ *
+ * @returns Object with entries, loading, clear, loadMore, hasMore, total
  */
 export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?: string) {
   const [entries, setEntries] = useState<AgentLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Refs for state that needs to survive re-renders
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -71,6 +82,9 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
     // Clear entries immediately on context change to prevent stale data visibility
     setEntries([]);
     setLoading(false);
+    setHasMore(false);
+    setTotal(null);
+    setLoadingMore(false);
 
     // Close existing EventSource
     if (eventSourceRef.current) {
@@ -102,8 +116,9 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
       if (!currentTaskId) return;
 
       setLoading(true);
+      setLoadingMore(false);
       try {
-        const historical = await fetchAgentLogs(currentTaskId, currentProjectId, { limit: MAX_LOG_ENTRIES });
+        const result = await fetchAgentLogsWithMeta(currentTaskId, currentProjectId, { limit: INITIAL_LOAD_LIMIT });
 
         // Reject stale response: check context version and request version
         if (cancelledRef.current ||
@@ -111,7 +126,9 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
             requestVersionRef.current !== requestVersion) {
           return;
         }
-        setEntries(capLogEntries(historical));
+        setEntries(capLogEntries(result.entries));
+        setHasMore(result.hasMore);
+        setTotal(result.total);
       } catch {
         // Reject stale error: check context version and request version
         if (cancelledRef.current ||
@@ -120,6 +137,8 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
           return;
         }
         setEntries([]);
+        setHasMore(false);
+        setTotal(null);
       } finally {
         // Only update loading state if not cancelled and not stale
         if (!cancelledRef.current &&
@@ -143,6 +162,8 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
         try {
           const entry: AgentLogEntry = JSON.parse(e.data);
           setEntries((prev) => capLogEntries([...prev, entry]));
+          // Update total if we know it (increment since new entry added)
+          setTotal((prev) => (prev !== null ? prev + 1 : null));
         } catch {
           // skip malformed events
         }
@@ -160,7 +181,45 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
     };
   }, [taskId, enabled, projectId]);
 
+  /**
+   * Load more older entries.
+   * Fetches the next 100 older entries and prepends them to the existing list.
+   */
+  const loadMore = useCallback(async () => {
+    if (!taskId || loadingMore) return;
+
+    const contextVersionAtStart = projectContextVersionRef.current;
+    const currentEntriesCount = entries.length;
+    const currentTaskId = taskId;
+
+    setLoadingMore(true);
+    try {
+      const result = await fetchAgentLogsWithMeta(currentTaskId, projectId, {
+        limit: INITIAL_LOAD_LIMIT,
+        offset: currentEntriesCount,
+      });
+
+      // Reject stale response
+      if (cancelledRef.current ||
+          projectContextVersionRef.current !== contextVersionAtStart) {
+        return;
+      }
+
+      // Prepend older entries to the existing list
+      setEntries((prev) => {
+        const combined = [...prev, ...result.entries];
+        return capLogEntries(combined);
+      });
+      setHasMore(result.hasMore);
+      setTotal(result.total);
+    } catch {
+      // Silently fail on load more errors
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [taskId, projectId, entries.length, loadingMore]);
+
   const clear = useCallback(() => setEntries([]), []);
 
-  return { entries, loading, clear };
+  return { entries, loading, clear, loadMore, hasMore, total, loadingMore };
 }

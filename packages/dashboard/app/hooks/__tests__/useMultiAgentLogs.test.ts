@@ -16,15 +16,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { MAX_LOG_ENTRIES, useMultiAgentLogs } from "../useMultiAgentLogs";
-import { fetchAgentLogs } from "../../api";
+import { fetchAgentLogsWithMeta } from "../../api";
 import { MockEventSource } from "../../../vitest.setup";
 
 // Mock the api module
 vi.mock("../../api", () => ({
-  fetchAgentLogs: vi.fn().mockResolvedValue([]),
+  fetchAgentLogsWithMeta: vi.fn().mockResolvedValue({ entries: [], total: 0, hasMore: false }),
 }));
 
-const mockFetchAgentLogs = vi.mocked(fetchAgentLogs);
+const mockFetchAgentLogsWithMeta = vi.mocked(fetchAgentLogsWithMeta);
+
+const INITIAL_LOAD_LIMIT = 100;
 
 // Helper to get the last connection for a specific task ID
 function getConnection(taskId: string): MockEventSource | undefined {
@@ -41,7 +43,7 @@ function getConnections(taskId: string): MockEventSource[] {
 
 beforeEach(() => {
   MockEventSource.instances = [];
-  mockFetchAgentLogs.mockReset().mockResolvedValue([]);
+  mockFetchAgentLogsWithMeta.mockReset().mockResolvedValue({ entries: [], total: 0, hasMore: false });
   
   // Ensure we start with real timers for every test
   vi.useRealTimers();
@@ -85,10 +87,10 @@ describe("useMultiAgentLogs", () => {
       { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-002", text: "log2", type: "text" as const },
     ];
     
-    mockFetchAgentLogs.mockImplementation((taskId) => {
-      if (taskId === "FN-001") return Promise.resolve(logs1);
-      if (taskId === "FN-002") return Promise.resolve(logs2);
-      return Promise.resolve([]);
+    mockFetchAgentLogsWithMeta.mockImplementation((taskId) => {
+      if (taskId === "FN-001") return Promise.resolve({ entries: logs1, total: logs1.length, hasMore: false });
+      if (taskId === "FN-002") return Promise.resolve({ entries: logs2, total: logs2.length, hasMore: false });
+      return Promise.resolve({ entries: [], total: 0, hasMore: false });
     });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001", "FN-002"]));
@@ -98,12 +100,12 @@ describe("useMultiAgentLogs", () => {
       expect(result.current["FN-002"].entries).toEqual(logs2);
     });
 
-    expect(mockFetchAgentLogs).toHaveBeenCalledWith("FN-001", undefined, { limit: 500 });
-    expect(mockFetchAgentLogs).toHaveBeenCalledWith("FN-002", undefined, { limit: 500 });
+    expect(mockFetchAgentLogsWithMeta).toHaveBeenCalledWith("FN-001", undefined, { limit: INITIAL_LOAD_LIMIT });
+    expect(mockFetchAgentLogsWithMeta).toHaveBeenCalledWith("FN-002", undefined, { limit: INITIAL_LOAD_LIMIT });
   });
 
   it("opens SSE EventSource for each task ID", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
     renderHook(() => useMultiAgentLogs(["FN-001", "FN-002"]));
 
@@ -120,7 +122,7 @@ describe("useMultiAgentLogs", () => {
       { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: "old", type: "text" as const },
     ];
     // Use mockResolvedValue (not Once) to handle Strict Mode double-run
-    mockFetchAgentLogs.mockResolvedValue(historical);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: historical, total: historical.length, hasMore: false });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -148,7 +150,7 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("closes all SSE connections on unmount (memory leak prevention)", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
     const { unmount } = renderHook(() => useMultiAgentLogs(["FN-001", "FN-002"]));
 
@@ -175,7 +177,7 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("closes specific connection when task ID removed from array", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
     const { rerender } = renderHook(
       ({ taskIds }: { taskIds: string[] }) => useMultiAgentLogs(taskIds),
@@ -199,7 +201,7 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("opens new connection when task ID added to array", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
     const { rerender } = renderHook(
       ({ taskIds }: { taskIds: string[] }) => useMultiAgentLogs(taskIds),
@@ -224,7 +226,7 @@ describe("useMultiAgentLogs", () => {
       { timestamp: "2026-01-01T00:01:00Z", taskId: "FN-001", text: "log2", type: "text" as const },
     ];
     // Use mockResolvedValue (not Once) to handle Strict Mode double-run
-    mockFetchAgentLogs.mockResolvedValue(logs);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: logs, total: logs.length, hasMore: false });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001", "FN-002"]));
 
@@ -243,7 +245,7 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("handles errors gracefully when fetching historical logs", async () => {
-    mockFetchAgentLogs.mockRejectedValue(new Error("Network error"));
+    mockFetchAgentLogsWithMeta.mockRejectedValue(new Error("Network error"));
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -255,8 +257,8 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("does not create duplicate connections while historical fetch is still pending", async () => {
-    let resolveFetch: ((value: never[]) => void) | undefined;
-    mockFetchAgentLogs.mockImplementation(
+    let resolveFetch: ((value: { entries: never[]; total: number; hasMore: boolean }) => void) | undefined;
+    mockFetchAgentLogsWithMeta.mockImplementation(
       () => new Promise((resolve) => {
         resolveFetch = resolve;
       }),
@@ -281,15 +283,15 @@ describe("useMultiAgentLogs", () => {
     // Should not create additional connections on rerender with same IDs
     expect(getConnections("FN-001").length).toBe(initialCount);
 
-    resolveFetch?.([]);
+    resolveFetch?.({ entries: [], total: 0, hasMore: false });
 
     await waitFor(() => {
-      expect(mockFetchAgentLogs).toHaveBeenCalledTimes(1);
+      expect(mockFetchAgentLogsWithMeta).toHaveBeenCalledTimes(1);
     });
   });
 
   it("closes a task connection when its stream emits an error", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
     renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -315,7 +317,7 @@ describe("useMultiAgentLogs", () => {
       type: "text" as const,
     }));
 
-    mockFetchAgentLogs.mockResolvedValue(oversized);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: oversized, total: oversized.length, hasMore: false });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -328,8 +330,8 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("preserves streamed entries that arrive before historical fetch resolves", async () => {
-    let resolveFetch: ((value: Array<{ timestamp: string; taskId: string; text: string; type: "text" }>) => void) | undefined;
-    mockFetchAgentLogs.mockImplementation(
+    let resolveFetch: ((value: { entries: Array<{ timestamp: string; taskId: string; text: string; type: "text" }>; total: number; hasMore: boolean }) => void) | undefined;
+    mockFetchAgentLogsWithMeta.mockImplementation(
       () => new Promise((resolve) => {
         resolveFetch = resolve;
       }),
@@ -354,14 +356,18 @@ describe("useMultiAgentLogs", () => {
     });
 
     act(() => {
-      resolveFetch?.([
-        {
-          timestamp: "2026-01-01T00:00:00Z",
-          taskId: "FN-001",
-          text: "historical",
-          type: "text",
-        },
-      ]);
+      resolveFetch?.({
+        entries: [
+          {
+            timestamp: "2026-01-01T00:00:00Z",
+            taskId: "FN-001",
+            text: "historical",
+            type: "text",
+          },
+        ],
+        total: 2,
+        hasMore: false,
+      });
     });
 
     await waitFor(() => {
@@ -373,7 +379,7 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("truncates live SSE entries per task to the most recent entries", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: MAX_LOG_ENTRIES + 15, hasMore: false });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -411,10 +417,10 @@ describe("useMultiAgentLogs", () => {
       { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-002", text: "task2-old", type: "text" as const },
     ];
     
-    mockFetchAgentLogs.mockImplementation((taskId) => {
-      if (taskId === "FN-001") return Promise.resolve(logs1);
-      if (taskId === "FN-002") return Promise.resolve(logs2);
-      return Promise.resolve([]);
+    mockFetchAgentLogsWithMeta.mockImplementation((taskId) => {
+      if (taskId === "FN-001") return Promise.resolve({ entries: logs1, total: logs1.length, hasMore: false });
+      if (taskId === "FN-002") return Promise.resolve({ entries: logs2, total: logs2.length, hasMore: false });
+      return Promise.resolve({ entries: [], total: 0, hasMore: false });
     });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001", "FN-002"]));
@@ -464,10 +470,14 @@ describe("useMultiAgentLogs", () => {
   it("preserves long text and detail in historical log entries without truncation", async () => {
     const longText = "A".repeat(5000);
     const longDetail = "B".repeat(5000);
-    mockFetchAgentLogs.mockResolvedValue([
-      { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: longText, type: "text" as const },
-      { timestamp: "2026-01-01T00:00:01Z", taskId: "FN-001", text: "Read", type: "tool" as const, detail: longDetail },
-    ]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({
+      entries: [
+        { timestamp: "2026-01-01T00:00:00Z", taskId: "FN-001", text: longText, type: "text" as const },
+        { timestamp: "2026-01-01T00:00:01Z", taskId: "FN-001", text: "Read", type: "tool" as const, detail: longDetail },
+      ],
+      total: 2,
+      hasMore: false,
+    });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -482,7 +492,7 @@ describe("useMultiAgentLogs", () => {
   });
 
   it("preserves long text and detail in live SSE entries without truncation", async () => {
-    mockFetchAgentLogs.mockResolvedValue([]);
+    mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 1, hasMore: false });
 
     const { result } = renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -517,7 +527,7 @@ describe("useMultiAgentLogs", () => {
 
   describe("projectId support", () => {
     it("includes projectId in EventSource URL when provided", async () => {
-      mockFetchAgentLogs.mockResolvedValue([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       renderHook(() => useMultiAgentLogs(["FN-001", "FN-002"], "proj-123"));
 
@@ -528,18 +538,18 @@ describe("useMultiAgentLogs", () => {
       });
     });
 
-    it("includes projectId in fetchAgentLogs call when provided", async () => {
-      mockFetchAgentLogs.mockResolvedValue([]);
+    it("includes projectId in fetchAgentLogsWithMeta call when provided", async () => {
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       renderHook(() => useMultiAgentLogs(["FN-001"], "proj-123"));
 
       await waitFor(() => {
-        expect(mockFetchAgentLogs).toHaveBeenCalledWith("FN-001", "proj-123", { limit: 500 });
+        expect(mockFetchAgentLogsWithMeta).toHaveBeenCalledWith("FN-001", "proj-123", { limit: INITIAL_LOAD_LIMIT });
       });
     });
 
     it("does not include projectId in URL when not provided", async () => {
-      mockFetchAgentLogs.mockResolvedValue([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       renderHook(() => useMultiAgentLogs(["FN-001"]));
 
@@ -550,7 +560,7 @@ describe("useMultiAgentLogs", () => {
     });
 
     it("creates new EventSource when taskIds change with projectId", async () => {
-      mockFetchAgentLogs.mockResolvedValue([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       const { rerender } = renderHook(
         ({ taskIds, projectId }: { taskIds: string[]; projectId?: string }) =>
@@ -578,7 +588,7 @@ describe("useMultiAgentLogs", () => {
 
     it("fetches with correct projectId based on when effect runs", async () => {
       // This test verifies that projectId is used at the time the effect runs
-      mockFetchAgentLogs.mockResolvedValue([]);
+      mockFetchAgentLogsWithMeta.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 
       // Render with projectId proj-A
       const { result: result1 } = renderHook(
@@ -593,7 +603,7 @@ describe("useMultiAgentLogs", () => {
       });
 
       // Capture calls made so far
-      const initialCallCount = mockFetchAgentLogs.mock.calls.length;
+      const initialCallCount = mockFetchAgentLogsWithMeta.mock.calls.length;
 
       // Create new hook instance with proj-B
       const { result: result2, rerender: rerender2 } = renderHook(
@@ -608,8 +618,8 @@ describe("useMultiAgentLogs", () => {
       });
 
       // The new hook should have made a fetch with proj-B
-      expect(mockFetchAgentLogs.mock.calls.length).toBeGreaterThan(initialCallCount);
-      const lastCall = mockFetchAgentLogs.mock.calls.at(-1);
+      expect(mockFetchAgentLogsWithMeta.mock.calls.length).toBeGreaterThan(initialCallCount);
+      const lastCall = mockFetchAgentLogsWithMeta.mock.calls.at(-1);
       expect(lastCall?.[1]).toBe("proj-B");
     });
   });

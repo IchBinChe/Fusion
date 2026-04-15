@@ -594,7 +594,14 @@ export function TaskDetailModal({
   }, [isEditing, handleEditKeyDown]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { entries: agentLogEntries, loading: agentLogLoading } = useAgentLogs(
+  const {
+    entries: agentLogEntries,
+    loading: agentLogLoading,
+    loadMore: loadMoreAgentLogs,
+    hasMore: agentLogHasMore,
+    total: agentLogTotal,
+    loadingMore: agentLogLoadingMore,
+  } = useAgentLogs(
     task.id,
     activeTab === "logs" && logSubview === "agent-log",
     projectId,
@@ -1194,6 +1201,10 @@ export function TaskDetailModal({
                   executorModel={resolveEffectiveExecutor(task, settings)}
                   validatorModel={resolveEffectiveValidator(task, settings)}
                   planningModel={resolveEffectivePlanning(task, agentLogEntries, settings)}
+                  hasMore={agentLogHasMore}
+                  onLoadMore={loadMoreAgentLogs}
+                  loadingMore={agentLogLoadingMore}
+                  totalCount={agentLogTotal}
                 />
               ) : (
                 <div className="detail-activity">

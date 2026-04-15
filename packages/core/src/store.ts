@@ -3734,20 +3734,76 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * (`MAX_LOG_ENTRIES`) in the dashboard hooks is a whole-list limit only.
    *
    * @param taskId - The task ID (e.g. "KB-001")
+   * @param options - Optional pagination options
+   * @param options.limit - Maximum number of entries to return (most recent)
+   * @param options.offset - Number of most-recent entries to skip (for pagination)
    * @returns Array of agent log entries, empty if no log file exists
    */
-  async getAgentLogs(taskId: string, options?: { limit?: number }): Promise<AgentLogEntry[]> {
+  async getAgentLogs(
+    taskId: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<AgentLogEntry[]> {
     const dir = this.taskDir(taskId);
     const logPath = join(dir, "agent.log");
     if (!existsSync(logPath)) return [];
-    if (options?.limit !== undefined) {
-      const limit = Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit)) : 0;
+
+    const limit = options?.limit !== undefined
+      ? (Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit)) : 0)
+      : undefined;
+    const offset = options?.offset !== undefined
+      ? (Number.isFinite(options.offset) ? Math.max(0, Math.floor(options.offset)) : 0)
+      : 0;
+
+    // If limit is specified, use readAgentLogTail for efficiency
+    if (limit !== undefined) {
       if (limit === 0) return [];
-      return this.readAgentLogTail(logPath, limit);
+      // When offset is provided, read limit + offset entries and slice off the first offset
+      const readCount = offset > 0 ? limit + offset : limit;
+      const entries = await this.readAgentLogTailAsync(logPath, readCount);
+      if (offset > 0) {
+        // Slice off the first 'offset' entries (oldest in the returned batch)
+        // This skips the most recent entries to get older entries
+        return entries.slice(offset);
+      }
+      return entries;
     }
 
+    // No limit specified - read entire file
     const content = await readFile(logPath, "utf-8");
-    return this.parseAgentLogContent(content);
+    const entries = this.parseAgentLogContent(content);
+    if (offset > 0) {
+      return entries.slice(0, -offset);
+    }
+    return entries;
+  }
+
+  /**
+   * Async version of readAgentLogTail that reads entries from end of file.
+   * Returns entries in chronological order (oldest first).
+   * Uses async file operations for consistency with the rest of the codebase.
+   */
+  private async readAgentLogTailAsync(logPath: string, limit: number): Promise<AgentLogEntry[]> {
+    const content = await readFile(logPath, "utf-8");
+    const allEntries = this.parseAgentLogContent(content);
+    return allEntries.slice(-limit);
+  }
+
+  /**
+   * Count total number of log entries in the agent log file.
+   * Uses efficient newline counting to avoid parsing entire file.
+   *
+   * @param taskId - The task ID (e.g. "KB-001")
+   * @returns Total number of log entries, or 0 if no log file exists
+   */
+  async getAgentLogCount(taskId: string): Promise<number> {
+    const dir = this.taskDir(taskId);
+    const logPath = join(dir, "agent.log");
+    if (!existsSync(logPath)) return 0;
+
+    // Count newlines efficiently - each entry is a JSON line ending with \n
+    const content = await readFile(logPath, "utf-8");
+    if (!content.trim()) return 0;
+    return content.split("\n").filter((line) => line.trim()).length;
   }
 
   /**

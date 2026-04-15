@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, Loader2 } from "lucide-react";
 
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
@@ -60,15 +60,44 @@ interface AgentLogViewerProps {
   executorModel?: ModelInfo | null;
   validatorModel?: ModelInfo | null;
   planningModel?: ModelInfo | null;
+  /** Whether more entries exist beyond what's currently loaded */
+  hasMore?: boolean;
+  /** Callback to load older entries */
+  onLoadMore?: () => void;
+  /** Whether a load more request is in progress */
+  loadingMore?: boolean;
+  /** Total number of entries (when known) for "Showing X of Y" summary */
+  totalCount?: number | null;
 }
 
 /**
  * Renders agent log entries in a scrollable, monospace container.
- * Displays entries in reverse chronological order (newest first).
- * Auto-scrolls to keep latest entries visible when streaming.
- * Supports toggling between markdown-formatted and plain-text rendering.
+ *
+ * Features:
+ * - Displays entries in reverse chronological order (newest first)
+ * - Auto-scrolls to keep latest entries visible when streaming
+ * - Supports toggling between markdown-formatted and plain-text rendering
+ * - "Load More" button to fetch older entries when pagination is enabled
+ * - Shows "Showing X of Y entries" summary when totalCount is provided
+ *
+ * @param entries - Array of log entries (in chronological order, oldest first)
+ * @param loading - Whether initial load is in progress
+ * @param hasMore - Whether more older entries exist beyond the current page
+ * @param onLoadMore - Callback to load older entries
+ * @param loadingMore - Whether a load more request is in progress
+ * @param totalCount - Total number of entries (when known) for summary display
  */
-export function AgentLogViewer({ entries, loading, executorModel, validatorModel, planningModel }: AgentLogViewerProps) {
+export function AgentLogViewer({
+  entries,
+  loading,
+  executorModel,
+  validatorModel,
+  planningModel,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
+  totalCount = null,
+}: AgentLogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previousEntryCountRef = useRef<number>(0);
   const [renderMarkdown, setRenderMarkdown] = useState(true);
@@ -198,6 +227,14 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
           </button>
         </div>
       </div>
+
+      {/* Pagination summary */}
+      {totalCount !== null && (
+        <div className="agent-log-summary" data-testid="agent-log-summary">
+          Showing {entries.length} of {totalCount} entries
+        </div>
+      )}
+
       {reversedEntries.map((entry, i) => {
         // Look at previous entry in reversed array (= next chronologically) for deduplication
         const prev = reversedEntries[i - 1];
@@ -275,6 +312,27 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
           </span>
         );
       })}
+
+      {/* Load More button */}
+      {hasMore && onLoadMore && (
+        <div className="agent-log-load-more" data-testid="agent-log-load-more">
+          <button
+            className="agent-log-mode-toggle"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            data-testid="agent-log-load-more-button"
+          >
+            {loadingMore ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Loading…
+              </>
+            ) : (
+              "Load More"
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

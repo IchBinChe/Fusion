@@ -381,13 +381,60 @@ export async function deleteAttachment(id: string, filename: string, projectId?:
   return api<Task>(withProjectId(`/tasks/${id}/attachments/${filename}`, projectId), { method: "DELETE" });
 }
 
-export function fetchAgentLogs(taskId: string, projectId?: string, options?: { limit?: number }): Promise<AgentLogEntry[]> {
+export function fetchAgentLogs(
+  taskId: string,
+  projectId?: string,
+  options?: { limit?: number; offset?: number },
+): Promise<AgentLogEntry[]> {
   const params = new URLSearchParams();
   if (options?.limit !== undefined) {
     params.set("limit", String(options.limit));
   }
+  if (options?.offset !== undefined) {
+    params.set("offset", String(options.offset));
+  }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return api<AgentLogEntry[]>(withProjectId(`/tasks/${taskId}/logs${suffix}`, projectId));
+}
+
+/**
+ * Fetch agent logs with pagination metadata.
+ * Returns entries along with total count and hasMore flag from response headers.
+ */
+export async function fetchAgentLogsWithMeta(
+  taskId: string,
+  projectId?: string,
+  options?: { limit?: number; offset?: number },
+): Promise<{ entries: AgentLogEntry[]; total: number; hasMore: boolean }> {
+  const params = new URLSearchParams();
+  if (options?.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  if (options?.offset !== undefined) {
+    params.set("offset", String(options.offset));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const url = withProjectId(`/tasks/${taskId}/logs${suffix}`, projectId);
+
+  // Call api function to get the fetch-compatible URL
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({ error: "Failed to fetch agent logs" }));
+    throw new Error((data as { error?: string }).error || `HTTP ${response.status}`);
+  }
+
+  const entries = await response.json() as AgentLogEntry[];
+
+  // Read pagination headers
+  const total = response.headers.has("X-Total-Count")
+    ? parseInt(response.headers.get("X-Total-Count")!, 10)
+    : entries.length;
+  const hasMore = response.headers.has("X-Has-More")
+    ? response.headers.get("X-Has-More") === "true"
+    : false;
+
+  return { entries, total, hasMore };
 }
 
 export function fetchSessionFiles(taskId: string, projectId?: string): Promise<string[]> {

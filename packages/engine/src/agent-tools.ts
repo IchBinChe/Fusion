@@ -164,6 +164,7 @@ export function createTaskDocumentWriteTool(store: TaskStore, taskId: string): T
           }],
           details: {},
         };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         return {
           content: [{
@@ -231,6 +232,7 @@ export function createTaskDocumentReadTool(store: TaskStore, taskId: string): To
           }],
           details: {},
         };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         return {
           content: [{

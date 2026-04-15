@@ -13,6 +13,7 @@
  *    by cleaning oldest idle worktrees when count exceeds 2× maxWorktrees.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readdirSync, statSync } from "node:fs";

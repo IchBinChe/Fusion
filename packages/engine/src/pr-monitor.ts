@@ -296,6 +296,7 @@ export class PrMonitor {
       tracked.consecutiveErrors = 0;
       tracked.lastCheckedAt = new Date();
       return true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       tracked.consecutiveErrors++;
       prMonitorLog.error(

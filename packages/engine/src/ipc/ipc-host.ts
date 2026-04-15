@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import type { IpcMessage, IpcCommandType, IpcResponseType } from "./ipc-protocol.js";
+import type { IpcMessage, IpcCommandType } from "./ipc-protocol.js";
 import { OK, ERROR, PONG, generateCorrelationId } from "./ipc-protocol.js";
 import { ipcLog } from "../logger.js";
 
@@ -151,7 +151,7 @@ export class IpcHost extends EventEmitter {
     this.disconnected = true;
 
     // Reject all pending commands
-    for (const [id, pending] of this.pendingCommands) {
+    for (const [_id, pending] of this.pendingCommands) {
       clearTimeout(pending.timeout);
       pending.reject(new Error(`IPC disconnected: ${error.message}`));
     }

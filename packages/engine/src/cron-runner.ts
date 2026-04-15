@@ -226,6 +226,7 @@ export class CronRunner {
         startedAt,
         completedAt: new Date().toISOString(),
       };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const stdout = err.stdout ?? "";
       const stderr = err.stderr ?? "";
@@ -333,6 +334,7 @@ export class CronRunner {
       stepIndex,
       success: false,
       output: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       error: `Unknown step type: "${(step as any).type}"`,
       startedAt: stepStartedAt,
       completedAt: new Date().toISOString(),
@@ -377,6 +379,7 @@ export class CronRunner {
         startedAt,
         completedAt: new Date().toISOString(),
       };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const stdout = err.stdout ?? "";
       const stderr = err.stderr ?? "";
@@ -470,6 +473,7 @@ export class CronRunner {
         startedAt,
         completedAt: new Date().toISOString(),
       };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const errorMessage = err.message ?? String(err);
       log.warn(`    ✗ AI prompt step "${step.name}" failed: ${errorMessage}`);

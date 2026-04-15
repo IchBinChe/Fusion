@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { execSync, exec } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -632,8 +633,8 @@ async function attemptInMergeVerificationFix(
   },
   settings: Settings,
   options: MergerOptions,
-  testCommand?: string,
-  buildCommand?: string,
+  _testCommand?: string,
+  _buildCommand?: string,
 ): Promise<boolean> {
   try {
     mergerLog.log(`${taskId}: spawning in-merge verification fix agent`);

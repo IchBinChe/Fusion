@@ -109,7 +109,7 @@ function formatPerformanceFeedbackSection(ratingSummary: AgentRatingSummary): st
   if (recentComments.length > 0) {
     lines.push("- Recent feedback:");
     for (const rating of recentComments) {
-      lines.push(`  - \"${rating.comment?.trim()}\" (score: ${rating.score.toFixed(1)})`);
+      lines.push(`  - "${rating.comment?.trim()}" (score: ${rating.score.toFixed(1)})`);
     }
   }
 

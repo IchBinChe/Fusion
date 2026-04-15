@@ -502,7 +502,7 @@ export class PluginRunner {
         this.hookTimeoutMs,
         `Hook ${hookName} timed out`,
       );
-    } catch (err) {
+    } catch (_err) {
       // Error already logged by invokeHook
     }
   }

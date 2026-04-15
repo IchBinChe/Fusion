@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -6,7 +7,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext } from "@fusion/core";
-import type { AgentStore } from "@fusion/core";
+
 import { buildExecutionMemoryInstructions, getTaskMergeBlocker, resolveAgentPrompt } from "@fusion/core";
 import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName, slugify } from "./worktree-names.js";
@@ -27,7 +28,7 @@ import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./re
 import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js";
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
-import { StepSessionExecutor, type StepSessionExecutorOptions, type StepResult } from "./step-session-executor.js";
+import { StepSessionExecutor } from "./step-session-executor.js";
 import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext } from "./run-audit.js";
@@ -38,8 +39,6 @@ import {
   createTaskDocumentReadTool as sharedCreateTaskDocumentReadTool,
   createTaskDocumentWriteTool as sharedCreateTaskDocumentWriteTool,
   createTaskLogTool as sharedCreateTaskLogTool,
-  taskCreateParams,
-  taskLogParams,
 } from "./agent-tools.js";
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
 
@@ -650,8 +649,8 @@ export class TaskExecutor {
    */
   private async executeReviewHandoff(
     task: Task,
-    session: AgentSession,
-    sessionEntry: { session: AgentSession; seenSteeringIds: Set<string>; lastModelProvider?: string | null; lastModelId?: string | null },
+    _session: AgentSession,
+    _sessionEntry: { session: AgentSession; seenSteeringIds: Set<string>; lastModelProvider?: string | null; lastModelId?: string | null },
   ): Promise<void> {
     try {
       executorLog.log(`Executing review handoff for ${task.id}`);
@@ -1292,7 +1291,9 @@ export class TaskExecutor {
                   await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
                   // Audit trail: record worktree removal (FN-1404)
                   await audit.git({ type: "worktree:remove", target: worktreePath });
-                } catch {}
+                } catch (_err) {
+                  // Ignore errors during worktree cleanup on stuck kill
+                }
               }
               await this.store.updateTask(task.id, {
                 recoveryRetryCount: decision.nextState.recoveryRetryCount,
@@ -1341,7 +1342,9 @@ export class TaskExecutor {
               if (worktreePath && existsSync(worktreePath)) {
                 try {
                   await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir });
-                } catch {}
+                } catch (_err) {
+                  // Ignore errors during worktree cleanup on stuck kill
+                }
               }
               await this.store.updateTask(task.id, { status: "stuck-killed", worktree: null, branch: null });
               if (task.column !== "todo") {
@@ -1435,6 +1438,7 @@ export class TaskExecutor {
           executorInstructions,
         );
 
+        // eslint-disable-next-line prefer-const
         let { session, sessionFile } = await createKbAgent({
           cwd: worktreePath,
           systemPrompt: executorSystemPrompt,
@@ -3477,7 +3481,7 @@ and show an appropriate message to the user.\`
           cwd: this.rootDir,
         });
         await this.store.logEntry(taskId, `Unlocked worktree`, worktreePath);
-      } catch {
+      } catch (_err) {
         // Unlock failed - worktree wasn't locked, that's fine
       }
 
@@ -3486,10 +3490,8 @@ and show an appropriate message to the user.\`
         await execAsync(`git worktree remove "${worktreePath}" --force`, {
           cwd: this.rootDir,
         });
+      } finally {
         await this.store.logEntry(taskId, `Removed conflicting worktree`, worktreePath);
-      } catch (e: any) {
-        // Re-throw to be caught by outer catch for proper error logging
-        throw e;
       }
 
       // Delete the branch if it exists

@@ -5,6 +5,7 @@
  * Provides factory functions for creating triage and executor agent sessions.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { existsSync, readFileSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -396,7 +397,6 @@ export function wrapToolsWithBoundary(
     }
 
     // Store the original execute function
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const originalExecute = tool.execute as any;
 
      
@@ -404,9 +404,9 @@ export function wrapToolsWithBoundary(
       ...tool,
        
       execute: async (...args: any[]) => {
-        const toolCallId = args[0] as string;
+        const _toolCallId = args[0] as string;
         const params = args[1] as Record<string, unknown>;
-        const signal = args[2] as AbortSignal | undefined;
+        const _signal = args[2] as AbortSignal | undefined;
 
         // Check path argument for file operations
         const pathArg = params.path as string | undefined;
@@ -528,7 +528,6 @@ export async function createKbAgent(options: AgentOptions): Promise<AgentResult>
       authStorage,
       modelRegistry,
       resourceLoader,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: wrappedTools as any,
       customTools: options.customTools,
       sessionManager,

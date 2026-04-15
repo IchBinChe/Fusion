@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type {
   TaskStore,
   Task,
@@ -17,7 +18,7 @@ import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import { aiMergeTask } from "./merger.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
-import type { HeartbeatMonitor, HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
+import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
 
 /**
  * Callback for processing pull-request merge strategy.

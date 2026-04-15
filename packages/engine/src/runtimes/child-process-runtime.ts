@@ -3,7 +3,6 @@ import { fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type {
-  Task,
   TaskStore,
   CentralCore,
 } from "@fusion/core";
@@ -19,7 +18,6 @@ import { IpcHost } from "../ipc/ipc-host.js";
 import {
   START_RUNTIME,
   STOP_RUNTIME,
-  GET_STATUS,
   GET_METRICS,
   TASK_CREATED,
   TASK_MOVED,

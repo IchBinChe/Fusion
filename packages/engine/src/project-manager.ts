@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Task, CentralCore, RegisteredProject } from "@fusion/core";
+import type { Task, CentralCore } from "@fusion/core";
 import { InProcessRuntime } from "./runtimes/in-process-runtime.js";
 import { ChildProcessRuntime } from "./runtimes/child-process-runtime.js";
 import { RemoteNodeRuntime } from "./runtimes/remote-node-runtime.js";

@@ -22,7 +22,6 @@
 import type {
   TaskStore,
   MissionStore,
-  Mission,
   AutopilotState,
   AutopilotStatus,
   Slice,

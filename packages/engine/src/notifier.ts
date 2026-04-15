@@ -1,5 +1,4 @@
-import type { TaskStore, Task, Column, Settings, MergeResult, NtfyNotificationEvent } from "@fusion/core";
-import { EventEmitter } from "node:events";
+import type { Task, Column, Settings, MergeResult, NtfyNotificationEvent } from "@fusion/core";
 import { schedulerLog } from "./logger.js";
 
 export interface NtfyNotifierOptions {

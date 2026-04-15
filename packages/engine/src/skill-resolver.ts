@@ -385,7 +385,7 @@ export function createSkillsOverrideFromSelection(
 
     // Log diagnostics if any
     if (newDiagnostics.length > 0) {
-      const purpose = sessionPurpose ? `[${sessionPurpose}]` : "skills";
+      const _purpose = sessionPurpose ? `[${sessionPurpose}]` : "skills";
       for (const diag of newDiagnostics) {
         console.error(`[pi] [skills] ${diag.type}: ${diag.message}`);
       }

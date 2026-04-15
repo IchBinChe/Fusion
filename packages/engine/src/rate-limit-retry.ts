@@ -77,6 +77,7 @@ export async function withRateLimitRetry<T>(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const error = err instanceof Error ? err : new Error(String(err));
 

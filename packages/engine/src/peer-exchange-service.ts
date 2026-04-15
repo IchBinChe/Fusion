@@ -1,5 +1,5 @@
 import type { CentralCore } from "@fusion/core";
-import type { NodeConfig, PeerInfo, PeerSyncRequest, PeerSyncResponse } from "@fusion/core";
+import type { NodeConfig, PeerSyncRequest, PeerSyncResponse } from "@fusion/core";
 import { peerExchangeLog } from "./logger.js";
 
 export interface PeerExchangeServiceOptions {

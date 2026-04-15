@@ -8,7 +8,7 @@ import type {
   RuntimeStatus,
   GlobalMetrics,
 } from "./project-runtime.js";
-import type { ProjectManagerEvents } from "./project-manager.js";
+
 import { hybridExecutorLog } from "./logger.js";
 
 /**
@@ -261,7 +261,7 @@ export class HybridExecutor extends EventEmitter<HybridExecutorEvents> {
       throw new Error(`Runtime not found for project ${projectId}`);
     }
 
-    const currentStatus = existingRuntime.getStatus();
+    const _currentStatus = existingRuntime.getStatus();
     const currentMode =
       existingRuntime instanceof
       (await import("./runtimes/child-process-runtime.js")).ChildProcessRuntime

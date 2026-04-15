@@ -41,7 +41,7 @@
  * This ensures manual/non-run paths are unaffected by audit instrumentation.
  */
 
-import type { TaskStore, RunAuditEventInput, RunAuditDomain } from "@fusion/core";
+import type { TaskStore, RunAuditEventInput } from "@fusion/core";
 
 /** Structured context for a run correlation ID. */
 export interface EngineRunContext {

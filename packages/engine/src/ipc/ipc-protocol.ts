@@ -10,9 +10,8 @@
  * 3. Worker can also send events unsolicited (task events, health changes)
  */
 
-import type { RuntimeStatus, RuntimeMetrics, ProjectRuntimeConfig } from "../project-runtime.js";
-import type { Task, TaskStore } from "@fusion/core";
-import type { Scheduler } from "../scheduler.js";
+import type { RuntimeStatus, ProjectRuntimeConfig } from "../project-runtime.js";
+import type { Task } from "@fusion/core";
 
 // ── Base Message Types ────────────────────────────────────────────────────
 

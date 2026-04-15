@@ -169,7 +169,7 @@ export class RoutineScheduler {
     // Update next run time
     if (routine.cronExpression) {
       try {
-        const nextRun = CronExpressionParser.parse(routine.cronExpression).next();
+        const _nextRun = CronExpressionParser.parse(routine.cronExpression).next();
         // Note: We can't update nextRunAt directly as it's derived from trigger
         // The RoutineStore handles this internally
       } catch (err) {

@@ -1947,6 +1947,46 @@ export const AGENT_VALID_TRANSITIONS: Record<AgentState, AgentState[]> = {
   terminated: ["idle", "active", "running"], // Can be restarted or reset
 };
 
+/**
+ * Detect if an agent is a runtime-created ephemeral agent (task-worker or spawned child).
+ * These agents are created by the engine for task execution and should typically be
+ * hidden from the default agents page listing.
+ *
+ * Detection heuristics (returns true if ANY match):
+ * - `agent.metadata?.agentKind === "task-worker"` — task-worker agents from InProcessRuntime
+ * - `agent.metadata?.taskWorker === true` — legacy task-worker marker
+ * - `agent.metadata?.managedBy === "task-executor"` — executor-managed agents
+ * - `agent.metadata?.type === "spawned"` — spawned child agents from TaskExecutor
+ * - Legacy fallback: executor role with name starting with "executor-" and no reportsTo
+ *
+ * @param agent - Agent object (partial shape accepted)
+ * @returns true if the agent is an ephemeral/runtime-created agent
+ */
+export function isEphemeralAgent(
+  agent: { metadata?: Record<string, unknown> | null; name?: string; role?: string; reportsTo?: string | null },
+): boolean {
+  const metadata = agent.metadata ?? {};
+
+  // Check explicit metadata markers first
+  if (metadata.agentKind === "task-worker") return true;
+  if (metadata.taskWorker === true) return true;
+  if (metadata.managedBy === "task-executor") return true;
+  if (metadata.type === "spawned") return true;
+
+  // Legacy fallback: executor agents with "executor-" prefix and no manager
+  // These are task workers that were created before metadata was standardized
+  if (
+    agent.role === "executor" &&
+    typeof agent.name === "string" &&
+    agent.name.startsWith("executor-") &&
+    agent.reportsTo == null
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 /** Single heartbeat event recorded for an agent */
 export interface AgentHeartbeatEvent {
   /** ISO-8601 timestamp of when the heartbeat was recorded */

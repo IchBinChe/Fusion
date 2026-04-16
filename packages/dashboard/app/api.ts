@@ -2314,14 +2314,13 @@ export function proxyApi<T>(path: string, opts?: RequestInit & { nodeId?: string
 
 /** Fetch all agents, optionally filtered by state or role */
 export function fetchAgents(
-  filter?: { state?: AgentState; role?: AgentCapability; includeSystem?: boolean },
+  filter?: { state?: AgentState; role?: AgentCapability; includeEphemeral?: boolean },
   projectId?: string,
 ): Promise<Agent[]> {
   const params = new URLSearchParams();
   if (filter?.state) params.set("state", filter.state);
   if (filter?.role) params.set("role", filter.role);
-  if (filter?.includeSystem === true) params.set("includeSystem", "true");
-  else if (filter?.includeSystem === false) params.set("includeSystem", "false");
+  if (filter?.includeEphemeral === true) params.set("includeEphemeral", "true");
   if (projectId) params.set("projectId", projectId);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return api<Agent[]>(`/agents${query}`);
@@ -2635,10 +2634,10 @@ export function fetchChainOfCommand(agentId: string, projectId?: string): Promis
 }
 
 /** Fetch the full org tree as nested nodes */
-export function fetchOrgTree(projectId?: string, options?: { includeSystem?: boolean }): Promise<OrgTreeNode[]> {
+export function fetchOrgTree(projectId?: string, options?: { includeEphemeral?: boolean }): Promise<OrgTreeNode[]> {
   const params = new URLSearchParams();
   if (projectId) params.set("projectId", projectId);
-  if (options?.includeSystem) params.set("includeSystem", "true");
+  if (options?.includeEphemeral) params.set("includeEphemeral", "true");
   const query = params.toString();
   return api<OrgTreeNode[]>(`/agents/org-tree${query ? `?${query}` : ""}`);
 }

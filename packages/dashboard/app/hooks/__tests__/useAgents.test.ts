@@ -107,7 +107,7 @@ describe("useAgents", () => {
       await result.current.loadAgents({ state: "active", role: "executor" });
     });
 
-    expect(mockFetchAgents).toHaveBeenLastCalledWith({ state: "active", role: "executor", includeSystem: false }, undefined);
+    expect(mockFetchAgents).toHaveBeenLastCalledWith({ state: "active", role: "executor" }, undefined);
   });
 
   it("handles fetchAgents rejection gracefully", async () => {
@@ -187,7 +187,8 @@ describe("useAgents", () => {
     renderHook(() => useAgents(projectId));
 
     await waitFor(() => {
-      expect(mockFetchAgents).toHaveBeenCalledWith({ includeSystem: false }, projectId);
+      // fetchAgents defaults to excluding ephemeral agents (handled by API)
+      expect(mockFetchAgents).toHaveBeenCalledWith(undefined, projectId);
       expect(mockFetchAgentStats).toHaveBeenCalledWith(projectId);
     });
 

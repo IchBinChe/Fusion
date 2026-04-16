@@ -121,7 +121,7 @@ describe("AgentsView", () => {
     it("passes projectId to agent fetches", async () => {
       render(<AgentsView addToast={mockAddToast} projectId={projectId} />);
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenCalledWith({ includeSystem: false }, projectId);
+        expect(mockFetchAgents).toHaveBeenCalledWith({ includeEphemeral: false }, projectId);
       });
     });
 
@@ -341,7 +341,7 @@ describe("AgentsView", () => {
       });
 
       await waitFor(() => {
-        expect(mockFetchOrgTree).toHaveBeenCalledWith(projectId, { includeSystem: false });
+        expect(mockFetchOrgTree).toHaveBeenCalledWith(projectId, { includeEphemeral: false });
       });
     });
 
@@ -430,7 +430,7 @@ describe("AgentsView", () => {
       fireEvent.change(filterSelect, { target: { value: "active" } });
 
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenCalledWith({ state: "active", includeSystem: false }, undefined);
+        expect(mockFetchAgents).toHaveBeenCalledWith({ state: "active", includeEphemeral: false }, undefined);
       });
     });
 
@@ -445,13 +445,13 @@ describe("AgentsView", () => {
       fireEvent.change(filterSelect, { target: { value: "idle" } });
 
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenLastCalledWith({ state: "idle", includeSystem: false }, undefined);
+        expect(mockFetchAgents).toHaveBeenLastCalledWith({ state: "idle", includeEphemeral: false }, undefined);
       });
 
       fireEvent.change(filterSelect, { target: { value: "all" } });
 
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeSystem: false }, undefined);
+        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeEphemeral: false }, undefined);
       });
     });
   });
@@ -469,16 +469,16 @@ describe("AgentsView", () => {
       expect(checkbox.checked).toBe(false);
     });
 
-    it("passes includeSystem: false by default to fetchAgents", async () => {
+    it("passes includeEphemeral: false by default to fetchAgents", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
       await waitFor(() => {
         expect(screen.getByText("All States")).toBeTruthy();
       });
 
-      // Default call should include includeSystem: false
+      // Default call should include includeEphemeral: false
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeSystem: false }, undefined);
+        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeEphemeral: false }, undefined);
       });
     });
 
@@ -493,7 +493,7 @@ describe("AgentsView", () => {
       fireEvent.click(checkbox);
 
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeSystem: true }, projectId);
+        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeEphemeral: true }, projectId);
       });
     });
 
@@ -509,7 +509,7 @@ describe("AgentsView", () => {
       fireEvent.click(checkbox);
 
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeSystem: true }, projectId);
+        expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeEphemeral: true }, projectId);
       });
 
       // Then filter by state
@@ -517,7 +517,7 @@ describe("AgentsView", () => {
       fireEvent.change(filterSelect, { target: { value: "active" } });
 
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenLastCalledWith({ state: "active", includeSystem: true }, projectId);
+        expect(mockFetchAgents).toHaveBeenLastCalledWith({ state: "active", includeEphemeral: true }, projectId);
       });
     });
 
@@ -555,7 +555,7 @@ describe("AgentsView", () => {
 
       // Now the agents should be reloaded with system agents included
       await waitFor(() => {
-        expect(mockFetchAgents).toHaveBeenCalledWith({ includeSystem: true }, projectId);
+        expect(mockFetchAgents).toHaveBeenCalledWith({ includeEphemeral: true }, projectId);
       });
     });
   });

@@ -10225,21 +10225,19 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   /**
    * GET /api/agents
    * List all agents with optional filtering.
-   * Query params: state, role, includeSystem
+   * Query params: state, role, includeEphemeral
    */
   router.get("/agents", async (req, res) => {
     try {
-      const filter: { state?: string; role?: string; includeSystem?: boolean } = {};
+      const filter: { state?: string; role?: string; includeEphemeral?: boolean } = {};
       if (req.query.state && typeof req.query.state === "string") {
         filter.state = req.query.state;
       }
       if (req.query.role && typeof req.query.role === "string") {
         filter.role = req.query.role;
       }
-      if (req.query.includeSystem === "true") {
-        filter.includeSystem = true;
-      } else if (req.query.includeSystem === "false") {
-        filter.includeSystem = false;
+      if (req.query.includeEphemeral === "true") {
+        filter.includeEphemeral = true;
       }
 
       const { store: scopedStore } = await getProjectContext(req);
@@ -10247,7 +10245,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
-      const agents = await agentStore.listAgents(filter as { state?: "idle" | "active" | "paused" | "terminated"; role?: import("@fusion/core").AgentCapability; includeSystem?: boolean });
+      const agents = await agentStore.listAgents(filter as { state?: "idle" | "active" | "paused" | "terminated"; role?: import("@fusion/core").AgentCapability; includeEphemeral?: boolean });
       res.json(agents);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -11003,8 +11001,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
-      const includeSystem = req.query.includeSystem === "true";
-      const tree = await agentStore.getOrgTree({ includeSystem });
+      const includeEphemeral = req.query.includeEphemeral === "true";
+      const tree = await agentStore.getOrgTree({ includeEphemeral });
       res.json(tree);
     } catch (err: unknown) {
       if (err instanceof ApiError) {

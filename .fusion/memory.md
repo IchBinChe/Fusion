@@ -2,18 +2,20 @@
 
 ## Architecture
 
-- **`FN-1737 Ephemeral Agent Auto-Deletion`**: Runtime-created agents (task-workers created by `InProcessRuntime` and spawned child agents created by `TaskExecutor`) are now auto-deleted from `AgentStore` after reaching a terminal state. A 5-second delay allows the UI to observe the "terminated" state before deletion. The `includeSystem` filter in `AgentStore.listAgents()` allows callers to exclude these ephemeral agents:
+- **`FN-1737/FN-1868 Ephemeral Agent Auto-Deletion`**: Runtime-created agents (task-workers created by `InProcessRuntime` and spawned child agents created by `TaskExecutor`) are auto-deleted from `AgentStore` after reaching a terminal state. A 5-second delay allows the UI to observe the "terminated" state before deletion. The `isEphemeralAgent()` helper in `@fusion/core` provides canonical detection heuristics:
   - `agent.metadata?.agentKind === "task-worker"` — task-worker agents
   - `agent.metadata?.type === "spawned"` — spawned child agents
   - `agent.metadata?.taskWorker === true` — legacy marker
   - `agent.metadata?.managedBy === "task-executor"` — executor-managed agents
-  - Default: `includeSystem: false` excludes these from the agents page UI
+  - Legacy fallback: executor role with name starting with "executor-" and no `reportsTo`
+- `AgentStore.listAgents()` and `getOrgTree()` exclude ephemeral agents by default via the `includeEphemeral` filter parameter. The dashboard API routes (`GET /api/agents`, `GET /api/agents/org-tree`) use this parameter.
+- Frontend uses `isEphemeralAgent` from `@fusion/core` to filter ephemeral agents in `displayAgents` and `displayOrgTree` memos.
 
 - **`FN-1776 Agent SSE Event Forwarding`**: Agent lifecycle events are now forwarded through the SSE pipeline:
   - `createSSE()` accepts an optional `AgentStore` parameter for forwarding `agent:created`, `agent:updated`, `agent:deleted`, and `agent:stateChanged` events
-  - `getOrgTree()` accepts `{ includeSystem?: boolean }` filter matching `listAgents()` pattern
-  - `GET /api/agents/org-tree` supports `includeSystem` query parameter
-  - `useAgents` hook passes `includeSystem: false` by default, excluding ephemeral agents
+  - `getOrgTree()` accepts `{ includeEphemeral?: boolean }` filter matching `listAgents()` pattern
+  - `GET /api/agents/org-tree` supports `includeEphemeral` query parameter
+  - `useAgents` hook excludes ephemeral agents from `activeAgents` by default
   - Server SSE endpoint resolves `AgentStore` from engine via `getAgentStore()` for project-scoped streams
 
 - **`FN-1736 Multi-Project Scoping Audit`**: Comprehensive audit of project-scoping across the Fusion stack found:

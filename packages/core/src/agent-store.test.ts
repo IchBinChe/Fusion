@@ -999,7 +999,7 @@ describe("AgentStore", () => {
       expect(agents[0].name).toBe("Valid");
     });
 
-    it("filters out system agents when includeSystem is false", async () => {
+    it("filters out ephemeral agents by default", async () => {
       // Create a normal agent
       const normal = await store.createAgent({ name: "Normal Agent", role: "executor" });
 
@@ -1031,21 +1031,17 @@ describe("AgentStore", () => {
         metadata: { managedBy: "task-executor" },
       });
 
-      // Without includeSystem filter, all agents are returned
+      // Without includeEphemeral filter, ephemeral agents are filtered out by default
       const allAgents = await store.listAgents();
-      expect(allAgents).toHaveLength(5);
+      expect(allAgents).toHaveLength(1);
+      expect(allAgents[0].id).toBe(normal.id);
 
-      // With includeSystem: false, system agents are filtered out
-      const nonSystemAgents = await store.listAgents({ includeSystem: false });
-      expect(nonSystemAgents).toHaveLength(1);
-      expect(nonSystemAgents[0].id).toBe(normal.id);
-
-      // With includeSystem: true, all agents are returned
-      const systemAgents = await store.listAgents({ includeSystem: true });
-      expect(systemAgents).toHaveLength(5);
+      // With includeEphemeral: true, all agents are returned
+      const allIncludingEphemeral = await store.listAgents({ includeEphemeral: true });
+      expect(allIncludingEphemeral).toHaveLength(5);
     });
 
-    it("includeSystem filter works with state filter", async () => {
+    it("includeEphemeral filter works with state filter", async () => {
       // Create a normal agent
       const normal = await store.createAgent({ name: "Normal Agent", role: "executor" });
 
@@ -1058,12 +1054,12 @@ describe("AgentStore", () => {
       await store.recordHeartbeat(taskWorker.id, "ok");
       await store.updateAgentState(taskWorker.id, "active");
 
-      // Without includeSystem, but with state=active - only returns active non-system agents
-      const activeNonSystem = await store.listAgents({ state: "active", includeSystem: false });
-      expect(activeNonSystem).toHaveLength(0);
+      // Without includeEphemeral filter - only returns active non-ephemeral agents
+      const activeNonEphemeral = await store.listAgents({ state: "active" });
+      expect(activeNonEphemeral).toHaveLength(0);
 
-      // With includeSystem: true, returns all active agents
-      const activeAll = await store.listAgents({ state: "active", includeSystem: true });
+      // With includeEphemeral: true, returns all active agents
+      const activeAll = await store.listAgents({ state: "active", includeEphemeral: true });
       expect(activeAll).toHaveLength(1);
       expect(activeAll[0].id).toBe(taskWorker.id);
     });

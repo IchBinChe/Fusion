@@ -13,6 +13,7 @@ import { NewAgentDialog } from "./NewAgentDialog";
 import { AgentImportModal } from "./AgentImportModal";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 import { getAgentHealthStatus } from "../utils/agentHealth";
+import { isEphemeralAgent } from "@fusion/core";
 
 export interface AgentsViewProps {
   addToast: (message: string, type?: "success" | "error") => void;
@@ -257,38 +258,38 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
 
   // Filter agents for display: hide terminated agents in default "All States" view
   // but show them when the user explicitly filters to "terminated"
+  // Always filter out ephemeral agents (task-workers and spawned children)
   const displayAgents = useMemo(() => {
+    let filtered = agents.filter(a => !isEphemeralAgent(a));
     if (filterState === "all") {
-      return agents.filter(a => a.state !== "terminated");
+      filtered = filtered.filter(a => a.state !== "terminated");
     }
-    return agents;
+    return filtered;
   }, [agents, filterState]);
 
-  // Filter org tree to exclude terminated agents in default view
+  // Filter org tree to exclude terminated and ephemeral agents in default view
   const displayOrgTree = useMemo(() => {
-    if (filterState === "all") {
-      // Recursively filter out terminated agents from the org tree
-      const filterNode = (node: OrgTreeNode): OrgTreeNode | null => {
-        if (node.agent.state === "terminated") return null;
-        return {
-          ...node,
-          children: node.children
-            .map(filterNode)
-            .filter((n): n is OrgTreeNode => n !== null),
-        };
+    // Recursively filter out terminated and ephemeral agents from the org tree
+    const filterNode = (node: OrgTreeNode): OrgTreeNode | null => {
+      if (isEphemeralAgent(node.agent)) return null;
+      if (filterState === "all" && node.agent.state === "terminated") return null;
+      return {
+        ...node,
+        children: node.children
+          .map(filterNode)
+          .filter((n): n is OrgTreeNode => n !== null),
       };
-      return orgTree
-        .map(filterNode)
-        .filter((n): n is OrgTreeNode => n !== null);
-    }
-    return orgTree;
+    };
+    return orgTree
+      .map(filterNode)
+      .filter((n): n is OrgTreeNode => n !== null);
   }, [orgTree, filterState]);
 
   const loadAgents = useCallback(async () => {
     setIsLoading(true);
     try {
       const filter = filterState !== "all" ? { state: filterState } : undefined;
-      const data = await fetchAgents({ ...filter, includeSystem: showSystemAgents }, projectId);
+      const data = await fetchAgents({ ...filter, includeEphemeral: showSystemAgents }, projectId);
       setAgents(data);
     } catch (err: any) {
       addToast(`Failed to load agents: ${err.message}`, "error");
@@ -306,7 +307,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
 
     let cancelled = false;
     setIsOrgTreeLoading(true);
-    fetchOrgTree(projectId, { includeSystem: showSystemAgents })
+    fetchOrgTree(projectId, { includeEphemeral: showSystemAgents })
       .then((data) => {
         if (!cancelled) {
           setOrgTree(data);

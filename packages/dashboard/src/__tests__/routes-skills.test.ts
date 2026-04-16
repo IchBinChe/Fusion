@@ -377,7 +377,56 @@ describe("Skills routes", () => {
       expect(res.body).toMatchObject({ error: "Skills adapter not configured", code: "adapter_not_configured" });
     });
 
-    it("passes limit and query parameters to catalog fetch", async () => {
+    it("returns unauthenticated public-search style entries", async () => {
+      const mockAdapter = createMockSkillsAdapter({
+        fetchCatalog: vi.fn().mockResolvedValue({
+          entries: [
+            {
+              id: "vercel-labs/agent-skills/vercel-react-best-practices",
+              slug: "vercel-labs/agent-skills/vercel-react-best-practices",
+              name: "vercel-react-best-practices",
+              repo: "vercel-labs/agent-skills",
+              installs: 421,
+              installation: {
+                installed: false,
+                matchingSkillIds: [],
+                matchingPaths: [],
+              },
+            },
+          ],
+          auth: { mode: "unauthenticated", tokenPresent: false, fallbackUsed: false },
+        }),
+      });
+      const store = new MockStore();
+      const app = createServer(store as any, { skillsAdapter: mockAdapter as SkillsAdapter });
+
+      const res = await request(app, "GET", "/api/skills/catalog");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        entries: [
+          {
+            id: "vercel-labs/agent-skills/vercel-react-best-practices",
+            slug: "vercel-labs/agent-skills/vercel-react-best-practices",
+            name: "vercel-react-best-practices",
+            repo: "vercel-labs/agent-skills",
+            installs: 421,
+            installation: {
+              installed: false,
+              matchingSkillIds: [],
+              matchingPaths: [],
+            },
+          },
+        ],
+        auth: {
+          mode: "unauthenticated",
+          tokenPresent: false,
+          fallbackUsed: false,
+        },
+      });
+    });
+
+    it("passes search query through to catalog adapter", async () => {
       const mockAdapter = createMockSkillsAdapter({
         fetchCatalog: vi.fn().mockResolvedValue({
           entries: [],
@@ -387,10 +436,38 @@ describe("Skills routes", () => {
       const store = new MockStore();
       const app = createServer(store as any, { skillsAdapter: mockAdapter as SkillsAdapter });
 
-      const res = await request(app, "GET", "/api/skills/catalog?limit=50&q=search-term");
+      const res = await request(app, "GET", "/api/skills/catalog?q=react");
 
       expect(res.status).toBe(200);
-      expect(mockAdapter.fetchCatalog).toHaveBeenCalledWith({ limit: 50, query: "search-term" });
+      expect(mockAdapter.fetchCatalog).toHaveBeenCalledWith({ limit: 20, query: "react" });
+    });
+
+    it("returns results when query is omitted (adapter handles wildcard fallback)", async () => {
+      const mockAdapter = createMockSkillsAdapter({
+        fetchCatalog: vi.fn().mockResolvedValue({
+          entries: [
+            {
+              id: "default-skill",
+              slug: "default-skill",
+              name: "Default Skill",
+              installation: {
+                installed: false,
+                matchingSkillIds: [],
+                matchingPaths: [],
+              },
+            },
+          ],
+          auth: { mode: "unauthenticated", tokenPresent: false, fallbackUsed: false },
+        }),
+      });
+      const store = new MockStore();
+      const app = createServer(store as any, { skillsAdapter: mockAdapter as SkillsAdapter });
+
+      const res = await request(app, "GET", "/api/skills/catalog");
+
+      expect(res.status).toBe(200);
+      expect(res.body.entries).toHaveLength(1);
+      expect(mockAdapter.fetchCatalog).toHaveBeenCalledWith({ limit: 20, query: undefined });
     });
 
     it("bounds limit parameter to max 100", async () => {

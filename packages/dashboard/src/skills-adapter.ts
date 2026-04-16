@@ -395,92 +395,63 @@ export function createSkillsAdapter(options: {
 
       // Get skills.sh token if available
       const token = process.env.SKILLS_SH_TOKEN;
+      const catalogUrl = buildCatalogUrl(boundedLimit, query);
+      const searchUrl = buildSearchUrl(boundedLimit, query);
 
-      const params = new URLSearchParams();
-      params.set("limit", String(boundedLimit));
-      if (query) {
-        params.set("q", query);
+      // No token available - use public search endpoint
+      if (!token) {
+        return fetchPublicCatalog(searchUrl, {
+          mode: "unauthenticated",
+          tokenPresent: false,
+          fallbackUsed: false,
+        });
       }
 
-      const upstreamUrl = `https://skills.sh/api/v1/skills?${params.toString()}`;
+      // Try authenticated v1 catalog endpoint first
+      try {
+        const authResponse = await fetch(catalogUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
 
-      // Try authenticated first if token is available
-      if (token) {
-        try {
-          const authResponse = await fetch(upstreamUrl, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              Accept: "application/json",
-            },
-            signal: AbortSignal.timeout(10_000),
-          });
-
-          if (authResponse.ok) {
-            const data = await authResponse.json().catch(() => null);
-            if (data) {
-              return normalizeCatalogResponse(data, false);
-            }
+        if (authResponse.ok) {
+          const data = await authResponse.json().catch(() => null);
+          if (data) {
+            return normalizeCatalogResponse(data, false);
           }
 
-          // 401/403 from authenticated request - fall back to unauthenticated
-          if (authResponse.status === 401 || authResponse.status === 403) {
-            const fallbackResponse = await fetch(upstreamUrl, {
-              headers: { Accept: "application/json" },
-              signal: AbortSignal.timeout(10_000),
-            });
-
-            if (fallbackResponse.ok) {
-              const fallbackData = await fallbackResponse.json().catch(() => null);
-              if (fallbackData) {
-                return normalizeCatalogResponse(fallbackData, true);
-              }
-            }
-          }
-
-          // Upstream error
           return {
-            error: `Upstream returned ${authResponse.status}: ${authResponse.statusText}`,
-            code: "upstream_http_error",
-          };
-        } catch (err) {
-          const error = err as Error;
-          if (error.name === "TimeoutError" || error.message?.includes("timeout")) {
-            return { error: "Upstream request timed out", code: "upstream_timeout" };
-          }
-          return {
-            error: error.message || "Upstream request failed",
-            code: "upstream_http_error",
+            error: "Invalid upstream response format",
+            code: "upstream_invalid_payload",
           };
         }
-      } else {
-        // No token - unauthenticated request
-        try {
-          const response = await fetch(upstreamUrl, {
-            headers: { Accept: "application/json" },
-            signal: AbortSignal.timeout(10_000),
+
+        // 401/403 from authenticated request - fall back to public search endpoint
+        if (authResponse.status === 401 || authResponse.status === 403) {
+          return fetchPublicCatalog(searchUrl, {
+            mode: "fallback-unauthenticated",
+            tokenPresent: true,
+            fallbackUsed: true,
           });
-
-          if (response.ok) {
-            const data = await response.json().catch(() => null);
-            if (data) {
-              return normalizeCatalogResponse(data, false);
-            }
-          }
-
-          return {
-            error: `Upstream returned ${response.status}: ${response.statusText}`,
-            code: "upstream_http_error",
-          };
-        } catch (err) {
-          const error = err as Error;
-          if (error.name === "TimeoutError" || error.message?.includes("timeout")) {
-            return { error: "Upstream request timed out", code: "upstream_timeout" };
-          }
-          return {
-            error: error.message || "Upstream request failed",
-            code: "upstream_http_error",
-          };
         }
+
+        // Upstream error
+        return {
+          error: `Upstream returned ${authResponse.status}: ${authResponse.statusText}`,
+          code: "upstream_http_error",
+        };
+      } catch (err) {
+        const error = err as Error;
+        if (isTimeoutError(error)) {
+          return { error: "Upstream request timed out", code: "upstream_timeout" };
+        }
+        return {
+          error: error.message || "Upstream request failed",
+          code: "upstream_http_error",
+        };
       }
     },
   };
@@ -501,6 +472,142 @@ function extractSkillName(skillPath: string, source: string): string {
   }
   // Fallback to source
   return source;
+}
+
+/**
+ * Build the authenticated catalog URL.
+ */
+function buildCatalogUrl(limit: number, query?: string): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+
+  const normalizedQuery = query?.trim();
+  if (normalizedQuery) {
+    params.set("q", normalizedQuery);
+  }
+
+  return `https://skills.sh/api/v1/skills?${params.toString()}`;
+}
+
+/**
+ * Build the public search URL.
+ *
+ * The search API requires a non-empty query. For initial catalog browsing,
+ * use "*" as a wildcard query.
+ */
+function buildSearchUrl(limit: number, query?: string): string {
+  const params = new URLSearchParams();
+  const normalizedQuery = query?.trim();
+
+  params.set("q", normalizedQuery && normalizedQuery.length > 0 ? normalizedQuery : "*");
+  params.set("limit", String(limit));
+
+  return `https://skills.sh/api/search?${params.toString()}`;
+}
+
+/**
+ * Fetch and normalize catalog data from the public /api/search endpoint.
+ */
+async function fetchPublicCatalog(
+  url: string,
+  auth: CatalogFetchResult["auth"],
+): Promise<CatalogFetchResult | UpstreamError> {
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!response.ok) {
+      return {
+        error: `Upstream returned ${response.status}: ${response.statusText}`,
+        code: "upstream_http_error",
+      };
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!data) {
+      return {
+        error: "Invalid upstream response format",
+        code: "upstream_invalid_payload",
+      };
+    }
+
+    return normalizeSearchResponse(data, auth);
+  } catch (err) {
+    const error = err as Error;
+    if (isTimeoutError(error)) {
+      return { error: "Upstream request timed out", code: "upstream_timeout" };
+    }
+    return {
+      error: error.message || "Upstream request failed",
+      code: "upstream_http_error",
+    };
+  }
+}
+
+/**
+ * Normalize public search endpoint response shape to CatalogFetchResult.
+ */
+function normalizeSearchResponse(
+  data: unknown,
+  auth: CatalogFetchResult["auth"],
+): CatalogFetchResult | UpstreamError {
+  if (!data || typeof data !== "object") {
+    return {
+      error: "Invalid upstream response format",
+      code: "upstream_invalid_payload",
+    };
+  }
+
+  const record = data as Record<string, unknown>;
+  if (!Array.isArray(record.skills)) {
+    return {
+      error: "Invalid upstream response format: expected { skills: [...] }",
+      code: "upstream_invalid_payload",
+    };
+  }
+
+  return {
+    entries: record.skills.map(normalizeSearchEntry),
+    auth,
+  };
+}
+
+/**
+ * Normalize a single /api/search skill entry to CatalogEntry.
+ */
+function normalizeSearchEntry(entry: unknown): CatalogEntry {
+  if (!entry || typeof entry !== "object") {
+    return {
+      id: "",
+      slug: "",
+      name: "Unknown",
+      installation: { installed: false, matchingSkillIds: [], matchingPaths: [] },
+    };
+  }
+
+  const record = entry as Record<string, unknown>;
+  const id = String(record.id ?? record.skillId ?? "");
+  const nameCandidate = String(record.name ?? record.skillId ?? id);
+
+  return {
+    id,
+    slug: id,
+    name: nameCandidate || "Unknown",
+    repo: record.source ? String(record.source) : undefined,
+    installs: typeof record.installs === "number" ? record.installs : undefined,
+    installation: {
+      installed: false,
+      matchingSkillIds: [],
+      matchingPaths: [],
+    },
+  };
+}
+
+function isTimeoutError(error: Error): boolean {
+  const message = error.message?.toLowerCase() ?? "";
+  return error.name === "TimeoutError" || message.includes("timeout");
 }
 
 /**

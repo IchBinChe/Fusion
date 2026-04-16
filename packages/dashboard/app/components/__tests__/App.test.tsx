@@ -2192,7 +2192,8 @@ describe("App onboarding reopen", () => {
     });
 
     // Navigate to Authentication section (it should be default or click to ensure)
-    const authSection = screen.getAllByText("Authentication")[0];
+    const authSections = await screen.findAllByText("Authentication");
+    const authSection = authSections[0];
     fireEvent.click(authSection);
 
     await waitFor(() => {
@@ -2254,7 +2255,11 @@ describe("App onboarding reopen", () => {
       expect(screen.getByText("Settings")).toBeTruthy();
     });
 
-    // Authentication is the default settings section; wait for it to hydrate.
+    // Navigate to Authentication section
+    const authSections = await screen.findAllByText("Authentication");
+    const authSection = authSections[0];
+    fireEvent.click(authSection);
+
     await waitFor(() => {
       expect(fetchAuthStatus).toHaveBeenCalled();
     });

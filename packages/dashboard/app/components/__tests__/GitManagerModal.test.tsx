@@ -2322,7 +2322,7 @@ describe("GitManagerModal", () => {
       fireEvent.click(screen.getByRole("tab", { name: /remotes/i }));
 
       await waitFor(() => {
-        expect(screen.getByText("origin")).toBeInTheDocument();
+        expect(screen.getByTestId("remote-detail-card")).toBeInTheDocument();
       });
 
       const editButton = screen.getByTitle("Edit remote URL");

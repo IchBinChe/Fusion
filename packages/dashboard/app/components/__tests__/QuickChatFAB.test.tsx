@@ -533,6 +533,7 @@ describe("QuickChatFAB", () => {
     });
 
     it("FAB position is clamped to viewport boundaries", async () => {
+      // Desktop viewport (jsdom default 1024px > 768px): 48px edge margin
       render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
 
       const fab = screen.getByTestId("quick-chat-fab");
@@ -559,7 +560,81 @@ describe("QuickChatFAB", () => {
         pointerId: 1,
       });
 
-      // Position should be clamped to at least 48px from edges
+      // Desktop: position should be clamped to at least 48px from edges
+      const savedPosition = JSON.parse(localStorageMock.setItem.mock.calls[0]?.[1] || "{}");
+      expect(savedPosition.x).toBeGreaterThanOrEqual(48);
+      expect(savedPosition.y).toBeGreaterThanOrEqual(48);
+    });
+
+    it("on mobile viewport, FAB can be dragged to within 4px of the edge", async () => {
+      // Mock mobile viewport (375px wide, which is <= 768px)
+      Object.defineProperty(window, "innerWidth", { value: 375, writable: true });
+      Object.defineProperty(window, "innerHeight", { value: 812, writable: true });
+
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Simulate drag to extreme position (off viewport)
+      fireEvent.pointerDown(fab, {
+        clientX: 100,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Try to drag way off screen (negative coordinates)
+      fireEvent.pointerMove(fab, {
+        clientX: -1000,
+        clientY: -1000,
+        pointerId: 1,
+      });
+
+      fireEvent.pointerUp(fab, {
+        clientX: -1000,
+        clientY: -1000,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Mobile (375px <= 768px): position should be clamped to at least 4px from edges
+      const savedPosition = JSON.parse(localStorageMock.setItem.mock.calls[0]?.[1] || "{}");
+      expect(savedPosition.x).toBeGreaterThanOrEqual(4);
+      expect(savedPosition.y).toBeGreaterThanOrEqual(4);
+    });
+
+    it("on desktop viewport, FAB edge margin remains 48px", async () => {
+      // Explicitly set desktop viewport (1024px wide, which is > 768px)
+      Object.defineProperty(window, "innerWidth", { value: 1024, writable: true });
+      Object.defineProperty(window, "innerHeight", { value: 768, writable: true });
+
+      render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+
+      const fab = screen.getByTestId("quick-chat-fab");
+
+      // Simulate drag to extreme position (off viewport)
+      fireEvent.pointerDown(fab, {
+        clientX: 100,
+        clientY: 100,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Try to drag way off screen (negative coordinates)
+      fireEvent.pointerMove(fab, {
+        clientX: -1000,
+        clientY: -1000,
+        pointerId: 1,
+      });
+
+      fireEvent.pointerUp(fab, {
+        clientX: -1000,
+        clientY: -1000,
+        button: 0,
+        pointerId: 1,
+      });
+
+      // Desktop: position should be clamped to at least 48px from edges
       const savedPosition = JSON.parse(localStorageMock.setItem.mock.calls[0]?.[1] || "{}");
       expect(savedPosition.x).toBeGreaterThanOrEqual(48);
       expect(savedPosition.y).toBeGreaterThanOrEqual(48);

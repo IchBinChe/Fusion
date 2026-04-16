@@ -45,9 +45,9 @@ function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefO
 
   // Default positions
   const getDefaultPosition = useCallback((): Position => {
-    // Mobile uses smaller default offset (16px vs 24px)
+    // Mobile uses tighter default offset (4px vs 24px) to maximize screen space
     if (typeof window !== "undefined" && window.innerWidth <= 768) {
-      return { x: 16, y: 16 + getFooterHeight() };
+      return { x: 4, y: 4 + getFooterHeight() };
     }
     return { x: 24, y: 24 + getFooterHeight() };
   }, [getFooterHeight]);
@@ -82,7 +82,8 @@ function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefO
     if (typeof window === "undefined") return pos;
 
     const fabSize = 48; // FAB is 48x48px
-    const edgeMargin = 48; // Keep at least 48px from viewport edges
+    // Mobile uses tighter margin (4px) to maximize screen space on small devices
+    const edgeMargin = window.innerWidth <= 768 ? 4 : 48;
     // Account for mobile nav height when clamping bottom
     const mobileNavHeight = window.innerWidth <= 768 ? 44 : 0;
     // Account for executor footer height on desktop

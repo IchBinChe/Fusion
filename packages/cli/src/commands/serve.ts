@@ -538,7 +538,6 @@ export async function runServe(
       const settingsStore = new GlobalSettingsStore(globalDir);
       const tokenManager = new DaemonTokenManager(settingsStore);
       daemonToken = await tokenManager.generateToken();
-      await tokenManager.storeToken(daemonToken);
     }
   }
 

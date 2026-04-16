@@ -155,6 +155,13 @@ vi.mock("../mission-interview.js", () => {
   };
 });
 
+// Mock project-store-resolver.js
+const mockGetOrCreateProjectStore = vi.fn();
+vi.mock("../project-store-resolver.js", () => ({
+  getOrCreateProjectStore: mockGetOrCreateProjectStore,
+  invalidateAllGlobalSettingsCaches: vi.fn(),
+}));
+
 // ── Mock Store ──────────────────────────────────────────────────────────────
 
 class MockStore extends EventEmitter {
@@ -271,6 +278,9 @@ describe("Chat API Routes", () => {
     // Reset and use the shared mock instance
     mockChatStore = mockChatStoreInstance;
     mockChatManager = createMockChatManager();
+
+    // Setup project-store-resolver mock to return the mock store
+    mockGetOrCreateProjectStore.mockResolvedValue(store);
 
     const { createServer } = await import("../server.js");
     app = createServer(store as any, {

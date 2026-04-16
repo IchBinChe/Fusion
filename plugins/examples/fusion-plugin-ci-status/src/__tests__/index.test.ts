@@ -125,6 +125,40 @@ describe("ci-status plugin", () => {
       expect(plugin.manifest.settingsSchema!.pollIntervalMs).toBeDefined();
       expect(plugin.manifest.settingsSchema!.branchPrefix).toBeDefined();
     });
+
+    describe("uiSlots", () => {
+      it("should have uiSlots array with 2 entries", () => {
+        expect(plugin.uiSlots).toBeDefined();
+        expect(plugin.uiSlots!.length).toBe(2);
+      });
+
+      it("should have task-card-badge slot", () => {
+        const slot = plugin.uiSlots!.find((s) => s.slotId === "task-card-badge");
+        expect(slot).toBeDefined();
+        expect(slot!.label).toBe("CI Status");
+        expect(slot!.icon).toBe("circle-check");
+        expect(slot!.componentPath).toBe("./components/ci-badge.js");
+      });
+
+      it("should have task-detail-tab slot", () => {
+        const slot = plugin.uiSlots!.find((s) => s.slotId === "task-detail-tab");
+        expect(slot).toBeDefined();
+        expect(slot!.label).toBe("CI History");
+        expect(slot!.icon).toBe("history");
+        expect(slot!.componentPath).toBe("./components/ci-history-tab.js");
+      });
+
+      it("should have required fields for each slot", () => {
+        for (const slot of plugin.uiSlots!) {
+          expect(typeof slot.slotId).toBe("string");
+          expect(slot.slotId.length).toBeGreaterThan(0);
+          expect(typeof slot.label).toBe("string");
+          expect(slot.label.length).toBeGreaterThan(0);
+          expect(typeof slot.componentPath).toBe("string");
+          expect(slot.componentPath.length).toBeGreaterThan(0);
+        }
+      });
+    });
   });
 
   describe("hooks.onLoad", () => {

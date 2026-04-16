@@ -10,11 +10,12 @@ A comprehensive guide to creating Fusion plugins that extend the task board with
 4. [Available Hooks and Signatures](#4-available-hooks-and-signatures)
 5. [Registering Tools](#5-registering-tools)
 6. [Registering Routes](#6-registering-routes)
-7. [Plugin Context API Reference](#7-plugin-context-api-reference)
-8. [Plugin Lifecycle States](#8-plugin-lifecycle-states)
-9. [Testing Plugins](#9-testing-plugins)
-10. [Publishing Plugins](#10-publishing-plugins)
-11. [Example Plugins](#11-example-plugins)
+7. [Registering UI Slots](#7-registering-ui-slots)
+8. [Plugin Context API Reference](#8-plugin-context-api-reference)
+9. [Plugin Lifecycle States](#9-plugin-lifecycle-states)
+10. [Testing Plugins](#10-testing-plugins)
+11. [Publishing Plugins](#11-publishing-plugins)
+12. [Example Plugins](#12-example-plugins)
 
 ---
 
@@ -399,7 +400,82 @@ Routes are mounted at `/api/plugins/{pluginId}/{path}`:
 
 ---
 
-## 7. Plugin Context API Reference
+## 7. Registering UI Slots
+
+UI slots are mount points in the Fusion dashboard where plugins can inject custom UI components. Each slot is identified by a unique `slotId` that corresponds to a specific location in the dashboard UI.
+
+### How UI Slots Work
+
+Plugins declare `uiSlots` in their `FusionPlugin` definition. The dashboard discovers all registered UI slots via `GET /api/plugins/ui-slots` and renders matching components at each mount point.
+
+### Available Slot IDs
+
+| Slot ID | Location | Description | Status |
+|---------|----------|-------------|--------|
+| `task-detail-tab` | Task detail modal | Tab added to the task detail view | Available |
+| `header-action` | Dashboard header | Action button in the header toolbar | Available |
+| `settings-section` | Settings modal | Section added to the settings panel | Available |
+| `task-card-badge` | Task card on the board | Small badge displayed on task cards (e.g., CI status indicator) | Planned |
+| `board-column-footer` | Board column | Footer area below the last card in a column | Planned |
+
+> **Note:** Slots marked "Planned" are defined in the type system but dashboard rendering is not yet implemented. You can register for these slots now and they will render once the dashboard integration is complete.
+
+### Defining UI Slots
+
+Add `uiSlots` to your `FusionPlugin` definition:
+
+```typescript
+import type { FusionPlugin, PluginUiSlotDefinition } from "@fusion/plugin-sdk";
+
+const uiSlots: PluginUiSlotDefinition[] = [
+  {
+    slotId: "task-detail-tab",
+    label: "CI History",
+    icon: "history",
+    componentPath: "./components/ci-tab.js",
+  },
+  {
+    slotId: "task-card-badge",
+    label: "CI Status",
+    icon: "circle-check",
+    componentPath: "./components/ci-badge.js",
+  },
+];
+
+const plugin: FusionPlugin = {
+  manifest: { /* ... */ },
+  state: "installed",
+  uiSlots,
+  hooks: { /* ... */ },
+};
+```
+
+### PluginUiSlotDefinition Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `slotId` | `string` | Yes | One of the known slot IDs (e.g., "task-detail-tab", "header-action") |
+| `label` | `string` | Yes | Human-readable label for the slot |
+| `icon` | `string` | No | Lucide icon name for visual identification |
+| `componentPath` | `string` | Yes | Path to the JS module exporting the component, relative to the plugin root |
+
+### Component Module Format
+
+The `componentPath` should point to a JS module that exports the component. For the current implementation, the dashboard renders placeholder `div` elements with `data-plugin-slot`, `data-slot-id`, `data-plugin-id`, and `data-component-path` attributes. Full dynamic component loading will be added in a future iteration.
+
+Plugin authors should create the component file at the declared path so it's ready when dynamic loading is implemented:
+
+```javascript
+// ./components/ci-badge.js
+// Component file (dashboard placeholder rendering for now)
+export default function CiBadge() {
+  return null; // Placeholder — dynamic loading coming soon
+}
+```
+
+---
+
+## 8. Plugin Context API Reference
 
 The context object is passed to hooks, tools, and route handlers:
 
@@ -452,7 +528,7 @@ hooks: {
 
 ---
 
-## 8. Plugin Lifecycle States
+## 9. Plugin Lifecycle States
 
 Plugins transition through these states:
 
@@ -489,7 +565,7 @@ Any state can transition to:
 
 ---
 
-## 9. Testing Plugins
+## 10. Testing Plugins
 
 Use Vitest for unit testing your plugins:
 
@@ -565,7 +641,7 @@ pnpm test
 
 ---
 
-## 10. Publishing Plugins
+## 11. Publishing Plugins
 
 ### Package Requirements
 
@@ -621,7 +697,7 @@ cp -r fusion-plugin-my-plugin ~/.fusion/plugins/
 
 ---
 
-## 11. Example Plugins
+## 12. Example Plugins
 
 Explore these reference implementations:
 
@@ -643,8 +719,8 @@ Automatically labels tasks based on description content using keyword matching.
 
 Polls CI status for branches and provides custom API endpoints.
 
-- Demonstrates: Custom routes, periodic background work, route handlers
-- Features: `onLoad`/`onUnload` lifecycle, `setInterval` polling, REST API
+- Demonstrates: Custom routes, periodic background work, route handlers, UI slot registration
+- Features: `onLoad`/`onUnload` lifecycle, `setInterval` polling, REST API, UI slots for task cards and task detail tabs
 
 ### [Settings Demo Plugin](../../plugins/examples/fusion-plugin-settings-demo/)
 
@@ -695,14 +771,30 @@ export default definePlugin({
 
 ```typescript
 import { definePlugin } from "@fusion/plugin-sdk";
-import type { FusionPlugin, PluginContext } from "@fusion/plugin-sdk";
+import type { FusionPlugin, PluginContext, PluginUiSlotDefinition } from "@fusion/plugin-sdk";
+
+// UI slots for custom dashboard components
+const uiSlots: PluginUiSlotDefinition[] = [
+  {
+    slotId: "task-card-badge",
+    label: "CI Status",
+    icon: "circle-check",
+    componentPath: "./components/ci-badge.js",
+  },
+  {
+    slotId: "task-detail-tab",
+    label: "CI History",
+    icon: "history",
+    componentPath: "./components/ci-history-tab.js",
+  },
+];
 
 export default definePlugin({
   manifest: {
     id: "my-full-plugin",
     name: "My Full Plugin",
     version: "1.0.0",
-    description: "A complete example with hooks, tools, and routes",
+    description: "A complete example with hooks, tools, routes, and UI slots",
     settingsSchema: {
       apiKey: {
         type: "string",
@@ -736,6 +828,7 @@ export default definePlugin({
       handler: async () => ({ status: "ok" }),
     },
   ],
+  uiSlots,
   hooks: {
     onLoad: (ctx) => ctx.logger.info("Loaded!"),
     onTaskCreated: (task, ctx) => {

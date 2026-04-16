@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { usePluginUiSlots } from "../hooks/usePluginUiSlots";
 

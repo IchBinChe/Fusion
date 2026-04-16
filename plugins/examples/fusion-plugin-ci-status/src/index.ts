@@ -4,6 +4,7 @@ import type {
   PluginContext,
   PluginSettingSchema,
   PluginRouteDefinition,
+  PluginUiSlotDefinition,
 } from "@fusion/plugin-sdk";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -164,6 +165,26 @@ const routes: PluginRouteDefinition[] = [
   },
 ];
 
+// ── UI Slots ─────────────────────────────────────────────────────────────────
+
+// UI slots declare where the plugin provides dashboard UI components.
+// The dashboard renders placeholder elements for each registered slot.
+// Full dynamic component loading will be added in a future iteration.
+const uiSlots: PluginUiSlotDefinition[] = [
+  {
+    slotId: "task-card-badge",
+    label: "CI Status",
+    icon: "circle-check",
+    componentPath: "./components/ci-badge.js",
+  },
+  {
+    slotId: "task-detail-tab",
+    label: "CI History",
+    icon: "history",
+    componentPath: "./components/ci-history-tab.js",
+  },
+];
+
 // ── Plugin Definition ───────────────────────────────────────────────────────────
 
 const plugin: FusionPlugin = definePlugin({
@@ -177,6 +198,7 @@ const plugin: FusionPlugin = definePlugin({
   },
   state: "installed",
   routes,
+  uiSlots,
   hooks: {
     onLoad: (ctx) => {
       pluginLogger = ctx.logger;

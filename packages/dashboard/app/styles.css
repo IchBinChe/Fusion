@@ -31998,6 +31998,10 @@ html .column.drag-over * {
   .agent-import-browse-list {
     max-height: calc(100dvh - 260px);
   }
+
+  .agent-import-skill-list {
+    max-height: calc(100dvh - 380px);
+  }
 }
 
 @media (max-width: 480px) {

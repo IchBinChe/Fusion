@@ -62,7 +62,7 @@ const mockUseTasks = vi.fn(() => ({
 
 // Accept both old and new hook signatures
 vi.mock("../../hooks/useTasks", () => ({
-  useTasks: (options?: { projectId?: string; searchQuery?: string }) => mockUseTasks(options),
+  useTasks: (options?: { projectId?: string; searchQuery?: string; sseEnabled?: boolean }) => mockUseTasks(options),
 }));
 
 // Mock useRemoteNodeData

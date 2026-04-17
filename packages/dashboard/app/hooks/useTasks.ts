@@ -36,11 +36,19 @@ export interface UseTasksOptions {
    * Server-side full-text search across title, ID, description, and comments.
    */
   searchQuery?: string;
+  /**
+   * When false, disables SSE live-update subscription to free browser
+   * HTTP/1.1 connection slots for other operations (e.g., mission detail fetches).
+   * Initial fetch and visibility-change refresh remain active regardless.
+   * Defaults to true.
+   */
+  sseEnabled?: boolean;
 }
 
 export function useTasks(options?: UseTasksOptions) {
   const projectId = options?.projectId;
   const searchQuery = options?.searchQuery;
+  const sseEnabled = options?.sseEnabled ?? true;
   const [tasks, setTasks] = useState<Task[]>([]);
   // Once the user expands the archived column, we keep including archived tasks
   // in subsequent refreshes for the lifetime of this hook instance.
@@ -150,7 +158,10 @@ export function useTasks(options?: UseTasksOptions) {
   // This prevents tasks from the previous project from appearing during project switches.
   // Connection lifecycle (reconnect + heartbeat) is owned by sse-bus so all
   // /api/events consumers share one underlying EventSource.
+  // When sseEnabled is false, the subscription is skipped to free browser connection slots.
   useEffect(() => {
+    if (sseEnabled === false) return;
+
     const contextVersionAtStart = projectContextVersionRef.current;
     const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
 
@@ -258,7 +269,7 @@ export function useTasks(options?: UseTasksOptions) {
         void refreshTasksRef.current();
       },
     });
-  }, [projectId]);
+  }, [projectId, sseEnabled]);
 
   const createTask = useCallback(async (input: TaskCreateInput): Promise<Task> => {
     const task = normalizeTask(await api.createTask(input, projectId));

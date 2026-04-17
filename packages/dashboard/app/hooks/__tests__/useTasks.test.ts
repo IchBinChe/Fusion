@@ -1531,4 +1531,95 @@ describe("useTasks", () => {
       });
     });
   });
+
+  describe("sseEnabled option", () => {
+    it("subscribes to SSE when sseEnabled is omitted (default)", async () => {
+      renderHook(() => useTasks({ projectId: "test-project" }));
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it("subscribes to SSE when sseEnabled is true", async () => {
+      renderHook(() => useTasks({ projectId: "test-project", sseEnabled: true }));
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it("does not subscribe to SSE when sseEnabled is false", async () => {
+      renderHook(() => useTasks({ projectId: "test-project", sseEnabled: false }));
+
+      // Give some time for effects to run
+      await act(async () => {
+        await flushPromises();
+      });
+
+      expect(MockEventSource.instances.length).toBe(0);
+    });
+
+    it("unsubscribes from SSE when sseEnabled toggles from true to false", async () => {
+      const { rerender } = renderHook(
+        ({ sseEnabled }: { sseEnabled?: boolean }) => useTasks({ projectId: "test-project", sseEnabled }),
+        { initialProps: { sseEnabled: true } }
+      );
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1);
+      });
+
+      const esBefore = MockEventSource.instances[0];
+
+      await act(async () => {
+        rerender({ sseEnabled: false });
+      });
+
+      // The previous EventSource should have been closed
+      expect(esBefore.close).toHaveBeenCalled();
+
+      // No new EventSource should have been created
+      await act(async () => {
+        await flushPromises();
+      });
+      expect(MockEventSource.instances.length).toBe(1); // Same instance, just closed
+    });
+
+    it("resubscribes to SSE when sseEnabled toggles from false to true", async () => {
+      const { rerender } = renderHook(
+        ({ sseEnabled }: { sseEnabled?: boolean }) => useTasks({ projectId: "test-project", sseEnabled }),
+        { initialProps: { sseEnabled: false } }
+      );
+
+      // No EventSource initially
+      await act(async () => {
+        await flushPromises();
+      });
+      expect(MockEventSource.instances.length).toBe(0);
+
+      // Toggle to true
+      await act(async () => {
+        rerender({ sseEnabled: true });
+      });
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it("still fetches initial tasks when sseEnabled is false", async () => {
+      mockFetchTasks.mockResolvedValue([
+        createMockTask({ id: "FN-001", title: "Test Task" }),
+      ]);
+
+      renderHook(() => useTasks({ projectId: "test-project", sseEnabled: false }));
+
+      await waitFor(() => {
+        expect(mockFetchTasks).toHaveBeenCalled();
+      });
+
+      expect(MockEventSource.instances.length).toBe(0);
+    });
+  });
 });

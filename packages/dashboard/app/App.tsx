@@ -84,9 +84,51 @@ function AppInner() {
   const effectiveProjects = isRemote && remoteData.projects.length > 0 ? remoteData.projects : projects;
   const effectiveTasks = isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : [];
   
+  // Theme management - required before useViewState
+  const { themeMode, colorTheme, setThemeMode, setColorTheme } = useTheme();
+
+  // Background AI sessions - required before useModalManager
+  const { sessions: bgSessions, generating: bgGenerating, needsInput: bgNeedsInput, planningSessions: bgPlanningSessions, dismissSession: bgDismiss } = useBackgroundSessions(currentProject?.id);
+  const sessionsNeedingInput = bgSessions.filter(
+    (session) => session.status === "awaiting_input" || session.status === "error"
+  );
+
+  // Modal state/handlers - required before useViewState
+  const modalManager = useModalManager({
+    projectId: currentProject?.id,
+    planningSessions: bgPlanningSessions,
+  });
+
+  // View state must be defined before useTasks since useTasks depends on taskView for SSE gating
+  const { viewMode, setViewMode, taskView, handleChangeTaskView, handleToggleTheme } = useViewState({
+    projectsLoading,
+    currentProjectLoading,
+    currentProject,
+    projectsLength: projects.length,
+    setupWizardOpen: modalManager.setupWizardOpen,
+    openSetupWizard: modalManager.openSetupWizard,
+    themeMode,
+    setThemeMode,
+  });
+
+  const handleTaskViewChange = useCallback((newView: TaskView) => {
+    if (newView === "missions") {
+      setMissionResumeSessionId(undefined);
+      setMissionTargetId(undefined);
+      setMilestoneSliceResumeSessionId(undefined);
+    }
+    handleChangeTaskView(newView);
+  }, [handleChangeTaskView]);
+
   // Tasks hook with project context and search query
+  // SSE is only enabled for board/list views to free connection slots for mission detail fetches
+  const taskSseEnabled = taskView === "board" || taskView === "list";
   const { tasks, createTask, moveTask, deleteTask, mergeTask, retryTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, lastFetchTimeMs } = useTasks(
-    currentProject ? { projectId: currentProject.id, searchQuery: searchQuery || undefined } : { searchQuery: searchQuery || undefined }
+    {
+      ...(currentProject ? { projectId: currentProject.id } : {}),
+      searchQuery: searchQuery || undefined,
+      sseEnabled: taskSseEnabled,
+    }
   );
 
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
@@ -115,23 +157,8 @@ function AppInner() {
     };
   }, [initialLoadComplete, projectsLoading, currentProjectLoading]);
 
-  // Theme management
-  const { themeMode, colorTheme, setThemeMode, setColorTheme } = useTheme();
-
-  // Background AI sessions
-  const { sessions: bgSessions, generating: bgGenerating, needsInput: bgNeedsInput, planningSessions: bgPlanningSessions, dismissSession: bgDismiss } = useBackgroundSessions(currentProject?.id);
-  const sessionsNeedingInput = bgSessions.filter(
-    (session) => session.status === "awaiting_input" || session.status === "error"
-  );
-
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
-
-  // Modal state/handlers extracted to a dedicated manager hook.
-  const modalManager = useModalManager({
-    projectId: currentProject?.id,
-    planningSessions: bgPlanningSessions,
-  });
 
   // App-level mailbox unread count state (used for header badge)
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
@@ -174,26 +201,6 @@ function AppInner() {
     toggleFavoriteProvider,
     toggleFavoriteModel,
   } = useFavorites();
-
-  const { viewMode, setViewMode, taskView, handleChangeTaskView, handleToggleTheme } = useViewState({
-    projectsLoading,
-    currentProjectLoading,
-    currentProject,
-    projectsLength: projects.length,
-    setupWizardOpen: modalManager.setupWizardOpen,
-    openSetupWizard: modalManager.openSetupWizard,
-    themeMode,
-    setThemeMode,
-  });
-
-  const handleTaskViewChange = useCallback((newView: TaskView) => {
-    if (newView === "missions") {
-      setMissionResumeSessionId(undefined);
-      setMissionTargetId(undefined);
-      setMilestoneSliceResumeSessionId(undefined);
-    }
-    handleChangeTaskView(newView);
-  }, [handleChangeTaskView]);
 
   // Auth and onboarding bootstrap logic extracted to a dedicated hook.
   useAuthOnboarding({

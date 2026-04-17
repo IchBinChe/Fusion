@@ -9,6 +9,13 @@ import {
   fetchAgentTasks,
   archiveTask,
   unarchiveTask,
+  deleteTask,
+  moveTask,
+  mergeTask,
+  retryTask,
+  duplicateTask,
+  pauseTask,
+  unpauseTask,
   fetchAuthStatus,
   loginProvider,
   logoutProvider,
@@ -54,7 +61,7 @@ import {
   type ExecutorStats,
   type ExecutorState,
 } from "./api";
-import type { Task, TaskDetail, BatchStatusResponse } from "@fusion/core";
+import type { Task, TaskDetail, BatchStatusResponse, MergeResult } from "@fusion/core";
 
 const FAKE_DETAIL: TaskDetail = {
   id: "FN-001",
@@ -1500,6 +1507,188 @@ describe("Git Management API", () => {
       globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Task not in archived" }, 400));
 
       await expect(unarchiveTask("FN-001")).rejects.toThrow("Task not in archived");
+    });
+  });
+
+  describe("deleteTask", () => {
+    it("sends DELETE to task endpoint", async () => {
+      const deletedTask: Task = { ...FAKE_DETAIL, column: "done" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, deletedTask));
+
+      const response = await deleteTask("FN-001");
+
+      expect(response).toEqual(deletedTask);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001", {
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Not found" }, 404));
+
+      await expect(deleteTask("FN-001")).rejects.toThrow("Not found");
+    });
+  });
+
+  describe("moveTask", () => {
+    it("sends POST to move endpoint with column body", async () => {
+      const movedTask: Task = { ...FAKE_DETAIL, column: "todo" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, movedTask));
+
+      const response = await moveTask("FN-001", "todo");
+
+      expect(response.column).toBe("todo");
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/move", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ column: "todo" }),
+      });
+    });
+
+    it("sends POST with done column", async () => {
+      const movedTask: Task = { ...FAKE_DETAIL, column: "done" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, movedTask));
+
+      const response = await moveTask("FN-001", "done");
+
+      expect(response.column).toBe("done");
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/move", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ column: "done" }),
+      });
+    });
+
+    it("forwards projectId as query param", async () => {
+      const movedTask: Task = { ...FAKE_DETAIL, column: "todo" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, movedTask));
+
+      await moveTask("FN-001", "todo", "proj_123");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/move?projectId=proj_123", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ column: "todo" }),
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Cannot move to same column" }, 400));
+
+      await expect(moveTask("FN-001", "todo")).rejects.toThrow("Cannot move to same column");
+    });
+  });
+
+  describe("mergeTask", () => {
+    it("sends POST to merge endpoint and returns MergeResult", async () => {
+      const mergeResult: MergeResult = {
+        source: "FN-001",
+        target: "FN-002",
+        details: {
+          mergedFields: ["description", "steps"],
+          sourceDeleted: true,
+        },
+      };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, mergeResult));
+
+      const response = await mergeTask("FN-001");
+
+      expect(response).toEqual(mergeResult);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/merge", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Cannot merge with itself" }, 400));
+
+      await expect(mergeTask("FN-001")).rejects.toThrow("Cannot merge with itself");
+    });
+  });
+
+  describe("retryTask", () => {
+    it("sends POST to retry endpoint", async () => {
+      const retriedTask: Task = { ...FAKE_DETAIL, column: "todo" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, retriedTask));
+
+      const response = await retryTask("FN-001");
+
+      expect(response).toEqual(retriedTask);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/retry", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Task not in error state" }, 400));
+
+      await expect(retryTask("FN-001")).rejects.toThrow("Task not in error state");
+    });
+  });
+
+  describe("duplicateTask", () => {
+    it("sends POST to duplicate endpoint", async () => {
+      const duplicatedTask: Task = { ...FAKE_DETAIL, id: "FN-002" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, duplicatedTask));
+
+      const response = await duplicateTask("FN-001");
+
+      expect(response.id).toBe("FN-002");
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/duplicate", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Duplicate failed" }, 500));
+
+      await expect(duplicateTask("FN-001")).rejects.toThrow("Duplicate failed");
+    });
+  });
+
+  describe("pauseTask", () => {
+    it("sends POST to pause endpoint", async () => {
+      const pausedTask: Task = { ...FAKE_DETAIL, column: "in-progress" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, pausedTask));
+
+      const response = await pauseTask("FN-001");
+
+      expect(response).toEqual(pausedTask);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/pause", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Cannot pause completed task" }, 400));
+
+      await expect(pauseTask("FN-001")).rejects.toThrow("Cannot pause completed task");
+    });
+  });
+
+  describe("unpauseTask", () => {
+    it("sends POST to unpause endpoint", async () => {
+      const unpausedTask: Task = { ...FAKE_DETAIL, column: "in-progress" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, unpausedTask));
+
+      const response = await unpauseTask("FN-001");
+
+      expect(response).toEqual(unpausedTask);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001/unpause", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("throws on error", async () => {
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(false, { error: "Task not paused" }, 400));
+
+      await expect(unpauseTask("FN-001")).rejects.toThrow("Task not paused");
     });
   });
 

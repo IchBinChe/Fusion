@@ -844,7 +844,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const tmpPath = join(dir, "task.json.tmp");
     this.suppressWatcher(taskJsonPath);
     await mkdir(dir, { recursive: true }); // Ensure directory exists
-    await writeFile(tmpPath, JSON.stringify(task, null, 2));
+    await writeFile(tmpPath, JSON.stringify(task));
     await rename(tmpPath, taskJsonPath);
   }
 
@@ -892,7 +892,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const tmpPath = join(dir, "task.json.tmp");
     this.suppressWatcher(taskJsonPath);
     await mkdir(dir, { recursive: true });
-    await writeFile(tmpPath, JSON.stringify(task, null, 2));
+    await writeFile(tmpPath, JSON.stringify(task));
     await rename(tmpPath, taskJsonPath);
   }
 
@@ -2416,7 +2416,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         entry.runContext = runContext;
       }
       task.log.push(entry);
-      task.log = compactTaskActivityLog(task.log);
+      if (task.log.length > TASK_ACTIVITY_LOG_ENTRY_LIMIT) {
+        task.log.splice(0, task.log.length - TASK_ACTIVITY_LOG_ENTRY_LIMIT);
+      }
       task.updatedAt = new Date().toISOString();
 
       // When runContext is provided, record audit event atomically with task mutation

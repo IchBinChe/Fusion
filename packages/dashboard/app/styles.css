@@ -1192,6 +1192,22 @@ body {
   box-shadow: var(--glow-warning);
 }
 
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn-secondary:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+.btn-secondary:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+}
+
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;
@@ -10839,6 +10855,16 @@ html .column.drag-over * {
 [data-theme="light"] .btn-warning:hover {
   background: color-mix(in srgb, var(--triage) 70%, black);
   box-shadow: var(--glow-warning);
+}
+
+[data-theme="light"] .btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+[data-theme="light"] .btn-secondary:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
 }
 
 /* ============================================================

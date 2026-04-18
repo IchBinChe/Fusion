@@ -13016,6 +13016,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
+      await reflectionStore.init();
 
       const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       if (!agentId) {
@@ -13056,6 +13057,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
+      await reflectionStore.init();
 
       const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       if (!agentId) {
@@ -13097,6 +13099,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: taskStore.getRootDir() });
       const reflectionStore = new ReflectionStore({ rootDir: taskStore.getRootDir() });
       await agentStore.init();
+      await reflectionStore.init();
 
       const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       if (!agentId) {
@@ -13142,6 +13145,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       const reflectionStore = new ReflectionStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
+      await reflectionStore.init();
 
       const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       if (!agentId) {
@@ -13182,6 +13186,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentStore = new AgentStore({ rootDir: taskStore.getRootDir() });
       const reflectionStore = new ReflectionStore({ rootDir: taskStore.getRootDir() });
       await agentStore.init();
+      await reflectionStore.init();
 
       const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       if (!agentId) {

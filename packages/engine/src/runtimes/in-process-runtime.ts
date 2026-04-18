@@ -254,7 +254,7 @@ export class InProcessRuntime
         },
       });
 
-      // 5. Initialize TaskExecutor
+      // 5b. Initialize TaskExecutor
       this.stuckTaskDetector = new StuckTaskDetector(this.taskStore, {
         beforeRequeue: (taskId) => this.selfHealingManager?.checkStuckBudget(taskId) ?? Promise.resolve(true),
         onLoopDetected: (event) => this.executor?.handleLoopDetected(event) ?? Promise.resolve(false),
@@ -268,6 +268,46 @@ export class InProcessRuntime
         },
       });
 
+      // 5a. Initialize AgentStore (required for reflection service and heartbeat monitoring)
+      let agentStoreForReflection: import("@fusion/core").AgentStore | undefined;
+      try {
+        const { AgentStore: AgentStoreClass } = await import("@fusion/core");
+        agentStoreForReflection = new AgentStoreClass({ rootDir: this.taskStore.getFusionDir() });
+        await agentStoreForReflection.init();
+        runtimeLog.log("AgentStore initialized for reflection service");
+      } catch (agentErr) {
+        runtimeLog.warn(`AgentStore initialization failed (reflection service will be unavailable):`, agentErr instanceof Error ? agentErr.message : agentErr);
+      }
+      this.agentStore = agentStoreForReflection;
+
+      // 5b. Initialize ReflectionStore for agent reflections
+      let reflectionStoreForService: import("@fusion/core").ReflectionStore | undefined;
+      try {
+        const { ReflectionStore: ReflectionStoreClass } = await import("@fusion/core");
+        reflectionStoreForService = new ReflectionStoreClass({ rootDir: this.taskStore.getFusionDir() });
+        await reflectionStoreForService.init();
+        runtimeLog.log("ReflectionStore initialized for reflection service");
+      } catch (reflErr) {
+        runtimeLog.warn(`ReflectionStore initialization failed (reflection service will be unavailable):`, reflErr instanceof Error ? reflErr.message : reflErr);
+      }
+
+      // 5c. Initialize AgentReflectionService (requires agentStore and reflectionStore)
+      let reflectionService: import("@fusion/engine").AgentReflectionService | undefined;
+      if (agentStoreForReflection && reflectionStoreForService) {
+        try {
+          const { AgentReflectionService: AgentReflectionServiceClass } = await import("@fusion/engine");
+          reflectionService = new AgentReflectionServiceClass({
+            agentStore: agentStoreForReflection,
+            taskStore: this.taskStore,
+            reflectionStore: reflectionStoreForService,
+            rootDir: this.config.workingDirectory,
+          });
+          runtimeLog.log("AgentReflectionService initialized");
+        } catch (reflServiceErr) {
+          runtimeLog.warn(`AgentReflectionService initialization failed:`, reflServiceErr instanceof Error ? reflServiceErr.message : reflServiceErr);
+        }
+      }
+
       const executorOptions: TaskExecutorOptions = {
         semaphore: this.globalSemaphore,
         pool: this.worktreePool,
@@ -276,6 +316,7 @@ export class InProcessRuntime
         pluginRunner: this.pluginRunner,
         messageStore: this.messageStore,
         missionStore,
+        reflectionService,
         onSliceComplete: (slice) => {
           void this.scheduler.onSliceComplete(slice);
         },
@@ -363,12 +404,11 @@ export class InProcessRuntime
         executorOptions
       );
 
-      // 6. Initialize AgentStore and HeartbeatMonitor
-      try {
-        const { AgentStore: AgentStoreClass } = await import("@fusion/core");
-        this.agentStore = new AgentStoreClass({ rootDir: this.taskStore.getFusionDir() });
-        await this.agentStore.init();
-
+      // 6. Initialize HeartbeatMonitor (reuses AgentStore from step 5a)
+      if (this.heartbeatMonitor) {
+        // Already started — nothing to do
+      }
+      if (!this.heartbeatMonitor && this.agentStore) {
         this.heartbeatMonitor = new HeartbeatMonitor({
           store: this.agentStore,
           agentStore: this.agentStore, // enables per-agent config resolution
@@ -383,8 +423,10 @@ export class InProcessRuntime
           },
         });
         this.heartbeatMonitor.start();
+      }
 
-        // Initialize HeartbeatTriggerScheduler
+      // 6a. Initialize HeartbeatTriggerScheduler (only if agentStore is available)
+      if (this.agentStore) {
         this.triggerScheduler = new HeartbeatTriggerScheduler(
           this.agentStore,
           async (agentId, source, context: WakeContext) => {
@@ -465,10 +507,7 @@ export class InProcessRuntime
           runtimeLog.warn(`Failed to register agents for heartbeat triggers:`, regErr);
         }
 
-        runtimeLog.log(`AgentStore, HeartbeatMonitor, and TriggerScheduler initialized`);
-      } catch (agentErr) {
-        // Non-fatal — agent monitoring is optional
-        runtimeLog.warn(`AgentStore initialization failed (continuing without agent monitoring):`, agentErr);
+        runtimeLog.log(`HeartbeatMonitor and TriggerScheduler initialized`);
       }
 
       // 7. Initialize TriageProcessor (task specification)

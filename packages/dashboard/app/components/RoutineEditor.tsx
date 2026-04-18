@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Calendar, Webhook, Code, Zap, Globe, Folder } from "lucide-react";
 import type {
   Routine,
@@ -235,6 +235,13 @@ export function RoutineEditor({ routine, onSubmit, onCancel, scope: formScope, p
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Sync localScope when formScope prop changes (e.g., when parent resets)
   useEffect(() => {
@@ -378,7 +385,9 @@ export function RoutineEditor({ routine, onSubmit, onCancel, scope: formScope, p
         };
         await onSubmit(input);
       } finally {
-        setSubmitting(false);
+        if (isMountedRef.current) {
+          setSubmitting(false);
+        }
       }
     },
     [validate, onSubmit, name, description, triggerType, cronExpression, webhookPath, webhookSecret, endpoint, actionMode, simpleActionType, command, prompt, modelProvider, modelId, taskTitle, taskDescription, taskColumn, steps, timeoutMs, executionPolicy, catchUpPolicy, enabled, localScope, projectId, routine?.scope, routine?.agentId],

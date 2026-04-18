@@ -5161,7 +5161,9 @@ export interface AgentMailboxResponse {
   ownerType: ParticipantType;
   unreadCount: number;
   lastMessage?: Message;
-  messages: Message[];
+  messages: Message[];      // Backward compat alias for inbox
+  inbox: Message[];
+  outbox: Message[];
 }
 
 /** Input for sending a message via the dashboard */

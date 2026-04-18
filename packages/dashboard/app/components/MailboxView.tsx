@@ -141,6 +141,7 @@ export function MailboxView({
   const [showComposer, setShowComposer] = useState(false);
   const [composeRecipient, setComposeRecipient] = useState<{ id: string; type: ParticipantType } | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentSubTab, setAgentSubTab] = useState<"inbox" | "outbox">("inbox");
   const [agentMailbox, setAgentMailbox] = useState<AgentMailboxResponse | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
 
@@ -637,7 +638,7 @@ export function MailboxView({
                         <select
                           className="message-composer-select mailbox-agent-select"
                           value={selectedAgentId ?? ""}
-                          onChange={(e) => setSelectedAgentId(e.target.value || null)}
+                          onChange={(e) => { setSelectedAgentId(e.target.value || null); setAgentSubTab("inbox"); }}
                           data-testid="mailbox-agent-select"
                         >
                           <option value="">Select an agent…</option>
@@ -657,6 +658,31 @@ export function MailboxView({
                         <span>Compose</span>
                       </button>
                     </div>
+
+                    {/* Agent Sub-Tabs (Inbox/Outbox) */}
+                    {selectedAgentId && (
+                      <div className="mailbox-agent-subtabs" data-testid="mailbox-agent-subtabs">
+                        <button
+                          className={`mailbox-agent-subtab ${agentSubTab === "inbox" ? "active" : ""}`}
+                          onClick={() => setAgentSubTab("inbox")}
+                          data-testid="mailbox-agent-subtab-inbox"
+                        >
+                          <InboxIcon size={12} />
+                          <span>Inbox</span>
+                          {agentMailbox && agentMailbox.unreadCount > 0 && (
+                            <span className="mailbox-tab-badge">{agentMailbox.unreadCount}</span>
+                          )}
+                        </button>
+                        <button
+                          className={`mailbox-agent-subtab ${agentSubTab === "outbox" ? "active" : ""}`}
+                          onClick={() => setAgentSubTab("outbox")}
+                          data-testid="mailbox-agent-subtab-outbox"
+                        >
+                          <Send size={12} />
+                          <span>Outbox</span>
+                        </button>
+                      </div>
+                    )}
                     <div className="mailbox-agents-content">
                       {!selectedAgentId && (
                         <div className="mailbox-empty">
@@ -665,13 +691,19 @@ export function MailboxView({
                         </div>
                       )}
                       {selectedAgentId && isLoading && !agentMailbox && <MailboxSkeleton />}
-                      {agentMailbox && agentMailbox.messages.length === 0 && (
+                      {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.length === 0 && (
                         <div className="mailbox-empty">
                           <InboxIcon size={32} />
-                          <p>No messages for this agent</p>
+                          <p>No received messages for this agent</p>
                         </div>
                       )}
-                      {agentMailbox?.messages.map((msg) => (
+                      {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.length === 0 && (
+                        <div className="mailbox-empty">
+                          <Send size={32} />
+                          <p>No sent messages for this agent</p>
+                        </div>
+                      )}
+                      {selectedAgentId && agentMailbox && agentSubTab === "inbox" && agentMailbox.inbox.map((msg) => (
                         <div
                           key={msg.id}
                           className={`mailbox-item ${!msg.read ? "unread" : ""}`}
@@ -687,6 +719,27 @@ export function MailboxView({
                                 {msg.fromType === "agent"
                                   ? participantLabel(msg.toId, msg.toType)
                                   : participantLabel(msg.fromId, msg.fromType)}
+                              </span>
+                              <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
+                            </div>
+                            <div className="mailbox-item-preview">{msg.content.slice(0, 80)}{msg.content.length > 80 ? "…" : ""}</div>
+                          </div>
+                        </div>
+                      ))}
+                      {selectedAgentId && agentMailbox && agentSubTab === "outbox" && agentMailbox.outbox.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className="mailbox-item"
+                          onClick={() => handleOpenMessage(msg)}
+                          data-testid={`mailbox-item-${msg.id}`}
+                        >
+                          <div className="mailbox-item-avatar">
+                            {msg.toType === "agent" ? <Bot size={16} /> : <User size={16} />}
+                          </div>
+                          <div className="mailbox-item-content">
+                            <div className="mailbox-item-header">
+                              <span className="mailbox-item-to">
+                                To: {participantLabel(msg.toId, msg.toType)}
                               </span>
                               <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
                             </div>

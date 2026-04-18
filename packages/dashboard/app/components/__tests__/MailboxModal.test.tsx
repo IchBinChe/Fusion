@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MailboxModal } from "../MailboxModal";
 import * as apiModule from "../../api";
 import type { Agent } from "../../api";
@@ -86,6 +86,19 @@ const mockReadMessage: Message = {
   id: "msg-002",
   read: true,
   content: "This message has been read already.",
+};
+
+const mockOutboxMessage: Message = {
+  id: "msg-003",
+  fromId: "agent-001",
+  fromType: "agent",
+  toId: "user-001",
+  toType: "user",
+  content: "This is a sent message from the agent.",
+  type: "agent-to-user",
+  read: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
 };
 
 const defaultProps = {
@@ -227,6 +240,8 @@ describe("MailboxModal", () => {
       ownerType: "agent",
       unreadCount: 0,
       messages: [],
+      inbox: [],
+      outbox: [],
     });
     render(<MailboxModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
@@ -372,6 +387,8 @@ describe("MailboxModal", () => {
       ownerType: "agent",
       unreadCount: 0,
       messages: [],
+      inbox: [],
+      outbox: [],
     });
     render(<MailboxModal {...defaultProps} />);
     fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
@@ -452,6 +469,210 @@ describe("MailboxModal", () => {
     render(<MailboxModal {...defaultProps} projectId="proj-1" />);
     await waitFor(() => {
       expect(mockFetchInbox).toHaveBeenCalledWith({ limit: 50 }, "proj-1");
+    });
+  });
+
+  describe("agent mailbox sub-tabs", () => {
+    it("shows inbox and outbox sub-tabs when agent is selected", async () => {
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-001",
+        ownerType: "agent",
+        unreadCount: 1,
+        messages: [mockMessage],
+        inbox: [mockMessage],
+        outbox: [],
+      });
+
+      render(<MailboxModal {...defaultProps} />);
+
+      // Switch to agents tab
+      fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+      });
+
+      // Select an agent
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+
+      await waitFor(() => {
+        expect(mockFetchAgentMailbox).toHaveBeenCalledWith("agent-001", undefined);
+      });
+
+      // Sub-tabs should be visible
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-subtabs")).toBeDefined();
+        expect(screen.getByTestId("mailbox-agent-subtab-inbox")).toBeDefined();
+        expect(screen.getByTestId("mailbox-agent-subtab-outbox")).toBeDefined();
+      });
+    });
+
+    it("switches to outbox view when clicking outbox sub-tab", async () => {
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-001",
+        ownerType: "agent",
+        unreadCount: 0,
+        messages: [mockOutboxMessage],
+        inbox: [],
+        outbox: [mockOutboxMessage],
+      });
+
+      render(<MailboxModal {...defaultProps} />);
+
+      // Switch to agents tab and select agent
+      fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+      });
+
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-subtabs")).toBeDefined();
+      });
+
+      // Click outbox sub-tab
+      const outboxTab = screen.getByTestId("mailbox-agent-subtab-outbox");
+      await act(async () => {
+        fireEvent.click(outboxTab);
+      });
+
+      // Should show outbox message (with "To:" label)
+      await waitFor(() => {
+        expect(screen.getByText("To: User: user-001")).toBeDefined();
+      });
+    });
+
+    it("switches back to inbox view when clicking inbox sub-tab", async () => {
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-001",
+        ownerType: "agent",
+        unreadCount: 0,
+        messages: [],
+        inbox: [],
+        outbox: [mockOutboxMessage],
+      });
+
+      render(<MailboxModal {...defaultProps} />);
+
+      // Switch to agents tab and select agent
+      fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+      });
+
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-subtabs")).toBeDefined();
+      });
+
+      // Click outbox first
+      const outboxTab = screen.getByTestId("mailbox-agent-subtab-outbox");
+      await act(async () => {
+        fireEvent.click(outboxTab);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("To: User: user-001")).toBeDefined();
+      });
+
+      // Click inbox sub-tab
+      const inboxTab = screen.getByTestId("mailbox-agent-subtab-inbox");
+      await act(async () => {
+        fireEvent.click(inboxTab);
+      });
+
+      // Should show empty inbox state
+      await waitFor(() => {
+        expect(screen.getByText("No received messages for this agent")).toBeDefined();
+      });
+    });
+
+    it("resets sub-tab to inbox when switching agents", async () => {
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-001",
+        ownerType: "agent",
+        unreadCount: 0,
+        messages: [mockOutboxMessage],
+        inbox: [],
+        outbox: [mockOutboxMessage],
+      });
+
+      render(<MailboxModal {...defaultProps} />);
+
+      // Switch to agents tab
+      fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+      });
+
+      // Select first agent
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-subtabs")).toBeDefined();
+      });
+
+      // Switch to outbox
+      const outboxTab = screen.getByTestId("mailbox-agent-subtab-outbox");
+      await act(async () => {
+        fireEvent.click(outboxTab);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("To: User: user-001")).toBeDefined();
+      });
+
+      // Switch to second agent - should reset to inbox
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-002",
+        ownerType: "agent",
+        unreadCount: 1,
+        messages: [mockMessage],
+        inbox: [mockMessage],
+        outbox: [],
+      });
+
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-002" } });
+
+      await waitFor(() => {
+        // Should be on inbox (default) with the message
+        expect(screen.getByTestId("mailbox-agent-subtab-inbox")).toHaveClass("active");
+      });
+    });
+
+    it("shows unread count badge on inbox sub-tab when agent has unread messages", async () => {
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-001",
+        ownerType: "agent",
+        unreadCount: 3,
+        messages: [mockMessage],
+        inbox: [mockMessage],
+        outbox: [],
+      });
+
+      render(<MailboxModal {...defaultProps} />);
+
+      // Switch to agents tab and select agent
+      fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+      });
+
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mailbox-agent-subtabs")).toBeDefined();
+      });
+
+      // Inbox tab should have the unread badge
+      const inboxTab = screen.getByTestId("mailbox-agent-subtab-inbox");
+      expect(inboxTab.querySelector(".mailbox-tab-badge")?.textContent).toBe("3");
     });
   });
 

@@ -17272,7 +17272,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const agentId = req.params.id;
       const mailbox = await msgStore.getMailbox(agentId, "agent");
       const inbox = await msgStore.getInbox(agentId, "agent");
-      res.json({ ...mailbox, messages: inbox });
+      const outbox = await msgStore.getOutbox(agentId, "agent");
+      res.json({ ...mailbox, messages: inbox, inbox, outbox });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

@@ -111,6 +111,7 @@ import {
   inferDefaultTestCommand,
   type ConflictCategory,
 } from "./merger.js";
+import { mergerLog } from "./logger.js";
 import { createKbAgent } from "./pi.js";
 import { execSync } from "node:child_process";
 import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@fusion/core";
@@ -1457,13 +1458,14 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
     expect(agentCallCount).toBe(1); // Agent was called once (on attempt 2, which failed)
   });
 
-  it("all 3 attempts fail: throws error and calls git reset --merge", async () => {
+  it("final cleanup reset succeeds after all 3 attempts fail", async () => {
     const store = createMockStore(
       { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
       [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
     );
 
     const resetCalls: string[] = [];
+    const warnSpy = vi.spyOn(mergerLog, "warn");
 
     mockedExecSync.mockImplementation((cmd: any) => {
       const cmdStr = String(cmd);
@@ -1517,6 +1519,82 @@ describe("aiMergeTask — retry logic with escalating strategies", () => {
 
     // Should have cleanup calls after each failed attempt plus final cleanup
     expect(resetCalls.length).toBeGreaterThanOrEqual(3);
+    expect(
+      warnSpy.mock.calls.some(([message]) => String(message).includes("git reset --merge cleanup failed")),
+    ).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it("final cleanup reset failure is logged but does not change thrown error", async () => {
+    const store = createMockStore(
+      { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
+      [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
+    );
+
+    const resetFailureMessage = "reset failed: dirty worktree";
+    const warnSpy = vi.spyOn(mergerLog, "warn");
+
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("rev-parse")) return Buffer.from("abc123");
+      if (cmdStr.includes("git log")) return "- feat: something";
+      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
+      if (cmdStr.includes("--stat")) return "1 file changed";
+
+      if (cmdStr.includes("merge --squash")) {
+        throw new Error("Merge conflict");
+      }
+
+      if (cmdStr.includes("merge -X theirs")) {
+        const err = new Error("Merge conflict");
+        err.name = "ExecSyncError";
+        throw err;
+      }
+
+      if (cmdStr.includes("diff --name-only --diff-filter=U")) {
+        return "src/always-conflicts.ts\n";
+      }
+
+      if (cmdStr.includes("git add")) {
+        const err = new Error("git add failed");
+        err.name = "ExecSyncError";
+        throw err;
+      }
+
+      if (cmdStr.includes("reset --merge")) {
+        throw new Error(resetFailureMessage);
+      }
+
+      return Buffer.from("");
+    });
+
+    mockedCreateHaiAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockRejectedValue(new Error("Agent failed")),
+        dispose: vi.fn(),
+      },
+    } as any);
+
+    let thrown: unknown;
+    try {
+      await aiMergeTask(store, "/tmp/root", "FN-050");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("all 3 attempts exhausted");
+    expect((thrown as Error).message).not.toContain(resetFailureMessage);
+
+    const cleanupWarnMessages = warnSpy.mock.calls
+      .map(([message]) => String(message))
+      .filter((message) => message.includes("git reset --merge cleanup failed"));
+
+    expect(cleanupWarnMessages.length).toBeGreaterThan(0);
+    expect(cleanupWarnMessages.some((message) => message.includes(resetFailureMessage))).toBe(true);
+
+    warnSpy.mockRestore();
   });
 
   it("tracks resolutionStrategy as 'ai' when attempt 1 succeeds even with autoResolve enabled", async () => {

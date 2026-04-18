@@ -1707,7 +1707,10 @@ export async function aiMergeTask(
     // Final cleanup
     try {
       execSync("git reset --merge", { cwd: rootDir, stdio: "pipe" });
-    } catch { /* */ }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      mergerLog.warn(`${taskId}: git reset --merge cleanup failed: ${errorMessage}`);
+    }
     throw new Error(`AI merge failed for ${taskId}: all 3 attempts exhausted`);
   }
 

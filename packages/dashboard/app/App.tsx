@@ -200,6 +200,7 @@ function AppInner() {
 
   const skillsEnabled = experimentalFeatures.skillsView === true;
   const nodesEnabled = experimentalFeatures.nodesView === true;
+  const agentsEnabled = experimentalFeatures.agentsView === true;
 
   // Redirect to board if insights/roadmaps view is disabled
   // Only run after settings have been loaded (experimentalFeatures is non-empty)
@@ -211,7 +212,10 @@ function AppInner() {
     if (taskView === "roadmaps" && !roadmapEnabled) {
       handleChangeTaskView("board");
     }
-  }, [taskView, insightsEnabled, roadmapEnabled, experimentalFeatures, handleChangeTaskView]);
+    if (taskView === "agents" && !agentsEnabled) {
+      handleChangeTaskView("board");
+    }
+  }, [taskView, insightsEnabled, roadmapEnabled, experimentalFeatures, handleChangeTaskView, agentsEnabled]);
 
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
@@ -441,7 +445,7 @@ function AppInner() {
       );
     }
 
-    if (taskView === "agents") {
+    if (taskView === "agents" && agentsEnabled) {
       return (
         <PageErrorBoundary>
           <AgentsView addToast={addToast} projectId={currentProject?.id} />
@@ -584,6 +588,7 @@ function AppInner() {
         view={taskView}
         onChangeView={viewMode === "project" && currentProject ? handleTaskViewChange : undefined}
         showSkillsTab={skillsEnabled}
+        showAgentsTab={agentsEnabled}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         projects={effectiveProjects}
@@ -665,6 +670,7 @@ function AppInner() {
         onOpenQuickChat={() => setQuickChatOpen(true)}
         projectId={currentProject?.id}
         showSkillsTab={skillsEnabled}
+        showAgentsTab={agentsEnabled}
         experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled }}
       />
       {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && (

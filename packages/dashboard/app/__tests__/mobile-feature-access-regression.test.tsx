@@ -113,7 +113,7 @@ describe("Mobile Feature Access Regression Guard", () => {
 
   it("agents view is accessible via mobile nav bar", () => {
     const props = createDefaultMobileNavProps();
-    render(<MobileNavBar {...props} />);
+    render(<MobileNavBar {...props} showAgentsTab={true} />);
 
     const agentsTab = screen.getByTestId("mobile-nav-tab-agents");
     expect(agentsTab).toBeDefined();
@@ -197,6 +197,7 @@ describe("Mobile Feature Access Regression Guard", () => {
         view="board"
         onChangeView={vi.fn()}
         mobileNavEnabled={false}
+        showAgentsTab={true}
       />,
     );
 
@@ -211,6 +212,7 @@ describe("Mobile Feature Access Regression Guard", () => {
       <MobileNavBar
         {...createDefaultMobileNavProps()}
         onChangeView={mobileNavOnChangeView}
+        showAgentsTab={true}
       />,
     );
 

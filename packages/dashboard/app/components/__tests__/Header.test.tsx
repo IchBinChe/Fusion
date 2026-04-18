@@ -270,14 +270,14 @@ describe("Header", () => {
 
   it("renders agents view button in view toggle when onChangeView is provided", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} showAgentsTab={true} />);
     const agentsBtn = screen.getByTitle("Agents view");
     expect(agentsBtn).toBeDefined();
   });
 
   it("calls onChangeView with 'agents' when agents view button is clicked", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} showAgentsTab={true} />);
     const agentsBtn = screen.getByTitle("Agents view");
     fireEvent.click(agentsBtn);
     expect(onChangeView).toHaveBeenCalledWith("agents");
@@ -285,7 +285,7 @@ describe("Header", () => {
 
   it("marks agents view button as active when view is 'agents'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="agents" onChangeView={onChangeView} />);
+    render(<Header view="agents" onChangeView={onChangeView} showAgentsTab={true} />);
     const agentsBtn = screen.getByTitle("Agents view");
     expect(agentsBtn.className).toContain("active");
     expect(agentsBtn.getAttribute("aria-pressed")).toBe("true");
@@ -293,7 +293,7 @@ describe("Header", () => {
 
   it("does not mark agents view button as active when view is 'board'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="board" onChangeView={onChangeView} />);
+    render(<Header view="board" onChangeView={onChangeView} showAgentsTab={true} />);
     const agentsBtn = screen.getByTitle("Agents view");
     expect(agentsBtn.className).not.toContain("active");
     expect(agentsBtn.getAttribute("aria-pressed")).toBe("false");
@@ -301,10 +301,28 @@ describe("Header", () => {
 
   it("does not mark board view button as active when view is 'agents'", () => {
     const onChangeView = vi.fn();
-    render(<Header view="agents" onChangeView={onChangeView} />);
+    render(<Header view="agents" onChangeView={onChangeView} showAgentsTab={true} />);
     const boardBtn = screen.getByTitle("Board view");
     expect(boardBtn.className).not.toContain("active");
     expect(boardBtn.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("hides agents view button when showAgentsTab is false", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} showAgentsTab={false} />);
+    expect(screen.queryByTitle("Agents view")).toBeNull();
+  });
+
+  it("hides agents view button when showAgentsTab is not provided", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} />);
+    expect(screen.queryByTitle("Agents view")).toBeNull();
+  });
+
+  it("shows agents view button when showAgentsTab is true", () => {
+    const onChangeView = vi.fn();
+    render(<Header view="board" onChangeView={onChangeView} showAgentsTab={true} />);
+    expect(screen.getByTitle("Agents view")).toBeDefined();
   });
 
   // ── Missions View Toggle ────────────────────────────────────────
@@ -657,6 +675,7 @@ describe("Header", () => {
         onChangeView={vi.fn()}
         searchQuery=""
         onSearchChange={onSearchChange}
+        showAgentsTab={true}
       />
     );
     expect(screen.queryByPlaceholderText("Search tasks...")).toBeNull();
@@ -1005,7 +1024,7 @@ describe("Header", () => {
     it("hides desktop view toggle when mobileNavEnabled is true (mobile view toggle shown separately)", () => {
       // When mobileNavEnabled, the full desktop-style view toggle (with agents, missions, etc.)
       // should be hidden. Instead, a compact board/list-only toggle appears via mobile-view-toggle.
-      render(<Header view="board" onChangeView={vi.fn()} mobileNavEnabled={true} />);
+      render(<Header view="board" onChangeView={vi.fn()} mobileNavEnabled={true} showAgentsTab={true} />);
       // The full desktop toggle is hidden
       expect(screen.queryByTitle("Agents view")).toBeNull();
       expect(screen.queryByTitle("Missions view")).toBeNull();

@@ -94,7 +94,7 @@ describe("tablet header controls", () => {
   });
 
   it("renders view toggle inline on tablet", () => {
-    renderTabletHeader({ onChangeView: noop });
+    renderTabletHeader({ onChangeView: noop, showAgentsTab: true });
     expect(screen.getByTitle("Board view")).toBeDefined();
     expect(screen.getByTitle("List view")).toBeDefined();
     expect(screen.getByTitle("Agents view")).toBeDefined();

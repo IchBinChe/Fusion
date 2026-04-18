@@ -15,7 +15,7 @@ const defaultSettings: Settings = {
   worktreeInitCommand: "",
   testCommand: "",
   buildCommand: "",
-  experimentalFeatures: { insights: true, roadmap: true },
+  experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true },
 };
 
 vi.mock("../../api", async (importOriginal) => {
@@ -1226,6 +1226,25 @@ describe("App view switching", () => {
     expect(screen.getByTitle("Agents view").className).toContain("active");
 
     localStorage.removeItem(taskViewStorageKey());
+  });
+
+  it("does not render agents view button when agentsView experimental feature is disabled", async () => {
+    // Override the default mock to exclude agentsView
+    vi.mocked(fetchSettings).mockResolvedValue({
+      ...defaultSettings,
+      experimentalFeatures: { insights: true, roadmap: true, skillsView: true }, // no agentsView
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle("Board view")).toBeTruthy();
+    });
+
+    expect(screen.queryByTitle("Agents view")).toBeNull();
+
+    // Cleanup: restore default mock
+    vi.mocked(fetchSettings).mockResolvedValue({ ...defaultSettings });
   });
 
   // ── Insights View ──────────────────────────────────────────────────

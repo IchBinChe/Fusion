@@ -187,6 +187,8 @@ export interface HeaderProps {
   onChangeView?: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights") => void;
   /** Whether to show the skills tab in the view toggle */
   showSkillsTab?: boolean;
+  /** When true, shows the Agents view tab button. Hidden by default (experimental feature). */
+  showAgentsTab?: boolean;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   /** Multi-project props */
@@ -237,6 +239,7 @@ export function Header({
   view = "board",
   onChangeView,
   showSkillsTab,
+  showAgentsTab,
   searchQuery = "",
   onSearchChange,
   projects = [],
@@ -694,15 +697,17 @@ export function Header({
             >
               <List size={16} />
             </button>
-            <button
-              className={`view-toggle-btn${view === "agents" ? " active" : ""}`}
-              onClick={() => onChangeView("agents")}
-              title="Agents view"
-              aria-label="Agents view"
-              aria-pressed={view === "agents"}
-            >
-              <Bot size={16} />
-            </button>
+            {showAgentsTab && (
+              <button
+                className={`view-toggle-btn${view === "agents" ? " active" : ""}`}
+                onClick={() => onChangeView("agents")}
+                title="Agents view"
+                aria-label="Agents view"
+                aria-pressed={view === "agents"}
+              >
+                <Bot size={16} />
+              </button>
+            )}
             <button
               className={`view-toggle-btn${view === "missions" ? " active" : ""}`}
               onClick={() => onChangeView("missions")}

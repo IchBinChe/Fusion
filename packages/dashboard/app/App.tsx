@@ -170,7 +170,9 @@ function AppInner() {
       .then((data: { unreadCount: number }) => {
         setMailboxUnreadCount(data.unreadCount);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("[App] Failed to fetch mailbox unread count:", err);
+      });
   }, [currentProject?.id]);
 
   // Nodes management is an overlay view (not a modal), so it stays local to App.
@@ -445,6 +447,7 @@ function AppInner() {
             resumeSessionId={missionResumeSessionId}
             targetMissionId={missionTargetId}
             milestoneSliceResumeSessionId={milestoneSliceResumeSessionId}
+            onMilestoneSliceResumeFetchError={() => setMilestoneSliceResumeSessionId(undefined)}
           />
         </PageErrorBoundary>
       );

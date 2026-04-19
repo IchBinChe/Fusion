@@ -81,6 +81,24 @@ describe("useBackgroundSessions", () => {
     });
   });
 
+  it("logs a warning when fetching background sessions fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const networkError = new Error("Network error");
+    mockFetchAiSessions.mockRejectedValueOnce(networkError);
+
+    const { result } = renderHook(() => useBackgroundSessions());
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[useBackgroundSessions] Failed to fetch AI sessions:",
+        networkError,
+      );
+    });
+
+    expect(result.current.sessions).toEqual([]);
+    warnSpy.mockRestore();
+  });
+
   it("applies SSE-driven session updates reactively", async () => {
     const { result } = renderHook(() => useBackgroundSessions());
 

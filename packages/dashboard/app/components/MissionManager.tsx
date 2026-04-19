@@ -117,6 +117,8 @@ interface MissionManagerProps {
   targetMissionId?: string;
   /** Resume session ID for milestone/slice interview sessions */
   milestoneSliceResumeSessionId?: string;
+  /** Called when milestone/slice resume session fetch fails */
+  onMilestoneSliceResumeFetchError?: () => void;
 }
 
 // Status badge colors — use CSS custom-property-compatible tokens
@@ -446,7 +448,7 @@ function getAutopilotActivitySummary(state: AutopilotState, lastActivityAt?: str
   return `Last activation ${getRelativeTime(lastActivityAt)}`;
 }
 
-export function MissionManager({ isOpen, isInline = false, onClose, addToast, projectId, onSelectTask, availableTasks = [], resumeSessionId, targetMissionId, milestoneSliceResumeSessionId }: MissionManagerProps) {
+export function MissionManager({ isOpen, isInline = false, onClose, addToast, projectId, onSelectTask, availableTasks = [], resumeSessionId, targetMissionId, milestoneSliceResumeSessionId, onMilestoneSliceResumeFetchError }: MissionManagerProps) {
   const isActive = isInline || isOpen;
   const [missions, setMissions] = useState<MissionWithSummary[]>([]);
   const [selectedMission, setSelectedMission] = useState<MissionWithHierarchy | null>(null);
@@ -521,7 +523,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         (s) => s.type === "mission_interview" && (s.status === "awaiting_input" || s.status === "error"),
       );
       setPendingInterviewSessions(pending);
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn("[MissionManager] Failed to fetch pending interview sessions:", err);
+    });
     return () => { cancelled = true; };
   }, [isActive, projectId, effectiveResumeSessionId]);
 
@@ -553,9 +557,13 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           resumeSessionId: milestoneSliceResumeSessionId,
         });
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      if (cancelled) return;
+      console.warn("[MissionManager] Failed to fetch session for milestone/slice resume:", err);
+      onMilestoneSliceResumeFetchError?.();
+    });
     return () => { cancelled = true; };
-  }, [isActive, milestoneSliceResumeSessionId]);
+  }, [isActive, milestoneSliceResumeSessionId, onMilestoneSliceResumeFetchError]);
 
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState<{ type: string; id: string } | null>(null);

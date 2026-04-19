@@ -41,6 +41,7 @@ vi.mock("../../api", async (importOriginal) => {
     fetchGitRemotes: vi.fn(() => Promise.resolve([])),
     fetchAgents: vi.fn(() => Promise.resolve([])),
     fetchTaskDetail: vi.fn((id: string) => Promise.resolve({ id, title: `Task ${id}` })),
+    fetchUnreadCount: vi.fn(() => Promise.resolve({ unreadCount: 0 })),
     fetchScripts: vi.fn(() => Promise.resolve({ build: "npm run build", test: "pnpm test" })),
     runScript: vi.fn(() => Promise.resolve({ sessionId: "sess-script-1", command: "echo hello" })),
     killPtyTerminalSession: vi.fn(() => Promise.resolve({ killed: true })),
@@ -220,7 +221,7 @@ vi.mock("../../hooks/useNodes", () => ({
 }));
 
 import { App } from "../../App";
-import { fetchAuthStatus, fetchSettings, fetchGlobalSettings, fetchTaskDetail, updateSettings, runScript, fetchScripts, fetchModels } from "../../api";
+import { fetchAuthStatus, fetchSettings, fetchGlobalSettings, fetchTaskDetail, fetchUnreadCount, updateSettings, runScript, fetchScripts, fetchModels } from "../../api";
 import * as apiNodeModule from "../../hooks/useRemoteNodeData";
 
 beforeEach(() => {
@@ -274,6 +275,30 @@ beforeEach(() => {
   mockGetSkippedSteps.mockReturnValue([]);
   mockGetStepData.mockReset();
   mockGetStepData.mockReturnValue(null);
+});
+
+describe("App mailbox unread count", () => {
+  it("logs a warning when unread count fetch fails and keeps the zero-count fallback", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unreadFetchError = new Error("Mailbox unavailable");
+    (fetchUnreadCount as ReturnType<typeof vi.fn>).mockRejectedValueOnce(unreadFetchError);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(fetchUnreadCount).toHaveBeenCalledWith("proj_123");
+    });
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[App] Failed to fetch mailbox unread count:",
+        unreadFetchError,
+      );
+    });
+
+    expect(screen.getByRole("status", { name: "Loading Fusion dashboard" })).toBeInTheDocument();
+    warnSpy.mockRestore();
+  });
 });
 
 describe("App deep link handling", () => {

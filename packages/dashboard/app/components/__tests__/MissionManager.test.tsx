@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { MissionManager } from "../MissionManager";
 
 const mockFetchAiSession = vi.fn();
+const mockFetchAiSessions = vi.fn();
 const mockCancelMissionInterview = vi.fn();
 const mockConnectMissionInterviewStream = vi.fn();
 const mockPreviewEnrichedDescription = vi.fn();
@@ -15,7 +16,7 @@ vi.mock("../../api", async () => {
   return {
     ...actual,
     fetchAiSession: (...args: any[]) => mockFetchAiSession(...args),
-    fetchAiSessions: () => Promise.resolve([]),
+    fetchAiSessions: (...args: any[]) => mockFetchAiSessions(...args),
     cancelMissionInterview: (...args: any[]) => mockCancelMissionInterview(...args),
     connectMissionInterviewStream: (...args: any[]) => mockConnectMissionInterviewStream(...args),
     previewEnrichedDescription: (...args: any[]) => mockPreviewEnrichedDescription(...args),
@@ -647,9 +648,11 @@ describe("MissionManager", () => {
     originalFetch = globalThis.fetch;
     originalEventSource = globalThis.EventSource;
     mockFetchAiSession.mockReset();
+    mockFetchAiSessions.mockReset();
     mockCancelMissionInterview.mockReset();
     mockConnectMissionInterviewStream.mockReset();
     mockFetchAiSession.mockResolvedValue(null);
+    mockFetchAiSessions.mockResolvedValue([]);
     mockCancelMissionInterview.mockResolvedValue(undefined);
     mockConnectMissionInterviewStream.mockReturnValue({
       close: vi.fn(),
@@ -1575,6 +1578,54 @@ describe("MissionManager", () => {
     await waitFor(() => {
       expect(screen.queryByText("Plan Mission with AI")).not.toBeInTheDocument();
     });
+  });
+
+  it("logs a warning when pending interview session fetch fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pendingFetchError = new Error("Pending sessions failed");
+    mockFetchAiSessions.mockRejectedValueOnce(pendingFetchError);
+    globalThis.fetch = createFetchMock();
+
+    render(<MissionManager isOpen={true} isInline={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[MissionManager] Failed to fetch pending interview sessions:",
+        pendingFetchError,
+      );
+    });
+
+    expect(screen.getByText("Missions")).toBeInTheDocument();
+    warnSpy.mockRestore();
+  });
+
+  it("logs a warning when milestone/slice resume session fetch fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const resumeFetchError = new Error("Resume session failed");
+    const onResumeFetchError = vi.fn();
+    mockFetchAiSession.mockRejectedValueOnce(resumeFetchError);
+    globalThis.fetch = createFetchMock();
+
+    render(
+      <MissionManager
+        isOpen={true}
+        isInline={true}
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+        milestoneSliceResumeSessionId="sess-resume-1"
+        onMilestoneSliceResumeFetchError={onResumeFetchError}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[MissionManager] Failed to fetch session for milestone/slice resume:",
+        resumeFetchError,
+      );
+    });
+
+    expect(onResumeFetchError).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 
   it("shows milestone hierarchy in detail view", async () => {

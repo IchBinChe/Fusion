@@ -57,7 +57,9 @@ export function useBackgroundSessions(projectId?: string): UseBackgroundSessions
         sessionTimestampsRef.current = nextTimestampMap;
         setSessions(fetched);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("[useBackgroundSessions] Failed to fetch AI sessions:", err);
+      });
   }, [projectId]);
 
   // Initial load: request state from sibling tabs first, then fetch authoritative API state.

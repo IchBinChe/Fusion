@@ -1,9 +1,10 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
 
-const defaultMaxWorkers = 1;
+const defaultMaxWorkers = 2;
 const requestedMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? String(defaultMaxWorkers), 10);
-const maxWorkers = Math.max(1, Math.min(1, Number.isFinite(requestedMaxWorkers) ? requestedMaxWorkers : defaultMaxWorkers));
+const maxWorkers = Math.max(1, Math.min(2, Number.isFinite(requestedMaxWorkers) ? requestedMaxWorkers : defaultMaxWorkers));
+process.env.VITEST_MAX_WORKERS = String(maxWorkers);
 
 export default defineConfig({
   resolve: {
@@ -14,6 +15,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     maxWorkers,
+    poolOptions: { threads: { minThreads: 1, maxThreads: maxWorkers }, forks: { minForks: 1, maxForks: maxWorkers } },
     fileParallelism: true,
     pool: "threads",
     // Enable isolate to allow parallel execution of tests with conflicting mocks

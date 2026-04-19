@@ -564,6 +564,54 @@ describe("AgentListModal", () => {
       });
     });
 
+    it("shows Start button for terminated agents", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("All States")).toBeTruthy();
+      });
+
+      const filterSelect = screen.getByDisplayValue("All States");
+      fireEvent.change(filterSelect, { target: { value: "terminated" } });
+
+      await waitFor(() => {
+        expect(screen.getByTitle("Start")).toBeTruthy();
+      });
+    });
+
+    it("starts terminated agent", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("All States")).toBeTruthy();
+      });
+
+      const filterSelect = screen.getByDisplayValue("All States");
+      fireEvent.change(filterSelect, { target: { value: "terminated" } });
+
+      await waitFor(() => {
+        expect(screen.getByTitle("Start")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByTitle("Start"));
+
+      await waitFor(() => {
+        expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-004", "active", undefined);
+      });
+    });
+
     it("handles state change errors gracefully", async () => {
       mockUpdateAgentState.mockRejectedValue(new Error("Invalid transition"));
 

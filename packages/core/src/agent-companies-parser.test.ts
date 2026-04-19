@@ -436,15 +436,36 @@ name: Archive CEO
       expect(pkg.agents[0]?.name).toBe("Archive CEO");
     });
 
-    it("throws AgentCompaniesParseError for a corrupt .tar.gz file", async () => {
+    it("throws descriptive error when tar extraction fails", async () => {
       const root = createTempDir();
       const archivePath = join(root, "corrupt.tgz");
-      writeTextFile(archivePath, "not a real gzip archive");
+      writeFileSync(archivePath, Buffer.from("not-a-real-gzip"));
 
-      await expect(parseCompanyArchive(archivePath)).rejects.toBeInstanceOf(AgentCompaniesParseError);
-      await expect(parseCompanyArchive(archivePath)).rejects.toThrow(
-        "Failed to parse Agent Companies archive",
-      );
+      await expect(parseCompanyArchive(archivePath)).rejects.toMatchObject({
+        name: "AgentCompaniesParseError",
+        message: expect.stringContaining("Failed to parse Agent Companies archive"),
+      });
+    });
+
+    it("parses a .tar.gz archive with nested directory structure", async () => {
+      const root = createTempDir();
+      const topLevelDir = join(root, "outer-layer");
+      const packageDir = join(topLevelDir, "company-package");
+
+      writeTextFile(join(packageDir, "COMPANY.md"), `---
+name: Nested Archive Company
+schema: agentcompanies/v1
+---`);
+      writeTextFile(join(packageDir, "agents", "ceo", "AGENTS.md"), `---
+name: Nested Archive CEO
+---`);
+
+      const archivePath = join(root, "nested-company.tgz");
+      execSync(`tar czf ${JSON.stringify(archivePath)} -C ${JSON.stringify(root)} outer-layer`);
+
+      const pkg = await parseCompanyArchive(archivePath);
+      expect(pkg.company?.name).toBe("Nested Archive Company");
+      expect(pkg.agents[0]?.name).toBe("Nested Archive CEO");
     });
 
     it("throws AgentCompaniesParseError for a non-existent .tar.gz file", async () => {

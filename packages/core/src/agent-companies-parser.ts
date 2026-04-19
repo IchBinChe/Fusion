@@ -5,7 +5,6 @@
  */
 
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -23,14 +22,6 @@ import type {
   TeamManifest,
 } from "./agent-companies-types.js";
 import type { AgentCapability, AgentCreateInput } from "./types.js";
-
-type TarExtractOptions = {
-  file: string;
-  cwd: string;
-};
-
-const require = createRequire(import.meta.url);
-let optionalTarExtract: ((options: TarExtractOptions) => Promise<void>) | null | undefined;
 
 export class AgentCompaniesParseError extends Error {
   constructor(message: string) {
@@ -482,42 +473,19 @@ function resolveExtractionRoot(tempDir: string): string {
   }
 
   if (directories.length === 1) {
-    return join(tempDir, directories[0].name);
+    return resolveExtractionRoot(join(tempDir, directories[0].name));
   }
 
   return tempDir;
 }
 
-function getOptionalTarExtract(): ((options: TarExtractOptions) => Promise<void>) | null {
-  if (optionalTarExtract !== undefined) {
-    return optionalTarExtract;
-  }
-
-  try {
-    const candidate = require("tar") as {
-      x?: (options: TarExtractOptions) => Promise<void>;
-    };
-    optionalTarExtract = typeof candidate.x === "function" ? candidate.x : null;
-  } catch {
-    optionalTarExtract = null;
-  }
-
-  return optionalTarExtract;
-}
-
 async function extractTarArchive(archivePath: string, outputDir: string): Promise<void> {
-  const tarExtract = getOptionalTarExtract();
-  if (tarExtract) {
-    await tarExtract({ file: archivePath, cwd: outputDir });
-    return;
-  }
-
   const [{ execFile }, { promisify }] = await Promise.all([
     import("node:child_process"),
     import("node:util"),
   ]);
   const execFileAsync = promisify(execFile);
-  await execFileAsync("tar", ["-xzf", archivePath, "-C", outputDir]);
+  await execFileAsync("tar", ["xzf", archivePath, "-C", outputDir]);
 }
 
 export async function parseCompanyArchive(archivePath: string): Promise<AgentCompaniesPackage> {

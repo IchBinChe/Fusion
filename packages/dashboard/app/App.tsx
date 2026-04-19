@@ -14,6 +14,7 @@ import { RoadmapsView } from "./components/RoadmapsView";
 import { SkillsView } from "./components/SkillsView";
 import { MailboxView } from "./components/MailboxView";
 import { MemoryView } from "./components/MemoryView";
+import { DevServerView } from "./components/DevServerView";
 import { PageErrorBoundary } from "./components/ErrorBoundary";
 import { AppModals } from "./components/AppModals";
 import { DashboardLoader, type DashboardLoaderStage } from "./components/DashboardLoader";
@@ -540,6 +541,14 @@ function AppInner() {
       );
     }
 
+    if (taskView === "dev-server") {
+      return (
+        <PageErrorBoundary>
+          <DevServerView projectId={currentProject?.id} />
+        </PageErrorBoundary>
+      );
+    }
+
     if (taskView === "board") {
       return (
         <PageErrorBoundary>
@@ -742,7 +751,7 @@ function AppInner() {
         showSkillsTab={skillsEnabled}
         experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled, memoryView: memoryEnabled }}
       />
-      {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && (
+      {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "dev-server" && (
         <QuickChatFAB
           projectId={currentProject.id}
           addToast={addToast}

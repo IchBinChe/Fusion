@@ -4,7 +4,26 @@ import type { ProjectInfo } from "../api";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 
 export type ViewMode = "overview" | "project";
-export type TaskView = "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory";
+export type TaskView = "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server";
+
+const TASK_VIEWS: readonly TaskView[] = [
+  "board",
+  "list",
+  "agents",
+  "missions",
+  "chat",
+  "documents",
+  "roadmaps",
+  "skills",
+  "mailbox",
+  "insights",
+  "memory",
+  "dev-server",
+];
+
+function isTaskView(value: string | null): value is TaskView {
+  return value !== null && TASK_VIEWS.includes(value as TaskView);
+}
 
 interface UseViewStateOptions {
   projectsLoading: boolean;
@@ -48,7 +67,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
 
   const [taskView, setTaskView] = useState<TaskView>(() => {
     const saved = getScopedItem("kb-dashboard-task-view");
-    if (saved === "board" || saved === "list" || saved === "agents" || saved === "missions" || saved === "chat" || saved === "documents" || saved === "roadmaps" || saved === "skills" || saved === "mailbox" || saved === "insights" || saved === "memory") return saved as TaskView;
+    if (isTaskView(saved)) return saved;
     return "board";
   });
 
@@ -58,8 +77,8 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
 
   useEffect(() => {
     const saved = getScopedItem("kb-dashboard-task-view", currentProject?.id);
-    if (saved === "board" || saved === "list" || saved === "agents" || saved === "missions" || saved === "chat" || saved === "documents" || saved === "roadmaps" || saved === "skills" || saved === "mailbox" || saved === "insights" || saved === "memory") {
-      setTaskView(saved as TaskView);
+    if (isTaskView(saved)) {
+      setTaskView(saved);
       return;
     }
     setTaskView("board");

@@ -1,520 +1,549 @@
 import { EventEmitter } from "node:events";
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import net from "node:net";
-import path from "node:path";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
+import { resolve } from "node:path";
+import {
+  loadDevServerStore,
+  resetDevServerStore,
+  type DevServerPersistedLogEntry,
+  type DevServerPersistedState,
+  type DevServerStatus,
+  type DevServerLogSource,
+  type DevServerStore,
+} from "./dev-server-store.js";
+import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
 
-export interface DevServerState {
-  id: string;
-  name: string;
-  status: "stopped" | "starting" | "running" | "failed";
-  command: string;
-  scriptName: string;
-  cwd: string;
-  pid?: number;
-  startedAt?: string;
-  previewUrl?: string;
-  detectedPort?: number;
-  manualPreviewUrl?: string;
-  logs: string[];
-  exitCode?: number | null;
-}
+const DEFAULT_SERVER_KEY = "default";
+const DEFAULT_LOG_LIMIT = 200;
+const DEFAULT_BUFFER_CAPACITY = 400;
+const STOP_TIMEOUT_MS = 5_000;
 
-interface PersistedDevServerState {
-  id: string;
-  name: string;
-  command: string;
-  scriptName: string;
-  cwd: string;
-  pid?: number;
-  startedAt?: string;
-  manualPreviewUrl?: string;
-  exitCode?: number | null;
-}
-
-export const MAX_LOG_LINES = 500;
+// Reserved dashboard port 4040 must never be suggested as a fallback dev-server port.
 export const FALLBACK_PORTS = [3000, 4173, 5173, 6006, 8080, 4200, 4400, 8888] as const;
 
-function createDefaultState(projectRoot: string): DevServerState {
-  return {
-    id: "default",
-    name: "default",
-    status: "stopped",
-    command: "",
-    scriptName: "",
-    cwd: projectRoot,
-    logs: [],
-    exitCode: null,
-  };
+export interface DevServerStartOptions {
+  command: string;
+  cwd?: string;
+  scriptName?: string | null;
 }
 
-function normalizeUrl(host: string, port: number): string {
-  const normalizedHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" ? "localhost" : host;
-  return `http://${normalizedHost}:${port}`;
+export interface DevServerSnapshot {
+  state: DevServerPersistedState;
+  logs: DevServerPersistedLogEntry[];
 }
 
-export function parseLineForUrl(line: string): { url: string; port: number } | null {
-  const patterns: RegExp[] = [
-    /(?:Local|local|ready on|listening on|started on|running at)\s*(?:http:\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i,
-    /http:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i,
-    /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = line.match(pattern);
-    if (!match) continue;
-
-    if (match.length === 3) {
-      const [, host, rawPort] = match;
-      const port = Number.parseInt(rawPort, 10);
-      if (!Number.isFinite(port)) return null;
-      return { url: normalizeUrl(host, port), port };
-    }
-
-    if (match.length === 2) {
-      const [, rawPort] = match;
-      const port = Number.parseInt(rawPort, 10);
-      if (!Number.isFinite(port)) return null;
-      return { url: normalizeUrl("localhost", port), port };
-    }
-  }
-
-  return null;
+export interface DevServerManagerEvent {
+  type: "state" | "log";
+  data: DevServerPersistedState | DevServerPersistedLogEntry;
 }
+
+type DevServerSubscriber = (event: DevServerManagerEvent, eventId: number) => void;
 
 export class DevServerManager extends EventEmitter {
-  private readonly stateFile: string;
-  private readonly servers = new Map<string, DevServerState>();
-  private readonly processes = new Map<string, ChildProcess>();
-  private readonly killTimers = new Map<string, NodeJS.Timeout>();
-  private portProbeTimer: NodeJS.Timeout | null = null;
-  private readonly loadPromise: Promise<void>;
+  private readonly subscribers = new Set<DevServerSubscriber>();
+  private readonly eventBuffer = new SessionEventBuffer(DEFAULT_BUFFER_CAPACITY);
+  private readonly logLimit: number;
 
-  constructor(private readonly projectRoot: string) {
+  private process: ChildProcessWithoutNullStreams | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private state: DevServerPersistedState;
+  private logs: DevServerPersistedLogEntry[] = [];
+  private initialized = false;
+  private persistenceChain = Promise.resolve();
+
+  constructor(
+    private readonly rootDir: string,
+    private readonly store: DevServerStore,
+    options?: { logLimit?: number },
+  ) {
     super();
-    this.stateFile = path.join(this.projectRoot, ".fusion", "dev-server.json");
-    this.servers.set("default", createDefaultState(this.projectRoot));
-    this.loadPromise = this.loadState();
+    this.logLimit = options?.logLimit ?? DEFAULT_LOG_LIMIT;
+    this.state = createDefaultState();
   }
 
-  async start(command: string, scriptName: string, cwd?: string): Promise<DevServerState> {
-    await this.loadPromise;
-
-    const current = this.getMutableState();
-    if (current.status !== "stopped") {
-      throw new Error(`Dev server is already ${current.status}`);
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
     }
 
-    const resolvedCwd = cwd ? path.resolve(cwd) : this.projectRoot;
-    const startedAt = new Date().toISOString();
-    const nextState: DevServerState = {
-      ...current,
-      id: "default",
-      name: "default",
-      status: "starting",
-      command,
-      scriptName,
-      cwd: resolvedCwd,
-      pid: undefined,
-      startedAt,
-      previewUrl: current.manualPreviewUrl,
-      detectedPort: undefined,
-      logs: [],
-      exitCode: null,
-    };
+    const loadedState = await this.store.loadState();
+    this.logs = await this.store.readLogTail(this.logLimit);
 
-    this.servers.set("default", nextState);
-    this.emit("status", this.cloneState(nextState));
-
-    const child = spawn(command, [], {
-      cwd: resolvedCwd,
-      shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        FORCE_COLOR: "1",
-        TERM: "xterm-256color",
-      },
-    });
-
-    if (child.pid) {
-      nextState.pid = child.pid;
+    if (loadedState) {
+      this.state = loadedState;
     }
 
-    this.processes.set("default", child);
-
-    const onOutput = (chunk: Buffer, markRunning: boolean): void => {
-      const lines = chunk
-        .toString("utf-8")
-        .split(/\r?\n/)
-        .map((line) => line.trimEnd())
-        .filter((line) => line.length > 0);
-
-      for (const line of lines) {
-        const state = this.getMutableState();
-        this.pushLogLine(state, line);
-
-        if (markRunning && state.status === "starting") {
-          state.status = "running";
-          this.emit("status", this.cloneState(state));
-
-          if (!state.previewUrl) {
-            this.scheduleFallbackPortProbe();
-          }
-        }
-
-        this.tryParseAndApplyUrl(line);
-        this.emit("log", { serverId: "default", line });
-      }
-    };
-
-    child.stdout?.on("data", (data: Buffer) => {
-      onOutput(data, true);
-    });
-
-    child.stderr?.on("data", (data: Buffer) => {
-      onOutput(data, false);
-    });
-
-    child.on("exit", (code: number | null) => {
-      const state = this.getMutableState();
-      state.status = code === 0 ? "stopped" : "failed";
-      state.exitCode = code;
-      state.pid = undefined;
-
-      this.processes.delete("default");
-      this.clearKillTimer("default");
-      this.clearPortProbeTimer();
-
-      if (state.manualPreviewUrl) {
-        state.previewUrl = state.manualPreviewUrl;
-      }
-
-      this.emit("status", this.cloneState(state));
-      this.persistState();
-    });
-
-    child.on("error", (err: Error) => {
-      const state = this.getMutableState();
-      state.status = "failed";
-      state.exitCode = 1;
-      state.pid = undefined;
-      this.pushLogLine(state, `[dev-server] ${err.message}`);
-
-      this.processes.delete("default");
-      this.clearKillTimer("default");
-      this.clearPortProbeTimer();
-
-      this.emit("status", this.cloneState(state));
-      this.persistState();
-    });
-
-    this.persistState();
-    return this.getState();
+    await this.reconcilePersistedProcessState();
+    this.initialized = true;
   }
 
-  async stop(): Promise<DevServerState> {
-    await this.loadPromise;
+  getState(): DevServerPersistedState {
+    return structuredClone(this.state);
+  }
 
-    const state = this.getMutableState();
-    const child = this.processes.get("default");
-    if (!child || (state.status !== "running" && state.status !== "starting")) {
+  getRecentLogs(limit = this.logLimit): DevServerPersistedLogEntry[] {
+    if (!Number.isFinite(limit) || limit <= 0) {
+      return [];
+    }
+    return this.logs.slice(-Math.floor(limit)).map((entry) => structuredClone(entry));
+  }
+
+  getSnapshot(limit = this.logLimit): DevServerSnapshot {
+    return {
+      state: this.getState(),
+      logs: this.getRecentLogs(limit),
+    };
+  }
+
+  getBufferedEvents(sinceId: number): SessionBufferedEvent[] {
+    return this.eventBuffer.getEventsSince(sinceId);
+  }
+
+  subscribe(callback: DevServerSubscriber): () => void {
+    this.subscribers.add(callback);
+    return () => {
+      this.subscribers.delete(callback);
+    };
+  }
+
+  async start(options: DevServerStartOptions): Promise<DevServerPersistedState> {
+    await this.ensureInitialized();
+
+    const command = options.command.trim();
+    if (!command) {
+      throw new Error("command is required");
+    }
+
+    if (this.state.pid && isProcessAlive(this.state.pid) && (this.state.status === "running" || this.state.status === "starting")) {
       return this.getState();
     }
 
-    state.status = "stopped";
-    this.emit("status", this.cloneState(state));
+    if (this.state.pid && !isProcessAlive(this.state.pid)) {
+      await this.setState({
+        status: "stopped",
+        pid: null,
+        exitCode: 1,
+        exitSignal: null,
+        exitedAt: new Date().toISOString(),
+        failureReason: "Persisted process is no longer running",
+      });
+    }
 
-    child.kill("SIGTERM");
+    const cwd = options.cwd ? resolve(options.cwd) : this.rootDir;
+    const now = new Date().toISOString();
 
-    const killTimer = setTimeout(() => {
-      if (!this.processes.has("default")) {
-        return;
-      }
+    await this.setState({
+      status: "starting",
+      command,
+      scriptName: options.scriptName ?? null,
+      cwd,
+      startedAt: now,
+      exitedAt: null,
+      exitCode: null,
+      exitSignal: null,
+      failureReason: null,
+      previewUrl: null,
+      previewProtocol: null,
+      previewHost: null,
+      previewPort: null,
+      previewPath: null,
+      pid: null,
+    });
 
-      const processToKill = this.processes.get("default");
-      processToKill?.kill("SIGKILL");
-    }, 5_000);
-    this.killTimers.set("default", killTimer);
+    this.appendLog({
+      serverKey: DEFAULT_SERVER_KEY,
+      source: "system",
+      message: `Starting dev server: ${command}`,
+      timestamp: now,
+    });
 
-    this.clearPortProbeTimer();
-    this.persistState();
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.process = child;
+
+    await this.setState({ pid: child.pid ?? null });
+
+    child.once("spawn", () => {
+      void this.setState({ status: "running" });
+    });
+
+    child.once("error", (error) => {
+      const failedAt = new Date().toISOString();
+      this.appendLog({
+        serverKey: DEFAULT_SERVER_KEY,
+        source: "system",
+        message: `Dev server failed to start: ${error.message}`,
+        timestamp: failedAt,
+      });
+      void this.setState({
+        status: "failed",
+        pid: null,
+        exitCode: 1,
+        exitSignal: null,
+        exitedAt: failedAt,
+        failureReason: error.message,
+      });
+      this.process = null;
+    });
+
+    child.once("exit", (code, signal) => {
+      const exitedAt = new Date().toISOString();
+      const failed = (code ?? 0) !== 0;
+      this.appendLog({
+        serverKey: DEFAULT_SERVER_KEY,
+        source: "system",
+        message: failed
+          ? `Dev server exited with code ${code ?? "unknown"}`
+          : "Dev server stopped",
+        timestamp: exitedAt,
+      });
+      void this.setState({
+        status: failed ? "failed" : "stopped",
+        pid: null,
+        exitCode: code ?? null,
+        exitSignal: signal ?? null,
+        exitedAt,
+        failureReason: failed ? `Process exited with code ${code ?? "unknown"}` : null,
+      });
+      this.process = null;
+    });
+
+    this.pipeOutput(child, "stdout");
+    this.pipeOutput(child, "stderr");
+
     return this.getState();
   }
 
-  async restart(): Promise<DevServerState> {
-    await this.loadPromise;
+  async stop(reason = "Stopped by user"): Promise<DevServerPersistedState> {
+    await this.ensureInitialized();
 
-    const state = this.getMutableState();
-    const command = state.command;
-    const scriptName = state.scriptName;
-    const cwd = state.cwd;
-
-    if (!command || !scriptName) {
-      throw new Error("Cannot restart dev server before it has been started once");
+    if (this.stopPromise) {
+      await this.stopPromise;
+      return this.getState();
     }
 
-    if (state.status !== "stopped" && state.status !== "failed") {
-      await this.stop();
-      await this.waitForProcessExit("default", 5_500);
-    }
+    this.stopPromise = this.stopInternal(reason)
+      .finally(() => {
+        this.stopPromise = null;
+      });
 
-    return this.start(command, scriptName, cwd);
-  }
-
-  getState(): DevServerState {
-    const state = this.servers.get("default");
-    if (!state) {
-      return createDefaultState(this.projectRoot);
-    }
-    return this.cloneState(state);
-  }
-
-  getAllStates(): DevServerState[] {
-    return Array.from(this.servers.values()).map((state) => this.cloneState(state));
-  }
-
-  getLogs(tail?: number): string[] {
-    const logs = this.getMutableState().logs;
-    if (tail === undefined || tail <= 0 || tail >= logs.length) {
-      return [...logs];
-    }
-    return logs.slice(-tail);
-  }
-
-  setManualPreviewUrl(url: string | null): DevServerState {
-    const state = this.getMutableState();
-    state.manualPreviewUrl = url ?? undefined;
-
-    if (url) {
-      state.previewUrl = url;
-    } else if (state.detectedPort) {
-      state.previewUrl = normalizeUrl("localhost", state.detectedPort);
-    } else {
-      state.previewUrl = undefined;
-    }
-
-    this.emit("status", this.cloneState(state));
-    this.persistState();
+    await this.stopPromise;
     return this.getState();
   }
 
-  destroy(): void {
-    for (const [serverId, child] of this.processes.entries()) {
-      child.kill("SIGTERM");
-      const killTimer = setTimeout(() => {
-        if (!this.processes.has(serverId)) {
-          return;
-        }
-        this.processes.get(serverId)?.kill("SIGKILL");
-      }, 5_000);
-      this.killTimers.set(serverId, killTimer);
-    }
-
-    for (const timer of this.killTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.killTimers.clear();
-
-    this.clearPortProbeTimer();
-    this.removeAllListeners();
-    this.processes.clear();
-    this.servers.clear();
+  async restart(options: DevServerStartOptions): Promise<DevServerPersistedState> {
+    await this.stop("Restarting dev server");
+    return this.start(options);
   }
 
-  private getMutableState(): DevServerState {
-    const state = this.servers.get("default");
-    if (state) {
-      return state;
+  async shutdown(): Promise<void> {
+    if (this.process || (this.state.pid && isProcessAlive(this.state.pid))) {
+      await this.stop("Dashboard backend shutting down");
     }
-
-    const fallback = createDefaultState(this.projectRoot);
-    this.servers.set("default", fallback);
-    return fallback;
+    await this.flushPersistence();
   }
 
-  private cloneState(state: DevServerState): DevServerState {
-    return {
-      ...state,
-      logs: [...state.logs],
-    };
+  resetForTests(): void {
+    this.subscribers.clear();
+    this.eventBuffer.clear();
+    this.logs = [];
+    this.process = null;
+    this.stopPromise = null;
+    this.state = createDefaultState();
+    this.initialized = false;
+    this.persistenceChain = Promise.resolve();
   }
 
-  private tryParseAndApplyUrl(line: string): void {
-    const parsed = parseLineForUrl(line);
-    if (!parsed) {
+  private async stopInternal(reason: string): Promise<void> {
+    const now = new Date().toISOString();
+    this.appendLog({
+      serverKey: DEFAULT_SERVER_KEY,
+      source: "system",
+      message: reason,
+      timestamp: now,
+    });
+
+    const currentPid = this.process?.pid ?? this.state.pid;
+
+    if (!currentPid) {
+      await this.setState({
+        status: "stopped",
+        pid: null,
+        exitCode: 0,
+        exitSignal: null,
+        exitedAt: now,
+        failureReason: null,
+      });
       return;
     }
 
-    const state = this.getMutableState();
-    state.detectedPort = parsed.port;
-    if (!state.manualPreviewUrl) {
-      state.previewUrl = parsed.url;
+    if (!isProcessAlive(currentPid)) {
+      await this.setState({
+        status: "stopped",
+        pid: null,
+        exitCode: 0,
+        exitSignal: null,
+        exitedAt: now,
+        failureReason: null,
+      });
+      return;
     }
 
-    this.emit("url-detected", { serverId: "default", url: parsed.url, port: parsed.port });
-    this.clearPortProbeTimer();
-    this.emit("status", this.cloneState(state));
-    this.persistState();
-  }
+    try {
+      process.kill(currentPid, "SIGTERM");
+    } catch {
+      // process may have already exited
+    }
 
-  private scheduleFallbackPortProbe(): void {
-    this.clearPortProbeTimer();
-    this.portProbeTimer = setTimeout(() => {
-      this.probeFallbackPorts();
-    }, 10_000);
-  }
+    const gracefulStop = waitForProcessExit(currentPid, STOP_TIMEOUT_MS);
+    const exited = await gracefulStop;
 
-  private probeFallbackPorts(): void {
-    void (async () => {
-      for (const port of FALLBACK_PORTS) {
-        const available = await this.testPort(port);
-        if (!available) {
-          continue;
-        }
-
-        const state = this.getMutableState();
-        state.detectedPort = port;
-        if (!state.manualPreviewUrl) {
-          state.previewUrl = normalizeUrl("localhost", port);
-        }
-
-        this.emit("url-detected", { serverId: "default", url: normalizeUrl("localhost", port), port });
-        this.emit("status", this.cloneState(state));
-        this.persistState();
-        return;
+    if (!exited) {
+      try {
+        process.kill(currentPid, "SIGKILL");
+      } catch {
+        // already gone
       }
-    })();
-  }
+    }
 
-  private async testPort(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const socket = net.createConnection({ port, host: "localhost" });
-
-      const complete = (result: boolean): void => {
-        socket.removeAllListeners();
-        if (!socket.destroyed) {
-          socket.destroy();
-        }
-        resolve(result);
-      };
-
-      socket.setTimeout(500);
-      socket.once("connect", () => complete(true));
-      socket.once("timeout", () => complete(false));
-      socket.once("error", () => complete(false));
+    await this.setState({
+      status: "stopped",
+      pid: null,
+      exitCode: 0,
+      exitSignal: exited ? "SIGTERM" : "SIGKILL",
+      exitedAt: new Date().toISOString(),
+      failureReason: null,
     });
   }
 
-  private clearPortProbeTimer(): void {
-    if (!this.portProbeTimer) {
-      return;
-    }
+  private pipeOutput(processRef: ChildProcessWithoutNullStreams, source: DevServerLogSource): void {
+    const stream = source === "stdout" ? processRef.stdout : processRef.stderr;
+    const rl = createInterface({ input: stream });
 
-    clearTimeout(this.portProbeTimer);
-    this.portProbeTimer = null;
-  }
-
-  private clearKillTimer(serverId: string): void {
-    const timer = this.killTimers.get(serverId);
-    if (!timer) {
-      return;
-    }
-
-    clearTimeout(timer);
-    this.killTimers.delete(serverId);
-  }
-
-  private pushLogLine(state: DevServerState, line: string): void {
-    state.logs.push(line);
-    if (state.logs.length > MAX_LOG_LINES) {
-      state.logs.splice(0, state.logs.length - MAX_LOG_LINES);
-    }
-  }
-
-  private async waitForProcessExit(serverId: string, timeoutMs: number): Promise<void> {
-    const start = Date.now();
-    while (this.processes.has(serverId) && Date.now() - start < timeoutMs) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
-  private persistState(): void {
-    const state = this.getMutableState();
-    const payload: PersistedDevServerState = {
-      id: state.id,
-      name: state.name,
-      command: state.command,
-      scriptName: state.scriptName,
-      cwd: state.cwd,
-      manualPreviewUrl: state.manualPreviewUrl,
-      exitCode: state.exitCode,
-      pid: state.pid,
-      startedAt: state.startedAt,
-    };
-
-    void (async () => {
-      try {
-        await mkdir(path.dirname(this.stateFile), { recursive: true });
-        await writeFile(this.stateFile, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
-      } catch (err) {
-        console.error("[dev-server] Failed to persist state:", err);
-      }
-    })();
-  }
-
-  private async loadState(): Promise<void> {
-    try {
-      const raw = await readFile(this.stateFile, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<PersistedDevServerState>;
-      const state = this.getMutableState();
-
-      state.command = typeof parsed.command === "string" ? parsed.command : "";
-      state.scriptName = typeof parsed.scriptName === "string" ? parsed.scriptName : "";
-      state.cwd = typeof parsed.cwd === "string" ? parsed.cwd : this.projectRoot;
-      state.manualPreviewUrl = typeof parsed.manualPreviewUrl === "string" ? parsed.manualPreviewUrl : undefined;
-      state.previewUrl = state.manualPreviewUrl;
-      state.startedAt = typeof parsed.startedAt === "string" ? parsed.startedAt : undefined;
-      state.exitCode = parsed.exitCode ?? null;
-
-      const maybePid = typeof parsed.pid === "number" ? parsed.pid : undefined;
-      if (maybePid === undefined) {
-        state.status = "stopped";
-        state.pid = undefined;
+    rl.on("line", (line) => {
+      const message = line.trim();
+      if (!message) {
         return;
       }
 
-      try {
-        process.kill(maybePid, 0);
-        state.status = "running";
-        state.pid = maybePid;
-      } catch {
-        state.status = "stopped";
-        state.pid = undefined;
+      const timestamp = new Date().toISOString();
+      this.appendLog({
+        serverKey: DEFAULT_SERVER_KEY,
+        source,
+        message,
+        timestamp,
+      });
+
+      const detectedPreview = detectPreviewUrl(message);
+      if (detectedPreview) {
+        const parsed = parsePreviewUrl(detectedPreview);
+        if (parsed) {
+          void this.setState({
+            status: "running",
+            previewUrl: parsed.previewUrl,
+            previewProtocol: parsed.previewProtocol,
+            previewHost: parsed.previewHost,
+            previewPort: parsed.previewPort,
+            previewPath: parsed.previewPath,
+          });
+        }
       }
-    } catch {
-      this.servers.set("default", createDefaultState(this.projectRoot));
+    });
+  }
+
+  private appendLog(entry: DevServerPersistedLogEntry): void {
+    this.logs.push(entry);
+    if (this.logs.length > this.logLimit) {
+      this.logs.splice(0, this.logs.length - this.logLimit);
     }
+
+    void this.enqueuePersistence(async () => {
+      await this.store.appendLog(entry);
+    });
+
+    this.broadcast({ type: "log", data: entry });
+  }
+
+  private async setState(patch: Partial<DevServerPersistedState>): Promise<void> {
+    this.state = {
+      ...this.state,
+      ...patch,
+      serverKey: DEFAULT_SERVER_KEY,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.enqueuePersistence(async () => {
+      await this.store.saveState(this.state);
+    });
+
+    this.broadcast({ type: "state", data: this.state });
+  }
+
+  private broadcast(event: DevServerManagerEvent): number {
+    const payload = JSON.stringify(event.data);
+    const eventId = this.eventBuffer.push(event.type, payload);
+
+    for (const subscriber of this.subscribers) {
+      try {
+        subscriber(event, eventId);
+      } catch {
+        // Ignore per-subscriber failures.
+      }
+    }
+
+    this.emit("event", event, eventId);
+    return eventId;
+  }
+
+  private async reconcilePersistedProcessState(): Promise<void> {
+    const shouldVerify = this.state.status === "running" || this.state.status === "starting";
+    if (!shouldVerify || !this.state.pid) {
+      return;
+    }
+
+    if (isProcessAlive(this.state.pid)) {
+      return;
+    }
+
+    await this.setState({
+      status: "stopped",
+      pid: null,
+      exitCode: 1,
+      exitSignal: null,
+      exitedAt: new Date().toISOString(),
+      failureReason: "Recovered process is no longer running",
+    });
+
+    this.appendLog({
+      serverKey: DEFAULT_SERVER_KEY,
+      source: "system",
+      message: "Recovered stale persisted PID and marked server as stopped",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+  }
+
+  private async enqueuePersistence(operation: () => Promise<void>): Promise<void> {
+    this.persistenceChain = this.persistenceChain
+      .then(operation)
+      .catch(() => {
+        // Keep the chain alive even if one write fails.
+      });
+
+    await this.persistenceChain;
+  }
+
+  private async flushPersistence(): Promise<void> {
+    await this.persistenceChain;
   }
 }
 
-const managers: Map<string, DevServerManager> = new Map();
+function createDefaultState(): DevServerPersistedState {
+  return {
+    serverKey: DEFAULT_SERVER_KEY,
+    status: "idle",
+    command: null,
+    scriptName: null,
+    cwd: null,
+    pid: null,
+    startedAt: null,
+    updatedAt: new Date().toISOString(),
+    previewUrl: null,
+    previewProtocol: null,
+    previewHost: null,
+    previewPort: null,
+    previewPath: null,
+    exitCode: null,
+    exitSignal: null,
+    exitedAt: null,
+    failureReason: null,
+  };
+}
 
-export function getDevServerManager(projectRoot: string): DevServerManager {
-  const resolvedRoot = path.resolve(projectRoot);
-  const existing = managers.get(resolvedRoot);
-  if (existing) {
-    return existing;
+function detectPreviewUrl(message: string): string | null {
+  const match = message.match(/https?:\/\/[^\s]+/i);
+  return match?.[0] ?? null;
+}
+
+function parsePreviewUrl(urlValue: string): {
+  previewUrl: string;
+  previewProtocol: string;
+  previewHost: string;
+  previewPort: number | null;
+  previewPath: string;
+} | null {
+  try {
+    const parsed = new URL(urlValue);
+    return {
+      previewUrl: parsed.toString(),
+      previewProtocol: parsed.protocol.replace(/:$/, ""),
+      previewHost: parsed.hostname,
+      previewPort: parsed.port ? Number.parseInt(parsed.port, 10) : null,
+      previewPath: parsed.pathname || "/",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const intervalMs = 100;
+  const maxChecks = Math.ceil(timeoutMs / intervalMs);
+
+  for (let i = 0; i < maxChecks; i += 1) {
+    if (!isProcessAlive(pid)) {
+      return true;
+    }
+    await new Promise((resolvePromise) => {
+      setTimeout(resolvePromise, intervalMs);
+    });
   }
 
-  const manager = new DevServerManager(resolvedRoot);
-  managers.set(resolvedRoot, manager);
+  return !isProcessAlive(pid);
+}
+
+const managerInstances = new Map<string, DevServerManager>();
+
+export async function loadDevServerManager(rootDir: string): Promise<DevServerManager> {
+  const key = resolve(rootDir);
+  let manager = managerInstances.get(key);
+
+  if (!manager) {
+    const store = await loadDevServerStore(rootDir);
+    manager = new DevServerManager(key, store);
+    managerInstances.set(key, manager);
+    await manager.initialize();
+  }
+
   return manager;
 }
 
-export function destroyAllDevServerManagers(): void {
-  for (const manager of managers.values()) {
-    manager.destroy();
+export async function shutdownAllDevServerManagers(): Promise<void> {
+  for (const manager of managerInstances.values()) {
+    await manager.shutdown();
   }
-  managers.clear();
+}
+
+export function resetDevServerManager(): void {
+  managerInstances.clear();
+  resetDevServerStore();
 }

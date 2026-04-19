@@ -14,7 +14,6 @@ import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
 import { ApiError, sendErrorResponse } from "./api-error.js";
 import { getOrCreateProjectStore, evictAllProjectStores, setOnProjectFirstCreated } from "./project-store-resolver.js";
 import { getTerminalService, STALE_SESSION_THRESHOLD_MS } from "./terminal-service.js";
-import { destroyAllDevServerManagers, getDevServerManager } from "./dev-server-manager.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import { terminalSessionManager } from "./terminal.js";
 
@@ -43,6 +42,7 @@ import {
   rehydrateFromStore as rehydrateMilestoneSliceSessions,
 } from "./milestone-slice-interview.js";
 import { ChatManager } from "./chat.js";
+import { loadDevServerManager, shutdownAllDevServerManagers } from "./dev-server-manager.js";
 import type { SkillsAdapter } from "./skills-adapter.js";
 import { createAuthMiddleware } from "./auth-middleware.js";
 
@@ -392,9 +392,6 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
   // Initialize terminal service with project root
   getTerminalService(store.getRootDir());
-
-  // Initialize dev server manager for this project
-  getDevServerManager(store.getRootDir());
 
   const isHeadless = options?.headless === true;
 
@@ -824,10 +821,18 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       server = originalListen(...normalizedArgs);
     }
 
+    void loadDevServerManager(store.getRootDir()).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[server] Failed to initialize dev-server manager: ${message}`);
+    });
+
     server.once("close", () => {
       clearAiSessionCleanupInterval();
       aiSessionStore.stopScheduledCleanup();
-      destroyAllDevServerManagers();
+      void shutdownAllDevServerManagers().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[server] Failed to shutdown dev-server managers: ${message}`);
+      });
     });
 
     if (!dashboardApp.__fnWebSocketsAttached) {

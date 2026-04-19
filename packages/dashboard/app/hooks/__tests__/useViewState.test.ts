@@ -200,6 +200,28 @@ describe("useViewState", () => {
     expect(localStorage.getItem("kb:proj_123:kb-dashboard-task-view")).toBe("insights");
   });
 
+  it("restores and persists dev-server task view", async () => {
+    localStorage.setItem("kb:proj_123:kb-dashboard-task-view", "dev-server");
+
+    const { result } = renderHook(() =>
+      useViewState(
+        createOptions({
+          currentProject: PROJECT,
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(result.current.taskView).toBe("dev-server");
+    });
+
+    await act(async () => {
+      result.current.setTaskView("dev-server");
+    });
+
+    expect(localStorage.getItem("kb:proj_123:kb-dashboard-task-view")).toBe("dev-server");
+  });
+
   it("restores legacy views (board/list/agents/missions/chat) from scoped storage", async () => {
     const legacyViews = ["board", "list", "agents", "missions", "chat"] as const;
 

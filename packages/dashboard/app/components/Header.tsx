@@ -183,8 +183,8 @@ export interface HeaderProps {
   enginePaused?: boolean;
   onToggleGlobalPause?: () => void;
   onToggleEnginePause?: () => void;
-  view?: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory";
-  onChangeView?: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory") => void;
+  view?: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server";
+  onChangeView?: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server") => void;
   /** Whether to show the skills tab in the view toggle */
   showSkillsTab?: boolean;
   /** When true, shows the Agents view tab button. Hidden by default (experimental feature). */
@@ -771,6 +771,16 @@ export function Header({
               aria-pressed={view === "missions"}
             >
               <Target size={16} />
+            </button>
+            <button
+              className={`view-toggle-btn${view === "dev-server" ? " active" : ""}`}
+              onClick={() => onChangeView("dev-server")}
+              title="Dev server view"
+              aria-label="Dev server view"
+              aria-pressed={view === "dev-server"}
+              data-testid="view-toggle-dev-server"
+            >
+              <Server size={16} />
             </button>
             <button
               className={`view-toggle-btn${view === "chat" ? " active" : ""}`}

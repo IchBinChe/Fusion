@@ -24,8 +24,6 @@ import { GitHubClient, parseBadgeUrl } from "./github.js";
 import { githubRateLimiter } from "./github-poll.js";
 import { terminalSessionManager } from "./terminal.js";
 import { getTerminalService } from "./terminal-service.js";
-import { getDevServerManager } from "./dev-server-manager.js";
-import { detectDevServerCandidates, invalidateDetectionCache } from "./dev-server-detect.js";
 import { listFiles, readFile, writeFile, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, searchWorkspaceFiles, copyWorkspaceFile, moveWorkspaceFile, deleteWorkspaceFile, renameWorkspaceFile, getWorkspaceFileForDownload, getWorkspaceFolderForZip, listProjectMarkdownFiles, scanMarkdownFiles, FileServiceError, type MarkdownFileListResponse } from "./file-service.js";
 import { clearUsageCache, fetchAllProviderUsage } from "./usage.js";
 import {
@@ -53,6 +51,7 @@ import {
 import { getMissionInterviewSession, cleanupMissionInterviewSession } from "./mission-interview.js";
 import { getTargetInterviewSession, cleanupTargetInterviewSession } from "./milestone-slice-interview.js";
 import { writeSSEEvent } from "./sse-buffer.js";
+import { loadDevServerManager } from "./dev-server-manager.js";
 import {
   ApiError,
   badRequest,
@@ -7594,129 +7593,6 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (err instanceof ApiError) {
         throw err;
       }
-      rethrowAsApiError(err);
-    }
-  });
-
-  /* === Dev Server Routes === */
-
-  router.get("/dev-server/candidates", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const candidates = await detectDevServerCandidates(scopedStore.getRootDir());
-      res.json(candidates);
-    } catch (err: unknown) {
-      rethrowAsApiError(err);
-    }
-  });
-
-  router.get("/dev-server/status", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const manager = getDevServerManager(scopedStore.getRootDir());
-      res.json(manager.getState());
-    } catch (err: unknown) {
-      rethrowAsApiError(err);
-    }
-  });
-
-  router.post("/dev-server/start", async (req, res) => {
-    try {
-      const { command, scriptName, cwd } = req.body ?? {};
-
-      if (typeof command !== "string" || command.trim().length === 0) {
-        throw badRequest("command is required");
-      }
-      if (typeof scriptName !== "string" || scriptName.trim().length === 0) {
-        throw badRequest("scriptName is required");
-      }
-      if (cwd !== undefined && typeof cwd !== "string") {
-        throw badRequest("cwd must be a string when provided");
-      }
-
-      const { store: scopedStore } = await getProjectContext(req);
-      const rootDir = scopedStore.getRootDir();
-      const manager = getDevServerManager(rootDir);
-
-      await manager.start(command, scriptName, cwd);
-      invalidateDetectionCache(rootDir);
-      res.json(manager.getState());
-    } catch (err: unknown) {
-      rethrowAsApiError(err);
-    }
-  });
-
-  router.post("/dev-server/stop", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const manager = getDevServerManager(scopedStore.getRootDir());
-      await manager.stop();
-      res.json(manager.getState());
-    } catch (err: unknown) {
-      rethrowAsApiError(err);
-    }
-  });
-
-  router.post("/dev-server/restart", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const manager = getDevServerManager(scopedStore.getRootDir());
-      await manager.restart();
-      res.json(manager.getState());
-    } catch (err: unknown) {
-      rethrowAsApiError(err);
-    }
-  });
-
-  router.post("/dev-server/preview-url", async (req, res) => {
-    try {
-      const { url } = req.body ?? {};
-      if (url !== null && typeof url !== "string") {
-        throw badRequest("url must be a string or null");
-      }
-
-      const { store: scopedStore } = await getProjectContext(req);
-      const manager = getDevServerManager(scopedStore.getRootDir());
-      manager.setManualPreviewUrl(url);
-      res.json(manager.getState());
-    } catch (err: unknown) {
-      rethrowAsApiError(err);
-    }
-  });
-
-  router.get("/dev-server/logs/stream", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const manager = getDevServerManager(scopedStore.getRootDir());
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
-      res.write(`event: connected\ndata: ${JSON.stringify({})}\n\n`);
-
-      const onLog = (event: { serverId: string; line: string }) => {
-        res.write(`event: dev-server:log\ndata: ${JSON.stringify({ line: event.line })}\n\n`);
-      };
-
-      const onStatus = (state: import("./dev-server-manager.js").DevServerState) => {
-        res.write(`event: dev-server:status\ndata: ${JSON.stringify(state)}\n\n`);
-      };
-
-      manager.on("log", onLog);
-      manager.on("status", onStatus);
-
-      const heartbeat = setInterval(() => {
-        res.write(": heartbeat\n\n");
-      }, 30_000);
-
-      req.on("close", () => {
-        clearInterval(heartbeat);
-        manager.off("log", onLog);
-        manager.off("status", onStatus);
-      });
-    } catch (err: unknown) {
       rethrowAsApiError(err);
     }
   });
@@ -17315,6 +17191,195 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       } else {
         rethrowAsApiError(err, "Internal server error");
       }
+    }
+  });
+
+  // ── Dev Server API ───────────────────────────────────────────────────────
+
+  async function getDevServerManagerForRequest(req: Request) {
+    const context = await getProjectContext(req);
+    const manager = await loadDevServerManager(context.store.getRootDir());
+    return { ...context, manager };
+  }
+
+  function parseDevServerHistoryLimit(req: Request): number {
+    const rawLimit = req.query.limit;
+    if (typeof rawLimit !== "string") {
+      return 200;
+    }
+
+    const parsed = Number.parseInt(rawLimit, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return 200;
+    }
+
+    return Math.min(parsed, 1000);
+  }
+
+  /**
+   * GET /api/dev-server/status
+   * Returns current dev-server state and recent logs for reconnect hydration.
+   */
+  router.get("/dev-server/status", async (req, res) => {
+    try {
+      const { manager } = await getDevServerManagerForRequest(req);
+      const limit = parseDevServerHistoryLimit(req);
+      res.json(manager.getSnapshot(limit));
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * GET /api/dev-server/history
+   * Returns recent persisted dev-server logs.
+   */
+  router.get("/dev-server/history", async (req, res) => {
+    try {
+      const { manager } = await getDevServerManagerForRequest(req);
+      const limit = parseDevServerHistoryLimit(req);
+      res.json({ logs: manager.getRecentLogs(limit) });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * POST /api/dev-server/start
+   * Body: { command: string, cwd?: string, scriptName?: string }
+   */
+  router.post("/dev-server/start", async (req, res) => {
+    try {
+      const { manager } = await getDevServerManagerForRequest(req);
+      const rawCommand = typeof req.body?.command === "string" ? req.body.command.trim() : "";
+      const fallbackCommand = manager.getState().command ?? "";
+      const command = rawCommand || fallbackCommand;
+      if (!command) {
+        throw badRequest("command is required");
+      }
+
+      const cwd = typeof req.body?.cwd === "string" && req.body.cwd.trim().length > 0
+        ? req.body.cwd.trim()
+        : undefined;
+      const scriptName = typeof req.body?.scriptName === "string" && req.body.scriptName.trim().length > 0
+        ? req.body.scriptName.trim()
+        : undefined;
+
+      const state = await manager.start({ command, cwd, scriptName });
+      res.json({ state });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * POST /api/dev-server/stop
+   */
+  router.post("/dev-server/stop", async (req, res) => {
+    try {
+      const { manager } = await getDevServerManagerForRequest(req);
+      const state = await manager.stop();
+      res.json({ state });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * POST /api/dev-server/restart
+   * Body: { command?: string, cwd?: string, scriptName?: string }
+   */
+  router.post("/dev-server/restart", async (req, res) => {
+    try {
+      const { manager } = await getDevServerManagerForRequest(req);
+      const rawCommand = typeof req.body?.command === "string" ? req.body.command.trim() : "";
+      const fallbackCommand = manager.getState().command ?? "";
+      const command = rawCommand || fallbackCommand;
+      if (!command) {
+        throw badRequest("command is required");
+      }
+
+      const cwd = typeof req.body?.cwd === "string" && req.body.cwd.trim().length > 0
+        ? req.body.cwd.trim()
+        : undefined;
+      const scriptName = typeof req.body?.scriptName === "string" && req.body.scriptName.trim().length > 0
+        ? req.body.scriptName.trim()
+        : undefined;
+
+      const state = await manager.restart({ command, cwd, scriptName });
+      res.json({ state });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * GET /api/dev-server/stream
+   * Streams state/log updates with buffered replay support via lastEventId.
+   */
+  router.get("/dev-server/stream", async (req, res) => {
+    try {
+      const { manager } = await getDevServerManagerForRequest(req);
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+
+      res.write(": connected\n\n");
+
+      const lastEventId = parseLastEventId(req);
+      if (lastEventId !== undefined) {
+        const buffered = manager.getBufferedEvents(lastEventId);
+        if (!replayBufferedSSE(res, buffered)) {
+          res.end();
+          return;
+        }
+      }
+
+      const unsubscribe = manager.subscribe((event, eventId) => {
+        if (!writeSSEEvent(res, event.type, JSON.stringify(event.data), eventId)) {
+          unsubscribe();
+          if (!res.writableEnded) {
+            res.end();
+          }
+        }
+      });
+
+      const keepAlive = setInterval(() => {
+        if (!res.writableEnded && !res.destroyed) {
+          res.write(": keepalive\n\n");
+        }
+      }, 15_000);
+
+      req.on("close", () => {
+        clearInterval(keepAlive);
+        unsubscribe();
+      });
+    } catch (err: unknown) {
+      if (res.headersSent) {
+        return;
+      }
+      if (err instanceof ApiError) {
+        sendErrorResponse(res, err.statusCode, err.message, { details: err.details });
+        return;
+      }
+      sendErrorResponse(res, 500, err instanceof Error ? err.message : "Internal server error");
     }
   });
 

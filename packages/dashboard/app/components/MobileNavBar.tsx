@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Play,
   Settings,
+  Server,
   Sparkles,
   Target,
   Terminal,
@@ -30,9 +31,9 @@ import { useViewportMode } from "./Header";
 
 export interface MobileNavBarProps {
   /** Current task view mode */
-  view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory";
+  view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server";
   /** Change task view handler */
-  onChangeView: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory") => void;
+  onChangeView: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server") => void;
   /** Whether the ExecutorStatusBar footer is visible */
   footerVisible: boolean;
   /** Whether any full-screen modal is currently open (hides the tab bar) */
@@ -231,6 +232,18 @@ export function MobileNavBar({
         >
           <MessageSquare />
           <span className="mobile-nav-tab-label">Chat</span>
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-tab${view === "dev-server" ? " mobile-nav-tab--active" : ""}`}
+          data-testid="mobile-nav-tab-dev-server"
+          role="tab"
+          aria-selected={view === "dev-server"}
+          onClick={() => onChangeView("dev-server")}
+        >
+          <Server />
+          <span className="mobile-nav-tab-label">Dev Server</span>
         </button>
 
         <button

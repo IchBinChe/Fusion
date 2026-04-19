@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type {
   AgentPerformanceSummary,
   AgentReflection,
@@ -63,7 +63,7 @@ export class ReflectionStore extends EventEmitter {
 
   constructor(options: ReflectionStoreOptions = {}) {
     super();
-    this.rootDir = options.rootDir ?? ".fusion";
+    this.rootDir = options.rootDir ?? resolve(".fusion");
     this.agentsDir = join(this.rootDir, "agents");
   }
 

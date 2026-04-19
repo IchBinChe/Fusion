@@ -8,7 +8,7 @@
  */
 
 import { mkdir, readFile, writeFile, readdir, unlink, rename } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type {
@@ -134,7 +134,7 @@ export class AgentStore extends EventEmitter {
 
   constructor(options: AgentStoreOptions = {}) {
     super();
-    this.rootDir = options.rootDir ?? ".fusion";
+    this.rootDir = options.rootDir ?? resolve(".fusion");
     this.agentsDir = join(this.rootDir, "agents");
     this.taskStore = options.taskStore;
   }

@@ -9,7 +9,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
 import type { SteeringComment, TaskComment } from "./types.js";
@@ -577,6 +577,10 @@ export class Database {
 
   constructor(kbDir: string) {
     this.dbPath = join(kbDir, "fusion.db");
+
+    if (!isAbsolute(kbDir)) {
+      throw new Error(`[fusion] Database constructor requires an absolute kbDir path, got: ${kbDir}`);
+    }
 
     // Ensure .fusion directory exists
     if (!existsSync(kbDir)) {

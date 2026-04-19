@@ -493,18 +493,20 @@ export function UsageIndicator({ isOpen, onClose, projectId }: UsageIndicatorPro
               <span>Last updated: {lastUpdated.toLocaleTimeString()}</span>
             )}
           </div>
-          <button
-            className="btn btn-sm"
-            onClick={handleRefresh}
-            disabled={loading || isRefreshing}
-            data-testid="usage-refresh-btn"
-          >
-            <RefreshCw size={14} className={isRefreshing ? "spin" : ""} style={{ marginRight: 6 }} />
-            Refresh
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={onClose}>
-            Close
-          </button>
+          <div className="usage-actions-right">
+            <button
+              className="btn btn-sm"
+              onClick={handleRefresh}
+              disabled={loading || isRefreshing}
+              data-testid="usage-refresh-btn"
+            >
+              <RefreshCw size={14} className={isRefreshing ? "spin" : ""} style={{ marginRight: 6 }} />
+              Refresh
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>

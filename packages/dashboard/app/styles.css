@@ -14467,6 +14467,13 @@ html .column.drag-over * {
   flex: 1;
 }
 
+.usage-actions-right {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  margin-left: auto;
+}
+
 /* Mobile responsive */
 @media (max-width: 768px) {
   .usage-modal {

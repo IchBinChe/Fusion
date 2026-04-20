@@ -16,6 +16,7 @@ import { AgentReflectionsTab } from "./AgentReflectionsTab";
 import { getAgentHealthStatus } from "../utils/agentHealth";
 import { SkillMultiselect } from "./SkillMultiselect";
 import { subscribeSse } from "../sse-bus";
+import { DEFAULT_HEARTBEAT_INTERVAL_MS, formatHeartbeatInterval } from "../utils/heartbeatIntervals";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 
 /**
@@ -101,6 +102,8 @@ const MEMORY_LAYER_DESCRIPTIONS: Record<MemoryFileInfo["layer"], string> = {
   dreams: "Synthesized patterns and emerging themes distilled from this agent's daily memory.",
 };
 
+const DEFAULT_HEARTBEAT_INTERVAL_LABEL = formatHeartbeatInterval(DEFAULT_HEARTBEAT_INTERVAL_MS);
+
 function pickDefaultAgentMemoryPath(files: MemoryFileInfo[], currentPath: string): string {
   if (files.some((file) => file.path === currentPath)) {
     return currentPath;
@@ -121,6 +124,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   const onCloseRef = useRef(onClose);
   const addToastRef = useRef(addToast);
   const agentRef = useRef<AgentDetail | null>(null);
+  const hasConfigChangesRef = useRef(false);
 
   // Track the context version to detect stale events after project/agent switches.
   // Incremented whenever agentId or projectId changes, invalidating any in-flight SSE handlers.
@@ -181,6 +185,10 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     }
   }, [agent?.taskId, agentId, projectId]);
 
+  const handleConfigChangesState = useCallback((hasChanges: boolean) => {
+    hasConfigChangesRef.current = hasChanges;
+  }, []);
+
   useEffect(() => {
     void loadAgent();
   }, [loadAgent]);
@@ -213,8 +221,36 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
       // Clear stale logs and streaming state immediately
       setLogs([]);
       setIsStreaming(false);
+      hasConfigChangesRef.current = false;
     }
   }, [agentId, projectId]);
+
+  // Refresh this view when the current agent is updated elsewhere, unless there are unsaved edits.
+  useEffect(() => {
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const contextVersionAtStart = contextVersionRef.current;
+
+    return subscribeSse(`/api/events${query}`, {
+      events: {
+        "agent:updated": (event) => {
+          if (contextVersionRef.current !== contextVersionAtStart) return;
+
+          try {
+            const payload: unknown = JSON.parse(event.data);
+            if (!payload || typeof payload !== "object") return;
+
+            const updatedId = (payload as { id?: unknown }).id;
+            if (updatedId !== agentId) return;
+            if (hasConfigChangesRef.current) return;
+
+            void loadAgent();
+          } catch {
+            // Ignore malformed events
+          }
+        },
+      },
+    });
+  }, [agentId, projectId, loadAgent]);
 
   // Set up SSE for live log streaming when viewing logs tab with a task
   useEffect(() => {
@@ -546,6 +582,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
               projectId={projectId}
               addToast={addToast}
               onSaved={loadAgent}
+              onHasChangesChange={handleConfigChangesState}
             />
           )}
         </div>
@@ -2583,16 +2620,63 @@ function PerformanceTab({
   );
 }
 
+function deriveHeartbeatValues(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): Record<string, string> {
+  const rc = runtimeConfig ?? {};
+  const nextValues: Record<string, string> = {};
+
+  if (rc.heartbeatIntervalMs !== undefined && rc.heartbeatIntervalMs !== null) {
+    nextValues.heartbeatIntervalMs = String(rc.heartbeatIntervalMs);
+  }
+  if (rc.heartbeatTimeoutMs !== undefined && rc.heartbeatTimeoutMs !== null) {
+    nextValues.heartbeatTimeoutMs = String(rc.heartbeatTimeoutMs);
+  }
+  if (rc.maxConcurrentRuns !== undefined && rc.maxConcurrentRuns !== null) {
+    nextValues.maxConcurrentRuns = String(rc.maxConcurrentRuns);
+  }
+  if (rc.messageResponseMode === "immediate" || rc.messageResponseMode === "on-heartbeat") {
+    nextValues.messageResponseMode = rc.messageResponseMode;
+  }
+
+  return nextValues;
+}
+
+function deriveBudgetValues(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): Record<string, string> {
+  const bc = (runtimeConfig ?? {}).budgetConfig as Record<string, unknown> | undefined;
+  const nextValues: Record<string, string> = {};
+
+  if (!bc) {
+    return nextValues;
+  }
+
+  if (bc.tokenBudget !== undefined && bc.tokenBudget !== null) {
+    nextValues.tokenBudget = String(bc.tokenBudget);
+  }
+  if (bc.usageThreshold !== undefined && bc.usageThreshold !== null) {
+    // Convert fraction (0-1) to percentage (0-100) for display
+    nextValues.usageThreshold = String(Number(bc.usageThreshold) * 100);
+  }
+  if (bc.budgetPeriod !== undefined && bc.budgetPeriod !== null) {
+    nextValues.budgetPeriod = String(bc.budgetPeriod);
+  }
+  if (bc.resetDay !== undefined && bc.resetDay !== null) {
+    nextValues.resetDay = String(bc.resetDay);
+  }
+
+  return nextValues;
+}
+
 function ConfigTab({ 
   agent,
   projectId,
   addToast,
   onSaved,
+  onHasChangesChange,
 }: { 
   agent: AgentDetail;
   projectId?: string;
   addToast: (message: string, type?: "success" | "error") => void;
   onSaved: () => Promise<void>;
+  onHasChangesChange?: (hasChanges: boolean) => void;
 }) {
   // Identity field state
   const [nameValue, setNameValue] = useState(agent.name);
@@ -2614,45 +2698,14 @@ function ConfigTab({
   });
 
   // Heartbeat config state initialised from agent.runtimeConfig
-  const [heartbeatValues, setHeartbeatValues] = useState<Record<string, string>>(() => {
-    const rc = agent.runtimeConfig ?? {};
-    const initial: Record<string, string> = {};
-    if (rc.heartbeatIntervalMs !== undefined && rc.heartbeatIntervalMs !== null) {
-      initial.heartbeatIntervalMs = String(rc.heartbeatIntervalMs);
-    }
-    if (rc.heartbeatTimeoutMs !== undefined && rc.heartbeatTimeoutMs !== null) {
-      initial.heartbeatTimeoutMs = String(rc.heartbeatTimeoutMs);
-    }
-    if (rc.maxConcurrentRuns !== undefined && rc.maxConcurrentRuns !== null) {
-      initial.maxConcurrentRuns = String(rc.maxConcurrentRuns);
-    }
-    if (rc.messageResponseMode === "immediate" || rc.messageResponseMode === "on-heartbeat") {
-      initial.messageResponseMode = rc.messageResponseMode;
-    }
-    return initial;
-  });
+  const [heartbeatValues, setHeartbeatValues] = useState<Record<string, string>>(
+    () => deriveHeartbeatValues(agent.runtimeConfig),
+  );
 
   // Budget config state initialised from agent.runtimeConfig.budgetConfig
-  const [budgetValues, setBudgetValues] = useState<Record<string, string>>(() => {
-    const bc = (agent.runtimeConfig ?? {}).budgetConfig as Record<string, unknown> | undefined;
-    const initial: Record<string, string> = {};
-    if (bc !== undefined && bc !== null) {
-      if (bc.tokenBudget !== undefined && bc.tokenBudget !== null) {
-        initial.tokenBudget = String(bc.tokenBudget);
-      }
-      if (bc.usageThreshold !== undefined && bc.usageThreshold !== null) {
-        // Convert fraction (0-1) to percentage (0-100) for display
-        initial.usageThreshold = String(Number(bc.usageThreshold) * 100);
-      }
-      if (bc.budgetPeriod !== undefined && bc.budgetPeriod !== null) {
-        initial.budgetPeriod = String(bc.budgetPeriod);
-      }
-      if (bc.resetDay !== undefined && bc.resetDay !== null) {
-        initial.resetDay = String(bc.resetDay);
-      }
-    }
-    return initial;
-  });
+  const [budgetValues, setBudgetValues] = useState<Record<string, string>>(
+    () => deriveBudgetValues(agent.runtimeConfig),
+  );
 
   // Bundle config state
   const [bundleMode, setBundleMode] = useState<string>(agent.bundleConfig?.mode ?? "");
@@ -2722,6 +2775,7 @@ function ConfigTab({
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [justSaved, setJustSaved] = useState(false);
   const justSavedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousAgentRuntimeSyncRef = useRef<{ id: string; updatedAt: string } | null>(null);
 
   useEffect(() => {
     return () => {
@@ -2785,6 +2839,43 @@ function ConfigTab({
 
     return false;
   })();
+
+  const previousHasChangesRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    if (!onHasChangesChange) return;
+    if (previousHasChangesRef.current === hasChanges) return;
+
+    previousHasChangesRef.current = hasChanges;
+    onHasChangesChange(hasChanges);
+  }, [hasChanges, onHasChangesChange]);
+
+  useEffect(() => {
+    return () => {
+      onHasChangesChange?.(false);
+    };
+  }, [onHasChangesChange]);
+
+  useEffect(() => {
+    const nextSnapshot = { id: agent.id, updatedAt: agent.updatedAt };
+    const previousSnapshot = previousAgentRuntimeSyncRef.current;
+    const hasNewAgentData =
+      !previousSnapshot
+      || previousSnapshot.id !== nextSnapshot.id
+      || previousSnapshot.updatedAt !== nextSnapshot.updatedAt;
+
+    if (!hasNewAgentData) {
+      return;
+    }
+
+    if (hasChanges) {
+      return;
+    }
+
+    previousAgentRuntimeSyncRef.current = nextSnapshot;
+    setHeartbeatValues(deriveHeartbeatValues(agent.runtimeConfig));
+    setBudgetValues(deriveBudgetValues(agent.runtimeConfig));
+  }, [agent, hasChanges]);
 
   const handleFieldChange = (key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
@@ -3146,14 +3237,16 @@ function ConfigTab({
               type="text"
               inputMode="numeric"
               className={cn("input", !!errors.heartbeatIntervalMs && "input--error")}
-              placeholder="30000"
+              placeholder={String(DEFAULT_HEARTBEAT_INTERVAL_MS)}
               value={heartbeatValues.heartbeatIntervalMs ?? ""}
               onChange={(e) => handleHeartbeatFieldChange("heartbeatIntervalMs", e.target.value)}
             />
             {errors.heartbeatIntervalMs ? (
               <span className="config-error">{errors.heartbeatIntervalMs}</span>
             ) : (
-              <span className="config-hint">How often heartbeats are checked. Leave empty for system default (30000ms)</span>
+              <span className="config-hint">
+                How often heartbeats are checked. Leave empty for system default ({DEFAULT_HEARTBEAT_INTERVAL_MS}ms / {DEFAULT_HEARTBEAT_INTERVAL_LABEL}).
+              </span>
             )}
           </div>
 

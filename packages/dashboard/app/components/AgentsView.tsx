@@ -14,6 +14,11 @@ import { NewAgentDialog } from "./NewAgentDialog";
 import { AgentImportModal } from "./AgentImportModal";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 import { getAgentHealthStatus } from "../utils/agentHealth";
+import {
+  formatHeartbeatInterval,
+  getHeartbeatIntervalOptions,
+  resolveHeartbeatIntervalMs,
+} from "../utils/heartbeatIntervals";
 import { isEphemeralAgent } from "@fusion/core";
 
 export interface AgentsViewProps {
@@ -31,34 +36,6 @@ const AGENT_ROLES: { value: AgentCapability; label: string; icon: string }[] = [
   { value: "custom", label: "Custom", icon: "✦" },
 ];
 
-const HEARTBEAT_INTERVAL_PRESETS = [
-  { value: 1000, label: "1s" },
-  { value: 5000, label: "5s" },
-  { value: 10000, label: "10s" },
-  { value: 30000, label: "30s" },
-  { value: 60000, label: "1m" },
-  { value: 300000, label: "5m" },
-  { value: 900000, label: "15m" },
-  { value: 1800000, label: "30m" },
-  { value: 3600000, label: "1h" },
-  { value: 10800000, label: "3h" },
-  { value: 21600000, label: "6h" },
-  { value: 43200000, label: "12h" },
-  { value: 86400000, label: "24h" },
-] as const;
-
-function formatInterval(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
-  return `${Math.round(ms / 3_600_000)}h`;
-}
-
-function getClosestHeartbeatPreset(ms: number): number {
-  return HEARTBEAT_INTERVAL_PRESETS.reduce<number>((closest, preset) => {
-    return Math.abs(preset.value - ms) < Math.abs(closest - ms) ? preset.value : closest;
-  }, HEARTBEAT_INTERVAL_PRESETS[0].value);
-}
 
 const STATE_COLORS: Record<AgentState, { bg: string; text: string; border: string }> = {
   idle: { bg: "var(--state-idle-bg)", text: "var(--state-idle-text)", border: "var(--state-idle-border)" },
@@ -454,7 +431,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
         },
         projectId,
       );
-      addToast(`Heartbeat interval updated to ${formatInterval(newIntervalMs)} for ${agent.name}`, "success");
+      addToast(`Heartbeat interval updated to ${formatHeartbeatInterval(newIntervalMs)} for ${agent.name}`, "success");
       void loadAgents();
     } catch (err: any) {
       addToast(`Failed to update heartbeat interval: ${err.message}`, "error");
@@ -870,11 +847,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
             displayAgents.map(agent => {
               const health = getHealthStatus(agent);
               const stateStyle = STATE_COLORS[agent.state];
-              const configuredIntervalMs =
-                typeof agent.runtimeConfig?.heartbeatIntervalMs === "number"
-                  ? Math.max(1000, Math.round(agent.runtimeConfig.heartbeatIntervalMs))
-                  : 3_600_000;
-              const selectedIntervalMs = getClosestHeartbeatPreset(configuredIntervalMs);
+              const configuredIntervalMs = resolveHeartbeatIntervalMs(agent.runtimeConfig?.heartbeatIntervalMs);
+              const heartbeatOptions = getHeartbeatIntervalOptions(configuredIntervalMs);
               const isUpdatingHeartbeat = updatingHeartbeatAgentId === agent.id;
               return (
                 <div key={agent.id} className="agent-card" style={{ borderLeftColor: stateStyle.border }}>
@@ -972,15 +946,15 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                     )}
                     <div className="agent-heartbeat-control">
                       <span className="text-secondary">Heartbeat:</span>
-                      <span className="badge text-secondary">{formatInterval(configuredIntervalMs)}</span>
+                      <span className="badge text-secondary">{formatHeartbeatInterval(configuredIntervalMs)}</span>
                       <select
                         className="select agent-heartbeat-select"
-                        value={selectedIntervalMs}
+                        value={configuredIntervalMs}
                         onChange={(e) => void handleHeartbeatIntervalChange(agent, Number(e.target.value))}
                         disabled={isUpdatingHeartbeat}
                         aria-label={`Set heartbeat interval for ${agent.name}`}
                       >
-                        {HEARTBEAT_INTERVAL_PRESETS.map((preset) => (
+                        {heartbeatOptions.map((preset) => (
                           <option key={preset.value} value={preset.value}>
                             {preset.label}
                           </option>

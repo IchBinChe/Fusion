@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { AgentDetailView } from "../AgentDetailView";
 import type { AgentCapability, AgentDetail } from "../../api";
+import { DEFAULT_HEARTBEAT_INTERVAL_MS } from "../../utils/heartbeatIntervals";
 
 // Mock the API functions
 vi.mock("../../api", () => ({
@@ -1120,6 +1121,27 @@ describe("AgentDetailView", () => {
         const heartbeatInput = screen.getByLabelText("Heartbeat Interval (ms)") as HTMLInputElement;
         expect(heartbeatInput.value).toBe("");
       });
+    });
+
+    it("shows shared system default hint for heartbeat interval", async () => {
+      mockFetchAgent.mockResolvedValue(createMockAgent({ metadata: {} }));
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />
+      );
+
+      await navigateToSettings(user);
+
+      const heartbeatInput = await screen.findByLabelText("Heartbeat Interval (ms)");
+      expect(heartbeatInput).toHaveAttribute("placeholder", String(DEFAULT_HEARTBEAT_INTERVAL_MS));
+      expect(
+        screen.getByText(`How often heartbeats are checked. Leave empty for system default (${DEFAULT_HEARTBEAT_INTERVAL_MS}ms / 1h).`),
+      ).toBeInTheDocument();
     });
 
     it("pre-fills heartbeat fields from agent runtimeConfig", async () => {

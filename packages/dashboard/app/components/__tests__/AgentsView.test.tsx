@@ -181,6 +181,25 @@ describe("AgentsView", () => {
       expect(screen.getByDisplayValue("30s")).toBeTruthy();
     });
 
+    it("uses the system default heartbeat interval when runtime config is unset", async () => {
+      mockFetchAgents.mockResolvedValue([
+        {
+          ...mockAgents[1],
+          runtimeConfig: {},
+        },
+      ]);
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Set heartbeat interval for Test Agent 2")).toBeTruthy();
+      });
+
+      const intervalSelect = screen.getByLabelText("Set heartbeat interval for Test Agent 2") as HTMLSelectElement;
+      expect(intervalSelect.value).toBe("3600000");
+      expect(intervalSelect.options[intervalSelect.selectedIndex]?.text).toBe("1h");
+    });
+
     it("updates agent heartbeat interval from preset dropdown", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
@@ -202,7 +221,7 @@ describe("AgentsView", () => {
       });
     });
 
-    it("maps non-preset heartbeat interval to closest preset", async () => {
+    it("shows a custom heartbeat option when configured interval is not a preset", async () => {
       mockFetchAgents.mockResolvedValue([
         {
           ...mockAgents[1],
@@ -217,8 +236,9 @@ describe("AgentsView", () => {
       });
 
       const intervalSelect = screen.getByLabelText("Set heartbeat interval for Test Agent 2") as HTMLSelectElement;
-      expect(intervalSelect.value).toBe("60000");
-      expect(screen.getAllByText("1m").length).toBeGreaterThan(0);
+      expect(intervalSelect.value).toBe("65000");
+      expect(intervalSelect.options[intervalSelect.selectedIndex]?.text).toBe("1m (custom)");
+      expect(screen.getByRole("option", { name: "1m (custom)" })).toBeTruthy();
     });
 
     it("shows refresh button", async () => {

@@ -7,15 +7,28 @@ const stylesContent = fs.readFileSync(stylesPath, "utf-8");
 
 // Agent component file paths to verify inline <style> blocks are removed
 const agentsViewContent = fs.readFileSync(path.join(__dirname, "../components/AgentsView.tsx"), "utf-8");
+const agentEmptyStateContent = fs.readFileSync(path.join(__dirname, "../components/AgentEmptyState.tsx"), "utf-8");
 const agentDetailViewContent = fs.readFileSync(path.join(__dirname, "../components/AgentDetailView.tsx"), "utf-8");
 const activeAgentsPanelContent = fs.readFileSync(path.join(__dirname, "../components/ActiveAgentsPanel.tsx"), "utf-8");
 const newAgentDialogContent = fs.readFileSync(path.join(__dirname, "../components/NewAgentDialog.tsx"), "utf-8");
 
 /** Check that styles.css contains a CSS class definition for the given selector */
+function extractRuleBlock(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = stylesContent.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  return match?.[1] ?? "";
+}
+
 function hasClass(cls: string): boolean {
   const escaped = cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Match standalone class or class within a grouped selector list
-  return new RegExp(`${escaped}\\s*(,|\\{)`).test(stylesContent);
+  // Match standalone class, grouped selector, or compound selector (e.g. `.foo svg`)
+  return new RegExp(`${escaped}(?=[\\s,{:.#>+~])`).test(stylesContent);
+}
+
+function extractSection(startMarker: string, endMarker: string): string {
+  const start = stylesContent.indexOf(startMarker);
+  const end = stylesContent.indexOf(endMarker, start + startMarker.length);
+  return start >= 0 && end >= 0 ? stylesContent.slice(start, end) : "";
 }
 
 describe("Agent CSS classes", () => {
@@ -53,6 +66,10 @@ describe("Agent CSS classes", () => {
   it("should define AgentMetricsBar CSS classes", () => {
     expect(hasClass(".agent-metrics-bar")).toBe(true);
     expect(hasClass(".agent-metric-card")).toBe(true);
+    expect(hasClass(".agent-metric-card--active")).toBe(true);
+    expect(hasClass(".agent-metric-card--tasks")).toBe(true);
+    expect(hasClass(".agent-metric-card--success")).toBe(true);
+    expect(hasClass(".agent-metric-card--runs")).toBe(true);
     expect(hasClass(".agent-metric-info")).toBe(true);
     expect(hasClass(".agent-metric-value")).toBe(true);
     expect(hasClass(".agent-metric-label")).toBe(true);
@@ -66,13 +83,26 @@ describe("Agent CSS classes", () => {
     expect(hasClass(".agents-view-controls")).toBe(true);
     expect(hasClass(".agents-view-content")).toBe(true);
     expect(hasClass(".agent-controls")).toBe(true);
+    expect(hasClass(".agent-controls-filters")).toBe(true);
     expect(hasClass(".agent-state-filter")).toBe(true);
     expect(hasClass(".agent-state-filter-select")).toBe(true);
     expect(hasClass(".agent-board")).toBe(true);
     expect(hasClass(".agent-board-card")).toBe(true);
+    expect(hasClass(".agent-board-card--idle")).toBe(true);
+    expect(hasClass(".agent-board-card--active")).toBe(true);
+    expect(hasClass(".agent-board-card--running")).toBe(true);
+    expect(hasClass(".agent-board-card--paused")).toBe(true);
+    expect(hasClass(".agent-board-card--error")).toBe(true);
+    expect(hasClass(".agent-board-card--terminated")).toBe(true);
     expect(hasClass(".agent-board-header")).toBe(true);
     expect(hasClass(".agent-board-icon")).toBe(true);
     expect(hasClass(".agent-board-badge")).toBe(true);
+    expect(hasClass(".agent-badge--idle")).toBe(true);
+    expect(hasClass(".agent-badge--active")).toBe(true);
+    expect(hasClass(".agent-badge--running")).toBe(true);
+    expect(hasClass(".agent-badge--paused")).toBe(true);
+    expect(hasClass(".agent-badge--error")).toBe(true);
+    expect(hasClass(".agent-badge--terminated")).toBe(true);
     expect(hasClass(".agent-board-health")).toBe(true);
     expect(hasClass(".agent-board-name")).toBe(true);
     expect(hasClass(".agent-board-id")).toBe(true);
@@ -80,6 +110,12 @@ describe("Agent CSS classes", () => {
     expect(hasClass(".agent-board-actions")).toBe(true);
     expect(hasClass(".agent-list")).toBe(true);
     expect(hasClass(".agent-card")).toBe(true);
+    expect(hasClass(".agent-card--idle")).toBe(true);
+    expect(hasClass(".agent-card--active")).toBe(true);
+    expect(hasClass(".agent-card--running")).toBe(true);
+    expect(hasClass(".agent-card--paused")).toBe(true);
+    expect(hasClass(".agent-card--error")).toBe(true);
+    expect(hasClass(".agent-card--terminated")).toBe(true);
     expect(hasClass(".agent-card-header")).toBe(true);
     expect(hasClass(".agent-card-body")).toBe(true);
     expect(hasClass(".agent-card-actions")).toBe(true);
@@ -97,6 +133,48 @@ describe("Agent CSS classes", () => {
     expect(hasClass(".agent-role-select")).toBe(true);
     expect(hasClass(".agent-empty")).toBe(true);
     expect(hasClass(".spin")).toBe(true);
+  });
+
+  it("should visually group the filter controls", () => {
+    const filtersBlock = extractRuleBlock(".agent-controls-filters");
+    expect(filtersBlock).toContain("padding: var(--space-xs) var(--space-sm)");
+    expect(filtersBlock).toContain("background: var(--surface)");
+    expect(filtersBlock).toContain("border: 1px solid var(--border)");
+    expect(filtersBlock).toContain("border-radius: var(--radius-md)");
+  });
+
+  it("should use design tokens for the updated tree view spacing and transitions", () => {
+    const treeViewBlock = extractRuleBlock(".agent-tree__view");
+    expect(treeViewBlock).toContain("gap: var(--space-xs)");
+    expect(treeViewBlock).toContain("padding: var(--space-sm) 0");
+
+    const treeNodeBlock = extractRuleBlock(".agent-tree__node");
+    expect(treeNodeBlock).toContain("gap: var(--space-sm)");
+    expect(treeNodeBlock).toContain("padding: var(--space-sm) var(--space-md)");
+    expect(treeNodeBlock).toContain("border-radius: var(--radius-sm)");
+    expect(treeNodeBlock).toContain("transition: background-color var(--transition-fast)");
+    expect(treeNodeBlock).not.toMatch(/gap:\s*4px|padding:\s*8px 12px|border-radius:\s*4px|0\.15s\s+ease/);
+
+    expect(extractRuleBlock(".agent-tree__indent--1")).toContain("padding-left: var(--space-xl)");
+    expect(extractRuleBlock(".agent-tree__indent--2")).toContain("padding-left: calc(var(--space-xl) * 2)");
+    expect(extractRuleBlock(".agent-tree__indent--3")).toContain("padding-left: calc(var(--space-xl) * 3)");
+    expect(extractRuleBlock(".agent-tree__indent--4")).toContain("padding-left: calc(var(--space-xl) * 4)");
+  });
+
+  it("should use dashboard tokens in the updated org chart styles", () => {
+    const orgChartSection = extractSection("/* === FN-1167: Agent Org Chart + Chain of Command === */", "/* === Agent Dialog Mobile Responsive === */");
+    expect(orgChartSection).toContain("gap: var(--space-xl)");
+    expect(orgChartSection).toContain("padding: var(--space-lg)");
+    expect(orgChartSection).toContain("min-height: calc(var(--space-xl) * 9 + var(--space-xs))");
+    expect(orgChartSection).toContain("border: 1px solid var(--border)");
+    expect(orgChartSection).toContain("color: var(--text)");
+    expect(orgChartSection).toContain("color: var(--text-muted)");
+    expect(orgChartSection).toContain("border-radius: var(--radius-pill)");
+    expect(orgChartSection).toContain("transition: border-color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast)");
+    expect(orgChartSection).not.toContain("var(--border-color)");
+    expect(orgChartSection).not.toContain("var(--text-primary)");
+    expect(orgChartSection).not.toContain("var(--text-secondary)");
+    expect(orgChartSection).not.toMatch(/1\.5rem|0\.75rem|0\.72rem|0\.78rem|0\.65rem|120ms\s+ease|220px|10px/);
   });
 
   // Verify AgentDetailView classes
@@ -211,9 +289,21 @@ describe("Agent CSS classes", () => {
     expect(hasClass(".agent-dialog-loading")).toBe(true);
   });
 
+  it("should define shared AgentEmptyState component primitives", () => {
+    expect(hasClass(".agent-empty-state__icon")).toBe(true);
+    expect(hasClass(".agent-empty-state__title")).toBe(true);
+    expect(hasClass(".agent-empty-state__description")).toBe(true);
+    expect(agentEmptyStateContent).toContain("Create Agent");
+  });
+
   // Verify no inline <style> blocks remain in agent components
   it("should not have inline <style> blocks in AgentsView", () => {
     expect(agentsViewContent).not.toContain("<style>");
+  });
+
+  it("should only keep runtime health color inline styles in AgentsView", () => {
+    const inlineStyleCount = (agentsViewContent.match(/style=\{\{/g) || []).length;
+    expect(inlineStyleCount).toBe(4);
   });
 
   it("should not have inline <style> blocks in AgentDetailView", () => {

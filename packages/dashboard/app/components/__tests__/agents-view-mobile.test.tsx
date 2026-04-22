@@ -44,6 +44,7 @@ vi.mock("../../api", () => ({
   deleteAgent: vi.fn(),
   startAgentRun: vi.fn(),
   fetchModels: vi.fn(() => Promise.resolve({ models: [] })),
+  fetchOrgTree: vi.fn(),
 }));
 
 import {
@@ -53,6 +54,7 @@ import {
   updateAgentState,
   deleteAgent,
   startAgentRun,
+  fetchOrgTree,
 } from "../../api";
 
 const mockAgents: Agent[] = [
@@ -105,6 +107,7 @@ describe("AgentsView mobile adaptations", () => {
       endedAt: null,
       status: "active",
     });
+    vi.mocked(fetchOrgTree).mockResolvedValue([]);
   });
 
   it("renders board view grid and board cards", async () => {
@@ -136,6 +139,7 @@ describe("AgentsView mobile adaptations", () => {
     await waitFor(() => expect(screen.getByText("Agents")).toBeTruthy());
 
     expect(container.querySelector(".agent-controls")).toBeTruthy();
+    expect(container.querySelector(".agent-controls-filters")).toBeTruthy();
     expect(container.querySelector(".agent-state-filter")).toBeTruthy();
     expect(container.querySelector(".agent-controls-actions")).toBeTruthy();
   });
@@ -195,9 +199,24 @@ describe("agents-view mobile CSS", () => {
     expect(block).toContain("flex-wrap: wrap");
   });
 
+  it("stacks grouped filter controls on mobile", () => {
+    expect(mobileMediaBlock).toContain(".agent-controls-filters");
+    const block = extractRuleBlock(mobileMediaBlock, ".agent-controls-filters");
+    expect(block).toContain("flex-direction: column");
+    expect(block).toContain("width: 100%");
+  });
+
   it("defines .agents-view-title with flex-wrap on mobile", () => {
     expect(mobileMediaBlock).toContain(".agents-view-title");
     const block = extractRuleBlock(mobileMediaBlock, ".agents-view-title");
     expect(block).toContain("flex-wrap: wrap");
+  });
+
+  it("defines mobile org chart sizing rules", () => {
+    expect(mobileMediaBlock).toContain(".org-chart-node");
+    expect(extractRuleBlock(mobileMediaBlock, ".org-chart-node")).toContain("min-width: calc(var(--space-2xl) * 5)");
+    expect(extractRuleBlock(mobileMediaBlock, ".org-chart-node-card")).toContain("padding: var(--space-sm)");
+    expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart")).toContain("gap: var(--space-sm)");
+    expect(extractRuleBlock(mobileMediaBlock, ".org-chart-node__badge")).toContain("font-size: calc(var(--space-sm) + var(--space-xs) * 0.625)");
   });
 });

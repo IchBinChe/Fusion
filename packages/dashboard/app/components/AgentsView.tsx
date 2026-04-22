@@ -5,6 +5,7 @@ import { fetchAgents, updateAgent, updateAgentState, deleteAgent, startAgentRun,
 import { AgentDetailView } from "./AgentDetailView";
 import { ActiveAgentsPanel } from "./ActiveAgentsPanel";
 import { AgentMetricsBar } from "./AgentMetricsBar";
+import { AgentEmptyState } from "./AgentEmptyState";
 import { useAgents } from "../hooks/useAgents";
 import { subscribeSse } from "../sse-bus";
 import { useAgentHierarchy } from "../hooks/useAgentHierarchy";
@@ -37,14 +38,41 @@ const AGENT_ROLES: { value: AgentCapability; label: string; icon: string }[] = [
 ];
 
 
-const STATE_COLORS: Record<AgentState, { bg: string; text: string; border: string }> = {
-  idle: { bg: "var(--state-idle-bg)", text: "var(--state-idle-text)", border: "var(--state-idle-border)" },
-  active: { bg: "var(--state-active-bg)", text: "var(--state-active-text)", border: "var(--state-active-border)" },
-  running: { bg: "var(--state-active-bg)", text: "var(--state-active-text)", border: "var(--state-active-border)" },
-  paused: { bg: "var(--state-paused-bg)", text: "var(--state-paused-text)", border: "var(--state-paused-border)" },
-  error: { bg: "var(--state-error-bg)", text: "var(--state-error-text)", border: "var(--state-error-border)" },
-  terminated: { bg: "var(--state-error-bg)", text: "var(--state-error-text)", border: "var(--state-error-border)" },
-};
+function getStateBadgeClass(state: AgentState): string {
+  switch (state) {
+    case "running":
+      return "agent-badge--running";
+    case "active":
+      return "agent-badge--active";
+    case "paused":
+      return "agent-badge--paused";
+    case "error":
+      return "agent-badge--error";
+    case "terminated":
+      return "agent-badge--terminated";
+    case "idle":
+    default:
+      return "agent-badge--idle";
+  }
+}
+
+function getStateCardClass(prefix: "agent-board-card" | "agent-card", state: AgentState): string {
+  switch (state) {
+    case "running":
+      return `${prefix}--running`;
+    case "active":
+      return `${prefix}--active`;
+    case "paused":
+      return `${prefix}--paused`;
+    case "error":
+      return `${prefix}--error`;
+    case "terminated":
+      return `${prefix}--terminated`;
+    case "idle":
+    default:
+      return `${prefix}--idle`;
+  }
+}
 
 /** Recursive tree node component for agent hierarchy */
 function AgentTreeNode({
@@ -70,7 +98,7 @@ function AgentTreeNode({
   const childCount = getChildCount(agent.id);
   const expanded = isExpanded(agent.id);
   const health = getHealthStatus(agent);
-  const stateStyle = STATE_COLORS[agent.state];
+  const stateBadgeClass = getStateBadgeClass(agent.state);
 
   return (
     <>
@@ -99,12 +127,7 @@ function AgentTreeNode({
           <span className="agent-tree__icon">{getRoleIcon(agent.role)}</span>
           <span className="agent-tree__name">{agent.name}</span>
           <span
-            className="agent-tree__badge"
-            style={{
-              background: stateStyle.bg,
-              color: stateStyle.text,
-              border: `1px solid ${stateStyle.border}`,
-            }}
+            className={`agent-tree__badge ${stateBadgeClass}`}
           >
             {agent.state}
           </span>
@@ -162,7 +185,7 @@ function OrgChartNode({
 }) {
   const { agent, children } = node;
   const health = getHealthStatus(agent);
-  const stateStyle = STATE_COLORS[agent.state];
+  const stateBadgeClass = getStateBadgeClass(agent.state);
 
   return (
     <div className={`org-chart-node${children.length > 0 ? " org-chart-node--has-children" : ""}`}>
@@ -179,12 +202,7 @@ function OrgChartNode({
         </div>
         <div className="org-chart-node__meta">
           <span
-            className="org-chart-node__badge"
-            style={{
-              background: stateStyle.bg,
-              color: stateStyle.text,
-              border: `1px solid ${stateStyle.border}`,
-            }}
+            className={`org-chart-node__badge ${stateBadgeClass}`}
           >
             {agent.state}
           </span>
@@ -539,7 +557,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       <div className="agents-view-content">
         {/* Filter and Create Bar */}
         <div className="agent-controls">
-          <div className="agent-state-filter">
+          <div className="agent-controls-filters">
+            <div className="agent-state-filter">
             <Filter size={14} />
             <select
               className="agent-state-filter-select"
@@ -557,7 +576,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
             </select>
           </div>
 
-          <label className="checkbox-label agent-system-filter">
+            <label className="checkbox-label agent-system-filter">
             <input
               type="checkbox"
               checked={showSystemAgents}
@@ -565,7 +584,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
               aria-label="Show system agents"
             />
             Show system agents
-          </label>
+            </label>
+          </div>
 
           <div className="agent-controls-actions">
             <button
@@ -609,11 +629,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
         {agentView === "tree" ? (
           <div className="agent-tree__view">
             {displayAgents.length === 0 ? (
-              <div className="agent-empty">
-                <Bot size={48} opacity={0.3} />
-                <p>No agents found</p>
-                <p className="text-secondary">Create an agent to get started</p>
-              </div>
+              <AgentEmptyState onCtaClick={() => setIsCreating(true)} />
             ) : (
               hierarchy.rootNodes.map((node) => (
                 <AgentTreeNode
@@ -638,11 +654,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                 <span>Loading org chart...</span>
               </div>
             ) : displayOrgTree.length === 0 ? (
-              <div className="agent-empty">
-                <Bot size={48} opacity={0.3} />
-                <p>No agents found</p>
-                <p className="text-secondary">Create an agent to get started</p>
-              </div>
+              <AgentEmptyState onCtaClick={() => setIsCreating(true)} />
             ) : (
               displayOrgTree.map((node) => (
                 <OrgChartNode
@@ -659,18 +671,15 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
         ) : (
         <div className={agentView === "board" ? "agent-board" : "agent-list"}>
           {displayAgents.length === 0 ? (
-            <div className="agent-empty">
-              <Bot size={48} opacity={0.3} />
-              <p>No agents found</p>
-              <p className="text-secondary">Create an agent to get started</p>
-            </div>
+            <AgentEmptyState onCtaClick={() => setIsCreating(true)} />
           ) : agentView === "board" ? (
             // Board view: compact grid layout
             displayAgents.map(agent => {
               const health = getHealthStatus(agent);
-              const stateStyle = STATE_COLORS[agent.state];
+              const stateBadgeClass = getStateBadgeClass(agent.state);
+              const stateCardClass = getStateCardClass("agent-board-card", agent.state);
               return (
-                <div key={agent.id} className="agent-board-card" style={{ borderColor: stateStyle.border }}>
+                <div key={agent.id} className={`agent-board-card ${stateCardClass}`}>
                   <div 
                     className="agent-board-clickable"
                     onClick={() => setSelectedAgentId(agent.id)}
@@ -681,12 +690,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                     <div className="agent-board-header">
                       <span className="agent-board-icon">{getRoleIcon(agent.role)}</span>
                       <span
-                        className="agent-board-badge"
-                        style={{
-                          background: stateStyle.bg,
-                          color: stateStyle.text,
-                          border: `1px solid ${stateStyle.border}`,
-                        }}
+                        className={`agent-board-badge ${stateBadgeClass}`}
                       >
                         {agent.state}
                       </span>
@@ -847,12 +851,13 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
             // List view: detailed card layout
             displayAgents.map(agent => {
               const health = getHealthStatus(agent);
-              const stateStyle = STATE_COLORS[agent.state];
+              const stateBadgeClass = getStateBadgeClass(agent.state);
+              const stateCardClass = getStateCardClass("agent-card", agent.state);
               const configuredIntervalMs = resolveHeartbeatIntervalMs(agent.runtimeConfig?.heartbeatIntervalMs);
               const heartbeatOptions = getHeartbeatIntervalOptions(configuredIntervalMs);
               const isUpdatingHeartbeat = updatingHeartbeatAgentId === agent.id;
               return (
-                <div key={agent.id} className="agent-card" style={{ borderLeftColor: stateStyle.border }}>
+                <div key={agent.id} className={`agent-card ${stateCardClass}`}>
                   <div className="agent-card-header">
                     <div 
                       className="agent-info agent-info--clickable"
@@ -905,12 +910,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                     </div>
                     <div className="agent-badges">
                       <span
-                        className="badge"
-                        style={{
-                          background: stateStyle.bg,
-                          color: stateStyle.text,
-                          border: `1px solid ${stateStyle.border}`,
-                        }}
+                        className={`badge ${stateBadgeClass}`}
                       >
                         {agent.state}
                       </span>

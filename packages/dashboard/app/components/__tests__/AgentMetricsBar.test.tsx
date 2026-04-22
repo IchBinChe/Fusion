@@ -108,4 +108,16 @@ describe("AgentMetricsBar", () => {
     expect(screen.getByTestId("check-circle-icon")).toBeInTheDocument();
     expect(screen.getByTestId("zap-icon")).toBeInTheDocument();
   });
+
+  it("applies metric variant classes without inline icon styles", () => {
+    const { container } = render(<AgentMetricsBar stats={makeStats()} />);
+
+    expect(container.querySelector(".agent-metric-card--active")).toBeInTheDocument();
+    expect(container.querySelector(".agent-metric-card--tasks")).toBeInTheDocument();
+    expect(container.querySelector(".agent-metric-card--success")).toBeInTheDocument();
+    expect(container.querySelector(".agent-metric-card--runs")).toBeInTheDocument();
+
+    const metricsBarMarkup = container.querySelector(".agent-metrics-bar")?.innerHTML ?? "";
+    expect(metricsBarMarkup).not.toContain("style=");
+  });
 });

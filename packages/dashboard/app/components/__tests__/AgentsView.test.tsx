@@ -134,6 +134,19 @@ describe("AgentsView", () => {
       await waitFor(() => {
         expect(screen.getByText("No agents found")).toBeTruthy();
         expect(screen.getByText("Create an agent to get started")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Create Agent" })).toBeTruthy();
+      });
+    });
+
+    it("opens the create dialog from the empty state CTA", async () => {
+      mockFetchAgents.mockResolvedValue([]);
+      render(<AgentsView addToast={mockAddToast} />);
+
+      const cta = await screen.findByRole("button", { name: "Create Agent" });
+      fireEvent.click(cta);
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog", { name: "Create new agent" })).toBeTruthy();
       });
     });
 
@@ -449,6 +462,7 @@ describe("AgentsView", () => {
       await waitFor(() => {
         expect(screen.getByText("No agents found")).toBeTruthy();
         expect(screen.getByText("Create an agent to get started")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Create Agent" })).toBeTruthy();
       });
     });
 

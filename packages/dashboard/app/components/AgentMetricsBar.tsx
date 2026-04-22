@@ -5,27 +5,33 @@ interface AgentMetricsBarProps {
   stats: AgentStats | null;
 }
 
+const METRIC_CARDS = [
+  { icon: Activity, label: "Active Agents", valueKey: "activeCount", className: "agent-metric-card--active" },
+  { icon: ListTodo, label: "Assigned Tasks", valueKey: "assignedTaskCount", className: "agent-metric-card--tasks" },
+  { icon: CheckCircle, label: "Success Rate", valueKey: "successRate", className: "agent-metric-card--success" },
+  { icon: Zap, label: "Total Runs", valueKey: "completedRuns", className: "agent-metric-card--runs" },
+] as const;
+
 export function AgentMetricsBar({ stats }: AgentMetricsBarProps) {
   if (!stats) return null;
 
-  const cards = [
-    { icon: Activity, label: "Active Agents", value: stats.activeCount, color: "var(--state-active-text)" },
-    { icon: ListTodo, label: "Assigned Tasks", value: stats.assignedTaskCount, color: "var(--in-progress)" },
-    { icon: CheckCircle, label: "Success Rate", value: `${Math.round(stats.successRate * 100)}%`, color: "var(--color-success, #3fb950)" },
-    { icon: Zap, label: "Total Runs", value: stats.completedRuns, color: "var(--in-progress)" },
-  ];
-
   return (
     <div className="agent-metrics-bar">
-      {cards.map(card => (
-        <div key={card.label} className="agent-metric-card">
-          <card.icon size={18} style={{ color: card.color }} />
-          <div className="agent-metric-info">
-            <span className="agent-metric-value">{card.value}</span>
-            <span className="agent-metric-label">{card.label}</span>
+      {METRIC_CARDS.map((card) => {
+        const value = card.valueKey === "successRate"
+          ? `${Math.round(stats.successRate * 100)}%`
+          : stats[card.valueKey];
+
+        return (
+          <div key={card.label} className={`agent-metric-card ${card.className}`}>
+            <card.icon size={18} />
+            <div className="agent-metric-info">
+              <span className="agent-metric-value">{value}</span>
+              <span className="agent-metric-label">{card.label}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -409,7 +409,6 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
     }
 
     const fallbackCwd = normalizeSourceToCwd(selectedSource) ?? ".";
-    const scriptName = selectedCandidate?.scriptName ?? selectedScript ?? "custom";
     const cwd = selectedCandidate?.cwd ?? fallbackCwd;
 
     void runAction(

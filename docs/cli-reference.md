@@ -70,7 +70,7 @@ WebSocket) is protected by a bearer token. On startup, Fusion prints both the
 raw token and a click-to-open URL that embeds `?token=<token>`:
 
 ```
-fn board
+fn dashboard
 ────────────────────────
 → http://localhost:4040
 Auth:    bearer token required

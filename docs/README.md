@@ -8,7 +8,7 @@ Fusion is an AI-orchestrated task board that turns ideas into reviewed, merged c
 
 ## Quick Start
 
-Install Fusion globally, run `fn dashboard`, then create your first task from the board or CLI.
+Start the local dashboard with `pnpm dev dashboard`, then create your first task from the board or CLI.
 
 For a full walkthrough (installation, onboarding, first task, and daily workflow basics):
 
@@ -68,7 +68,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 
 ## External Resources
 
-- GitHub repository: https://github.com/gsxdsm/fusion
+- GitHub repository: https://github.com/Runfusion/Fusion
 - npm package: https://www.npmjs.com/package/@gsxdsm/fusion
 - pi agent framework: https://github.com/badlogic/pi-mono
 

@@ -28,6 +28,7 @@ import { isUsageLimitError } from "./usage-limit-detector.js";
  * - Socket errors (socket hang up)
  * - Transport layer failures
  * - AI provider abort errors (request was aborted — temporary streaming/API cancellations)
+ * - OpenAI/Codex infrastructure errors surfaced as structured `server_error` payloads
  */
 export const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
   // Proxy/gateway errors - indicate temporary routing issues
@@ -56,6 +57,13 @@ export const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
   // AbortController when a provider drops an in-flight operation. Excludes user-
   // initiated cancellations like "operation was aborted by user" — those are not transient.
   /operation was aborted(?!\s+by\b)/i,
+
+  // OpenAI/Codex structured infrastructure failures. These arrive as JSON-ish payloads
+  // like {"type":"error","error":{"type":"server_error","code":"server_error",...}}
+  // and are temporary service-side failures rather than task-specific defects.
+  /"type":"server_error"/i,
+  /"code":"server_error"/i,
+  /An error occurred while processing your request\./i,
 ];
 
 /**

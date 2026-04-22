@@ -92,6 +92,11 @@ describe("Transient Error Detector", () => {
       expect(isTransientError("OPERATION WAS ABORTED")).toBe(true);
     });
 
+    it("matches OpenAI/Codex structured server_error payloads", () => {
+      const message = `Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID 9349dabf-bcb7-4c36-aa40-f645dd04a472 in your message.","param":null},"sequence_number":2}`;
+      expect(isTransientError(message)).toBe(true);
+    });
+
     it("does NOT match user-initiated 'operation was aborted by user'", () => {
       expect(isTransientError("The operation was aborted by user")).toBe(false);
       expect(isTransientError("operation was aborted by the signal")).toBe(false);
@@ -163,6 +168,11 @@ describe("Transient Error Detector", () => {
       expect(classifyError("socket hang up")).toBe("transient");
       expect(classifyError("Connection refused")).toBe("transient");
       expect(classifyError("request was aborted")).toBe("transient");
+    });
+
+    it("classifies OpenAI/Codex server_error payloads as 'transient'", () => {
+      const message = `Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID 9349dabf-bcb7-4c36-aa40-f645dd04a472 in your message.","param":null},"sequence_number":2}`;
+      expect(classifyError(message)).toBe("transient");
     });
 
     it("classifies 'Request was aborted' as 'transient', not 'usage-limit'", () => {

@@ -113,9 +113,9 @@ Typical flow:
 | `POST /api/missions/:missionId/autopilot/start` | Start watching manually |
 | `POST /api/missions/:missionId/autopilot/stop` | Stop watching manually |
 
-## Factory Operating Model
+## Validation Contract Lifecycle
 
-The Factory operating model is Fusion's structured feature delivery system for missions. It combines validation contracts, AI validation, and bounded retries to provide systematic, auditable feature completion. The model covers the full end-to-end lifecycle from clarification through blocked handoff.
+Fusion's validation contract lifecycle is the structured feature delivery system for missions. It combines validation contracts, AI validation, and bounded retries to provide systematic, auditable feature completion. The lifecycle covers the full end-to-end path from clarification through blocked handoff.
 
 ### End-to-End Flow
 
@@ -329,7 +329,7 @@ interface MissionAssertionFailureRecord {
 
 ### Parity Verification Tests
 
-The Factory model is validated by integration tests in two dependent tasks:
+This lifecycle is validated by integration tests in two dependent tasks:
 
 **FN-1571 — Core parity tests:**
 - `packages/core/src/mission-factory-parity.integration.test.ts` — MissionStore rollups, assertion persistence, validator run records, fix feature lineage

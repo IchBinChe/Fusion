@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { TaskStore, AutomationStore, CentralCore, AgentStore, PluginStore, PluginLoader, getTaskMergeBlocker, getEnabledPiExtensionPaths } from "@fusion/core";
 import { createServer, GitHubClient, createSkillsAdapter, getProjectSettingsPath, loadTlsCredentialsFromEnv } from "@fusion/dashboard";
@@ -193,10 +194,30 @@ async function resolveRuntimeProjectPath(): Promise<string> {
   }
 }
 
-export async function runDashboard(port: number, opts: { paused?: boolean; dev?: boolean; interactive?: boolean; open?: boolean; host?: string } = {}) {
+export async function runDashboard(port: number, opts: { paused?: boolean; dev?: boolean; interactive?: boolean; open?: boolean; host?: string; noAuth?: boolean; token?: string } = {}) {
   // Default to localhost so the dashboard (and its shell-capable terminal API)
   // is not exposed on the LAN. Pass --host 0.0.0.0 explicitly to opt-in.
   const selectedHost = opts.host ?? "127.0.0.1";
+
+  // ── Bearer-token auth ────────────────────────────────────────────────
+  //
+  // By default the dashboard API is gated by a bearer token so that when the
+  // server is bound to a non-localhost interface (e.g. `pnpm dev dashboard`
+  // which injects --host 0.0.0.0 for LAN testing) nearby users can't hit the
+  // terminal or exec endpoints uninvited. Precedence:
+  //   1. `opts.token`            — explicit override (mostly for tests)
+  //   2. `FUSION_DASHBOARD_TOKEN` — user-provided env
+  //   3. `FUSION_DAEMON_TOKEN`    — back-compat with daemon mode
+  //   4. auto-generated random token (printed at startup so the user can auth)
+  // `--no-auth` skips the middleware entirely. The token is embedded in the
+  // launch URL (as `?token=...`) so the user can click once and the browser
+  // stores it to localStorage for subsequent loads.
+  const dashboardAuthToken: string | undefined = opts.noAuth
+    ? undefined
+    : opts.token
+      ?? process.env.FUSION_DASHBOARD_TOKEN
+      ?? process.env.FUSION_DAEMON_TOKEN
+      ?? `fn_${randomBytes(16).toString("hex")}`;
   ensureProcessDiagnostics();
 
   // Handle interactive port selection
@@ -606,6 +627,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
       skillsAdapter,
       https: loadTlsCredentialsFromEnv(),
+      daemon: dashboardAuthToken ? { token: dashboardAuthToken } : undefined,
     });
 
     const shutdown = async (signal: NodeJS.Signals) => {
@@ -787,6 +809,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       pluginRunner: pluginLoader,
       skillsAdapter,
       https: loadTlsCredentialsFromEnv(),
+      daemon: dashboardAuthToken ? { token: dashboardAuthToken } : undefined,
     });
   }
 
@@ -918,10 +941,29 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       }
     }
 
+    // Compose the user-visible URL. When we're bound to a non-localhost
+    // interface (LAN testing), surface the actual host so the URL is
+    // usable from another device. Otherwise keep it as `localhost` for
+    // the nicer click-to-open experience.
+    const displayHost =
+      selectedHost === "0.0.0.0" || selectedHost === "::" ? selectedHost : "localhost";
+    const baseUrl = `http://${displayHost}:${actualPort}`;
+    const tokenizedUrl = dashboardAuthToken
+      ? `${baseUrl}/?token=${encodeURIComponent(dashboardAuthToken)}`
+      : baseUrl;
+
     console.log();
     console.log(`  fn board`);
     console.log(`  ────────────────────────`);
-    console.log(`  → http://localhost:${actualPort}`);
+    console.log(`  → ${baseUrl}`);
+    if (dashboardAuthToken) {
+      console.log(`  Auth:    bearer token required`);
+      console.log(`  Token:   ${dashboardAuthToken}`);
+      console.log(`  Open:    ${tokenizedUrl}`);
+      console.log(`           (the browser stores the token so you only need to click once)`);
+    } else {
+      console.log(`  Auth:    disabled (--no-auth)`);
+    }
     console.log();
     console.log(`  Tasks stored in .fusion/tasks/`);
     console.log(`  Merge:      AI-assisted (conflict resolution + commit messages)`);

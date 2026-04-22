@@ -1,3 +1,5 @@
+import { appendTokenQuery } from "./auth";
+
 // Shared EventSource multiplexer.
 //
 // Browsers cap HTTP/1.1 connections to a single origin at ~6. Each native
@@ -86,7 +88,10 @@ function openChannel(channel: Channel): void {
     channel.reconnectTimer = null;
   }
 
-  const es = new EventSource(channel.url);
+  // EventSource can't set custom headers, so the bearer token must ride on
+  // the URL as `fn_token=<token>`. `appendTokenQuery` is a no-op when no
+  // token is configured.
+  const es = new EventSource(appendTokenQuery(channel.url));
   channel.es = es;
 
   es.addEventListener("open", () => {

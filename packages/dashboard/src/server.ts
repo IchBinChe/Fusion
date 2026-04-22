@@ -44,7 +44,7 @@ import {
 import { ChatManager } from "./chat.js";
 import { stopAllDevServers } from "./dev-server-routes.js";
 import type { SkillsAdapter } from "./skills-adapter.js";
-import { createAuthMiddleware } from "./auth-middleware.js";
+import { createAuthMiddleware, authenticateUpgradeRequest, getDaemonToken } from "./auth-middleware.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -866,9 +866,22 @@ export function setupTerminalWebSocket(
   // Default terminal service for stale eviction (uses default store's root dir)
   const defaultTerminalService = getTerminalService(store.getRootDir());
 
+  // Resolve the daemon token once so every upgrade picks up the same value.
+  const wsDaemonToken = getDaemonToken(options);
+
   server.on("upgrade", (req, socket, head) => {
     const pathname = new URL(req.url || "", `http://${req.headers.host}`).pathname;
     if (pathname !== "/api/terminal/ws") {
+      return;
+    }
+
+    // When daemon auth is active, refuse WebSocket upgrades that don't
+    // carry a valid bearer token. The token can come from the Authorization
+    // header (rare for browser WebSocket clients) or the `fn_token` query
+    // param (what our own client uses).
+    if (wsDaemonToken && !authenticateUpgradeRequest(wsDaemonToken, req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
       return;
     }
 
@@ -1130,9 +1143,19 @@ export function setupBadgeWebSocket(
 
   const wss = new WebSocketServer({ noServer: true });
 
+  // Resolve the daemon token once per server so every upgrade picks up the
+  // same value. See the equivalent block in setupTerminalWebSocket above.
+  const badgeWsDaemonToken = getDaemonToken(options);
+
   server.on("upgrade", (req, socket, head) => {
     const pathname = new URL(req.url || "", `http://${req.headers.host}`).pathname;
     if (pathname !== "/api/ws") {
+      return;
+    }
+
+    if (badgeWsDaemonToken && !authenticateUpgradeRequest(badgeWsDaemonToken, req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
       return;
     }
 

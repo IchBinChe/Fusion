@@ -65,6 +65,7 @@ import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
 import type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry } from "@fusion/dashboard";
 import type { MilestoneValidationTelemetry } from "./components/mission-types";
+import { appendTokenQuery } from "./auth";
 
 // Re-export skills types for use by hooks and components
 export type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry };
@@ -1889,7 +1890,8 @@ function createResilientEventSource(
     if (closedByUser) return;
 
     const nextUrl = appendLastEventId(url, lastSeenEventId);
-    const source = new EventSource(nextUrl);
+    // EventSource can't set headers — carry the bearer token via `fn_token=`.
+    const source = new EventSource(appendTokenQuery(nextUrl));
     eventSource = source;
 
     source.onopen = () => {

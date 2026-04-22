@@ -72,12 +72,25 @@ fn dashboard --paused              # start with automation paused
 fn dashboard --dev                 # run UI only (no engine)
 ```
 
-Open: `http://localhost:4040` (or your custom port).
+On startup, Fusion prints a click-to-open URL that includes a bearer token:
+
+```
+→ http://localhost:4040
+Token:   fn_8f3a...
+Open:    http://localhost:4040/?token=fn_8f3a...
+```
+
+Click the **Open** link. Your browser captures the token into `localStorage`,
+strips it from the visible URL, and reuses it automatically on later loads.
+See [CLI reference → fn dashboard → Authentication](./cli-reference.md#fn-dashboard)
+for details, including how to set a stable token via `FUSION_DASHBOARD_TOKEN`
+or disable auth with `--no-auth` for strictly-local setups.
 
 Other launch modes:
 
 ```bash
-fn serve --port 5050 --host 0.0.0.0   # headless node (API + engine, no web UI)
+fn dashboard --host 0.0.0.0            # expose on LAN (auth stays on by default)
+fn serve --port 5050 --host 0.0.0.0    # headless node (API + engine, no web UI)
 fn daemon --port 5050                  # daemon mode with token auth support
 fn desktop                             # launch Electron desktop app
 ```

@@ -40,15 +40,67 @@ fn init --name my-project --path /absolute/path/to/project
 
 ## `fn dashboard`
 
-Start the web dashboard (default port `4040`).
+Start the web dashboard (default port `4040`, bound to `127.0.0.1`).
 
 ```bash
 fn dashboard
 fn dashboard --port 5050
+fn dashboard --host 0.0.0.0                # expose on LAN (use with care)
+fn dashboard --token fn_yourStaticToken    # reuse a fixed token
+fn dashboard --no-auth                     # disable bearer auth (local only)
 fn dashboard --interactive
 fn dashboard --paused
 fn dashboard --dev
 ```
+
+| Option | Description |
+|---|---|
+| `--port`, `-p` | Dashboard HTTP port (default `4040`). |
+| `--host` | Host to bind (default `127.0.0.1`, localhost only). Pass `0.0.0.0` to expose on all interfaces. |
+| `--token <token>` | Bearer token to use. Default: `$FUSION_DASHBOARD_TOKEN` → `$FUSION_DAEMON_TOKEN` → auto-generated. |
+| `--no-auth` | Disable bearer-token auth. Not recommended when binding to `0.0.0.0`. |
+| `--paused` | Start with the engine paused (automation disabled). |
+| `--interactive` | Interactive port selection. |
+| `--dev` | Start dashboard only (no AI engine, no triage/scheduler). |
+
+### Authentication
+
+Unless `--no-auth` is passed, the dashboard API (including the terminal
+WebSocket) is protected by a bearer token. On startup, Fusion prints both the
+raw token and a click-to-open URL that embeds `?token=<token>`:
+
+```
+fn board
+────────────────────────
+→ http://localhost:4040
+Auth:    bearer token required
+Token:   fn_8f3a...
+Open:    http://localhost:4040/?token=fn_8f3a...
+         (the browser stores the token so you only need to click once)
+```
+
+On first visit the dashboard captures the token from the URL into
+`localStorage` (key `fn.authToken`) and strips it from the visible URL so the
+secret does not end up in browser history. Subsequent loads (including
+closing and reopening the tab) reuse the stored token.
+
+Precedence when resolving the token:
+
+1. `--token <token>` flag
+2. `FUSION_DASHBOARD_TOKEN` environment variable
+3. `FUSION_DAEMON_TOKEN` environment variable (back-compat with `fn daemon`)
+4. Random `fn_<32 hex>` generated per run
+
+To reuse a stable token across runs, export one of the env vars:
+
+```bash
+export FUSION_DASHBOARD_TOKEN=fn_my_stable_token
+fn dashboard
+```
+
+If you ever need to revoke access, either restart `fn dashboard` (which
+rotates the auto-generated token) or clear the `fn.authToken` entry from
+each client's `localStorage`.
 
 ---
 

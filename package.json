@@ -2,6 +2,15 @@
   "name": "fusion-workspace",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
+  "homepage": "https://github.com/Runfusion/Fusion#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Runfusion/Fusion"
+  },
+  "bugs": {
+    "url": "https://github.com/Runfusion/Fusion/issues"
+  },
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {

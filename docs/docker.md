@@ -32,9 +32,19 @@ Pass provider credentials and integrations with `-e` flags:
 -e ANTHROPIC_API_KEY=...
 -e OPENAI_API_KEY=...
 -e GITHUB_TOKEN=...
+-e FUSION_DASHBOARD_TOKEN=fn_your_stable_token   # optional; persists across restarts
 ```
 
 Add any other provider keys your setup requires (for example `OPENROUTER_API_KEY`).
+
+### Dashboard authentication
+
+The dashboard is bearer-token protected by default. In a container the
+auto-generated token appears in `docker logs` on startup — copy it, or set
+`FUSION_DASHBOARD_TOKEN` (or the back-compat `FUSION_DAEMON_TOKEN`) to a
+stable value so the token survives restarts. See
+[CLI reference → fn dashboard → Authentication](./cli-reference.md#fn-dashboard)
+for the full flow.
 
 ## Pass additional CLI flags
 

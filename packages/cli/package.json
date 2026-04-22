@@ -1,6 +1,12 @@
 {
   "name": "@gsxdsm/fusion",
   "version": "0.4.0",
+  "license": "MIT",
+  "description": "Fusion CLI: HTTP API server, daemon, dashboard launcher, and task tooling for the Fusion AI coding agent.",
+  "homepage": "https://github.com/Runfusion/Fusion#readme",
+  "bugs": {
+    "url": "https://github.com/Runfusion/Fusion/issues"
+  },
   "type": "module",
   "keywords": [
     "pi-package"

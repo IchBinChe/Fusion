@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { appendTokenQuery } from "../auth";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
 
@@ -278,7 +279,10 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
       wsUrl += `&projectId=${encodeURIComponent(projectId)}`;
     }
 
-    const ws = new WebSocket(wsUrl);
+    // Carry the bearer token on the URL — WebSocket `new WebSocket` can't set
+    // an Authorization header. `appendTokenQuery` adds `fn_token=<token>`
+    // when auth is active and returns the URL unchanged otherwise.
+    const ws = new WebSocket(appendTokenQuery(wsUrl));
     wsRef.current = ws;
 
     ws.onopen = () => {

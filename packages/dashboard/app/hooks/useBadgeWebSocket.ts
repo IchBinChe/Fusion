@@ -24,6 +24,7 @@
  */
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { IssueInfo, PrInfo } from "@fusion/core";
+import { appendTokenQuery } from "../auth";
 
 interface BadgeUpdatedMessage {
   type: "badge:updated";
@@ -194,7 +195,9 @@ class BadgeWebSocketStore {
     if (this.projectId) {
       url += `?projectId=${encodeURIComponent(this.projectId)}`;
     }
-    const ws = new WebSocket(url);
+    // Bearer token must be on the URL — WebSocket construction doesn't
+    // support custom headers. No-op when auth is disabled.
+    const ws = new WebSocket(appendTokenQuery(url));
     this.ws = ws;
 
     ws.onopen = () => {

@@ -38,7 +38,12 @@ For Docker deployment, see [docs/docker.md](./docs/docker.md).
    fn dashboard
    ```
 
-3. **Open** [http://localhost:4040](http://localhost:4040) — create tasks from the board or the CLI.
+3. **Click the `Open:` URL** printed in the terminal. It embeds a bearer token
+   (`http://localhost:4040/?token=fn_...`) that the browser captures to
+   `localStorage` on first visit and reuses automatically thereafter. See
+   [CLI reference → fn dashboard → Authentication](./docs/cli-reference.md#fn-dashboard)
+   for how to pin a stable token via `FUSION_DASHBOARD_TOKEN` or opt out with
+   `--no-auth`.
 
 ### First-run Setup
 

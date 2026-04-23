@@ -51,8 +51,8 @@ export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
    */
   private get db(): Database {
     if (!this._db) {
-      const kbDir = `${this.rootDir}/.fusion`;
-      this._db = new Database(kbDir);
+      const fusionDir = `${this.rootDir}/.fusion`;
+      this._db = new Database(fusionDir);
       this._db.init();
     }
     return this._db;

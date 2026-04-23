@@ -85,9 +85,8 @@ Triage → Todo → In Progress → In Review → Done → Archived
 ## Task Storage Structure
 
 ```
-.kb/
-├── kb.db                    # SQLite database (WAL mode)
-├── config.json              # Board config
+.fusion/
+├── fusion.db                # SQLite database (WAL mode)
 └── tasks/
     └── KB-001/
         ├── PROMPT.md        # Task specification

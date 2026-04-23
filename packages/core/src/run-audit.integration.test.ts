@@ -26,14 +26,14 @@ function makeTmpDir(): string {
 
 describe("Run Audit Integration", () => {
   let rootDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let db: Database;
   let store: TaskStore;
 
   beforeEach(async () => {
     rootDir = makeTmpDir();
-    kbDir = join(rootDir, ".fusion");
-    db = new Database(kbDir);
+    fusionDir = join(rootDir, ".fusion");
+    db = new Database(fusionDir);
     db.init();
     store = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
     await store.init();

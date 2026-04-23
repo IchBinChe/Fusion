@@ -5,25 +5,6 @@ import { CronExpressionParser } from "cron-parser";
 import type { ProjectSettings } from "./types.js";
 
 /**
- * Legacy backup directory default value from the old .kb storage structure.
- * Projects that were created before the .fusion rename may still have this
- * value persisted in their config. It is canonicalized to the new default
- * so that all backup operations use a consistent directory.
- */
-const LEGACY_BACKUP_DIR = ".kb/backups";
-
-/**
- * Canonicalizes the backup directory from legacy defaults.
- * Only the exact legacy default alias is transformed — custom paths are preserved.
- */
-function canonicalizeBackupDir(dir: string | undefined): string | undefined {
-  if (dir === LEGACY_BACKUP_DIR) {
-    return ".fusion/backups";
-  }
-  return dir;
-}
-
-/**
  * Metadata for a database backup file.
  */
 export interface BackupInfo {
@@ -52,17 +33,17 @@ export interface BackupOptions {
  * cleanup of old backups, and restoration.
  */
 export class BackupManager {
-  private kbDir: string;
+  private fusionDir: string;
   private backupDir: string;
   private retention: number;
 
   /**
    * Creates a new BackupManager instance.
-   * @param kbDir - Absolute path to the .fusion directory
+   * @param fusionDir - Absolute path to the .fusion directory
    * @param options - Backup configuration options
    */
-  constructor(kbDir: string, options?: BackupOptions) {
-    this.kbDir = kbDir;
+  constructor(fusionDir: string, options?: BackupOptions) {
+    this.fusionDir = fusionDir;
     this.backupDir = options?.backupDir ?? ".fusion/backups";
     this.retention = options?.retention ?? 7;
   }
@@ -71,8 +52,8 @@ export class BackupManager {
    * Gets the absolute path to the backup directory.
    */
   private getBackupDirPath(): string {
-    // The backupDir is relative to project root, which is parent of kbDir
-    return join(this.kbDir, "..", this.backupDir);
+    // The backupDir is relative to project root, which is parent of fusionDir
+    return join(this.fusionDir, "..", this.backupDir);
   }
 
   /**
@@ -80,7 +61,7 @@ export class BackupManager {
    * @returns BackupInfo for the newly created backup
    */
   async createBackup(): Promise<BackupInfo> {
-    const sourcePath = join(this.kbDir, "fusion.db");
+    const sourcePath = join(this.fusionDir, "fusion.db");
     const backupDirPath = this.getBackupDirPath();
     
     // Ensure backup directory exists
@@ -124,21 +105,18 @@ export class BackupManager {
       const backups: BackupInfo[] = [];
 
       for (const filename of files) {
-        // Match both new fusion-* and legacy kb-* backup patterns:
+        // Match fusion-* backup patterns:
         //   fusion-YYYY-MM-DD-HHmmss.db, fusion-YYYY-MM-DD-HHmmss-N.db,
-        //   fusion-pre-restore-YYYY-MM-DD-HHmmss.db,
-        //   kb-YYYY-MM-DD-HHmmss.db, kb-YYYY-MM-DD-HHmmss-N.db,
-        //   kb-pre-restore-YYYY-MM-DD-HHmmss.db
-        if (!filename.match(/^(fusion|kb)(-pre-restore)?-\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?\.db$/)) {
+        //   fusion-pre-restore-YYYY-MM-DD-HHmmss.db
+        if (!filename.match(/^fusion(-pre-restore)?-\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?\.db$/)) {
           continue;
         }
 
         const filePath = join(backupDirPath, filename);
         const stats = await stat(filePath);
 
-        // Parse timestamp from filename, supporting both fusion-* and kb-* prefixes
-        // Also handles counter suffix: fusion-YYYY-MM-DD-HHmmss-N.db
-        const match = filename.match(/^((?:fusion|kb)(?:-pre-restore)?)-(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})(?:-\d+)?\.db$/);
+        // Parse timestamp from filename. Also handles counter suffix: fusion-YYYY-MM-DD-HHmmss-N.db
+        const match = filename.match(/^(fusion(?:-pre-restore)?)-(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})(?:-\d+)?\.db$/);
         const createdAt = match
           ? `${match[2]}-${match[3]}-${match[4]}T${match[5]}:${match[6]}:${match[7]}Z`
           : stats.mtime.toISOString();
@@ -211,7 +189,7 @@ export class BackupManager {
   ): Promise<void> {
     const backupDirPath = this.getBackupDirPath();
     const sourcePath = join(backupDirPath, filename);
-    const targetPath = join(this.kbDir, "fusion.db");
+    const targetPath = join(this.fusionDir, "fusion.db");
 
     // Verify source exists
     try {
@@ -304,17 +282,16 @@ export function validateBackupDir(dir: string): boolean {
 
 /**
  * Factory function to create a BackupManager with project settings.
- * Applies defensive canonicalization for the legacy backup directory default.
- * @param kbDir - Absolute path to the .fusion directory
+ * @param fusionDir - Absolute path to the .fusion directory
  * @param settings - Project settings containing backup configuration
  * @returns Configured BackupManager instance
  */
 export function createBackupManager(
-  kbDir: string,
+  fusionDir: string,
   settings?: Partial<ProjectSettings>
 ): BackupManager {
-  return new BackupManager(kbDir, {
-    backupDir: canonicalizeBackupDir(settings?.autoBackupDir),
+  return new BackupManager(fusionDir, {
+    backupDir: settings?.autoBackupDir,
     retention: settings?.autoBackupRetention,
   });
 }
@@ -327,12 +304,12 @@ export function createBackupManager(
  * at the automation/scheduler level. This allows manual backups via CLI even when
  * auto-backup is disabled.
  * 
- * @param kbDir - Absolute path to the .fusion directory
+ * @param fusionDir - Absolute path to the .fusion directory
  * @param settings - Project settings
  * @returns Result of the backup operation
  */
 export async function runBackupCommand(
-  kbDir: string,
+  fusionDir: string,
   settings: ProjectSettings
 ): Promise<{ success: boolean; output: string; backupPath?: string; deletedCount?: number }> {
   // Validate schedule if provided (for logging purposes)
@@ -344,7 +321,7 @@ export async function runBackupCommand(
   }
 
   // Create backup manager with settings
-  const manager = createBackupManager(kbDir, settings);
+  const manager = createBackupManager(fusionDir, settings);
 
   try {
     // Create the backup

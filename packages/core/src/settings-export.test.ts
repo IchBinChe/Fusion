@@ -20,8 +20,8 @@ import {
 // Helper to create a temporary test environment
 function createTestEnv() {
   const tempDir = mkdtempSync(join(tmpdir(), "kb-settings-test-"));
-  const kbDir = join(tempDir, ".fusion");
-  const tasksDir = join(kbDir, "tasks");
+  const fusionDir = join(tempDir, ".fusion");
+  const tasksDir = join(fusionDir, "tasks");
   const globalSettingsDir = join(tempDir, "global-settings");
 
   mkdirSync(tasksDir, { recursive: true });
@@ -29,7 +29,7 @@ function createTestEnv() {
 
   // Create initial config.json
   writeFileSync(
-    join(kbDir, "config.json"),
+    join(fusionDir, "config.json"),
     JSON.stringify({ nextId: 1, settings: {} }),
   );
 
@@ -39,7 +39,7 @@ function createTestEnv() {
     JSON.stringify({}),
   );
 
-  return { tempDir, kbDir, tasksDir, globalSettingsDir };
+  return { tempDir, fusionDir, tasksDir, globalSettingsDir };
 }
 
 // Helper to clean up test environment

@@ -12,16 +12,16 @@ function makeTmpDir(): string {
 
 describe("ChatStore", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let db: Database;
   let store: ChatStore;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
-    db = new Database(kbDir);
+    fusionDir = join(tmpDir, ".fusion");
+    db = new Database(fusionDir);
     db.init();
-    store = new ChatStore(kbDir, db);
+    store = new ChatStore(fusionDir, db);
   });
 
   afterEach(async () => {

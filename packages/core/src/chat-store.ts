@@ -44,7 +44,7 @@ export interface ChatStoreEvents {
 
 export class ChatStore extends EventEmitter<ChatStoreEvents> {
   constructor(
-    private kbDir: string,
+    private fusionDir: string,
     private db: Database,
   ) {
     super();

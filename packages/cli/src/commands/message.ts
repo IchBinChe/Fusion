@@ -26,8 +26,8 @@ async function getProjectPath(projectName?: string): Promise<string> {
  */
 async function createMessageStore(projectName?: string): Promise<{ store: MessageStore; db: Database }> {
   const projectPath = await getProjectPath(projectName);
-  const kbDir = projectPath + "/.fusion";
-  const db = createDatabase(kbDir);
+  const fusionDir = projectPath + "/.fusion";
+  const db = createDatabase(fusionDir);
   db.init();
   const store = new MessageStore(db);
   return { store, db };

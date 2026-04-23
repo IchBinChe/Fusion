@@ -21,7 +21,7 @@ vi.mock("@fusion/core", () => ({
   TaskStore: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
     getSettings: mockGetSettings,
-    kbDir: "/cwd/.fusion",
+    fusionDir: "/cwd/.fusion",
   })),
   createBackupManager: vi.fn(() => ({
     listBackups: mockListBackups,
@@ -60,7 +60,7 @@ describe("backup commands", () => {
       projectName: "demo-project",
       projectPath: "/projects/demo",
       isRegistered: true,
-      store: { getSettings: mockGetSettings, kbDir: "/projects/demo/.fusion" },
+      store: { getSettings: mockGetSettings, fusionDir: "/projects/demo/.fusion" },
     });
   });
 

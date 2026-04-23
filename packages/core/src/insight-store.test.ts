@@ -32,7 +32,7 @@ function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "fn-insight-test-"));
 }
 
-let kbDir: string;
+let fusionDir: string;
 let db: Database;
 let store: InsightStore;
 
@@ -46,8 +46,8 @@ function createProvenance(overrides: Partial<InsightProvenance> = {}): InsightPr
 }
 
 beforeEach(() => {
-  kbDir = makeTmpDir();
-  db = createDatabase(kbDir);
+  fusionDir = makeTmpDir();
+  db = createDatabase(fusionDir);
   db.init();
   store = new InsightStore(db);
 });

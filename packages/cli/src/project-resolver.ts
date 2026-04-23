@@ -220,12 +220,12 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
 
   // 2. Walk up from cwd to find .fusion/
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
-  const kbDir = findKbDir(cwd);
+  const fusionDir = findKbDir(cwd);
 
-  if (kbDir) {
+  if (fusionDir) {
     // 3. Match path against registered projects
     const allProjects = await central.listProjects();
-    const normalizedKbDir = normalize(kbDir);
+    const normalizedKbDir = normalize(fusionDir);
 
     const match = allProjects.find((p) => normalize(p.path) === normalizedKbDir);
 
@@ -245,12 +245,12 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
 
     // 4. Has .fusion/ but not registered
     if (interactive) {
-      console.log(`\n  Found fn project at ${kbDir} but it's not registered.`);
+      console.log(`\n  Found fn project at ${fusionDir} but it's not registered.`);
       const shouldRegister = await promptConfirm("Register this project now?", true);
 
       if (shouldRegister) {
         const rl = createInterface({ input: process.stdin, output: process.stdout });
-        const defaultName = kbDir.split("/").pop() || "unnamed";
+        const defaultName = fusionDir.split("/").pop() || "unnamed";
         const name = await rl.question(`  Project name [${defaultName}]: `);
         rl.close();
 
@@ -259,7 +259,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
         try {
           const newProject = await central.registerProject({
             name: finalName,
-            path: kbDir,
+            path: fusionDir,
             isolationMode: "in-process",
           });
 
@@ -272,22 +272,22 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
           throw new ProjectResolutionError(
             `Failed to register project: ${err.message}`,
             "NOT_REGISTERED",
-            { directory: kbDir, error: err.message }
+            { directory: fusionDir, error: err.message }
           );
         }
       } else {
         throw new ProjectResolutionError(
           "Project not registered. Run `fn project add <path>` to register.",
           "NOT_REGISTERED",
-          { directory: kbDir }
+          { directory: fusionDir }
         );
       }
     } else {
       throw new ProjectResolutionError(
-        `Found fn project at ${kbDir} but it's not registered.\n\n` +
-          "Run `fn project add " + kbDir + "` to register it, or use --project <name>.",
+        `Found fn project at ${fusionDir} but it's not registered.\n\n` +
+          "Run `fn project add " + fusionDir + "` to register it, or use --project <name>.",
         "NOT_REGISTERED",
-        { directory: kbDir }
+        { directory: fusionDir }
       );
     }
   }

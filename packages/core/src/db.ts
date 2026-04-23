@@ -618,16 +618,16 @@ export class Database {
   private transactionDepth = 0;
   private readonly _fts5Available: boolean;
 
-  constructor(kbDir: string) {
-    this.dbPath = join(kbDir, "fusion.db");
+  constructor(fusionDir: string) {
+    this.dbPath = join(fusionDir, "fusion.db");
 
-    if (!isAbsolute(kbDir)) {
-      throw new Error(`[fusion] Database constructor requires an absolute kbDir path, got: ${kbDir}`);
+    if (!isAbsolute(fusionDir)) {
+      throw new Error(`[fusion] Database constructor requires an absolute fusionDir path, got: ${fusionDir}`);
     }
 
     // Ensure .fusion directory exists
-    if (!existsSync(kbDir)) {
-      mkdirSync(kbDir, { recursive: true });
+    if (!existsSync(fusionDir)) {
+      mkdirSync(fusionDir, { recursive: true });
     }
 
     this.db = new DatabaseSync(this.dbPath);
@@ -1896,11 +1896,11 @@ export class Database {
 /**
  * Create a new Database instance (does NOT initialize schema).
  * Callers must call `db.init()` separately.
- * @param kbDir - Path to the `.fusion` directory (e.g., `/path/to/project/.fusion`)
+ * @param fusionDir - Path to the `.fusion` directory (e.g., `/path/to/project/.fusion`)
  * @returns Database instance (not yet initialized)
  */
-export function createDatabase(kbDir: string): Database {
-  return new Database(kbDir);
+export function createDatabase(fusionDir: string): Database {
+  return new Database(fusionDir);
 }
 
 export { normalizeTaskComments };

@@ -1,17 +1,16 @@
 /**
  * Migration and First-Run Experience
  *
- * Handles the transition from single-project to multi-project mode:
- * - Detects first-run state (fresh install, needs migration, setup wizard, normal)
- * - Auto-discovers existing .kb/ directories for migration
- * - Coordinates migration to central database
+ * Handles the multi-project setup flow:
+ * - Detects first-run state (fresh install, setup wizard, normal)
+ * - Auto-discovers existing .fusion/ directories for registration
+ * - Coordinates project registration to central database
  * - Provides backward compatibility for single-project workflows
  *
  * @module migration
  */
 
 import { existsSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, basename, dirname } from "node:path";
 import type { CentralCore } from "./central-core.js";
@@ -19,8 +18,7 @@ import { CentralCore as CentralCoreClass } from "./central-core.js";
 
 /**
  * Check whether `<dir>/<folderName>/<dbName>` exists as a non-empty regular file.
- * Used to decide if a directory contains either a legacy (.kb/kb.db) or
- * current (.fusion/fusion.db) project database.
+ * Used to decide if a directory contains a current (.fusion/fusion.db) project database.
  */
 function hasProjectDbFile(dir: string, folderName: string, dbName: string): boolean {
   const projectDir = join(dir, folderName);
@@ -41,18 +39,17 @@ function hasProjectDbFile(dir: string, folderName: string, dbName: string): bool
 
 /** First-run state detection results */
 export type FirstRunState =
-  | "fresh-install"      // No central DB, no .kb/ anywhere
-  | "needs-migration"    // No central DB, but .kb/kb.db exists in cwd
+  | "fresh-install"      // No central DB, no .fusion/ anywhere
   | "setup-wizard"       // Central DB exists but has zero projects
   | "normal-operation";  // Central DB exists with projects
 
-/** Detected project for migration consideration */
+/** Detected project for registration consideration */
 export interface DetectedProject {
   /** Absolute path to project directory */
   path: string;
   /** Auto-generated or derived project name */
   name: string;
-  /** Whether the project has a valid kb.db */
+  /** Whether the project has a valid fusion.db */
   hasDb: boolean;
 }
 
@@ -100,12 +97,11 @@ export class ProjectRequiredError extends Error {
 // ── FirstRunDetector ─────────────────────────────────────────────────
 
 /**
- * Detects the first-run state and existing projects for migration.
+ * Detects the first-run state and existing projects for registration.
  *
  * This class determines which startup path to take:
  * - Fresh install → Show setup wizard
- * - Existing single project → Auto-migrate
- * - Already migrated → Normal operation
+ * - Already set up → Normal operation
  */
 export class FirstRunDetector {
   private readonly globalDir: string;
@@ -121,12 +117,11 @@ export class FirstRunDetector {
   /**
    * Detect the current first-run state.
    *
-   * Returns one of four states:
-   * - `"fresh-install"` — No central DB, no local `.kb/` found
-   * - `"needs-migration"` — No central DB, but `.kb/kb.db` exists in cwd
+   * Returns one of three states:
+   * - `"fresh-install"` — No central DB, no local `.fusion/` found
    * - `"setup-wizard"` — Central DB exists but has zero projects
    * - `"normal-operation"` — Central DB exists with one or more projects
-   * 
+   *
    * @param existingCentral — Optional existing CentralCore instance to use instead of creating a new one
    */
   async detectFirstRunState(existingCentral?: CentralCore): Promise<FirstRunState> {
@@ -136,26 +131,24 @@ export class FirstRunDetector {
       // No central DB - check for local project in cwd or parent directories
       const cwd = process.cwd();
       const detected = await this.detectExistingProjects(cwd);
-      return detected.length > 0 ? "needs-migration" : "fresh-install";
+      return detected.length > 0 ? "setup-wizard" : "fresh-install";
     }
 
     // Central DB exists - check if it has projects
     let central: CentralCore | undefined = existingCentral;
     let shouldClose = false;
-    
+
     if (!central) {
       try {
         central = new CentralCoreClass(this.globalDir);
         await central.init();
         shouldClose = true;
       } catch {
-        // Central DB exists but is unreadable — fall back to local detection
-        const cwd = process.cwd();
-        const detected = await this.detectExistingProjects(cwd);
-        return detected.length > 0 ? "needs-migration" : "fresh-install";
+        // Central DB exists but is unreadable — treat as fresh install
+        return "fresh-install";
       }
     }
-    
+
     try {
       const projects = await central.listProjects();
       return projects.length === 0 ? "setup-wizard" : "normal-operation";
@@ -187,7 +180,7 @@ export class FirstRunDetector {
   /**
    * Detect existing projects by walking up the directory tree.
    *
-   * Starting from `cwd`, walks up looking for `.kb/kb.db` files.
+   * Starting from `cwd`, walks up looking for `.fusion/fusion.db` files.
    * Stops at home directory or root.
    *
    * @param cwd — Starting directory (default: process.cwd())
@@ -206,7 +199,7 @@ export class FirstRunDetector {
       if (visited.has(current)) break;
       visited.add(current);
 
-      if (this.hasKbProject(current)) {
+      if (this.hasFusionProject(current)) {
         const name = await this.generateProjectName(current);
         projects.push({
           path: current,
@@ -295,12 +288,10 @@ export class FirstRunDetector {
   }
 
   /**
-   * Check if a directory contains a valid kb project.
+   * Check if a directory contains a valid fusion project (.fusion/fusion.db).
    */
-  private hasKbProject(dir: string): boolean {
-    // Check for current .fusion/fusion.db or legacy .kb/kb.db
-    return hasProjectDbFile(dir, ".fusion", "fusion.db") ||
-           hasProjectDbFile(dir, ".kb", "kb.db");
+  private hasFusionProject(dir: string): boolean {
+    return hasProjectDbFile(dir, ".fusion", "fusion.db");
   }
 
   private getDefaultGlobalDir(): string {
@@ -311,10 +302,10 @@ export class FirstRunDetector {
 // ── MigrationCoordinator ─────────────────────────────────────────────
 
 /**
- * Coordinates migration and setup flows.
+ * Coordinates project setup flows.
  *
  * Orchestrates:
- * - Auto-migration of existing single projects
+ * - Auto-registration of existing single projects
  * - Setup wizard project registration
  * - Idempotent re-runs
  */
@@ -330,11 +321,10 @@ export class MigrationCoordinator {
   }
 
   /**
-   * Coordinate the full migration flow based on current state.
+   * Coordinate the full setup flow based on current state.
    *
-   * Detects state and executes appropriate migration path:
-   * - needs-migration → Auto-register existing project
-   * - setup-wizard → No-op (call completeSetup separately)
+   * Detects state and executes appropriate path:
+   * - setup-wizard with local project → Auto-register existing project
    * - others → No-op
    */
   async coordinateMigration(): Promise<MigrationResult> {
@@ -342,19 +332,6 @@ export class MigrationCoordinator {
     const state = await detector.detectFirstRunState();
 
     switch (state) {
-      case "needs-migration": {
-        // Find the project in cwd
-        const projects = await detector.detectExistingProjects(process.cwd());
-        if (projects.length === 0) {
-          return {
-            success: false,
-            projectsRegistered: [],
-            errors: ["No existing kb project found for migration"],
-          };
-        }
-        return this.registerSingleProject(projects[0].path);
-      }
-
       case "fresh-install":
         return {
           success: true,
@@ -386,7 +363,7 @@ export class MigrationCoordinator {
   }
 
   /**
-   * Register a single existing project (for auto-migration).
+   * Register a single existing project (for auto-registration).
    *
    * @param projectPath — Absolute path to project
    * @returns Migration result
@@ -404,9 +381,9 @@ export class MigrationCoordinator {
       return result;
     }
 
-    // Validate it's an actual kb project
+    // Validate it's an actual fusion project
     const detector = new FirstRunDetector(this.central.getGlobalDir());
-    if (!this.isValidKbProject(projectPath)) {
+    if (!this.isValidFusionProject(projectPath)) {
       result.errors.push(`Path is not a valid kb project: ${projectPath}`);
       return result;
     }
@@ -479,8 +456,8 @@ export class MigrationCoordinator {
 
     for (const input of projects) {
       try {
-        // Validate it's a valid kb project
-        if (!this.isValidKbProject(input.path)) {
+        // Validate it's a valid fusion project
+        if (!this.isValidFusionProject(input.path)) {
           result.success = false;
           result.errors.push(`Path is not a valid kb project: ${input.path}`);
           continue;
@@ -539,11 +516,10 @@ export class MigrationCoordinator {
   }
 
   /**
-   * Check if a directory is a valid kb project (has .fusion/fusion.db or .kb/kb.db).
+   * Check if a directory is a valid fusion project (has .fusion/fusion.db).
    */
-  private isValidKbProject(dir: string): boolean {
-    return hasProjectDbFile(dir, ".fusion", "fusion.db") ||
-           hasProjectDbFile(dir, ".kb", "kb.db");
+  private isValidFusionProject(dir: string): boolean {
+    return hasProjectDbFile(dir, ".fusion", "fusion.db");
   }
 }
 
@@ -665,13 +641,5 @@ export class BackwardCompat {
   private async getAvailableProjects(): Promise<Array<{ id: string; name: string }>> {
     const all = await this.central.listProjects();
     return all.map((p) => ({ id: p.id, name: p.name }));
-  }
-
-  /**
-   * Check if a directory contains a current .fusion project or legacy .kb project.
-   */
-  private hasProjectData(dir: string): boolean {
-    return hasProjectDbFile(dir, ".fusion", "fusion.db") ||
-           hasProjectDbFile(dir, ".kb", "kb.db");
   }
 }

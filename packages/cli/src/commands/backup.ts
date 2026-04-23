@@ -22,14 +22,14 @@ async function resolveBackupStore(projectName?: string): Promise<TaskStore> {
 async function getBackupManager(projectName?: string): Promise<{
   manager: BackupManager;
   store: TaskStore;
-  kbDir: string;
+  fusionDir: string;
 }> {
   const store = await resolveBackupStore(projectName);
-  // Access the private kbDir property via type assertion
-  const kbDir = (store as unknown as { kbDir: string }).kbDir;
+  // Access the private fusionDir property via type assertion
+  const fusionDir = (store as unknown as { fusionDir: string }).fusionDir;
   const settings = await store.getSettings();
-  const manager = createBackupManager(kbDir, settings);
-  return { manager, store, kbDir };
+  const manager = createBackupManager(fusionDir, settings);
+  return { manager, store, fusionDir };
 }
 
 /**
@@ -37,12 +37,12 @@ async function getBackupManager(projectName?: string): Promise<{
  * Usage: fn backup --create
  */
 export async function runBackupCreate(projectName?: string): Promise<void> {
-  const { kbDir, store } = await getBackupManager(projectName);
+  const { fusionDir, store } = await getBackupManager(projectName);
   const settings = await store.getSettings();
   
   console.log("Creating database backup...");
   
-  const result = await runBackupCommand(kbDir, settings);
+  const result = await runBackupCommand(fusionDir, settings);
   
   if (result.success) {
     console.log(result.output);

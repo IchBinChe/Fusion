@@ -380,51 +380,6 @@ function getFlagValueNumber(args: string[], flag: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/**
- * Check if migration is needed and run it automatically.
- * This handles the transition from single-project to multi-project mode.
- */
-async function checkAndMigrate(): Promise<void> {
-  // Skip if KB_SKIP_MIGRATION is set
-  if (process.env.KB_SKIP_MIGRATION === "1") {
-    return;
-  }
-
-  try {
-    const { needsCentralMigration, autoMigrateToCentral } = await import("@fusion/core");
-
-    // Check if migration is needed
-    if (!needsCentralMigration(process.cwd())) {
-      return;
-    }
-
-    console.log("\n🔄 Migrating to multi-project mode...");
-
-    // Get CentralCore and run migration
-    const { CentralCore } = await import("@fusion/core");
-    const central = new CentralCore();
-    await central.init();
-
-    try {
-      const result = await autoMigrateToCentral(process.cwd(), central);
-
-      if (result.success) {
-        console.log(`✓ Registered project: ${result.projectsRegistered.join(", ")}`);
-        if (result.errors.length > 0) {
-          console.log(`  Warnings: ${result.errors.join(", ")}`);
-        }
-      } else {
-        console.log(`⚠ Migration warnings: ${result.errors.join(", ")}`);
-      }
-    } finally {
-      await central.close();
-    }
-  } catch (err) {
-    // Migration errors are non-fatal - continue with legacy mode
-    console.log(`⚠ Migration check failed: ${(err as Error).message}`);
-  }
-}
-
 async function main() {
   const { cleanedArgs: args, projectName } = extractGlobalProjectFlag(process.argv.slice(2));
 
@@ -434,12 +389,6 @@ async function main() {
   }
 
   const command = args[0];
-
-  // Migration check: run auto-migration for existing single-project users
-  // Skip for init command itself (user is explicitly initializing)
-  if (command !== "init" && command !== "dashboard") {
-    await checkAndMigrate();
-  }
 
   const {
     runDashboard,

@@ -18,7 +18,7 @@ import type { ProjectSettings } from "./types.js";
 
 describe("BackupManager", () => {
   let tempDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let backupManager: BackupManager;
 
   beforeEach(async () => {
@@ -27,11 +27,11 @@ describe("BackupManager", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     
     tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
-    kbDir = join(tempDir, ".fusion");
-    await mkdir(kbDir, { recursive: true });
+    fusionDir = join(tempDir, ".fusion");
+    await mkdir(fusionDir, { recursive: true });
     // Create a dummy database file
-    writeFileSync(join(kbDir, "fusion.db"), "dummy database content");
-    backupManager = new BackupManager(kbDir);
+    writeFileSync(join(fusionDir, "fusion.db"), "dummy database content");
+    backupManager = new BackupManager(fusionDir);
   });
 
   afterEach(async () => {
@@ -50,7 +50,7 @@ describe("BackupManager", () => {
     it("should copy database content correctly", async () => {
       const backup = await backupManager.createBackup();
 
-      const originalContent = readFileSync(join(kbDir, "fusion.db"), "utf-8");
+      const originalContent = readFileSync(join(fusionDir, "fusion.db"), "utf-8");
       const backupContent = readFileSync(backup.path, "utf-8");
 
       expect(backupContent).toBe(originalContent);
@@ -67,7 +67,7 @@ describe("BackupManager", () => {
 
     it("should create backup directory if it does not exist", async () => {
       const customBackupDir = "custom-backups";
-      const manager = new BackupManager(kbDir, { backupDir: customBackupDir });
+      const manager = new BackupManager(fusionDir, { backupDir: customBackupDir });
 
       const customBackupPath = join(tempDir, customBackupDir);
       expect(existsSync(customBackupPath)).toBe(false);
@@ -195,7 +195,7 @@ describe("BackupManager", () => {
     });
 
     it("should delete oldest backups exceeding retention", async () => {
-      const manager = new BackupManager(kbDir, { retention: 2 });
+      const manager = new BackupManager(fusionDir, { retention: 2 });
 
       // Create 4 backups by advancing time deterministically
       for (let i = 0; i < 4; i++) {
@@ -211,7 +211,7 @@ describe("BackupManager", () => {
     });
 
     it("should keep the newest backups after cleanup", async () => {
-      const manager = new BackupManager(kbDir, { retention: 2 });
+      const manager = new BackupManager(fusionDir, { retention: 2 });
 
       // Create 4 backups and record their names by advancing time
       const backupNames: string[] = [];
@@ -239,13 +239,13 @@ describe("BackupManager", () => {
       const backup = await backupManager.createBackup();
 
       // Modify the original database
-      await writeFile(join(kbDir, "fusion.db"), "modified content");
+      await writeFile(join(fusionDir, "fusion.db"), "modified content");
 
       // Restore the backup
       await backupManager.restoreBackup(backup.filename, { createPreRestoreBackup: false });
 
       // Verify the restore
-      const restoredContent = readFileSync(join(kbDir, "fusion.db"), "utf-8");
+      const restoredContent = readFileSync(join(fusionDir, "fusion.db"), "utf-8");
       expect(restoredContent).toBe("dummy database content");
     });
 
@@ -365,16 +365,16 @@ describe("createBackupManager", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     
     const tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
-    const kbDir = join(tempDir, ".fusion");
-    await mkdir(kbDir, { recursive: true });
-    writeFileSync(join(kbDir, "fusion.db"), "test");
+    const fusionDir = join(tempDir, ".fusion");
+    await mkdir(fusionDir, { recursive: true });
+    writeFileSync(join(fusionDir, "fusion.db"), "test");
 
     const settings: Partial<ProjectSettings> = {
       autoBackupDir: "custom/backups",
       autoBackupRetention: 2,
     };
 
-    const manager = createBackupManager(kbDir, settings);
+    const manager = createBackupManager(fusionDir, settings);
 
     // Create 4 backups by advancing time
     for (let i = 0; i < 4; i++) {
@@ -392,15 +392,15 @@ describe("createBackupManager", () => {
 
   it("should canonicalize legacy .kb/backups to .fusion/backups in settings", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
-    const kbDir = join(tempDir, ".fusion");
-    await mkdir(kbDir, { recursive: true });
-    writeFileSync(join(kbDir, "fusion.db"), "test");
+    const fusionDir = join(tempDir, ".fusion");
+    await mkdir(fusionDir, { recursive: true });
+    writeFileSync(join(fusionDir, "fusion.db"), "test");
 
     const settings: Partial<ProjectSettings> = {
       autoBackupDir: ".kb/backups", // Legacy value
     };
 
-    const manager = createBackupManager(kbDir, settings);
+    const manager = createBackupManager(fusionDir, settings);
 
     // Use fake timers and create a backup
     vi.useFakeTimers();
@@ -417,15 +417,15 @@ describe("createBackupManager", () => {
 
   it("should preserve non-legacy custom .kb/* directories", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
-    const kbDir = join(tempDir, ".fusion");
-    await mkdir(kbDir, { recursive: true });
-    writeFileSync(join(kbDir, "fusion.db"), "test");
+    const fusionDir = join(tempDir, ".fusion");
+    await mkdir(fusionDir, { recursive: true });
+    writeFileSync(join(fusionDir, "fusion.db"), "test");
 
     const settings: Partial<ProjectSettings> = {
       autoBackupDir: ".kb/my-custom-backups", // Custom path, not the legacy default
     };
 
-    const manager = createBackupManager(kbDir, settings);
+    const manager = createBackupManager(fusionDir, settings);
 
     // Use fake timers and create a backup
     vi.useFakeTimers();
@@ -526,7 +526,7 @@ describe("syncBackupRoutine", () => {
 
 describe("runBackupCommand", () => {
   let tempDir: string;
-  let kbDir: string;
+  let fusionDir: string;
 
   beforeEach(async () => {
     // Use fake timers for deterministic timestamp control
@@ -534,9 +534,9 @@ describe("runBackupCommand", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     
     tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
-    kbDir = join(tempDir, ".fusion");
-    await mkdir(kbDir, { recursive: true });
-    writeFileSync(join(kbDir, "fusion.db"), "dummy database content");
+    fusionDir = join(tempDir, ".fusion");
+    await mkdir(fusionDir, { recursive: true });
+    writeFileSync(join(fusionDir, "fusion.db"), "dummy database content");
   });
 
   afterEach(async () => {
@@ -554,7 +554,7 @@ describe("runBackupCommand", () => {
       autoBackupEnabled: false, // Disabled, but should still work when called manually
     };
 
-    const result = await runBackupCommand(kbDir, settings);
+    const result = await runBackupCommand(fusionDir, settings);
 
     // Should succeed even when autoBackupEnabled is false
     expect(result.success).toBe(true);
@@ -572,7 +572,7 @@ describe("runBackupCommand", () => {
       autoBackupRetention: 7,
     };
 
-    const result = await runBackupCommand(kbDir, settings);
+    const result = await runBackupCommand(fusionDir, settings);
 
     expect(result.success).toBe(true);
     expect(result.backupPath).toBeDefined();
@@ -590,7 +590,7 @@ describe("runBackupCommand", () => {
       autoBackupSchedule: "invalid-cron",
     };
 
-    const result = await runBackupCommand(kbDir, settings);
+    const result = await runBackupCommand(fusionDir, settings);
 
     expect(result.success).toBe(false);
     expect(result.output).toContain("Invalid backup schedule");
@@ -608,7 +608,7 @@ describe("runBackupCommand", () => {
     };
 
     // Create 3 backups first (manually to test cleanup) by advancing time
-    const manager = createBackupManager(kbDir, settings);
+    const manager = createBackupManager(fusionDir, settings);
     for (let i = 0; i < 3; i++) {
       vi.setSystemTime(new Date(`2026-01-01T00:00:0${i}.000Z`));
       await manager.createBackup();
@@ -616,7 +616,7 @@ describe("runBackupCommand", () => {
 
     // Now run backup command
     vi.setSystemTime(new Date("2026-01-01T00:00:03.000Z"));
-    const result = await runBackupCommand(kbDir, settings);
+    const result = await runBackupCommand(fusionDir, settings);
 
     expect(result.success).toBe(true);
     expect(result.deletedCount).toBeGreaterThanOrEqual(1);
@@ -624,7 +624,7 @@ describe("runBackupCommand", () => {
 
   it("should return failure when database file is missing", async () => {
     // Remove the database
-    await rm(join(kbDir, "fusion.db"));
+    await rm(join(fusionDir, "fusion.db"));
 
     const settings: ProjectSettings = {
       maxConcurrent: 2,
@@ -635,7 +635,7 @@ describe("runBackupCommand", () => {
       autoBackupEnabled: true,
     };
 
-    const result = await runBackupCommand(kbDir, settings);
+    const result = await runBackupCommand(fusionDir, settings);
 
     expect(result.success).toBe(false);
     expect(result.output).toContain("failed");

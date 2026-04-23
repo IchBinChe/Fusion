@@ -43,13 +43,13 @@ describe("FTS5 runtime guard", () => {
 
   describe("Database", () => {
     let tmpDir: string;
-    let kbDir: string;
+    let fusionDir: string;
     let db: Database;
 
     beforeEach(() => {
       tmpDir = makeTmpDir();
-      kbDir = join(tmpDir, ".fusion");
-      db = new Database(kbDir);
+      fusionDir = join(tmpDir, ".fusion");
+      db = new Database(fusionDir);
     });
 
     afterEach(async () => {
@@ -208,13 +208,13 @@ describe("FTS5 runtime guard", () => {
 
   describe("ArchiveDatabase.search LIKE fallback", () => {
     let tmpDir: string;
-    let kbDir: string;
+    let fusionDir: string;
     let archive: ArchiveDatabase;
 
     beforeEach(() => {
       tmpDir = makeTmpDir();
-      kbDir = join(tmpDir, ".fusion");
-      archive = new ArchiveDatabase(kbDir);
+      fusionDir = join(tmpDir, ".fusion");
+      archive = new ArchiveDatabase(fusionDir);
       archive.init();
     });
 

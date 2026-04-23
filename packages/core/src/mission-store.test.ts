@@ -25,16 +25,16 @@ function createTaskInDb(
 
 describe("MissionStore", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let db: Database;
   let store: MissionStore;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
-    db = new Database(kbDir);
+    fusionDir = join(tmpDir, ".fusion");
+    db = new Database(fusionDir);
     db.init();
-    store = new MissionStore(kbDir, db);
+    store = new MissionStore(fusionDir, db);
   });
 
   afterEach(async () => {
@@ -1663,7 +1663,7 @@ describe("MissionStore", () => {
     it("throws if feature not found", async () => {
       // Need a TaskStore reference for this test
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       await expect(msWithTs.triageFeature("F-NONEXISTENT")).rejects.toThrow(
@@ -1673,7 +1673,7 @@ describe("MissionStore", () => {
 
     it("throws if feature is already triaged", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1693,7 +1693,7 @@ describe("MissionStore", () => {
 
     it("creates a task and links it to the feature", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1725,7 +1725,7 @@ describe("MissionStore", () => {
 
     it("uses provided title and description overrides", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1746,7 +1746,7 @@ describe("MissionStore", () => {
 
     it("emits feature:linked event", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const linkedHandler = vi.fn();
@@ -1781,7 +1781,7 @@ describe("MissionStore", () => {
 
     it("throws if slice not found", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       await expect(msWithTs.triageSlice("SL-NONEXISTENT")).rejects.toThrow(
@@ -1791,7 +1791,7 @@ describe("MissionStore", () => {
 
     it("triages all defined features in a slice", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1818,7 +1818,7 @@ describe("MissionStore", () => {
 
     it("skips already triaged features", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1840,7 +1840,7 @@ describe("MissionStore", () => {
 
     it("returns empty array if no defined features", async () => {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1861,7 +1861,7 @@ describe("MissionStore", () => {
       ms: MissionStore;
     }> {
       const { TaskStore } = await import("./store.js");
-      const ts = new TaskStore(kbDir, join(kbDir, ".fusion-global-settings"));
+      const ts = new TaskStore(fusionDir, join(fusionDir, ".fusion-global-settings"));
       const ms = ts.getMissionStore();
       return { ts, ms };
     }
@@ -1979,7 +1979,7 @@ describe("MissionStore", () => {
       // The MissionStore was created via TaskStore, so taskStore is available.
       // To make triage fail, we'll delete the task from the DB after it's created.
       // Instead, let's use a MissionStore WITHOUT a TaskStore but with autoAdvance.
-      const storeNoTs = new MissionStore(kbDir, db);
+      const storeNoTs = new MissionStore(fusionDir, db);
 
       const mission2 = storeNoTs.createMission({ title: "Mission 2" });
       storeNoTs.updateMission(mission2.id, { autoAdvance: true });

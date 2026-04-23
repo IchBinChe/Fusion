@@ -375,11 +375,6 @@ export type {
   ProjectSetupInput,
   ResolvedContext,
 } from "./migration.js";
-export {
-  needsCentralMigration,
-  detectExistingProjects,
-  autoMigrateToCentral,
-} from "./db-migrate.js";
 
 // ── Memory Insights ──────────────────────────────────────────────────────
 

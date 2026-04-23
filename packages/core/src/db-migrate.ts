@@ -1,22 +1,20 @@
 /**
  * Migration from legacy file-based storage to SQLite.
- * 
+ *
  * Detects legacy data (.fusion/tasks/, .fusion/config.json, etc.) and migrates
  * it to the SQLite database. After successful migration, original files
  * are renamed with .bak suffix as backups.
- * 
+ *
  * Migration is idempotent: if the database already exists, migration is skipped.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { readFile, readdir, rename, stat } from "node:fs/promises";
-import { join, resolve, dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { readFile, readdir, rename } from "node:fs/promises";
+import { join } from "node:path";
 import type { Database } from "./db.js";
 import { toJson, toJsonNullable, normalizeTaskComments } from "./db.js";
 import type { Task, BoardConfig, ActivityLogEntry, ArchivedTaskEntry, WorkflowStep } from "./types.js";
 import type { ScheduledTask } from "./automation.js";
-import { resolveGlobalDir } from "./global-settings.js";
 
 // ── Detection ────────────────────────────────────────────────────────
 
@@ -24,36 +22,36 @@ import { resolveGlobalDir } from "./global-settings.js";
  * Check if legacy file-based data exists but no SQLite database is present.
  * Returns true if migration is needed.
  */
-export function detectLegacyData(kbDir: string): boolean {
-  const hasDb = existsSync(join(kbDir, "fusion.db"));
+export function detectLegacyData(fusionDir: string): boolean {
+  const hasDb = existsSync(join(fusionDir, "fusion.db"));
   if (hasDb) return false;
 
   return (
-    existsSync(join(kbDir, "tasks")) ||
-    existsSync(join(kbDir, "config.json")) ||
-    existsSync(join(kbDir, "agents")) ||
-    existsSync(join(kbDir, "automations")) ||
-    existsSync(join(kbDir, "activity-log.jsonl")) ||
-    existsSync(join(kbDir, "archive.jsonl"))
+    existsSync(join(fusionDir, "tasks")) ||
+    existsSync(join(fusionDir, "config.json")) ||
+    existsSync(join(fusionDir, "agents")) ||
+    existsSync(join(fusionDir, "automations")) ||
+    existsSync(join(fusionDir, "activity-log.jsonl")) ||
+    existsSync(join(fusionDir, "archive.jsonl"))
   );
 }
 
 /**
  * Get the migration status of a fn directory.
  */
-export function getMigrationStatus(kbDir: string): {
+export function getMigrationStatus(fusionDir: string): {
   hasLegacy: boolean;
   hasDatabase: boolean;
   needsMigration: boolean;
 } {
-  const hasDatabase = existsSync(join(kbDir, "fusion.db"));
+  const hasDatabase = existsSync(join(fusionDir, "fusion.db"));
   const hasLegacy =
-    existsSync(join(kbDir, "tasks")) ||
-    existsSync(join(kbDir, "config.json")) ||
-    existsSync(join(kbDir, "agents")) ||
-    existsSync(join(kbDir, "automations")) ||
-    existsSync(join(kbDir, "activity-log.jsonl")) ||
-    existsSync(join(kbDir, "archive.jsonl"));
+    existsSync(join(fusionDir, "tasks")) ||
+    existsSync(join(fusionDir, "config.json")) ||
+    existsSync(join(fusionDir, "agents")) ||
+    existsSync(join(fusionDir, "automations")) ||
+    existsSync(join(fusionDir, "activity-log.jsonl")) ||
+    existsSync(join(fusionDir, "archive.jsonl"));
 
   return {
     hasLegacy,
@@ -70,63 +68,63 @@ export function getMigrationStatus(kbDir: string): {
  * prevent migration of other data.
  */
 export async function migrateFromLegacy(
-  kbDir: string,
+  fusionDir: string,
   db: Database,
 ): Promise<void> {
   console.log("[migrate] Starting migration from file-based to SQLite...");
 
   // 1. Migrate config.json
   try {
-    await migrateConfig(kbDir, db);
+    await migrateConfig(fusionDir, db);
   } catch (err) {
     console.warn("[migrate] Warning: failed to migrate config.json:", (err as Error).message);
   }
 
   // 2. Migrate tasks
   try {
-    await migrateTasks(kbDir, db);
+    await migrateTasks(fusionDir, db);
   } catch (err) {
     console.warn("[migrate] Warning: failed to migrate tasks:", (err as Error).message);
   }
 
   // 3. Migrate activity log
   try {
-    await migrateActivityLog(kbDir, db);
+    await migrateActivityLog(fusionDir, db);
   } catch (err) {
     console.warn("[migrate] Warning: failed to migrate activity log:", (err as Error).message);
   }
 
   // 4. Migrate archive
   try {
-    await migrateArchive(kbDir, db);
+    await migrateArchive(fusionDir, db);
   } catch (err) {
     console.warn("[migrate] Warning: failed to migrate archive:", (err as Error).message);
   }
 
   // 5. Migrate automations
   try {
-    await migrateAutomations(kbDir, db);
+    await migrateAutomations(fusionDir, db);
   } catch (err) {
     console.warn("[migrate] Warning: failed to migrate automations:", (err as Error).message);
   }
 
   // 6. Migrate agents
   try {
-    await migrateAgents(kbDir, db);
+    await migrateAgents(fusionDir, db);
   } catch (err) {
     console.warn("[migrate] Warning: failed to migrate agents:", (err as Error).message);
   }
 
   // 7. Create backups
-  await createBackups(kbDir);
+  await createBackups(fusionDir);
 
   console.log("[migrate] Migration complete.");
 }
 
 // ── Config Migration ─────────────────────────────────────────────────
 
-async function migrateConfig(kbDir: string, db: Database): Promise<void> {
-  const configPath = join(kbDir, "config.json");
+async function migrateConfig(fusionDir: string, db: Database): Promise<void> {
+  const configPath = join(fusionDir, "config.json");
   if (!existsSync(configPath)) return;
 
   const raw = await readFile(configPath, "utf-8");
@@ -207,8 +205,8 @@ async function migrateConfig(kbDir: string, db: Database): Promise<void> {
 
 // ── Task Migration ───────────────────────────────────────────────────
 
-async function migrateTasks(kbDir: string, db: Database): Promise<void> {
-  const tasksDir = join(kbDir, "tasks");
+async function migrateTasks(fusionDir: string, db: Database): Promise<void> {
+  const tasksDir = join(fusionDir, "tasks");
   if (!existsSync(tasksDir)) return;
 
   const entries = await readdir(tasksDir, { withFileTypes: true });
@@ -302,8 +300,8 @@ async function migrateTasks(kbDir: string, db: Database): Promise<void> {
 
 // ── Activity Log Migration ───────────────────────────────────────────
 
-async function migrateActivityLog(kbDir: string, db: Database): Promise<void> {
-  const logPath = join(kbDir, "activity-log.jsonl");
+async function migrateActivityLog(fusionDir: string, db: Database): Promise<void> {
+  const logPath = join(fusionDir, "activity-log.jsonl");
   if (!existsSync(logPath)) return;
 
   const content = await readFile(logPath, "utf-8");
@@ -340,8 +338,8 @@ async function migrateActivityLog(kbDir: string, db: Database): Promise<void> {
 
 // ── Archive Migration ────────────────────────────────────────────────
 
-async function migrateArchive(kbDir: string, db: Database): Promise<void> {
-  const archivePath = join(kbDir, "archive.jsonl");
+async function migrateArchive(fusionDir: string, db: Database): Promise<void> {
+  const archivePath = join(fusionDir, "archive.jsonl");
   if (!existsSync(archivePath)) return;
 
   const content = await readFile(archivePath, "utf-8");
@@ -374,8 +372,8 @@ async function migrateArchive(kbDir: string, db: Database): Promise<void> {
 
 // ── Automations Migration ────────────────────────────────────────────
 
-async function migrateAutomations(kbDir: string, db: Database): Promise<void> {
-  const automationsDir = join(kbDir, "automations");
+async function migrateAutomations(fusionDir: string, db: Database): Promise<void> {
+  const automationsDir = join(fusionDir, "automations");
   if (!existsSync(automationsDir)) return;
 
   const entries = await readdir(automationsDir);
@@ -429,8 +427,8 @@ async function migrateAutomations(kbDir: string, db: Database): Promise<void> {
 
 // ── Agents Migration ─────────────────────────────────────────────────
 
-async function migrateAgents(kbDir: string, db: Database): Promise<void> {
-  const agentsDir = join(kbDir, "agents");
+async function migrateAgents(fusionDir: string, db: Database): Promise<void> {
+  const agentsDir = join(fusionDir, "agents");
   if (!existsSync(agentsDir)) return;
 
   const entries = await readdir(agentsDir);
@@ -515,9 +513,9 @@ async function migrateAgents(kbDir: string, db: Database): Promise<void> {
  * task directory are the "migrated" data now in SQLite. We rename individual
  * task.json files to task.json.bak instead.
  */
-async function createBackups(kbDir: string): Promise<void> {
+async function createBackups(fusionDir: string): Promise<void> {
   // Backup individual task.json files (preserving blob files in place)
-  const tasksDir = join(kbDir, "tasks");
+  const tasksDir = join(fusionDir, "tasks");
   if (existsSync(tasksDir)) {
     try {
       const entries = await readdir(tasksDir, { withFileTypes: true });
@@ -535,7 +533,7 @@ async function createBackups(kbDir: string): Promise<void> {
   }
 
   // Backup config.json
-  const configPath = join(kbDir, "config.json");
+  const configPath = join(fusionDir, "config.json");
   if (existsSync(configPath)) {
     try {
       await rename(configPath, configPath + ".bak");
@@ -546,7 +544,7 @@ async function createBackups(kbDir: string): Promise<void> {
   }
 
   // Backup activity-log.jsonl
-  const activityLogPath = join(kbDir, "activity-log.jsonl");
+  const activityLogPath = join(fusionDir, "activity-log.jsonl");
   if (existsSync(activityLogPath)) {
     try {
       await rename(activityLogPath, activityLogPath + ".bak");
@@ -557,7 +555,7 @@ async function createBackups(kbDir: string): Promise<void> {
   }
 
   // Backup archive.jsonl
-  const archivePath = join(kbDir, "archive.jsonl");
+  const archivePath = join(fusionDir, "archive.jsonl");
   if (existsSync(archivePath)) {
     try {
       await rename(archivePath, archivePath + ".bak");
@@ -568,7 +566,7 @@ async function createBackups(kbDir: string): Promise<void> {
   }
 
   // Backup automations directory
-  const automationsDir = join(kbDir, "automations");
+  const automationsDir = join(fusionDir, "automations");
   if (existsSync(automationsDir)) {
     try {
       await rename(automationsDir, automationsDir + ".bak");
@@ -579,7 +577,7 @@ async function createBackups(kbDir: string): Promise<void> {
   }
 
   // Backup agents directory
-  const agentsDir = join(kbDir, "agents");
+  const agentsDir = join(fusionDir, "agents");
   if (existsSync(agentsDir)) {
     try {
       await rename(agentsDir, agentsDir + ".bak");
@@ -588,88 +586,4 @@ async function createBackups(kbDir: string): Promise<void> {
       console.warn("[migrate] Warning: failed to backup agents/:", (err as Error).message);
     }
   }
-}
-
-// ── Central Migration ────────────────────────────────────────────────
-
-/**
- * Check if migration to central database is needed.
- *
- * Returns true if:
- * - Central DB doesn't exist AND
- * - cwd has `.fusion/fusion.db` or `.fusion/fusion.db` (existing single-project)
- *
- * @param cwd — Current working directory to check
- * @param globalDir — Directory for central database. Defaults to `~/.fusion/`.
- */
-export function needsCentralMigration(cwd: string, globalDir?: string): boolean {
-  const centralDbPath = join(resolveGlobalDir(globalDir), "fusion-central.db");
-  if (existsSync(centralDbPath)) {
-    return false;
-  }
-
-  let current = resolve(cwd);
-  const home = homedir();
-  const root = dirname(current) === current ? current : "/";
-
-  while (true) {
-    const fusionDbPath = join(current, ".fusion", "fusion.db");
-    if (existsSync(fusionDbPath)) {
-      try {
-        const stat = statSync(fusionDbPath);
-        if (stat.isFile() && stat.size > 0) return true;
-      } catch { /* fall through */ }
-    }
-    const dbPath = join(current, ".fusion", "fusion.db");
-    if (existsSync(dbPath)) {
-      try {
-        const stat = statSync(dbPath);
-        return stat.isFile() && stat.size > 0;
-      } catch {
-        return false;
-      }
-    }
-
-    if (current === home || current === root) {
-      break;
-    }
-
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-
-  return false;
-}
-
-/**
- * Detect existing projects by walking up from cwd.
- *
- * @param cwd — Starting directory (default: process.cwd())
- * @param globalDir — Directory for central database. Defaults to `~/.fusion/`.
- * @returns Array of detected projects
- */
-export async function detectExistingProjects(
-  cwd?: string,
-  globalDir?: string
-): Promise<Array<{ path: string; name: string; hasDb: boolean }>> {
-  const { FirstRunDetector } = await import("./migration.js");
-  const detector = new FirstRunDetector(globalDir);
-  return detector.detectExistingProjects(cwd);
-}
-
-/**
- * Auto-migrate an existing single project to central database.
- *
- * @param existingProjectPath — Absolute path to existing project
- * @param central — Initialized CentralCore instance
- * @returns Migration result
- */
-export async function autoMigrateToCentral(
-  existingProjectPath: string,
-  central: import("./central-core.js").CentralCore
-): Promise<import("./migration.js").MigrationResult> {
-  const { MigrationCoordinator } = await import("./migration.js");
-  const coordinator = new MigrationCoordinator(central);
-  return coordinator.registerSingleProject(existingProjectPath);
 }

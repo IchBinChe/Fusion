@@ -54,11 +54,11 @@ export class ArchiveDatabase {
   private db: DatabaseSync;
   private readonly _fts5Available: boolean;
 
-  constructor(kbDir: string) {
-    if (!existsSync(kbDir)) {
-      mkdirSync(kbDir, { recursive: true });
+  constructor(fusionDir: string) {
+    if (!existsSync(fusionDir)) {
+      mkdirSync(fusionDir, { recursive: true });
     }
-    this.db = new DatabaseSync(join(kbDir, "archive.db"));
+    this.db = new DatabaseSync(join(fusionDir, "archive.db"));
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
     this._fts5Available = probeFts5(this.db);

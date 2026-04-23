@@ -133,12 +133,12 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Creates a new MissionStore instance.
    *
-   * @param kbDir - Path to the .fusion directory (e.g., /path/to/project/.fusion)
+   * @param fusionDir - Path to the .fusion directory (e.g., /path/to/project/.fusion)
    * @param db - Shared Database instance (same instance used by TaskStore)
    * @param taskStore - Optional TaskStore reference for triage operations that create tasks
    */
   constructor(
-    private kbDir: string,
+    private fusionDir: string,
     private db: Database,
     private taskStore?: import("./store.js").TaskStore,
   ) {

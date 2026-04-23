@@ -189,7 +189,6 @@ vi.mock("./commands/message.js", () => ({
 
 const originalArgv = process.argv;
 const originalExit = process.exit;
-const originalSkipMigration = process.env.KB_SKIP_MIGRATION;
 const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
 
 let importCounter = 0;
@@ -206,7 +205,6 @@ describe("bin command routing and fallbacks", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.KB_SKIP_MIGRATION = "1";
     delete process.env.PI_PACKAGE_DIR;
     process.exit = vi.fn(((code?: number) => {
       throw new Error(`process.exit:${code ?? 0}`);
@@ -216,11 +214,6 @@ describe("bin command routing and fallbacks", () => {
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
-    if (originalSkipMigration === undefined) {
-      delete process.env.KB_SKIP_MIGRATION;
-    } else {
-      process.env.KB_SKIP_MIGRATION = originalSkipMigration;
-    }
 
     if (originalPiPackageDir === undefined) {
       delete process.env.PI_PACKAGE_DIR;

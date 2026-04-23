@@ -12,11 +12,11 @@ function makeTmpDir(): string {
 
 describe("detectLegacyData", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
+    fusionDir = join(tmpDir, ".fusion");
   });
 
   afterEach(async () => {
@@ -24,60 +24,60 @@ describe("detectLegacyData", () => {
   });
 
   it("returns false for empty directory", () => {
-    expect(detectLegacyData(kbDir)).toBe(false);
+    expect(detectLegacyData(fusionDir)).toBe(false);
   });
 
   it("returns true when tasks/ exists", async () => {
-    await mkdir(join(kbDir, "tasks"), { recursive: true });
-    expect(detectLegacyData(kbDir)).toBe(true);
+    await mkdir(join(fusionDir, "tasks"), { recursive: true });
+    expect(detectLegacyData(fusionDir)).toBe(true);
   });
 
   it("returns true when config.json exists", async () => {
-    await mkdir(kbDir, { recursive: true });
-    await writeFile(join(kbDir, "config.json"), '{"nextId":1}');
-    expect(detectLegacyData(kbDir)).toBe(true);
+    await mkdir(fusionDir, { recursive: true });
+    await writeFile(join(fusionDir, "config.json"), '{"nextId":1}');
+    expect(detectLegacyData(fusionDir)).toBe(true);
   });
 
   it("returns true when activity-log.jsonl exists", async () => {
-    await mkdir(kbDir, { recursive: true });
-    await writeFile(join(kbDir, "activity-log.jsonl"), "");
-    expect(detectLegacyData(kbDir)).toBe(true);
+    await mkdir(fusionDir, { recursive: true });
+    await writeFile(join(fusionDir, "activity-log.jsonl"), "");
+    expect(detectLegacyData(fusionDir)).toBe(true);
   });
 
   it("returns true when archive.jsonl exists", async () => {
-    await mkdir(kbDir, { recursive: true });
-    await writeFile(join(kbDir, "archive.jsonl"), "");
-    expect(detectLegacyData(kbDir)).toBe(true);
+    await mkdir(fusionDir, { recursive: true });
+    await writeFile(join(fusionDir, "archive.jsonl"), "");
+    expect(detectLegacyData(fusionDir)).toBe(true);
   });
 
   it("returns true when automations/ exists", async () => {
-    await mkdir(join(kbDir, "automations"), { recursive: true });
-    expect(detectLegacyData(kbDir)).toBe(true);
+    await mkdir(join(fusionDir, "automations"), { recursive: true });
+    expect(detectLegacyData(fusionDir)).toBe(true);
   });
 
   it("returns true when agents/ exists", async () => {
-    await mkdir(join(kbDir, "agents"), { recursive: true });
-    expect(detectLegacyData(kbDir)).toBe(true);
+    await mkdir(join(fusionDir, "agents"), { recursive: true });
+    expect(detectLegacyData(fusionDir)).toBe(true);
   });
 
   it("returns false when db already exists", async () => {
-    await mkdir(join(kbDir, "tasks"), { recursive: true });
+    await mkdir(join(fusionDir, "tasks"), { recursive: true });
     // Create a db file
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     db.init();
     db.close();
 
-    expect(detectLegacyData(kbDir)).toBe(false);
+    expect(detectLegacyData(fusionDir)).toBe(false);
   });
 });
 
 describe("getMigrationStatus", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
+    fusionDir = join(tmpDir, ".fusion");
   });
 
   afterEach(async () => {
@@ -85,7 +85,7 @@ describe("getMigrationStatus", () => {
   });
 
   it("returns all false for empty directory", () => {
-    const status = getMigrationStatus(kbDir);
+    const status = getMigrationStatus(fusionDir);
     expect(status).toEqual({
       hasLegacy: false,
       hasDatabase: false,
@@ -94,20 +94,20 @@ describe("getMigrationStatus", () => {
   });
 
   it("returns needsMigration when legacy exists but no db", async () => {
-    await mkdir(join(kbDir, "tasks"), { recursive: true });
-    const status = getMigrationStatus(kbDir);
+    await mkdir(join(fusionDir, "tasks"), { recursive: true });
+    const status = getMigrationStatus(fusionDir);
     expect(status.hasLegacy).toBe(true);
     expect(status.hasDatabase).toBe(false);
     expect(status.needsMigration).toBe(true);
   });
 
   it("returns no migration needed when both exist", async () => {
-    await mkdir(join(kbDir, "tasks"), { recursive: true });
-    const db = new Database(kbDir);
+    await mkdir(join(fusionDir, "tasks"), { recursive: true });
+    const db = new Database(fusionDir);
     db.init();
     db.close();
 
-    const status = getMigrationStatus(kbDir);
+    const status = getMigrationStatus(fusionDir);
     expect(status.hasLegacy).toBe(true);
     expect(status.hasDatabase).toBe(true);
     expect(status.needsMigration).toBe(false);
@@ -116,14 +116,14 @@ describe("getMigrationStatus", () => {
 
 describe("migrateFromLegacy", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let db: Database;
 
   beforeEach(async () => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
-    await mkdir(kbDir, { recursive: true });
-    db = new Database(kbDir);
+    fusionDir = join(tmpDir, ".fusion");
+    await mkdir(fusionDir, { recursive: true });
+    db = new Database(fusionDir);
     db.init();
     // Suppress migration console output in tests
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -143,7 +143,7 @@ describe("migrateFromLegacy", () => {
   describe("config migration", () => {
     it("migrates config.json to config table", async () => {
       await writeFile(
-        join(kbDir, "config.json"),
+        join(fusionDir, "config.json"),
         JSON.stringify({
           nextId: 42,
           nextWorkflowStepId: 3,
@@ -152,7 +152,7 @@ describe("migrateFromLegacy", () => {
         }),
       );
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const row = db.prepare("SELECT * FROM config WHERE id = 1").get() as any;
       expect(row.nextId).toBe(42);
@@ -176,7 +176,7 @@ describe("migrateFromLegacy", () => {
 
   describe("task migration", () => {
     it("migrates task.json files to tasks table", async () => {
-      const tasksDir = join(kbDir, "tasks");
+      const tasksDir = join(fusionDir, "tasks");
       const taskDir = join(tasksDir, "FN-001");
       await mkdir(taskDir, { recursive: true });
 
@@ -199,7 +199,7 @@ describe("migrateFromLegacy", () => {
       await writeFile(join(taskDir, "task.json"), JSON.stringify(task));
       await writeFile(join(taskDir, "PROMPT.md"), "# KB-001\n\nTest task");
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const row = db.prepare("SELECT * FROM tasks WHERE id = 'FN-001'").get() as any;
       expect(row).toBeDefined();
@@ -213,7 +213,7 @@ describe("migrateFromLegacy", () => {
     });
 
     it("skips invalid task.json files", async () => {
-      const tasksDir = join(kbDir, "tasks");
+      const tasksDir = join(fusionDir, "tasks");
       const validDir = join(tasksDir, "FN-001");
       const invalidDir = join(tasksDir, "FN-002");
       await mkdir(validDir, { recursive: true });
@@ -235,7 +235,7 @@ describe("migrateFromLegacy", () => {
       );
       await writeFile(join(invalidDir, "task.json"), "not valid json{{");
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const valid = db.prepare("SELECT * FROM tasks WHERE id = 'FN-001'").get();
       const invalid = db.prepare("SELECT * FROM tasks WHERE id = 'FN-002'").get();
@@ -244,7 +244,7 @@ describe("migrateFromLegacy", () => {
     });
 
     it("preserves blob files (PROMPT.md, agent.log, attachments)", async () => {
-      const tasksDir = join(kbDir, "tasks");
+      const tasksDir = join(fusionDir, "tasks");
       const taskDir = join(tasksDir, "FN-001");
       const attachDir = join(taskDir, "attachments");
       await mkdir(attachDir, { recursive: true });
@@ -267,7 +267,7 @@ describe("migrateFromLegacy", () => {
       await writeFile(join(taskDir, "agent.log"), '{"timestamp":"2025","text":"hello","type":"text"}\n');
       await writeFile(join(attachDir, "test.txt"), "attachment content");
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       // Blob files should still exist
       expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(true);
@@ -287,11 +287,11 @@ describe("migrateFromLegacy", () => {
         { id: "2", timestamp: "2025-01-02T00:00:00.000Z", type: "task:moved", taskId: "FN-001", details: "Moved to todo", metadata: { from: "triage", to: "todo" } },
       ];
       await writeFile(
-        join(kbDir, "activity-log.jsonl"),
+        join(fusionDir, "activity-log.jsonl"),
         entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
       );
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const rows = db.prepare("SELECT * FROM activityLog ORDER BY timestamp").all() as any[];
       expect(rows).toHaveLength(2);
@@ -302,11 +302,11 @@ describe("migrateFromLegacy", () => {
 
     it("skips malformed activity log lines", async () => {
       await writeFile(
-        join(kbDir, "activity-log.jsonl"),
+        join(fusionDir, "activity-log.jsonl"),
         '{"id":"1","timestamp":"2025","type":"task:created","details":"ok"}\nnot json\n{"id":"2","timestamp":"2025","type":"task:moved","details":"ok"}\n',
       );
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const rows = db.prepare("SELECT * FROM activityLog").all();
       expect(rows).toHaveLength(2);
@@ -328,9 +328,9 @@ describe("migrateFromLegacy", () => {
         updatedAt: "2025-01-01",
         archivedAt: "2025-01-15T00:00:00.000Z",
       };
-      await writeFile(join(kbDir, "archive.jsonl"), JSON.stringify(entry) + "\n");
+      await writeFile(join(fusionDir, "archive.jsonl"), JSON.stringify(entry) + "\n");
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const row = db.prepare("SELECT * FROM archivedTasks WHERE id = 'FN-001'").get() as any;
       expect(row).toBeDefined();
@@ -341,7 +341,7 @@ describe("migrateFromLegacy", () => {
 
   describe("automations migration", () => {
     it("migrates automation JSON files to automations table", async () => {
-      const automationsDir = join(kbDir, "automations");
+      const automationsDir = join(fusionDir, "automations");
       await mkdir(automationsDir, { recursive: true });
 
       const schedule = {
@@ -359,7 +359,7 @@ describe("migrateFromLegacy", () => {
       };
       await writeFile(join(automationsDir, "test-uuid.json"), JSON.stringify(schedule));
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const row = db.prepare("SELECT * FROM automations WHERE id = 'test-uuid'").get() as any;
       expect(row).toBeDefined();
@@ -371,7 +371,7 @@ describe("migrateFromLegacy", () => {
 
   describe("agents migration", () => {
     it("migrates agent JSON files and heartbeats", async () => {
-      const agentsDir = join(kbDir, "agents");
+      const agentsDir = join(fusionDir, "agents");
       await mkdir(agentsDir, { recursive: true });
 
       const agent = {
@@ -395,7 +395,7 @@ describe("migrateFromLegacy", () => {
         heartbeats.map((h) => JSON.stringify(h)).join("\n") + "\n",
       );
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const agentRow = db.prepare("SELECT * FROM agents WHERE id = 'agent-001'").get() as any;
       expect(agentRow).toBeDefined();
@@ -410,36 +410,36 @@ describe("migrateFromLegacy", () => {
 
   describe("backups", () => {
     it("backs up config.json, activity-log.jsonl, archive.jsonl", async () => {
-      await writeFile(join(kbDir, "config.json"), '{"nextId":1}');
-      await writeFile(join(kbDir, "activity-log.jsonl"), "");
-      await writeFile(join(kbDir, "archive.jsonl"), "");
+      await writeFile(join(fusionDir, "config.json"), '{"nextId":1}');
+      await writeFile(join(fusionDir, "activity-log.jsonl"), "");
+      await writeFile(join(fusionDir, "archive.jsonl"), "");
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
-      expect(existsSync(join(kbDir, "config.json.bak"))).toBe(true);
-      expect(existsSync(join(kbDir, "activity-log.jsonl.bak"))).toBe(true);
-      expect(existsSync(join(kbDir, "archive.jsonl.bak"))).toBe(true);
+      expect(existsSync(join(fusionDir, "config.json.bak"))).toBe(true);
+      expect(existsSync(join(fusionDir, "activity-log.jsonl.bak"))).toBe(true);
+      expect(existsSync(join(fusionDir, "archive.jsonl.bak"))).toBe(true);
 
       // Originals should be gone
-      expect(existsSync(join(kbDir, "config.json"))).toBe(false);
-      expect(existsSync(join(kbDir, "activity-log.jsonl"))).toBe(false);
-      expect(existsSync(join(kbDir, "archive.jsonl"))).toBe(false);
+      expect(existsSync(join(fusionDir, "config.json"))).toBe(false);
+      expect(existsSync(join(fusionDir, "activity-log.jsonl"))).toBe(false);
+      expect(existsSync(join(fusionDir, "archive.jsonl"))).toBe(false);
     });
 
     it("backs up automations/ and agents/ directories", async () => {
-      await mkdir(join(kbDir, "automations"), { recursive: true });
-      await mkdir(join(kbDir, "agents"), { recursive: true });
+      await mkdir(join(fusionDir, "automations"), { recursive: true });
+      await mkdir(join(fusionDir, "agents"), { recursive: true });
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
-      expect(existsSync(join(kbDir, "automations.bak"))).toBe(true);
-      expect(existsSync(join(kbDir, "agents.bak"))).toBe(true);
-      expect(existsSync(join(kbDir, "automations"))).toBe(false);
-      expect(existsSync(join(kbDir, "agents"))).toBe(false);
+      expect(existsSync(join(fusionDir, "automations.bak"))).toBe(true);
+      expect(existsSync(join(fusionDir, "agents.bak"))).toBe(true);
+      expect(existsSync(join(fusionDir, "automations"))).toBe(false);
+      expect(existsSync(join(fusionDir, "agents"))).toBe(false);
     });
 
     it("backs up individual task.json files, preserving blob files", async () => {
-      const tasksDir = join(kbDir, "tasks");
+      const tasksDir = join(fusionDir, "tasks");
       const taskDir = join(tasksDir, "FN-001");
       await mkdir(taskDir, { recursive: true });
 
@@ -459,7 +459,7 @@ describe("migrateFromLegacy", () => {
       );
       await writeFile(join(taskDir, "PROMPT.md"), "# Test");
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       // tasks/ directory should still exist
       expect(existsSync(tasksDir)).toBe(true);
@@ -473,14 +473,14 @@ describe("migrateFromLegacy", () => {
 
   describe("idempotency", () => {
     it("does not fail when no legacy data exists", async () => {
-      // Fresh kbDir with no legacy files
-      await expect(migrateFromLegacy(kbDir, db)).resolves.not.toThrow();
+      // Fresh fusionDir with no legacy files
+      await expect(migrateFromLegacy(fusionDir, db)).resolves.not.toThrow();
     });
   });
 
   describe("comment migration", () => {
     it("deduplicates overlapping steeringComments and comments during legacy import", async () => {
-      const tasksDir = join(kbDir, "tasks");
+      const tasksDir = join(fusionDir, "tasks");
       const taskDir = join(tasksDir, "FN-002");
       await mkdir(taskDir, { recursive: true });
 
@@ -506,7 +506,7 @@ describe("migrateFromLegacy", () => {
         }),
       );
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const row = db.prepare("SELECT steeringComments, comments FROM tasks WHERE id = 'FN-002'").get() as any;
       expect(JSON.parse(row.steeringComments)).toEqual([
@@ -521,7 +521,7 @@ describe("migrateFromLegacy", () => {
 
   describe("data integrity", () => {
     it("preserves all task fields through migration", async () => {
-      const tasksDir = join(kbDir, "tasks");
+      const tasksDir = join(fusionDir, "tasks");
       const taskDir = join(tasksDir, "FN-001");
       await mkdir(taskDir, { recursive: true });
 
@@ -564,7 +564,7 @@ describe("migrateFromLegacy", () => {
 
       await writeFile(join(taskDir, "task.json"), JSON.stringify(fullTask));
 
-      await migrateFromLegacy(kbDir, db);
+      await migrateFromLegacy(fusionDir, db);
 
       const row = db.prepare("SELECT * FROM tasks WHERE id = 'FN-001'").get() as any;
       expect(row.id).toBe("FN-001");

@@ -3737,7 +3737,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const { store: scopedStore } = await getProjectContext(req);
       const { createBackupManager } = await import("@fusion/core");
       const settings = await scopedStore.getSettings();
-      const manager = createBackupManager(scopedStore["fusionDir"], settings);
+      const manager = createBackupManager(scopedStore.getFusionDir(), settings);
       const backups = await manager.listBackups();
       
       // Calculate total size
@@ -3765,7 +3765,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const { store: scopedStore } = await getProjectContext(req);
       const { runBackupCommand } = await import("@fusion/core");
       const settings = await scopedStore.getSettings();
-      const result = await runBackupCommand(scopedStore["fusionDir"], settings);
+      const result = await runBackupCommand(scopedStore.getFusionDir(), settings);
       
       if (result.success) {
         res.json({

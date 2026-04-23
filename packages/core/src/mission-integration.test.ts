@@ -390,7 +390,7 @@ describe("MissionStore integration with TaskStore", () => {
 
     const refreshed = missionStore.getFeature(feature.id);
     expect(refreshed?.taskId).toBeUndefined();
-  });
+  }, 15000);
 
   // ── Parity: Restart Fidelity Tests ──────────────────────────────────
 

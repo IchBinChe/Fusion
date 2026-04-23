@@ -20,13 +20,6 @@ import { ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
 
-/**
- * Legacy backup directory default value from the old .kb storage structure.
- * Projects that were created before the .fusion rename may still have this
- * value persisted in their config. It is canonicalized to the new default
- * so that all backup operations use a consistent directory.
- */
-const LEGACY_BACKUP_DIR = ".kb/backups";
 const TASK_ACTIVITY_LOG_ENTRY_LIMIT = 1_000;
 const TASK_ACTIVITY_LOG_OUTCOME_LIMIT = 4_000;
 const ARCHIVE_AGENT_LOG_SNAPSHOT_LIMIT = 25;
@@ -96,24 +89,9 @@ function compactTaskActivityLog(entries: TaskLogEntry[]): TaskLogEntry[] {
 }
 
 /**
- * Canonicalizes a settings object by resolving legacy defaults.
- * Currently handles the .kb/backups → .fusion/backups migration and
- * strips legacy fields that are no longer valid.
- *
- * This function applies only the exact-match legacy alias transformation.
- * Other custom .kb/* paths are preserved as-is.
+ * Canonicalizes a settings object by stripping legacy fields that are no longer valid.
  */
 function canonicalizeSettings(settings: Settings): Settings {
-  // Canonicalize the legacy backup directory default to the new location.
-  // Only the exact legacy default value is transformed — custom paths like
-  // ".kb/my-custom-backups" are preserved unchanged.
-  if ((settings as Partial<ProjectSettings>).autoBackupDir === LEGACY_BACKUP_DIR) {
-    return {
-      ...settings,
-      autoBackupDir: ".fusion/backups",
-    };
-  }
-
   // Strip legacy globalMaxConcurrent from project settings - this field was
   // deprecated in favor of the global-level maxConcurrent in concurrency settings.
   const { globalMaxConcurrent, ...rest } = settings as Settings & { globalMaxConcurrent?: number };
@@ -203,7 +181,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * optional blob files must tolerate missing files/directories because cleanup, migration,
    * or manual filesystem changes can remove them independently of the database row.
    */
-  private kbDir: string;
+  private fusionDir: string;
   private tasksDir: string;
   private configPath: string;
   /** SQLite database for structured data storage */
@@ -254,9 +232,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   constructor(private rootDir: string, globalSettingsDir?: string) {
     super();
     this.setMaxListeners(100);
-    this.kbDir = join(rootDir, ".fusion");
-    this.tasksDir = join(this.kbDir, "tasks");
-    this.configPath = join(this.kbDir, "config.json");
+    this.fusionDir = join(rootDir, ".fusion");
+    this.tasksDir = join(this.fusionDir, "tasks");
+    this.configPath = join(this.fusionDir, "config.json");
     const resolvedGlobalSettingsDir = globalSettingsDir
       ?? (process.env.VITEST === "true" ? join(rootDir, ".fusion-global-settings") : undefined);
     this.globalSettingsStore = new GlobalSettingsStore(resolvedGlobalSettingsDir);
@@ -268,10 +246,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   private get db(): Database {
     if (!this._db) {
-      this._db = new Database(this.kbDir);
+      this._db = new Database(this.fusionDir);
       this._db.init();
       // Auto-migrate legacy data if needed
-      if (detectLegacyData(this.kbDir)) {
+      if (detectLegacyData(this.fusionDir)) {
         // Note: migrateFromLegacy is async but we need sync access.
         // The init() method handles async migration. This getter
         // just ensures the DB is available for synchronous operations.
@@ -282,7 +260,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private get archiveDb(): ArchiveDatabase {
     if (!this._archiveDb) {
-      this._archiveDb = new ArchiveDatabase(this.kbDir);
+      this._archiveDb = new ArchiveDatabase(this.fusionDir);
       this._archiveDb.init();
       this.migrateLegacyArchiveEntriesToArchiveDb();
     }
@@ -294,13 +272,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     
     // Initialize SQLite database
     if (!this._db) {
-      this._db = new Database(this.kbDir);
+      this._db = new Database(this.fusionDir);
       this._db.init();
     }
     
     // Auto-migrate from legacy file-based storage
-    if (detectLegacyData(this.kbDir)) {
-      await migrateFromLegacy(this.kbDir, this._db);
+    if (detectLegacyData(this.fusionDir)) {
+      await migrateFromLegacy(this.fusionDir, this._db);
     }
     await this.migrateActiveArchivedTasksToArchiveDb();
     await this.importLegacyAgentLogsOnce();
@@ -1092,7 +1070,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Returns the combined view that most consumers should use. Project-level
    * values in `.fusion/config.json` override global values from `~/.fusion/settings.json`.
    *
-   * Settings are canonicalized to resolve legacy defaults (e.g., `.kb/backups` → `.fusion/backups`).
+   *
    */
   async getSettings(): Promise<Settings> {
     const [globalSettings, config] = await Promise.all([
@@ -1116,7 +1094,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    *
    * Note: Do NOT use this method when you need workflow steps — use `getSettings()` instead.
    *
-   * Settings are canonicalized to resolve legacy defaults (e.g., `.kb/backups` → `.fusion/backups`).
+   *
    */
   async getSettingsFast(): Promise<Settings> {
     const [globalSettings, row] = await Promise.all([
@@ -1138,7 +1116,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * project-level settings independently (useful for the UI to show
    * which scope a value comes from).
    *
-   * Settings are canonicalized to resolve legacy defaults (e.g., `.kb/backups` → `.fusion/backups`).
+   *
    */
   async getSettingsByScope(): Promise<{ global: GlobalSettings; project: Partial<ProjectSettings> }> {
     const [globalSettings, config] = await Promise.all([
@@ -1171,7 +1149,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * uses the cached global settings from `GlobalSettingsStore`. Use this for
    * read-heavy paths like the settings page that don't need workflow steps.
    *
-   * Settings are canonicalized to resolve legacy defaults (e.g., `.kb/backups` → `.fusion/backups`).
+   *
    */
   async getSettingsByScopeFast(): Promise<{ global: GlobalSettings; project: Partial<ProjectSettings> }> {
     const [globalSettings, row] = await Promise.all([
@@ -5064,7 +5042,7 @@ ${stepsSection}`;
 
   /** Return the `.fusion` directory path (e.g. `/project/.fusion`). */
   getFusionDir(): string {
-    return this.kbDir;
+    return this.fusionDir;
   }
 
   getTasksDir(): string {
@@ -5310,7 +5288,7 @@ ${notificationsSection}`;
    */
   getMissionStore(): MissionStore {
     if (!this.missionStore) {
-      this.missionStore = new MissionStore(this.kbDir, this.db, this);
+      this.missionStore = new MissionStore(this.fusionDir, this.db, this);
     }
     return this.missionStore;
   }

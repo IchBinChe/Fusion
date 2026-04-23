@@ -12,13 +12,13 @@ function makeTmpDir(): string {
 
 describe("Database", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let db: Database;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
-    db = new Database(kbDir);
+    fusionDir = join(tmpDir, ".fusion");
+    db = new Database(fusionDir);
     db.init(); // Explicit init required — createDatabase() does not auto-init
   });
 
@@ -33,11 +33,11 @@ describe("Database", () => {
 
   describe("initialization", () => {
     it("creates the database file", () => {
-      expect(existsSync(join(kbDir, "fusion.db"))).toBe(true);
+      expect(existsSync(join(fusionDir, "fusion.db"))).toBe(true);
     });
 
     it("creates the .fusion directory if missing", () => {
-      expect(existsSync(kbDir)).toBe(true);
+      expect(existsSync(fusionDir)).toBe(true);
     });
 
     it("sets WAL journal mode", () => {
@@ -206,14 +206,14 @@ describe("Database", () => {
 
       // Close and reopen
       db.close();
-      const db2 = new Database(kbDir);
+      const db2 = new Database(fusionDir);
       db2.init();
 
       expect(db2.getLastModified()).toBe(ts);
       db2.close();
 
       // Re-assign so afterEach doesn't fail
-      db = new Database(kbDir);
+      db = new Database(fusionDir);
       db.init();
     });
 
@@ -422,7 +422,7 @@ describe("Database", () => {
 
       // Close and reopen
       db.close();
-      db = new Database(kbDir);
+      db = new Database(fusionDir);
       db.init();
 
       // Verify foreign key enforcement is active after reopen
@@ -675,10 +675,10 @@ describe("schema migrations", () => {
 
   it("migrates a v1 database by adding missing columns", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
     // Create a v1 database manually (without comments and mergeDetails columns)
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     // Create tables without the new columns
     db.exec(`
       CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
@@ -782,8 +782,8 @@ describe("schema migrations", () => {
 
   it("skips migration if already at target version", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
-    const db = new Database(kbDir);
+    const fusionDir = join(tmpDir, ".fusion");
+    const db = new Database(fusionDir);
     db.init();
 
     expect(db.getSchemaVersion()).toBe(42);
@@ -797,9 +797,9 @@ describe("schema migrations", () => {
 
   it("applies migration 14+15 by creating agentRatings and ai_sessions indexes", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
     db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '13')");
     db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
@@ -821,9 +821,9 @@ describe("schema migrations", () => {
 
   it("migrates a v16 database by creating mission_events table and indexes", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
     db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '16')");
     db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
@@ -846,10 +846,10 @@ describe("schema migrations", () => {
 
   it("migrates a v2 database by adding missionId and sliceId columns", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
     // Create a v2 database manually (without missionId and sliceId columns)
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     // Create tables without the new columns (matching v2 schema)
     db.exec(`
       CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
@@ -966,9 +966,9 @@ describe("schema migrations", () => {
 
   it("migrates pre-comments databases by copying steering comments into unified comments exactly once", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     db.exec(`
       CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS tasks (
@@ -1042,9 +1042,9 @@ describe("schema migrations", () => {
 
   it("deduplicates overlapping steeringComments and comments during schema upgrade", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
-    const db = new Database(kbDir);
+    const db = new Database(fusionDir);
     db.exec(`
       CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS tasks (
@@ -1120,13 +1120,13 @@ describe("schema migrations", () => {
 
 describe("FTS5 full-text search", () => {
   let tmpDir: string;
-  let kbDir: string;
+  let fusionDir: string;
   let db: Database;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    kbDir = join(tmpDir, ".fusion");
-    db = new Database(kbDir);
+    fusionDir = join(tmpDir, ".fusion");
+    db = new Database(fusionDir);
     db.init();
   });
 
@@ -1286,11 +1286,11 @@ describe("createDatabase factory", () => {
 
   it("creates a database instance without auto-init", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
-    const db = createDatabase(kbDir);
+    const fusionDir = join(tmpDir, ".fusion");
+    const db = createDatabase(fusionDir);
 
     // DB file exists (created on open) but schema not initialized
-    expect(existsSync(join(kbDir, "fusion.db"))).toBe(true);
+    expect(existsSync(join(fusionDir, "fusion.db"))).toBe(true);
     // Schema is NOT yet created — querying __meta would fail
     expect(() => db.getSchemaVersion()).toThrow();
 
@@ -1299,8 +1299,8 @@ describe("createDatabase factory", () => {
 
   it("works after explicit init()", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
-    const db = createDatabase(kbDir);
+    const fusionDir = join(tmpDir, ".fusion");
+    const db = createDatabase(fusionDir);
     db.init();
 
     expect(db.getSchemaVersion()).toBe(42);
@@ -1311,26 +1311,26 @@ describe("createDatabase factory", () => {
 
   it("getPath returns the database file path", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
-    const db = createDatabase(kbDir);
+    const fusionDir = join(tmpDir, ".fusion");
+    const db = createDatabase(fusionDir);
 
-    expect(db.getPath()).toBe(join(kbDir, "fusion.db"));
+    expect(db.getPath()).toBe(join(fusionDir, "fusion.db"));
 
     db.close();
   });
 
   it("is idempotent when init() called multiple times", () => {
     tmpDir = makeTmpDir();
-    const kbDir = join(tmpDir, ".fusion");
+    const fusionDir = join(tmpDir, ".fusion");
 
     // First call
-    const db1 = createDatabase(kbDir);
+    const db1 = createDatabase(fusionDir);
     db1.init();
     db1.prepare("UPDATE config SET nextId = 99 WHERE id = 1").run();
     db1.close();
 
     // Second call — init should not overwrite data
-    const db2 = createDatabase(kbDir);
+    const db2 = createDatabase(fusionDir);
     db2.init();
     const row = db2.prepare("SELECT nextId FROM config WHERE id = 1").get() as any;
     expect(row.nextId).toBe(99);

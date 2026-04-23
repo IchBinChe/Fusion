@@ -55,8 +55,8 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
    */
   private get db(): Database {
     if (!this._db) {
-      const kbDir = join(this.rootDir, ".fusion");
-      this._db = new Database(kbDir);
+      const fusionDir = join(this.rootDir, ".fusion");
+      this._db = new Database(fusionDir);
       this._db.init();
     }
     return this._db;

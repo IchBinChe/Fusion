@@ -14,7 +14,6 @@ import {
   ProjectRequiredError,
   type ProjectSetupInput,
 } from "./migration.js";
-import { needsCentralMigration, autoMigrateToCentral, detectExistingProjects as detectExistingProjectsFromDbMigrate } from "./db-migrate.js";
 import { CentralCore } from "./central-core.js";
 
 // Helper to create a fake kb project
@@ -57,17 +56,17 @@ describe("FirstRunDetector", () => {
       expect(state).toBe("fresh-install");
     });
 
-    it("should detect needs-migration when local .fusion/ exists but no central DB", async () => {
+    it("should detect setup-wizard when local .fusion/ exists but no central DB", async () => {
       const tempProjectDir = useIsolatedCwd("kb-needs-migration-");
       createFakeKbProject(tempProjectDir);
 
       const detector = new FirstRunDetector(tempGlobalDir);
       const state = await detector.detectFirstRunState();
 
-      expect(state).toBe("needs-migration");
+      expect(state).toBe("setup-wizard");
     });
 
-    it("should detect needs-migration from nested directory inside an existing project", async () => {
+    it("should detect setup-wizard from nested directory inside an existing project with no central DB", async () => {
       const tempProjectDir = tempWorkspace("kb-needs-migration-nested-");
       createFakeKbProject(tempProjectDir);
       const nestedDir = join(tempProjectDir, "src", "features", "deep");
@@ -79,7 +78,7 @@ describe("FirstRunDetector", () => {
         const detector = new FirstRunDetector(tempGlobalDir);
         const state = await detector.detectFirstRunState();
 
-        expect(state).toBe("needs-migration");
+        expect(state).toBe("setup-wizard");
       } finally {
         process.chdir(originalCwd);
       }
@@ -128,7 +127,7 @@ describe("FirstRunDetector", () => {
       }
     });
 
-    it("should fall back to needs-migration when central DB exists but is unreadable", async () => {
+    it("should return fresh-install when central DB exists but is unreadable", async () => {
       const tempProjectDir = useIsolatedCwd("kb-corrupt-central-");
       createFakeKbProject(tempProjectDir);
 
@@ -138,7 +137,7 @@ describe("FirstRunDetector", () => {
       const detector = new FirstRunDetector(tempGlobalDir);
       const state = await detector.detectFirstRunState();
 
-      expect(state).toBe("needs-migration");
+      expect(state).toBe("fresh-install");
     });
 
     it("should return fresh-install when central DB exists but is unreadable and no local project is found", async () => {
@@ -261,83 +260,6 @@ describe("FirstRunDetector", () => {
       const detector = new FirstRunDetector(tempGlobalDir);
       expect(detector.getCentralDbPath()).toBe(join(tempGlobalDir, "fusion-central.db"));
     });
-  });
-});
-
-describe("db-migrate wrappers", () => {
-  it("should forward detectExistingProjects through db-migrate wrapper", async () => {
-    const tempGlobalDir = tempWorkspace("kb-dbmigrate-detect-global-");
-    const tempProjectDir = tempWorkspace("kb-dbmigrate-detect-project-");
-    createFakeKbProject(tempProjectDir);
-    const nestedDir = join(tempProjectDir, "src", "nested");
-    mkdirSync(nestedDir, { recursive: true });
-
-    const detected = await detectExistingProjectsFromDbMigrate(nestedDir, tempGlobalDir);
-
-    expect(detected).toHaveLength(1);
-    expect(detected[0].path).toBe(tempProjectDir);
-  });
-
-  it("should autoMigrateToCentral and register the project", async () => {
-    const tempGlobalDir = tempWorkspace("kb-dbmigrate-auto-global-");
-    const tempProjectDir = tempWorkspace("kb-dbmigrate-auto-project-");
-    createFakeKbProject(tempProjectDir);
-
-    const central = new CentralCore(tempGlobalDir);
-    await central.init();
-
-    try {
-      const result = await autoMigrateToCentral(tempProjectDir, central);
-      expect(result.success).toBe(true);
-      expect(result.projectsRegistered).toHaveLength(1);
-
-      const project = await central.getProject(result.projectsRegistered[0]);
-      expect(project).toBeDefined();
-      expect(project!.path).toBe(tempProjectDir);
-      expect(project!.status).toBe("active");
-    } finally {
-      await central.close();
-    }
-  });
-
-  it("should autoMigrateToCentral idempotently on repeat runs", async () => {
-    const tempGlobalDir = tempWorkspace("kb-dbmigrate-idempotent-global-");
-    const tempProjectDir = tempWorkspace("kb-dbmigrate-idempotent-project-");
-    createFakeKbProject(tempProjectDir);
-
-    const central = new CentralCore(tempGlobalDir);
-    await central.init();
-
-    try {
-      const result1 = await autoMigrateToCentral(tempProjectDir, central);
-      const result2 = await autoMigrateToCentral(tempProjectDir, central);
-
-      expect(result1.success).toBe(true);
-      expect(result2.success).toBe(true);
-      expect(result1.projectsRegistered[0]).toBe(result2.projectsRegistered[0]);
-    } finally {
-      await central.close();
-    }
-  });
-});
-
-describe("needsCentralMigration", () => {
-  it("should detect migration need from nested directory inside a project", () => {
-    const tempGlobalDir = tempWorkspace("kb-needs-central-global-");
-    const tempProjectDir = tempWorkspace("kb-needs-central-project-");
-    createFakeKbProject(tempProjectDir);
-    const nestedDir = join(tempProjectDir, "src", "nested");
-    mkdirSync(nestedDir, { recursive: true });
-
-    expect(needsCentralMigration(nestedDir, tempGlobalDir)).toBe(true);
-  });
-
-  it("should detect migration need from the project root itself", () => {
-    const tempGlobalDir = tempWorkspace("kb-needs-central-root-global-");
-    const tempProjectDir = tempWorkspace("kb-needs-central-root-project-");
-    createFakeKbProject(tempProjectDir);
-
-    expect(needsCentralMigration(tempProjectDir, tempGlobalDir)).toBe(true);
   });
 });
 

@@ -4366,8 +4366,8 @@ export interface FirstRunStatus {
 
 /** Setup state for first-run wizard */
 export interface SetupState {
-  /** The first-run state: fresh-install, needs-migration, setup-wizard, normal-operation */
-  state: "fresh-install" | "needs-migration" | "setup-wizard" | "normal-operation";
+  /** The first-run state: fresh-install, setup-wizard, normal-operation */
+  state: "fresh-install" | "setup-wizard" | "normal-operation";
   /** Projects detected on the filesystem (not yet registered) */
   detectedProjects: Array<{
     path: string;

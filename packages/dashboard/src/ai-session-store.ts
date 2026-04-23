@@ -12,6 +12,7 @@
 
 import { EventEmitter } from "node:events";
 import type { Database } from "@fusion/core";
+import { createSessionDiagnostics } from "./ai-session-diagnostics.js";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -71,6 +72,8 @@ export interface AiSessionCleanupSummary {
   orphanedDeleted: number;
   totalDeleted: number;
 }
+
+const diagnostics = createSessionDiagnostics("ai-session-store");
 
 // ── Store ───────────────────────────────────────────────────────────────
 
@@ -403,7 +406,7 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
     recovered += Number(withoutQuestion.changes ?? 0);
 
     if (recovered > 0) {
-      console.log(`[ai-session-store] Recovered ${recovered} stale sessions after restart`);
+      diagnostics.info("Recovered stale sessions after restart", { recovered });
     }
     return recovered;
   }
@@ -471,9 +474,11 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
     }
 
     const totalDeleted = terminalDeleted + orphanedDeleted;
-    console.log(
-      `[ai-session-store] Cleanup: removed ${terminalDeleted} terminal, ${orphanedDeleted} orphaned sessions`,
-    );
+    diagnostics.info("Cleanup removed stale sessions", {
+      terminalDeleted,
+      orphanedDeleted,
+      totalDeleted,
+    });
 
     return {
       terminalDeleted,
@@ -491,8 +496,8 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
     const runCleanup = () => {
       try {
         this.cleanupStaleSessions(ttlMs);
-      } catch (err) {
-        console.error("[ai-session-store] Scheduled cleanup failed:", err);
+      } catch (error) {
+        diagnostics.errorFromException("Scheduled cleanup failed", error, { ttlMs });
       }
     };
 

@@ -10,6 +10,7 @@ import {
   type AiSessionRow,
   type AiSessionStatus,
 } from "./ai-session-store.js";
+import { resetDiagnosticsSink, setDiagnosticsSink, type LogEntry } from "./ai-session-diagnostics.js";
 
 describe("AiSessionStore", () => {
   let tmpRoot: string;
@@ -25,6 +26,7 @@ describe("AiSessionStore", () => {
 
   afterEach(async () => {
     store.stopScheduledCleanup();
+    resetDiagnosticsSink();
     vi.useRealTimers();
     try {
       db.close();
@@ -73,6 +75,20 @@ describe("AiSessionStore", () => {
     }
   }
 
+  function captureDiagnostics(): LogEntry[] {
+    const entries: LogEntry[] = [];
+    setDiagnosticsSink((level, scope, message, context) => {
+      entries.push({
+        level,
+        scope,
+        message,
+        context,
+        timestamp: new Date(),
+      });
+    });
+    return entries;
+  }
+
   it("cleanupOld removes only stale terminal sessions and emits deleted events", () => {
     const deletedIds: string[] = [];
     store.on("ai_session:deleted", (id) => deletedIds.push(id));
@@ -111,6 +127,35 @@ describe("AiSessionStore", () => {
     expect(store.get("S-generating-old")).toBeNull();
     expect(store.get("S-awaiting-old")).toBeNull();
     expect(store.get("S-generating-fresh")).not.toBeNull();
+  });
+
+  it("cleanupStaleSessions emits structured diagnostics with cleanup summary counts", () => {
+    const diagnostics = captureDiagnostics();
+
+    seedSession({ id: "S-complete-old", status: "complete", ageMs: 8 * 24 * 60 * 60 * 1000 });
+    seedSession({ id: "S-error-old", status: "error", ageMs: 8 * 24 * 60 * 60 * 1000 });
+    seedSession({ id: "S-generating-old", status: "generating", ageMs: 8 * 24 * 60 * 60 * 1000 });
+
+    const summary = store.cleanupStaleSessions();
+
+    expect(summary).toEqual({
+      terminalDeleted: 2,
+      orphanedDeleted: 1,
+      totalDeleted: 3,
+    });
+
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        scope: "ai-session-store",
+        message: "Cleanup removed stale sessions",
+        context: expect.objectContaining({
+          terminalDeleted: 2,
+          orphanedDeleted: 1,
+          totalDeleted: 3,
+        }),
+      }),
+    );
   });
 
   it("cleanupStaleSessions respects explicit maxAgeMs values", () => {
@@ -162,6 +207,33 @@ describe("AiSessionStore", () => {
     expect(store.get("S-old-2")).not.toBeNull();
   });
 
+  it("startScheduledCleanup emits structured error diagnostics and remains non-fatal on cleanup failure", () => {
+    vi.useFakeTimers();
+    const diagnostics = captureDiagnostics();
+
+    const cleanupSpy = vi
+      .spyOn(store, "cleanupStaleSessions")
+      .mockImplementation(() => {
+        throw new Error("boom");
+      });
+
+    store.startScheduledCleanup(1_000, 60_000);
+
+    expect(() => vi.advanceTimersByTime(2_000)).not.toThrow();
+    expect(cleanupSpy).toHaveBeenCalledTimes(2);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        scope: "ai-session-store",
+        message: "Scheduled cleanup failed",
+        context: expect.objectContaining({
+          ttlMs: 60_000,
+          error: expect.objectContaining({ message: "boom" }),
+        }),
+      }),
+    );
+  });
+
   it("supports configurable TTL values", () => {
     seedSession({ id: "S-older", status: "complete", ageMs: 2 * 60 * 60 * 1000 });
     seedSession({ id: "S-recent", status: "complete", ageMs: 30 * 60 * 1000 });
@@ -190,6 +262,29 @@ describe("AiSessionStore", () => {
     expect(store.get("S-recoverable")?.status).toBe("awaiting_input");
     expect(store.get("S-broken")?.status).toBe("error");
     expect(store.get("S-broken")?.error).toBe("Session interrupted — please restart");
+  });
+
+  it("recoverStaleSessions emits structured diagnostics when stale sessions are recovered", () => {
+    const diagnostics = captureDiagnostics();
+
+    seedSession({
+      id: "S-recoverable",
+      status: "generating",
+      currentQuestion: { id: "q-1", type: "text", question: "Continue?" },
+    });
+    seedSession({ id: "S-broken", status: "generating", currentQuestion: null });
+
+    const recovered = store.recoverStaleSessions();
+
+    expect(recovered).toBe(2);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        scope: "ai-session-store",
+        message: "Recovered stale sessions after restart",
+        context: expect.objectContaining({ recovered: 2 }),
+      }),
+    );
   });
 
   it("listActive returns generating/awaiting_input/error sessions", () => {

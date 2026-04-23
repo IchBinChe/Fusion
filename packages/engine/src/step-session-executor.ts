@@ -545,6 +545,41 @@ interface SessionHandle {
   dispose: () => void;
 }
 
+function resolveExecutorModelPair(
+  taskModelProvider: string | undefined,
+  taskModelId: string | undefined,
+  settings: Partial<Settings> | undefined,
+): { provider: string | undefined; modelId: string | undefined } {
+  if (taskModelProvider && taskModelId) {
+    return { provider: taskModelProvider, modelId: taskModelId };
+  }
+  if (settings?.executionProvider && settings?.executionModelId) {
+    return {
+      provider: settings.executionProvider,
+      modelId: settings.executionModelId,
+    };
+  }
+  if (settings?.executionGlobalProvider && settings?.executionGlobalModelId) {
+    return {
+      provider: settings.executionGlobalProvider,
+      modelId: settings.executionGlobalModelId,
+    };
+  }
+  if (settings?.defaultProviderOverride && settings?.defaultModelIdOverride) {
+    return {
+      provider: settings.defaultProviderOverride,
+      modelId: settings.defaultModelIdOverride,
+    };
+  }
+  if (settings?.defaultProvider && settings?.defaultModelId) {
+    return {
+      provider: settings.defaultProvider,
+      modelId: settings.defaultModelId,
+    };
+  }
+  return { provider: undefined, modelId: undefined };
+}
+
 /** Fallback store used when step logging persistence is not configured. */
 const NOOP_TASK_STORE: Pick<TaskStore, "appendAgentLog"> = {
   appendAgentLog: async () => undefined,
@@ -830,23 +865,15 @@ export class StepSessionExecutor {
           // Create fresh agent session for this attempt
           // Resolve executor model using canonical lane hierarchy:
           // 1. Task override pair (taskDetail.modelProvider + taskDetail.modelId)
-          // 2. Project execution override pair (settings.executionProvider + settings.executionModelId)
+          // 2. Project execution lane pair (settings.executionProvider + settings.executionModelId)
           // 3. Global execution lane pair (settings.executionGlobalProvider + settings.executionGlobalModelId)
-          // 4. Default pair (settings.defaultProvider + settings.defaultModelId)
-          const executorProvider = taskDetail.modelProvider && taskDetail.modelId
-            ? taskDetail.modelProvider
-            : (settings.executionProvider && settings.executionModelId
-                ? settings.executionProvider
-                : (settings.executionGlobalProvider && settings.executionGlobalModelId
-                    ? settings.executionGlobalProvider
-                    : settings.defaultProvider));
-          const executorModelId = taskDetail.modelProvider && taskDetail.modelId
-            ? taskDetail.modelId
-            : (settings.executionProvider && settings.executionModelId
-                ? settings.executionModelId
-                : (settings.executionGlobalProvider && settings.executionGlobalModelId
-                    ? settings.executionGlobalModelId
-                    : settings.defaultModelId));
+          // 4. Project default override pair (settings.defaultProviderOverride + settings.defaultModelIdOverride)
+          // 5. Global default pair (settings.defaultProvider + settings.defaultModelId)
+          const { provider: executorProvider, modelId: executorModelId } = resolveExecutorModelPair(
+            taskDetail.modelProvider,
+            taskDetail.modelId,
+            settings,
+          );
 
           const createResult = await createFnAgent({
             cwd: worktreePath,

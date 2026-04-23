@@ -398,6 +398,41 @@ function getExecutorSystemPrompt(settings: Settings): string {
   return customPrompt || EXECUTOR_SYSTEM_PROMPT;
 }
 
+function resolveExecutorModelPair(
+  taskModelProvider: string | undefined,
+  taskModelId: string | undefined,
+  settings: Partial<Settings> | undefined,
+): { provider: string | undefined; modelId: string | undefined } {
+  if (taskModelProvider && taskModelId) {
+    return { provider: taskModelProvider, modelId: taskModelId };
+  }
+  if (settings?.executionProvider && settings?.executionModelId) {
+    return {
+      provider: settings.executionProvider,
+      modelId: settings.executionModelId,
+    };
+  }
+  if (settings?.executionGlobalProvider && settings?.executionGlobalModelId) {
+    return {
+      provider: settings.executionGlobalProvider,
+      modelId: settings.executionGlobalModelId,
+    };
+  }
+  if (settings?.defaultProviderOverride && settings?.defaultModelIdOverride) {
+    return {
+      provider: settings.defaultProviderOverride,
+      modelId: settings.defaultModelIdOverride,
+    };
+  }
+  if (settings?.defaultProvider && settings?.defaultModelId) {
+    return {
+      provider: settings.defaultProvider,
+      modelId: settings.defaultModelId,
+    };
+  }
+  return { provider: undefined, modelId: undefined };
+}
+
 export interface TaskExecutorOptions {
   semaphore?: AgentSemaphore;
   /** Worktree pool for recycling idle worktrees across tasks. */
@@ -634,20 +669,11 @@ export class TaskExecutor {
 
             const settings = await this.store.getSettings();
             // Resolve model using canonical lane hierarchy for hot-swap
-            const newProvider = task.modelProvider && task.modelId
-              ? task.modelProvider
-              : (settings?.executionProvider && settings?.executionModelId
-                  ? settings.executionProvider
-                  : (settings?.executionGlobalProvider && settings?.executionGlobalModelId
-                      ? settings.executionGlobalProvider
-                      : settings?.defaultProvider));
-            const newModelId = task.modelProvider && task.modelId
-              ? task.modelId
-              : (settings?.executionProvider && settings?.executionModelId
-                  ? settings.executionModelId
-                  : (settings?.executionGlobalProvider && settings?.executionGlobalModelId
-                      ? settings.executionGlobalModelId
-                      : settings?.defaultModelId));
+            const { provider: newProvider, modelId: newModelId } = resolveExecutorModelPair(
+              task.modelProvider,
+              task.modelId,
+              settings,
+            );
 
             if (newProvider && newModelId) {
               try {
@@ -1724,23 +1750,15 @@ export class TaskExecutor {
       const agentWork = async () => {
         // Resolve model settings using canonical lane hierarchy:
         // 1. Task override pair (modelProvider + modelId)
-        // 2. Project execution override pair (executionProvider + executionModelId)
+        // 2. Project execution lane pair (executionProvider + executionModelId)
         // 3. Global execution lane pair (executionGlobalProvider + executionGlobalModelId)
-        // 4. Default pair (defaultProvider + defaultModelId)
-        const executorProvider = detail.modelProvider && detail.modelId
-          ? detail.modelProvider
-          : (settings.executionProvider && settings.executionModelId
-              ? settings.executionProvider
-              : (settings.executionGlobalProvider && settings.executionGlobalModelId
-                  ? settings.executionGlobalProvider
-                  : settings.defaultProvider));
-        const executorModelId = detail.modelProvider && detail.modelId
-          ? detail.modelId
-          : (settings.executionProvider && settings.executionModelId
-              ? settings.executionModelId
-              : (settings.executionGlobalProvider && settings.executionGlobalModelId
-                  ? settings.executionGlobalModelId
-                  : settings.defaultModelId));
+        // 4. Project default override pair (defaultProviderOverride + defaultModelIdOverride)
+        // 5. Global default pair (defaultProvider + defaultModelId)
+        const { provider: executorProvider, modelId: executorModelId } = resolveExecutorModelPair(
+          detail.modelProvider,
+          detail.modelId,
+          settings,
+        );
         const executorFallbackProvider = settings.fallbackProvider;
         const executorFallbackModelId = settings.fallbackModelId;
         const executorThinkingLevel = detail.thinkingLevel ?? settings.defaultThinkingLevel;

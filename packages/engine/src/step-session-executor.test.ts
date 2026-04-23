@@ -2206,3 +2206,84 @@ describe("StepSessionExecutor tool availability", () => {
     expect(toolNames).toContain("task_create");
   });
 });
+
+describe("StepSessionExecutor executor model lane hierarchy", () => {
+  async function captureAgentModel(settingsOverrides: Partial<Settings>, taskOverrides: Partial<TaskDetail> = {}) {
+    let capturedProvider: string | undefined;
+    let capturedModelId: string | undefined;
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+      capturedProvider = opts.defaultProvider;
+      capturedModelId = opts.defaultModelId;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+        },
+      } as any;
+    });
+
+    const executor = new StepSessionExecutor({
+      taskDetail: makeTaskDetail({
+        prompt: makeStepPrompt("FN-MODEL", 1),
+        steps: [{ name: "Step 0", status: "pending" }],
+        ...taskOverrides,
+      }),
+      worktreePath: "/project/.worktrees/main",
+      rootDir: "/project",
+      settings: makeSettings({ maxParallelSteps: 1, ...settingsOverrides }),
+    });
+
+    try {
+      const executePromise = executor.executeAll();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await executePromise;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    return { provider: capturedProvider, modelId: capturedModelId };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses project default override pair when execution lanes are absent", async () => {
+    const resolved = await captureAgentModel({
+      executionProvider: undefined,
+      executionModelId: undefined,
+      executionGlobalProvider: undefined,
+      executionGlobalModelId: undefined,
+      defaultProviderOverride: "openai",
+      defaultModelIdOverride: "gpt-4o",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    });
+
+    expect(resolved).toEqual({
+      provider: "openai",
+      modelId: "gpt-4o",
+    });
+  });
+
+  it("falls through to global default when project default override is incomplete", async () => {
+    const resolved = await captureAgentModel({
+      executionProvider: undefined,
+      executionModelId: undefined,
+      executionGlobalProvider: undefined,
+      executionGlobalModelId: undefined,
+      defaultProviderOverride: "openai",
+      defaultModelIdOverride: undefined,
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    });
+
+    expect(resolved).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+  });
+});

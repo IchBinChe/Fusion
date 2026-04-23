@@ -556,7 +556,7 @@ export class DashboardTUI {
 
   private renderHeader(): void {
     const cols = process.stdout.columns || 80;
-    const title = colorize("  fn board  ", "cyan");
+    const title = colorize("  fusion  ", "cyan");
     const titleLen = visibleLength(title);
 
     process.stdout.write(title);
@@ -1011,4 +1011,82 @@ function padRight(text: string, width: number): string {
 
 export function isTTYAvailable(): boolean {
   return Boolean(process.stdout.isTTY && process.stdin.isTTY);
+}
+
+// ── Header String Helper (for testing) ─────────────────────────────────────
+
+/**
+ * Render the header to a string using the given column width.
+ * Used for testing without requiring TTY mode.
+ */
+export function renderHeaderToString(cols: number): string {
+  const title = colorize("  fusion  ", "cyan");
+  const titleLen = visibleLength(title);
+
+  let output = title;
+
+  // Build tabs based on column width (same logic as renderHeader)
+  if (cols >= 70) {
+    for (let i = 0; i < SECTION_ORDER.length; i++) {
+      const section = SECTION_ORDER[i];
+      const isActive = section === "logs"; // Default active section for test
+      const num = (i + 1).toString();
+      const label = section.charAt(0).toUpperCase() + section.slice(1);
+      const tabText = `[${num}] ${label}`;
+      const style = isActive ? "brightBlue" : "dim";
+      output += colorize(` ${tabText} `, style);
+    }
+  } else if (cols >= 40) {
+    const shortLabels: Record<SectionId, string> = {
+      logs: "L",
+      system: "S",
+      utilities: "U",
+      stats: "St",
+      settings: "Se",
+    };
+    for (let i = 0; i < SECTION_ORDER.length; i++) {
+      const section = SECTION_ORDER[i];
+      const isActive = section === "logs";
+      const num = (i + 1).toString();
+      const shortLabel = shortLabels[section];
+      const tabText = `[${num}]${shortLabel}`;
+      const style = isActive ? "brightBlue" : "dim";
+      output += colorize(` ${tabText} `, style);
+    }
+  } else {
+    output += colorize(" [1]Logs ", "brightBlue");
+    output += colorize(" [n/p]nav ", "dim");
+  }
+
+  // Calculate tabs length for padding
+  const tabsLength = SECTION_ORDER.reduce((acc, s, i) => {
+    let label: string;
+    if (cols >= 70) {
+      label = s.charAt(0).toUpperCase() + s.slice(1);
+    } else if (cols >= 40) {
+      const shortLabels: Record<SectionId, string> = {
+        logs: "L",
+        system: "S",
+        utilities: "U",
+        stats: "St",
+        settings: "Se",
+      };
+      label = shortLabels[s];
+    } else {
+      label = s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    const tabText = `[${i + 1}]${label} `;
+    return acc + tabText.length;
+  }, 0);
+  const headerLen = titleLen + tabsLength;
+
+  const remaining = cols - headerLen;
+  if (remaining > 0) {
+    output += " ".repeat(remaining);
+  }
+
+  output += "\n";
+  output += colorize("─".repeat(Math.max(20, cols)), "dim") + "\n";
+
+  return output;
 }

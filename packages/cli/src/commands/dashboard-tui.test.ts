@@ -3,6 +3,7 @@ import {
   LogRingBuffer,
   DashboardLogSink,
   isTTYAvailable,
+  renderHeaderToString,
   type SystemInfo,
   type TaskStats,
   type SettingsValues,
@@ -145,6 +146,40 @@ describe("isTTYAvailable", () => {
     // In test environment these may be undefined, resulting in falsy
     const result = isTTYAvailable();
     expect(typeof result).toBe("boolean");
+  });
+});
+
+// ── Header Branding Tests ───────────────────────────────────────────────
+
+describe("renderHeaderToString", () => {
+  it("includes 'fusion' in header title", () => {
+    const header = renderHeaderToString(80);
+    expect(header).toContain("fusion");
+  });
+
+  it("does not include old 'fn board' branding", () => {
+    const header = renderHeaderToString(80);
+    expect(header).not.toContain("fn board");
+  });
+
+  it("renders correctly at wide terminal width (>= 70 cols)", () => {
+    const header = renderHeaderToString(80);
+    expect(header).toContain("fusion");
+    expect(header).toContain("Logs");
+    expect(header).toContain("System");
+  });
+
+  it("renders correctly at medium terminal width (>= 40 cols)", () => {
+    const header = renderHeaderToString(50);
+    expect(header).toContain("fusion");
+    expect(header).toContain("[1]L"); // Short label for Logs
+  });
+
+  it("renders correctly at narrow terminal width (< 40 cols)", () => {
+    const header = renderHeaderToString(30);
+    expect(header).toContain("fusion");
+    expect(header).toContain("Logs");
+    expect(header).toContain("[n/p]nav");
   });
 });
 

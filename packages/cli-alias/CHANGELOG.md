@@ -1,5 +1,11 @@
 # runfusion.ai
 
+## 0.0.4
+
+### Patch Changes
+
+- Bump the alias package to stay in sync with the current Fusion release.
+
 ## 0.0.3
 
 ### Patch Changes

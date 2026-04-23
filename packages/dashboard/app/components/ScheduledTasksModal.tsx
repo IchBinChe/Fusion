@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, Zap, Globe, Folder } from "lucide-react";
+import { Plus, Zap, Globe, Folder, X } from "lucide-react";
 import type { Routine, RoutineCreateInput } from "@fusion/core";
 import {
   fetchRoutines,
@@ -250,11 +250,31 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
   return (
     <div className="modal-overlay open" onClick={handleOverlayClick}>
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="schedules-modal-title">
-        <div className="modal-header">
-          <h3 id="schedules-modal-title">Automations</h3>
-          <div className="modal-header-actions">
-            {/* Scope selector */}
-            <div className="scheduling-scope-selector" role="group" aria-label="Scheduling scope">
+        <div className="modal-header scheduling-modal-header">
+          <div className="scheduling-header-main-row">
+            <div className="detail-title-row">
+              <Zap size={20} className="icon-triage" />
+              <h3 id="schedules-modal-title">Automations</h3>
+            </div>
+            <div className="modal-header-actions">
+              {isShowingList && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setRoutineView("create")}
+                  aria-label="Create new automation"
+                >
+                  <Plus size={14} />
+                  New Automation
+                </button>
+              )}
+              <button className="modal-close" onClick={onClose} aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="scheduling-header-scope-row" role="group" aria-label="Scheduling scope">
+            <div className="scheduling-scope-selector">
               <button
                 type="button"
                 className={`scope-btn${activeScope === "global" ? " active" : ""}`}
@@ -276,19 +296,6 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
                 Project
               </button>
             </div>
-            {isShowingList && (
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => setRoutineView("create")}
-                aria-label="Create new automation"
-              >
-                <Plus size={14} />
-                New Automation
-              </button>
-            )}
-            <button className="modal-close" onClick={onClose} aria-label="Close">
-              &times;
-            </button>
           </div>
         </div>
 

@@ -17054,30 +17054,57 @@ html .column.drag-over * {
   max-height: 70vh;
 }
 
+/* Scheduling modal header */
+.scheduling-modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-sm);
+}
+
+.scheduling-header-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.scheduling-header-main-row .detail-title-row {
+  min-width: 0;
+}
+
+.scheduling-header-scope-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
 /* Scheduling scope selector */
 .scheduling-scope-selector {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-xs);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 2px;
+  padding: var(--space-xs);
 }
 
 .scope-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  font-size: 12px;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--text-xs, 12px);
   font-weight: 500;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .scope-btn:hover {
@@ -17087,12 +17114,12 @@ html .column.drag-over * {
 
 .scope-btn.active {
   background: var(--todo);
-  color: white;
+  color: var(--cta-text);
 }
 
 .scope-btn:focus-visible {
   outline: none;
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-strong);
 }
 
 /* Schedule form scope toggle */
@@ -17768,13 +17795,28 @@ html .column.drag-over * {
     padding-right: var(--space-lg);
   }
 
-  .scheduling-scope-selector {
-    flex-shrink: 0;
+  .scheduling-header-main-row {
+    align-items: flex-start;
   }
 
-  .modal-header-actions {
+  .scheduling-modal-header .modal-header-actions {
     flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--space-sm);
+  }
+
+  .scheduling-header-scope-row {
+    padding-top: var(--space-sm);
+  }
+
+  .scheduling-scope-selector {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .scope-btn {
+    flex: 1;
+    justify-content: center;
   }
 
   .detail-tabs {

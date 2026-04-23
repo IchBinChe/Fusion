@@ -21,6 +21,7 @@ vi.mock("lucide-react", () => ({
   Globe: () => <span data-testid="icon-globe">Global</span>,
   Folder: () => <span data-testid="icon-folder">Project</span>,
   Layers: () => <span data-testid="icon-layers">Layers</span>,
+  X: () => <span data-testid="icon-x-close">Close</span>,
 }));
 
 vi.mock("@fusion/core", () => ({}));
@@ -128,6 +129,25 @@ describe("ScheduledTasksModal", () => {
     });
     expect(screen.getByText("npx runfusion.ai backup --create")).toBeDefined();
     expect(screen.getByText("New Automation")).toBeDefined();
+  });
+
+  it("renders scope controls in a dedicated header row", async () => {
+    mockFetchRoutines.mockResolvedValue([makeRoutine({ name: "Scoped Routine" })]);
+    const { container } = render(<ScheduledTasksModal onClose={onClose} addToast={addToast} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Scoped Routine")).toBeDefined();
+    });
+
+    const headerActions = container.querySelector(".scheduling-header-main-row .modal-header-actions");
+    const scopeRow = container.querySelector(".scheduling-header-scope-row");
+    const scopeSelector = container.querySelector(".scheduling-scope-selector");
+
+    expect(headerActions).toBeTruthy();
+    expect(scopeRow).toBeTruthy();
+    expect(scopeSelector).toBeTruthy();
+    expect(scopeRow?.contains(scopeSelector as Node)).toBe(true);
+    expect(headerActions?.contains(scopeSelector as Node)).toBe(false);
   });
 
   it("uses routine APIs with global scope by default", async () => {

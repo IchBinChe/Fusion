@@ -36120,7 +36120,7 @@ html .column.drag-over * {
     min-height: 36px;
   }
 
-  /* Pi Extensions list items */
+  /* Pi Extensions list items - mobile adjustments */
   .pi-ext-list {
     gap: var(--space-xs);
   }
@@ -36129,269 +36129,270 @@ html .column.drag-over * {
     padding: var(--space-sm);
   }
 
-  /* Pi Extensions Manager package UI */
-  .pi-ext-add-form {
-    margin-bottom: var(--space-md);
-  }
-
+  /* Pi Extensions Manager - mobile-specific layout */
   .pi-ext-add-form-row {
-    display: flex;
-    gap: var(--space-sm);
-    align-items: center;
-  }
-
-  .pi-ext-add-form-row .input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .pi-ext-package-list {
-    display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    align-items: stretch;
   }
 
-  .pi-ext-package-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
+  .pi-ext-add-form-row .btn,
+  .pi-ext-add-form-row .btn-primary {
+    width: 100%;
   }
 
   .pi-ext-package-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: calc(var(--space-sm) + 2px) var(--space-md);
-    flex-wrap: wrap;
-  }
-
-  .pi-ext-expand-btn {
-    background: none;
-    border: none;
-    padding: var(--space-xs);
-    cursor: pointer;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-sm);
-    transition: color var(--transition-fast);
-  }
-
-  .pi-ext-expand-btn:hover {
-    color: var(--text);
-  }
-
-  .pi-ext-expand-btn:focus-visible {
-    outline: 2px solid var(--focus-ring-strong);
-    outline-offset: 1px;
-  }
-
-  .pi-ext-expand-placeholder {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-
-  .pi-ext-source-badge--npm {
-    color: var(--color-info);
-    background: color-mix(in srgb, var(--color-info) 12%, transparent);
-  }
-
-  .pi-ext-source-badge--git {
-    color: var(--color-success);
-    background: color-mix(in srgb, var(--color-success) 12%, transparent);
-  }
-
-  .pi-ext-source-badge--local {
-    color: var(--text-muted);
-    background: color-mix(in srgb, var(--text-muted) 12%, transparent);
-  }
-
-  .pi-ext-package-source {
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    flex: 1;
-    min-width: 0;
-    word-break: break-all;
-  }
-
-  .pi-ext-filter-hint {
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-
-  .pi-ext-package-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    flex-shrink: 0;
-  }
-
-  .pi-ext-remove-btn {
-    background: none;
-    border: none;
-    padding: 4px;
-    cursor: pointer;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-sm);
-    transition: color var(--transition-fast);
-  }
-
-  .pi-ext-remove-btn:hover {
-    color: var(--color-error);
-  }
-
-  .pi-ext-remove-btn:focus-visible {
-    outline: 2px solid var(--focus-ring-strong);
-    outline-offset: 1px;
-  }
-
-  .pi-ext-filter-list {
     padding: var(--space-sm) var(--space-md);
-    border-top: 1px solid var(--border);
-    background: var(--bg);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-
-  .pi-ext-filter-section {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    flex-wrap: wrap;
-    color: var(--text-muted);
-  }
-
-  .pi-ext-filter-label {
-    font-size: 0.72rem;
-    font-weight: 500;
-  }
-
-  .pi-ext-filter-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding: var(--space-xs) calc(var(--space-xs) + 4px);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-size: 0.72rem;
-    font-family: var(--font-mono);
-    color: var(--text-muted);
-  }
-
-  .pi-ext-top-level {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    margin-top: var(--space-md);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border);
-  }
-
-  .pi-ext-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-
-  .pi-ext-section-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    color: var(--text-muted);
-    font-size: 0.82rem;
-  }
-
-  .pi-ext-section-header span:first-of-type {
-    font-weight: 500;
-  }
-
-  .pi-ext-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 4px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    font-size: 0.68rem;
-    color: var(--text-dim);
-  }
-
-  .pi-ext-resource-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-  }
-
-  .pi-ext-resource-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding: calc(var(--space-xs) + 1px) calc(var(--space-xs) + 4px);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
   }
 
   .pi-ext-resource-path {
-    font-size: 0.75rem;
-    font-family: var(--font-mono);
-    color: var(--text-muted);
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 120px;
   }
+}
 
-  .pi-ext-resource-remove {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    color: var(--text-dim);
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-sm);
-    transition: color var(--transition-fast);
-  }
+/* ── Pi Extensions Manager Package UI ──────────────────────── */
 
-  .pi-ext-resource-remove:hover {
-    color: var(--color-error);
-  }
+.pi-ext-add-form {
+  margin-bottom: var(--space-md);
+}
 
-  .pi-ext-resource-remove:focus-visible {
-    outline: 2px solid var(--focus-ring-strong);
-    outline-offset: 1px;
-  }
+.pi-ext-add-form-row {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
 
-  @media (max-width: 768px) {
-    .pi-ext-add-form-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
+.pi-ext-add-form-row .input {
+  flex: 1;
+  min-width: 0;
+}
 
-    .pi-ext-add-form-row .btn,
-    .pi-ext-add-form-row .btn-primary {
-      width: 100%;
-    }
+.pi-ext-package-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
 
-    .pi-ext-package-header {
-      padding: var(--space-sm) calc(var(--space-sm) + 2px);
-    }
+.pi-ext-package-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
 
-    .pi-ext-resource-path {
-      max-width: 120px;
-    }
-  }
+.pi-ext-package-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: calc(var(--space-sm) + 2px) var(--space-md);
+  flex-wrap: wrap;
+}
+
+.pi-ext-expand-btn {
+  background: none;
+  border: none;
+  padding: var(--space-xs);
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.pi-ext-expand-btn:hover {
+  color: var(--text);
+}
+
+.pi-ext-expand-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.pi-ext-expand-placeholder {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* Package source type badges */
+.pi-ext-source-badge--npm {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+.pi-ext-source-badge--git {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+
+.pi-ext-source-badge--local {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.pi-ext-package-source {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.pi-ext-filter-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.pi-ext-package-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.pi-ext-remove-btn {
+  background: none;
+  border: none;
+  padding: var(--space-xs);
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.pi-ext-remove-btn:hover {
+  color: var(--color-error);
+}
+
+.pi-ext-remove-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.pi-ext-filter-list {
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.pi-ext-filter-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  color: var(--text-muted);
+}
+
+.pi-ext-filter-label {
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.pi-ext-filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.pi-ext-top-level {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border);
+}
+
+.pi-ext-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.pi-ext-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.pi-ext-section-header span:first-of-type {
+  font-weight: 500;
+}
+
+.pi-ext-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-xs);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.pi-ext-resource-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.pi-ext-resource-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pi-ext-resource-path {
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pi-ext-resource-remove {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.pi-ext-resource-remove:hover {
+  color: var(--color-error);
+}
+
+.pi-ext-resource-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 /* Discovered Extensions Section */

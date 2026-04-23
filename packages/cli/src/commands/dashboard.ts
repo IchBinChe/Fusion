@@ -10,10 +10,11 @@ import {
   processPullRequestMergeTask,
 } from "./task-lifecycle.js";
 import { promptForPort } from "./port-prompt.js";
-import { createReadOnlyProviderSettingsView, createProjectSettingsPersistence } from "./provider-settings.js";
+import { createReadOnlyProviderSettingsView } from "./provider-settings.js";
 import { createReadOnlyAuthFileStorage, mergeAuthStorageReads, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
 import { getFusionAuthPath, getLegacyAuthPaths, getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
 import { resolveProject } from "../project-context.js";
+import { DashboardTUI, DashboardLogSink, isTTYAvailable, type SystemInfo } from "./dashboard-tui.js";
 
 // Re-export for backward compatibility with tests
 export { promptForPort };
@@ -234,7 +235,96 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     }
   }
   const cwd = await resolveRuntimeProjectPath();
-  const store = new TaskStore(cwd);
+
+  // ── TTY Detection & TUI Initialization ─────────────────────────────
+  //
+  // When both stdout and stdin are TTY, we activate the interactive TUI
+  // instead of plain console output. The TUI provides 5 sections:
+  // logs, system, utilities, stats, settings with keyboard navigation.
+  //
+  // In non-TTY mode (CI, piped output), we fall back to plain console
+  // output to maintain compatibility with automated workflows.
+  //
+  const isTTY = isTTYAvailable();
+  let tui: DashboardTUI | undefined;
+  const dashboardStartedAt = Date.now();
+
+  // Declare store and agentStore early so callbacks can safely reference them
+  // (they're assigned after initialization, but the variables exist from the start)
+  let store: TaskStore | undefined;
+  let agentStore: AgentStore | undefined;
+
+  // Create a log sink that routes to TUI in TTY mode, or console otherwise
+  const logSink = new DashboardLogSink();
+
+  if (isTTY) {
+    tui = new DashboardTUI();
+    // Set up callbacks for utility actions
+    tui.setCallbacks({
+      onRefreshStats: async () => {
+        if (store && agentStore) {
+          const tasks = await store.listTasks({ slim: true, includeArchived: false });
+          const counts = new Map<string, number>();
+          for (const task of tasks) {
+            counts.set(task.column, (counts.get(task.column) ?? 0) + 1);
+          }
+          const active = tasks.filter((task) =>
+            task.column === "in-progress" || task.column === "in-review"
+          ).length;
+          const agents = await agentStore.listAgents();
+          const agentStats = { idle: 0, active: 0, running: 0, error: 0 };
+          for (const agent of agents) {
+            const state = agent.state as keyof typeof agentStats;
+            if (state in agentStats) {
+              agentStats[state]++;
+            }
+          }
+          tui!.setTaskStats({
+            total: tasks.length,
+            byColumn: Object.fromEntries(counts),
+            active,
+            agents: agentStats,
+          });
+        }
+      },
+      onClearLogs: () => {
+        // Logs are already cleared in TUI, this is for external notification
+      },
+      onTogglePause: async (paused: boolean) => {
+        if (store) {
+          await store.updateSettings({ enginePaused: paused });
+          tui!.log(`Engine ${paused ? "paused" : "resumed"}`);
+          const fullSettings = await store.getSettings();
+          // Return SettingsValues subset for TUI
+          return {
+            maxConcurrent: fullSettings.maxConcurrent ?? 1,
+            maxWorktrees: fullSettings.maxWorktrees ?? 2,
+            autoMerge: fullSettings.autoMerge ?? false,
+            mergeStrategy: fullSettings.mergeStrategy ?? "direct",
+            pollIntervalMs: fullSettings.pollIntervalMs ?? 60_000,
+            enginePaused: fullSettings.enginePaused ?? false,
+            globalPause: fullSettings.globalPause ?? false,
+          };
+        }
+        return {
+          maxConcurrent: 1,
+          maxWorktrees: 2,
+          autoMerge: false,
+          mergeStrategy: "direct",
+          pollIntervalMs: 60_000,
+          enginePaused: paused,
+          globalPause: false,
+        };
+      },
+    });
+    // Start the TUI
+    await tui.start();
+
+    // Wire the TUI into the log sink so all console output routes through TUI
+    logSink.setTUI(tui);
+  }
+
+  store = new TaskStore(cwd);
   await store.init();
   await store.watch();
 
@@ -251,6 +341,88 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     "agent:log": store.listenerCount("agent:log"),
   }));
 
+  // ── Reactive TUI Updates ─────────────────────────────────────────────
+  //
+  // Subscribe to store and agent events to keep the TUI Stats/Settings
+  // panels in sync without manual refresh.
+  //
+  let tuiRefreshPending = false;
+  let tuiRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Debounced refresh of TUI stats - batches rapid task updates
+   */
+  async function refreshTUIStats(): Promise<void> {
+    if (!tui || !isTTY) return;
+    if (!store || !agentStore) return;
+
+    // Mark pending to prevent duplicate refreshes
+    if (tuiRefreshPending) return;
+    tuiRefreshPending = true;
+
+    try {
+      const tasks = await store.listTasks({ slim: true, includeArchived: false });
+      const counts = new Map<string, number>();
+      for (const task of tasks) {
+        counts.set(task.column, (counts.get(task.column) ?? 0) + 1);
+      }
+      const active = tasks.filter((task) =>
+        task.column === "in-progress" || task.column === "in-review"
+      ).length;
+      const agents = await agentStore.listAgents();
+      const agentStats = { idle: 0, active: 0, running: 0, error: 0 };
+      for (const agent of agents) {
+        const state = agent.state as keyof typeof agentStats;
+        if (state in agentStats) {
+          agentStats[state]++;
+        }
+      }
+      tui.setTaskStats({
+        total: tasks.length,
+        byColumn: Object.fromEntries(counts),
+        active,
+        agents: agentStats,
+      });
+    } finally {
+      tuiRefreshPending = false;
+    }
+  }
+
+  /**
+   * Debounced settings refresh
+   */
+  async function refreshTUISettings(): Promise<void> {
+    if (!tui || !isTTY) return;
+    if (!store) return;
+
+    try {
+      const settings = await store.getSettings();
+      tui.setSettings({
+        maxConcurrent: settings.maxConcurrent ?? 1,
+        maxWorktrees: settings.maxWorktrees ?? 2,
+        autoMerge: settings.autoMerge ?? false,
+        mergeStrategy: settings.mergeStrategy ?? "direct",
+        pollIntervalMs: settings.pollIntervalMs ?? 60_000,
+        enginePaused: settings.enginePaused ?? false,
+        globalPause: settings.globalPause ?? false,
+      });
+    } catch {
+      // Ignore errors refreshing settings
+    }
+  }
+
+  /**
+   * Schedule a debounced stats refresh (batches rapid changes)
+   */
+  function scheduleStatsRefresh(): void {
+    if (tuiRefreshDebounceTimer) {
+      clearTimeout(tuiRefreshDebounceTimer);
+    }
+    tuiRefreshDebounceTimer = setTimeout(() => {
+      void refreshTUIStats();
+    }, 500); // 500ms debounce
+  }
+
   const handlers: Array<{
     target: NodeJS.EventEmitter;
     event: string | symbol;
@@ -259,12 +431,16 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   const disposeCallbacks: Array<() => void> = [];
   let disposed = false;
   let shutdownInProgress = false;
-  const dashboardStartedAt = Date.now();
 
   async function logShutdownDiagnostics(reason: string): Promise<void> {
     const uptimeSeconds = Math.round((Date.now() - dashboardStartedAt) / 1000);
     let taskSummary = "tasks=unknown";
     try {
+      if (!store) {
+        taskSummary = "tasks=unavailable (store not initialized)";
+        console.log(`[dashboard] shutdown requested reason=${reason} pid=${process.pid} ppid=${process.ppid} uptime=${uptimeSeconds}s ${taskSummary}`);
+        return;
+      }
       const tasks = await store.listTasks({ slim: true, includeArchived: false });
       const counts = new Map<string, number>();
       for (const task of tasks) {
@@ -305,8 +481,31 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // and are properly managed throughout their lifecycle (creation, state
   // transitions, termination). Passed to TaskExecutor for agent spawning.
   //
-  const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+  agentStore = new AgentStore({ rootDir: store.getFusionDir() });
   await agentStore.init();
+
+  // ── Reactive TUI Updates ─────────────────────────────────────────────
+  //
+  // Subscribe to store and agent events to keep the TUI Stats/Settings
+  // panels in sync without manual refresh.
+  //
+  if (tui && isTTY) {
+    // Subscribe to task events for reactive stats updates
+    registerHandler(store, "task:created", scheduleStatsRefresh);
+    registerHandler(store, "task:moved", scheduleStatsRefresh);
+    registerHandler(store, "task:updated", scheduleStatsRefresh);
+    registerHandler(store, "task:deleted", scheduleStatsRefresh);
+
+    // Subscribe to settings updates
+    registerHandler(store, "settings:updated", () => {
+      void refreshTUISettings();
+    });
+
+    // Subscribe to agent events via agentStore
+    registerHandler(agentStore, "agent:created", scheduleStatsRefresh);
+    registerHandler(agentStore, "agent:updated", scheduleStatsRefresh);
+    registerHandler(agentStore, "agent:deleted", scheduleStatsRefresh);
+  }
 
   // ── PluginStore: plugin installation management ─────────────────────
   //
@@ -347,7 +546,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // Set enginePaused if starting in paused mode
   if (opts.paused) {
     await store.updateSettings({ enginePaused: true });
-    console.log("[engine] Starting in paused mode — automation disabled");
+    logSink.log("Starting in paused mode — automation disabled", "engine");
   }
 
   // ── onMerge: AI-powered merge ─────────────────────────────────────
@@ -427,7 +626,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     );
 
     for (const { path, error } of extensionsResult.errors) {
-      console.log(`[extensions] Failed to load ${path}: ${error}`);
+      logSink.log(`Failed to load ${path}: ${error}`, "extensions");
     }
 
     for (const { name, config, extensionPath } of extensionsResult.runtime.pendingProviderRegistrations) {
@@ -435,7 +634,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         modelRegistry.registerProvider(name, config);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.log(`[extensions] Failed to register provider from ${extensionPath}: ${message}`);
+        logSink.log(`Failed to register provider from ${extensionPath}: ${message}`, "extensions");
       }
     }
 
@@ -478,15 +677,15 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
           api: "openai-completions",
           models: orModels,
         });
-        console.log(`[openrouter] Synced ${orModels.length} models from OpenRouter API`);
+        logSink.log(`Synced ${orModels.length} models from OpenRouter API`, "openrouter");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.log(`[openrouter] Failed to sync models: ${message}`);
+        logSink.log(`Failed to sync models: ${message}`, "openrouter");
       }
     })();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.log(`[extensions] Failed to discover extensions: ${message}`);
+    logSink.log(`Failed to discover extensions: ${message}`, "extensions");
     createExtensionRuntime();
     modelRegistry.refresh();
   }
@@ -508,6 +707,17 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+
+    // Clear pending debounce timer
+    if (tuiRefreshDebounceTimer) {
+      clearTimeout(tuiRefreshDebounceTimer);
+      tuiRefreshDebounceTimer = null;
+    }
+
+    // Stop TUI if active
+    if (tui) {
+      void tui.stop();
+    }
 
     for (const { target, event, handler } of handlers) {
       target.off(event, handler);
@@ -727,10 +937,10 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         taskStore: store,
         rootDir: cwd,
         onMissed: (agentId) => {
-          console.log(`[engine] Agent ${agentId} missed heartbeat`);
+          logSink.log(`Agent ${agentId} missed heartbeat`, "engine");
         },
         onTerminated: (agentId) => {
-          console.log(`[engine] Agent ${agentId} terminated (unresponsive)`);
+          logSink.log(`Agent ${agentId} terminated (unresponsive)`, "engine");
         },
       });
       heartbeatMonitorImpl.start();
@@ -762,9 +972,10 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
       const agents = await agentStore.listAgents();
       for (const agent of agents) {
-        // State drives whether a timer is armed. Arm timers only for
-        // non-ephemeral agents currently in active/running — transitions
-        // after startup are handled by the scheduler's agent:updated listener.
+        // State is the source of truth: arm timers only for non-ephemeral
+        // agents that are currently active/running. Transitions into
+        // tickable states while the scheduler is already running are
+        // handled by the scheduler's own agent:updated listener.
         if (isEphemeralAgent(agent)) continue;
         if (agent.state !== "active" && agent.state !== "running") continue;
         const rc = agent.runtimeConfig;
@@ -774,10 +985,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         });
       }
       if (agents.length > 0) {
-        console.log(`[engine] Registered ${triggerScheduler.getRegisteredAgents().length} agents for heartbeat triggers`);
+        logSink.log(`Registered ${triggerScheduler.getRegisteredAgents().length} agents for heartbeat triggers`, "engine");
       }
     } catch (err) {
-      console.log(`[engine] HeartbeatMonitor initialization failed (continuing without agent monitoring):`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      logSink.log(`HeartbeatMonitor initialization failed (continuing without agent monitoring): ${message}`, "engine");
     }
 
     // Dev mode: no engine, pass individual proxy objects to createServer
@@ -956,32 +1168,106 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       ? `${baseUrl}/?token=${encodeURIComponent(dashboardAuthToken)}`
       : baseUrl;
 
-    console.log();
-    console.log(`  fn board`);
-    console.log(`  ────────────────────────`);
-    console.log(`  → ${baseUrl}`);
-    if (dashboardAuthToken) {
-      console.log(`  Auth:    bearer token required`);
-      console.log(`  Token:   ${dashboardAuthToken}`);
-      console.log(`  Open:    ${tokenizedUrl}`);
-      console.log(`           (the browser stores the token so you only need to click once)`);
+    // ── TTY Mode: Set system info on TUI ───────────────────────────────
+    //
+    // In TTY mode, we populate the TUI System panel instead of printing
+    // the plain-text banner. The TUI provides navigation and real-time
+    // log streaming.
+    //
+    if (isTTY && tui) {
+      // Determine engine mode
+      const settings = await store.getSettings();
+      const engineMode = opts.dev ? "dev" : settings.enginePaused ? "paused" : "active";
+
+      const systemInfo: SystemInfo = {
+        host: displayHost,
+        port: actualPort,
+        baseUrl,
+        authEnabled: Boolean(dashboardAuthToken),
+        authToken: dashboardAuthToken,
+        tokenizedUrl: dashboardAuthToken ? tokenizedUrl : undefined,
+        engineMode,
+        fileWatcher: true,
+        startTimeMs: dashboardStartedAt,
+      };
+      tui.setSystemInfo(systemInfo);
+      tui.setSettings({
+        maxConcurrent: settings.maxConcurrent ?? 1,
+        maxWorktrees: settings.maxWorktrees ?? 2,
+        autoMerge: settings.autoMerge ?? false,
+        mergeStrategy: settings.mergeStrategy ?? "direct",
+        pollIntervalMs: settings.pollIntervalMs ?? 60_000,
+        enginePaused: settings.enginePaused ?? false,
+        globalPause: settings.globalPause ?? false,
+      });
+
+      // Populate initial stats
+      const tasks = await store.listTasks({ slim: true, includeArchived: false });
+      const counts = new Map<string, number>();
+      for (const task of tasks) {
+        counts.set(task.column, (counts.get(task.column) ?? 0) + 1);
+      }
+      const active = tasks.filter((task) =>
+        task.column === "in-progress" || task.column === "in-review"
+      ).length;
+      const agents = await agentStore.listAgents();
+      const agentStats = { idle: 0, active: 0, running: 0, error: 0 };
+      for (const agent of agents) {
+        const state = agent.state as keyof typeof agentStats;
+        if (state in agentStats) {
+          agentStats[state]++;
+        }
+      }
+      tui.setTaskStats({
+        total: tasks.length,
+        byColumn: Object.fromEntries(counts),
+        active,
+        agents: agentStats,
+      });
+
+      // Log startup messages to TUI
+      tui.log(`Dashboard started at ${baseUrl}`);
+      if (engineMode === "active") {
+        tui.log("AI engine active");
+      } else if (engineMode === "dev") {
+        tui.log("AI engine disabled (dev mode)");
+      } else {
+        tui.log("AI engine paused");
+      }
+      tui.log("File watcher active");
     } else {
-      console.log(`  Auth:    disabled (--no-auth)`);
+      // ── Non-TTY Mode: Print plain-text banner ───────────────────────────
+      //
+      // Preserve the original banner format for CI/automated workflows
+      // and backward compatibility.
+      //
+      console.log();
+      console.log(`  fn board`);
+      console.log(`  ────────────────────────`);
+      console.log(`  → ${baseUrl}`);
+      if (dashboardAuthToken) {
+        console.log(`  Auth:    bearer token required`);
+        console.log(`  Token:   ${dashboardAuthToken}`);
+        console.log(`  Open:    ${tokenizedUrl}`);
+        console.log(`           (the browser stores the token so you only need to click once)`);
+      } else {
+        console.log(`  Auth:    disabled (--no-auth)`);
+      }
+      console.log();
+      console.log(`  Tasks stored in .fusion/tasks/`);
+      console.log(`  Merge:      AI-assisted (conflict resolution + commit messages)`);
+      if (opts.dev) {
+        console.log(`  AI engine:  ✗ disabled (dev mode)`);
+      } else {
+        console.log(`  AI engine:  ✓ active`);
+        console.log(`    • triage: auto-specifying tasks`);
+        console.log(`    • scheduler: dependency-aware execution`);
+        console.log(`    • cron: scheduled task execution`);
+      }
+      console.log(`  File watcher: ✓ active`);
+      console.log(`  Press Ctrl+C to stop`);
+      console.log();
     }
-    console.log();
-    console.log(`  Tasks stored in .fusion/tasks/`);
-    console.log(`  Merge:      AI-assisted (conflict resolution + commit messages)`);
-    if (opts.dev) {
-      console.log(`  AI engine:  ✗ disabled (dev mode)`);
-    } else {
-      console.log(`  AI engine:  ✓ active`);
-      console.log(`    • triage: auto-specifying tasks`);
-      console.log(`    • scheduler: dependency-aware execution`);
-      console.log(`    • cron: scheduled task execution`);
-    }
-    console.log(`  File watcher: ✓ active`);
-    console.log(`  Press Ctrl+C to stop`);
-    console.log();
   });
 
   return { dispose };

@@ -889,7 +889,7 @@ export function setupTerminalWebSocket(
     // carry a valid bearer token. The token can come from the Authorization
     // header (rare for browser WebSocket clients) or the `fn_token` query
     // param (what our own client uses).
-    if (wsDaemonToken && !authenticateUpgradeRequest(wsDaemonToken, req)) {
+    if (wsDaemonToken && !options?.noAuth && !authenticateUpgradeRequest(wsDaemonToken, req)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
@@ -1163,7 +1163,7 @@ export function setupBadgeWebSocket(
       return;
     }
 
-    if (badgeWsDaemonToken && !authenticateUpgradeRequest(badgeWsDaemonToken, req)) {
+    if (badgeWsDaemonToken && !options?.noAuth && !authenticateUpgradeRequest(badgeWsDaemonToken, req)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;

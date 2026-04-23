@@ -63,6 +63,36 @@ fn dashboard --dev
 | `--interactive` | Interactive port selection. |
 | `--dev` | Start dashboard only (no AI engine, no triage/scheduler). |
 
+### Interactive Terminal UI (TTY Mode)
+
+When running in an interactive terminal (TTY), `fn dashboard` starts an
+interactive TUI with five sections:
+
+| Section | Description |
+|---|---|
+| **Logs** | Real-time log entries with timestamps and severity levels |
+| **System** | Host, port, URL, auth mode, token, engine status, uptime |
+| **Utilities** | Actions: refresh stats, clear logs, toggle engine pause |
+| **Stats** | Task counts by column, active task count, agent state counts |
+| **Settings** | Key settings from the task store |
+
+**Keyboard Navigation:**
+
+| Key | Action |
+|---|---|
+| `1-5` | Switch to tab by number |
+| `n` or `→` | Next tab |
+| `p` or `←` | Previous tab |
+| `r` | Refresh stats (in Utilities tab) |
+| `c` | Clear logs (in Utilities tab) |
+| `t` | Toggle engine pause (in Utilities tab) |
+| `?` or `h` | Toggle help overlay |
+| `q` | Quit |
+| `Ctrl+C` | Force quit |
+
+In non-TTY mode (CI, piped output, scripts), the dashboard falls back to
+plain console output to maintain compatibility with automated workflows.
+
 ### Authentication
 
 Unless `--no-auth` is passed, the dashboard API (including the terminal

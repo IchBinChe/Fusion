@@ -2329,6 +2329,116 @@ describe("runDashboard — lifecycle listener cleanup", () => {
   });
 });
 
+describe("runDashboard — CentralCore cleanup diagnostics", () => {
+  function getNewSignalHandler(
+    signal: "SIGINT" | "SIGTERM",
+    baseline: Array<(...args: any[]) => unknown>,
+  ): () => void {
+    const added = process.listeners(signal).find((listener) => !baseline.includes(listener as (...args: any[]) => unknown));
+    expect(added).toBeDefined();
+    return added as () => void;
+  }
+
+  async function configureCentralCoreCloseFailure(errorMessage: string): Promise<{
+    close: ReturnType<typeof vi.fn>;
+    mockStore: ReturnType<typeof makeMockStore>;
+  }> {
+    const { TaskStore, CentralCore } = await import("@fusion/core");
+    const mockStore = makeMockStore();
+    const close = vi.fn().mockRejectedValue(new Error(errorMessage));
+
+    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => mockStore);
+    (CentralCore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      init: vi.fn().mockResolvedValue(undefined),
+      close,
+      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+      listProjects: vi.fn().mockResolvedValue([{ id: "project-1", path: process.cwd() }]),
+      startDiscovery: vi.fn().mockResolvedValue(undefined),
+      stopDiscovery: vi.fn(),
+      listNodes: vi.fn().mockResolvedValue([]),
+      updateNode: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    return { close, mockStore };
+  }
+
+  it("logs non-fatal diagnostics when CentralCore.close fails in dispose cleanup", async () => {
+    const { close } = await configureCentralCoreCloseFailure("dispose close failed");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unhandledRejectionSpy = vi.fn();
+    process.on("unhandledRejection", unhandledRejectionSpy);
+
+    try {
+      const { dispose } = await runDashboard(0, { open: false });
+      dispose();
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(close).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[dashboard] CentralCore.close() failed during dispose cleanup: dispose close failed"),
+      );
+      expect(unhandledRejectionSpy).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandledRejectionSpy);
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("logs shutdown diagnostics and still closes store + exits when CentralCore.close fails", async () => {
+    const { close, mockStore } = await configureCentralCoreCloseFailure("normal shutdown close failed");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const baselineSigintHandlers = process.listeners("SIGINT");
+
+    try {
+      await runDashboard(0, { open: false });
+      const sigintHandler = getNewSignalHandler("SIGINT", baselineSigintHandlers);
+      sigintHandler();
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(close).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[dashboard] CentralCore.close() failed during shutdown (SIGINT): normal shutdown close failed"),
+      );
+      expect(mockStore.close).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    } finally {
+      warnSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  it("logs dev shutdown diagnostics and still exits when mesh CentralCore.close fails", async () => {
+    const { close, mockStore } = await configureCentralCoreCloseFailure("dev shutdown close failed");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const baselineSigtermHandlers = process.listeners("SIGTERM");
+
+    try {
+      await runDashboard(0, { open: false, dev: true });
+      const sigtermHandler = getNewSignalHandler("SIGTERM", baselineSigtermHandlers);
+      sigtermHandler();
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(close).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[dashboard] CentralCore.close() failed during dev shutdown (SIGTERM): dev shutdown close failed"),
+      );
+      expect(mockStore.close).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    } finally {
+      warnSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+});
+
 // ── promptForPort tests ───────────────────────────────────────────────
 
 import { promptForPort } from "./dashboard.js";

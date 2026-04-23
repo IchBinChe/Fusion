@@ -575,6 +575,15 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     );
   }
 
+  async function closeCentralCoreBestEffort(core: CentralCore, context: string): Promise<void> {
+    try {
+      await core.close();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logSink.warn(`CentralCore.close() failed during ${context}: ${message}`, "dashboard");
+    }
+  }
+
   function registerHandler(
     target: NodeJS.EventEmitter,
     event: string | symbol,
@@ -949,7 +958,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
     disposeCallbacks.push(async () => {
       await engineManager.stopAll();
-      await centralCoreForEngine.close().catch(() => {});
+      await closeCentralCoreBestEffort(centralCoreForEngine, "dispose cleanup");
     });
 
     app = createServer(store, {
@@ -1025,7 +1034,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         }
       }
 
-      await centralCoreForEngine.close().catch(() => {});
+      await closeCentralCoreBestEffort(centralCoreForEngine, `shutdown (${signal})`);
 
       store.close();
       process.exit(0);
@@ -1216,7 +1225,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       }
 
       if (centralCoreForMesh) {
-        await centralCoreForMesh.close().catch(() => {});
+        await closeCentralCoreBestEffort(centralCoreForMesh, `dev shutdown (${signal})`);
       }
 
       store.close();

@@ -654,32 +654,86 @@ describe("AgentLogViewer", () => {
   });
 
   describe("auto-scroll behavior", () => {
-    it("scrolls to top when new entries arrive and user is near the top", () => {
-      const { rerender, container } = render(<AgentLogViewer entries={[makeEntry({ text: "first" })]} loading={false} />);
+    it("scrolls to top when streaming updates arrive and user is near the top", () => {
+      const initialEntries = [
+        makeEntry({ text: "first", timestamp: "2026-01-01T00:00:00Z" }),
+      ];
+      const streamedEntries = [
+        ...initialEntries,
+        makeEntry({ text: "second", timestamp: "2026-01-01T00:00:01Z" }),
+      ];
+
+      const { rerender, container } = render(<AgentLogViewer entries={initialEntries} loading={false} />);
       const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLDivElement;
-      
-      // Simulate user being at the top
-      viewer.scrollTop = 0;
-      
-      // Add a new entry
-      rerender(<AgentLogViewer entries={[makeEntry({ text: "second" }), makeEntry({ text: "first" })]} loading={false} />);
-      
-      // Should have scrolled to top (newest first)
+
+      let scrollHeight = 600;
+      Object.defineProperty(viewer, "scrollHeight", {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      viewer.scrollTop = 20;
+      rerender(<AgentLogViewer entries={[...initialEntries]} loading={false} />);
+
+      scrollHeight = 720;
+      rerender(<AgentLogViewer entries={streamedEntries} loading={false} />);
+
       expect(viewer.scrollTop).toBe(0);
     });
 
-    it("does not auto-scroll when user has scrolled down", () => {
-      const { rerender, container } = render(<AgentLogViewer entries={[makeEntry({ text: "first" })]} loading={false} />);
+    it("keeps the viewport anchored when streaming updates arrive and user is reading older output", () => {
+      const initialEntries = [
+        makeEntry({ text: "first", timestamp: "2026-01-01T00:00:00Z" }),
+      ];
+      const streamedEntries = [
+        ...initialEntries,
+        makeEntry({ text: "second", timestamp: "2026-01-01T00:00:01Z" }),
+      ];
+
+      const { rerender, container } = render(<AgentLogViewer entries={initialEntries} loading={false} />);
       const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLDivElement;
-      
-      // Simulate user scrolling down past the threshold
-      Object.defineProperty(viewer, 'scrollTop', { value: 100, writable: true });
-      
-      // Add a new entry
-      rerender(<AgentLogViewer entries={[makeEntry({ text: "second" }), makeEntry({ text: "first" })]} loading={false} />);
-      
-      // Should not have scrolled (scrollTop should remain 100)
-      expect(viewer.scrollTop).toBe(100);
+
+      let scrollHeight = 1000;
+      Object.defineProperty(viewer, "scrollHeight", {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      viewer.scrollTop = 220;
+      rerender(<AgentLogViewer entries={[...initialEntries]} loading={false} />);
+
+      scrollHeight = 1120;
+      rerender(<AgentLogViewer entries={streamedEntries} loading={false} />);
+
+      // Anchored by delta (1120 - 1000): 220 + 120
+      expect(viewer.scrollTop).toBe(340);
+    });
+
+    it("does not offset scroll when loading older history at the bottom", () => {
+      const initialEntries = [
+        makeEntry({ text: "recent", timestamp: "2026-01-01T00:00:00Z" }),
+      ];
+      const olderLoadedEntries = [
+        makeEntry({ text: "older", timestamp: "2025-12-31T23:59:00Z" }),
+        ...initialEntries,
+      ];
+
+      const { rerender, container } = render(<AgentLogViewer entries={initialEntries} loading={false} />);
+      const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLDivElement;
+
+      let scrollHeight = 900;
+      Object.defineProperty(viewer, "scrollHeight", {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      viewer.scrollTop = 260;
+      rerender(<AgentLogViewer entries={[...initialEntries]} loading={false} />);
+
+      scrollHeight = 1030;
+      rerender(<AgentLogViewer entries={olderLoadedEntries} loading={false} />);
+
+      expect(viewer.scrollTop).toBe(260);
     });
   });
 

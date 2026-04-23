@@ -1,6 +1,6 @@
 import type { AgentLogEntry } from "@fusion/core";
 import { ProviderIcon } from "./ProviderIcon";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useLayoutEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -48,6 +48,16 @@ const markdownComponents: Components = {
     </table>
   ),
 };
+
+const TOP_FOLLOW_THRESHOLD_PX = 50;
+
+function getEntryKey(entry: AgentLogEntry | undefined): string | null {
+  if (!entry) {
+    return null;
+  }
+
+  return [entry.timestamp, entry.agent, entry.type, entry.text, entry.detail].join("|");
+}
 
 interface ModelInfo {
   provider?: string;
@@ -100,28 +110,44 @@ export function AgentLogViewer({
 }: AgentLogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previousEntryCountRef = useRef<number>(0);
+  const previousScrollHeightRef = useRef<number>(0);
+  const previousNewestEntryKeyRef = useRef<string | null>(null);
   const [renderMarkdown, setRenderMarkdown] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Auto-scroll to top when new entries arrive (since newest are first)
-  useEffect(() => {
+  // Newest entries render first. When streaming prepends content while the reader is away
+  // from the top, keep the viewport anchored by offsetting scrollTop with the added height.
+  // Near the top, preserve live-follow behavior by snapping back to the latest output.
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const newEntryCount = entries.length;
     const previousCount = previousEntryCountRef.current;
+    const previousScrollHeight = previousScrollHeightRef.current;
+    const newestEntryKey = getEntryKey(entries[entries.length - 1]);
+    const newestEntryChanged = previousNewestEntryKeyRef.current !== newestEntryKey;
 
-    // Only scroll if new entries were added and user is near the top
+    // Only adjust scroll for streaming updates (which append to chronological data
+    // and therefore prepend in this reversed viewer).
     if (newEntryCount > previousCount) {
-      // Check if user is already near the top (within 50px)
-      const isNearTop = container.scrollTop <= 50;
+      const isNearTop = container.scrollTop <= TOP_FOLLOW_THRESHOLD_PX;
 
-      if (isNearTop) {
-        container.scrollTop = 0;
+      if (newestEntryChanged) {
+        if (isNearTop) {
+          container.scrollTop = 0;
+        } else {
+          const heightDelta = container.scrollHeight - previousScrollHeight;
+          if (heightDelta > 0) {
+            container.scrollTop += heightDelta;
+          }
+        }
       }
     }
 
     previousEntryCountRef.current = newEntryCount;
+    previousScrollHeightRef.current = container.scrollHeight;
+    previousNewestEntryKeyRef.current = newestEntryKey;
   }, [entries]);
 
   // Escape key handler to exit fullscreen mode

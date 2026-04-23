@@ -2,6 +2,12 @@
  * Runtime Adapter Tests
  *
  * Tests for the PaperclipRuntimeAdapter class.
+ *
+ * ## Mocking Strategy
+ *
+ * The adapter imports pi functions from a seam module (./pi-module.js) which
+ * re-exports them from the engine. This allows Vitest to mock the seam directly,
+ * enabling behavioral tests of the adapter's delegation to pi functions.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -9,20 +15,19 @@ import { PaperclipRuntimeAdapter } from "../runtime-adapter.js";
 
 // ── Mock Modules ────────────────────────────────────────────────────────────────
 
-const mockCreateFnAgent = vi.fn();
-const mockPromptWithFallback = vi.fn();
+// Use vi.hoisted() so Vitest properly handles the hoisted mock reference
+const { mockCreateFnAgent, mockPromptWithFallback, mockDescribeModel } = vi.hoisted(() => ({
+  mockCreateFnAgent: vi.fn(),
+  mockPromptWithFallback: vi.fn(),
+  mockDescribeModel: vi.fn(),
+}));
 
-// The adapter does `require("../../../packages/engine/src/pi.js")` from
-// runtime-adapter.ts — which resolves to the same absolute path as the
-// test's `../../../../` form. Register both spellings so vi.mock matches
-// whichever string the adapter's require() uses at runtime.
-const piMock = {
+// Mock the pi-module seam so the adapter uses our mock functions
+vi.mock("../pi-module.js", () => ({
   createFnAgent: mockCreateFnAgent,
   promptWithFallback: mockPromptWithFallback,
-  describeModel: vi.fn().mockReturnValue("mock/anthropic-claude"),
-};
-vi.mock("../../../../packages/engine/src/pi.js", () => piMock);
-vi.mock("../../../packages/engine/src/pi.js", () => piMock);
+  describeModel: mockDescribeModel,
+}));
 
 // ── Test Suite ─────────────────────────────────────────────────────────────────
 
@@ -31,6 +36,8 @@ describe("PaperclipRuntimeAdapter", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default mock return values
+    mockDescribeModel.mockReturnValue("mock/anthropic-claude");
     adapter = new PaperclipRuntimeAdapter();
   });
 
@@ -48,11 +55,8 @@ describe("PaperclipRuntimeAdapter", () => {
     });
   });
 
-  // TODO: The adapter loads pi.js via CommonJS `require(...)`, which vi.mock
-  // does not intercept. Re-enable these tests once the adapter switches to
-  // ESM imports (or use vi.doMock with a dynamic loader seam).
-  describe.skip("createSession", () => {
-    it("should call createFnAgent with correct options", async () => {
+  describe("createSession", () => {
+    it("should call createFnAgent with all options mapped correctly", async () => {
       const mockSession = { dispose: vi.fn() };
       const mockResult = { session: mockSession, sessionFile: "/path/to/session.json" };
       mockCreateFnAgent.mockResolvedValue(mockResult);
@@ -88,7 +92,7 @@ describe("PaperclipRuntimeAdapter", () => {
       expect(result.sessionFile).toBe("/path/to/session.json");
     });
 
-    it("should pass through model options", async () => {
+    it("should pass through model provider options", async () => {
       mockCreateFnAgent.mockResolvedValue({ session: {} });
 
       await adapter.createSession({
@@ -147,10 +151,55 @@ describe("PaperclipRuntimeAdapter", () => {
         }),
       );
     });
+
+    it("should pass through event handlers", async () => {
+      mockCreateFnAgent.mockResolvedValue({ session: {} });
+      const onText = vi.fn();
+      const onThinking = vi.fn();
+      const onToolStart = vi.fn();
+      const onToolEnd = vi.fn();
+
+      await adapter.createSession({
+        cwd: "/project",
+        systemPrompt: "Test",
+        onText,
+        onThinking,
+        onToolStart,
+        onToolEnd,
+      });
+
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          onText,
+          onThinking,
+          onToolStart,
+          onToolEnd,
+        }),
+      );
+    });
+
+    it("should pass through thinking level and session manager", async () => {
+      mockCreateFnAgent.mockResolvedValue({ session: {} });
+      const sessionManager = { maxHistory: 100 };
+
+      await adapter.createSession({
+        cwd: "/project",
+        systemPrompt: "Test",
+        defaultThinkingLevel: "medium",
+        sessionManager,
+      });
+
+      expect(mockCreateFnAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultThinkingLevel: "medium",
+          sessionManager,
+        }),
+      );
+    });
   });
 
-  describe.skip("promptWithFallback", () => {
-    it("should delegate to promptWithFallback from engine", async () => {
+  describe("promptWithFallback", () => {
+    it("should delegate to promptWithFallback from pi module with options", async () => {
       const mockSession = { id: "test-session" };
       mockPromptWithFallback.mockResolvedValue(undefined);
 
@@ -160,25 +209,57 @@ describe("PaperclipRuntimeAdapter", () => {
       expect(mockPromptWithFallback).toHaveBeenCalledWith(mockSession, "Hello", { images: [] });
     });
 
-    it("should work without options", async () => {
+    it("should delegate to promptWithFallback without options", async () => {
       mockPromptWithFallback.mockResolvedValue(undefined);
 
       await adapter.promptWithFallback({} as any, "Hello");
 
+      expect(mockPromptWithFallback).toHaveBeenCalledTimes(1);
       expect(mockPromptWithFallback).toHaveBeenCalledWith({}, "Hello", undefined);
+    });
+
+    it("should forward session object directly to pi", async () => {
+      const mockSession = {
+        id: "session-123",
+        model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+      };
+      mockPromptWithFallback.mockResolvedValue(undefined);
+
+      await adapter.promptWithFallback(mockSession as any, "Tell me a joke");
+
+      expect(mockPromptWithFallback).toHaveBeenCalledWith(mockSession, "Tell me a joke", undefined);
+      expect(mockSession.id).toBe("session-123");
     });
   });
 
-  describe.skip("describeModel", () => {
+  describe("describeModel", () => {
     it("should return model description from pi describeModel", () => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { describeModel } = require("../../../../packages/engine/src/pi.js");
-
       const mockSession = { model: { provider: "anthropic", id: "claude-sonnet-4-5" } };
+      mockDescribeModel.mockReturnValue("anthropic/claude-sonnet-4-5");
+
       const result = adapter.describeModel(mockSession as any);
 
-      expect(describeModel).toHaveBeenCalledWith(mockSession);
-      expect(result).toBe("mock/anthropic-claude"); // from mock
+      expect(mockDescribeModel).toHaveBeenCalledTimes(1);
+      expect(mockDescribeModel).toHaveBeenCalledWith(mockSession);
+      expect(result).toBe("anthropic/claude-sonnet-4-5");
+    });
+
+    it("should return unknown model when session has no model", () => {
+      mockDescribeModel.mockReturnValue("unknown model");
+
+      const result = adapter.describeModel({} as any);
+
+      expect(mockDescribeModel).toHaveBeenCalledWith({});
+      expect(result).toBe("unknown model");
+    });
+
+    it("should forward the session object directly to pi describeModel", () => {
+      const mockSession = { id: "test-session", model: { provider: "openai", id: "gpt-4o" } };
+      mockDescribeModel.mockReturnValue("openai/gpt-4o");
+
+      adapter.describeModel(mockSession as any);
+
+      expect(mockDescribeModel).toHaveBeenCalledWith(mockSession);
     });
   });
 

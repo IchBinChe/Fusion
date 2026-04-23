@@ -37,23 +37,18 @@ import type {
   AgentSessionResult,
 } from "./types.js";
 
-// ── describeModel (from pi.ts, not re-exported from @fusion/engine) ─────────────
+// ── Pi Module Seam ─────────────────────────────────────────────────────────────
 //
-// describeModel is defined in packages/engine/src/pi.ts but is NOT exported from
-// the @fusion/engine public API. We import it via relative path for use in the adapter.
-// This is acceptable within the monorepo workspace. External plugins would need a
-// different approach (e.g., the engine could export it publicly in the future).
+// The pi functions are imported from a local seam module (pi-module.ts) which
+// re-exports them from the engine. This approach provides a mockable import path
+// for Vitest tests without relying on CommonJS require() which bypasses mocks.
 //
-type PiModule = {
-  createFnAgent: (options: unknown) => Promise<AgentSessionResult>;
-  promptWithFallback: (session: unknown, prompt: string, options?: unknown) => Promise<void>;
-  describeModel: (session: unknown) => string;
-};
+// The seam module is at: ./pi-module.js
+//
+import { createFnAgent, promptWithFallback, describeModel } from "./pi-module.js";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const loadPiModule = (): PiModule => require("../../../packages/engine/src/pi.js") as PiModule;
-
-const { describeModel: getModelDescription } = loadPiModule();
+/** Cached describeModel reference for synchronous describeModel() calls */
+const getModelDescription = describeModel;
 
 /**
  * Paperclip runtime adapter implementing the Fusion AgentRuntime interface.
@@ -81,7 +76,6 @@ export class PaperclipRuntimeAdapter implements AgentRuntime {
    * @returns Promise resolving to the session result with session and optional sessionFile
    */
   async createSession(options: AgentRuntimeOptions): Promise<AgentSessionResult> {
-    const { createFnAgent } = loadPiModule();
     return createFnAgent({
       cwd: options.cwd,
       systemPrompt: options.systemPrompt,
@@ -115,8 +109,7 @@ export class PaperclipRuntimeAdapter implements AgentRuntime {
    * @param options - Optional prompt options (e.g., images for vision)
    */
   async promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void> {
-    const { promptWithFallback: pwf } = loadPiModule();
-    return pwf(session, prompt, options);
+    return promptWithFallback(session, prompt, options);
   }
 
   /**

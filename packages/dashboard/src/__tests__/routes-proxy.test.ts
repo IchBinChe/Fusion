@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import type { Task } from "@fusion/core";
 import { request } from "../test-request.js";
 import { createServer } from "../server.js";
+import type { RuntimeLogger } from "../runtime-logger.js";
 
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockClose = vi.fn().mockResolvedValue(undefined);
@@ -68,6 +69,38 @@ function makeNode(overrides: Partial<Record<string, unknown>> = {}) {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+type RuntimeLogEntry = {
+  level: "info" | "warn" | "error";
+  scope: string;
+  message: string;
+  context?: Record<string, unknown>;
+};
+
+function createRuntimeLoggerHarness(scope = "test"): { logger: RuntimeLogger; entries: RuntimeLogEntry[] } {
+  const entries: RuntimeLogEntry[] = [];
+
+  const makeLogger = (currentScope: string): RuntimeLogger => ({
+    scope: currentScope,
+    info(message, context) {
+      entries.push({ level: "info", scope: currentScope, message, context });
+    },
+    warn(message, context) {
+      entries.push({ level: "warn", scope: currentScope, message, context });
+    },
+    error(message, context) {
+      entries.push({ level: "error", scope: currentScope, message, context });
+    },
+    child(childScope) {
+      return makeLogger(`${currentScope}:${childScope}`);
+    },
+  });
+
+  return {
+    logger: makeLogger(scope),
+    entries,
   };
 }
 
@@ -534,6 +567,8 @@ describe("Node proxy routes", () => {
         type: "remote",
         url: "http://remote:4040",
       });
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = createServer(new MockStore() as any, { runtimeLogger: runtimeHarness.logger });
 
       vi.stubGlobal(
         "fetch",
@@ -542,11 +577,26 @@ describe("Node proxy routes", () => {
 
       mockGetNode.mockResolvedValue(remoteNode);
 
-      const res = await request(app, "GET", "/api/proxy/node_remote/events");
+      const res = await request(appWithLogger, "GET", "/api/proxy/node_remote/events");
 
       expect(res.status).toBe(502);
       expect(res.body).toEqual({ error: "Remote node unreachable" });
       expect(mockClose).toHaveBeenCalled();
+      expect(runtimeHarness.entries).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          scope: "test:routes:remote-route:proxy-sse",
+          message: "SSE proxy transport failure",
+          context: expect.objectContaining({
+            nodeId: "node_remote",
+            upstreamPath: "/api/events",
+            stage: "fetch",
+            transportClassification: "transport",
+            errorClass: "TypeError",
+            errorMessage: "getaddrinfo ENOTFOUND",
+          }),
+        }),
+      );
     });
 
     it("returns 504 when SSE fetch throws AbortError", async () => {
@@ -556,6 +606,8 @@ describe("Node proxy routes", () => {
         type: "remote",
         url: "http://remote:4040",
       });
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = createServer(new MockStore() as any, { runtimeLogger: runtimeHarness.logger });
 
       const abortError = new Error("The user abort");
       abortError.name = "AbortError";
@@ -564,11 +616,75 @@ describe("Node proxy routes", () => {
 
       mockGetNode.mockResolvedValue(remoteNode);
 
-      const res = await request(app, "GET", "/api/proxy/node_remote/events");
+      const res = await request(appWithLogger, "GET", "/api/proxy/node_remote/events");
 
       expect(res.status).toBe(504);
       expect(res.body).toEqual({ error: "Remote node timeout" });
       expect(mockClose).toHaveBeenCalled();
+      expect(runtimeHarness.entries).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          scope: "test:routes:remote-route:proxy-sse",
+          message: "SSE proxy request timed out",
+          context: expect.objectContaining({
+            nodeId: "node_remote",
+            upstreamPath: "/api/events",
+            stage: "fetch",
+            transportClassification: "timeout",
+            errorMessage: "The user abort",
+          }),
+        }),
+      );
+    });
+
+    it("emits structured diagnostics when upstream SSE stream errors", async () => {
+      const remoteNode = makeNode({
+        id: "node_remote",
+        name: "remote",
+        type: "remote",
+        url: "http://remote:4040",
+      });
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = createServer(new MockStore() as any, { runtimeLogger: runtimeHarness.logger });
+
+      const failingStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data: hello\\n\\n"));
+          controller.error(new Error("stream exploded"));
+        },
+      });
+
+      const headers = new Headers({ "content-type": "text/event-stream" });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers,
+          body: failingStream,
+        } as unknown as Response),
+      );
+
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const res = await request(appWithLogger, "GET", "/api/proxy/node_remote/events");
+
+      expect(res.status).toBe(200);
+      expect(runtimeHarness.entries).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          scope: "test:routes:remote-route:proxy-sse",
+          message: "SSE proxy stream error",
+          context: expect.objectContaining({
+            nodeId: "node_remote",
+            upstreamPath: "/api/events",
+            stage: "upstream-stream",
+            transportClassification: "unexpected",
+            errorClass: "Error",
+            errorMessage: "stream exploded",
+          }),
+        }),
+      );
     });
   });
 });

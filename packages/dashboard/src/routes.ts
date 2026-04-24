@@ -1927,6 +1927,101 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     return getOrCreateProjectStore(projectId);
   }
 
+  type RemoteRouteErrorClassification = "timeout" | "transport" | "unexpected";
+
+  interface RemoteRouteDiagnosticInput {
+    route: string;
+    message: string;
+    nodeId?: string;
+    upstreamPath?: string;
+    stage?: string;
+    operationStage?: string;
+    error?: unknown;
+    level?: "info" | "warn" | "error";
+    context?: Record<string, unknown>;
+  }
+
+  function classifyRemoteRouteError(error: unknown): {
+    classification: RemoteRouteErrorClassification;
+    errorClass: string;
+    errorMessage: string;
+  } {
+    const fallbackMessage = String(error);
+
+    if (error instanceof Error) {
+      const errorClass = error.constructor?.name || error.name || "Error";
+      const errorMessage = error.message || fallbackMessage;
+
+      if (error.name === "AbortError") {
+        return {
+          classification: "timeout",
+          errorClass,
+          errorMessage,
+        };
+      }
+
+      if (error instanceof TypeError) {
+        return {
+          classification: "transport",
+          errorClass,
+          errorMessage,
+        };
+      }
+
+      return {
+        classification: "unexpected",
+        errorClass,
+        errorMessage,
+      };
+    }
+
+    if ((error as { name?: unknown } | null)?.name === "AbortError") {
+      return {
+        classification: "timeout",
+        errorClass: "AbortError",
+        errorMessage: fallbackMessage,
+      };
+    }
+
+    return {
+      classification: "unexpected",
+      errorClass: typeof error,
+      errorMessage: fallbackMessage,
+    };
+  }
+
+  function emitRemoteRouteDiagnostic(input: RemoteRouteDiagnosticInput): void {
+    const logger = runtimeLogger.child("remote-route").child(input.route);
+    const level = input.level ?? "error";
+
+    const context: Record<string, unknown> = {
+      ...(input.nodeId !== undefined ? { nodeId: input.nodeId } : {}),
+      ...(input.upstreamPath !== undefined ? { upstreamPath: input.upstreamPath } : {}),
+      ...(input.stage !== undefined ? { stage: input.stage } : {}),
+      ...(input.operationStage !== undefined ? { operationStage: input.operationStage } : {}),
+      ...(input.context ?? {}),
+    };
+
+    if (input.error !== undefined) {
+      const classified = classifyRemoteRouteError(input.error);
+      context.transportClassification = classified.classification;
+      context.errorClass = classified.errorClass;
+      context.errorMessage = classified.errorMessage;
+    }
+
+    if (level === "info") {
+      logger.info(input.message, context);
+      return;
+    }
+
+    if (level === "warn") {
+      logger.warn(input.message, context);
+      return;
+    }
+
+    logger.error(input.message, context);
+  }
+
   /**
    * Forward an HTTP request to a remote node.
    * Validates the node exists, is remote, and has a URL, then proxies the request.
@@ -16825,11 +16920,29 @@ async function persistImportedSkills(
             const applyResult = await central.applyRemoteSettings(remoteSettings);
 
             if (applyResult.success) {
-              runtimeLogger.child("mesh/sync").info(
-                `Applied remote settings from ${senderNodeId}: global=${applyResult.globalCount}, projects=${applyResult.projectCount}, auth=${applyResult.authCount}`,
-              );
+              emitRemoteRouteDiagnostic({
+                route: "mesh-sync",
+                message: "Applied remote settings payload",
+                nodeId: senderNodeId,
+                upstreamPath: "/api/mesh/sync",
+                operationStage: "apply-remote-settings",
+                level: "info",
+                context: {
+                  globalCount: applyResult.globalCount,
+                  projectCount: applyResult.projectCount,
+                  authCount: applyResult.authCount,
+                },
+              });
             } else {
-              runtimeLogger.child("mesh/sync").warn(`Failed to apply remote settings: ${applyResult.error}`);
+              emitRemoteRouteDiagnostic({
+                route: "mesh-sync",
+                message: "Failed to apply remote settings payload",
+                nodeId: senderNodeId,
+                upstreamPath: "/api/mesh/sync",
+                operationStage: "apply-remote-settings",
+                level: "warn",
+                error: new Error(applyResult.error ?? "Unknown applyRemoteSettings failure"),
+              });
             }
           }
 
@@ -16837,8 +16950,13 @@ async function persistImportedSkills(
           responseSettings = localPayload;
         } catch (err) {
           // Log but don't fail the sync - peers are more important
-          runtimeLogger.child("mesh/sync").error("Settings sync error", {
-            error: err instanceof Error ? err.message : String(err),
+          emitRemoteRouteDiagnostic({
+            route: "mesh-sync",
+            message: "Settings sync operation failed",
+            nodeId: senderNodeId,
+            upstreamPath: "/api/mesh/sync",
+            operationStage: "settings-sync",
+            error: err,
           });
         }
       }
@@ -18313,7 +18431,8 @@ async function persistImportedSkills(
       // Parse query string and build target URL
       const parsedUrl = new URL(req.url, "http://localhost");
       const queryString = parsedUrl.search;
-      const targetUrl = new URL(`/api/events${queryString}`, node.url).toString();
+      const upstreamPath = `/api/events${queryString}`;
+      const targetUrl = new URL(upstreamPath, node.url).toString();
 
       // Build headers, injecting Authorization if apiKey is present
       const headers: Record<string, string> = {};
@@ -18359,6 +18478,14 @@ async function persistImportedSkills(
       req.on("close", () => {
         if (!destroyed) {
           destroyed = true;
+          emitRemoteRouteDiagnostic({
+            route: "proxy-sse",
+            message: "Closing SSE proxy stream after client disconnect",
+            nodeId,
+            upstreamPath,
+            stage: "client-disconnect",
+            level: "info",
+          });
           controller.abort();
           nodeStream.destroy();
         }
@@ -18378,29 +18505,61 @@ async function persistImportedSkills(
 
       nodeStream.on("error", (err: Error) => {
         // Log but don't crash — stream may already be closing
-        runtimeLogger.child("proxy:sse").error(`Stream error for node ${nodeId}`, {
-          error: err.message,
+        emitRemoteRouteDiagnostic({
+          route: "proxy-sse",
+          message: "SSE proxy stream error",
+          nodeId,
+          upstreamPath,
+          stage: "upstream-stream",
+          error: err,
         });
         if (!res.writableEnded) {
           res.end();
         }
       });
     } catch (err: unknown) {
+      const parsedUrl = new URL(req.url, "http://localhost");
+      const queryString = parsedUrl.search;
+      const upstreamPath = `/api/events${queryString}`;
+
       if (err instanceof Error && err.name === "AbortError") {
+        emitRemoteRouteDiagnostic({
+          route: "proxy-sse",
+          message: "SSE proxy request timed out",
+          nodeId,
+          upstreamPath,
+          stage: "fetch",
+          error: err,
+          level: "warn",
+        });
         if (!res.headersSent) {
           res.status(504).json({ error: "Remote node timeout" });
         } else if (!res.writableEnded) {
           res.end();
         }
       } else if (err instanceof TypeError) {
+        emitRemoteRouteDiagnostic({
+          route: "proxy-sse",
+          message: "SSE proxy transport failure",
+          nodeId,
+          upstreamPath,
+          stage: "fetch",
+          error: err,
+          level: "warn",
+        });
         if (!res.headersSent) {
           res.status(502).json({ error: "Remote node unreachable" });
         } else if (!res.writableEnded) {
           res.end();
         }
       } else {
-        runtimeLogger.child("proxy:sse").error(`Unexpected error for node ${nodeId}`, {
-          error: err instanceof Error ? err.message : String(err),
+        emitRemoteRouteDiagnostic({
+          route: "proxy-sse",
+          message: "SSE proxy unexpected failure",
+          nodeId,
+          upstreamPath,
+          stage: "fetch",
+          error: err,
         });
         if (!res.headersSent) {
           if (err instanceof ApiError) {
@@ -18525,28 +18684,66 @@ async function persistImportedSkills(
       });
 
       nodeStream.on("error", (err: Error) => {
-        proxyLogger.error(`Stream error for node ${nodeId}`, {
-          error: err.message,
+        emitRemoteRouteDiagnostic({
+          route: "proxy-wildcard",
+          message: "Wildcard proxy stream error",
+          nodeId,
+          upstreamPath: targetPath,
+          stage: "upstream-stream",
+          error: err,
         });
         if (!res.writableEnded) {
           res.end();
         }
       });
     } catch (err: unknown) {
-      if (res.headersSent) {
-        return;
-      }
+      const parsedUrl = new URL(req.url ?? "/", "http://localhost");
+      const queryString = parsedUrl.search;
+      const targetPath = `/${remainingPath}${queryString}`;
+
       // Check for AbortError by name property (works for both native Error and jsdom DOMException)
       const errorObj = err as { name?: string } | null;
       const isAbortError = errorObj?.name === "AbortError";
       if (isAbortError) {
+        emitRemoteRouteDiagnostic({
+          route: "proxy-wildcard",
+          message: "Wildcard proxy request timed out",
+          nodeId,
+          upstreamPath: targetPath,
+          stage: "fetch",
+          error: err,
+          level: "warn",
+        });
+        if (res.headersSent) {
+          return;
+        }
         res.status(504).json({ error: "Gateway Timeout" });
       } else if (err instanceof TypeError) {
+        emitRemoteRouteDiagnostic({
+          route: "proxy-wildcard",
+          message: "Wildcard proxy transport failure",
+          nodeId,
+          upstreamPath: targetPath,
+          stage: "fetch",
+          error: err,
+          level: "warn",
+        });
+        if (res.headersSent) {
+          return;
+        }
         res.status(502).json({ error: "Bad Gateway" });
       } else {
-        proxyLogger.error(`Unexpected error for node ${nodeId}`, {
-          error: err instanceof Error ? err.message : String(err),
+        emitRemoteRouteDiagnostic({
+          route: "proxy-wildcard",
+          message: "Wildcard proxy unexpected failure",
+          nodeId,
+          upstreamPath: targetPath,
+          stage: "fetch",
+          error: err,
         });
+        if (res.headersSent) {
+          return;
+        }
         res.status(502).json({ error: "Bad Gateway" });
       }
     } finally {

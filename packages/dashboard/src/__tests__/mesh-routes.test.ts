@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import type { Task, TaskStore } from "@fusion/core";
 import { request } from "../test-request.js";
 import { createServer } from "../server.js";
+import type { RuntimeLogger } from "../runtime-logger.js";
 
 // Request helper type for the test-request module
 type TestRequestFn = (
@@ -115,6 +116,38 @@ function makeNodeConfig(overrides: Partial<Record<string, unknown>> = {}) {
     createdAt: "2026-04-01T10:00:00.000Z",
     updatedAt: "2026-04-01T12:00:00.000Z",
     ...overrides,
+  };
+}
+
+type RuntimeLogEntry = {
+  level: "info" | "warn" | "error";
+  scope: string;
+  message: string;
+  context?: Record<string, unknown>;
+};
+
+function createRuntimeLoggerHarness(scope = "test"): { logger: RuntimeLogger; entries: RuntimeLogEntry[] } {
+  const entries: RuntimeLogEntry[] = [];
+
+  const makeLogger = (currentScope: string): RuntimeLogger => ({
+    scope: currentScope,
+    info(message, context) {
+      entries.push({ level: "info", scope: currentScope, message, context });
+    },
+    warn(message, context) {
+      entries.push({ level: "warn", scope: currentScope, message, context });
+    },
+    error(message, context) {
+      entries.push({ level: "error", scope: currentScope, message, context });
+    },
+    child(childScope) {
+      return makeLogger(`${currentScope}:${childScope}`);
+    },
+  });
+
+  return {
+    logger: makeLogger(scope),
+    entries,
   };
 }
 
@@ -525,6 +558,10 @@ describe("POST /api/mesh/sync", () => {
     it("should not fail sync when settings apply fails", async () => {
       const remotePayload = makeSettingsPayload({ checksum: "remote-checksum" });
       const localPayload = makeSettingsPayload({ checksum: "local-checksum" });
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = createServer(new MockStore() as unknown as TaskStore, {
+        runtimeLogger: runtimeHarness.logger,
+      });
 
       mockGetSettings.mockResolvedValue({});
       mockGetSettingsForSync.mockResolvedValue(localPayload);
@@ -537,7 +574,7 @@ describe("POST /api/mesh/sync", () => {
       });
 
       const response = await request(
-        app,
+        appWithLogger,
         "POST",
         "/api/mesh/sync",
         JSON.stringify({
@@ -554,15 +591,34 @@ describe("POST /api/mesh/sync", () => {
       expect(response.status).toBe(200);
       expect(mockMergePeers).toHaveBeenCalled();
       expect((response.body as any).knownPeers).toBeDefined();
+      expect(runtimeHarness.entries).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          scope: "test:routes:remote-route:mesh-sync",
+          message: "Failed to apply remote settings payload",
+          context: expect.objectContaining({
+            nodeId: "node_remote",
+            upstreamPath: "/api/mesh/sync",
+            operationStage: "apply-remote-settings",
+            transportClassification: "unexpected",
+            errorClass: "Error",
+            errorMessage: "Checksum mismatch",
+          }),
+        }),
+      );
     });
 
     it("should not fail sync when getSettingsForSync throws", async () => {
       const remotePayload = makeSettingsPayload({ checksum: "remote-checksum" });
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = createServer(new MockStore() as unknown as TaskStore, {
+        runtimeLogger: runtimeHarness.logger,
+      });
 
       mockGetSettings.mockRejectedValue(new Error("Settings unavailable"));
 
       const response = await request(
-        app,
+        appWithLogger,
         "POST",
         "/api/mesh/sync",
         JSON.stringify({
@@ -580,6 +636,21 @@ describe("POST /api/mesh/sync", () => {
       expect(mockMergePeers).toHaveBeenCalled();
       expect((response.body as any).knownPeers).toBeDefined();
       expect((response.body as any).settings).toBeUndefined();
+      expect(runtimeHarness.entries).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          scope: "test:routes:remote-route:mesh-sync",
+          message: "Settings sync operation failed",
+          context: expect.objectContaining({
+            nodeId: "node_remote",
+            upstreamPath: "/api/mesh/sync",
+            operationStage: "settings-sync",
+            transportClassification: "unexpected",
+            errorClass: "Error",
+            errorMessage: "Settings unavailable",
+          }),
+        }),
+      );
     });
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { request, get } from "../test-request.js";
+import type { RuntimeLogger } from "../runtime-logger.js";
 
 // ── Mock @fusion/core for proxy routes ──────────────────────────────
 
@@ -87,6 +88,38 @@ function createMockResponse(status: number, headers: Record<string, string>, bod
     headers: mockHeaders,
     body: stream,
     ok: status >= 200 && status < 300,
+  };
+}
+
+type RuntimeLogEntry = {
+  level: "info" | "warn" | "error";
+  scope: string;
+  message: string;
+  context?: Record<string, unknown>;
+};
+
+function createRuntimeLoggerHarness(scope = "test"): { logger: RuntimeLogger; entries: RuntimeLogEntry[] } {
+  const entries: RuntimeLogEntry[] = [];
+
+  const makeLogger = (currentScope: string): RuntimeLogger => ({
+    scope: currentScope,
+    info(message, context) {
+      entries.push({ level: "info", scope: currentScope, message, context });
+    },
+    warn(message, context) {
+      entries.push({ level: "warn", scope: currentScope, message, context });
+    },
+    error(message, context) {
+      entries.push({ level: "error", scope: currentScope, message, context });
+    },
+    child(childScope) {
+      return makeLogger(`${currentScope}:${childScope}`);
+    },
+  });
+
+  return {
+    logger: makeLogger(scope),
+    entries,
   };
 }
 
@@ -186,6 +219,10 @@ describe("Proxy routes", () => {
     it("returns 502 on connection error (TypeError)", async () => {
       const node = createMockRemoteNode();
       mockGetNode.mockResolvedValue(node);
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = (await import("../server.js")).createServer(store as any, {
+        runtimeLogger: runtimeHarness.logger,
+      });
 
       const mockFetch = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
 
@@ -193,10 +230,25 @@ describe("Proxy routes", () => {
       globalThis.fetch = mockFetch;
 
       try {
-        const res = await get(app, "/api/proxy/remote-node/browse-directory");
+        const res = await get(appWithLogger, "/api/proxy/remote-node/browse-directory");
 
         expect(res.status).toBe(502);
         expect(res.body).toEqual({ error: "Bad Gateway" });
+        expect(runtimeHarness.entries).toContainEqual(
+          expect.objectContaining({
+            level: "warn",
+            scope: "test:routes:remote-route:proxy-wildcard",
+            message: "Wildcard proxy transport failure",
+            context: expect.objectContaining({
+              nodeId: "remote-node",
+              upstreamPath: "/browse-directory",
+              stage: "fetch",
+              transportClassification: "transport",
+              errorClass: "TypeError",
+              errorMessage: "fetch failed",
+            }),
+          }),
+        );
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -205,6 +257,10 @@ describe("Proxy routes", () => {
     it("returns 504 on timeout/AbortError", async () => {
       const node = createMockRemoteNode();
       mockGetNode.mockResolvedValue(node);
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = (await import("../server.js")).createServer(store as any, {
+        runtimeLogger: runtimeHarness.logger,
+      });
 
       // Create an AbortError-like DOMException
       const abortError = new DOMException("Aborted", "AbortError");
@@ -214,10 +270,24 @@ describe("Proxy routes", () => {
       globalThis.fetch = mockFetch;
 
       try {
-        const res = await get(app, "/api/proxy/remote-node/browse-directory");
+        const res = await get(appWithLogger, "/api/proxy/remote-node/browse-directory");
 
         expect(res.status).toBe(504);
         expect(res.body).toEqual({ error: "Gateway Timeout" });
+        expect(runtimeHarness.entries).toContainEqual(
+          expect.objectContaining({
+            level: "warn",
+            scope: "test:routes:remote-route:proxy-wildcard",
+            message: "Wildcard proxy request timed out",
+            context: expect.objectContaining({
+              nodeId: "remote-node",
+              upstreamPath: "/browse-directory",
+              stage: "fetch",
+              transportClassification: "timeout",
+              errorClass: "AbortError",
+            }),
+          }),
+        );
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -438,6 +508,10 @@ describe("Proxy routes", () => {
     it("returns 502 on upstream error during POST", async () => {
       const node = createMockRemoteNode();
       mockGetNode.mockResolvedValue(node);
+      const runtimeHarness = createRuntimeLoggerHarness();
+      const appWithLogger = (await import("../server.js")).createServer(store as any, {
+        runtimeLogger: runtimeHarness.logger,
+      });
 
       const requestBody = JSON.stringify({ key: "value" });
       const rawBody = Buffer.from(requestBody);
@@ -448,7 +522,7 @@ describe("Proxy routes", () => {
 
       try {
         const res = await request(
-          app,
+          appWithLogger,
           "POST",
           "/api/proxy/remote-node/settings/sync",
           requestBody,
@@ -458,6 +532,21 @@ describe("Proxy routes", () => {
 
         expect(res.status).toBe(502);
         expect(res.body).toEqual({ error: "Bad Gateway" });
+        expect(runtimeHarness.entries).toContainEqual(
+          expect.objectContaining({
+            level: "warn",
+            scope: "test:routes:remote-route:proxy-wildcard",
+            message: "Wildcard proxy transport failure",
+            context: expect.objectContaining({
+              nodeId: "remote-node",
+              upstreamPath: "/settings/sync",
+              stage: "fetch",
+              transportClassification: "transport",
+              errorClass: "TypeError",
+              errorMessage: "fetch failed",
+            }),
+          }),
+        );
       } finally {
         globalThis.fetch = originalFetch;
       }

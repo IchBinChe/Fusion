@@ -103,6 +103,15 @@ describe("AgentsView", () => {
     mockUpdateSettings.mockResolvedValue({});
   });
 
+  const openControlsPanel = async () => {
+    const trigger = await screen.findByRole("button", { name: "Controls" });
+    fireEvent.click(trigger);
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Agent controls" })).toBeTruthy();
+    });
+    return trigger;
+  };
+
   describe("rendering", () => {
     it("renders the agents view header", async () => {
       render(<AgentsView addToast={mockAddToast} />);
@@ -118,6 +127,58 @@ describe("AgentsView", () => {
         expect(screen.getAllByText("Test Agent 1").length).toBeGreaterThanOrEqual(1);
         expect(screen.getAllByText("Test Agent 2").length).toBeGreaterThanOrEqual(1);
       });
+    });
+
+    it("keeps New Agent directly accessible while controls live in popup", async () => {
+      render(<AgentsView addToast={mockAddToast} />);
+
+      expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+      expect(screen.queryByRole("dialog", { name: "Agent controls" })).toBeNull();
+
+      await openControlsPanel();
+      expect(screen.getByLabelText("Filter agents by state")).toBeTruthy();
+      expect(screen.getByLabelText("Show system agents")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Import" })).toBeTruthy();
+      expect(screen.getByRole("slider", { name: "Heartbeat Speed" })).toBeTruthy();
+      expect(screen.getByLabelText("Heartbeat speed preset")).toBeTruthy();
+    });
+
+    it("closes controls popup on Escape and outside click", async () => {
+      render(<AgentsView addToast={mockAddToast} />);
+      const trigger = await openControlsPanel();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Agent controls" })).toBeNull();
+      });
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+      fireEvent.click(trigger);
+      await waitFor(() => {
+        expect(screen.getByRole("dialog", { name: "Agent controls" })).toBeTruthy();
+      });
+
+      fireEvent.mouseDown(document.body);
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Agent controls" })).toBeNull();
+      });
+    });
+
+    it("renders secondary sections after the main collection", async () => {
+      const { container } = render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(container.querySelector(".agent-list")).toBeTruthy();
+        expect(container.querySelector(".agent-metrics-bar")).toBeTruthy();
+        expect(container.querySelector(".active-agents-panel")).toBeTruthy();
+      });
+
+      const list = container.querySelector(".agent-list");
+      const metrics = container.querySelector(".agent-metrics-bar");
+      const activePanel = container.querySelector(".active-agents-panel");
+      expect(list && metrics && activePanel).toBeTruthy();
+      expect(list!.compareDocumentPosition(metrics!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(metrics!.compareDocumentPosition(activePanel!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("fetches agents only once on mount (regression: no duplicate initial load path)", async () => {
@@ -173,13 +234,10 @@ describe("AgentsView", () => {
 
     it("shows terminated agents when explicitly filtered", async () => {
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Switch to terminated filter
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "terminated" } });
 
       await waitFor(() => {
@@ -740,10 +798,7 @@ describe("AgentsView", () => {
   describe("filter agents by state", () => {
     it("renders the state filter with styled container", async () => {
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Styled filter container exists
       const filterContainer = document.querySelector(".agent-state-filter");
@@ -756,12 +811,9 @@ describe("AgentsView", () => {
 
     it("can filter agents by state", async () => {
       render(<AgentsView addToast={mockAddToast} />);
+      await openControlsPanel();
 
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
-
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "active" } });
 
       await waitFor(() => {
@@ -771,12 +823,9 @@ describe("AgentsView", () => {
 
     it("clears filter when selecting 'all'", async () => {
       render(<AgentsView addToast={mockAddToast} />);
+      await openControlsPanel();
 
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
-
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "idle" } });
 
       await waitFor(() => {
@@ -794,10 +843,7 @@ describe("AgentsView", () => {
   describe("show system agents toggle", () => {
     it("renders the system agents checkbox", async () => {
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Show system agents")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Checkbox should be unchecked by default
       const checkbox = screen.getByLabelText("Show system agents") as HTMLInputElement;
@@ -807,10 +853,6 @@ describe("AgentsView", () => {
     it("passes includeEphemeral: false by default to fetchAgents", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
-
       // Default call should include includeEphemeral: false
       await waitFor(() => {
         expect(mockFetchAgents).toHaveBeenLastCalledWith({ includeEphemeral: false }, undefined);
@@ -819,10 +861,7 @@ describe("AgentsView", () => {
 
     it("toggles system agents visibility when checkbox is clicked", async () => {
       render(<AgentsView addToast={mockAddToast} projectId={projectId} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       const checkbox = screen.getByLabelText("Show system agents");
       fireEvent.click(checkbox);
@@ -834,10 +873,7 @@ describe("AgentsView", () => {
 
     it("combines system agents toggle with state filter", async () => {
       render(<AgentsView addToast={mockAddToast} projectId={projectId} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // First enable system agents toggle
       const checkbox = screen.getByLabelText("Show system agents");
@@ -848,7 +884,7 @@ describe("AgentsView", () => {
       });
 
       // Then filter by state
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "active" } });
 
       await waitFor(() => {
@@ -881,6 +917,7 @@ describe("AgentsView", () => {
 
       expect(screen.queryByText("executor-FN-TEST")).toBeNull();
 
+      await openControlsPanel();
       const checkbox = screen.getByLabelText("Show system agents");
       fireEvent.click(checkbox);
 
@@ -1184,13 +1221,10 @@ describe("AgentsView", () => {
 
     it("shows Delete button for terminated agents when explicitly filtered", async () => {
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Switch to terminated filter
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "terminated" } });
 
       await waitFor(() => {
@@ -1223,13 +1257,10 @@ describe("AgentsView", () => {
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Switch to terminated filter to see terminated agent
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "terminated" } });
 
       await waitFor(() => {
@@ -1257,13 +1288,10 @@ describe("AgentsView", () => {
       vi.spyOn(window, "confirm").mockReturnValue(true);
 
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("All States")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Switch to terminated filter to see terminated agent
-      const filterSelect = screen.getByDisplayValue("All States");
+      const filterSelect = screen.getByLabelText("Filter agents by state");
       fireEvent.change(filterSelect, { target: { value: "terminated" } });
 
       await waitFor(() => {
@@ -1493,10 +1521,7 @@ describe("AgentsView", () => {
     it("renders the global heartbeat speed control", async () => {
       mockFetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Heartbeat Speed")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Check the slider and preset are rendered
       expect(screen.getByRole("slider", { name: "Heartbeat Speed" })).toBeTruthy();
@@ -1509,20 +1534,16 @@ describe("AgentsView", () => {
     it("loads heartbeat multiplier from settings", async () => {
       mockFetchSettings.mockResolvedValue({ heartbeatMultiplier: 2.5 });
       render(<AgentsView addToast={mockAddToast} />);
+      await openControlsPanel();
 
-      await waitFor(() => {
-        const slider = screen.getByRole("slider", { name: "Heartbeat Speed" }) as HTMLInputElement;
-        expect(slider.value).toBe("2.5");
-      });
+      const slider = screen.getByRole("slider", { name: "Heartbeat Speed" }) as HTMLInputElement;
+      expect(slider.value).toBe("2.5");
     });
 
     it("saves heartbeat multiplier when slider changes", async () => {
       mockFetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Heartbeat Speed")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Change the slider
       const slider = screen.getByRole("slider", { name: "Heartbeat Speed" });
@@ -1537,10 +1558,7 @@ describe("AgentsView", () => {
     it("saves heartbeat multiplier when preset is selected", async () => {
       mockFetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Heartbeat Speed")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Change the preset
       const preset = screen.getByLabelText("Heartbeat speed preset") as HTMLSelectElement;
@@ -1555,10 +1573,7 @@ describe("AgentsView", () => {
       mockFetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
       mockUpdateSettings.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 100)));
       render(<AgentsView addToast={mockAddToast} />);
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Heartbeat Speed")).toBeTruthy();
-      });
+      await openControlsPanel();
 
       // Change the slider - this should start the save
       const slider = screen.getByRole("slider", { name: "Heartbeat Speed" });

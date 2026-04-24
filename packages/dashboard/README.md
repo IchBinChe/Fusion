@@ -179,7 +179,9 @@ In addition to the global mobile foundation, several power-user surfaces now inc
 
 - **AgentsView**
   - Board mode collapses to a single column (`.agent-board { grid-template-columns: 1fr; }`).
-  - Controls stack vertically (`.agent-controls` + `.agent-controls-actions`) with full-width action buttons and touch-friendly sizing.
+  - Main agent collection remains the first content block; secondary metrics/live panels remain below it.
+  - Import/filter/global heartbeat controls live in a dismissible `Controls` popup (`.agent-controls-panel`) that stays reachable on mobile.
+  - Controls inside the popup stack vertically (`.agent-controls` + `.agent-controls-actions`) with full-width touch-friendly sizing.
   - State filter stretches full width on mobile.
   - Tree-view indentation is reduced (`.agent-tree__indent--1..4`) to prevent horizontal overflow at deeper hierarchy levels.
 
@@ -229,6 +231,8 @@ When `taskStuckTimeoutMs` is configured in project settings, stuck tasks are vis
 Manage AI agents with a dedicated control surface accessible from the main dashboard navigation. All agent surfaces (AgentsView, AgentListModal, AgentDetailView) share consistent token-based styling using dashboard design tokens (`--surface`, `--card`, `--border`, `--text`, `--color-success`, `--color-error`, etc.) and locally defined state color tokens (`--state-idle-*`, `--state-active-*`, `--state-paused-*`, `--state-error-*`) for theme-aware rendering.
 
 **Features**:
+- **Agent-first layout**: The main agent collection (list/board/tree/org) renders first, with summary sections (metrics + active/live panel) below it.
+- **Controls Popup**: Import, state filter, Show system agents toggle, and global Heartbeat Speed are grouped under a compact `Controls` trigger (`aria-haspopup`, `aria-expanded`, Escape/outside-click dismissal).
 - **State Filter**: Styled dropdown to filter agents by state (All States, Idle, Active, Paused, Terminated) with Filter icon, aria-label, and consistent dashboard styling using design tokens (`--radius-sm`, `--border`, `--bg`, `--focus-ring`)
 - **Terminated Agent Filtering**: By default ("All States" filter), terminated agents are automatically hidden from the agent list to reduce clutter from frequently-terminating runtime task-worker agents. Terminated agents remain accessible by explicitly selecting the "Terminated" filter option, enabling intentional inspection and cleanup when needed. This behavior applies to both the main AgentsView and the AgentListModal.
 - **View Modes**: Board (compact grid) and list (detailed card) layouts, persisted to localStorage

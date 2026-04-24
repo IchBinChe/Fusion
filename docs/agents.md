@@ -86,9 +86,10 @@ These fields can only be set during update (not on create):
 
 The agents surface provides:
 
-- Agent list and status
+- Agent-first list/board/tree/org collection (primary content appears first)
+- A compact **Controls** popup for secondary actions (state filter, Show system agents toggle, Import, and global Heartbeat Speed)
 - Detail/config panels
-- Runtime metrics
+- Runtime metrics and active-agent live cards rendered below the main collection
 - Run history
 - Task assignment context
 
@@ -143,7 +144,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `budgetConfig` | `AgentBudgetConfig` | — | Token budget governance settings |
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
-Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat intervals globally; per-agent `heartbeatIntervalMs` remains the base interval before multiplier scaling. This setting is configured from the **Agents** screen's "Heartbeat Speed" control.
+Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat intervals globally; per-agent `heartbeatIntervalMs` remains the base interval before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
 
 ## Agent Instructions (Dashboard)
 

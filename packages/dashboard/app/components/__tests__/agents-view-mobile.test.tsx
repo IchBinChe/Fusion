@@ -136,14 +136,22 @@ describe("AgentsView mobile adaptations", () => {
     });
   });
 
-  it("renders agent controls, filter, and action buttons", async () => {
+  it("renders controls trigger and reveals panel controls on demand", async () => {
     const { container } = render(<AgentsView addToast={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("Agents")).toBeTruthy());
 
-    expect(container.querySelector(".agent-controls")).toBeTruthy();
-    expect(container.querySelector(".agent-controls-filters")).toBeTruthy();
-    expect(container.querySelector(".agent-state-filter")).toBeTruthy();
-    expect(container.querySelector(".agent-controls-actions")).toBeTruthy();
+    const controlsTrigger = screen.getByRole("button", { name: "Controls" });
+    expect(controlsTrigger.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(controlsTrigger);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Agent controls" })).toBeTruthy();
+      expect(container.querySelector(".agent-controls")).toBeTruthy();
+      expect(container.querySelector(".agent-controls-filters")).toBeTruthy();
+      expect(container.querySelector(".agent-state-filter")).toBeTruthy();
+      expect(container.querySelector(".agent-controls-actions")).toBeTruthy();
+    });
   });
 
   it("switches between board, list, and tree views", async () => {
@@ -162,6 +170,8 @@ describe("AgentsView mobile adaptations", () => {
 
   it("renders state filter select with expected options", async () => {
     render(<AgentsView addToast={vi.fn()} />);
+    const controlsTrigger = await screen.findByRole("button", { name: "Controls" });
+    fireEvent.click(controlsTrigger);
     await waitFor(() => expect(screen.getByLabelText("Filter agents by state")).toBeTruthy());
 
     const select = screen.getByLabelText("Filter agents by state") as HTMLSelectElement;

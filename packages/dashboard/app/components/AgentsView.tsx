@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronDown, GitBranch, Filter, Upload, Network } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo, useId } from "react";
+import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronDown, GitBranch, Filter, Upload, Network, SlidersHorizontal } from "lucide-react";
 import type { Agent, AgentCapability, AgentState, OrgTreeNode } from "../api";
 import { updateAgent, updateAgentState, deleteAgent, startAgentRun, fetchOrgTree, fetchSettings, updateSettings } from "../api";
 import { AgentDetailView } from "./AgentDetailView";
@@ -265,6 +265,10 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
   });
   const [orgTree, setOrgTree] = useState<OrgTreeNode[]>([]);
   const [isOrgTreeLoading, setIsOrgTreeLoading] = useState(false);
+  const [isControlsPanelOpen, setIsControlsPanelOpen] = useState(false);
+  const controlsPanelRef = useRef<HTMLDivElement>(null);
+  const controlsTriggerRef = useRef<HTMLButtonElement>(null);
+  const controlsPanelId = useId();
 
   useEffect(() => {
     const saved = getScopedItem("fn-agent-view", projectId);
@@ -402,6 +406,34 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       clearInterval(pollInterval);
     };
   }, [loadAgents]);
+
+  useEffect(() => {
+    if (!isControlsPanelOpen) return;
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (controlsPanelRef.current?.contains(target)) return;
+      if (controlsTriggerRef.current?.contains(target)) return;
+      setIsControlsPanelOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsControlsPanelOpen(false);
+      controlsTriggerRef.current?.focus();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isControlsPanelOpen]);
 
   const handleStateChange = async (agentId: string, newState: AgentState) => {
     if (transitioningAgentIds.has(agentId)) return;
@@ -675,116 +707,145 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
               <Network size={16} />
             </button>
           </div>
-          <button
-            className="btn-icon"
-            onClick={() => void loadAgents()}
-            title="Refresh"
-            disabled={isLoading}
-          >
-            <RefreshCw size={16} className={isLoading ? "spin" : ""} />
-          </button>
-        </div>
-      </div>
-
-      <div className="agents-view-content">
-        {/* Filter and Create Bar */}
-        <div className="agent-controls">
-          <div className="agent-controls-filters">
-            <div className="agent-state-filter">
-            <Filter size={14} />
-            <select
-              className="agent-state-filter-select"
-              value={filterState}
-              onChange={(e) => setFilterState(e.target.value as AgentState | "all")}
-              aria-label="Filter agents by state"
-            >
-              <option value="all">All States</option>
-              <option value="idle">Idle</option>
-              <option value="active">Active</option>
-              <option value="running">Running</option>
-              <option value="paused">Paused</option>
-              <option value="error">Error</option>
-              <option value="terminated">Terminated</option>
-            </select>
-          </div>
-
-            <label className="checkbox-label agent-system-filter">
-            <input
-              type="checkbox"
-              checked={showSystemAgents}
-              onChange={(e) => setShowSystemAgents(e.target.checked)}
-              aria-label="Show system agents"
-            />
-            Show system agents
-            </label>
-          </div>
-
-          <div className="agent-controls-actions">
+          <div className="agents-view-primary-actions">
             <button
-              className="btn"
-              onClick={() => setIsImporting(true)}
+              ref={controlsTriggerRef}
+              className={`btn agent-controls-trigger${isControlsPanelOpen ? " agent-controls-trigger--active" : ""}`}
+              onClick={() => setIsControlsPanelOpen((open) => !open)}
+              aria-haspopup="dialog"
+              aria-expanded={isControlsPanelOpen}
+              aria-controls={controlsPanelId}
             >
-              <Upload size={16} />
-              Import
+              <SlidersHorizontal size={16} />
+              Controls
             </button>
             <button
               className="btn btn--primary"
-              onClick={() => setIsCreating(true)}
+              onClick={() => {
+                setIsCreating(true);
+                setIsControlsPanelOpen(false);
+              }}
             >
               <Plus size={16} />
               New Agent
             </button>
+            <button
+              className="btn-icon"
+              onClick={() => void loadAgents()}
+              title="Refresh"
+              disabled={isLoading}
+            >
+              <RefreshCw size={16} className={isLoading ? "spin" : ""} />
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Global Heartbeat Speed Control */}
-        <div className="agent-global-controls">
-          <div className="heartbeat-multiplier-group">
-            <div className="heartbeat-multiplier-controls">
-              <label htmlFor="globalHeartbeatMultiplier" className="heartbeat-multiplier-label">
-                Heartbeat Speed
+      {isControlsPanelOpen && (
+        <div
+          ref={controlsPanelRef}
+          id={controlsPanelId}
+          className="agent-controls-panel"
+          role="dialog"
+          aria-label="Agent controls"
+          aria-modal="false"
+        >
+          <div className="agent-controls">
+            <div className="agent-controls-filters">
+              <div className="agent-state-filter">
+                <Filter size={14} />
+                <select
+                  className="agent-state-filter-select"
+                  value={filterState}
+                  onChange={(e) => setFilterState(e.target.value as AgentState | "all")}
+                  aria-label="Filter agents by state"
+                >
+                  <option value="all">All States</option>
+                  <option value="idle">Idle</option>
+                  <option value="active">Active</option>
+                  <option value="running">Running</option>
+                  <option value="paused">Paused</option>
+                  <option value="error">Error</option>
+                  <option value="terminated">Terminated</option>
+                </select>
+              </div>
+
+              <label className="checkbox-label agent-system-filter">
+                <input
+                  type="checkbox"
+                  checked={showSystemAgents}
+                  onChange={(e) => setShowSystemAgents(e.target.checked)}
+                  aria-label="Show system agents"
+                />
+                Show system agents
               </label>
-              <input
-                id="globalHeartbeatMultiplier"
-                className="heartbeat-multiplier-slider touch-target"
-                type="range"
-                min={0.1}
-                max={10}
-                step={0.1}
-                value={heartbeatMultiplier}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
-                }}
-                disabled={isSavingMultiplier}
-              />
-              <span className="heartbeat-multiplier-value">×{heartbeatMultiplier.toFixed(1)}</span>
-              <select
-                className="heartbeat-multiplier-preset"
-                value={String(
-                  HEARTBEAT_MULTIPLIER_PRESETS.reduce((closest, candidate) => {
-                    return Math.abs(candidate - heartbeatMultiplier) < Math.abs(closest - heartbeatMultiplier) ? candidate : closest;
-                  }, HEARTBEAT_MULTIPLIER_PRESETS[0])
-                )}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
-                }}
-                disabled={isSavingMultiplier}
-                aria-label="Heartbeat speed preset"
-              >
-                {HEARTBEAT_MULTIPLIER_PRESETS.map((multiplier) => (
-                  <option key={multiplier} value={String(multiplier)}>
-                    ×{multiplier}
-                  </option>
-                ))}
-              </select>
             </div>
-            <small className="text-secondary">
-              Scales all agent heartbeat intervals. ×0.5 = twice as fast, ×2.0 = twice as slow. Default: ×1.0
-            </small>
+
+            <div className="agent-controls-actions">
+              <button
+                className="btn"
+                onClick={() => {
+                  setIsImporting(true);
+                  setIsControlsPanelOpen(false);
+                }}
+              >
+                <Upload size={16} />
+                Import
+              </button>
+            </div>
+          </div>
+
+          <div className="agent-global-controls">
+            <div className="heartbeat-multiplier-group">
+              <div className="heartbeat-multiplier-controls">
+                <label htmlFor="globalHeartbeatMultiplier" className="heartbeat-multiplier-label">
+                  Heartbeat Speed
+                </label>
+                <input
+                  id="globalHeartbeatMultiplier"
+                  className="heartbeat-multiplier-slider touch-target"
+                  type="range"
+                  min={0.1}
+                  max={10}
+                  step={0.1}
+                  value={heartbeatMultiplier}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
+                  }}
+                  disabled={isSavingMultiplier}
+                />
+                <span className="heartbeat-multiplier-value">×{heartbeatMultiplier.toFixed(1)}</span>
+                <select
+                  className="heartbeat-multiplier-preset"
+                  value={String(
+                    HEARTBEAT_MULTIPLIER_PRESETS.reduce((closest, candidate) => {
+                      return Math.abs(candidate - heartbeatMultiplier) < Math.abs(closest - heartbeatMultiplier) ? candidate : closest;
+                    }, HEARTBEAT_MULTIPLIER_PRESETS[0])
+                  )}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
+                  }}
+                  disabled={isSavingMultiplier}
+                  aria-label="Heartbeat speed preset"
+                >
+                  {HEARTBEAT_MULTIPLIER_PRESETS.map((multiplier) => (
+                    <option key={multiplier} value={String(multiplier)}>
+                      ×{multiplier}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <small className="text-secondary">
+                Scales all agent heartbeat intervals. ×0.5 = twice as fast, ×2.0 = twice as slow. Default: ×1.0
+              </small>
+            </div>
           </div>
         </div>
+      )}
+
+      <div className="agents-view-content">
 
         <NewAgentDialog
           isOpen={isCreating}
@@ -800,13 +861,7 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
           projectId={projectId}
         />
 
-        {/* Metrics Bar */}
-        <AgentMetricsBar stats={stats} />
-
-        {/* Active Agents Panel - Live streaming cards */}
-        <ActiveAgentsPanel agents={activeAgents} projectId={projectId} onAgentSelect={setSelectedAgentId} />
-
-        {/* Agent List */}
+        {/* Agent Collection */}
         {agentView === "tree" ? (
           <div className="agent-tree__view">
             {displayAgents.length === 0 ? (
@@ -1205,6 +1260,10 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
           )}
         </div>
         )}
+
+        {/* Secondary sections */}
+        <AgentMetricsBar stats={stats} />
+        <ActiveAgentsPanel agents={activeAgents} projectId={projectId} onAgentSelect={setSelectedAgentId} />
       </div>
 
       {/* Agent Detail Modal */}

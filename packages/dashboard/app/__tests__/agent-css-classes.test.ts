@@ -81,11 +81,18 @@ describe("Agent CSS classes", () => {
     expect(hasClass(".agents-view-header")).toBe(true);
     expect(hasClass(".agents-view-title")).toBe(true);
     expect(hasClass(".agents-view-controls")).toBe(true);
+    expect(hasClass(".agents-view-primary-actions")).toBe(true);
     expect(hasClass(".agents-view-content")).toBe(true);
+    expect(hasClass(".agent-controls-trigger")).toBe(true);
+    expect(hasClass(".agent-controls-trigger--active")).toBe(true);
+    expect(hasClass(".agent-controls-panel")).toBe(true);
     expect(hasClass(".agent-controls")).toBe(true);
     expect(hasClass(".agent-controls-filters")).toBe(true);
     expect(hasClass(".agent-state-filter")).toBe(true);
     expect(hasClass(".agent-state-filter-select")).toBe(true);
+    expect(hasClass(".agent-system-filter")).toBe(true);
+    expect(hasClass(".agent-controls-actions")).toBe(true);
+    expect(hasClass(".agent-global-controls")).toBe(true);
     expect(hasClass(".agent-board")).toBe(true);
     expect(hasClass(".agent-board-card")).toBe(true);
     expect(hasClass(".agent-board-card--idle")).toBe(true);

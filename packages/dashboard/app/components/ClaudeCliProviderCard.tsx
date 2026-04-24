@@ -291,10 +291,11 @@ function ClaudeCliStatusLine({
       </small>
     );
   }
+  // Enabled but `ready` is false and we have no specific reason — usually a
+  // transient state after flipping the toggle before the first probe
+  // completes.
   return (
-    <small className="settings-muted">
-      Enabled. Restart Fusion to complete activation.
-    </small>
+    <small className="settings-muted">Enabled. Validating…</small>
   );
 }
 
@@ -317,9 +318,9 @@ function ClaudeCliActionToast({
   return (
     <p className="onboarding-helper-text">
       {verb}.{" "}
-      {action.restartRequired
-        ? "Restart Fusion to activate the routing change."
-        : "No further action needed."}
+      {action.kind === "enabled"
+        ? "Claude-CLI-routed models are now visible in the model picker."
+        : "Claude-CLI-routed models are hidden from the model picker."}
     </p>
   );
 }

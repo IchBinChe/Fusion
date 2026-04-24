@@ -375,22 +375,6 @@ function slugifyPresetName(name: string): string {
   return slug || "preset";
 }
 
-/**
- * Extract RunMutationContext from the X-Run-Context header.
- * Used to correlate dashboard mutations with agent runs for audit trails.
- */
-function _extractRunContext(req: { headers: { [key: string]: string | string[] | undefined } }): import("@fusion/core").RunMutationContext | undefined {
-  const header = req.headers['x-run-context'];
-  if (typeof header !== 'string') return undefined;
-  try {
-    const parsed = JSON.parse(header);
-    if (parsed && typeof parsed.runId === 'string' && typeof parsed.agentId === 'string') {
-      return parsed as import("@fusion/core").RunMutationContext;
-    }
-  } catch { /* invalid JSON, ignore */ }
-  return undefined;
-}
-
 function validateModelPresets(value: unknown): ModelPreset[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) {
@@ -7585,12 +7569,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         const session = terminalSessionManager.getSession(id);
         if (!session) {
           throw notFound("Session not found");
-        } else {
-          throw badRequest("Session is not running");
         }
-        return;
+        throw badRequest("Session is not running");
       }
-      
+
       res.json({ killed: true, sessionId: id });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -7782,10 +7764,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         const session = terminalService.getSession(id);
         if (!session) {
           throw notFound("Session not found");
-        } else {
-          throw badRequest("Failed to kill session");
         }
-        return;
+        throw badRequest("Failed to kill session");
       }
 
       res.json({ killed: true });
@@ -11486,43 +11466,35 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   function validateAgentInstructionsPayload(
-    res: Response,
     instructionsPath: unknown,
     instructionsText: unknown,
   ): boolean {
     if (instructionsPath !== undefined && instructionsPath !== null && instructionsPath !== "") {
       if (typeof instructionsPath !== "string") {
         throw badRequest("instructionsPath must be a string");
-        return false;
       }
       if (instructionsPath.length > 500) {
         throw badRequest("instructionsPath must be at most 500 characters");
-        return false;
       }
       if (instructionsPath.includes("..")) {
         throw badRequest("instructionsPath must not contain parent directory traversal (..)");
-        return false;
       }
       const isAbsoluteUnix = instructionsPath.startsWith("/");
       const isAbsoluteWindows = /^[A-Za-z]:[\\/]/.test(instructionsPath);
       if (isAbsoluteUnix || isAbsoluteWindows) {
         throw badRequest("instructionsPath must be a project-relative path");
-        return false;
       }
       if (!instructionsPath.endsWith(".md")) {
         throw badRequest("instructionsPath must end in .md");
-        return false;
       }
     }
 
     if (instructionsText !== undefined && instructionsText !== null && instructionsText !== "") {
       if (typeof instructionsText !== "string") {
         throw badRequest("instructionsText must be a string");
-        return false;
       }
       if (instructionsText.length > 50000) {
         throw badRequest("instructionsText must be at most 50,000 characters");
-        return false;
       }
     }
 
@@ -11584,7 +11556,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (permissions !== undefined && (typeof permissions !== "object" || permissions === null || Array.isArray(permissions))) {
         throw badRequest("permissions must be an object");
       }
-      if (!validateAgentInstructionsPayload(res, instructionsPath, instructionsText)) {
+      if (!validateAgentInstructionsPayload(instructionsPath, instructionsText)) {
         return;
       }
       if (soul !== undefined && soul !== null && typeof soul !== "string") {
@@ -12617,7 +12589,7 @@ async function persistImportedSkills(
         updates.totalOutputTokens = body.totalOutputTokens ?? undefined;
       }
 
-      if (!validateAgentInstructionsPayload(res, body.instructionsPath, body.instructionsText)) {
+      if (!validateAgentInstructionsPayload(body.instructionsPath, body.instructionsText)) {
         return;
       }
       if ("instructionsPath" in body) {
@@ -12769,7 +12741,7 @@ async function persistImportedSkills(
   router.patch("/agents/:id/instructions", async (req, res) => {
     try {
       const { instructionsPath, instructionsText } = req.body ?? {};
-      if (!validateAgentInstructionsPayload(res, instructionsPath, instructionsText)) {
+      if (!validateAgentInstructionsPayload(instructionsPath, instructionsText)) {
         return;
       }
 
@@ -18940,15 +18912,16 @@ function registerModelsRoute(
         }
       }
 
-      // When the user has opted to route AI through pi-claude-cli, only
-      // Anthropic Claude models are reachable — pi-claude-cli wraps the
-      // local Claude CLI and does not bridge other providers. Surface only
-      // those models so every picker in the app (settings, onboarding, per
-      // lane overrides) stays honest about what'll actually run.
-      // OpenRouter-proxied Claude (provider: "openrouter") is excluded on
-      // purpose: it hits OpenRouter's API, not the local CLI.
-      if (useClaudeCli) {
-        models = models.filter((m) => m.provider === "anthropic");
+      // The vendored @fusion/pi-claude-cli extension registers its provider
+      // as "pi-claude-cli" (distinct from "anthropic") regardless of the
+      // toggle. When the toggle is OFF, hide those entries from the picker
+      // so users don't see CLI-routed models they haven't opted into.
+      // When ON, show everything — the user deliberately wants them visible
+      // alongside any direct Anthropic auth or other providers they've
+      // connected. Hiding only the CLI-routed entries (not restricting to
+      // them) preserves full flexibility.
+      if (!useClaudeCli) {
+        models = models.filter((m) => m.provider !== "pi-claude-cli");
       }
 
       res.json({ models, favoriteProviders, favoriteModels });
@@ -19165,12 +19138,14 @@ function registerAuthRoutes(
 
       res.json({
         enabled: next,
-        // Pi extension registrations can't be added/removed mid-process,
-        // so flipping on/off requires a restart for the model routing
-        // itself to take effect. Skill install/backfill happens
-        // immediately either way. Surface this so the UI can show a
-        // "Restart Fusion to activate" prompt when next !== prev.
-        restartRequired: prev !== next,
+        // The pi-claude-cli extension is loaded unconditionally at startup
+        // (the provider it registers is namespaced distinctly so it doesn't
+        // clash with direct Anthropic auth), so flipping this setting has
+        // immediate effect — the /api/models filter reads the new value on
+        // next request. No restart needed. `restartRequired` is retained
+        // in the response shape for forward compatibility but is always
+        // false today.
+        restartRequired: false,
       });
     } catch (err: unknown) {
       if (err instanceof ApiError) {

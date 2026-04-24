@@ -3,7 +3,7 @@ import { Pencil, Bot, X, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, Settings, AgentLogEntry, Agent } from "@fusion/core";
-import { COLUMN_LABELS, VALID_TRANSITIONS } from "@fusion/core";
+import { COLUMN_LABELS, VALID_TRANSITIONS, getErrorMessage } from "@fusion/core";
 import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent } from "../api";
 import type { WorkflowStepResult } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
@@ -371,9 +371,9 @@ export function TaskDetailModal({
       .then((results) => {
         if (!cancelled) setWorkflowResults(results);
       })
-      .catch((err: any) => {
+      .catch((err) => {
         if (!cancelled) {
-          addToast(`Failed to load workflow results: ${err.message}`, "error");
+          addToast(`Failed to load workflow results: ${getErrorMessage(err)}`, "error");
         }
       })
       .finally(() => {
@@ -601,8 +601,8 @@ export function TaskDetailModal({
       setEditPendingImages([]);
       addToast(`Updated ${task.id}`, "success");
       setIsEditing(false);
-    } catch (err: any) {
-      addToast(`Failed to update ${task.id}: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
     } finally {
       if (mountedRef.current) {
         setIsSaving(false);
@@ -614,8 +614,8 @@ export function TaskDetailModal({
     try {
       await updateTask(task.id, { description }, projectId);
       addToast("Description saved", "success");
-    } catch (err: any) {
-      addToast(`Failed to save: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save: ${getErrorMessage(err)}`, "error");
     }
   }, [task.id, addToast, projectId]);
 
@@ -671,8 +671,8 @@ export function TaskDetailModal({
         await onMoveTask(task.id, column);
         onClose();
         addToast(`Moved to ${COLUMN_LABELS[column]}`, "success");
-      } catch (err: any) {
-        addToast(err.message, "error");
+      } catch (err) {
+        addToast(getErrorMessage(err), "error");
       }
     },
     [task.id, onMoveTask, onClose, addToast],
@@ -684,8 +684,8 @@ export function TaskDetailModal({
       await onDeleteTask(task.id);
       onClose();
       addToast(`Deleted ${task.id}`, "info");
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, onDeleteTask, onClose, addToast]);
 
@@ -700,8 +700,8 @@ export function TaskDetailModal({
           : `Closed ${task.id} (${result.error || "no branch to merge"})`;
         addToast(msg, "success");
       })
-      .catch((err: any) => {
-        addToast(err.message, "error");
+      .catch((err) => {
+        addToast(getErrorMessage(err), "error");
       });
   }, [task.id, onMergeTask, onClose, addToast]);
 
@@ -712,8 +712,8 @@ export function TaskDetailModal({
       .then(() => {
         addToast(`Retried ${task.id}`, "success");
       })
-      .catch((err: any) => {
-        addToast(err.message, "error");
+      .catch((err) => {
+        addToast(getErrorMessage(err), "error");
       });
   }, [task.id, onRetryTask, onClose, addToast]);
 
@@ -724,8 +724,8 @@ export function TaskDetailModal({
       const newTask = await onDuplicateTask(task.id);
       onClose();
       addToast(`Duplicated ${task.id} → ${newTask.id}`, "success");
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, onDuplicateTask, onClose, addToast]);
 
@@ -739,8 +739,8 @@ export function TaskDetailModal({
         addToast(`Paused ${task.id}`, "success");
       }
       onClose();
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, task.paused, onClose, addToast]);
 
@@ -749,8 +749,8 @@ export function TaskDetailModal({
       await approvePlan(task.id, projectId);
       addToast(`Plan approved — ${task.id} moved to Todo`, "success");
       onClose();
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, onClose, addToast]);
 
@@ -760,8 +760,8 @@ export function TaskDetailModal({
       await rejectPlan(task.id, projectId);
       addToast(`Plan rejected — ${task.id} returned to Triage for re-specification`, "info");
       onClose();
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, onClose, addToast]);
 
@@ -771,8 +771,8 @@ export function TaskDetailModal({
       await rebuildTaskSpec(task.id, projectId);
       onClose();
       addToast(`Respecifying ${task.id}...`, "info");
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, projectId, onClose, addToast]);
 
@@ -823,8 +823,8 @@ export function TaskDetailModal({
       const newTask = await refineTask(task.id, refineFeedback.trim(), projectId);
       addToast(`Refinement task created: ${newTask.id}`, "success");
       onClose();
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     } finally {
       setIsRefining(false);
     }
@@ -836,8 +836,8 @@ export function TaskDetailModal({
       const attachment = await uploadAttachment(task.id, file, projectId);
       setAttachments((prev) => [...prev, attachment]);
       addToast("Screenshot attached", "success");
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     } finally {
       setUploading(false);
     }
@@ -891,8 +891,8 @@ export function TaskDetailModal({
       await deleteAttachment(task.id, filename, projectId);
       setAttachments((prev) => prev.filter((a) => a.filename !== filename));
       addToast("Attachment deleted", "info");
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, addToast]);
 
@@ -904,9 +904,9 @@ export function TaskDetailModal({
       const updatedTask = await updateTask(task.id, { enabledWorkflowSteps }, projectId);
       addToast("Workflow steps updated", "success");
       onTaskUpdated?.(updatedTask);
-    } catch (err: any) {
+    } catch (err) {
       setWorkflowEnabledSteps(previousSteps);
-      addToast(`Failed to update workflow steps: ${err.message}`, "error");
+      addToast(`Failed to update workflow steps: ${getErrorMessage(err)}`, "error");
     }
   }, [task.id, projectId, workflowEnabledSteps, onTaskUpdated, addToast]);
 
@@ -916,8 +916,8 @@ export function TaskDetailModal({
       const loadedAgents = await fetchAgents(undefined, projectId);
       setAgents(loadedAgents);
       setShowAgentPicker(true);
-    } catch (err: any) {
-      addToast(`Failed to load agents: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load agents: ${getErrorMessage(err)}`, "error");
       setShowAgentPicker(false);
     } finally {
       setAgentsLoading(false);
@@ -936,8 +936,8 @@ export function TaskDetailModal({
       setShowAgentPicker(false);
       onTaskUpdated?.(updatedTask);
       addToast("Assigned agent updated", "success");
-    } catch (err: any) {
-      addToast(`Failed to assign agent: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to assign agent: ${getErrorMessage(err)}`, "error");
     }
   }, [task.id, projectId, agents, onTaskUpdated, addToast]);
 
@@ -948,8 +948,8 @@ export function TaskDetailModal({
       setShowAgentPicker(false);
       onTaskUpdated?.(updatedTask);
       addToast("Agent unassigned", "success");
-    } catch (err: any) {
-      addToast(`Failed to unassign agent: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to unassign agent: ${getErrorMessage(err)}`, "error");
     }
   }, [task.id, projectId, onTaskUpdated, addToast]);
 
@@ -958,9 +958,9 @@ export function TaskDetailModal({
     setDependencies(newDeps);
     try {
       await updateTask(task.id, { dependencies: newDeps }, projectId);
-    } catch (err: any) {
+    } catch (err) {
       setDependencies(dependencies);
-      addToast(err.message, "error");
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, dependencies, addToast]);
 
@@ -970,9 +970,9 @@ export function TaskDetailModal({
     setDependencies(newDeps);
     try {
       await updateTask(task.id, { dependencies: newDeps }, projectId);
-    } catch (err: any) {
+    } catch (err) {
       setDependencies(dependencies);
-      addToast(err.message, "error");
+      addToast(getErrorMessage(err), "error");
     }
   }, [task.id, dependencies, addToast]);
 
@@ -995,8 +995,8 @@ export function TaskDetailModal({
       if (fullDetail) {
         fullDetail.prompt = newContent;
       }
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
       throw err;
     } finally {
       setIsSavingSpec(false);
@@ -1010,11 +1010,12 @@ export function TaskDetailModal({
       addToast("AI revision requested. Task moved to triage.", "success");
       // Task has been moved to triage, close modal
       onClose();
-    } catch (err: any) {
-      if (err.message?.includes("in-review") || err.message?.includes("done")) {
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      if (msg.includes("in-review") || msg.includes("done")) {
         addToast("Cannot request revision: Task must be in 'todo' or 'in-progress' column.", "error");
       } else {
-        addToast(err.message, "error");
+        addToast(msg, "error");
       }
     } finally {
       setIsRequestingRevision(false);

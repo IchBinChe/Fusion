@@ -20,6 +20,120 @@ import { ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
 
+/** Database row shape for the tasks table (all columns). */
+interface TaskRow {
+  id: string;
+  title: string | null;
+  description: string;
+  column: string;
+  status: string | null;
+  size: string | null;
+  reviewLevel: number | null;
+  currentStep: number;
+  worktree: string | null;
+  blockedBy: string | null;
+  paused: number | null;
+  baseBranch: string | null;
+  branch: string | null;
+  baseCommitSha: string | null;
+  modelPresetId: string | null;
+  modelProvider: string | null;
+  modelId: string | null;
+  validatorModelProvider: string | null;
+  validatorModelId: string | null;
+  planningModelProvider: string | null;
+  planningModelId: string | null;
+  mergeRetries: number | null;
+  workflowStepRetries: number | null;
+  stuckKillCount: number | null;
+  postReviewFixCount: number | null;
+  recoveryRetryCount: number | null;
+  taskDoneRetryCount: number | null;
+  nextRecoveryAt: string | null;
+  error: string | null;
+  summary: string | null;
+  thinkingLevel: string | null;
+  executionMode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  columnMovedAt: string | null;
+  dependencies: string | null;
+  steps: string | null;
+  log: string | null;
+  attachments: string | null;
+  steeringComments: string | null;
+  comments: string | null;
+  workflowStepResults: string | null;
+  prInfo: string | null;
+  issueInfo: string | null;
+  mergeDetails: string | null;
+  breakIntoSubtasks: number | null;
+  enabledWorkflowSteps: string | null;
+  modifiedFiles: string | null;
+  missionId: string | null;
+  sliceId: string | null;
+  assignedAgentId: string | null;
+  assigneeUserId: string | null;
+  checkedOutBy: string | null;
+  checkedOutAt: string | null;
+}
+
+/** Database row shape for the task_documents table. */
+interface TaskDocumentRow {
+  id: string;
+  taskId: string;
+  key: string;
+  content: string;
+  revision: number;
+  author: string;
+  metadata: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the task_document_revisions table. */
+interface TaskDocumentRevisionRow {
+  id: number;
+  taskId: string;
+  key: string;
+  content: string;
+  revision: number;
+  author: string;
+  metadata: string | null;
+  createdAt: string;
+}
+
+/** Database row shape for the runAuditEvents table. */
+interface RunAuditEventRow {
+  id: string;
+  timestamp: string;
+  taskId: string | null;
+  agentId: string;
+  runId: string;
+  domain: string;
+  mutationType: string;
+  target: string;
+  metadata: string | null;
+}
+
+/** Database row shape for the config table. */
+interface ConfigRow {
+  nextId: number;
+  settings: string | null;
+  nextWorkflowStepId: number | null;
+}
+
+/** Database row shape for the activityLog table. */
+interface ActivityLogRow {
+  id: string;
+  timestamp: string;
+  type: string;
+  taskId: string | null;
+  taskTitle: string | null;
+  details: string;
+  metadata: string | null;
+}
+
 const TASK_ACTIVITY_LOG_ENTRY_LIMIT = 1_000;
 const TASK_ACTIVITY_LOG_OUTCOME_LIMIT = 4_000;
 const ARCHIVE_AGENT_LOG_SNAPSHOT_LIMIT = 25;
@@ -313,14 +427,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Convert a database row to a Task object, parsing JSON columns.
    */
-  private rowToTask(row: any): Task {
+  private rowToTask(row: TaskRow): Task {
     return {
       id: row.id,
       title: row.title || undefined,
       description: row.description,
       column: row.column as Column,
       status: row.status || undefined,
-      size: row.size || undefined,
+      size: (row.size || undefined) as Task["size"],
       reviewLevel: row.reviewLevel ?? undefined,
       currentStep: row.currentStep || 0,
       worktree: row.worktree || undefined,
@@ -345,8 +459,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       nextRecoveryAt: row.nextRecoveryAt || undefined,
       error: row.error || undefined,
       summary: row.summary || undefined,
-      thinkingLevel: row.thinkingLevel || undefined,
-      executionMode: row.executionMode || undefined,
+      thinkingLevel: (row.thinkingLevel || undefined) as Task["thinkingLevel"],
+      executionMode: (row.executionMode || undefined) as Task["executionMode"],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       columnMovedAt: row.columnMovedAt || undefined,
@@ -550,7 +664,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Convert a task_documents row to a TaskDocument object.
    */
-  private rowToTaskDocument(row: any): TaskDocument {
+  private rowToTaskDocument(row: TaskDocumentRow): TaskDocument {
     return {
       id: row.id,
       taskId: row.taskId,
@@ -567,7 +681,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Convert a task_document_revisions row to a TaskDocumentRevision object.
    */
-  private rowToTaskDocumentRevision(row: any): TaskDocumentRevision {
+  private rowToTaskDocumentRevision(row: TaskDocumentRevisionRow): TaskDocumentRevision {
     return {
       id: row.id,
       taskId: row.taskId,
@@ -780,7 +894,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const selectClause = options?.activityLogLimit
       ? this.getTaskSelectClauseWithActivityLogLimit(options.activityLogLimit)
       : "*";
-    const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE id = ?`).get(id);
+    const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE id = ?`).get(id) as unknown as TaskRow | undefined;
     if (!row) return undefined;
     return this.rowToTask(row);
   }
@@ -1129,7 +1243,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (config.settings) {
       for (const key of Object.keys(config.settings)) {
         if (!isGlobalSettingsKey(key)) {
-          (projectSettings as any)[key] = (config.settings as any)[key];
+          (projectSettings as Record<string, unknown>)[key] = (config.settings as Record<string, unknown>)[key];
         }
       }
     }
@@ -1164,7 +1278,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (projectSettings) {
       for (const key of Object.keys(projectSettings)) {
         if (!isGlobalSettingsKey(key)) {
-          (projectScoped as any)[key] = (projectSettings as any)[key];
+          (projectScoped as Record<string, unknown>)[key] = (projectSettings as Record<string, unknown>)[key];
         }
       }
     }
@@ -1320,7 +1434,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   private async readConfig(): Promise<BoardConfig> {
-    const row = this.db.prepare("SELECT * FROM config WHERE id = 1").get() as any;
+    const row = this.db.prepare("SELECT * FROM config WHERE id = 1").get() as unknown as ConfigRow | undefined;
     if (!row) {
       return { nextId: 1 };
     }
@@ -1353,7 +1467,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Returns only the core config fields needed for config.json serialization.
    */
   private readConfigFast(): BoardConfig {
-    const row = this.db.prepare("SELECT * FROM config WHERE id = 1").get() as any;
+    const row = this.db.prepare("SELECT * FROM config WHERE id = 1").get() as ConfigRow | undefined;
     if (!row) {
       return { nextId: 1 };
     }
@@ -1404,10 +1518,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Use withConfigLock to ensure the entire ID allocation + config sync is serialized
     return this.withConfigLock(async () => {
       const id = this.db.transaction(() => {
-        const row = this.db.prepare("SELECT nextId, settings FROM config WHERE id = 1").get() as any;
-        const settings = fromJson<Settings>(row.settings);
+        const row = this.db.prepare("SELECT nextId, settings FROM config WHERE id = 1").get() as unknown as { nextId: number; settings: string | null } | undefined;
+        const settings = fromJson<Settings>(row?.settings ?? null);
         const prefix = settings?.taskPrefix || "KB";
-        const nextId = row.nextId || 1;
+        const nextId = row?.nextId || 1;
         const taskId = `${prefix}-${String(nextId).padStart(3, "0")}`;
         this.db.prepare("UPDATE config SET nextId = ? WHERE id = 1").run(nextId + 1);
         this.db.bumpLastModified();
@@ -1941,7 +2055,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const sql = `SELECT ${selectClause} FROM tasks${whereClause} ORDER BY createdAt ASC`;
 
     const rows = this.db.prepare(sql).all(...params);
-    const activeTasks = await Promise.all((rows as any[]).map(async (row) => {
+    const activeTasks = await Promise.all((rows as unknown as TaskRow[]).map(async (row) => {
       const task = this.rowToTask(row);
       if (!slim || task.steps.length > 0) {
         return task;
@@ -2025,7 +2139,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const slim = options?.slim ?? false;
     const selectClause = this.getTaskSelectClause(slim, "t");
 
-    let rows: any[];
+    let rows: TaskRow[];
     if (this.db.fts5Available) {
       // For FTS5 MATCH, quote tokens that contain special characters like hyphens
       // to prevent them from being interpreted as operators
@@ -2045,7 +2159,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         ${whereClause}
         ORDER BY rank
         LIMIT ${limit >= 0 ? limit : -1}${offsetClause}
-      `).all(ftsQuery) as any[];
+      `).all(ftsQuery) as unknown as TaskRow[];
     } else {
       // LIKE fallback: any token matching any searchable column counts as a hit.
       // Tokens are OR'd; per token we OR across id/title/description/comments.
@@ -2066,7 +2180,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         WHERE (${whereTokens})${archivedClause}
         ORDER BY t.createdAt ASC
         LIMIT ${limit >= 0 ? limit : -1}${offsetClause}
-      `).all(...params) as any[];
+      `).all(...params) as unknown as TaskRow[];
     }
 
     const activeMatches = await Promise.all(rows.map(async (row) => {
@@ -2093,7 +2207,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     const tasksById = new Map(tasks.map((task) => [task.id, task]));
-    const isCheckoutAware = "checkoutTask" in this && typeof (this as any).checkoutTask === "function";
+    const isCheckoutAware = "checkoutTask" in this && typeof (this as Record<string, unknown>).checkoutTask === "function";
     const isDoneLike = (task: Task | undefined) => task?.column === "done" || task?.column === "archived";
     const sortByOldestColumnMove = (a: Task, b: Task) => {
       const aSortAt = a.columnMovedAt ?? a.createdAt;
@@ -2468,7 +2582,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           domain: "database",
           mutationType: "task:update",
           target: task.id,
-          metadata: { updatedFields: Object.keys(updates).filter((k) => (updates as any)[k] !== undefined) },
+          metadata: { updatedFields: Object.keys(updates).filter((k) => (updates as Record<string, unknown>)[k] !== undefined) },
         });
       } else {
         await this.atomicWriteTaskJson(dir, task);
@@ -2717,7 +2831,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Convert a database row to a RunAuditEvent object.
    */
-  private rowToRunAuditEvent(row: any): RunAuditEvent {
+  private rowToRunAuditEvent(row: RunAuditEventRow): RunAuditEvent {
     return {
       id: row.id,
       timestamp: row.timestamp,
@@ -2842,7 +2956,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ${whereClause}
       ${orderClause}
       ${limitClause}
-    `).all(...sqlParams) as any[];
+    `).all(...sqlParams) as unknown as RunAuditEventRow[];
 
     return rows.map((row) => this.rowToRunAuditEvent(row));
   }
@@ -3559,8 +3673,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // Use lastKnownPollTime (ISO string) to filter — much cheaper than full scan.
       const selectClause = this.getTaskSelectClause(true);
       const changedRows = this.lastPollTime
-        ? this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE updatedAt > ? OR columnMovedAt > ?`).all(this.lastPollTime, this.lastPollTime) as any[]
-        : this.db.prepare(`SELECT ${selectClause} FROM tasks`).all() as any[];
+        ? this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE updatedAt > ? OR columnMovedAt > ?`).all(this.lastPollTime, this.lastPollTime) as unknown as TaskRow[]
+        : this.db.prepare(`SELECT ${selectClause} FROM tasks`).all() as unknown as TaskRow[];
       this.lastPollTime = new Date().toISOString();
 
       for (let i = 0; i < changedRows.length; i++) {
@@ -4015,7 +4129,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async getTaskDocuments(taskId: string): Promise<TaskDocument[]> {
     const rows = this.db
       .prepare("SELECT * FROM task_documents WHERE taskId = ? ORDER BY key")
-      .all(taskId) as any[];
+      .all(taskId) as unknown as TaskDocumentRow[];
     return rows.map((row) => this.rowToTaskDocument(row));
   }
 
@@ -4036,7 +4150,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       FROM task_documents td
       JOIN tasks t ON td.taskId = t.id
     `;
-    const params: any[] = [];
+    const params: (string | number)[] = [];
 
     if (options?.searchQuery && options.searchQuery.trim() !== "") {
       const query = `%${options.searchQuery.trim()}%`;
@@ -4047,7 +4161,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     sql += ` ORDER BY td.updatedAt DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
-    const rows = this.db.prepare(sql).all(...params) as any[];
+    const rows = this.db.prepare(sql).all(...params) as unknown as (TaskDocumentRow & { taskTitle: string; taskDescription: string; taskColumn: string })[];
     return rows.map((row) => {
       const doc = this.rowToTaskDocument(row);
       return {
@@ -4065,7 +4179,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async getTaskDocument(taskId: string, key: string): Promise<TaskDocument | null> {
     const row = this.db
       .prepare("SELECT * FROM task_documents WHERE taskId = ? AND key = ?")
-      .get(taskId, key) as any | undefined;
+      .get(taskId, key) as unknown as TaskDocumentRow | undefined;
     if (!row) return null;
     return this.rowToTaskDocument(row);
   }
@@ -4096,7 +4210,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const document = this.db.transaction(() => {
       const existing = this.db
         .prepare("SELECT * FROM task_documents WHERE taskId = ? AND key = ?")
-        .get(taskId, input.key) as any | undefined;
+        .get(taskId, input.key) as TaskDocumentRow | undefined;
 
       if (existing) {
         this.db.prepare(
@@ -4144,7 +4258,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
       const row = this.db
         .prepare("SELECT * FROM task_documents WHERE taskId = ? AND key = ?")
-        .get(taskId, input.key) as any | undefined;
+        .get(taskId, input.key) as TaskDocumentRow | undefined;
 
       if (!row) {
         throw new Error(`Failed to upsert document ${input.key} for task ${taskId}`);
@@ -4174,12 +4288,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           .prepare(
             "SELECT * FROM task_document_revisions WHERE taskId = ? AND key = ? ORDER BY revision DESC LIMIT ?",
           )
-          .all(taskId, key, Math.max(0, options.limit ?? 0)) as any[])
+          .all(taskId, key, Math.max(0, options.limit ?? 0)) as unknown as TaskDocumentRevisionRow[])
       : (this.db
           .prepare(
             "SELECT * FROM task_document_revisions WHERE taskId = ? AND key = ? ORDER BY revision DESC",
           )
-          .all(taskId, key) as any[]);
+          .all(taskId, key) as unknown as TaskDocumentRevisionRow[]);
 
     return rows.map((row) => this.rowToTaskDocumentRevision(row));
   }
@@ -4539,7 +4653,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   private async migrateActiveArchivedTasksToArchiveDb(): Promise<void> {
-    const rows = this.db.prepare(`SELECT * FROM tasks WHERE "column" = 'archived'`).all() as any[];
+    const rows = this.db.prepare(`SELECT * FROM tasks WHERE "column" = 'archived'`).all() as unknown as TaskRow[];
     if (rows.length === 0) {
       return;
     }
@@ -5183,7 +5297,7 @@ ${notificationsSection}`;
    */
   private getSettingsSync(): Settings {
     try {
-      const row = this.db.prepare("SELECT settings FROM config WHERE id = 1").get() as any;
+      const row = this.db.prepare("SELECT settings FROM config WHERE id = 1").get() as { settings: string | null } | undefined;
       if (!row) return DEFAULT_SETTINGS;
       const settings = fromJson<Settings>(row.settings);
       return { ...DEFAULT_SETTINGS, ...settings };
@@ -5242,7 +5356,7 @@ ${notificationsSection}`;
    */
   async getActivityLog(options?: { limit?: number; since?: string; type?: ActivityEventType }): Promise<ActivityLogEntry[]> {
     let sql = "SELECT * FROM activityLog WHERE 1=1";
-    const params: any[] = [];
+    const params: (string | number)[] = [];
 
     if (options?.since) {
       sql += " AND timestamp > ?";
@@ -5261,7 +5375,7 @@ ${notificationsSection}`;
       params.push(options.limit);
     }
 
-    const rows = this.db.prepare(sql).all(...params) as any[];
+    const rows = this.db.prepare(sql).all(...params) as unknown as ActivityLogRow[];
     return rows.map((row) => ({
       id: row.id,
       timestamp: row.timestamp,

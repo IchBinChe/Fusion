@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Task } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   apiFetchGitHubIssues,
   apiImportGitHubIssue,
@@ -164,8 +165,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
       if (fetchedIssues.length === 0) {
         setError("No open issues found");
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to fetch issues");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to fetch issues");
     } finally {
       setLoading(false);
     }
@@ -189,8 +190,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
       if (fetchedPulls.length === 0) {
         setError("No open pull requests found");
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to fetch pull requests");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to fetch pull requests");
     } finally {
       setLoading(false);
     }
@@ -280,11 +281,12 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
         const task = await apiImportGitHubIssue(owner.trim(), repo.trim(), selectedIssueNumber, projectId);
         onImport(task);
         onClose();
-      } catch (err: any) {
-        if (err.message?.includes("already imported")) {
-          setError(err.message);
+      } catch (err) {
+        const msg = getErrorMessage(err);
+        if (msg?.includes("already imported")) {
+          setError(msg);
         } else {
-          setError(err.message || "Failed to import issue");
+          setError(msg || "Failed to import issue");
         }
       } finally {
         setImporting(false);
@@ -299,11 +301,12 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
         const task = await apiImportGitHubPull(owner.trim(), repo.trim(), selectedPullNumber, projectId);
         onImport(task);
         onClose();
-      } catch (err: any) {
-        if (err.message?.includes("already imported")) {
-          setError(err.message);
+      } catch (err) {
+        const msg = getErrorMessage(err);
+        if (msg?.includes("already imported")) {
+          setError(msg);
         } else {
-          setError(err.message || "Failed to import pull request");
+          setError(msg || "Failed to import pull request");
         }
       } finally {
         setImporting(false);

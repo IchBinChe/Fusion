@@ -454,7 +454,7 @@ export function TaskForm({
         descTextareaRef.current.style.height = "auto";
         descTextareaRef.current.style.height = descTextareaRef.current.scrollHeight + "px";
       }
-    } catch (err: any) {
+    } catch (err) {
       const errorMessage = getRefineErrorMessage(err);
       addToast(errorMessage, "error");
     } finally {

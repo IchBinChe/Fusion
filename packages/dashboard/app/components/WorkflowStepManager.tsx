@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { WorkflowStep, WorkflowStepInput, WorkflowStepMode, WorkflowStepPhase } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   fetchWorkflowSteps,
   createWorkflowStep,
@@ -138,8 +139,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       setLoading(true);
       const data = await fetchWorkflowSteps(projectId);
       setSteps(data);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load workflow steps", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load workflow steps", "error");
     } finally {
       setLoading(false);
     }
@@ -168,8 +169,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       setTemplatesLoading(true);
       const response = await fetchWorkflowStepTemplates();
       setTemplates(response.templates);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load templates", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load templates", "error");
     } finally {
       setTemplatesLoading(false);
     }
@@ -261,8 +262,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       setEditingId(null);
       setForm(EMPTY_FORM);
       await loadSteps();
-    } catch (err: any) {
-      addToast(err.message || "Failed to save workflow step", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to save workflow step", "error");
     } finally {
       setSaving(false);
     }
@@ -278,8 +279,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         setForm(EMPTY_FORM);
       }
       await loadSteps();
-    } catch (err: any) {
-      addToast(err.message || "Failed to delete workflow step", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to delete workflow step", "error");
     }
   }, [editingId, addToast, loadSteps]);
 
@@ -320,8 +321,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         setForm((prev) => ({ ...prev, prompt: result.prompt }));
         addToast("Prompt refined with AI", "success");
         await loadSteps();
-      } catch (err: any) {
-        addToast(err.message || "Failed to refine prompt", "error");
+      } catch (err) {
+        addToast(getErrorMessage(err) || "Failed to refine prompt", "error");
       } finally {
         setSaving(false);
         setRefining(false);
@@ -337,8 +338,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       setForm((prev) => ({ ...prev, prompt: result.prompt }));
       addToast("Prompt refined with AI", "success");
       await loadSteps();
-    } catch (err: any) {
-      addToast(err.message || "Failed to refine prompt", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to refine prompt", "error");
     } finally {
       setRefining(false);
     }
@@ -352,11 +353,12 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       await loadSteps();
       // Switch to "My Workflow Steps" tab to show the newly added step
       setActiveTab("my-steps");
-    } catch (err: any) {
-      if (err.message?.includes("already exists")) {
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      if (msg?.includes("already exists")) {
         addToast(`A workflow step named '${template.name}' already exists`, "error");
       } else {
-        addToast(err.message || "Failed to add workflow step from template", "error");
+        addToast(msg || "Failed to add workflow step from template", "error");
       }
     } finally {
       setAddingTemplateId(null);

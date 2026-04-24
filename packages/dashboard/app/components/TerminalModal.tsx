@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { getErrorMessage } from "@fusion/core";
 import { X, Trash2, Terminal as TerminalIcon, RefreshCw } from "lucide-react";
 import { useTerminal } from "../hooks/useTerminal";
 import { useTerminalSessions } from "../hooks/useTerminalSessions";
@@ -786,8 +787,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     // Restart the active tab's session
     try {
       await restartActiveTab();
-    } catch (err: any) {
-      setError(err.message || "Failed to restart terminal session");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to restart terminal session");
     }
   }, [restartActiveTab]);
 

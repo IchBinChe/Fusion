@@ -268,11 +268,12 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
 
           console.log(`\n  ✓ Registered project "${newProject.name}"`);
           return createResolvedProject(newProject);
-        } catch (err: any) {
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           throw new ProjectResolutionError(
-            `Failed to register project: ${err.message}`,
+            `Failed to register project: ${errMsg}`,
             "NOT_REGISTERED",
-            { directory: fusionDir, error: err.message }
+            { directory: fusionDir, error: errMsg }
           );
         }
       } else {

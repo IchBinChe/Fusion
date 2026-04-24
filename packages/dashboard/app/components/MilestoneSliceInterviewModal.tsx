@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { PlanningQuestion } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   startMilestoneInterview,
   startSliceInterview,
@@ -210,9 +211,9 @@ export function MilestoneSliceInterviewModal({
       currentSessionIdRef.current = sessionId;
       setLockSessionId(sessionId);
       connectToInterviewStream(sessionId);
-    } catch (err: any) {
+    } catch (err) {
       setIsReconnecting(false);
-      setError(err.message || `Failed to start ${targetLabel.toLowerCase()} interview`);
+      setError(getErrorMessage(err) || `Failed to start ${targetLabel.toLowerCase()} interview`);
       setView({ type: "initial" });
       currentSessionIdRef.current = null;
       setLockSessionId(null);
@@ -227,8 +228,8 @@ export function MilestoneSliceInterviewModal({
       await skipInterview(targetId, projectId);
       onApplied();
       setView({ type: "applied" });
-    } catch (err: any) {
-      setError(err.message || `Failed to skip ${targetLabel.toLowerCase()} interview`);
+    } catch (err) {
+      setError(getErrorMessage(err) || `Failed to skip ${targetLabel.toLowerCase()} interview`);
       setIsApplying(false);
     }
   }, [onApplied, projectId, skipInterview, targetId, targetLabel]);
@@ -395,10 +396,10 @@ export function MilestoneSliceInterviewModal({
       try {
         connectToInterviewStream(sessionId);
         await respondToInterview(sessionId, responses, projectId, sessionTabId);
-      } catch (err: any) {
+      } catch (err) {
         streamConnectionRef.current?.close();
         streamConnectionRef.current = null;
-        setError(err.message || "Failed to submit response");
+        setError(getErrorMessage(err) || "Failed to submit response");
         setView({ type: "question", sessionId, question: view.question });
       }
     },
@@ -415,8 +416,8 @@ export function MilestoneSliceInterviewModal({
       await applyInterview(view.sessionId, editedSummary || undefined, projectId);
       onApplied();
       setView({ type: "applied" });
-    } catch (err: any) {
-      setError(err.message || "Failed to apply interview results");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to apply interview results");
       setIsApplying(false);
     }
   }, [applyInterview, editedSummary, onApplied, projectId, view]);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Globe, Folder } from "lucide-react";
-import { THINKING_LEVELS, isGlobalSettingsKey, isProjectSettingsKey } from "@fusion/core";
-import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig } from "@fusion/core";
+import { THINKING_LEVELS, isGlobalSettingsKey, isProjectSettingsKey, getErrorMessage } from "@fusion/core";
+import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
 import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, saveApiKey, clearApiKey, fetchModels, testNtfyNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, fetchGitRemotesDetailed } from "../api";
 import type { AuthProvider, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemoteDetailed } from "../api";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
@@ -95,6 +95,9 @@ const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
 
 export type SectionId = SettingsSection["id"];
 
+/** Local form state extends Settings with a worktreeInitCommand override and lets tokenCap carry null (delete semantic). */
+type SettingsFormState = Settings & { worktreeInitCommand?: string; tokenCap?: number | null };
+
 interface SettingsModalProps {
   onClose: () => void;
   addToast: (message: string, type?: ToastType) => void;
@@ -124,7 +127,7 @@ export function SettingsModal({
   onColorThemeChange,
   onReopenOnboarding,
 }: SettingsModalProps) {
-  const [form, setForm] = useState<Settings & { worktreeInitCommand?: string }>({
+  const [form, setForm] = useState<SettingsFormState>({
     maxConcurrent: 2,
     maxTriageConcurrent: 2,
     maxWorktrees: 4,
@@ -256,7 +259,7 @@ export function SettingsModal({
         setLoading(false);
       })
       .catch((err) => {
-        addToast(err.message, "error");
+        addToast(getErrorMessage(err), "error");
         setLoading(false);
       });
   }, [addToast, projectId]);
@@ -343,9 +346,9 @@ export function SettingsModal({
         setMemoryContent(content);
         setMemoryDirty(false);
       })
-      .catch((err: any) => {
+      .catch((err) => {
         if (cancelled) return;
-        addToast(err?.message || "Failed to load project memory", "error");
+        addToast(getErrorMessage(err) || "Failed to load project memory", "error");
         setMemoryContent("");
       })
       .finally(() => {
@@ -397,8 +400,8 @@ export function SettingsModal({
           // Continue polling on transient errors
         }
       }, 2000);
-    } catch (err: any) {
-      addToast(err.message || "Login failed", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Login failed", "error");
       setAuthActionInProgress(null);
     }
   }, [addToast]);
@@ -409,8 +412,8 @@ export function SettingsModal({
       await logoutProvider(providerId);
       await loadAuthStatus();
       addToast("Logged out", "success");
-    } catch (err: any) {
-      addToast(err.message || "Logout failed", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Logout failed", "error");
     } finally {
       setAuthActionInProgress(null);
     }
@@ -437,8 +440,8 @@ export function SettingsModal({
       });
       await loadAuthStatus();
       addToast("API key saved", "success");
-    } catch (err: any) {
-      setApiKeyErrors((prev) => ({ ...prev, [providerId]: err.message || "Failed to save API key" }));
+    } catch (err) {
+      setApiKeyErrors((prev) => ({ ...prev, [providerId]: getErrorMessage(err) || "Failed to save API key" }));
     } finally {
       setAuthActionInProgress(null);
     }
@@ -460,8 +463,8 @@ export function SettingsModal({
       });
       await loadAuthStatus();
       addToast("API key cleared", "success");
-    } catch (err: any) {
-      addToast(err.message || "Failed to clear API key", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to clear API key", "error");
     } finally {
       setAuthActionInProgress(null);
     }
@@ -484,8 +487,8 @@ export function SettingsModal({
       } else {
         addToast("Failed to send test notification", "error");
       }
-    } catch (err: any) {
-      addToast(err.message || "Failed to send test notification", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to send test notification", "error");
     } finally {
       setTestNotificationLoading(false);
     }
@@ -503,8 +506,8 @@ export function SettingsModal({
       } else {
         addToast(result.error || "Failed to create backup", "error");
       }
-    } catch (err: any) {
-      addToast(err.message || "Failed to create backup", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to create backup", "error");
     } finally {
       setBackupLoading(false);
     }
@@ -532,8 +535,8 @@ export function SettingsModal({
       
       const scopeLabel = scope === "global" ? "global" : scope === "project" ? "project" : "all";
       addToast(`Settings exported (${scopeLabel} scope)`, "success");
-    } catch (err: any) {
-      addToast(err.message || "Failed to export settings", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to export settings", "error");
     }
   }, [addToast, activeSectionScope, projectId]);
 
@@ -549,8 +552,8 @@ export function SettingsModal({
       const data = JSON.parse(text) as SettingsExportData;
       setImportPreview(data);
       setImportDialogOpen(true);
-    } catch (err: any) {
-      addToast(`Invalid JSON file: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Invalid JSON file: ${getErrorMessage(err)}`, "error");
       setImportFile(null);
     } finally {
       setImportLoading(false);
@@ -577,8 +580,8 @@ export function SettingsModal({
       } else {
         addToast(result.error || "Import failed", "error");
       }
-    } catch (err: any) {
-      addToast(err.message || "Failed to import settings", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to import settings", "error");
     } finally {
       setImportLoading(false);
     }
@@ -803,9 +806,9 @@ export function SettingsModal({
           //   if current value is undefined AND initial was defined, use null
           const initialValue = initialValues?.[key as keyof GlobalSettings];
           if (value === undefined && initialValue !== undefined) {
-            (globalPatch as any)[key] = null; // null means "explicitly clear"
+            (globalPatch as Record<string, unknown>)[key] = null; // null means "explicitly clear"
           } else {
-            (globalPatch as any)[key] = value;
+            (globalPatch as Record<string, unknown>)[key] = value;
           }
         }
       }
@@ -837,14 +840,14 @@ export function SettingsModal({
           if (value !== initialProjectValue) {
             // Detect explicit reset: current is undefined/null but initial was set
             if ((value === undefined || value === null) && initialProjectValue !== undefined && initialProjectValue !== null) {
-              (projectPatch as any)[key] = null; // null-as-delete
+              (projectPatch as Record<string, unknown>)[key] = null; // null-as-delete
             } else if (value !== undefined) {
-              (projectPatch as any)[key] = value;
+              (projectPatch as Record<string, unknown>)[key] = value;
             }
           }
         } else {
           // For non-model settings: existing behavior
-          (projectPatch as any)[key] = value;
+          (projectPatch as Record<string, unknown>)[key] = value;
         }
       }
 
@@ -862,8 +865,8 @@ export function SettingsModal({
 
       addToast("Settings saved", "success");
       onClose();
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [form, globalMaxConcurrent, prefixError, presetDraft, initialValues, initialScopedValues, onClose, addToast, projectId]);
 
@@ -872,8 +875,8 @@ export function SettingsModal({
       await saveMemoryFile(selectedMemoryPath, memoryContent, projectId);
       setMemoryDirty(false);
       addToast("Memory saved", "success");
-    } catch (err: any) {
-      addToast(err?.message || "Failed to save memory", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to save memory", "error");
     }
   }, [selectedMemoryPath, memoryContent, projectId, addToast]);
 
@@ -893,8 +896,8 @@ export function SettingsModal({
       setMemoryFiles(files);
 
       addToast("Memory file compacted", "success");
-    } catch (err: any) {
-      addToast(err?.message || "Failed to compact memory", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to compact memory", "error");
     } finally {
       setMemoryCompactLoading(false);
     }
@@ -910,8 +913,8 @@ export function SettingsModal({
         result.qmdAvailable ? "Memory retrieval test complete" : "qmd is not installed; local fallback was used",
         result.qmdAvailable ? "success" : "warning",
       );
-    } catch (err: any) {
-      addToast(err?.message || "Failed to test memory retrieval", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to test memory retrieval", "error");
     } finally {
       setMemoryTestLoading(false);
     }
@@ -926,8 +929,8 @@ export function SettingsModal({
         result.qmdAvailable ? "qmd installed successfully" : "qmd install finished, but qmd is still unavailable",
         result.qmdAvailable ? "success" : "warning",
       );
-    } catch (err: any) {
-      addToast(err?.message || "Failed to install qmd", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to install qmd", "error");
     } finally {
       setQmdInstallLoading(false);
     }
@@ -1143,7 +1146,7 @@ export function SettingsModal({
                     value={form.defaultThinkingLevel || ""}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setForm((f) => ({ ...f, defaultThinkingLevel: val || undefined } as any));
+                      setForm((f) => ({ ...f, defaultThinkingLevel: (val as ThinkingLevel) || undefined }));
                     }}
                   >
                     <option value="">Default</option>
@@ -1254,18 +1257,18 @@ export function SettingsModal({
                   id="tokenCap"
                   type="number"
                   placeholder="No cap"
-                  value={(form as any).tokenCap ?? ""}
+                  value={form.tokenCap ?? ""}
                   onChange={(e) => {
                     const val = e.target.value;
-                    setForm((f) => ({ ...f, tokenCap: val ? parseInt(val, 10) : null } as any));
+                    setForm((f) => ({ ...f, tokenCap: val ? parseInt(val, 10) : null } as SettingsFormState));
                   }}
                 />
-                {(form as any).tokenCap != null && (
+                {form.tokenCap != null && (
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
                     title="Reset to default (no cap)"
-                    onClick={() => setForm((f) => ({ ...f, tokenCap: null } as any))}
+                    onClick={() => setForm((f) => ({ ...f, tokenCap: null } as unknown as SettingsFormState))}
                     style={{ whiteSpace: "nowrap" }}
                   >
                     Reset
@@ -1758,7 +1761,7 @@ export function SettingsModal({
                 value={form.maxConcurrent ?? ""}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setForm((f) => ({ ...f, maxConcurrent: val === "" ? undefined : Number(val) } as any));
+                  setForm((f) => ({ ...f, maxConcurrent: val === "" ? undefined : Number(val) } as SettingsFormState));
                 }}
               />
             </div>
@@ -1772,7 +1775,7 @@ export function SettingsModal({
                 value={form.maxTriageConcurrent ?? ""}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setForm((f) => ({ ...f, maxTriageConcurrent: val === "" ? undefined : Number(val) } as any));
+                  setForm((f) => ({ ...f, maxTriageConcurrent: val === "" ? undefined : Number(val) } as SettingsFormState));
                 }}
               />
               <small>Maximum concurrent triage/specification agents</small>
@@ -1787,7 +1790,7 @@ export function SettingsModal({
                 value={form.pollIntervalMs ?? ""}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setForm((f) => ({ ...f, pollIntervalMs: val === "" ? undefined : Number(val) } as any));
+                  setForm((f) => ({ ...f, pollIntervalMs: val === "" ? undefined : Number(val) } as SettingsFormState));
                 }}
               />
             </div>
@@ -1975,7 +1978,7 @@ export function SettingsModal({
                 value={form.maxWorktrees ?? ""}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setForm((f) => ({ ...f, maxWorktrees: val === "" ? undefined : Number(val) } as any));
+                  setForm((f) => ({ ...f, maxWorktrees: val === "" ? undefined : Number(val) } as SettingsFormState));
                 }}
               />
               <small>Limits total git worktrees including in-review tasks</small>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { FileCode, ChevronDown, ChevronRight, ChevronLeft, AlertCircle, GitCommit, WrapText, Maximize2 } from "lucide-react";
 import type { MergeDetails, Column } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { fetchTaskDiff, type TaskDiff } from "../api";
 import { highlightDiff } from "../utils/highlightDiff";
 import { truncateMiddle } from "../utils/truncatePath";
@@ -90,8 +91,8 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
         setExpandedFiles(new Set([normalized[0].path]));
         setCurrentFileIndex(0);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to load diff");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to load diff");
     } finally {
       setLoading(false);
     }

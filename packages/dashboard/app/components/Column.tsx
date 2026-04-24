@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useCallback, useEffect } from "react";
 import { useFlashOnIncrease } from "../hooks/useFlashOnIncrease";
 import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@fusion/core";
-import { COLUMN_LABELS, COLUMN_DESCRIPTIONS } from "@fusion/core";
+import { COLUMN_LABELS, COLUMN_DESCRIPTIONS, getErrorMessage } from "@fusion/core";
 import { TaskCard } from "./TaskCard";
 import { WorktreeGroup } from "./WorktreeGroup";
 import { QuickEntryBox } from "./QuickEntryBox";
@@ -113,8 +113,8 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
 
     try {
       await onMoveTask(taskId, column);
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     }
   }, [column, onMoveTask, addToast, tasks]);
 
@@ -144,8 +144,8 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
     try {
       const archived = await onArchiveAllDone();
       addToast(`Archived ${archived.length} tasks`, "success");
-    } catch (err: any) {
-      addToast(err.message || "Failed to archive tasks", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to archive tasks", "error");
     }
   }, [onArchiveAllDone, tasks.length, addToast]);
 

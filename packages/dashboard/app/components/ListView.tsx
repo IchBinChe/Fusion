@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight } from "lucide-react";
 import type { Task, TaskDetail, Column, TaskCreateInput } from "@fusion/core";
-import { COLUMN_LABELS, COLUMNS } from "@fusion/core";
+import { COLUMN_LABELS, COLUMNS, getErrorMessage } from "@fusion/core";
 import { batchUpdateTaskModels } from "../api";
 import type { ModelInfo } from "../api";
 import { QuickEntryBox } from "./QuickEntryBox";
@@ -522,8 +522,8 @@ export function ListView({
       clearSelection();
       setExecutorModel("__no_change__");
       setValidatorModel("__no_change__");
-    } catch (err: any) {
-      addToast(err.message || "Failed to update models", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to update models", "error");
     } finally {
       setIsApplying(false);
     }
@@ -582,8 +582,8 @@ export function ListView({
 
       try {
         await onMoveTask(taskId, column);
-      } catch (err: any) {
-        addToast(err.message, "error");
+      } catch (err) {
+        addToast(getErrorMessage(err), "error");
       }
     },
     [onMoveTask, addToast]

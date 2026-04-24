@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare, CircleDot, XCircle, GitMerge } from "lucide-react";
 import type { PrInfo } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { createPr, refreshPrStatus, type PrRefreshResponse } from "../api";
 import type { ToastType } from "../hooks/useToast";
 
@@ -54,8 +55,8 @@ export function PrSection({
       setPrTitle("");
       setPrBody("");
       addToast(`Created PR #${newPr.number}`, "success");
-    } catch (err: any) {
-      addToast(err.message || "Failed to create PR", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to create PR", "error");
     } finally {
       setIsCreating(false);
     }
@@ -70,8 +71,8 @@ export function PrSection({
       setRefreshState(updated);
       onPrUpdated(updated.prInfo);
       addToast("PR status refreshed", "success");
-    } catch (err: any) {
-      addToast(err.message || "Failed to refresh PR", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to refresh PR", "error");
     } finally {
       setIsRefreshing(false);
     }

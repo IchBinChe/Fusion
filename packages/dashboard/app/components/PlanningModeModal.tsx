@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { Task, PlanningQuestion, PlanningSummary } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   startPlanningStreaming,
   respondToPlanning,
@@ -145,8 +146,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setLoadedModels(response.models);
       setFavoriteProviders(response.favoriteProviders);
       setFavoriteModels(response.favoriteModels);
-    } catch (err: any) {
-      setModelsError(err?.message || "Failed to load models");
+    } catch (err) {
+      setModelsError(getErrorMessage(err) || "Failed to load models");
     } finally {
       setModelsLoading(false);
     }
@@ -311,9 +312,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
       connectToPlanningStream(sessionId);
       setResponseHistory([]);
-    } catch (err: any) {
+    } catch (err) {
       setIsReconnecting(false);
-      setError(err.message || "Failed to start planning session");
+      setError(getErrorMessage(err) || "Failed to start planning session");
       setView({ type: "initial" });
       currentSessionIdRef.current = null;
       setLockSessionId(null);
@@ -584,8 +585,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         // Submit response - AI will broadcast events via the already-connected stream
         await respondToPlanning(sessionId, responses, projectId, sessionTabId);
         // Events (question/summary) will arrive via the existing SSE stream
-      } catch (err: any) {
-        setError(err.message || "Failed to submit response");
+      } catch (err) {
+        setError(getErrorMessage(err) || "Failed to submit response");
         setView({ type: "question", session });
       }
     },
@@ -609,9 +610,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       currentSessionIdRef.current = retryTarget.sessionId;
       setLockSessionId(retryTarget.sessionId);
       await retryPlanningSession(retryTarget.sessionId, projectId, sessionTabId);
-    } catch (err: any) {
-      let retryError = err;
-      const retryErrorMessage = err?.message || "";
+    } catch (err) {
+      let retryError: unknown = err;
+      const retryErrorMessage = getErrorMessage(err) || "";
 
       if (retryErrorMessage.includes("not in an error state")) {
         try {
@@ -661,7 +662,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
           setIsReconnecting(false);
           return;
-        } catch (sessionRefreshError: any) {
+        } catch (sessionRefreshError) {
           retryError = sessionRefreshError;
         }
       }
@@ -671,7 +672,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setView({
         type: "error",
         session: retryTarget,
-        errorMessage: retryError?.message || "Retry failed. Please try again.",
+        errorMessage: getErrorMessage(retryError) || "Retry failed. Please try again.",
       });
       setIsReconnecting(false);
     } finally {
@@ -689,8 +690,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       const task = await createTaskFromPlanning(view.session.sessionId, editedSummary ?? undefined, projectId);
       onTaskCreated(task);
       handleCancel();
-    } catch (err: any) {
-      setError(err.message || "Failed to create task");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to create task");
       setView({ type: "summary", session: view.session, summary: view.summary });
     }
   }, [editedSummary, view, projectId, onTaskCreated, handleCancel]);
@@ -710,8 +711,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         subtasks: result.subtasks,
         dirty: false,
       });
-    } catch (err: any) {
-      setError(err.message || "Failed to start breakdown");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to start breakdown");
       setView({ type: "summary", session: view.session, summary: view.summary });
     }
   }, [editedSummary, view, projectId]);
@@ -738,8 +739,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       currentSessionIdRef.current = null;
       setLockSessionId(null);
       onClose();
-    } catch (err: any) {
-      setError(err.message || "Failed to create tasks");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to create tasks");
       setView({ type: "breakdown", sessionId: view.sessionId, subtasks: view.subtasks, dirty: view.dirty });
     }
   }, [view, onTasksCreated, onClose, projectId]);

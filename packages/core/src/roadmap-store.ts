@@ -68,6 +68,39 @@ export interface RoadmapStoreEvents {
   "feature:moved": [{ feature: RoadmapFeature; fromMilestoneId: string; toMilestoneId: string }];
 }
 
+// ── Row Interfaces ──────────────────────────────────────────────────
+
+/** Database row shape for roadmaps. */
+interface RoadmapRow {
+  id: string;
+  title: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for roadmap_milestones. */
+interface RoadmapMilestoneRow {
+  id: string;
+  roadmapId: string;
+  title: string;
+  description: string | null;
+  orderIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for roadmap_features. */
+interface RoadmapFeatureRow {
+  id: string;
+  milestoneId: string;
+  title: string;
+  description: string | null;
+  orderIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── RoadmapStore Class ──────────────────────────────────────────────
 
 export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
@@ -103,7 +136,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
 
   // ── Row-to-Object Converters ───────────────────────────────────────
 
-  private rowToRoadmap(row: any): Roadmap {
+  private rowToRoadmap(row: RoadmapRow): Roadmap {
     return {
       id: row.id,
       title: row.title,
@@ -113,7 +146,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
     };
   }
 
-  private rowToMilestone(row: any): RoadmapMilestone {
+  private rowToMilestone(row: RoadmapMilestoneRow): RoadmapMilestone {
     return {
       id: row.id,
       roadmapId: row.roadmapId,
@@ -125,7 +158,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
     };
   }
 
-  private rowToFeature(row: any): RoadmapFeature {
+  private rowToFeature(row: RoadmapFeatureRow): RoadmapFeature {
     return {
       id: row.id,
       milestoneId: row.milestoneId,
@@ -180,7 +213,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
    * @returns The roadmap, or undefined if not found
    */
   getRoadmap(id: string): Roadmap | undefined {
-    const row = this.db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(id) as unknown as RoadmapRow | undefined;
     if (!row) return undefined;
     return this.rowToRoadmap(row);
   }
@@ -194,7 +227,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM roadmaps ORDER BY createdAt DESC"
     ).all();
-    return (rows as any[]).map((row) => this.rowToRoadmap(row));
+    return (rows as unknown as RoadmapRow[]).map((row) => this.rowToRoadmap(row));
   }
 
   /**
@@ -317,7 +350,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
    * @returns The milestone, or undefined if not found
    */
   getMilestone(id: string): RoadmapMilestone | undefined {
-    const row = this.db.prepare("SELECT * FROM roadmap_milestones WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM roadmap_milestones WHERE id = ?").get(id) as unknown as RoadmapMilestoneRow | undefined;
     if (!row) return undefined;
     return this.rowToMilestone(row);
   }
@@ -335,7 +368,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM roadmap_milestones WHERE roadmapId = ? ORDER BY orderIndex ASC, createdAt ASC, id ASC"
     ).all(roadmapId);
-    return (rows as any[]).map((row) => this.rowToMilestone(row));
+    return (rows as unknown as RoadmapMilestoneRow[]).map((row) => this.rowToMilestone(row));
   }
 
   /**
@@ -459,7 +492,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
    * @returns The feature, or undefined if not found
    */
   getFeature(id: string): RoadmapFeature | undefined {
-    const row = this.db.prepare("SELECT * FROM roadmap_features WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM roadmap_features WHERE id = ?").get(id) as unknown as RoadmapFeatureRow | undefined;
     if (!row) return undefined;
     return this.rowToFeature(row);
   }
@@ -477,7 +510,7 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM roadmap_features WHERE milestoneId = ? ORDER BY orderIndex ASC, createdAt ASC, id ASC"
     ).all(milestoneId);
-    return (rows as any[]).map((row) => this.rowToFeature(row));
+    return (rows as unknown as RoadmapFeatureRow[]).map((row) => this.rowToFeature(row));
   }
 
   /**

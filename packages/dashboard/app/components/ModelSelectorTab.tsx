@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { fetchModels, updateTask, updateGlobalSettings } from "../api";
 import type { ModelInfo } from "../api";
 import type { Settings, Task, TaskDetail } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
@@ -289,7 +290,7 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
           getSuccessToastMessage(target, targetSelections[target]),
           "success",
         );
-      } catch (err: any) {
+      } catch (err) {
         if (activeTaskIdRef.current !== requestTaskId) {
           return;
         }
@@ -302,7 +303,7 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
           setSelectedPlanning(previousSavedPlanning);
         }
 
-        addToast(err.message || "Failed to save model settings", "error");
+        addToast(getErrorMessage(err) || "Failed to save model settings", "error");
       } finally {
         if (activeTaskIdRef.current === requestTaskId) {
           setSavingTarget(null);
@@ -390,13 +391,13 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
             "success",
           );
         }
-      } catch (err: any) {
+      } catch (err) {
         if (activeTaskIdRef.current !== requestTaskId) {
           return;
         }
 
         setSelectedThinking(previousThinking);
-        addToast(err.message || "Failed to save thinking level", "error");
+        addToast(getErrorMessage(err) || "Failed to save thinking level", "error");
       } finally {
         if (activeTaskIdRef.current === requestTaskId) {
           setSavingTarget(null);

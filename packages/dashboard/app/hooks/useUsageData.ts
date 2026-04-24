@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { getErrorMessage } from "@fusion/core";
 import { fetchUsageData, type ProviderUsage } from "../api";
 
 interface UsageDataState {
@@ -57,14 +58,14 @@ export function useUsageData(options: UseUsageDataOptions = {}) {
         error: null,
         lastUpdated: new Date(),
       });
-    } catch (err: any) {
+    } catch (err) {
       // Don't update state if the request was aborted
-      if (err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
 
       setState((prev) => ({
         ...prev,
         loading: false,
-        error: err.message || "Failed to fetch usage data",
+        error: getErrorMessage(err) || "Failed to fetch usage data",
       }));
     }
   }, []);

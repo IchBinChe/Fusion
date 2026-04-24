@@ -143,25 +143,26 @@ async function runConfiguredCommand(
       bufferExceeded: false,
       timedOut: false,
     };
-  } catch (error: any) {
-    const code = error?.code;
-    const status = typeof error?.status === "number" ? error.status : null;
+  } catch (error) {
+    const errObj = error as Record<string, unknown>;
+    const code = errObj?.code;
+    const status = typeof errObj?.status === "number" ? errObj.status : null;
     const exitCode = typeof code === "number" ? code : status;
-    const message = String(error?.message ?? "");
+    const message = String(errObj?.message ?? "");
 
     return {
-      stdout: error?.stdout?.toString?.() ?? "",
-      stderr: error?.stderr?.toString?.() ?? "",
+      stdout: typeof (errObj?.stdout as { toString?: unknown })?.toString === "function" ? String(errObj.stdout) : "",
+      stderr: typeof (errObj?.stderr as { toString?: unknown })?.toString === "function" ? String(errObj.stderr) : "",
       exitCode,
-      signal: (error?.signal as NodeJS.Signals | null | undefined) ?? null,
+      signal: (errObj?.signal as NodeJS.Signals | null | undefined) ?? null,
       bufferExceeded:
         code === "ENOBUFS"
         || code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
         || message.includes("maxBuffer"),
       timedOut:
         code === "ETIMEDOUT"
-        || (error?.killed === true && (error?.signal === "SIGTERM" || message.includes("timed out"))),
-      spawnError: code === "ENOENT" || code === "EACCES" ? error : undefined,
+        || (errObj?.killed === true && (errObj?.signal === "SIGTERM" || message.includes("timed out"))),
+      spawnError: code === "ENOENT" || code === "EACCES" ? (error as Error) : undefined,
     };
   }
 }

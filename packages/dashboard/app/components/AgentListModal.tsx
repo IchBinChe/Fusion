@@ -4,6 +4,7 @@ import type { Agent, AgentCapability, AgentState } from "../api";
 import { fetchAgents, createAgent, updateAgent, updateAgentState, deleteAgent } from "../api";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 import { getAgentHealthStatus } from "../utils/agentHealth";
+import { getErrorMessage } from "@fusion/core";
 import type { AgentHealthStatus } from "../utils/agentHealth";
 
 interface AgentListModalProps {
@@ -68,8 +69,8 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
       const filter = filterState !== "all" ? { state: filterState } : undefined;
       const data = await fetchAgents(filter, projectId);
       setAgents(data);
-    } catch (err: any) {
-      addToast(`Failed to load agents: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load agents: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsLoading(false);
     }
@@ -103,8 +104,8 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
       setNewAgentName("");
       setIsCreating(false);
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to create agent: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to create agent: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -113,8 +114,8 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
       await updateAgentState(agentId, newState, projectId);
       addToast(`Agent state updated to ${newState}`, "success");
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to update state: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update state: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -124,8 +125,8 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
       await deleteAgent(agentId, projectId);
       addToast(`Agent "${agentName}" deleted`, "success");
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to delete agent: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to delete agent: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -144,8 +145,8 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
       addToast(`Agent role updated to ${AGENT_ROLES.find(r => r.value === newRole)?.label ?? newRole}`, "success");
       setEditingRoleForAgent(null);
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to update role: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update role: ${getErrorMessage(err)}`, "error");
     }
   };
 

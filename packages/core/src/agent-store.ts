@@ -42,6 +42,20 @@ import type { TaskStore } from "./store.js";
 import { computeAccessState } from "./agent-permissions.js";
 import { Database } from "./db.js";
 
+/** Database row shape returned by SELECT on agentRatings. */
+interface AgentRatingRow {
+  id: string;
+  agentId: string;
+  raterType: string;
+  raterId: string | null;
+  score: number;
+  category: string | null;
+  comment: string | null;
+  runId: string | null;
+  taskId: string | null;
+  createdAt: string;
+}
+
 /** Events emitted by AgentStore */
 export interface AgentStoreEvents {
   /** Emitted when an agent is created */
@@ -533,11 +547,11 @@ export class AgentStore extends EventEmitter {
     };
   }
 
-  private mapRatingRow(row: any): AgentRating {
+  private mapRatingRow(row: AgentRatingRow): AgentRating {
     return {
       id: row.id,
       agentId: row.agentId,
-      raterType: row.raterType,
+      raterType: row.raterType as AgentRating["raterType"],
       raterId: row.raterId ?? undefined,
       score: row.score,
       category: row.category ?? undefined,
@@ -604,7 +618,7 @@ export class AgentStore extends EventEmitter {
       params.push(options.limit);
     }
 
-    const rows = this.db.prepare(query).all(...params);
+    const rows = this.db.prepare(query).all(...params) as unknown as AgentRatingRow[];
     return rows.map((row) => this.mapRatingRow(row));
   }
 

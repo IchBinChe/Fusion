@@ -33,6 +33,31 @@ export interface RoutineStoreEvents {
   "routine:run": [data: { routine: Routine; result: RoutineExecutionResult }];
 }
 
+/** Database row shape for the routines table. */
+interface RoutineRow {
+  id: string;
+  agentId: string;
+  name: string;
+  description: string | null;
+  triggerType: string;
+  triggerConfig: string | null;
+  command: string | null;
+  steps: string | null;
+  timeoutMs: number | null;
+  catchUpPolicy: string;
+  executionPolicy: string;
+  enabled: number;
+  lastRunAt: string | null;
+  lastRunResult: string | null;
+  nextRunAt: string | null;
+  runCount: number;
+  runHistory: string;
+  catchUpLimit: number;
+  scope: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
   /** SQLite database instance (lazy init). */
   private _db: Database | null = null;
@@ -66,7 +91,7 @@ export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
 
   // ── Row Conversion ─────────────────────────────────────────────────
 
-  private rowToRoutine(row: any): Routine {
+  private rowToRoutine(row: RoutineRow): Routine {
     const triggerConfig = fromJson<{
       cronExpression?: string;
       timezone?: string;
@@ -288,7 +313,7 @@ export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
    * Get a routine by ID.
    */
   async getRoutine(id: string): Promise<Routine> {
-    const row = this.db.prepare("SELECT * FROM routines WHERE id = ?").get(id) as any;
+    const row = this.db.prepare("SELECT * FROM routines WHERE id = ?").get(id) as unknown as RoutineRow | undefined;
     if (!row) {
       throw Object.assign(new Error(`Routine '${id}' not found`), { code: "ENOENT" });
     }
@@ -299,7 +324,7 @@ export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
    * List all routines.
    */
   async listRoutines(): Promise<Routine[]> {
-    const rows = this.db.prepare("SELECT * FROM routines ORDER BY createdAt ASC").all() as any[];
+    const rows = this.db.prepare("SELECT * FROM routines ORDER BY createdAt ASC").all() as unknown as RoutineRow[];
     return rows.map((row) => this.rowToRoutine(row));
   }
 
@@ -480,7 +505,7 @@ export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
     const now = new Date().toISOString();
     const rows = this.db.prepare(
       "SELECT * FROM routines WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ? AND scope = ?"
-    ).all(now, scope) as any[];
+    ).all(now, scope) as unknown as RoutineRow[];
     return rows.map((row) => this.rowToRoutine(row));
   }
 
@@ -492,7 +517,7 @@ export class RoutineStore extends EventEmitter<RoutineStoreEvents> {
     const now = new Date().toISOString();
     const rows = this.db.prepare(
       "SELECT * FROM routines WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?"
-    ).all(now) as any[];
+    ).all(now) as unknown as RoutineRow[];
     return rows.map((row) => this.rowToRoutine(row));
   }
 }

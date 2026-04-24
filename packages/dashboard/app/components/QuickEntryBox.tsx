@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { ToastType } from "../hooks/useToast";
 import type { Task, TaskCreateInput, Settings } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import type { ModelInfo, RefinementType, Agent } from "../api";
 import { fetchModels, fetchSettings, refineText, getRefineErrorMessage, updateGlobalSettings, fetchAgents, uploadAttachment } from "../api";
 import { Link, Paperclip, Brain, Lightbulb, ListTree, Sparkles, Save, ChevronDown, ChevronUp, ChevronRight, Bot } from "lucide-react";
@@ -461,8 +462,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       // Clear input for rapid entry
       resetForm();
       // Note: Focus restoration is handled by useEffect when isSubmitting becomes false
-    } catch (err: any) {
-      addToast(err.message || "Failed to create task", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to create task", "error");
       // Keep input content on failure so user can retry
     } finally {
       setIsSubmitting(false);
@@ -1019,7 +1020,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         textareaRef.current.style.height = "auto";
         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
       }
-    } catch (err: any) {
+    } catch (err) {
       const errorMessage = getRefineErrorMessage(err);
       addToast(errorMessage, "error");
     } finally {
@@ -1050,8 +1051,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       if (!parentFavoriteModels) {
         setFavoriteModels(response.favoriteModels);
       }
-    } catch (err: any) {
-      setModelsError(err?.message || "Failed to load models");
+    } catch (err) {
+      setModelsError(getErrorMessage(err) || "Failed to load models");
     } finally {
       setModelsLoading(false);
     }
@@ -1071,8 +1072,9 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       setAgentsProjectId(projectId);
       setShowAgentPicker(true);
       updateAgentPickerPosition();
-    } catch (err: any) {
-      addToast(err?.message ? `Failed to load agents: ${err.message}` : "Failed to load agents", "error");
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      addToast(msg ? `Failed to load agents: ${msg}` : "Failed to load agents", "error");
       setShowAgentPicker(false);
     } finally {
       setAgentsLoading(false);

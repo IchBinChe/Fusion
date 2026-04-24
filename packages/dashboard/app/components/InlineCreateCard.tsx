@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Brain, Link, Lightbulb, ListTree, Zap, ChevronDown, ChevronUp, Bot, Maximize2, Minimize2 } from "lucide-react";
 import type { Task, TaskCreateInput, Settings } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { fetchModels, uploadAttachment, fetchSettings, updateGlobalSettings, fetchAgents } from "../api";
 import type { ModelInfo, Agent } from "../api";
@@ -140,8 +141,8 @@ export function InlineCreateCard({
       setLoadedModels(response.models);
       setFavoriteProviders(response.favoriteProviders);
       setFavoriteModels(response.favoriteModels);
-    } catch (err: any) {
-      setModelsError(err?.message || "Failed to load models");
+    } catch (err) {
+      setModelsError(getErrorMessage(err) || "Failed to load models");
     } finally {
       setModelsLoading(false);
     }
@@ -362,8 +363,8 @@ export function InlineCreateCard({
       if (typeof window !== "undefined") {
         removeScopedItem(STORAGE_KEY, projectId);
       }
-    } catch (err: any) {
-      addToast(err.message, "error");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
     } finally {
       setSubmitting(false);
     }
@@ -472,8 +473,9 @@ export function InlineCreateCard({
       const result = await fetchAgents(undefined, projectId);
       setAgents(result);
       setShowAgentPicker(true);
-    } catch (err: any) {
-      addToast(err?.message ? `Failed to load agents: ${err.message}` : "Failed to load agents", "error");
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      addToast(msg ? `Failed to load agents: ${msg}` : "Failed to load agents", "error");
       setShowAgentPicker(false);
     } finally {
       setAgentsLoading(false);

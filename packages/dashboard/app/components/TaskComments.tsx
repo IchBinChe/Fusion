@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Task, TaskComment } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { addSteeringComment, updateTaskComment, deleteTaskComment } from "../api";
 import type { ToastType } from "../hooks/useToast";
 
@@ -47,8 +48,8 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
       setDraft("");
       onTaskUpdated?.(updated);
       addToast("Comment added", "success");
-    } catch (error: any) {
-      addToast(error.message || "Failed to add comment", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to add comment", "error");
     } finally {
       setSubmitting(false);
     }
@@ -64,8 +65,8 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
       setEditingText("");
       onTaskUpdated?.(updated);
       addToast("Comment updated", "success");
-    } catch (error: any) {
-      addToast(error.message || "Failed to update comment", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to update comment", "error");
     } finally {
       setSubmitting(false);
     }
@@ -77,8 +78,8 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
       const updated = await deleteTaskComment(task.id, commentId, projectId);
       onTaskUpdated?.(updated);
       addToast("Comment deleted", "success");
-    } catch (error: any) {
-      addToast(error.message || "Failed to delete comment", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to delete comment", "error");
     } finally {
       setDeletingId(null);
     }

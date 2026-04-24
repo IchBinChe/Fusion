@@ -7,10 +7,11 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus, ModelInfo, MemoryFileInfo } from "../api";
+import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus, ModelInfo, MemoryFileInfo, AgentCapability } from "../api";
 import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchAgents } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry, Task } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { AgentLogViewer } from "./AgentLogViewer";
 import { AgentReflectionsTab } from "./AgentReflectionsTab";
 import { getAgentHealthStatus } from "../utils/agentHealth";
@@ -146,8 +147,8 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     try {
       const data = await fetchAgent(agentId, projectId);
       setAgent(data);
-    } catch (err: any) {
-      addToastRef.current(`Failed to load agent: ${err.message}`, "error");
+    } catch (err) {
+      addToastRef.current(`Failed to load agent: ${getErrorMessage(err)}`, "error");
       onCloseRef.current();
     } finally {
       setIsLoading(false);
@@ -174,7 +175,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
           return;
         }
         setLogs(result.entries);
-      } catch (err: any) {
+      } catch (err) {
         // Reject stale error: check context version and current IDs
         if (contextVersionRef.current !== contextVersionAtCapture ||
             agentId !== currentAgentId ||
@@ -310,8 +311,8 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
       await updateAgentState(agentId, newState, projectId);
       addToast(`Agent state updated to ${newState}`, "success");
       void loadAgent();
-    } catch (err: any) {
-      addToast(`Failed to update state: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update state: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -321,8 +322,8 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
       await deleteAgent(agentId, projectId);
       addToast(`Agent "${agent.name}" deleted`, "success");
       onClose();
-    } catch (err: any) {
-      addToast(`Failed to delete agent: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to delete agent: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -674,7 +675,7 @@ function DashboardTab({
   }, [agent.id, projectId]);
 
   const stats = useMemo(() => {
-    const runs = (agent as any).completedRuns || [];
+    const runs = agent.completedRuns || [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -1049,8 +1050,8 @@ function RunsTab({
     try {
       const data = await fetchAgentRuns(agentId, 50, projectId);
       setRuns(data);
-    } catch (err: any) {
-      addToast(`Failed to load runs: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load runs: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsLoadingRuns(false);
     }
@@ -1090,8 +1091,8 @@ function RunsTab({
       ]);
       setRunLogs(logs);
       setDetailRun(detail);
-    } catch (err: any) {
-      addToast(`Failed to load run details: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load run details: ${getErrorMessage(err)}`, "error");
       setRunLogs([]);
       setDetailRun(null);
     } finally {
@@ -1106,8 +1107,8 @@ function RunsTab({
       addToast(`Heartbeat run started for ${agentName ?? agentId}`, "success");
       setIsLoadingRuns(true);
       void loadRuns();
-    } catch (err: any) {
-      addToast(`Failed to start heartbeat run: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to start heartbeat run: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -1121,8 +1122,8 @@ function RunsTab({
       addToast("Run stopped", "success");
       setIsLoadingRuns(true);
       void loadRuns();
-    } catch (err: any) {
-      addToast(`Failed to stop run: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to stop run: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -1479,10 +1480,10 @@ function TasksTab({
           setTasks(assignedTasks);
         }
       })
-      .catch((err: any) => {
+      .catch((err) => {
         if (!cancelled) {
           setTasks([]);
-          addToast(`Failed to load assigned tasks: ${err.message}`, "error");
+          addToast(`Failed to load assigned tasks: ${getErrorMessage(err)}`, "error");
         }
       })
       .finally(() => {
@@ -1660,8 +1661,8 @@ function SoulTab({
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 3000);
       await onSaved();
-    } catch (err: any) {
-      addToast(`Failed to save soul: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save soul: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsSaving(false);
     }
@@ -1810,8 +1811,8 @@ function MemoryTab({
       setSelectedFileContent(result.content);
       setSelectedFileDirty(false);
       setSelectedFileJustSaved(false);
-    } catch (err: any) {
-      addToast(`Failed to load agent memory file: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load agent memory file: ${getErrorMessage(err)}`, "error");
     } finally {
       setSelectedFileLoading(false);
     }
@@ -1832,8 +1833,8 @@ function MemoryTab({
 
       const nextPath = pickDefaultAgentMemoryPath(files, preferredPath);
       await loadSelectedMemoryFile(nextPath);
-    } catch (err: any) {
-      addToast(`Failed to load memory files: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load memory files: ${getErrorMessage(err)}`, "error");
       setMemoryFiles([]);
       setSelectedFilePath("");
       setSelectedFileContent("");
@@ -1865,8 +1866,8 @@ function MemoryTab({
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 3000);
       await onSaved();
-    } catch (err: any) {
-      addToast(`Failed to save memory: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save memory: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsSaving(false);
     }
@@ -1899,8 +1900,8 @@ function MemoryTab({
       setFileSwitchHint("");
       await loadMemoryFiles(selectedFilePath);
       addToast("Agent memory file saved", "success");
-    } catch (err: any) {
-      addToast(`Failed to save agent memory file: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save agent memory file: ${getErrorMessage(err)}`, "error");
     } finally {
       setSavingSelectedFile(false);
     }
@@ -2150,13 +2151,14 @@ function InstructionsTab({
         setFileContent(data.content);
         setFileContentDirty(false);
       })
-      .catch((err: any) => {
+      .catch((err) => {
         // ENOENT means file doesn't exist yet - treat as empty "new file" state
-        if (err.message?.includes("ENOENT") || err.message?.includes("Not found") || err.message?.includes("not found")) {
+        const msg = getErrorMessage(err);
+        if (msg.includes("ENOENT") || msg.includes("Not found") || msg.includes("not found")) {
           setFileContent("");
           setFileContentDirty(false);
         } else {
-          addToast(`Failed to load instructions file: ${err.message}`, "error");
+          addToast(`Failed to load instructions file: ${msg}`, "error");
           setFileContent("");
         }
       })
@@ -2197,8 +2199,8 @@ function InstructionsTab({
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 3000);
       await onSaved();
-    } catch (err: any) {
-      addToast(`Failed to save instructions: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save instructions: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsSaving(false);
     }
@@ -2218,8 +2220,8 @@ function InstructionsTab({
       setFileContentDirty(false);
       setJustSavedFile(true);
       setTimeout(() => setJustSavedFile(false), 3000);
-    } catch (err: any) {
-      addToast(`Failed to save instructions file: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save instructions file: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsSavingFile(false);
     }
@@ -2437,8 +2439,8 @@ function PerformanceTab({
       ]);
       setSummary(summaryData);
       setRatings(ratingsData);
-    } catch (err: any) {
-      addToast(`Failed to load ratings: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load ratings: ${getErrorMessage(err)}`, "error");
     } finally {
       setLoading(false);
     }
@@ -2466,8 +2468,8 @@ function PerformanceTab({
       setNewComment("");
       addToast("Rating added", "success");
       await loadData();
-    } catch (err: any) {
-      addToast(`Failed to add rating: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to add rating: ${getErrorMessage(err)}`, "error");
     } finally {
       setSubmitting(false);
     }
@@ -2479,8 +2481,8 @@ function PerformanceTab({
       await deleteAgentRating(agentId, ratingId, projectId);
       addToast("Rating deleted", "success");
       await loadData();
-    } catch (err: any) {
-      addToast(`Failed to delete rating: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to delete rating: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -2824,8 +2826,8 @@ function ConfigTab({
       // Refresh budget status
       const status = await fetchAgentBudgetStatus(agent.id, projectId);
       setBudgetStatus(status);
-    } catch (err: any) {
-      addToast(`Failed to reset budget: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to reset budget: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsResettingBudget(false);
     }
@@ -3160,7 +3162,7 @@ function ConfigTab({
     try {
       await updateAgent(agent.id, {
         name: nameValue.trim() || undefined,
-        role: roleValue as any,
+        role: roleValue,
         title: titleValue.trim() || undefined,
         icon: iconValue.trim() || undefined,
         reportsTo: reportsToValue.trim() || undefined,
@@ -3176,8 +3178,8 @@ function ConfigTab({
       }
       justSavedTimeoutRef.current = setTimeout(() => setJustSaved(false), 3000);
       await onSaved();
-    } catch (err: any) {
-      addToast(`Failed to save settings: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save settings: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsSaving(false);
     }
@@ -3209,7 +3211,7 @@ function ConfigTab({
               id="agent-role"
               className="select"
               value={roleValue}
-              onChange={(e) => setRoleValue(e.target.value as any)}
+              onChange={(e) => setRoleValue(e.target.value as AgentCapability)}
             >
               <option value="triage">Triage</option>
               <option value="executor">Executor</option>

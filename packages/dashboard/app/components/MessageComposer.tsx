@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { X, Send, Loader2, Bot, AlertCircle } from "lucide-react";
 import type { ParticipantType, MessageType } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { sendMessage } from "../api";
 import type { Agent } from "../api";
 
@@ -66,8 +67,8 @@ export function MessageComposer({
         projectId,
       );
       onSend();
-    } catch (err: any) {
-      const msg = err?.message ?? "Failed to send message";
+    } catch (err) {
+      const msg = getErrorMessage(err) || "Failed to send message";
       setError(msg);
       addToast?.(msg, "error");
     } finally {

@@ -95,8 +95,8 @@ export function AgentReflectionsTab({ agentId, projectId, addToast }: AgentRefle
       ]);
       setReflections(reflectionsData);
       setPerformance(performanceData);
-    } catch (err: any) {
-      addToast(`Failed to load reflections: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load reflections: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsLoading(false);
     }

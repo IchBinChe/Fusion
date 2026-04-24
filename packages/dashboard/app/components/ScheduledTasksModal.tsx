@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Zap, Globe, Folder, X } from "lucide-react";
 import type { Routine, RoutineCreateInput } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   fetchRoutines,
   createRoutine,
@@ -46,8 +47,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
     try {
       const data = await fetchRoutines(scopeOptions);
       setRoutines(data);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load routines", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load routines", "error");
     }
   }, [addToast, scopeOptions]);
 
@@ -95,8 +96,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
         addToast("Routine created", "success");
         setRoutineView("list");
         await loadRoutines();
-      } catch (err: any) {
-        addToast(err.message || "Failed to create routine", "error");
+      } catch (err) {
+        addToast(getErrorMessage(err) || "Failed to create routine", "error");
       }
     },
     [addToast, loadRoutines, scopeOptions],
@@ -116,8 +117,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
         setRoutineView("list");
         setEditingRoutine(undefined);
         await loadRoutines();
-      } catch (err: any) {
-        addToast(err.message || "Failed to update routine", "error");
+      } catch (err) {
+        addToast(getErrorMessage(err) || "Failed to update routine", "error");
       }
     },
     [editingRoutine, addToast, loadRoutines, scopeOptions],
@@ -129,8 +130,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
         await deleteRoutine(routine.id, scopeOptions);
         addToast(`Deleted "${routine.name}"`, "success");
         await loadRoutines();
-      } catch (err: any) {
-        addToast(err.message || "Failed to delete routine", "error");
+      } catch (err) {
+        addToast(getErrorMessage(err) || "Failed to delete routine", "error");
       }
     },
     [addToast, loadRoutines, scopeOptions],
@@ -147,8 +148,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
           addToast(`"${routine.name}" failed: ${result.error || "Unknown error"}`, "error");
         }
         await loadRoutines();
-      } catch (err: any) {
-        addToast(err.message || "Failed to run routine", "error");
+      } catch (err) {
+        addToast(getErrorMessage(err) || "Failed to run routine", "error");
       } finally {
         setRunningRoutineId(null);
       }
@@ -165,8 +166,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
           "success",
         );
         await loadRoutines();
-      } catch (err: any) {
-        addToast(err.message || "Failed to toggle routine", "error");
+      } catch (err) {
+        addToast(getErrorMessage(err) || "Failed to toggle routine", "error");
       }
     },
     [addToast, loadRoutines, scopeOptions],

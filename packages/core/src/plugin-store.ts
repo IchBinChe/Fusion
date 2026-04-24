@@ -42,6 +42,25 @@ export interface PluginUpdateInput {
   dependencies?: string[];
 }
 
+/** Database row shape for the plugins table. */
+interface PluginRow {
+  id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  author: string | null;
+  homepage: string | null;
+  path: string;
+  enabled: number;
+  state: string;
+  settings: string | null;
+  settingsSchema: string | null;
+  error: string | null;
+  dependencies: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class PluginStore extends EventEmitter<PluginStoreEvents> {
   /** SQLite database instance */
   private _db: Database | null = null;
@@ -70,7 +89,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
 
   // ── Row Conversion ─────────────────────────────────────────────────
 
-  private rowToPlugin(row: any): PluginInstallation {
+  private rowToPlugin(row: PluginRow): PluginInstallation {
     return {
       id: row.id,
       name: row.name,
@@ -263,7 +282,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
    * Get a plugin by id.
    */
   async getPlugin(id: string): Promise<PluginInstallation> {
-    const row = this.db.prepare("SELECT * FROM plugins WHERE id = ?").get(id) as any;
+    const row = this.db.prepare("SELECT * FROM plugins WHERE id = ?").get(id) as unknown as PluginRow | undefined;
     if (!row) {
       throw Object.assign(new Error(`Plugin "${id}" not found`), { code: "ENOENT" });
     }
@@ -278,7 +297,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
   ): Promise<PluginInstallation[]> {
     let sql = "SELECT * FROM plugins";
     const conditions: string[] = [];
-    const params: any[] = [];
+    const params: (string | number)[] = [];
 
     if (filter?.enabled !== undefined) {
       conditions.push("enabled = ?");
@@ -294,7 +313,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
     }
     sql += " ORDER BY createdAt ASC";
 
-    const rows = this.db.prepare(sql).all(...params) as any[];
+    const rows = this.db.prepare(sql).all(...params) as unknown as PluginRow[];
     return rows.map((row) => this.rowToPlugin(row));
   }
 
@@ -424,7 +443,7 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
     const now = new Date().toISOString();
 
     const setClauses: string[] = ["updatedAt = ?"];
-    const params: any[] = [now];
+    const params: (string | null)[] = [now];
 
     if (updates.name !== undefined) {
       setClauses.push("name = ?");

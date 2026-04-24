@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getErrorMessage } from "@fusion/core";
 import type { FileNode, FileListResponse } from "../api";
 import { fetchWorkspaceFileList } from "../api";
 
@@ -65,9 +66,9 @@ export function useWorkspaceFileBrowser(
         if (!cancelled) {
           setEntries(response.entries);
         }
-      } catch (err: any) {
+      } catch (err) {
         if (!cancelled) {
-          setError(err.message || "Failed to load files");
+          setError(getErrorMessage(err) || "Failed to load files");
           setEntries([]);
         }
       } finally {

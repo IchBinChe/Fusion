@@ -11,7 +11,7 @@ import {
   type RuntimeLogger,
 } from "@fusion/dashboard";
 import { aiMergeTask, MissionAutopilot, MissionExecutionLoop, HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext, ProjectEngineManager, PeerExchangeService } from "@fusion/engine";
-import { AuthStorage, DefaultPackageManager, ModelRegistry, discoverAndLoadExtensions, createExtensionRuntime } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, DefaultPackageManager, ModelRegistry, SettingsManager, discoverAndLoadExtensions, createExtensionRuntime } from "@mariozechner/pi-coding-agent";
 import {
   getMergeStrategy,
   processPullRequestMergeTask,
@@ -342,8 +342,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   if (opts.interactive) {
     try {
       selectedPort = await promptForPort(port);
-    } catch (err: any) {
-      if (err.message === "Interactive prompt cancelled") {
+    } catch (err) {
+      if (err instanceof Error && err.message === "Interactive prompt cancelled") {
         console.log("Cancelled — exiting");
         process.exit(0);
       }
@@ -761,7 +761,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     packageManager = new DefaultPackageManager({
       cwd,
       agentDir,
-      settingsManager: createReadOnlyProviderSettingsView(cwd, agentDir) as any,
+      settingsManager: createReadOnlyProviderSettingsView(cwd, agentDir) as unknown as SettingsManager,
     });
     const resolvedPaths = await packageManager.resolve();
     const packageExtensionPaths = resolvedPaths.extensions
@@ -827,7 +827,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         const res = await fetch("https://openrouter.ai/api/v1/models", { headers });
         if (!res.ok) return;
         const json = await res.json() as { data?: Array<{ id: string; name: string; context_length?: number; top_provider?: { max_completion_tokens?: number }; pricing?: Record<string, string>; architecture?: { modality?: string; input_modalities?: string[] } }> };
-        const orModels = (json.data || []).map((m: any) => {
+        const orModels = (json.data || []).map((m) => {
           const id = (m.id || "").toLowerCase();
           const name = (m.name || "").toLowerCase();
           const reasoning = id.includes(":thinking") || id.includes("-r1") || id.includes("/r1") || id.includes("o1-") || id.includes("o3-") || id.includes("o4-") || id.includes("reasoner") || name.includes("thinking") || name.includes("reasoner");
@@ -870,7 +870,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const skillsAdapter = packageManager
     ? createSkillsAdapter({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dashboard's resolve() uses a looser onMissing signature than pi's DefaultPackageManager
         packageManager: packageManager as any,
         getSettingsPath: (rootDir: string) => getProjectSettingsPath(rootDir),
       })

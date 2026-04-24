@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { PlanningQuestion } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   startMissionInterview,
   respondToMissionInterview,
@@ -158,8 +159,8 @@ export function MissionInterviewModal({
         setLoadedModels(resp.models);
         setFavoriteProviders(resp.favoriteProviders);
         setFavoriteModels(resp.favoriteModels);
-      } catch (err: any) {
-        setModelsError(err.message || "Failed to load models");
+      } catch (err) {
+        setModelsError(getErrorMessage(err) || "Failed to load models");
       } finally {
         setModelsLoading(false);
       }
@@ -322,9 +323,9 @@ export function MissionInterviewModal({
 
         connectToMissionInterviewStream(sessionId);
         setResponseHistory([]);
-      } catch (err: any) {
+      } catch (err) {
         setIsReconnecting(false);
-        setError(err.message || "Failed to start interview session");
+        setError(getErrorMessage(err) || "Failed to start interview session");
         setView({ type: "initial" });
         currentSessionIdRef.current = null;
         setLockSessionId(null);
@@ -593,10 +594,10 @@ export function MissionInterviewModal({
         connectToMissionInterviewStream(sessionId);
         await respondToMissionInterview(sessionId, responses, projectId, sessionTabId);
         setHasProgress(true);
-      } catch (err: any) {
+      } catch (err) {
         streamConnectionRef.current?.close();
         streamConnectionRef.current = null;
-        setError(err.message || "Failed to submit response");
+        setError(getErrorMessage(err) || "Failed to submit response");
         setView({ type: "question", sessionId, question: view.question });
       }
     },
@@ -619,9 +620,9 @@ export function MissionInterviewModal({
       currentSessionIdRef.current = retrySessionId;
       setLockSessionId(retrySessionId);
       await retryMissionInterviewSession(retrySessionId, projectId, sessionTabId);
-    } catch (err: any) {
-      let retryError = err;
-      const retryErrorMessage = err?.message || "";
+    } catch (err) {
+      let retryError: unknown = err;
+      const retryErrorMessage = getErrorMessage(err) || "";
 
       if (retryErrorMessage.includes("not in an error state")) {
         try {
@@ -678,7 +679,7 @@ export function MissionInterviewModal({
 
           setIsReconnecting(false);
           return;
-        } catch (sessionRefreshError: any) {
+        } catch (sessionRefreshError) {
           retryError = sessionRefreshError;
         }
       }
@@ -688,7 +689,7 @@ export function MissionInterviewModal({
       setView({
         type: "error",
         sessionId: retrySessionId,
-        errorMessage: retryError?.message || "Retry failed. Please try again.",
+        errorMessage: getErrorMessage(retryError) || "Retry failed. Please try again.",
       });
       setIsReconnecting(false);
     } finally {
@@ -723,8 +724,8 @@ export function MissionInterviewModal({
       currentSessionIdRef.current = null;
       setLockSessionId(null);
       onClose();
-    } catch (err: any) {
-      setError(err.message || "Failed to create mission");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to create mission");
       setIsCreating(false);
     }
   }, [view, editedSummary, onMissionCreated, onClose, projectId]);
@@ -867,8 +868,8 @@ export function MissionInterviewModal({
                               setFavoriteProviders(resp.favoriteProviders);
                               setFavoriteModels(resp.favoriteModels);
                               setModelsError(null);
-                            } catch (err: any) {
-                              setModelsError(err.message || "Failed to load models");
+                            } catch (err) {
+                              setModelsError(getErrorMessage(err) || "Failed to load models");
                             } finally {
                               setModelsLoading(false);
                             }

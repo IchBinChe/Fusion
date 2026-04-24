@@ -17,13 +17,18 @@
 import { createInterface } from "node:readline";
 import {
   AssistantMessageEventStream,
+  type Api,
   type Model,
   type SimpleStreamOptions,
+  type TextContent,
+  type ThinkingContent,
+  type ToolCall,
 } from "@mariozechner/pi-ai";
 import {
   buildPrompt,
   buildSystemPrompt,
   buildResumePrompt,
+  type PiContext,
 } from "./prompt-builder.js";
 import {
   spawnClaude,
@@ -66,8 +71,8 @@ type StreamViaCLiOptions = SimpleStreamOptions & {
  * @returns An AssistantMessageEventStream that receives bridged events
  */
 export function streamViaCli(
-  model: Model<any>,
-  context: { messages: any[]; systemPrompt?: string },
+  model: Model<Api>,
+  context: PiContext,
   options?: StreamViaCLiOptions,
 ): AssistantMessageEventStream {
   // @ts-expect-error — tsc can't verify AssistantMessageEventStream is a value
@@ -153,7 +158,7 @@ export function streamViaCli(
           type: "done",
           reason: "stop",
           message: errorMessage,
-        } as any);
+        });
         stream.end();
       }
 
@@ -235,7 +240,7 @@ export function streamViaCli(
         if (msg.type === "stream_event") {
           // Only forward top-level events to pi's event bridge.
           // Sub-agent events (parent_tool_use_id !== null) are internal to the CLI.
-          const isTopLevel = !(msg as any).parent_tool_use_id;
+          const isTopLevel = !msg.parent_tool_use_id;
           if (isTopLevel) {
             bridge.handleEvent(msg.event);
           }
@@ -296,7 +301,7 @@ export function streamViaCli(
         // it means only user MCP tools were called (filtered by event bridge).
         // Override to "stop" so pi doesn't try to execute non-existent tools.
         const piToolCalls = (output.content || []).filter(
-          (c: any) => c.type === "toolCall",
+          (c: TextContent | ThinkingContent | ToolCall) => c.type === "toolCall",
         );
         const effectiveReason =
           output.stopReason === "toolUse" && piToolCalls.length === 0
@@ -316,12 +321,25 @@ export function streamViaCli(
         });
         stream.end();
       }
-    } catch (err: any) {
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Push a "done" event with a text error so pi gets a valid AssistantMessage.
+      // Pushing type:"error" would require an AssistantMessage in the error field,
+      // but we don't have a full AssistantMessage here.
       stream.push({
-        type: "error",
-        reason: "error",
-        error: err.message ?? "Unexpected error in streamViaCli",
-      } as any);
+        type: "done",
+        reason: "stop",
+        message: {
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: `Error: ${errMsg}` }],
+          api: "pi-claude-cli",
+          provider: model.provider,
+          model: model.id,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "stop" as const,
+          timestamp: Date.now(),
+        },
+      });
       stream.end();
     } finally {
       // Clean up abort listener

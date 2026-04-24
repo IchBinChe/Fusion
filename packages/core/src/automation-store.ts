@@ -19,6 +19,27 @@ export interface AutomationStoreEvents {
   "schedule:run": [data: { schedule: ScheduledTask; result: AutomationRunResult }];
 }
 
+/** Database row shape for the automations table. */
+interface ScheduleRow {
+  id: string;
+  name: string;
+  description: string | null;
+  scheduleType: string;
+  cronExpression: string;
+  command: string;
+  enabled: number;
+  timeoutMs: number | null;
+  steps: string | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastRunResult: string | null;
+  runCount: number;
+  runHistory: string;
+  scope: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class AutomationStore extends EventEmitter<AutomationStoreEvents> {
   /** Per-schedule promise chain for serializing writes. */
   private scheduleLocks: Map<string, Promise<void>> = new Map();
@@ -49,7 +70,7 @@ export class AutomationStore extends EventEmitter<AutomationStoreEvents> {
 
   // ── Row Conversion ─────────────────────────────────────────────────
 
-  private rowToSchedule(row: any): ScheduledTask {
+  private rowToSchedule(row: ScheduleRow): ScheduledTask {
     return {
       id: row.id,
       name: row.name,
@@ -126,7 +147,7 @@ export class AutomationStore extends EventEmitter<AutomationStoreEvents> {
   // ── Persistence ────────────────────────────────────────────────────
 
   private async readScheduleJson(id: string): Promise<ScheduledTask> {
-    const row = this.db.prepare('SELECT * FROM automations WHERE id = ?').get(id);
+    const row = this.db.prepare('SELECT * FROM automations WHERE id = ?').get(id) as unknown as ScheduleRow | undefined;
     if (!row) {
       throw Object.assign(new Error(`Schedule '${id}' not found`), { code: "ENOENT" });
     }
@@ -223,7 +244,7 @@ export class AutomationStore extends EventEmitter<AutomationStoreEvents> {
   }
 
   async listSchedules(): Promise<ScheduledTask[]> {
-    const rows = this.db.prepare('SELECT * FROM automations ORDER BY createdAt ASC').all() as any[];
+    const rows = this.db.prepare('SELECT * FROM automations ORDER BY createdAt ASC').all() as unknown as ScheduleRow[];
     return rows.map((row) => this.rowToSchedule(row));
   }
 
@@ -372,7 +393,7 @@ export class AutomationStore extends EventEmitter<AutomationStoreEvents> {
     const now = new Date().toISOString();
     const rows = this.db.prepare(
       'SELECT * FROM automations WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ? AND scope = ?'
-    ).all(now, scope) as any[];
+    ).all(now, scope) as unknown as ScheduleRow[];
     return rows.map((row) => this.rowToSchedule(row));
   }
 
@@ -384,7 +405,7 @@ export class AutomationStore extends EventEmitter<AutomationStoreEvents> {
     const now = new Date().toISOString();
     const rows = this.db.prepare(
       'SELECT * FROM automations WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?'
-    ).all(now) as any[];
+    ).all(now) as unknown as ScheduleRow[];
     return rows.map((row) => this.rowToSchedule(row));
   }
 }

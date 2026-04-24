@@ -273,12 +273,13 @@ export class RoutineRunner {
         startedAt,
         completedAt: new Date().toISOString(),
       };
-    } catch (err: any) {
-      const stdout = err.stdout ?? "";
-      const stderr = err.stderr ?? "";
-      const error = err.killed
+    } catch (err) {
+      const errObj = err as Record<string, unknown>;
+      const stdout = typeof errObj.stdout === "string" ? errObj.stdout : "";
+      const stderr = typeof errObj.stderr === "string" ? errObj.stderr : "";
+      const error = errObj.killed === true
         ? `Command timed out after ${(timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000}s`
-        : err.message ?? String(err);
+        : (err instanceof Error ? err.message : null) ?? String(err);
       return {
         success: false,
         output: truncateOutput(stdout, stderr),
@@ -398,7 +399,7 @@ export class RoutineRunner {
       stepIndex,
       success: false,
       output: "",
-      error: `Unknown step type: "${(step as any).type}"`,
+      error: `Unknown step type: "${String((step as unknown as Record<string, unknown>).type)}"`,
       startedAt,
       completedAt: new Date().toISOString(),
     };

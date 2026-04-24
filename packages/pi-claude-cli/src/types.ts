@@ -5,6 +5,8 @@
 export interface ClaudeStreamEventMessage {
   type: "stream_event";
   event: ClaudeApiEvent;
+  /** Present on sub-agent stream events; null/undefined for top-level events. */
+  parent_tool_use_id?: string | null;
 }
 
 export interface ClaudeResultMessage {

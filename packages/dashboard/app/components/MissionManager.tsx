@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { getErrorMessage } from "@fusion/core";
 import {
   X,
   Plus,
@@ -659,8 +660,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       const data = await fetchMissions(projectId);
       setMissions(data);
       void loadMissionHealth(data);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load missions", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load missions", "error");
     } finally {
       setLoading(false);
     }
@@ -699,8 +700,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         setSelectedMilestoneId(null);
         setValidationTelemetry(null);
       }
-    } catch (err: any) {
-      addToast(err.message || "Failed to load mission details", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load mission details", "error");
     } finally {
       setDetailLoading(false);
     }
@@ -816,8 +817,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           scrollActivityToLatest("auto");
         });
       }
-    } catch (err: any) {
-      addToast(err.message || "Failed to load mission activity", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load mission activity", "error");
     } finally {
       if (!append) {
         setEventsLoading(false);
@@ -1170,8 +1171,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       }
       await loadMissions();
       handleCancelMission();
-    } catch (err: any) {
-      addToast(err.message || "Failed to save mission", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to save mission", "error");
     } finally {
       setSaving(false);
     }
@@ -1186,8 +1187,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       }
       await loadMissions();
       setDeleteConfirmId(null);
-    } catch (err: any) {
-      addToast(err.message || "Failed to delete mission", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to delete mission", "error");
     }
   }, [addToast, loadMissions, selectedMission, projectId]);
 
@@ -1241,8 +1242,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       }
       await loadMissionDetail(selectedMission!.id);
       handleCancelMilestone();
-    } catch (err: any) {
-      addToast(err.message || "Failed to save milestone", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to save milestone", "error");
     } finally {
       setSaving(false);
     }
@@ -1254,8 +1255,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast("Milestone deleted", "success");
       await loadMissionDetail(selectedMission!.id);
       setDeleteConfirmId(null);
-    } catch (err: any) {
-      addToast(err.message || "Failed to delete milestone", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to delete milestone", "error");
     }
   }, [addToast, loadMissionDetail, selectedMission, projectId]);
 
@@ -1338,8 +1339,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       }
       await loadMissionDetail(selectedMission!.id);
       handleCancelSlice();
-    } catch (err: any) {
-      addToast(err.message || "Failed to save slice", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to save slice", "error");
     } finally {
       setSaving(false);
     }
@@ -1351,8 +1352,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast("Slice deleted", "success");
       await loadMissionDetail(selectedMission!.id);
       setDeleteConfirmId(null);
-    } catch (err: any) {
-      addToast(err.message || "Failed to delete slice", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to delete slice", "error");
     }
   }, [addToast, loadMissionDetail, selectedMission, projectId]);
 
@@ -1361,8 +1362,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await activateSlice(sliceId, projectId);
       addToast("Slice activated", "success");
       await loadMissionDetail(selectedMission!.id);
-    } catch (err: any) {
-      addToast(err.message || "Failed to activate slice", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to activate slice", "error");
     }
   }, [addToast, loadMissionDetail, selectedMission, projectId]);
 
@@ -1430,8 +1431,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       }
       await loadMissionDetail(selectedMission!.id);
       handleCancelFeature();
-    } catch (err: any) {
-      addToast(err.message || "Failed to save feature", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to save feature", "error");
     } finally {
       setSaving(false);
     }
@@ -1443,8 +1444,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast("Feature deleted", "success");
       await loadMissionDetail(selectedMission!.id);
       setDeleteConfirmId(null);
-    } catch (err: any) {
-      addToast(err.message || "Failed to delete feature", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to delete feature", "error");
     }
   }, [addToast, loadMissionDetail, selectedMission, projectId]);
 
@@ -1460,8 +1461,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await loadMissionDetail(selectedMission!.id);
       setLinkTaskFeatureId(null);
       setSelectedTaskId("");
-    } catch (err: any) {
-      addToast(err.message || "Failed to link feature to task", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to link feature to task", "error");
     }
   }, [linkTaskFeatureId, selectedTaskId, addToast, loadMissionDetail, selectedMission, projectId]);
 
@@ -1470,8 +1471,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await unlinkFeatureFromTask(featureId, projectId);
       addToast("Feature unlinked from task", "success");
       await loadMissionDetail(selectedMission!.id);
-    } catch (err: any) {
-      addToast(err.message || "Failed to unlink feature", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to unlink feature", "error");
     }
   }, [addToast, loadMissionDetail, selectedMission, projectId]);
 
@@ -1482,8 +1483,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await triageFeature(featureId, undefined, undefined, projectId);
       addToast("Feature triaged — task created", "success");
       await loadMissionDetail(selectedMission!.id);
-    } catch (err: any) {
-      addToast(err.message || "Failed to triage feature", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to triage feature", "error");
     } finally {
       setSaving(false);
     }
@@ -1522,8 +1523,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       const result = await triageAllSliceFeatures(sliceId, projectId);
       addToast(`Triaged ${result.count} feature${result.count !== 1 ? "s" : ""}`, "success");
       await loadMissionDetail(selectedMission!.id);
-    } catch (err: any) {
-      addToast(err.message || "Failed to triage slice features", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to triage slice features", "error");
     } finally {
       setSaving(false);
     }
@@ -1574,8 +1575,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await loadValidationRollup(milestoneId);
       setIsCreatingAssertion(false);
       setAssertionForm({ title: "", assertion: "", status: "pending" });
-    } catch (err: any) {
-      addToast(err.message || "Failed to create assertion", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to create assertion", "error");
     } finally {
       setSaving(false);
     }
@@ -1612,8 +1613,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await loadAssertionsForMilestone(milestoneId);
       await loadValidationRollup(milestoneId);
       handleCancelAssertion();
-    } catch (err: any) {
-      addToast(err.message || "Failed to update assertion", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to update assertion", "error");
     } finally {
       setSaving(false);
     }
@@ -1658,8 +1659,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast("Feature linked to assertion", "success");
       await loadLinkedFeaturesForAssertion(assertionId);
       setFeaturePickerOpenForAssertion(null);
-    } catch (err: any) {
-      addToast(err.message || "Failed to link feature", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to link feature", "error");
     } finally {
       setLinkingAssertions((prev) => {
         const next = new Set(prev);
@@ -1676,8 +1677,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       await unlinkFeatureFromAssertion(featureId, assertionId, projectId);
       addToast("Feature unlinked from assertion", "success");
       await loadLinkedFeaturesForAssertion(assertionId);
-    } catch (err: any) {
-      addToast(err.message || "Failed to unlink feature", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to unlink feature", "error");
     } finally {
       setUnlinkingFeatures((prev) => {
         const next = new Set(prev);
@@ -1701,8 +1702,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         next.set(featureId, snapshot);
         return next;
       });
-    } catch (err: any) {
-      addToast(err.message || "Failed to trigger validation", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to trigger validation", "error");
     } finally {
       setValidatingFeatures((prev) => {
         const next = new Set(prev);
@@ -1822,8 +1823,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast("Mission resumed", "success");
       await loadMissionDetail(missionId);
       loadMissions();
-    } catch (err: any) {
-      addToast(err.message || "Failed to resume mission", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to resume mission", "error");
     }
   }, [addToast, loadMissionDetail, loadMissions, projectId]);
 
@@ -1835,8 +1836,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast(`Mission stopped (${count} task${count !== 1 ? "s" : ""} paused)`, "success");
       await loadMissionDetail(missionId);
       loadMissions();
-    } catch (err: any) {
-      addToast(err.message || "Failed to stop mission", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to stop mission", "error");
     }
   }, [addToast, loadMissionDetail, loadMissions, projectId]);
 
@@ -1847,8 +1848,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       addToast("Mission started — first slice activated", "success");
       await loadMissionDetail(missionId);
       loadMissions();
-    } catch (err: any) {
-      addToast(err.message || "Failed to start mission", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to start mission", "error");
     }
   }, [addToast, loadMissionDetail, loadMissions, projectId]);
 
@@ -1861,8 +1862,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       // Reload mission detail to reflect updated fields
       await loadMissionDetail(missionId);
       loadMissions();
-    } catch (err: any) {
-      addToast(err.message || "Failed to update autopilot", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to update autopilot", "error");
     }
   }, [addToast, loadMissionDetail, loadMissions, projectId]);
 
@@ -3454,9 +3455,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               )}
 
               {/* Mission items */}
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {missions.map((mission: any) => {
-                const m = mission as { id: string; title: string; description?: string; status: string; summary?: { totalMilestones: number; completedMilestones: number; totalFeatures: number; completedFeatures: number; progressPercent: number } };
+              {missions.map((mission) => {
+                const m = mission;
                 const selId = selectedMission as { id: string } | null;
                 const isSelected = selId && selId.id === m.id;
                 const statusColors = missionStatusColors[m.status as MissionStatus] || { bg: "", text: "" };

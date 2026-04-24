@@ -160,8 +160,8 @@ export async function fetchGitRemote(remote: string = "origin", cwd: string = pr
   try {
     const { stdout } = await execAsync(`git fetch ${remote}`, { encoding: "utf-8", timeout: 30000, cwd });
     return { fetched: true, message: stdout.trim() || "Fetch completed" };
-  } catch (err: any) {
-    const message = err.message || String(err);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     if (message.includes("Could not resolve host") || message.includes("Connection refused")) {
       throw new Error("Failed to connect to remote");
     }
@@ -177,8 +177,8 @@ export async function pullGitBranch(cwd: string = process.cwd()): Promise<GitPul
   try {
     const { stdout } = await execAsync("git pull", { encoding: "utf-8", timeout: 30000, cwd });
     return { success: true, message: stdout.trim() };
-  } catch (err: any) {
-    const message = err.message || String(err);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     if (message.includes("CONFLICT") || message.includes("Merge conflict")) {
       return { success: false, message: "Merge conflict detected. Resolve manually.", conflict: true };
     }
@@ -193,8 +193,8 @@ export async function pushGitBranch(cwd: string = process.cwd()): Promise<GitPus
   try {
     const { stdout } = await execAsync("git push", { encoding: "utf-8", timeout: 30000, cwd });
     return { success: true, message: stdout.trim() || "Push completed" };
-  } catch (err: any) {
-    const message = err.message || String(err);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     if (message.includes("rejected") || message.includes("non-fast-forward")) {
       throw new Error("Push rejected. Pull latest changes first.");
     }
@@ -281,8 +281,8 @@ export async function runGitFetch(remote?: string, projectName?: string): Promis
     console.log();
     console.log(`  ✓ Fetched from ${targetRemote}`);
     console.log();
-  } catch (err: any) {
-    console.error(`Error: ${err.message}`);
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 }
@@ -333,8 +333,8 @@ export async function runGitPull(options: { skipConfirm?: boolean; projectName?:
       console.log(`    ${stdout.trim()}`);
     }
     console.log();
-  } catch (err: any) {
-    const message = err.message || String(err);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     if (message.includes("CONFLICT") || message.includes("Merge conflict")) {
       console.error("  ✗ Merge conflict detected. Resolve manually.");
       process.exit(1);
@@ -401,8 +401,8 @@ export async function runGitPush(options: { skipConfirm?: boolean; projectName?:
       console.log(`    ${stdout.trim()}`);
     }
     console.log();
-  } catch (err: any) {
-    const message = err.message || String(err);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     if (message.includes("rejected") || message.includes("non-fast-forward")) {
       console.error("Error: Push rejected. Pull latest changes first.");
     } else if (message.includes("Could not resolve host") || message.includes("Connection refused")) {

@@ -1,7 +1,7 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2 } from "lucide-react";
 import type { Task, TaskDetail, Column, PrInfo, IssueInfo } from "@fusion/core";
-import { COLUMN_LABELS, VALID_TRANSITIONS } from "@fusion/core";
+import { COLUMN_LABELS, VALID_TRANSITIONS, getErrorMessage } from "@fusion/core";
 import { fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { pickPreferredBadge } from "./TaskCardBadge";
@@ -438,8 +438,8 @@ function TaskCardComponent({
       try {
         await uploadAttachment(task.id, file, projectId);
         addToast(`Attached ${file.name} to ${task.id}`, "success");
-      } catch (err: any) {
-        addToast(`Failed to attach ${file.name}: ${err.message}`, "error");
+      } catch (err) {
+        addToast(`Failed to attach ${file.name}: ${getErrorMessage(err)}`, "error");
       }
     }
   }, [task.id, isFileDrag, addToast]);
@@ -640,8 +640,8 @@ function TaskCardComponent({
       });
       addToast(`Updated ${task.id}`, "success");
       setIsEditing(false);
-    } catch (err: any) {
-      addToast(`Failed to update ${task.id}: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
       // Stay in edit mode on error so user can retry
     } finally {
       setIsSaving(false);

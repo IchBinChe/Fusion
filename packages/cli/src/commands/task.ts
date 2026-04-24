@@ -472,8 +472,8 @@ export async function runTaskMerge(id: string, projectName?: string) {
     }
     console.log(`    Status:   done`);
     console.log();
-  } catch (err: any) {
-    console.error(`\n  ✗ ${err.message}\n`);
+  } catch (err) {
+    console.error(`\n  ✗ ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
 }
@@ -692,8 +692,8 @@ export async function runTaskDelete(id: string, force?: boolean, projectName?: s
     console.log();
     console.log(`  ✓ Deleted ${id}`);
     console.log();
-  } catch (err: any) {
-    console.error(`✗ Failed to delete ${id}: ${err.message}`);
+  } catch (err) {
+    console.error(`✗ Failed to delete ${id}: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
     return;
   }
@@ -733,8 +733,8 @@ export async function runTaskImportGitHubInteractive(
   let issues: GitHubIssue[];
   try {
     issues = await fetchGitHubIssues(owner, repo, { limit, labels });
-  } catch (err: any) {
-    console.error(`  ✗ ${err.message}\n`);
+  } catch (err) {
+    console.error(`  ✗ ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
 
@@ -921,8 +921,8 @@ export async function runTaskImportFromGitHub(
   let issues: GitHubIssue[];
   try {
     issues = await fetchGitHubIssues(owner, repo, { limit, labels });
-  } catch (err: any) {
-    console.error(`  ✗ ${err.message}\n`);
+  } catch (err) {
+    console.error(`  ✗ ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
 
@@ -1047,8 +1047,8 @@ export async function runTaskSteer(id: string, message?: string, projectName?: s
   let task;
   try {
     task = await store.addSteeringComment(id, trimmed, "user");
-  } catch (err: any) {
-    if (err.code === "ENOENT") {
+  } catch (err) {
+    if (typeof err === "object" && err !== null && (err as Record<string, unknown>).code === "ENOENT") {
       console.error(`Error: Task not found: ${id}`);
       process.exit(1);
     }
@@ -1078,8 +1078,8 @@ export async function runTaskPrCreate(id: string, options: PrCreateOptions = {},
   let task;
   try {
     task = await store.getTask(id);
-  } catch (err: any) {
-    if (err.code === "ENOENT") {
+  } catch (err) {
+    if (typeof err === "object" && err !== null && (err as Record<string, unknown>).code === "ENOENT") {
       console.error(`Error: Task ${id} not found`);
       process.exit(1);
     }
@@ -1168,16 +1168,17 @@ export async function runTaskPrCreate(id: string, options: PrCreateOptions = {},
     console.log(`    PR #${prInfo.number}: ${prInfo.url}`);
     console.log(`    Branch: ${branchName} → ${prInfo.baseBranch}`);
     console.log();
-  } catch (err: any) {
+  } catch (err) {
     // Handle specific error cases
-    if (err.message?.includes("already exists")) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("already exists")) {
       console.error(`Error: A pull request already exists for ${owner}/${repo}:${branchName}`);
       process.exit(1);
-    } else if (err.message?.includes("No commits between")) {
+    } else if (msg.includes("No commits between")) {
       console.error(`Error: No commits between ${options.base || "default base"} and ${branchName}. Push changes before creating PR.`);
       process.exit(1);
     } else {
-      console.error(`Error: ${err.message || "Failed to create PR"}`);
+      console.error(`Error: ${msg || "Failed to create PR"}`);
       process.exit(1);
     }
   }
@@ -1472,7 +1473,7 @@ export async function runTaskPlan(initialPlanArg?: string, yesFlag = false, proj
             break;
           }
           default: {
-            console.error(`\n  Unknown question type: ${(currentQuestion as any).type}`);
+            console.error(`\n  Unknown question type: ${String((currentQuestion as unknown as Record<string, unknown>).type)}`);
             process.exit(1);
           }
         }

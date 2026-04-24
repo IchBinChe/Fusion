@@ -107,7 +107,7 @@ export function cleanupSystemPromptFile(): void {
  */
 export function writeUserMessage(
   proc: ChildProcess,
-  prompt: string | any[],
+  prompt: string | unknown[],
 ): void {
   const message = {
     type: "user",

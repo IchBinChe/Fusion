@@ -1,6 +1,7 @@
 import type { ClaudeApiEvent, TrackedContentBlock } from "./types";
 import { calculateCost } from "@mariozechner/pi-ai";
 import type {
+  Api,
   AssistantMessage,
   AssistantMessageEventStream,
   Model,
@@ -71,7 +72,7 @@ function mapStopReason(
  */
 export function createEventBridge(
   stream: AssistantMessageEventStream,
-  model: Model<any>,
+  model: Model<Api>,
 ): EventBridge {
   // Tracked content blocks indexed by Claude's content_block index
   const blocks: TrackedBlock[] = [];
@@ -270,7 +271,7 @@ export function createEventBridge(
         // Try to parse accumulated JSON -- on success update args, on failure keep previous
         try {
           block.arguments = JSON.parse(block.partialJson);
-          (output.content[idx] as any).arguments = block.arguments;
+          (output.content[idx] as ToolCall).arguments = block.arguments as Record<string, unknown>;
         } catch {
           // Partial JSON not yet parseable -- keep previous arguments
         }
@@ -305,7 +306,7 @@ export function createEventBridge(
 
     const block = blocks[idx];
     // Clean up the tracking index from the block (no longer needed)
-    delete (block as any).index;
+    delete (block as unknown as Record<string, unknown>).index;
 
     if (block.type === "text") {
       stream.push({
@@ -333,11 +334,11 @@ export function createEventBridge(
 
       // Update output.content with final arguments
       const contentBlock = output.content[idx] as ToolCall;
-      (contentBlock as any).arguments = finalArgs;
-
       // ToolCall.arguments is typed as Record<string, any> in pi-ai, but we
       // intentionally emit a raw string when JSON parse fails completely.
       // Pi handles string arguments gracefully at runtime.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- finalArgs may be a raw string when JSON parse fails; pi-ai handles it at runtime
+      (contentBlock as any).arguments = finalArgs;
       const toolCall = {
         type: "toolCall" as const,
         id: block.id,

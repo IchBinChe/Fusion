@@ -153,20 +153,20 @@ const upload = multer({
 
 const execFileAsync = promisify(execFile);
 
-function readJsonObject(path: string): Record<string, any> {
+function readJsonObject(path: string): Record<string, unknown> {
   if (!nodeFs.existsSync(path)) {
     return {};
   }
 
   try {
     const parsed = JSON.parse(nodeFs.readFileSync(path, "utf-8"));
-    return parsed && typeof parsed === "object" ? parsed as Record<string, any> : {};
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
   }
 }
 
-function hasPackageManagerSettings(settings: Record<string, any>): boolean {
+function hasPackageManagerSettings(settings: Record<string, unknown>): boolean {
   return Array.isArray(settings.packages) || Array.isArray(settings.npmCommand);
 }
 
@@ -215,6 +215,7 @@ async function discoverDashboardPiExtensions(cwd: string): Promise<PiExtensionSe
         getNpmCommand: () => Array.isArray(mergedSettings.npmCommand)
           ? [...mergedSettings.npmCommand]
           : undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- settingsManager shape varies across pi-coding-agent versions; typed as any per upstream API
       } as any,
     });
     const resolved = await packageManager.resolve(async () => "skip");
@@ -15153,7 +15154,7 @@ async function persistImportedSkills(
         await central.init();
 
         const localNodes = await central.listNodes();
-        const localNode = localNodes.find((n: any) => n.type === "local");
+        const localNode = localNodes.find((n: { type?: string; id?: string }) => n.type === "local");
 
         if (localNode && localNode.id === nodeId) {
           // Local node — fall through to existing filesystem logic below
@@ -15198,11 +15199,12 @@ async function persistImportedSkills(
             }
             res.status(proxyRes.status);
             res.send(body);
-          } catch (fetchErr: any) {
-            if (fetchErr.name === "AbortError" || fetchErr.code === "ETIMEDOUT") {
-              throw new ApiError(504, `Remote node timeout: ${fetchErr.message}`);
+          } catch (fetchErr) {
+            const e = fetchErr as { name?: string; code?: string; message?: string };
+            if (e.name === "AbortError" || e.code === "ETIMEDOUT") {
+              throw new ApiError(504, `Remote node timeout: ${e.message ?? String(fetchErr)}`);
             }
-            throw new ApiError(502, `Remote node error: ${fetchErr.message}`);
+            throw new ApiError(502, `Remote node error: ${e.message ?? String(fetchErr)}`);
           }
           return;
         }

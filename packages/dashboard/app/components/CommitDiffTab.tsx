@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { FileCode, ChevronDown, ChevronRight, AlertCircle, GitCommit } from "lucide-react";
 import type { MergeDetails } from "@fusion/core";
 import { fetchCommitDiff } from "../api";
+import { getErrorMessage } from "@fusion/core";
 import { highlightDiff } from "../utils/highlightDiff";
 
 interface CommitDiffTabProps {
@@ -92,8 +93,8 @@ export function CommitDiffTab({ commitSha, mergeDetails }: CommitDiffTabProps) {
       if (parsed.length > 0) {
         setExpandedFiles(new Set([parsed[0].path]));
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to load commit diff");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to load commit diff");
     } finally {
       setLoading(false);
     }

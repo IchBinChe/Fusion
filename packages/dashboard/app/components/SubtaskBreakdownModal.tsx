@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Task } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import {
   startSubtaskBreakdown,
   retrySubtaskSession,
@@ -242,8 +243,8 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
       const { sessionId } = await startSubtaskBreakdown(localDescription.trim(), projectId);
       setView({ type: "generating", sessionId });
       connectToSubtaskStream(sessionId);
-    } catch (err: any) {
-      setError(err.message || "Failed to start subtask breakdown");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to start subtask breakdown");
       setView({ type: "initial" });
     }
   }, [connectToSubtaskStream, localDescription, projectId]);
@@ -295,8 +296,8 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
             errorMessage: session.error ?? "Session encountered an error",
           });
         }
-      } catch (err: any) {
-        setError(err.message || "Failed to resume session");
+      } catch (err) {
+        setError(getErrorMessage(err) || "Failed to resume session");
       }
     })();
   }, [connectToSubtaskStream, isOpen, resumeSessionId, view.type, projectId]);
@@ -478,8 +479,8 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
       onTasksCreated(result.tasks);
       resetState();
       onClose();
-    } catch (err: any) {
-      setError(err.message || "Failed to create tasks");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to create tasks");
       setView({ type: "editing", sessionId });
     }
   }, [isInvalid, onClose, onTasksCreated, parentTaskId, projectId, resetState, sessionId, subtasks]);
@@ -498,9 +499,9 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
 
     try {
       await retrySubtaskSession(retrySessionId, projectId, sessionTabId);
-    } catch (err: any) {
-      let retryError = err;
-      const retryErrorMessage = err?.message || "";
+    } catch (err) {
+      let retryError: unknown = err;
+      const retryErrorMessage = getErrorMessage(err) || "";
 
       if (retryErrorMessage.includes("not in an error state")) {
         try {
@@ -536,7 +537,7 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
 
           setIsReconnecting(false);
           return;
-        } catch (sessionRefreshError: any) {
+        } catch (sessionRefreshError) {
           retryError = sessionRefreshError;
         }
       }
@@ -546,7 +547,7 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
       setView({
         type: "error",
         sessionId: retrySessionId,
-        errorMessage: retryError?.message || "Retry failed. Please try again.",
+        errorMessage: getErrorMessage(retryError) || "Retry failed. Please try again.",
       });
       setIsReconnecting(false);
     } finally {

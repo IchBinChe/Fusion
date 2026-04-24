@@ -30,6 +30,7 @@ import {
   AuthStorage,
   DefaultPackageManager,
   ModelRegistry,
+  SettingsManager,
   discoverAndLoadExtensions,
   createExtensionRuntime,
 } from "@mariozechner/pi-coding-agent";
@@ -218,8 +219,8 @@ export async function runServe(
   if (opts.interactive) {
     try {
       selectedPort = await promptForPort(port);
-    } catch (err: any) {
-      if (err.message === "Interactive prompt cancelled") {
+    } catch (err) {
+      if (err instanceof Error && err.message === "Interactive prompt cancelled") {
         console.log("Cancelled — exiting");
         process.exit(0);
       }
@@ -319,7 +320,7 @@ export async function runServe(
     processPullRequestMerge: (s, wd, taskId) =>
       processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
     getTaskMergeBlocker,
-    onInsightRunProcessed: onMemoryInsightRunProcessed as any,
+    onInsightRunProcessed: (s: unknown, r: unknown) => onMemoryInsightRunProcessed(s as ScheduledTask, r as AutomationRunResult),
   });
 
   // Start engines for all registered projects eagerly
@@ -439,7 +440,7 @@ export async function runServe(
     packageManager = new DefaultPackageManager({
       cwd,
       agentDir,
-      settingsManager: createReadOnlyProviderSettingsView(cwd, agentDir) as any,
+      settingsManager: createReadOnlyProviderSettingsView(cwd, agentDir) as unknown as SettingsManager,
     });
     const resolvedPaths = await packageManager.resolve();
     const packageExtensionPaths = resolvedPaths.extensions
@@ -618,7 +619,7 @@ export async function runServe(
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const skillsAdapter = packageManager
     ? createSkillsAdapter({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dashboard's resolve() uses a looser onMissing signature than pi's DefaultPackageManager
         packageManager: packageManager as any,
         getSettingsPath: (rootDir: string) => getProjectSettingsPath(rootDir),
       })

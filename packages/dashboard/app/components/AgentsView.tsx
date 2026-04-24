@@ -22,7 +22,7 @@ import {
   MIN_HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_INTERVAL_PRESETS,
 } from "../utils/heartbeatIntervals";
-import { isEphemeralAgent } from "@fusion/core";
+import { isEphemeralAgent, getErrorMessage } from "@fusion/core";
 
 export interface AgentsViewProps {
   addToast: (message: string, type?: "success" | "error") => void;
@@ -313,8 +313,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
     try {
       await updateSettings({ heartbeatMultiplier: clampedValue }, projectId);
       addToast(`Heartbeat speed set to ×${clampedValue.toFixed(1)}`, "success");
-    } catch (err: any) {
-      addToast(`Failed to save heartbeat multiplier: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to save heartbeat multiplier: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsSavingMultiplier(false);
     }
@@ -356,8 +356,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       const filter = filterState !== "all" ? { state: filterState } : undefined;
       const data = await fetchAgents({ ...filter, includeEphemeral: showSystemAgents }, projectId);
       setAgents(data);
-    } catch (err: any) {
-      addToast(`Failed to load agents: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to load agents: ${getErrorMessage(err)}`, "error");
     } finally {
       setIsLoading(false);
     }
@@ -378,9 +378,9 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
           setOrgTree(data);
         }
       })
-      .catch((err: any) => {
+      .catch((err) => {
         if (!cancelled) {
-          addToast(`Failed to load org chart: ${err.message}`, "error");
+          addToast(`Failed to load org chart: ${getErrorMessage(err)}`, "error");
           setOrgTree([]);
         }
       })
@@ -435,16 +435,16 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       if (newState === "active") {
         try {
           await startAgentRun(agentId, projectId);
-        } catch (runErr: any) {
-          addToast(`Agent activated, but failed to start run: ${runErr.message}`, "error");
+        } catch (runErr) {
+          addToast(`Agent activated, but failed to start run: ${getErrorMessage(runErr)}`, "error");
         }
       }
       void loadAgents();
-    } catch (err: any) {
+    } catch (err) {
       if (previousAgent) {
         setAgents(prev => prev.map(a => a.id === agentId ? previousAgent : a));
       }
-      addToast(`Failed to update state: ${err.message}`, "error");
+      addToast(`Failed to update state: ${getErrorMessage(err)}`, "error");
     } finally {
       setTransitioningAgentIds(prev => { const next = new Set(prev); next.delete(agentId); return next; });
     }
@@ -456,8 +456,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       await deleteAgent(agentId, projectId);
       addToast(`Agent "${agentName}" deleted`, "success");
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to delete agent: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to delete agent: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -476,8 +476,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       addToast(`Agent role updated to ${AGENT_ROLES.find(r => r.value === newRole)?.label ?? newRole}`, "success");
       setEditingRoleForAgent(null);
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to update role: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update role: ${getErrorMessage(err)}`, "error");
     }
   };
 
@@ -512,8 +512,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       );
       addToast(`Heartbeat interval updated to ${formatHeartbeatInterval(newIntervalMs)} for ${agent.name}`, "success");
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to update heartbeat interval: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update heartbeat interval: ${getErrorMessage(err)}`, "error");
     } finally {
       setUpdatingHeartbeatAgentId(null);
     }
@@ -572,8 +572,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
           return next;
         });
         void loadAgents();
-      } catch (err: any) {
-        addToast(`Failed to update heartbeat interval: ${err.message}`, "error");
+      } catch (err) {
+        addToast(`Failed to update heartbeat interval: ${getErrorMessage(err)}`, "error");
       } finally {
         setUpdatingHeartbeatAgentId(null);
       }
@@ -602,8 +602,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
         return next;
       });
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to update heartbeat interval: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to update heartbeat interval: ${getErrorMessage(err)}`, "error");
     } finally {
       setUpdatingHeartbeatAgentId(null);
     }
@@ -634,8 +634,8 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
       await startAgentRun(agentId, projectId, { source: "on_demand", triggerDetail: "Triggered from dashboard" });
       addToast(`Heartbeat run started for ${agentName}`, "success");
       void loadAgents();
-    } catch (err: any) {
-      addToast(`Failed to start heartbeat run: ${err.message}`, "error");
+    } catch (err) {
+      addToast(`Failed to start heartbeat run: ${getErrorMessage(err)}`, "error");
     }
   };
 

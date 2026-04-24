@@ -219,85 +219,84 @@ export function createSSE(
     };
 
     // --- Event handler definitions ---
-    /* eslint-disable @typescript-eslint/no-explicit-any -- EventEmitter handlers receive untyped event data */
-    const onCreated = (task: any) => {
+    const onCreated = (task: unknown) => {
       send(`event: task:created\ndata: ${JSON.stringify(stripTaskListHeavyFields(task))}\n\n`);
     };
-    const onMoved = (data: any) => {
+    const onMoved = (data: unknown) => {
       send(`event: task:moved\ndata: ${JSON.stringify(stripTaskEventHeavyFields(data))}\n\n`);
     };
-    const onUpdated = (task: any) => {
+    const onUpdated = (task: unknown) => {
       send(`event: task:updated\ndata: ${JSON.stringify(stripTaskListHeavyFields(task))}\n\n`);
     };
-    const onDeleted = (task: any) => {
+    const onDeleted = (task: unknown) => {
       send(`event: task:deleted\ndata: ${JSON.stringify(stripTaskListHeavyFields(task))}\n\n`);
     };
-    const onMerged = (result: any) => {
+    const onMerged = (result: unknown) => {
       send(`event: task:merged\ndata: ${JSON.stringify(stripTaskEventHeavyFields(result))}\n\n`);
     };
 
-    const onMissionCreated = (data: any) => {
+    const onMissionCreated = (data: unknown) => {
       send(`event: mission:created\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onMissionUpdated = (data: any) => {
+    const onMissionUpdated = (data: unknown) => {
       send(`event: mission:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onMissionDeleted = (data: any) => {
+    const onMissionDeleted = (data: unknown) => {
       send(`event: mission:deleted\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onMilestoneCreated = (data: any) => {
+    const onMilestoneCreated = (data: unknown) => {
       send(`event: milestone:created\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onMilestoneUpdated = (data: any) => {
+    const onMilestoneUpdated = (data: unknown) => {
       send(`event: milestone:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onMilestoneDeleted = (data: any) => {
+    const onMilestoneDeleted = (data: unknown) => {
       send(`event: milestone:deleted\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onSliceCreated = (data: any) => {
+    const onSliceCreated = (data: unknown) => {
       send(`event: slice:created\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onSliceUpdated = (data: any) => {
+    const onSliceUpdated = (data: unknown) => {
       send(`event: slice:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onSliceDeleted = (data: any) => {
+    const onSliceDeleted = (data: unknown) => {
       send(`event: slice:deleted\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onSliceActivated = (data: any) => {
+    const onSliceActivated = (data: unknown) => {
       send(`event: slice:activated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onFeatureCreated = (data: any) => {
+    const onFeatureCreated = (data: unknown) => {
       send(`event: feature:created\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onFeatureUpdated = (data: any) => {
+    const onFeatureUpdated = (data: unknown) => {
       send(`event: feature:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onFeatureDeleted = (data: any) => {
+    const onFeatureDeleted = (data: unknown) => {
       send(`event: feature:deleted\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onFeatureLinked = (data: any) => {
+    const onFeatureLinked = (data: unknown) => {
       send(`event: feature:linked\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onAssertionCreated = (data: any) => {
+    const onAssertionCreated = (data: unknown) => {
       send(`event: assertion:created\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onAssertionUpdated = (data: any) => {
+    const onAssertionUpdated = (data: unknown) => {
       send(`event: assertion:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onAssertionDeleted = (data: any) => {
+    const onAssertionDeleted = (data: unknown) => {
       send(`event: assertion:deleted\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onAssertionLinked = (data: any) => {
+    const onAssertionLinked = (data: unknown) => {
       send(`event: assertion:linked\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onAssertionUnlinked = (data: any) => {
+    const onAssertionUnlinked = (data: unknown) => {
       send(`event: assertion:unlinked\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onMissionEvent = (data: any) => {
+    const onMissionEvent = (data: unknown) => {
       send(`event: mission:event\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    const onMilestoneValidationUpdated = (data: any) => {
+    const onMilestoneValidationUpdated = (data: unknown) => {
       send(`event: milestone:validation:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
@@ -313,14 +312,12 @@ export function createSSE(
       send(`event: fix-feature:created\ndata: ${JSON.stringify(payload)}\n\n`);
     };
 
-    const onAiSessionUpdated = (data: any) => {
+    const onAiSessionUpdated = (data: unknown) => {
       send(`event: ai_session:updated\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const onAiSessionDeleted = (data: any) => {
+    const onAiSessionDeleted = (data: unknown) => {
       send(`event: ai_session:deleted\ndata: ${JSON.stringify(data)}\n\n`);
     };
-
-    /* eslint-enable @typescript-eslint/no-explicit-any */
 
     // --- Unified plugin lifecycle handler ---
     // Instead of emitting individual plugin events, we normalize all plugin
@@ -358,11 +355,11 @@ export function createSSE(
     };
 
     // --- Agent lifecycle event handlers ---
-    const onAgentCreated = (agent: any) => {
+    const onAgentCreated = (agent: unknown) => {
       send(`event: agent:created\ndata: ${JSON.stringify(agent)}\n\n`);
     };
 
-    const onAgentUpdated = (agent: any) => {
+    const onAgentUpdated = (agent: unknown) => {
       send(`event: agent:updated\ndata: ${JSON.stringify(agent)}\n\n`);
     };
 
@@ -392,11 +389,11 @@ export function createSSE(
     };
 
     // --- Chat store event handlers ---
-    const onChatSessionCreated = (session: any) => {
+    const onChatSessionCreated = (session: unknown) => {
       send(`event: chat:session:created\ndata: ${JSON.stringify(session)}\n\n`);
     };
 
-    const onChatSessionUpdated = (session: any) => {
+    const onChatSessionUpdated = (session: unknown) => {
       send(`event: chat:session:updated\ndata: ${JSON.stringify(session)}\n\n`);
     };
 
@@ -404,7 +401,7 @@ export function createSSE(
       send(`event: chat:session:deleted\ndata: ${JSON.stringify({ id: sessionId })}\n\n`);
     };
 
-    const onChatMessageAdded = (message: any) => {
+    const onChatMessageAdded = (message: unknown) => {
       send(`event: chat:message:added\ndata: ${JSON.stringify(message)}\n\n`);
     };
 

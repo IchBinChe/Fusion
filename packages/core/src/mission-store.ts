@@ -127,6 +127,147 @@ export interface MissionStoreEvents {
   "fix-feature:created": [FixFeatureCreatedPayload];
 }
 
+// ── Row Interfaces ──────────────────────────────────────────────────
+
+/** Database row shape for the missions table. */
+interface MissionRow {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  interviewState: string;
+  autoAdvance: number;
+  autopilotEnabled: number;
+  autopilotState: string;
+  lastAutopilotActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the milestones table. */
+interface MilestoneRow {
+  id: string;
+  missionId: string;
+  title: string;
+  description: string | null;
+  status: string;
+  orderIndex: number;
+  interviewState: string;
+  dependencies: string | null;
+  planningNotes: string | null;
+  verification: string | null;
+  validationState: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the mission_contract_assertions table. */
+interface AssertionRow {
+  id: string;
+  milestoneId: string;
+  title: string;
+  assertion: string;
+  status: string;
+  orderIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the mission_feature_assertions table. */
+interface FeatureAssertionLinkRow {
+  featureId: string;
+  assertionId: string;
+  createdAt: string;
+}
+
+/** Database row shape for the slices table. */
+interface SliceRow {
+  id: string;
+  milestoneId: string;
+  title: string;
+  description: string | null;
+  status: string;
+  orderIndex: number;
+  activatedAt: string | null;
+  planState: string | null;
+  planningNotes: string | null;
+  verification: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the mission_features table. */
+interface FeatureRow {
+  id: string;
+  sliceId: string;
+  taskId: string | null;
+  title: string;
+  description: string | null;
+  acceptanceCriteria: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  loopState: string | null;
+  implementationAttemptCount: number | null;
+  validatorAttemptCount: number | null;
+  lastValidatorRunId: string | null;
+  lastValidatorStatus: string | null;
+  generatedFromFeatureId: string | null;
+  generatedFromRunId: string | null;
+}
+
+/** Database row shape for the mission_events table. */
+interface MissionEventRow {
+  id: string;
+  missionId: string;
+  eventType: string;
+  description: string;
+  metadata: string | null;
+  timestamp: string;
+  seq: number | null;
+}
+
+/** Database row shape for the mission_validator_runs table. */
+interface ValidatorRunRow {
+  id: string;
+  featureId: string;
+  milestoneId: string;
+  sliceId: string;
+  status: string;
+  triggerType: string | null;
+  implementationAttempt: number | null;
+  validatorAttempt: number | null;
+  taskId: string | null;
+  summary: string | null;
+  blockedReason: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the mission_validator_failures table. */
+interface FailureRow {
+  id: string;
+  runId: string;
+  featureId: string;
+  assertionId: string;
+  message: string | null;
+  expected: string | null;
+  actual: string | null;
+  createdAt: string;
+}
+
+/** Database row shape for the mission_fix_feature_lineage table. */
+interface LineageRow {
+  id: string;
+  sourceFeatureId: string;
+  fixFeatureId: string;
+  runId: string;
+  failedAssertionIds: string | null;
+  createdAt: string;
+}
+
 // ── MissionStore Class ──────────────────────────────────────────────
 
 export class MissionStore extends EventEmitter<MissionStoreEvents> {
@@ -158,7 +299,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a Mission object.
    */
-  private rowToMission(row: any): Mission {
+  private rowToMission(row: MissionRow): Mission {
     return {
       id: row.id,
       title: row.title,
@@ -177,7 +318,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a Milestone object.
    */
-  private rowToMilestone(row: any): Milestone {
+  private rowToMilestone(row: MilestoneRow): Milestone {
     return {
       id: row.id,
       missionId: row.missionId,
@@ -198,7 +339,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a MissionContractAssertion object.
    */
-  private rowToAssertion(row: any): MissionContractAssertion {
+  private rowToAssertion(row: AssertionRow): MissionContractAssertion {
     return {
       id: row.id,
       milestoneId: row.milestoneId,
@@ -214,7 +355,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a FeatureAssertionLink object.
    */
-  private rowToFeatureAssertionLink(row: any): FeatureAssertionLink {
+  private rowToFeatureAssertionLink(row: FeatureAssertionLinkRow): FeatureAssertionLink {
     return {
       featureId: row.featureId,
       assertionId: row.assertionId,
@@ -225,7 +366,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a Slice object.
    */
-  private rowToSlice(row: any): Slice {
+  private rowToSlice(row: SliceRow): Slice {
     return {
       id: row.id,
       milestoneId: row.milestoneId,
@@ -245,7 +386,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a MissionFeature object.
    */
-  private rowToFeature(row: any): MissionFeature {
+  private rowToFeature(row: FeatureRow): MissionFeature {
     return {
       id: row.id,
       sliceId: row.sliceId,
@@ -269,7 +410,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a MissionEvent object.
    */
-  private rowToMissionEvent(row: any): MissionEvent {
+  private rowToMissionEvent(row: MissionEventRow): MissionEvent {
     return {
       id: row.id,
       missionId: row.missionId,
@@ -284,7 +425,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a MissionValidatorRun object.
    */
-  private rowToValidatorRun(row: any): MissionValidatorRun {
+  private rowToValidatorRun(row: ValidatorRunRow): MissionValidatorRun {
     return {
       id: row.id,
       featureId: row.featureId,
@@ -307,7 +448,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a MissionAssertionFailureRecord object.
    */
-  private rowToFailure(row: any): MissionAssertionFailureRecord {
+  private rowToFailure(row: FailureRow): MissionAssertionFailureRecord {
     return {
       id: row.id,
       runId: row.runId,
@@ -323,7 +464,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Convert a database row to a MissionFixFeatureLineage object.
    */
-  private rowToLineage(row: any): MissionFixFeatureLineage {
+  private rowToLineage(row: LineageRow): MissionFixFeatureLineage {
     return {
       id: row.id,
       sourceFeatureId: row.sourceFeatureId,
@@ -388,7 +529,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The mission, or undefined if not found
    */
   getMission(id: string): Mission | undefined {
-    const row = this.db.prepare("SELECT * FROM missions WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM missions WHERE id = ?").get(id) as unknown as MissionRow | undefined;
     if (!row) return undefined;
     return this.rowToMission(row);
   }
@@ -429,7 +570,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    */
   listMissions(): Mission[] {
     const rows = this.db.prepare("SELECT * FROM missions ORDER BY createdAt DESC").all();
-    return (rows as any[]).map((row) => this.rowToMission(row));
+    return (rows as unknown as MissionRow[]).map((row) => this.rowToMission(row));
   }
 
   /**
@@ -494,19 +635,19 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     // 2. Batch query all milestones
     const milestoneRows = this.db.prepare(
       "SELECT * FROM milestones ORDER BY orderIndex ASC"
-    ).all() as any[];
+    ).all() as unknown as MilestoneRow[];
     const allMilestones = milestoneRows.map((row) => this.rowToMilestone(row));
 
     // 3. Batch query all slices
     const sliceRows = this.db.prepare(
       "SELECT * FROM slices ORDER BY orderIndex ASC"
-    ).all() as any[];
+    ).all() as unknown as SliceRow[];
     const allSlices = sliceRows.map((row) => this.rowToSlice(row));
 
     // 4. Batch query all features
     const featureRows = this.db.prepare(
       "SELECT * FROM mission_features ORDER BY createdAt ASC"
-    ).all() as any[];
+    ).all() as unknown as FeatureRow[];
     const allFeatures = featureRows.map((row) => this.rowToFeature(row));
 
     // 5. Group in-memory: slices by milestoneId, features by sliceId
@@ -585,19 +726,19 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     // 1. Batch query all milestones
     const milestoneRows = this.db.prepare(
       "SELECT * FROM milestones ORDER BY orderIndex ASC"
-    ).all() as any[];
+    ).all() as unknown as MilestoneRow[];
     const allMilestones = milestoneRows.map((row) => this.rowToMilestone(row));
 
     // 2. Batch query all slices
     const sliceRows = this.db.prepare(
       "SELECT * FROM slices ORDER BY orderIndex ASC"
-    ).all() as any[];
+    ).all() as unknown as SliceRow[];
     const allSlices = sliceRows.map((row) => this.rowToSlice(row));
 
     // 3. Batch query all features
     const featureRows = this.db.prepare(
       "SELECT * FROM mission_features ORDER BY createdAt ASC"
-    ).all() as any[];
+    ).all() as unknown as FeatureRow[];
     const allFeatures = featureRows.map((row) => this.rowToFeature(row));
 
     // 4. Batch query all failed task IDs
@@ -798,7 +939,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       WHERE ${whereSql}
       ORDER BY timestamp DESC, id DESC
       LIMIT ? OFFSET ?
-    `).all(...params, limit, offset) as any[];
+    `).all(...params, limit, offset) as unknown as MissionEventRow[];
 
     return {
       events: rows.map((row) => this.rowToMissionEvent(row)),
@@ -1048,7 +1189,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The milestone, or undefined if not found
    */
   getMilestone(id: string): Milestone | undefined {
-    const row = this.db.prepare("SELECT * FROM milestones WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM milestones WHERE id = ?").get(id) as unknown as MilestoneRow | undefined;
     if (!row) return undefined;
     return this.rowToMilestone(row);
   }
@@ -1063,7 +1204,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM milestones WHERE missionId = ? ORDER BY orderIndex ASC"
     ).all(missionId);
-    return (rows as any[]).map((row) => this.rowToMilestone(row));
+    return (rows as unknown as MilestoneRow[]).map((row) => this.rowToMilestone(row));
   }
 
   /**
@@ -1260,7 +1401,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The slice, or undefined if not found
    */
   getSlice(id: string): Slice | undefined {
-    const row = this.db.prepare("SELECT * FROM slices WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM slices WHERE id = ?").get(id) as unknown as SliceRow | undefined;
     if (!row) return undefined;
     return this.rowToSlice(row);
   }
@@ -1275,7 +1416,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM slices WHERE milestoneId = ? ORDER BY orderIndex ASC"
     ).all(milestoneId);
-    return (rows as any[]).map((row) => this.rowToSlice(row));
+    return (rows as unknown as SliceRow[]).map((row) => this.rowToSlice(row));
   }
 
   /**
@@ -1524,7 +1665,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The feature, or undefined if not found
    */
   getFeature(id: string): MissionFeature | undefined {
-    const row = this.db.prepare("SELECT * FROM mission_features WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM mission_features WHERE id = ?").get(id) as unknown as FeatureRow | undefined;
     if (!row) return undefined;
     return this.rowToFeature(row);
   }
@@ -1539,7 +1680,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM mission_features WHERE sliceId = ? ORDER BY createdAt ASC"
     ).all(sliceId);
-    return (rows as any[]).map((row) => this.rowToFeature(row));
+    return (rows as unknown as FeatureRow[]).map((row) => this.rowToFeature(row));
   }
 
   /**
@@ -1780,7 +1921,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The feature, or undefined if no feature is linked to this task
    */
   getFeatureByTaskId(taskId: string): MissionFeature | undefined {
-    const row = this.db.prepare("SELECT * FROM mission_features WHERE taskId = ?").get(taskId);
+    const row = this.db.prepare("SELECT * FROM mission_features WHERE taskId = ?").get(taskId) as unknown as FeatureRow | undefined;
     if (!row) return undefined;
     return this.rowToFeature(row);
   }
@@ -1976,7 +2117,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The validator run, or undefined if not found
    */
   getValidatorRun(id: string): MissionValidatorRun | undefined {
-    const row = this.db.prepare("SELECT * FROM mission_validator_runs WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM mission_validator_runs WHERE id = ?").get(id) as ValidatorRunRow | undefined;
     if (!row) return undefined;
     return this.rowToValidatorRun(row);
   }
@@ -2057,7 +2198,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM mission_validator_failures WHERE runId = ? ORDER BY createdAt ASC"
     ).all(runId);
-    return (rows as any[]).map((row) => this.rowToFailure(row));
+    return (rows as unknown as FailureRow[]).map((row) => this.rowToFailure(row));
   }
 
   /**
@@ -2070,7 +2211,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM mission_validator_runs WHERE featureId = ? ORDER BY startedAt DESC"
     ).all(featureId);
-    return (rows as any[]).map((row) => this.rowToValidatorRun(row));
+    return (rows as unknown as ValidatorRunRow[]).map((row) => this.rowToValidatorRun(row));
   }
 
   /**
@@ -2230,10 +2371,10 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     // Get lineage entries where this feature is the source or the fix
     const sourceLineageRows = this.db.prepare(
       "SELECT * FROM mission_fix_feature_lineage WHERE sourceFeatureId = ?"
-    ).all(featureId) as any[];
+    ).all(featureId) as unknown as LineageRow[];
     const fixLineageRows = this.db.prepare(
       "SELECT * FROM mission_fix_feature_lineage WHERE fixFeatureId = ?"
-    ).all(featureId) as any[];
+    ).all(featureId) as unknown as LineageRow[];
 
     const lineage = [
       ...sourceLineageRows.map((row) => this.rowToLineage(row)),
@@ -2411,7 +2552,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @returns The assertion, or undefined if not found
    */
   getContractAssertion(id: string): MissionContractAssertion | undefined {
-    const row = this.db.prepare("SELECT * FROM mission_contract_assertions WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM mission_contract_assertions WHERE id = ?").get(id) as unknown as AssertionRow | undefined;
     if (!row) return undefined;
     return this.rowToAssertion(row);
   }
@@ -2429,7 +2570,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const rows = this.db.prepare(
       "SELECT * FROM mission_contract_assertions WHERE milestoneId = ? ORDER BY orderIndex ASC, createdAt ASC, id ASC"
     ).all(milestoneId);
-    return (rows as any[]).map((row) => this.rowToAssertion(row));
+    return (rows as unknown as AssertionRow[]).map((row) => this.rowToAssertion(row));
   }
 
   /**
@@ -2626,7 +2767,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       WHERE fa.featureId = ?
       ORDER BY ca.orderIndex ASC, ca.createdAt ASC, ca.id ASC
     `).all(featureId);
-    return (rows as any[]).map((row) => this.rowToAssertion(row));
+    return (rows as unknown as AssertionRow[]).map((row) => this.rowToAssertion(row));
   }
 
   /**
@@ -2642,7 +2783,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       WHERE fa.assertionId = ?
       ORDER BY mf.createdAt ASC
     `).all(assertionId);
-    return (rows as any[]).map((row) => this.rowToFeature(row));
+    return (rows as unknown as FeatureRow[]).map((row) => this.rowToFeature(row));
   }
 
   // ── Validation Rollup Operations ───────────────────────────────────

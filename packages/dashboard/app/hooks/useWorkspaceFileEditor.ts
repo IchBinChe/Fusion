@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getErrorMessage } from "@fusion/core";
 import type { FileContentResponse, SaveFileResponse } from "../api";
 import { fetchWorkspaceFileContent, saveWorkspaceFileContent } from "../api";
 
@@ -63,9 +64,9 @@ export function useWorkspaceFileEditor(
           setOriginalContent(response.content);
           setMtime(response.mtime);
         }
-      } catch (err: any) {
+      } catch (err) {
         if (!cancelled) {
-          setError(err.message || "Failed to load file");
+          setError(getErrorMessage(err) || "Failed to load file");
           setContentState("");
           setOriginalContent("");
           setMtime(null);
@@ -98,8 +99,8 @@ export function useWorkspaceFileEditor(
       const response: SaveFileResponse = await saveWorkspaceFileContent(workspace, filePath, content, projectId);
       setOriginalContent(content);
       setMtime(response.mtime);
-    } catch (err: any) {
-      setError(err.message || "Failed to save file");
+    } catch (err) {
+      setError(getErrorMessage(err) || "Failed to save file");
       throw err;
     } finally {
       setSaving(false);

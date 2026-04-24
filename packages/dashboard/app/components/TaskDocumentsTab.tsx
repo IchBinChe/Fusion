@@ -3,6 +3,7 @@ import { FileText, ChevronDown, ChevronUp, Plus, Trash2, History } from "lucide-
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, TaskDocument, TaskDocumentRevision } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import {
   fetchTaskDocuments,
@@ -61,8 +62,8 @@ export function TaskDocumentsTab({
     try {
       const docs = await fetchTaskDocuments(taskId, projectId);
       setDocuments(docs);
-    } catch (error: any) {
-      addToast(error.message || "Failed to load documents", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to load documents", "error");
     } finally {
       setLoading(false);
     }
@@ -102,8 +103,8 @@ export function TaskDocumentsTab({
       try {
         const revs = await fetchTaskDocumentRevisions(taskId, docKey, projectId);
         setRevisions(revs);
-      } catch (error: any) {
-        addToast(error.message || "Failed to load revisions", "error");
+      } catch (error) {
+        addToast(getErrorMessage(error) || "Failed to load revisions", "error");
       } finally {
         setLoadingRevisions(false);
       }
@@ -136,8 +137,8 @@ export function TaskDocumentsTab({
         setExpandedContent(updated.content);
       }
       addToast("Document saved", "success");
-    } catch (error: any) {
-      addToast(error.message || "Failed to save document", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to save document", "error");
     } finally {
       setSaving(false);
     }
@@ -169,8 +170,8 @@ export function TaskDocumentsTab({
       setNewDocContent("");
       await loadDocuments();
       addToast("Document created", "success");
-    } catch (error: any) {
-      addToast(error.message || "Failed to create document", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to create document", "error");
     } finally {
       setSaving(false);
     }
@@ -192,8 +193,8 @@ export function TaskDocumentsTab({
       }
       await loadDocuments();
       addToast("Document deleted", "success");
-    } catch (error: any) {
-      addToast(error.message || "Failed to delete document", "error");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "Failed to delete document", "error");
     } finally {
       setDeletingKey(null);
     }

@@ -192,9 +192,11 @@ export function withTokenHeader(init?: HeadersInit): HeadersInit | undefined {
  * through the `api()` helper without requiring us to touch each one.
  */
 export function installAuthFetch(): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- property sentinel on global window object, no better type exists
   if (typeof window === "undefined" || (window as any).__fnAuthFetchInstalled) {
     return;
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- property sentinel on global window object, no better type exists
   (window as any).__fnAuthFetchInstalled = true;
 
   // Ensure token is captured-from-URL before the first fetch fires.

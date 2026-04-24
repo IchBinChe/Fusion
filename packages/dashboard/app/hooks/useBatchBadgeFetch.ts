@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { fetchBatchStatus } from "../api";
 import type { BatchStatusResult } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 
 // Module-level store to share batch data across hook instances
 const batchBadgeStore = {
@@ -68,11 +69,12 @@ export function useBatchBadgeFetch(projectId?: string): UseBatchBadgeFetchResult
       try {
         const results = await fetchBatchStatus(taskIds, projectId);
         return results;
-      } catch (err: any) {
+      } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
         // If it's a 429 rate limit error, wait before retrying with exponential backoff
-        if (err?.message?.includes("429") || err?.message?.toLowerCase().includes("rate limit")) {
+        const errMsg = getErrorMessage(err);
+        if (errMsg?.includes("429") || errMsg?.toLowerCase().includes("rate limit")) {
           const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000); // Max 30s delay
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getErrorMessage } from "@fusion/core";
 import { fetchScripts, addScript, removeScript, type ScriptEntry } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import {
@@ -55,8 +56,8 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
       setLoading(true);
       const data = await fetchScripts(projectId);
       setScripts(data);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load scripts", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load scripts", "error");
     } finally {
       setLoading(false);
     }
@@ -126,11 +127,12 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
       setForm(EMPTY_FORM);
       setNameError(null);
       await loadScripts();
-    } catch (err: any) {
-      if (err.message?.includes("already exists")) {
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      if (msg?.includes("already exists")) {
         addToast("A script with this name already exists", "error");
       } else {
-        addToast(err.message || "Failed to save script", "error");
+        addToast(msg || "Failed to save script", "error");
       }
     } finally {
       setSaving(false);
@@ -147,8 +149,8 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
         setForm(EMPTY_FORM);
       }
       await loadScripts();
-    } catch (err: any) {
-      addToast(err.message || "Failed to delete script", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to delete script", "error");
     }
   }, [isEditing, addToast, loadScripts, projectId]);
 

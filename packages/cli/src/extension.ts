@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import {
   TaskStore,
@@ -298,7 +298,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       column: Type.Optional(
         StringEnum([...COLUMNS] as unknown as string[], {
           description: "Filter to a specific column",
-        }) as any,
+        }) as unknown as TSchema,
       ),
       limit: Type.Optional(
         Type.Number({
@@ -1039,10 +1039,10 @@ export default function kbExtension(pi: ExtensionAPI) {
       let taskId: string | undefined;
       try {
         taskId = await runTaskPlan(params.description, true); // Use --yes flag for non-interactive
-      } catch (err: any) {
+      } catch (err) {
         console.error = originalError;
         console.log = originalLog;
-        throw new Error(`Planning mode failed: ${err.message}`);
+        throw new Error(`Planning mode failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         console.error = originalError;
         console.log = originalLog;

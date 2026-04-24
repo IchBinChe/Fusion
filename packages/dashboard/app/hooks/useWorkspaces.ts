@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getErrorMessage } from "@fusion/core";
 import { fetchWorkspaces, type WorkspaceTaskInfo } from "../api";
 
 export interface WorkspaceInfo {
@@ -56,9 +57,9 @@ export function useWorkspaces(projectId?: string): UseWorkspacesReturn {
         setProjectName(getProjectName(response.project));
         setWorkspaces(response.tasks.map(mapTaskWorkspace));
         setError(null);
-      } catch (err: any) {
+      } catch (err) {
         if (!cancelled) {
-          setError(err.message || "Failed to load workspaces");
+          setError(getErrorMessage(err) || "Failed to load workspaces");
         }
       } finally {
         if (!cancelled) {

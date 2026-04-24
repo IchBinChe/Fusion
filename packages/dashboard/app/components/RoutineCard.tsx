@@ -155,7 +155,7 @@ export function RoutineCard({ routine, onEdit, onDelete, onRun, onToggle, runnin
 
   // Get cron expression if available (from trigger or direct field)
   const cronExpression = routine.trigger.type === "cron"
-    ? (routine.trigger as any).cronExpression || routine.cronExpression || ""
+    ? (("cronExpression" in routine.trigger ? routine.trigger.cronExpression : undefined) as string | undefined) || routine.cronExpression || ""
     : routine.cronExpression || "";
 
   return (

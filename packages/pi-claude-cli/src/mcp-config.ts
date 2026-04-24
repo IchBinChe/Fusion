@@ -10,6 +10,24 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
+/**
+ * A single tool descriptor returned by pi.getAllTools().
+ */
+interface PiToolInfo {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/**
+ * Minimal duck-type interface for the pi ExtensionAPI instance.
+ * We only call getAllTools(), so we only declare that method.
+ * The return type is unknown to accommodate defensive runtime checks.
+ */
+interface PiInstance {
+  getAllTools(): unknown;
+}
+
 /** The 6 built-in tools that pi handles natively (match pi tool names). */
 const BUILT_IN_TOOL_NAMES = new Set([
   "read",
@@ -33,16 +51,16 @@ export interface McpToolDef {
  * @param pi - The pi ExtensionAPI instance
  * @returns Array of custom tool definitions (empty if all tools are built-in)
  */
-export function getCustomToolDefs(pi: any): McpToolDef[] {
+export function getCustomToolDefs(pi: PiInstance): McpToolDef[] {
   const allTools = pi.getAllTools();
 
   if (!Array.isArray(allTools)) {
     return [];
   }
 
-  return allTools
-    .filter((tool: any) => !BUILT_IN_TOOL_NAMES.has(tool.name))
-    .map((tool: any) => ({
+  return (allTools as PiToolInfo[])
+    .filter((tool) => !BUILT_IN_TOOL_NAMES.has(tool.name))
+    .map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.parameters,

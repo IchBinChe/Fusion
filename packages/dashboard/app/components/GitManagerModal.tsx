@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Task } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import type {
   GitStatus,
@@ -265,9 +266,9 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
           break;
         }
       }
-    } catch (err: any) {
-      setSectionError(err.message || "Failed to fetch git data");
-      addToast(err.message || "Failed to fetch git data", "error");
+    } catch (err) {
+      setSectionError(getErrorMessage(err) || "Failed to fetch git data");
+      addToast(getErrorMessage(err) || "Failed to fetch git data", "error");
     } finally {
       setLoading(false);
     }
@@ -312,8 +313,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       const changes = await fetchFileChanges(projectId);
       setFileChanges(changes);
       setSelectedFiles(new Set());
-    } catch (err: any) {
-      addToast(err.message || "Failed to stage files", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to stage files", "error");
     }
   }, [addToast, projectId]);
 
@@ -324,8 +325,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       const changes = await fetchFileChanges(projectId);
       setFileChanges(changes);
       setSelectedFiles(new Set());
-    } catch (err: any) {
-      addToast(err.message || "Failed to unstage files", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to unstage files", "error");
     }
   }, [addToast, projectId]);
 
@@ -338,8 +339,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       setFileChanges(changes);
       setStatus(statusData);
       setSelectedFiles(new Set());
-    } catch (err: any) {
-      addToast(err.message || "Failed to discard changes", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to discard changes", "error");
     }
   }, [addToast, projectId]);
 
@@ -355,8 +356,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       const [changes, statusData] = await Promise.all([fetchFileChanges(projectId), fetchGitStatus(projectId)]);
       setFileChanges(changes);
       setStatus(statusData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to commit", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to commit", "error");
     } finally {
       setCommitting(false);
     }
@@ -376,8 +377,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       const [changes, statusData] = await Promise.all([fetchFileChanges(projectId), fetchGitStatus(projectId)]);
       setFileChanges(changes);
       setStatus(statusData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to commit", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to commit", "error");
     } finally {
       setCommitting(false);
     }
@@ -388,8 +389,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     try {
       const diff = await fetchUnstagedDiff(projectId);
       setChangeDiff(diff);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load diff", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load diff", "error");
     } finally {
       setLoadingChangeDiff(false);
     }
@@ -420,8 +421,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     try {
       const diff = await fetchCommitDiff(hash, projectId);
       setCommitDiff(diff);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load diff", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load diff", "error");
       setCommitDiff(null);
     } finally {
       setLoadingDiff(false);
@@ -456,8 +457,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       setBranchBase("");
       const branchesData = await fetchGitBranches(projectId);
       setBranches(branchesData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to create branch", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to create branch", "error");
     } finally {
       setLoading(false);
     }
@@ -471,8 +472,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       const [statusData, branchesData] = await Promise.all([fetchGitStatus(projectId), fetchGitBranches(projectId)]);
       setStatus(statusData);
       setBranches(branchesData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to checkout branch", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to checkout branch", "error");
     } finally {
       setLoading(false);
     }
@@ -486,20 +487,20 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       addToast(`Deleted branch ${name}`, "success");
       const branchesData = await fetchGitBranches(projectId);
       setBranches(branchesData);
-    } catch (err: any) {
-      if (err.message?.includes("not fully merged")) {
+    } catch (err) {
+      if (getErrorMessage(err).includes("not fully merged")) {
         if (confirm("Branch has unmerged commits. Force delete?")) {
           try {
             await deleteBranch(name, true, projectId);
             addToast(`Force deleted branch ${name}`, "success");
             const branchesData = await fetchGitBranches(projectId);
             setBranches(branchesData);
-          } catch (forceErr: any) {
-            addToast(forceErr.message || "Failed to delete branch", "error");
+          } catch (forceErr) {
+            addToast(getErrorMessage(forceErr) || "Failed to delete branch", "error");
           }
         }
       } else {
-        addToast(err.message || "Failed to delete branch", "error");
+        addToast(getErrorMessage(err) || "Failed to delete branch", "error");
       }
     } finally {
       setLoading(false);
@@ -578,8 +579,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       setStashMessage("");
       const stashesData = await fetchGitStashList(projectId);
       setStashes(stashesData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to stash changes", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to stash changes", "error");
     } finally {
       setStashLoading(null);
     }
@@ -592,8 +593,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       addToast(drop ? "Stash popped" : "Stash applied", "success");
       const stashesData = await fetchGitStashList(projectId);
       setStashes(stashesData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to apply stash", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to apply stash", "error");
     } finally {
       setStashLoading(null);
     }
@@ -607,8 +608,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       addToast("Stash dropped", "success");
       const stashesData = await fetchGitStashList(projectId);
       setStashes(stashesData);
-    } catch (err: any) {
-      addToast(err.message || "Failed to drop stash", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to drop stash", "error");
     } finally {
       setStashLoading(null);
     }
@@ -624,8 +625,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       addToast(result.message || "Fetch completed", result.fetched ? "success" : "info");
       const statusData = await fetchGitStatus(projectId);
       setStatus(statusData);
-    } catch (err: any) {
-      addToast(err.message || "Fetch failed", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Fetch failed", "error");
     } finally {
       setRemoteLoading(null);
     }
@@ -643,8 +644,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       }
       const statusData = await fetchGitStatus(projectId);
       setStatus(statusData);
-    } catch (err: any) {
-      addToast(err.message || "Pull failed", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Pull failed", "error");
     } finally {
       setRemoteLoading(null);
     }
@@ -658,8 +659,8 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
       addToast(result.message || "Push completed", "success");
       const statusData = await fetchGitStatus(projectId);
       setStatus(statusData);
-    } catch (err: any) {
-      addToast(err.message || "Push failed", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Push failed", "error");
     } finally {
       setRemoteLoading(null);
     }
@@ -1747,8 +1748,8 @@ function RemotesPanel({
     try {
       const data = await fetchGitRemotesDetailed(projectId);
       setRemotes(data);
-    } catch (err: any) {
-      addToast(err.message || "Failed to load remotes", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to load remotes", "error");
     } finally {
       setLoading(false);
     }
@@ -1773,8 +1774,8 @@ function RemotesPanel({
     try {
       const commits = await fetchRemoteCommits(remoteName, undefined, 10, projectId);
       setRemoteCommits(commits);
-    } catch (err: any) {
-      setRemoteCommitsError(err.message || "Failed to load remote commits");
+    } catch (err) {
+      setRemoteCommitsError(getErrorMessage(err) || "Failed to load remote commits");
       setRemoteCommits([]);
     } finally {
       setLoadingRemoteCommits(false);
@@ -1793,8 +1794,8 @@ function RemotesPanel({
       setNewRemoteUrl("");
       setShowAddForm(false);
       await loadRemotes();
-    } catch (err: any) {
-      addToast(err.message || "Failed to add remote", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to add remote", "error");
     } finally {
       setRemoteActionLoading(null);
     }
@@ -1808,8 +1809,8 @@ function RemotesPanel({
       await removeGitRemote(name, projectId);
       addToast(`Remote '${name}' removed`, "success");
       await loadRemotes();
-    } catch (err: any) {
-      addToast(err.message || "Failed to remove remote", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to remove remote", "error");
     } finally {
       setRemoteActionLoading(null);
     }
@@ -1825,8 +1826,8 @@ function RemotesPanel({
       setEditingRemote(null);
       setEditNameValue("");
       await loadRemotes();
-    } catch (err: any) {
-      addToast(err.message || "Failed to rename remote", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to rename remote", "error");
     } finally {
       setRemoteActionLoading(null);
     }
@@ -1842,8 +1843,8 @@ function RemotesPanel({
       setEditingRemote(null);
       setEditUrlValue("");
       await loadRemotes();
-    } catch (err: any) {
-      addToast(err.message || "Failed to update remote URL", "error");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to update remote URL", "error");
     } finally {
       setRemoteActionLoading(null);
     }

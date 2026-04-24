@@ -30,6 +30,23 @@ export interface MessageStoreEvents {
   "message:deleted": [messageId: string];
 }
 
+// ── Row Interfaces ───────────────────────────────────────────────────
+
+/** Database row shape for the messages table. */
+interface MessageRow {
+  id: string;
+  fromId: string;
+  fromType: string;
+  toId: string;
+  toType: string;
+  content: string;
+  type: string;
+  read: number;
+  metadata: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Options Types ────────────────────────────────────────────────────
 
 /** Options for MessageStore constructor */
@@ -95,7 +112,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
   /**
    * Convert a database row to a Message object.
    */
-  private rowToMessage(row: any): Message {
+  private rowToMessage(row: MessageRow): Message {
     return {
       id: row.id,
       fromId: row.fromId,
@@ -172,7 +189,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
    * @returns The message, or null if not found
    */
   getMessage(id: string): Message | null {
-    const row = this.stmtGetById.get(id);
+    const row = this.stmtGetById.get(id) as unknown as MessageRow | undefined;
     if (!row) return null;
     return this.rowToMessage(row);
   }
@@ -239,7 +256,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
-    return (rows as any[]).map((row) => this.rowToMessage(row));
+    return (rows as unknown as MessageRow[]).map((row) => this.rowToMessage(row));
   }
 
   /**
@@ -336,7 +353,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
       participantA.id, participantA.type,
     );
 
-    return (rows as any[]).map((row) => this.rowToMessage(row));
+    return (rows as unknown as MessageRow[]).map((row) => this.rowToMessage(row));
   }
 
   /**
@@ -352,7 +369,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     const unreadRow = this.stmtCountUnread.get(ownerId, ownerType) as { count: number } | undefined;
     const unreadCount = unreadRow?.count ?? 0;
 
-    const lastRow = this.stmtGetLastMessage.get(ownerId, ownerType);
+    const lastRow = this.stmtGetLastMessage.get(ownerId, ownerType) as unknown as MessageRow | undefined;
     const lastMessage = lastRow ? this.rowToMessage(lastRow) : undefined;
 
     return {

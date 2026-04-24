@@ -29,6 +29,7 @@ import {
   AuthStorage,
   DefaultPackageManager,
   ModelRegistry,
+  SettingsManager,
   discoverAndLoadExtensions,
   createExtensionRuntime,
 } from "@mariozechner/pi-coding-agent";
@@ -214,8 +215,8 @@ export async function runDaemon(opts: DaemonOptions = {}) {
   if (opts.interactive) {
     try {
       selectedPort = await promptForPort(selectedPort);
-    } catch (err: any) {
-      if (err.message === "Interactive prompt cancelled") {
+    } catch (err) {
+      if (err instanceof Error && err.message === "Interactive prompt cancelled") {
         console.log("Cancelled — exiting");
         process.exit(0);
       }
@@ -298,7 +299,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     processPullRequestMerge: (s, wd, taskId) =>
       processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
     getTaskMergeBlocker,
-    onInsightRunProcessed: onMemoryInsightRunProcessed as any,
+    onInsightRunProcessed: (s: unknown, r: unknown) => onMemoryInsightRunProcessed(s as ScheduledTask, r as AutomationRunResult),
   });
 
   await engineManager.startAll();
@@ -385,7 +386,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     packageManager = new DefaultPackageManager({
       cwd,
       agentDir,
-      settingsManager: createReadOnlyProviderSettingsView(cwd, agentDir) as any,
+      settingsManager: createReadOnlyProviderSettingsView(cwd, agentDir) as unknown as SettingsManager,
     });
     const resolvedPaths = await packageManager.resolve();
     const packageExtensionPaths = resolvedPaths.extensions
@@ -451,7 +452,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
   // ── Skills adapter for skills discovery and execution toggling ─────────────
   const skillsAdapter = packageManager
     ? createSkillsAdapter({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dashboard's resolve() uses a looser onMissing signature than pi's DefaultPackageManager
         packageManager: packageManager as any,
         getSettingsPath: (rootDir: string) => getProjectSettingsPath(rootDir),
       })

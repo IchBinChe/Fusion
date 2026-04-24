@@ -40,6 +40,32 @@ export interface ChatStoreEvents {
   "chat:message:deleted": [messageId: string];
 }
 
+// ── Row Interfaces ───────────────────────────────────────────────────
+
+/** Database row shape for chat_sessions. */
+interface ChatSessionRow {
+  id: string;
+  agentId: string;
+  title: string | null;
+  status: string;
+  projectId: string | null;
+  modelProvider: string | null;
+  modelId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for chat_messages. */
+interface ChatMessageRow {
+  id: string;
+  sessionId: string;
+  role: string;
+  content: string;
+  thinkingOutput: string | null;
+  metadata: string | null;
+  createdAt: string;
+}
+
 // ── ChatStore Class ─────────────────────────────────────────────────
 
 export class ChatStore extends EventEmitter<ChatStoreEvents> {
@@ -56,7 +82,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
   /**
    * Convert a database row to a ChatSession object.
    */
-  private rowToSession(row: any): ChatSession {
+  private rowToSession(row: ChatSessionRow): ChatSession {
     return {
       id: row.id,
       agentId: row.agentId,
@@ -73,7 +99,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
   /**
    * Convert a database row to a ChatMessage object.
    */
-  private rowToMessage(row: any): ChatMessage {
+  private rowToMessage(row: ChatMessageRow): ChatMessage {
     return {
       id: row.id,
       sessionId: row.sessionId,
@@ -136,7 +162,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
    * @returns The session, or undefined if not found
    */
   getSession(id: string): ChatSession | undefined {
-    const row = this.db.prepare("SELECT * FROM chat_sessions WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM chat_sessions WHERE id = ?").get(id) as unknown as ChatSessionRow | undefined;
     if (!row) return undefined;
     return this.rowToSession(row);
   }
@@ -174,7 +200,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       SELECT * FROM chat_sessions ${whereSql} ORDER BY updatedAt DESC
     `).all(...params);
 
-    return (rows as any[]).map((row) => this.rowToSession(row));
+    return (rows as unknown as ChatSessionRow[]).map((row) => this.rowToSession(row));
   }
 
   /**
@@ -327,7 +353,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
-    return (rows as any[]).map((row) => this.rowToMessage(row));
+    return (rows as unknown as ChatMessageRow[]).map((row) => this.rowToMessage(row));
   }
 
   /**
@@ -337,7 +363,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
    * @returns The message, or undefined if not found
    */
   getMessage(id: string): ChatMessage | undefined {
-    const row = this.db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id);
+    const row = this.db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as unknown as ChatMessageRow | undefined;
     if (!row) return undefined;
     return this.rowToMessage(row);
   }
@@ -370,7 +396,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
     `).all(...sessionIds);
 
     const result = new Map<string, ChatMessage>();
-    for (const row of rows as any[]) {
+    for (const row of rows as unknown as ChatMessageRow[]) {
       const message = this.rowToMessage(row);
       result.set(message.sessionId, message);
     }

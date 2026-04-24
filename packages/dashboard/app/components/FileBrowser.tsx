@@ -3,6 +3,7 @@ import { Folder, File, ChevronRight, Loader2, Copy, Move, Trash2, Pencil, Downlo
 import type { FileNode } from "../api";
 import { copyFile, moveFile, deleteFile, renameFile, downloadFileUrl, downloadZipUrl } from "../api";
 import { appendTokenQuery } from "../auth";
+import { getErrorMessage } from "@fusion/core";
 
 interface FileBrowserProps {
   entries: FileNode[];
@@ -492,8 +493,8 @@ export function FileBrowser({
 
       setDialog(INITIAL_DIALOG);
       onRefresh?.();
-    } catch (err: any) {
-      setOperationError(err.message || "Operation failed");
+    } catch (err) {
+      setOperationError(getErrorMessage(err) || "Operation failed");
     } finally {
       setOperationLoading(false);
     }

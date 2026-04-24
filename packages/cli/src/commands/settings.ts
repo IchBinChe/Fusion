@@ -300,8 +300,8 @@ export async function runSettingsSet(key: string, value: string, projectName?: s
     console.log();
     console.log(`  ✓ Updated ${getSettingLabel(key)} to ${formatSettingValue(key as keyof Settings, parsedValue, currentSettings as Settings)}`);
     console.log();
-  } catch (err: any) {
-    console.error(`Error: ${err.message}`);
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
     return;
   }

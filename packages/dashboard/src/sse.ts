@@ -277,7 +277,7 @@ export function createSSE(
 
   return (_req: Request, res: Response) => {
     const connectionId = nextConnectionId++;
-    const clientId = normalizeSSEClientId(_req.query.clientId);
+    const clientId = normalizeSSEClientId(_req.query?.clientId);
     const socket = res.socket ?? _req.socket;
 
     res.setHeader("Content-Type", "text/event-stream");

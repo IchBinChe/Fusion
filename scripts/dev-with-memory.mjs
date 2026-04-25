@@ -53,28 +53,43 @@ const forwardedArgs = needsDevHostInjection
   ? [...args, "--host", "0.0.0.0"]
   : args;
 
+// Resolve absolute paths to tsx loader so they survive shell quoting.
+// Use Node's resolver instead of hardcoding the pnpm version-specific path.
+const { createRequire } = await import("node:module");
+const path = await import("node:path");
+const require = createRequire(import.meta.url);
+const tsxPkgJson = require.resolve("tsx/package.json");
+const tsxDir = path.dirname(tsxPkgJson);
+const PRELOAD = path.join(tsxDir, "dist", "preflight.cjs");
+const LOADER = path.join(tsxDir, "dist", "loader.mjs");
+const ENTRY = path.resolve(process.cwd(), "packages/cli/src/bin.ts");
+
+// Spawn node directly (no shell) so the inspector attaches to the real app
+// process and there's no parent/child wrapper consuming --inspect.
+function runApp(extraArgs) {
+  const tsx = spawn(process.execPath, [
+    "--require", PRELOAD,
+    "--import", `file://${LOADER}`,
+    ENTRY,
+    ...extraArgs,
+  ], {
+    stdio: "inherit",
+    env: { ...process.env, NODE_OPTIONS: runNodeOptions },
+  });
+  tsx.on("close", (c) => process.exit(c ?? 1));
+}
+
 // If no args, run default: build + CLI
 if (forwardedArgs.length === 0) {
   const pnpm = spawn("pnpm", ["build"], { stdio: "inherit", shell: true });
   pnpm.on("close", (code) => {
     if (code !== 0) process.exit(code ?? 1);
-    const tsx = spawn("node_modules/.bin/tsx", ["packages/cli/src/bin.ts"], {
-      stdio: "inherit",
-      shell: true,
-      env: { ...process.env, NODE_OPTIONS: runNodeOptions },
-    });
-    tsx.on("close", (c) => process.exit(c ?? 1));
+    runApp([]);
   });
 } else {
-  // Build first (without inspector), then exec the CLI with inspector flags.
   const build = spawn("pnpm", ["build"], { stdio: "inherit", shell: true });
   build.on("close", (code) => {
     if (code !== 0) process.exit(code ?? 1);
-    const tsx = spawn("node_modules/.bin/tsx", ["packages/cli/src/bin.ts", ...forwardedArgs], {
-      stdio: "inherit",
-      shell: true,
-      env: { ...process.env, NODE_OPTIONS: runNodeOptions },
-    });
-    tsx.on("close", (c) => process.exit(c ?? 1));
+    runApp(forwardedArgs);
   });
 }

@@ -15,6 +15,7 @@ import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } fro
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 
 // @ts-expect-error -- Bun-only global; undefined in Node
 const isBunBinary = typeof Bun !== "undefined" && !!Bun.embeddedFiles;
@@ -58,6 +59,14 @@ function configurePiPackage(): void {
 }
 
 configurePiPackage();
+
+// Drain Node's User Timing buffer. Ink (react-reconciler) in dev mode emits
+// performance.mark()/measure() on every render; entries accumulate forever
+// without an observer, retaining ~600MB after 20-30min of TUI rendering.
+setInterval(() => {
+  performance.clearMeasures();
+  performance.clearMarks();
+}, 30_000).unref();
 
 /**
  * Load `.env` (and `.env.local`) from the current working directory into

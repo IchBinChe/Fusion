@@ -41,7 +41,7 @@ import type {
 } from "./state.js";
 import { SECTION_ORDER } from "./state.js";
 import type { LogEntry } from "./log-ring-buffer.js";
-import { FUSION_LOGO_LINES, FUSION_TAGLINE } from "./logo.js";
+import { FUSION_LOGO_LINES, FUSION_LOGO_LARGE_LINES, FUSION_TAGLINE } from "./logo.js";
 import { useProjects, useTasks } from "./hooks/use-projects.js";
 
 // ── Format helpers ────────────────────────────────────────────────────────────
@@ -75,19 +75,26 @@ function formatRelativeTime(iso: string): string {
   return `${h}h ago`;
 }
 
-// All-blue vertical gradient — top: brightest, bottom: shadow.
-const LOGO_COLORS = ["whiteBright", "cyanBright", "cyan", "blueBright", "blue", "blue"] as const;
+// All-blue vertical gradient — top: brightest white, bottom: deep blue.
+// Strictly white + blue shades, no cyan/purple.
+const LOGO_COLORS = ["whiteBright", "white", "blueBright", "blueBright", "blue", "blue", "blue", "blue"] as const;
 type InkColor = typeof LOGO_COLORS[number];
 
-function logoColor(index: number): InkColor {
-  return LOGO_COLORS[Math.min(index, LOGO_COLORS.length - 1)];
+function logoColor(index: number, total: number): InkColor {
+  // Map this row's index proportionally across LOGO_COLORS so gradient
+  // looks consistent regardless of how tall the chosen logo variant is.
+  const slot = Math.min(
+    LOGO_COLORS.length - 1,
+    Math.floor((index / Math.max(1, total - 1)) * (LOGO_COLORS.length - 1)),
+  );
+  return LOGO_COLORS[slot];
 }
 
-function AnimatedFusionLogo() {
+function AnimatedFusionLogo({ lines }: { lines: readonly string[] }) {
   return (
     <Box flexDirection="column" alignItems="center">
-      {FUSION_LOGO_LINES.map((line, i) => (
-        <Text key={i} color={logoColor(i)} bold>{line}</Text>
+      {lines.map((line, i) => (
+        <Text key={i} color={logoColor(i, lines.length)} bold>{line}</Text>
       ))}
     </Box>
   );
@@ -95,31 +102,31 @@ function AnimatedFusionLogo() {
 
 // ── Splash screen ─────────────────────────────────────────────────────────────
 
-// Smallest terminal that can fit the full block-letter splash centered.
-// Below either threshold the block-letter logo gets dropped for a plain
-// "FUSION" word so nothing wraps awkwardly on small terminals. The splash
-// always pins to the top-left — never centered — so it doesn't jump around
-// when the terminal resizes.
+// Logo width thresholds. Below SPLASH_MIN_COLS we fall back to the plain
+// "FUSION" word; otherwise we pick the largest variant that fits.
 const SPLASH_MIN_COLS = 56;
-const SPLASH_MIN_ROWS = 20;
+const SPLASH_MIN_ROWS = 12;
+const LARGE_LOGO_MIN_COLS = 70;
+const LARGE_LOGO_MIN_ROWS = 16;
 
 function SplashScreen({ loadingStatus }: { loadingStatus: string }) {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
   const compact = cols < SPLASH_MIN_COLS || rows < SPLASH_MIN_ROWS;
+  const large = cols >= LARGE_LOGO_MIN_COLS && rows >= LARGE_LOGO_MIN_ROWS;
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
       {compact ? (
-        <Text bold color="cyanBright">FUSION</Text>
+        <Text bold color="blueBright">FUSION</Text>
       ) : (
-        <AnimatedFusionLogo />
+        <AnimatedFusionLogo lines={large ? FUSION_LOGO_LARGE_LINES : FUSION_LOGO_LINES} />
       )}
       <Text color="blueBright" dimColor>{FUSION_TAGLINE}</Text>
       <Box height={1} />
       <Box flexDirection="row" gap={1}>
-        <Text color="cyanBright"><Spinner type="dots" /></Text>
+        <Text color="blueBright"><Spinner type="dots" /></Text>
         <Text color="blueBright" dimColor>{loadingStatus}</Text>
       </Box>
     </Box>
@@ -131,7 +138,7 @@ function SplashScreen({ loadingStatus }: { loadingStatus: string }) {
 function MiniLogo() {
   return (
     <Box flexDirection="row" gap={0}>
-      <Text color="cyan" bold>FUSION</Text>
+      <Text color="blueBright" bold>FUSION</Text>
     </Box>
   );
 }
@@ -210,22 +217,12 @@ function SystemPanel({ state, isFocused }: { state: DashboardState; isFocused: b
                   <Text wrap="truncate" color="cyanBright">{info.tokenizedUrl}</Text>
                 </Box>
               )}
-              <Box flexDirection="row" gap={1}>
-                <Text dimColor>Press</Text>
-                <Text color="cyanBright" bold>[Enter]</Text>
-                <Text dimColor>to open in browser</Text>
-              </Box>
             </>
           ) : (
             <>
               <Box flexDirection="row" gap={1}>
                 <Text dimColor>Auth:</Text>
                 <Text color="yellow">no auth</Text>
-              </Box>
-              <Box flexDirection="row" gap={1}>
-                <Text dimColor>Press</Text>
-                <Text color="cyanBright" bold>[Enter]</Text>
-                <Text dimColor>to open in browser</Text>
               </Box>
             </>
           )}
@@ -756,20 +753,31 @@ function KanbanColumnView({
 }) {
   const accent = COLUMN_COLORS[column];
   const headerColor = isFocused ? "whiteBright" : accent;
-  const cardWidth = Math.max(12, width - 4);
+  const cardWidth = Math.max(16, width - 2);
+  const innerHeaderWidth = Math.max(8, width - 2);
+  const label = `${columnLabel(column).toUpperCase()} (${tasks.length})`;
+  const headerText = ` ${label} `.length > innerHeaderWidth
+    ? ` ${label} `.slice(0, innerHeaderWidth)
+    : ` ${label} `.padEnd(innerHeaderWidth, " ");
   return (
-    <Box flexDirection="column" width={width} flexShrink={0} paddingX={1}>
-      <Box flexDirection="row" gap={1}>
+    <Box
+      flexDirection="column"
+      width={width}
+      flexShrink={1}
+      flexGrow={1}
+      paddingX={1}
+      overflow="hidden"
+    >
+      <Box width={innerHeaderWidth} flexShrink={0}>
         <Text bold color={headerColor} backgroundColor={isFocused ? accent : undefined}>
-          {` ${columnLabel(column).toUpperCase()} `}
+          {headerText}
         </Text>
-        <Text dimColor>{tasks.length}</Text>
       </Box>
-      <Box height={1} />
+      <Box height={1} flexShrink={0} />
       {tasks.length === 0 ? (
         <Text dimColor>—</Text>
       ) : (
-        <Box flexDirection="column" gap={0}>
+        <Box flexDirection="column" gap={0} flexShrink={1} overflow="hidden">
           {tasks.map((task, i) => (
             <TaskCard
               key={task.id}

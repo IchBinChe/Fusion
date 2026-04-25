@@ -1634,3 +1634,20 @@
   }
 }
 
+/* Desktop: render as a top-right popover card instead of a centered modal */
+@media (min-width: 769px) {
+  .modal-overlay:has(.usage-modal) {
+    background: transparent;
+    backdrop-filter: none;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 60px var(--space-md) 0 0;
+  }
+
+  .modal.usage-modal {
+    width: 420px;
+    max-height: 70vh;
+    box-shadow: var(--shadow-lg);
+  }
+}
+

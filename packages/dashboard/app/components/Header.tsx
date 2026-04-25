@@ -917,23 +917,6 @@ export function Header({
           </button>
         )}
 
-        {/* Mailbox button - desktop only */}
-        {!isCompact && onOpenMailbox && (
-          <button
-            className={`btn-icon${mailboxUnreadCount > 0 ? " btn-icon--has-indicator" : ""}`}
-            onClick={onOpenMailbox}
-            title={`Mailbox${mailboxUnreadCount > 0 ? ` (${mailboxUnreadCount} unread)` : ""}`}
-            data-testid="header-mailbox-btn"
-          >
-            <Mail size={16} />
-            {mailboxUnreadCount > 0 && (
-              <span className="header-badge" data-testid="header-mailbox-badge">
-                {mailboxUnreadCount > 9 ? "9+" : mailboxUnreadCount}
-              </span>
-            )}
-          </button>
-        )}
-
         {/* Desktop actions */}
         {!isCompact && !isElectron && (
           <button className="btn-icon" onClick={onOpenGitHubImport} title="Import from GitHub">

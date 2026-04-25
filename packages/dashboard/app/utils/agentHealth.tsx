@@ -11,17 +11,19 @@ import { resolveHeartbeatIntervalMs } from "./heartbeatIntervals";
 
 /**
  * Grace multiplier applied to an agent's configured interval before flagging
- * it Unresponsive. A human reads "missed two scheduled ticks" as "something
- * is wrong", which is what 2× captures; this also tolerates timer jitter and
- * a paused engine restarting without causing a UI flicker.
+ * it Unresponsive. We require several missed scheduled ticks before raising
+ * the alarm — momentary timer jitter, an engine restart, or a single skipped
+ * tick should never flip the UI to "Unresponsive".
  */
-const HEARTBEAT_GRACE_MULTIPLIER = 2;
+const HEARTBEAT_GRACE_MULTIPLIER = 4;
 
 /**
  * Staleness floor. Even on an agent configured for 1s heartbeats we don't
- * want the UI flickering between Healthy/Unresponsive on every tick.
+ * want the UI flickering between Healthy/Unresponsive on every tick. Five
+ * minutes is enough wall-clock buffer for any reasonable agent to recover
+ * from an engine pause/resume cycle.
  */
-const MIN_HEARTBEAT_STALENESS_MS = 60_000;
+const MIN_HEARTBEAT_STALENESS_MS = 5 * 60_000;
 
 /** Shape of the health status returned by getAgentHealthStatus */
 export interface AgentHealthStatus {

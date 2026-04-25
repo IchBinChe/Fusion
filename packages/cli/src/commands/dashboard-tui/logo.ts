@@ -1,7 +1,8 @@
-// FUSION block-letter logo using Unicode box-drawing + full blocks.
-// Font: ANSI Shadow (figlet-style). Hardcoded so we have no runtime dep.
-// The caller applies a cyan→whiteBright vertical gradient.
+// FUSION block-letter logos using Unicode box-drawing + full blocks.
+// The caller picks a size based on terminal dimensions and applies an
+// all-blue vertical gradient.
 
+// ANSI Shadow font — 47 cols × 6 rows.
 export const FUSION_LOGO_LINES = [
   "███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗",
   "██╔════╝██║   ██║██╔════╝██║██╔═══██╗████╗  ██║",
@@ -9,6 +10,18 @@ export const FUSION_LOGO_LINES = [
   "██╔══╝  ██║   ██║╚════██║██║██║   ██║██║╚██╗██║",
   "██║     ╚██████╔╝███████║██║╚██████╔╝██║ ╚████║",
   "╚═╝      ╚═════╝ ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝",
+];
+
+// Colossal font — 62 cols × 8 rows. Used when the terminal has room for it.
+export const FUSION_LOGO_LARGE_LINES = [
+  "8888888888 888     888  .d8888b. 8888888 .d88888b.  888b    888 ",
+  "888        888     888 d88P  Y88b  888  d88P\" \"Y88b 8888b   888 ",
+  "888        888     888 Y88b.       888  888     888 88888b  888 ",
+  "8888888    888     888  \"Y888b.    888  888     888 888Y88b 888 ",
+  "888        888     888     \"Y88b.  888  888     888 888 Y88b888 ",
+  "888        888     888       \"888  888  888     888 888  Y88888 ",
+  "888        Y88b. .d88P Y88b  d88P  888  Y88b. .d88P 888   Y8888 ",
+  "888         \"Y88888P\"   \"Y8888P\" 8888888 \"Y88888P\"  888    Y888 ",
 ];
 
 export const FUSION_TAGLINE = "AI coding agent dashboard";

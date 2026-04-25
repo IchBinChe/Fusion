@@ -1,9 +1,16 @@
 /* === Terminal Modal === */
+/* Center vertically (override the overlay's default top alignment). */
+.modal-overlay:has(.terminal-modal) {
+  align-items: center;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .modal.terminal-modal {
   width: 90vw;
   max-width: 1600px;
-  min-height: 90vh;
-  max-height: 90vh;
+  min-height: 80vh;
+  max-height: 85vh;
   background: var(--card);
   display: flex;
   flex-direction: column;

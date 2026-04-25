@@ -88,6 +88,8 @@ export interface TaskFormProps {
   renderBelowPrimary?: React.ReactNode;
   /** When true, skip rendering the Dependencies form-group inside "More options". Use when the parent renders its own dependency UI via renderBelowPrimary. */
   hideDependencies?: boolean;
+  /** When true (default), More options auto-expands when non-default advanced selections are present. */
+  autoExpandMoreOptionsOnSelection?: boolean;
 }
 
 export function TaskForm({
@@ -128,6 +130,7 @@ export function TaskForm({
   onClose,
   renderBelowPrimary,
   hideDependencies,
+  autoExpandMoreOptionsOnSelection = true,
   reviewLevel,
   onReviewLevelChange,
 }: TaskFormProps) {
@@ -144,7 +147,9 @@ export function TaskForm({
     reviewLevel !== undefined;
 
   const [showDepDropdown, setShowDepDropdown] = useState(false);
-  const [showMoreOptions, setShowMoreOptions] = useState(hasInitialMoreOptions);
+  const [showMoreOptions, setShowMoreOptions] = useState(
+    autoExpandMoreOptionsOnSelection ? hasInitialMoreOptions : false,
+  );
   const [depSearch, setDepSearch] = useState("");
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [favoriteProviders, setFavoriteProviders] = useState<string[]>([]);
@@ -243,11 +248,16 @@ export function TaskForm({
 
   // Auto-expand advanced options when non-default values are present.
   useEffect(() => {
+    if (!autoExpandMoreOptionsOnSelection) {
+      hadMoreOptionSelectionsRef.current = hasMoreOptionSelections;
+      return;
+    }
+
     if (hasMoreOptionSelections && !hadMoreOptionSelectionsRef.current) {
       setShowMoreOptions(true);
     }
     hadMoreOptionSelectionsRef.current = hasMoreOptionSelections;
-  }, [hasMoreOptionSelections]);
+  }, [hasMoreOptionSelections, autoExpandMoreOptionsOnSelection]);
 
   // Keep dependency dropdown state clean when advanced options are collapsed.
   useEffect(() => {
@@ -731,6 +741,7 @@ export function TaskForm({
         id="task-form-more-options"
         className={`task-form-more-options${showMoreOptions ? "" : " collapsed"}`}
         aria-hidden={!showMoreOptions}
+        hidden={!showMoreOptions}
         data-testid="task-form-more-options"
       >
       {/* Attachments */}

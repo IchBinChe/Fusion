@@ -4,7 +4,7 @@
 }
 
 .new-task-modal .modal-body {
-  padding: 20px 24px;
+  padding: var(--space-xl);
   overflow-y: auto;
   max-height: calc(80vh - 120px);
   flex: 1;
@@ -13,7 +13,7 @@
 
 .new-task-modal .form-group {
   margin-top: 0;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-xl);
   padding: 0;
 }
 
@@ -26,7 +26,7 @@
 }
 
 .new-task-modal .checkbox-label {
-  margin-bottom: 4px !important;
+  margin-bottom: var(--space-xs) !important;
 }
 
 .task-form-primary-section {
@@ -72,7 +72,7 @@
   width: fit-content;
   margin-top: 0;
   margin-bottom: 0;
-  padding: 6px;
+  padding: var(--space-sm);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
@@ -88,7 +88,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-sm);
-  padding: 10px 2px;
+  padding: var(--space-sm) var(--space-xs);
   margin: 0 0 var(--space-sm);
   border: none;
   border-top: 1px solid var(--border-subtle);
@@ -118,18 +118,18 @@
 }
 
 .task-form-more-options {
-  margin-left: 6px;
-  padding-left: 12px;
+  margin-left: var(--space-sm);
+  padding-left: var(--space-md);
   border-left: 1px solid var(--border-subtle);
   overflow: hidden;
   max-height: 2400px;
   opacity: 1;
   transition:
-    max-height 0.24s ease,
-    opacity 0.2s ease,
-    margin-top 0.2s ease,
-    padding 0.2s ease,
-    border-color 0.2s ease;
+    max-height var(--transition-slow),
+    opacity var(--transition-normal),
+    margin-top var(--transition-normal),
+    padding var(--transition-normal),
+    border-color var(--transition-normal);
 }
 
 .task-form-more-options.collapsed {
@@ -157,7 +157,7 @@
 }
 
 .task-form-more-options .form-group small {
-  margin-top: 6px;
+  margin-top: var(--space-sm);
   color: var(--text-secondary, var(--text-muted));
 }
 
@@ -267,7 +267,7 @@
 .workflow-step-order-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-xs);
   flex-shrink: 0;
 }
 

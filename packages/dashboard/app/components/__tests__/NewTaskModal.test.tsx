@@ -97,7 +97,9 @@ describe("NewTaskModal", () => {
     renderNewTaskModal();
 
     const toggle = screen.getByTestId("task-form-more-options-toggle");
+    const moreOptions = screen.getByTestId("task-form-more-options");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(moreOptions).toHaveAttribute("hidden");
     // Dependencies are now in quick-fields (visible by default), so the dep-trigger is present
     expect(screen.getByTestId("dep-trigger")).toBeInTheDocument();
 
@@ -105,6 +107,7 @@ describe("NewTaskModal", () => {
 
     await waitFor(() => {
       expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(moreOptions).not.toHaveAttribute("hidden");
     });
     // Model Configuration, Attachments, and Workflow Steps are revealed
     expect(screen.getByText(/Model Configuration/i)).toBeTruthy();
@@ -536,6 +539,32 @@ describe("NewTaskModal", () => {
 
   // DefaultOn workflow step handling (FN-883)
   describe("defaultOn workflow step handling", () => {
+    it("keeps More options collapsed by default even when defaultOn workflow steps are auto-applied", async () => {
+      const { fetchWorkflowSteps } = await import("../../api");
+      vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([
+        { id: "WS-001", name: "QA Check", description: "Run tests", prompt: "Check tests", enabled: true, defaultOn: true, createdAt: "", updatedAt: "" },
+      ]);
+
+      renderNewTaskModal();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("workflow-step-checkbox-WS-001")).toBeTruthy();
+      });
+
+      const toggle = screen.getByTestId("task-form-more-options-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(toggle).toHaveAttribute("aria-expanded", "true");
+      });
+
+      expect(screen.getByText(/Model Configuration/i)).toBeTruthy();
+      expect(screen.getByText(/Attachments/i)).toBeTruthy();
+      expect(screen.getByText(/Workflow Steps/i)).toBeTruthy();
+    });
+
     it("sends undefined enabledWorkflowSteps when no defaultOn steps and user hasn't interacted", async () => {
       const { fetchWorkflowSteps } = await import("../../api");
       vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([

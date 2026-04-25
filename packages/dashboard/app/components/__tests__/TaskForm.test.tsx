@@ -1116,6 +1116,42 @@ describe("TaskForm defaultOn auto-selection (FN-883)", () => {
     expect(onDefaultOnApplied).toHaveBeenCalledWith(["WS-001"]);
   });
 
+  it("auto-expands More options by default when advanced selections are prefilled", () => {
+    renderTaskForm({
+      mode: "create",
+      selectedWorkflowSteps: ["WS-001"],
+    });
+
+    expect(screen.getByTestId("task-form-more-options-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("stays collapsed when auto-expand is disabled even with prefilled advanced selections", () => {
+    renderTaskForm({
+      mode: "create",
+      selectedWorkflowSteps: ["WS-001"],
+      autoExpandMoreOptionsOnSelection: false,
+    });
+
+    expect(screen.getByTestId("task-form-more-options-toggle")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("hides advanced controls from interaction when More options is collapsed", () => {
+    renderTaskForm({ mode: "create" });
+
+    const toggle = screen.getByTestId("task-form-more-options-toggle");
+    const moreOptions = screen.getByTestId("task-form-more-options");
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(moreOptions).toHaveAttribute("hidden");
+    expect(moreOptions).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(moreOptions).not.toHaveAttribute("hidden");
+    expect(moreOptions).toHaveAttribute("aria-hidden", "false");
+  });
+
   it("does not auto-select workflow steps in edit mode", async () => {
     const { fetchWorkflowSteps } = await import("../../api");
     vi.mocked(fetchWorkflowSteps).mockResolvedValueOnce([

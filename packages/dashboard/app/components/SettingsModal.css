@@ -150,6 +150,52 @@
   margin-top: var(--space-xl);
 }
 
+.settings-plugins-subsection-toggle {
+  display: inline-flex;
+  gap: var(--space-xs);
+  padding: 0 var(--space-xl);
+  margin: var(--space-md) 0;
+}
+
+.settings-plugins-subsection-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: var(--space-xs) var(--space-md);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.settings-plugins-subsection-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.settings-plugins-subsection-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.settings-plugins-subsection-btn.active {
+  background: color-mix(in srgb, var(--todo) 14%, transparent);
+  border-color: color-mix(in srgb, var(--todo) 45%, var(--border));
+  color: var(--todo);
+}
+
+.settings-plugins-subsection-panel {
+  padding-bottom: var(--space-md);
+}
+
 /* Scope indicators in sidebar nav items */
 .settings-scope-icon {
   margin-right: 6px;
@@ -674,6 +720,17 @@
   .settings-section-heading {
     padding: var(--space-lg) var(--space-lg) var(--space-md);
     margin: 0 var(--space-lg) 0;
+  }
+
+  .settings-plugins-subsection-toggle {
+    display: flex;
+    width: 100%;
+    padding: 0 var(--space-lg);
+  }
+
+  .settings-plugins-subsection-btn {
+    flex: 1;
+    min-height: 36px;
   }
 
   .form-group {

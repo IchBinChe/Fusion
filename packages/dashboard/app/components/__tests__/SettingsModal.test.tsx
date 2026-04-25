@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "../SettingsModal";
 import type { SettingsExportData } from "../../api";
@@ -61,6 +61,18 @@ vi.mock("../../hooks/useMemoryBackendStatus", () => ({
   useMemoryBackendStatus: (...args: unknown[]) => mockUseMemoryBackendStatus(...args),
 }));
 
+vi.mock("../PluginManager", () => ({
+  PluginManager: () => <div data-testid="plugin-manager">Plugin manager content</div>,
+}));
+
+vi.mock("../PiExtensionsManager", () => ({
+  PiExtensionsManager: () => <div data-testid="pi-extensions-manager">Pi extensions content</div>,
+}));
+
+vi.mock("../PluginSlot", () => ({
+  PluginSlot: () => <div data-testid="plugin-slot">Plugin slot content</div>,
+}));
+
 const noop = () => {};
 
 const defaultSettings = {
@@ -88,6 +100,13 @@ function renderModal(props = {}) {
       {...props}
     />
   );
+}
+
+async function waitForSettingsModalReady() {
+  await waitFor(() => {
+    expect(mockFetchSettings).toHaveBeenCalled();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
 }
 
 describe("SettingsModal", () => {
@@ -315,6 +334,55 @@ describe("SettingsModal", () => {
       for (const filename of capturedFilenames) {
         expect(filename).not.toMatch(/^kb-settings-/);
       }
+    });
+  });
+
+  describe("Plugins section navigation", () => {
+    it("does not render a standalone Pi Extensions sidebar item", async () => {
+      renderModal();
+      await waitForSettingsModalReady();
+
+      const sidebar = document.querySelector(".settings-sidebar");
+      expect(sidebar).toBeInTheDocument();
+      expect(within(sidebar as HTMLElement).queryByRole("button", { name: /Pi Extensions$/ })).not.toBeInTheDocument();
+      expect(within(sidebar as HTMLElement).getByRole("button", { name: /Plugins$/ })).toBeInTheDocument();
+    });
+
+    it("renders accessible tab semantics for Plugins subsection controls", async () => {
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(await screen.findByRole("button", { name: /Plugins$/ }));
+
+      const tablist = await screen.findByRole("tablist", { name: "Plugin manager type" });
+      const fusionTab = within(tablist).getByRole("tab", { name: "Fusion Plugins" });
+      const piTab = within(tablist).getByRole("tab", { name: "Pi Extensions" });
+
+      expect(fusionTab).toHaveAttribute("aria-selected", "true");
+      expect(fusionTab).toHaveAttribute("aria-controls", "plugins-panel-fusion-plugins");
+      expect(piTab).toHaveAttribute("aria-selected", "false");
+      expect(piTab).toHaveAttribute("aria-controls", "plugins-panel-pi-extensions");
+    });
+
+    it("switches between Fusion Plugins and Pi Extensions managers", async () => {
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(await screen.findByRole("button", { name: /Plugins$/ }));
+
+      expect(await screen.findByTestId("plugin-manager")).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-slot")).toBeInTheDocument();
+      expect(screen.queryByTestId("pi-extensions-manager")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("tab", { name: "Pi Extensions" }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("pi-extensions-manager")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("plugin-manager")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("plugin-slot")).not.toBeInTheDocument();
+      expect(screen.getByRole("tabpanel", { name: "Pi Extensions" })).toBeVisible();
+      expect(document.getElementById("plugins-panel-fusion-plugins")).toHaveAttribute("hidden");
     });
   });
 

@@ -29,7 +29,7 @@ import "./SettingsModal.css";
  *
  * Group headers (isGroupHeader: true) are non-clickable labels that visually group sections.
  * The sidebar is organized into three groups:
- *   - Account: Scope-less sections (authentication, pi-extensions)
+ *   - Account: Scope-less sections (authentication)
  *   - Global: Global-scoped sections (appearance, notifications, node-sync, global-models)
  *   - Project: Project-scoped sections (project-models, general, scheduling, worktrees, commands,
  *     merge, memory, experimental, prompts, backups, plugins)
@@ -54,7 +54,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   // Account group (scope-less items — independent of settings storage)
   { id: "__account_header", label: "Account", scope: undefined, isGroupHeader: true },
   { id: "authentication", label: "Authentication", scope: undefined, icon: Globe },
-  { id: "pi-extensions", label: "Pi Extensions", scope: undefined },
 
   // Global group (shared across all Fusion projects)
   { id: "__global_header", label: "Global", scope: undefined, isGroupHeader: true },
@@ -102,7 +101,10 @@ const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
   devServerView: "Dev Server View",
 };
 
-export type SectionId = SettingsSection["id"];
+type LegacySectionId = "pi-extensions";
+export type SectionId = SettingsSection["id"] | LegacySectionId;
+
+type PluginsSubsectionId = "fusion-plugins" | "pi-extensions";
 
 /** Local form state extends Settings with a worktreeInitCommand override and lets tokenCap carry null (delete semantic). */
 type SettingsFormState = Settings & { worktreeInitCommand?: string; tokenCap?: number | null };
@@ -162,7 +164,17 @@ export function SettingsModal({
   const [initialScopedValues, setInitialScopedValues] = useState<{ global: GlobalSettings; project: Partial<Settings> } | null>(null);
   // Find the first non-group-header section for default active section
   const firstNonHeaderSection = SETTINGS_SECTIONS.find((s) => !s.isGroupHeader);
-  const [activeSection, setActiveSection] = useState<SectionId>(initialSection ?? firstNonHeaderSection?.id ?? "authentication");
+  const [activeSection, setActiveSection] = useState<SectionId>(() => {
+    if (initialSection === "pi-extensions") {
+      return "plugins";
+    }
+    return initialSection ?? firstNonHeaderSection?.id ?? "authentication";
+  });
+  // Deterministic default: opening Plugins starts on Fusion Plugins unless legacy
+  // `initialSection="pi-extensions"` is explicitly provided.
+  const [activePluginsSubsection, setActivePluginsSubsection] = useState<PluginsSubsectionId>(() =>
+    initialSection === "pi-extensions" ? "pi-extensions" : "fusion-plugins",
+  );
   const [showMobileSectionPicker, setShowMobileSectionPicker] = useState(() =>
     typeof window !== "undefined" && typeof window.matchMedia === "function"
       ? window.matchMedia(MOBILE_SETTINGS_MEDIA_QUERY)?.matches === true
@@ -3110,17 +3122,62 @@ export function SettingsModal({
           <>
             {renderScopeBanner()}
             <h4 className="settings-section-heading">Plugins</h4>
-            <Suspense fallback={null}>
-              <PluginManager addToast={addToast} projectId={projectId} />
-            </Suspense>
-            <PluginSlot slotId="settings-section" projectId={projectId} />
+            <div className="settings-plugins-subsection-toggle" role="tablist" aria-label="Plugin manager type">
+              <button
+                type="button"
+                id="plugins-tab-fusion-plugins"
+                role="tab"
+                aria-controls="plugins-panel-fusion-plugins"
+                aria-selected={activePluginsSubsection === "fusion-plugins"}
+                tabIndex={activePluginsSubsection === "fusion-plugins" ? 0 : -1}
+                className={`settings-plugins-subsection-btn${activePluginsSubsection === "fusion-plugins" ? " active" : ""}`}
+                onClick={() => setActivePluginsSubsection("fusion-plugins")}
+              >
+                Fusion Plugins
+              </button>
+              <button
+                type="button"
+                id="plugins-tab-pi-extensions"
+                role="tab"
+                aria-controls="plugins-panel-pi-extensions"
+                aria-selected={activePluginsSubsection === "pi-extensions"}
+                tabIndex={activePluginsSubsection === "pi-extensions" ? 0 : -1}
+                className={`settings-plugins-subsection-btn${activePluginsSubsection === "pi-extensions" ? " active" : ""}`}
+                onClick={() => setActivePluginsSubsection("pi-extensions")}
+              >
+                Pi Extensions
+              </button>
+            </div>
+            <div
+              id="plugins-panel-fusion-plugins"
+              role="tabpanel"
+              aria-labelledby="plugins-tab-fusion-plugins"
+              className="settings-plugins-subsection-panel"
+              hidden={activePluginsSubsection !== "fusion-plugins"}
+            >
+              {activePluginsSubsection === "fusion-plugins" && (
+                <>
+                  <Suspense fallback={null}>
+                    <PluginManager addToast={addToast} projectId={projectId} />
+                  </Suspense>
+                  <PluginSlot slotId="settings-section" projectId={projectId} />
+                </>
+              )}
+            </div>
+            <div
+              id="plugins-panel-pi-extensions"
+              role="tabpanel"
+              aria-labelledby="plugins-tab-pi-extensions"
+              className="settings-plugins-subsection-panel"
+              hidden={activePluginsSubsection !== "pi-extensions"}
+            >
+              {activePluginsSubsection === "pi-extensions" && (
+                <Suspense fallback={null}>
+                  <PiExtensionsManager addToast={addToast} projectId={projectId} />
+                </Suspense>
+              )}
+            </div>
           </>
-        );
-      case "pi-extensions":
-        return (
-          <Suspense fallback={null}>
-            <PiExtensionsManager addToast={addToast} projectId={projectId} />
-          </Suspense>
         );
       case "authentication": {
         // CLI-backed providers (currently just claude-cli) render their own

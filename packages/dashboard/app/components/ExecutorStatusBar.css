@@ -149,14 +149,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--executor-status-touch-size);
-  min-height: var(--executor-status-touch-size);
   padding: 0;
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  line-height: 1;
   transition: color var(--transition-fast);
+}
+
+/* Mobile keeps a tappable 40-ish px target. Desktop collapses to the icon
+   so it aligns on the same baseline as the surrounding status-bar text. */
+@media (pointer: coarse), (max-width: 768px) {
+  .executor-status-bar__folder-toggle {
+    min-width: var(--executor-status-touch-size);
+    min-height: var(--executor-status-touch-size);
+  }
 }
 
 .executor-status-bar__folder-toggle:hover {

@@ -6,9 +6,12 @@
 
 All registrars receive `ApiRoutesContext` from `./types.ts`, built by `createApiRoutesContext()` in `./context.ts`.
 
+Registrars should be typed as `ApiRouteRegistrar` so modules share one explicit registration contract.
+
 The context centralizes cross-cutting dependencies so registrars preserve behavior without re-implementing plumbing:
 
 - Request/project scoping: `getProjectIdFromRequest`, `getScopedStore`, `getProjectContext`
+  - These are also exported from `context.ts` as canonical helpers for future extraction tasks.
 - Engine-aware fallback behavior for project-bound and root-store APIs
 - Runtime loggers and diagnostics emitters (`runtimeLogger`, `planningLogger`, `proxyLogger`, `chatLogger`)
 - Proxy/auth/audit helpers (`proxyToRemoteNode`, `emitRemoteRouteDiagnostic`, `emitAuthSyncAuditLog`)
@@ -37,13 +40,15 @@ Express matches in registration order. Keep registrar and in-registrar route ord
 
 If adding a new endpoint, place it in the domain registrar and verify it does not shadow existing handlers.
 
-## Integration mounts that stay in `routes.ts`
+## Integrated routers
 
-These routers remain mounted directly by the orchestrator and must keep their current prefixes/options wiring:
+Integrated routers are mounted through `register-integrated-routers.ts` and intentionally called from `routes.ts` at precedence-sensitive points:
 
-- `createMissionRouter` → `/api/missions`
-- `createRoadmapRouter` → `/api/roadmaps`
-- `createInsightsRouter` → `/api/insights`
-- `createDevServerRouter` → `/api/dev-server`
+- `registerIntegratedRouters(...)` mounts:
+  - `createMissionRouter` → `/api/missions`
+  - `createRoadmapRouter` → `/api/roadmaps`
+  - `createInsightsRouter` → `/api/insights`
+- `registerIntegratedDevServerRouter(...)` mounts:
+  - `createDevServerRouter` → `/api/dev-server`
 
-Do not re-home these mounts without explicit migration and regression coverage.
+Keep these calls in their current positions inside `createApiRoutes()` unless an explicit route-ordering migration is planned and regression-tested.

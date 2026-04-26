@@ -1574,9 +1574,8 @@ describe("ListView Quick Entry", () => {
 
     await waitFor(() => {
       expect(mockOnQuickCreate).toHaveBeenCalled();
+      expect(input.value).toBe("");
     });
-
-    expect(input.value).toBe("");
   });
 
   it("shows error toast when onQuickCreate fails and keeps input content", async () => {

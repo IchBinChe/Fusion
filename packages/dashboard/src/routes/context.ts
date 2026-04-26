@@ -58,6 +58,48 @@ function classifyRemoteRouteError(error: unknown): {
   };
 }
 
+export function getProjectIdFromRequest(req: Request): string | undefined {
+  if (req.query && typeof req.query.projectId === "string" && req.query.projectId.length > 0) {
+    return req.query.projectId;
+  }
+  if (req.body && typeof req.body.projectId === "string" && req.body.projectId.length > 0) {
+    return req.body.projectId;
+  }
+  return undefined;
+}
+
+export async function getScopedStore(req: Request, store: TaskStore): Promise<TaskStore> {
+  const projectId = getProjectIdFromRequest(req);
+  if (!projectId) return store;
+  return getOrCreateProjectStore(projectId);
+}
+
+export async function getProjectContext(
+  req: Request,
+  store: TaskStore,
+  options?: ServerOptions,
+): Promise<ProjectContext> {
+  const projectId = getProjectIdFromRequest(req);
+  const engineManager = options?.engineManager;
+
+  if (projectId && engineManager) {
+    let engine = engineManager.getEngine(projectId);
+    if (!engine) {
+      try {
+        engine = await engineManager.ensureEngine(projectId);
+      } catch {
+        // fall through
+      }
+    }
+    if (engine) {
+      return { store: engine.getTaskStore(), engine, projectId };
+    }
+  }
+
+  const scopedStore = await getScopedStore(req, store);
+  return { store: scopedStore, engine: undefined, projectId };
+}
+
 export function createApiRoutesContext(store: TaskStore, options?: ServerOptions): ApiRoutesContext {
   const router = Router();
   const runtimeLogger = options?.runtimeLogger?.child("routes") ?? createRuntimeLogger("routes");
@@ -88,43 +130,8 @@ export function createApiRoutesContext(store: TaskStore, options?: ServerOptions
     return [...projects].sort((a, b) => rankProject(b.path) - rankProject(a.path));
   }
 
-  function getProjectIdFromRequest(req: Request): string | undefined {
-    if (req.query && typeof req.query.projectId === "string" && req.query.projectId.length > 0) {
-      return req.query.projectId;
-    }
-    if (req.body && typeof req.body.projectId === "string" && req.body.projectId.length > 0) {
-      return req.body.projectId;
-    }
-    return undefined;
-  }
-
-  async function getScopedStore(req: Request): Promise<TaskStore> {
-    const projectId = getProjectIdFromRequest(req);
-    if (!projectId) return store;
-    return getOrCreateProjectStore(projectId);
-  }
-
-  async function getProjectContext(req: Request): Promise<ProjectContext> {
-    const projectId = getProjectIdFromRequest(req);
-    const engineManager = options?.engineManager;
-
-    if (projectId && engineManager) {
-      let engine = engineManager.getEngine(projectId);
-      if (!engine) {
-        try {
-          engine = await engineManager.ensureEngine(projectId);
-        } catch {
-          // fall through
-        }
-      }
-      if (engine) {
-        return { store: engine.getTaskStore(), engine, projectId };
-      }
-    }
-
-    const scopedStore = await getScopedStore(req);
-    return { store: scopedStore, engine: undefined, projectId };
-  }
+  const resolveScopedStore = (req: Request): Promise<TaskStore> => getScopedStore(req, store);
+  const resolveProjectContext = (req: Request): Promise<ProjectContext> => getProjectContext(req, store, options);
 
   function emitRemoteRouteDiagnostic(input: RemoteRouteDiagnosticInput): void {
     const logger = runtimeLogger.child("remote-route").child(input.route);
@@ -391,8 +398,8 @@ export function createApiRoutesContext(store: TaskStore, options?: ServerOptions
     chatLogger,
     prioritizeProjectsForCurrentDirectory,
     getProjectIdFromRequest,
-    getScopedStore,
-    getProjectContext,
+    getScopedStore: resolveScopedStore,
+    getProjectContext: resolveProjectContext,
     emitRemoteRouteDiagnostic,
     emitAuthSyncAuditLog,
     proxyToRemoteNode,

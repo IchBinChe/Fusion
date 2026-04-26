@@ -10,6 +10,11 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { createApiRoutes } from "../routes.js";
+import {
+  getProjectIdFromRequest as getProjectIdFromRouteRequest,
+  getProjectContext as resolveRouteProjectContext,
+  getScopedStore as resolveRouteScopedStore,
+} from "../routes/context.js";
 import { GitHubClient } from "../github.js";
 import { githubRateLimiter } from "../github-poll.js";
 import type { TaskStore, TaskAttachment, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult, ChatSession, ChatMessage } from "@fusion/core";
@@ -204,6 +209,59 @@ async function REQUEST(
   const res = await performRequest(app, method, path, body, headers);
   return { status: res.status, body: res.body };
 }
+
+describe("routes/context project scoping helpers", () => {
+  it("prefers query.projectId over body.projectId", () => {
+    const req = {
+      query: { projectId: "query-project" },
+      body: { projectId: "body-project" },
+    } as unknown as express.Request;
+
+    expect(getProjectIdFromRouteRequest(req)).toBe("query-project");
+  });
+
+  it("falls back to body.projectId when query.projectId is absent", () => {
+    const req = {
+      query: {},
+      body: { projectId: "body-project" },
+    } as unknown as express.Request;
+
+    expect(getProjectIdFromRouteRequest(req)).toBe("body-project");
+  });
+
+  it("getScopedStore returns root store when projectId is missing", async () => {
+    const store = createMockStore();
+    const req = { query: {}, body: {} } as unknown as express.Request;
+    const getOrCreateSpy = vi.spyOn(projectStoreResolver, "getOrCreateProjectStore");
+
+    const scopedStore = await resolveRouteScopedStore(req, store);
+
+    expect(scopedStore).toBe(store);
+    expect(getOrCreateSpy).not.toHaveBeenCalled();
+  });
+
+  it("getProjectContext falls back to scoped store when ensureEngine throws", async () => {
+    const store = createMockStore();
+    const fallbackStore = createMockStore();
+    const getOrCreateSpy = vi.spyOn(projectStoreResolver, "getOrCreateProjectStore").mockResolvedValueOnce(fallbackStore);
+
+    const req = { query: { projectId: "proj-123" }, body: {} } as unknown as express.Request;
+    const options = {
+      engineManager: {
+        getEngine: vi.fn().mockReturnValue(undefined),
+        ensureEngine: vi.fn().mockRejectedValue(new Error("startup failed")),
+      },
+    } as any;
+
+    const context = await resolveRouteProjectContext(req, store, options);
+
+    expect(context.projectId).toBe("proj-123");
+    expect(context.engine).toBeUndefined();
+    expect(context.store).toBe(fallbackStore);
+    expect(options.engineManager.ensureEngine).toHaveBeenCalledWith("proj-123");
+    expect(getOrCreateSpy).toHaveBeenCalledWith("proj-123");
+  });
+});
 
 /** Build a minimal multipart/form-data body */
 function buildMultipart(fieldName: string, filename: string, contentType: string, content: Buffer): { body: Buffer; boundary: string } {

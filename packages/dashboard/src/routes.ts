@@ -44,9 +44,6 @@ import {
   hasPrBadgeFieldsChanged,
   hasIssueBadgeFieldsChanged,
 } from "./github-webhooks.js";
-import { createMissionRouter } from "./mission-routes.js";
-import { createRoadmapRouter } from "./roadmap-routes.js";
-import { createInsightsRouter } from "./insights-routes.js";
 import { getOrCreateProjectStore, invalidateAllGlobalSettingsCaches } from "./project-store-resolver.js";
 import { AiSessionStore, SESSION_CLEANUP_DEFAULT_MAX_AGE_MS } from "./ai-session-store.js";
 import { getSession as getPlanningSession, cleanupSession as cleanupPlanningSession } from "./planning.js";
@@ -62,7 +59,6 @@ import {
 import { getMissionInterviewSession, cleanupMissionInterviewSession } from "./mission-interview.js";
 import { getTargetInterviewSession, cleanupTargetInterviewSession } from "./milestone-slice-interview.js";
 import { writeSSEEvent } from "./sse-buffer.js";
-import { createDevServerRouter } from "./dev-server-routes.js";
 import {
   ApiError,
   badRequest,
@@ -88,6 +84,7 @@ import { registerFilesTerminalWorkspaceRoutes } from "./routes/register-files-te
 import { registerAgentsProjectsNodesRoutes } from "./routes/register-agents-projects-nodes.js";
 import { registerPluginsAutomationRoutes } from "./routes/register-plugins-automation.js";
 import { registerProxyRoutes } from "./routes/register-proxy.js";
+import { registerIntegratedRouters, registerIntegratedDevServerRouter } from "./routes/register-integrated-routers.js";
 
 const TASK_DETAIL_ACTIVITY_LOG_LIMIT = 500;
 
@@ -2036,8 +2033,9 @@ function checkSessionLock(
  * Public API route entrypoint used by server.ts.
  *
  * `createApiRoutes()` is intentionally an orchestrator: it builds shared
- * request/project context once, mounts registrar modules in precedence-safe
- * order, and keeps compatibility exports in this module stable for tests and
+ * request/project context once, mounts registrar modules (including integrated
+ * router registrars) in precedence-safe order, and keeps compatibility exports
+ * in this module stable for tests and
  * downstream consumers (`resolveDiffBase`, `__resetBatchImportRateLimiter`,
  * `__setCreateFnAgentForRefine`, `AuthStorageLike`, `ModelRegistryLike`).
  */
@@ -14512,18 +14510,18 @@ async function persistImportedSkills(
     }
   });
 
-  // ── Mission Routes ─────────────────────────────────────────────────────────
-  // Mount mission routes at /api/missions
-  router.use("/missions", createMissionRouter(store, options?.missionAutopilot, aiSessionStore, options?.missionExecutionLoop, options?.engineManager));
-
-  // ── Roadmap Routes ─────────────────────────────────────────────────────────
-  // Mount roadmap routes at /api/roadmaps
-  router.use("/roadmaps", createRoadmapRouter(store));
-
-  // ── Insights Routes ─────────────────────────────────────────────────────────
-  // Mount insights routes at /api/insights
-  // Uses projectId from query/body for scoping
-  router.use("/insights", createInsightsRouter(store));
+  // ── Integrated domain routers ──────────────────────────────────────────────
+  // Keep this call at the current position to preserve precedence with
+  // surrounding route handlers. registerIntegratedRouters() mounts:
+  // - /missions
+  // - /roadmaps
+  // - /insights
+  registerIntegratedRouters({
+    router,
+    store,
+    options,
+    aiSessionStore,
+  });
 
   // ── Plugin Routes ─────────────────────────────────────────────────────────
   // Plugin management endpoints with projectId scoping support.
@@ -17769,11 +17767,9 @@ async function persistImportedSkills(
     }
   });
 
-  // Dev server management routes
-  const devServerRouter = createDevServerRouter({
-    projectRoot: store.getRootDir(),
-  });
-  router.use("/dev-server", devServerRouter);
+  // Dev server mount intentionally stays in this late position to keep route
+  // precedence unchanged relative to existing wildcard handlers.
+  registerIntegratedDevServerRouter({ router, store });
 
   // Scripts and messaging routes are registered by registerMessagingScriptRoutes().
 

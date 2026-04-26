@@ -54,3 +54,5 @@ export interface ApiRoutesContext {
   resolveRoutineRunner(req: Request, scope: ScopeValue | undefined): NonNullable<ServerOptions["routineRunner"]>;
   rethrowAsApiError(error: unknown, fallbackMessage?: string): never;
 }
+
+export type ApiRouteRegistrar = (context: ApiRoutesContext) => void;

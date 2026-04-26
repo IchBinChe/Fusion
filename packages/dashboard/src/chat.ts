@@ -29,10 +29,17 @@ import * as engine from "@fusion/engine";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
+const engineExports = engine as Record<string, unknown>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createFnAgent: any = engine.createFnAgent;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let buildAgentChatPromptFn: any = "buildAgentChatPrompt" in engine ? engine.buildAgentChatPrompt : undefined;
+const defaultBuildAgentChatPromptFn: any =
+  "buildAgentChatPrompt" in engineExports &&
+  typeof engineExports["buildAgentChatPrompt"] === "function"
+    ? engineExports["buildAgentChatPrompt"]
+    : undefined;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let buildAgentChatPromptFn: any = defaultBuildAgentChatPromptFn;
 
 /**
  * Diagnostics logger for the chat module.
@@ -897,7 +904,7 @@ export function __setBuildAgentChatPrompt(mock: typeof buildAgentChatPromptFn): 
 export function __resetChatState(): void {
   chatStreamManager.reset();
   rateLimits.clear();
-  buildAgentChatPromptFn = "buildAgentChatPrompt" in engine ? engine.buildAgentChatPrompt : undefined;
+  buildAgentChatPromptFn = defaultBuildAgentChatPromptFn;
 
   // Reset diagnostics logger to default
   __setChatDiagnostics(null);

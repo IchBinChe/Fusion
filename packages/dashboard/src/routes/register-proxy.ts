@@ -226,9 +226,10 @@ export function registerProxyRoutes(ctx: ApiRoutesContext): void {
 
   /**
    * Generic wildcard proxy route — forwards any HTTP request to a remote node.
+   * Keep this after specific /proxy routes so they retain precedence.
    * Matches /api/proxy/:nodeId/*
    */
-  router.all("/proxy/:nodeId/*splat", async (req: Request, res: Response) => {
+  router.all("/proxy/:nodeId/{*splat}", async (req: Request, res: Response) => {
     const nodeId = req.params.nodeId as string;
     const splat = req.params.splat as string | string[];
     const remainingPath = Array.isArray(splat) ? splat.join("/") : splat;
@@ -242,6 +243,11 @@ export function registerProxyRoutes(ctx: ApiRoutesContext): void {
       const node = await central.getNode(nodeId);
       if (!node) {
         res.status(404).json({ error: "Node not found" });
+        return;
+      }
+
+      if (node.type === "local") {
+        res.status(400).json({ error: "Cannot proxy to local node" });
         return;
       }
 

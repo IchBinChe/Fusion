@@ -2065,6 +2065,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   // Registrar mount order is part of the API contract. Keep specific routes
   // before generic parameter/wildcard routes to preserve Express precedence.
+  // Proxy registrar must remain last so explicit /proxy handlers stay ahead
+  // of the fallback /proxy/:nodeId/{*splat} wildcard route.
   const routeContext = {
     router,
     store,

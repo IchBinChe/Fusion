@@ -10,11 +10,12 @@ const agentsViewPath = path.join(__dirname, "../components/AgentsView.tsx");
 const agentDetailViewPath = path.join(__dirname, "../components/AgentDetailView.tsx");
 const agentRunHistoryPath = path.join(__dirname, "../components/AgentRunHistory.tsx");
 const apiPath = path.join(__dirname, "../api.ts");
+const apiLegacyPath = path.join(__dirname, "../api/legacy.ts");
 
 const agentsViewContent = fs.readFileSync(agentsViewPath, "utf-8");
 const agentDetailViewContent = fs.readFileSync(agentDetailViewPath, "utf-8");
 const agentRunHistoryContent = fs.readFileSync(agentRunHistoryPath, "utf-8");
-const apiContent = fs.readFileSync(apiPath, "utf-8");
+const apiContent = `${fs.readFileSync(apiPath, "utf-8")}\n${fs.existsSync(apiLegacyPath) ? fs.readFileSync(apiLegacyPath, "utf-8") : ""}`;
 
 describe("Agent runs UI — static analysis", () => {
   describe("startAgentRun API function", () => {

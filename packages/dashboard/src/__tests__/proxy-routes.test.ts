@@ -206,14 +206,24 @@ describe("Proxy routes", () => {
       expect(res.body).toEqual({ error: "Node not found" });
     });
 
-    it("returns 400 when node is local (no url)", async () => {
+    it("returns 400 when node is local", async () => {
       const node = createMockRemoteNode({ type: "local", url: undefined });
       mockGetNode.mockResolvedValue(node);
 
       const res = await get(app, "/api/proxy/local-node/some-endpoint");
 
       expect(res.status).toBe(400);
-      expect(res.body).toEqual({ error: "Node has no URL" });
+      expect(res.body).toEqual({ error: "Cannot proxy to local node" });
+    });
+
+    it("returns 400 when local node has a URL", async () => {
+      const node = createMockRemoteNode({ type: "local", url: "http://local:4040" });
+      mockGetNode.mockResolvedValue(node);
+
+      const res = await get(app, "/api/proxy/local-node/some-endpoint");
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Cannot proxy to local node" });
     });
 
     it("returns 502 on connection error (TypeError)", async () => {

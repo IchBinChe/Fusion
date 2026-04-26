@@ -654,6 +654,45 @@
   font-weight: 500;
 }
 
+.terminal-font-size-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.terminal-font-size-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
+  min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
+  padding: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.terminal-font-size-btn:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+
+.terminal-font-size-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.terminal-font-size-value {
+  min-width: calc(var(--space-xl) + var(--space-xs));
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
 .terminal-reconnect-btn,
 .terminal-restart-btn {
   display: flex;
@@ -836,6 +875,11 @@
 
   .terminal-shortcuts {
     font-size: 11px;
+  }
+
+  .terminal-font-size-btn {
+    min-width: calc(var(--space-xl) + var(--space-md));
+    min-height: calc(var(--space-xl) + var(--space-md));
   }
 
   .terminal-shortcuts kbd {

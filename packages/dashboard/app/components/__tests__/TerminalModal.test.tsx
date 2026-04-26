@@ -62,6 +62,7 @@ const mockUseTerminal = vi.mocked(useTerminalModule.useTerminal);
 const mockUseTerminalSessions = vi.mocked(useTerminalSessionsModule.useTerminalSessions);
 const mockCreateTerminalSession = vi.mocked(apiModule.createTerminalSession);
 const mockKillPtyTerminalSession = vi.mocked(apiModule.killPtyTerminalSession);
+const TERMINAL_FONT_SIZE_KEY = "kb-terminal-font-size";
 
 // Default tab state
 const defaultTab = {
@@ -107,6 +108,8 @@ describe("TerminalModal", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.removeItem(TERMINAL_FONT_SIZE_KEY);
+    mockTerminalInstance.options.fontSize = 14;
     mockCreateTerminalSession.mockResolvedValue({
       sessionId: "test-session-123",
       shell: "/bin/bash",
@@ -514,6 +517,96 @@ describe("TerminalModal", () => {
     // Verify xterm was opened with the terminal container div
     const terminalDiv = screen.getByTestId("terminal-xterm");
     expect(mockTerminalInstance.open).toHaveBeenCalledWith(terminalDiv);
+  });
+
+  describe("font size controls", () => {
+    it("renders controls in the status bar with default font-size value", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-decrease")).toBeTruthy();
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
+        expect(screen.getByTestId("terminal-font-size-increase")).toBeTruthy();
+      });
+    });
+
+    it("increases font size via button and persists to localStorage", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-font-size-increase"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("15px");
+        expect(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY)).toBe("15");
+      });
+    });
+
+    it("decreases font size via button and persists to localStorage", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-font-size-decrease"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("13px");
+        expect(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY)).toBe("13");
+      });
+    });
+
+    it("reads persisted font size from localStorage on mount", async () => {
+      window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, "18");
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("18px");
+      });
+    });
+
+    it("clamps button changes to max 32", async () => {
+      window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, "32");
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-font-size-increase"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("32px");
+        expect(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY)).toBe("32");
+      });
+    });
+
+    it("clamps button changes to min 8", async () => {
+      window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, "8");
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-font-size-decrease"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("8px");
+        expect(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY)).toBe("8");
+      });
+    });
+
+    it("keeps keyboard zoom shortcuts wired to shared font-size state", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.keyDown(window, { ctrlKey: true, code: "Equal" });
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("15px");
+      });
+
+      fireEvent.keyDown(window, { ctrlKey: true, code: "Minus" });
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
+      });
+
+      fireEvent.keyDown(window, { ctrlKey: true, code: "Digit0" });
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
+        expect(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY)).toBe("14");
+      });
+    });
   });
 
   it("xterm container is rendered (visible under loading overlay) while loading", async () => {

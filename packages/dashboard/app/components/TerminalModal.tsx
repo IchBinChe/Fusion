@@ -1,7 +1,7 @@
 import "./TerminalModal.css";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getErrorMessage } from "@fusion/core";
-import { X, Trash2, Terminal as TerminalIcon, RefreshCw } from "lucide-react";
+import { X, Trash2, Terminal as TerminalIcon, RefreshCw, Minus, Plus } from "lucide-react";
 import { useTerminal } from "../hooks/useTerminal";
 import { useTerminalSessions } from "../hooks/useTerminalSessions";
 import "@xterm/xterm/css/xterm.css";
@@ -13,6 +13,36 @@ import type { FitAddon } from "@xterm/addon-fit";
 const XTERM_INIT_TIMEOUT_MS = 10000;
 
 const XTERM_IMPORT_RETRY_DELAYS_MS = [500, 1500, 3000] as const;
+const TERMINAL_FONT_SIZE_KEY = "kb-terminal-font-size";
+const DEFAULT_FONT_SIZE = 14;
+const MIN_TERMINAL_FONT_SIZE = 8;
+const MAX_TERMINAL_FONT_SIZE = 32;
+
+function clampTerminalFontSize(value: number): number {
+  return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, value));
+}
+
+function readInitialTerminalFontSize(): number {
+  if (typeof window === "undefined") {
+    return DEFAULT_FONT_SIZE;
+  }
+
+  try {
+    const savedFontSize = window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY);
+    if (!savedFontSize) {
+      return DEFAULT_FONT_SIZE;
+    }
+
+    const parsed = Number.parseInt(savedFontSize, 10);
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_FONT_SIZE;
+    }
+
+    return clampTerminalFontSize(parsed);
+  } catch {
+    return DEFAULT_FONT_SIZE;
+  }
+}
 
 function isRetryableDynamicImportError(error: unknown): boolean {
   const message =
@@ -152,6 +182,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const [openGeneration, setOpenGeneration] = useState(0);
   const [keyboardOverlap, setKeyboardOverlap] = useState(0);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+  const [fontSize, setFontSize] = useState<number>(() => readInitialTerminalFontSize());
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -161,6 +192,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const xtermInitializedRef = useRef<string | false>(false);
   const resizeRef = useRef<((cols: number, rows: number) => void) | null>(null);
   const keyboardOverlapRef = useRef(0);
+  const fontSizeRef = useRef(fontSize);
   /** Tracks a pending requestAnimationFrame for deferred xterm re-fit. */
   const pendingFitRef = useRef<number | null>(null);
   /** Tracks the previous projectId to detect project switches and invalidate xterm. */
@@ -169,6 +201,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // Keep the latest keyboard overlap in a ref so async xterm setup can read
   // current mobile keyboard state without forcing the init effect to re-run.
   keyboardOverlapRef.current = keyboardOverlap;
+  fontSizeRef.current = fontSize;
 
   /**
    * Fit xterm and publish cols/rows for a specific terminal session.
@@ -305,6 +338,32 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // without needing resize as a dependency (avoids ordering issues).
   resizeRef.current = resize;
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, String(fontSize));
+    } catch {
+      // Ignore localStorage persistence errors.
+    }
+  }, [fontSize]);
+
+  const refitTerminal = useCallback(() => {
+    const terminal = xtermRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    try {
+      (fitAddonRef.current as InstanceType<typeof FitAddon> | null)?.fit();
+      resize(terminal.cols, terminal.rows);
+    } catch {
+      // Ignore fit errors during viewport transitions.
+    }
+  }, [resize]);
+
   // Initialize xterm.js when session is ready.
   // Keying this effect by active session id (not full activeTab object) avoids
   // tearing down xterm lifecycle wiring during unrelated tab metadata updates
@@ -370,7 +429,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
         terminal = new TerminalCtor({
           cursorBlink: true,
           cursorStyle: "block",
-          fontSize: 14,
+          fontSize: fontSizeRef.current,
           fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
           theme: {
             background: "#1e1e1e",
@@ -623,6 +682,15 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     }
   }, [connectionStatus, initialCommand, sendInput, activeTab, openGeneration]);
 
+  useEffect(() => {
+    if (!xtermReady || !xtermRef.current) {
+      return;
+    }
+
+    xtermRef.current.options.fontSize = fontSize;
+    refitTerminal();
+  }, [fontSize, xtermReady, refitTerminal]);
+
   // Handle keyboard shortcuts (zoom)
   useEffect(() => {
     if (!isOpen) return;
@@ -633,39 +701,31 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
       // Zoom in: Ctrl/Cmd + Plus
       if (e.code === "Equal" || e.code === "NumpadAdd") {
         e.preventDefault();
-        if (xtermRef.current) {
-          const currentSize = xtermRef.current.options.fontSize || 14;
-          xtermRef.current.options.fontSize = Math.min(currentSize + 1, 32);
-          (fitAddonRef.current as InstanceType<typeof FitAddon> | null)?.fit();
-        }
+        setFontSize((current) => clampTerminalFontSize(current + 1));
+        refitTerminal();
         return;
       }
 
       // Zoom out: Ctrl/Cmd + Minus
       if (e.code === "Minus" || e.code === "NumpadSubtract") {
         e.preventDefault();
-        if (xtermRef.current) {
-          const currentSize = xtermRef.current.options.fontSize || 14;
-          xtermRef.current.options.fontSize = Math.max(currentSize - 1, 8);
-          (fitAddonRef.current as InstanceType<typeof FitAddon> | null)?.fit();
-        }
+        setFontSize((current) => clampTerminalFontSize(current - 1));
+        refitTerminal();
         return;
       }
 
       // Reset zoom: Ctrl/Cmd + 0
       if (e.code === "Digit0" || e.code === "Numpad0") {
         e.preventDefault();
-        if (xtermRef.current) {
-          xtermRef.current.options.fontSize = 14;
-          (fitAddonRef.current as InstanceType<typeof FitAddon> | null)?.fit();
-        }
+        setFontSize(DEFAULT_FONT_SIZE);
+        refitTerminal();
         return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, refitTerminal]);
 
   // Handle escape key to close
   useEffect(() => {
@@ -835,6 +895,16 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const handleRefreshPage = useCallback(() => {
     window.location.reload();
   }, []);
+
+  const handleIncreaseFontSize = useCallback(() => {
+    setFontSize((current) => clampTerminalFontSize(current + 1));
+    refitTerminal();
+  }, [refitTerminal]);
+
+  const handleDecreaseFontSize = useCallback(() => {
+    setFontSize((current) => clampTerminalFontSize(current - 1));
+    refitTerminal();
+  }, [refitTerminal]);
 
   if (!isOpen) return null;
 
@@ -1072,6 +1142,29 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
               Exit: {exitCode}
             </span>
           )}
+          <span className="terminal-font-size-controls">
+            <button
+              type="button"
+              className="terminal-font-size-btn"
+              onClick={handleDecreaseFontSize}
+              data-testid="terminal-font-size-decrease"
+              aria-label="Decrease terminal font size"
+            >
+              <Minus size={14} />
+            </button>
+            <span className="terminal-font-size-value" data-testid="terminal-font-size-value">
+              {fontSize}px
+            </span>
+            <button
+              type="button"
+              className="terminal-font-size-btn"
+              onClick={handleIncreaseFontSize}
+              data-testid="terminal-font-size-increase"
+              aria-label="Increase terminal font size"
+            >
+              <Plus size={14} />
+            </button>
+          </span>
           <span className="terminal-shortcuts">
             Ctrl++/- zoom • Ctrl+L clear • Esc close
           </span>

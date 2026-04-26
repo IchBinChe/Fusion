@@ -161,6 +161,19 @@ Click the chevron next to the status indicator to open the node selector dropdow
 
 The selected node persists across browser sessions via localStorage. If the selected remote node is unregistered, the dashboard automatically falls back to local mode.
 
+## Remote Access (Settings)
+
+Dashboard remote controls live in **Settings → Remote Access**.
+
+From this section, operators can:
+
+- Configure Tailscale and Cloudflare provider fields
+- Activate the current provider
+- Start/stop tunnel lifecycle manually
+- Generate login URLs / QR payloads using persistent or short-lived token mode
+
+For setup prerequisites, security caveats for tokenized URLs/QR links, and troubleshooting, use the canonical **[Remote Access runbook](./remote-access.md)**.
+
 ## Skills API
 
 The Skills API provides endpoints for managing execution skills. Skills are toggled via project-scoped settings in `.fusion/settings.json`.

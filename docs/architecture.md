@@ -351,6 +351,8 @@ Implemented in `agent-heartbeat.ts`:
 - `PeerExchangeService` (`peer-exchange-service.ts`) — peer sync orchestration
 
 ### Remote access runtime
+
+Operator setup + troubleshooting guide: **[Remote Access runbook](./remote-access.md)**.
 - `remote-access/tunnel-process-manager.ts` owns tunnel lifecycle orchestration with `spawn`-based, non-blocking process supervision.
 - `remote-access/types.ts` defines the runtime contract used by downstream API/TUI/headless layers:
   - Providers: `"tailscale" | "cloudflare"`
@@ -392,6 +394,7 @@ Implemented in `agent-heartbeat.ts`:
 Key server capabilities:
 - REST APIs for tasks, git, GitHub, agents, missions, planning, automations/routines, settings
 - Remote access APIs (`/api/remote/*`) for provider config, activation, tunnel lifecycle, status, token issuance, authenticated URL generation, and QR payload generation
+  - Operational runbook (prereqs/security/troubleshooting): [`docs/remote-access.md`](./remote-access.md)
   - `/api/remote/tunnel/start` and `/api/remote/tunnel/stop` are the only lifecycle transition endpoints.
   - `/api/remote/status` includes tunnel status plus restore diagnostics (`restore.outcome` + `restore.reason`) with parity between dashboard and headless `fn serve` runtimes.
 - Remote auth handoff endpoints:

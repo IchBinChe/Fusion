@@ -22,6 +22,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Getting Started](./getting-started.md) | Installation, first-run, first task, and daily workflow basics |
 | [Dashboard Guide](./dashboard-guide.md) | Board/list views, terminal, git manager, files, planning, and UI tools |
 | [CLI Reference](./cli-reference.md) | Complete `fn` command reference with subcommands, flags, and examples |
+| [Remote Access](./remote-access.md) | Operator runbook for Tailscale/Cloudflare setup, tokenized login links, security caveats, and troubleshooting |
 
 ### Task & Project Management
 | Guide | Description |

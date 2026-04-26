@@ -181,6 +181,8 @@ fn daemon --port 5050                  # daemon mode with token auth support
 fn desktop                             # launch Electron desktop app
 ```
 
+If you plan to expose Fusion remotely, read the **[Remote Access runbook](./remote-access.md)** before enabling tunnels. It covers provider prerequisites, tokenized login-link security caveats, and operational troubleshooting.
+
 ## Create Your First Task
 
 You can create tasks from the board or CLI.

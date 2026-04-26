@@ -87,6 +87,8 @@ Remote actions support:
 - Short-lived token generation with TTL input and expiry display
 - URL + QR hand-off (always shows full authenticated URL)
 
+> ⚠️ Remote URL/QR payloads include tokenized query data. Treat them like credentials and avoid sharing them in screenshots/chat/logs. Prefer short-lived links for ad-hoc phone login.
+
 Remote action keys in Settings detail pane:
 - `C` activate selected provider
 - `V` start tunnel
@@ -230,6 +232,20 @@ fn serve --interactive
 When remote access is enabled/configured, the headless server exposes `/api/remote/*`
 control/status endpoints and applies the same hybrid token validation rules for
 remote routes (persistent token + optional short-lived token registry).
+
+Headless operators should use the same lifecycle/API flow as dashboard mode:
+
+- `POST /api/remote/provider/activate`
+- `POST /api/remote/tunnel/start`
+- `POST /api/remote/tunnel/stop`
+- `GET /api/remote/status`
+- `POST /api/remote-access/auth/login-url`
+
+`GET /remote-login?rt=<token>` is intentionally public for phone-link handoff,
+but token validity is still enforced server-side.
+
+For end-to-end setup, risk guidance, and troubleshooting, see
+**[docs/remote-access.md](./remote-access.md)**.
 
 For programmatic consumers, these endpoints map to the engine tunnel manager contract:
 - `getStatus()` for current snapshot

@@ -181,6 +181,8 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 Remote access settings are project-only (stored in `.fusion/config.json`), not global.
 The canonical persisted shape is a nested `remoteAccess` object.
 
+Use **[Remote Access runbook](./remote-access.md)** for setup prerequisites (Tailscale/Cloudflare), tokenized login-link security caveats, and operational troubleshooting. Keep this section as a schema reference.
+
 | Setting | Type | Default | Description |
 |---|---|---:|---|
 | `remoteAccess.enabled` | `boolean` | `false` | Master toggle for remote access orchestration. |

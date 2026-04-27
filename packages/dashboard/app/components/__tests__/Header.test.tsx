@@ -134,9 +134,15 @@ describe("Header", () => {
       expect(listBtn.getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("does not render view overflow trigger when no overflow items are enabled", () => {
+    it("renders view overflow trigger so Todos remains reachable", () => {
       renderHeader({ onChangeView: noop });
-      expect(screen.queryByTestId("view-toggle-overflow-trigger")).toBeNull();
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
+    });
+
+    it("shows the Todos entry in view overflow", () => {
+      renderHeader({ onChangeView: noop });
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.getByTestId("view-overflow-todos")).toBeInTheDocument();
     });
 
     it("renders view overflow trigger when an experimental overflow feature is enabled", () => {
@@ -149,13 +155,13 @@ describe("Header", () => {
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
 
-    it("does not render view overflow trigger when overflow feature flags are explicitly false", () => {
+    it("still renders view overflow trigger when overflow feature flags are explicitly false", () => {
       renderHeader({
         onChangeView: noop,
         showSkillsTab: false,
         experimentalFeatures: { insights: false, roadmap: false, memoryView: false },
       });
-      expect(screen.queryByTestId("view-toggle-overflow-trigger")).toBeNull();
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
   });
 

@@ -269,6 +269,7 @@ describe("TodoView", () => {
 
   it("applies active class to selected list", () => {
     render(<TodoView addToast={addToast} />);
-    expect(screen.getByTestId("todo-list-list-1")).toHaveClass("todo-list-item--active");
+    const selectedButton = screen.getByTestId("todo-list-list-1");
+    expect(selectedButton.closest(".todo-list-item")).toHaveClass("todo-list-item--active");
   });
 });

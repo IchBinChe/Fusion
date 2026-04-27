@@ -301,14 +301,17 @@ export function Header({
   }, [overflowScripts]);
 
   const hasViewOverflowItems = useMemo(() => {
+    const hasTodosView = Boolean(onChangeView);
+
     return !!(
+      hasTodosView ||
       experimentalFeatures?.insights ||
       experimentalFeatures?.roadmap ||
       showSkillsTab ||
       experimentalFeatures?.memoryView ||
       experimentalFeatures?.devServerView
     );
-  }, [experimentalFeatures, showSkillsTab]);
+  }, [experimentalFeatures, onChangeView, showSkillsTab]);
 
   // Keep ref in sync with state
   useEffect(() => {

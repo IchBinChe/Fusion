@@ -278,15 +278,6 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
                   <div
                     key={list.id}
                     className={`todo-list-item${isActive ? " todo-list-item--active" : ""}`}
-                    onClick={() => setSelectedListId(list.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        setSelectedListId(list.id);
-                      }
-                    }}
-                    data-testid={`todo-list-${list.id}`}
                   >
                     {isEditing ? (
                       <>
@@ -303,14 +294,12 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
                             }
                           }}
                           autoFocus
-                          onClick={(event) => event.stopPropagation()}
                           data-testid={`rename-list-input-${list.id}`}
                         />
                         <button
                           type="button"
                           className="btn btn-sm btn-icon todo-icon-btn"
-                          onClick={(event) => {
-                            event.stopPropagation();
+                          onClick={() => {
                             void handleSaveRenameList();
                           }}
                           aria-label="Save list rename"
@@ -320,10 +309,7 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
                         <button
                           type="button"
                           className="btn btn-sm btn-icon todo-icon-btn"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleCancelRenameList();
-                          }}
+                          onClick={handleCancelRenameList}
                           aria-label="Cancel list rename"
                         >
                           <X size={14} />
@@ -331,13 +317,19 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
                       </>
                     ) : (
                       <>
-                        <span className="todo-list-item-name">{list.title}</span>
+                        <button
+                          type="button"
+                          className="todo-list-select-btn"
+                          onClick={() => setSelectedListId(list.id)}
+                          data-testid={`todo-list-${list.id}`}
+                        >
+                          <span className="todo-list-item-name">{list.title}</span>
+                        </button>
                         <div className="todo-list-item-actions">
                           <button
                             type="button"
                             className="btn btn-sm btn-icon todo-icon-btn"
-                            onClick={(event) => {
-                              event.stopPropagation();
+                            onClick={() => {
                               handleStartRenameList(list);
                             }}
                             aria-label={`Rename ${list.title}`}
@@ -348,8 +340,7 @@ export function TodoView({ projectId, addToast }: TodoViewProps) {
                           <button
                             type="button"
                             className="btn btn-sm btn-icon btn-danger todo-icon-btn"
-                            onClick={(event) => {
-                              event.stopPropagation();
+                            onClick={() => {
                               void handleDeleteList(list.id);
                             }}
                             aria-label={`Delete ${list.title}`}

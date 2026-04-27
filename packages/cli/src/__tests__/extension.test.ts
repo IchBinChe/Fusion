@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 
 // Each test spins up a fresh temp workspace, mounts the full extension API,
 // registers tools, and exercises them through real TaskStore/MissionStore
@@ -79,6 +80,28 @@ function makeCtx(cwd: string) {
   return { cwd } as any;
 }
 
+async function removeDirWithRetries(path: string) {
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOTEMPTY" && code !== "EBUSY") {
+        throw error;
+      }
+
+      if (attempt === maxAttempts) {
+        throw error;
+      }
+
+      await delay(25 * attempt);
+    }
+  }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 // Skipped: 39 tests × ~1-4s each (~62s total) exercise every fn pi tool
@@ -102,7 +125,7 @@ describe.skip("fn pi extension", () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await removeDirWithRetries(tmpDir);
   });
 
   describe("registration", () => {

@@ -443,6 +443,30 @@ fn plugin install ./plugins/fusion-plugin-openclaw-runtime
 
 For more details, see the [Paperclip Runtime Plugin documentation](../plugins/fusion-plugin-paperclip-runtime/README.md), [Hermes Runtime Plugin documentation](../plugins/fusion-plugin-hermes-runtime/README.md), and [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
 
+### OpenClaw Gateway Configuration
+
+The OpenClaw runtime plugin connects to a running OpenClaw gateway instance through its OpenAI-compatible HTTP API. You can configure the gateway connection using plugin settings or environment variables.
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `gatewayUrl` | `string` | `http://127.0.0.1:18789` | URL of the OpenClaw gateway instance |
+| `gatewayToken` | `string` | (none) | Authentication token for the gateway |
+| `agentId` | `string` | `"main"` | OpenClaw agent ID to use for sessions |
+
+| Setting | Environment Variable | Default if Unset |
+|---|---|---|
+| `gatewayUrl` | `OPENCLAW_GATEWAY_URL` | `http://127.0.0.1:18789` |
+| `gatewayToken` | `OPENCLAW_GATEWAY_TOKEN` | (none — unauthenticated) |
+| `agentId` | `OPENCLAW_AGENT_ID` | `main` |
+
+Resolution priority is: plugin settings (`PluginContext.settings`) → environment variables → built-in defaults.
+
+> ℹ️ These are **plugin-level** settings configured when the OpenClaw runtime plugin is installed/enabled (for example in the dashboard Plugin Manager or plugin config). They are not agent-level `runtimeConfig` fields. Agents only need `runtimeConfig.runtimeHint: "openclaw"`; gateway connection details are handled by the plugin.
+
+> ⚠️ `gatewayToken` is a secret. Never log it or commit it to version control. For production, prefer setting `OPENCLAW_GATEWAY_TOKEN` in the environment.
+
+For additional gateway/runtime details, see the [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
+
 ---
 
 ## Prompt Overrides

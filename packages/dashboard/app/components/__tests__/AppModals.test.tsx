@@ -58,6 +58,14 @@ vi.mock("../NewTaskModal", () => ({
   NewTaskModal: () => null,
 }));
 
+const mockSystemStatsModalProps = vi.fn();
+vi.mock("../SystemStatsModal", () => ({
+  SystemStatsModal: (props: any) => {
+    mockSystemStatsModalProps(props);
+    return null;
+  },
+}));
+
 vi.mock("../ActivityLogModal", () => ({
   ActivityLogModal: () => null,
 }));
@@ -133,6 +141,7 @@ describe("AppModals", () => {
     filesOpen: false,
     fileBrowserWorkspace: "project",
     usageOpen: false,
+    systemStatsOpen: false,
     schedulesOpen: false,
     newTaskModalOpen: false,
     activityLogOpen: false,
@@ -159,6 +168,8 @@ describe("AppModals", () => {
     setFileWorkspace: vi.fn(),
     openUsage: vi.fn(),
     closeUsage: vi.fn(),
+    openSystemStats: vi.fn(),
+    closeSystemStats: vi.fn(),
     openSchedules: vi.fn(),
     closeSchedules: vi.fn(),
     openNewTask: vi.fn(),
@@ -194,6 +205,7 @@ describe("AppModals", () => {
     mockScheduledTasksModalProps.mockClear();
     mockModelOnboardingModalProps.mockClear();
     mockSettingsModalProps.mockClear();
+    mockSystemStatsModalProps.mockClear();
   });
 
   it("renders without crashing", () => {
@@ -342,6 +354,42 @@ describe("AppModals", () => {
       );
       expect(mockScheduledTasksModalProps).toHaveBeenCalledTimes(1);
       expect(mockScheduledTasksModalProps.mock.calls[0][0].projectId).toBe(expected);
+    });
+  });
+
+  describe("SystemStatsModal wiring", () => {
+    const commonProps = {
+      tasks: [],
+      projects: [],
+      currentProject: null,
+      toasts: mockToasts,
+      removeToast: vi.fn(),
+      projectActions: { handleAddProject: vi.fn(), handleSetupComplete: vi.fn(), handleModelOnboardingComplete: vi.fn() },
+      taskHandlers: { handleModalCreate: vi.fn(), handlePlanningTaskCreated: vi.fn(), handlePlanningTasksCreated: vi.fn(), handleSubtaskTasksCreated: vi.fn(), handleGitHubImport: vi.fn() },
+      taskOperations: { moveTask: vi.fn(), deleteTask: vi.fn(), mergeTask: vi.fn(), retryTask: vi.fn(), duplicateTask: vi.fn() },
+      deepLink: { handleDetailClose: vi.fn() },
+      settings: mockSettings,
+    };
+
+    it("passes modal manager state and projectId through to SystemStatsModal", () => {
+      const closeSystemStats = vi.fn();
+      render(
+        <AppModals
+          {...commonProps}
+          projectId="proj-system"
+          addToast={vi.fn()}
+          modalManager={{ ...mockModalManager, systemStatsOpen: true, closeSystemStats }}
+        />,
+      );
+
+      expect(mockSystemStatsModalProps).toHaveBeenCalledTimes(1);
+      expect(mockSystemStatsModalProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isOpen: true,
+          onClose: closeSystemStats,
+          projectId: "proj-system",
+        }),
+      );
     });
   });
 });

@@ -785,6 +785,7 @@ function AppInner() {
         activePlanningSessionCount={bgPlanningSessions.length}
         onOpenUsage={modalManager.openUsage}
         onOpenActivityLog={modalManager.openActivityLog}
+        onOpenSystemStats={modalManager.openSystemStats}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
         mailboxUnreadCount={mailboxUnreadCount}
         onOpenSchedules={modalManager.openSchedules}
@@ -883,6 +884,7 @@ function AppInner() {
         modalOpen={modalManager.anyModalOpen}
         onOpenSettings={handleOpenSettings}
         onOpenActivityLog={modalManager.openActivityLog}
+        onOpenSystemStats={modalManager.openSystemStats}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
         mailboxUnreadCount={mailboxUnreadCount}
         onOpenGitManager={modalManager.openGitManager}

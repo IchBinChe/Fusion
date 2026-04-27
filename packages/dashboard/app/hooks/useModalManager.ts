@@ -37,6 +37,7 @@ export interface ModalManager {
   githubImportOpen: boolean;
   usageOpen: boolean;
   usageAnchorRect: DOMRect | null;
+  systemStatsOpen: boolean;
   terminalOpen: boolean;
   terminalInitialCommand: string | undefined;
   filesOpen: boolean;
@@ -80,6 +81,9 @@ export interface ModalManager {
 
   openUsage: (anchorRect?: DOMRect | null) => void;
   closeUsage: () => void;
+
+  openSystemStats: () => void;
+  closeSystemStats: () => void;
 
   toggleTerminal: () => void;
   closeTerminal: () => void;
@@ -140,6 +144,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [githubImportOpen, setGitHubImportOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [usageAnchorRect, setUsageAnchorRect] = useState<DOMRect | null>(null);
+  const [systemStatsOpen, setSystemStatsOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalInitialCommand, setTerminalInitialCommand] = useState<string | undefined>(undefined);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -166,6 +171,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       scriptsOpen ||
       agentsOpen ||
       usageOpen ||
+      systemStatsOpen ||
       schedulesOpen ||
       githubImportOpen ||
       setupWizardOpen ||
@@ -249,6 +255,9 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     setUsageAnchorRect(null);
   }, []);
 
+  const openSystemStats = useCallback(() => setSystemStatsOpen(true), []);
+  const closeSystemStats = useCallback(() => setSystemStatsOpen(false), []);
+
   const toggleTerminal = useCallback(() => {
     setTerminalOpen((prev) => !prev);
   }, []);
@@ -325,6 +334,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     githubImportOpen,
     usageOpen,
     usageAnchorRect,
+    systemStatsOpen,
     terminalOpen,
     terminalInitialCommand,
     filesOpen,
@@ -359,6 +369,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     closeGitHubImport,
     openUsage,
     closeUsage,
+    openSystemStats,
+    closeSystemStats,
     toggleTerminal,
     closeTerminal,
     openFiles,

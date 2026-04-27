@@ -4841,6 +4841,44 @@ export function fetchExecutorStats(projectId?: string): Promise<{
   }>(withProjectId("/executor/stats", projectId));
 }
 
+export interface SystemStatsSnapshot {
+  rss: number;
+  heapUsed: number;
+  heapTotal: number;
+  heapLimit: number;
+  external: number;
+  arrayBuffers: number;
+  cpuPercent: number | null;
+  loadAvg: [number, number, number];
+  cpuCount: number;
+  systemTotalMem: number;
+  systemFreeMem: number;
+  pid: number;
+  nodeVersion: string;
+  platform: string;
+}
+
+export interface TaskStatsSnapshot {
+  total: number;
+  byColumn: Record<string, number>;
+  active: number;
+  agents: {
+    idle: number;
+    active: number;
+    running: number;
+    error: number;
+  };
+}
+
+export interface SystemStatsResponse {
+  systemStats: SystemStatsSnapshot;
+  taskStats: TaskStatsSnapshot;
+}
+
+export function fetchSystemStats(projectId?: string): Promise<SystemStatsResponse> {
+  return api<SystemStatsResponse>(withProjectId("/system-stats", projectId));
+}
+
 /** Fetch unified activity feed */
 export function fetchActivityFeed(options?: FeedOptions): Promise<ActivityFeedEntry[]> {
   const params = new URLSearchParams();

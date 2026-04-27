@@ -95,7 +95,7 @@ vi.mock("@fusion/engine", () => ({
   },
 }));
 
-import { isGhAvailable, isGhAuthenticated } from "@fusion/core";
+import { AgentStore, isGhAvailable, isGhAuthenticated } from "@fusion/core";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
@@ -248,6 +248,99 @@ describe("route registrar ordering invariants", () => {
 
     expect(indexOf("GET /mesh/state")).toBeLessThan(indexOf("POST /mesh/sync"));
     expect(indexOf("GET /discovery/status")).toBeGreaterThan(indexOf("POST /mesh/sync"));
+  });
+});
+
+describe("GET /api/system-stats", () => {
+  const projectId = "proj-system-stats";
+
+  function buildApp(store: TaskStore, options?: Parameters<typeof createApiRoutes>[1]) {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, options));
+    return app;
+  }
+
+  it("returns process/system metrics with task and agent aggregates", async () => {
+    const store = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([
+        { id: "FN-1", column: "triage" },
+        { id: "FN-2", column: "in-progress" },
+        { id: "FN-3", column: "in-review" },
+      ]),
+      getFusionDir: vi.fn().mockReturnValue("/fake/default"),
+    });
+
+    vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
+    vi.spyOn(AgentStore.prototype, "listAgents").mockResolvedValue([
+      { id: "agent-1", state: "idle" },
+      { id: "agent-2", state: "active" },
+      { id: "agent-3", state: "running" },
+      { id: "agent-4", state: "error" },
+    ] as Array<Awaited<ReturnType<AgentStore["listAgents"]>>[number]>);
+
+    const res = await GET(buildApp(store), "/api/system-stats");
+
+    expect(res.status).toBe(200);
+    expect(res.body.systemStats).toEqual(
+      expect.objectContaining({
+        rss: expect.any(Number),
+        heapUsed: expect.any(Number),
+        heapTotal: expect.any(Number),
+        heapLimit: expect.any(Number),
+        external: expect.any(Number),
+        arrayBuffers: expect.any(Number),
+        cpuPercent: null,
+        loadAvg: expect.arrayContaining([expect.any(Number)]),
+        cpuCount: expect.any(Number),
+        systemTotalMem: expect.any(Number),
+        systemFreeMem: expect.any(Number),
+        pid: expect.any(Number),
+        nodeVersion: expect.stringMatching(/^v/),
+        platform: expect.stringContaining("/"),
+      }),
+    );
+    expect(res.body.taskStats).toEqual({
+      total: 3,
+      byColumn: {
+        triage: 1,
+        todo: 0,
+        "in-progress": 1,
+        "in-review": 1,
+        done: 0,
+        archived: 0,
+      },
+      active: 2,
+      agents: {
+        idle: 1,
+        active: 1,
+        running: 1,
+        error: 1,
+      },
+    });
+  });
+
+  it("uses project-scoped store when projectId query param is provided", async () => {
+    const defaultStore = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([{ id: "FN-default", column: "triage" }]),
+      getFusionDir: vi.fn().mockReturnValue("/fake/default"),
+    });
+    const scopedStore = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([{ id: "FN-scoped", column: "todo" }]),
+      getFusionDir: vi.fn().mockReturnValue("/fake/scoped"),
+    });
+
+    vi.spyOn(projectStoreResolver, "getOrCreateProjectStore").mockResolvedValue(scopedStore);
+    vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
+    vi.spyOn(AgentStore.prototype, "listAgents").mockResolvedValue([]);
+
+    const res = await GET(buildApp(defaultStore), `/api/system-stats?projectId=${projectId}`);
+
+    expect(res.status).toBe(200);
+    expect(projectStoreResolver.getOrCreateProjectStore).toHaveBeenCalledWith(projectId);
+    expect(scopedStore.listTasks).toHaveBeenCalledTimes(1);
+    expect(defaultStore.listTasks).not.toHaveBeenCalled();
+    expect(res.body.taskStats.byColumn.todo).toBe(1);
   });
 });
 

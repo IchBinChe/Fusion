@@ -165,6 +165,7 @@ export interface HeaderProps {
   activePlanningSessionCount?: number;
   onOpenUsage?: (anchorRect?: DOMRect | null) => void;
   onOpenActivityLog?: () => void;
+  onOpenSystemStats?: () => void;
   /** Opens the mailbox view */
   onOpenMailbox?: () => void;
   /** Unread message count for badge display */
@@ -222,6 +223,7 @@ export function Header({
   activePlanningSessionCount = 0,
   onOpenUsage,
   onOpenActivityLog,
+  onOpenSystemStats,
   onOpenMailbox,
   mailboxUnreadCount = 0,
   onOpenSchedules,
@@ -953,6 +955,13 @@ export function Header({
             data-testid="desktop-header-usage-btn"
           >
             <Activity size={16} />
+          </button>
+        )}
+
+        {/* System Stats button - desktop only */}
+        {!isCompact && onOpenSystemStats && (
+          <button className="btn-icon" onClick={onOpenSystemStats} title="System Stats" data-testid="desktop-header-system-stats-btn">
+            <Monitor size={16} />
           </button>
         )}
 

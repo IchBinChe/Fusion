@@ -396,6 +396,7 @@ Operator setup + troubleshooting guide: **[Remote Access runbook](./remote-acces
 
 Key server capabilities:
 - REST APIs for tasks, git, GitHub, agents, missions, planning, automations/routines, settings
+- System stats snapshot API (`GET /api/system-stats`) exposing dashboard process/system telemetry plus task and agent aggregates for the System Stats modal
 - Remote access APIs (`/api/remote/*`) for provider config, activation, tunnel lifecycle, status, token issuance, authenticated URL generation, and QR payload generation
   - Operational runbook (prereqs/security/troubleshooting): [`docs/remote-access.md`](./remote-access.md)
   - `/api/remote/tunnel/start` and `/api/remote/tunnel/stop` are the only lifecycle transition endpoints.

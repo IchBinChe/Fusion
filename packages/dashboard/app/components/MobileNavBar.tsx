@@ -43,6 +43,7 @@ export interface MobileNavBarProps {
   // Navigation handlers
   onOpenSettings?: () => void;
   onOpenActivityLog?: () => void;
+  onOpenSystemStats?: () => void;
   onOpenMailbox?: () => void;
   mailboxUnreadCount?: number;
   onOpenGitManager?: () => void;
@@ -90,6 +91,7 @@ export function MobileNavBar({
   modalOpen = false,
   onOpenSettings,
   onOpenActivityLog,
+  onOpenSystemStats,
   onOpenMailbox,
   mailboxUnreadCount = 0,
   onOpenGitManager,
@@ -341,6 +343,16 @@ export function MobileNavBar({
             >
               <Activity />
               <span>Activity Log</span>
+            </button>
+
+            <button
+              type="button"
+              className="mobile-more-item"
+              data-testid="mobile-more-item-system-stats"
+              onClick={() => handleMoreAction(onOpenSystemStats)}
+            >
+              <Monitor />
+              <span>System Stats</span>
             </button>
 
             <button

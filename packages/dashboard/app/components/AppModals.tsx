@@ -16,6 +16,7 @@ import { FileBrowserModal } from "./FileBrowserModal";
 import { UsageIndicator } from "./UsageIndicator";
 import { ScheduledTasksModal } from "./ScheduledTasksModal";
 import { NewTaskModal } from "./NewTaskModal";
+import { SystemStatsModal } from "./SystemStatsModal";
 import { ActivityLogModal } from "./ActivityLogModal";
 import { GitManagerModal } from "./GitManagerModal";
 import { WorkflowStepManager } from "./WorkflowStepManager";
@@ -233,6 +234,12 @@ export function AppModals({
         onClose={modalManager.closeUsage}
         projectId={projectId}
         anchorRect={modalManager.usageAnchorRect}
+      />
+
+      <SystemStatsModal
+        isOpen={modalManager.systemStatsOpen}
+        onClose={modalManager.closeSystemStats}
+        projectId={projectId}
       />
 
       {modalManager.schedulesOpen && (

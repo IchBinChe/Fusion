@@ -9,6 +9,8 @@ declare module "express" {
 import multer from "multer";
 import { resolve, sep, join, isAbsolute } from "node:path";
 import * as nodeFs from "node:fs";
+import os from "node:os";
+import v8 from "node:v8";
 
 import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType } from "@fusion/core";
 import { type Task, type PiExtensionEntry, type PiExtensionSettings, AutomationStore, RoutineStore, isWebhookTrigger, MemoryBackendError, listAgentMemoryFiles, readAgentMemoryFile, writeAgentMemoryFile, discoverPiExtensions, getFusionAgentDir, getLegacyPiAgentDir } from "@fusion/core";
@@ -1188,6 +1190,74 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         enginePaused: settings.enginePaused ?? false,
         maxConcurrent: settings.maxConcurrent ?? 2,
         lastActivityAt,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * GET /api/system-stats
+   * Returns process/system metrics plus task and agent aggregates.
+   */
+  router.get("/system-stats", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const mem = process.memoryUsage();
+      const heapStats = v8.getHeapStatistics();
+      const load = os.loadavg();
+
+      const tasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
+      const byColumn: Record<string, number> = {
+        triage: 0,
+        todo: 0,
+        "in-progress": 0,
+        "in-review": 0,
+        done: 0,
+        archived: 0,
+      };
+      for (const task of tasks) {
+        byColumn[task.column] = (byColumn[task.column] ?? 0) + 1;
+      }
+
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+      const agents = await agentStore.listAgents();
+      const agentCounts = { idle: 0, active: 0, running: 0, error: 0 };
+      for (const agent of agents) {
+        const state = agent.state as keyof typeof agentCounts;
+        if (state in agentCounts) {
+          agentCounts[state] += 1;
+        }
+      }
+
+      res.json({
+        systemStats: {
+          rss: mem.rss,
+          heapUsed: mem.heapUsed,
+          heapTotal: mem.heapTotal,
+          heapLimit: heapStats.heap_size_limit,
+          external: mem.external,
+          arrayBuffers: mem.arrayBuffers,
+          cpuPercent: null,
+          loadAvg: [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
+          cpuCount: os.cpus().length,
+          systemTotalMem: os.totalmem(),
+          systemFreeMem: os.freemem(),
+          pid: process.pid,
+          nodeVersion: process.version,
+          platform: `${process.platform}/${process.arch}`,
+        },
+        taskStats: {
+          total: tasks.length,
+          byColumn,
+          active: tasks.filter((task) => task.column === "in-progress" || task.column === "in-review").length,
+          agents: agentCounts,
+        },
       });
     } catch (err: unknown) {
       if (err instanceof ApiError) {

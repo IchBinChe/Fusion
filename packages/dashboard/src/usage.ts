@@ -1699,13 +1699,16 @@ export async function fetchAllProviderUsage(authStorage?: AuthStorageLike): Prom
     }
   }
 
+  // Only return providers that have valid auth configured.
+  const authenticatedProviders = providers.filter((provider) => provider.status !== "no-auth");
+
   // Update cache
   usageCache = {
-    data: providers,
+    data: authenticatedProviders,
     timestamp: Date.now(),
   };
 
-  return providers;
+  return authenticatedProviders;
 }
 
 /**

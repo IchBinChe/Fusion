@@ -67,7 +67,7 @@ describe("usage", () => {
   });
 
   describe("fetchAllProviderUsage", () => {
-    it("returns providers array even when all are not authenticated", async () => {
+    it("returns an empty providers array when all providers are not authenticated", async () => {
       // All credential files don't exist
       mockReadFile.mockImplementation(async () => {
         return Promise.reject(new Error("File not found"));
@@ -75,20 +75,7 @@ describe("usage", () => {
 
       const providers = await fetchAllProviderUsage();
 
-      expect(providers).toHaveLength(6);
-      expect(providers.map((p) => p.name)).toContain("Claude");
-      expect(providers.map((p) => p.name)).toContain("Codex");
-      expect(providers.map((p) => p.name)).toContain("Gemini");
-      expect(providers.map((p) => p.name)).toContain("Minimax");
-      expect(providers.map((p) => p.name)).toContain("Zai");
-      expect(providers.map((p) => p.name)).toContain("GitHub Copilot");
-      expect(providers.map((p) => p.name)).not.toContain("Kimi");
-
-      // All should be no-auth status
-      for (const p of providers) {
-        expect(p.status).toBe("no-auth");
-        expect(p.error).toBeDefined();
-      }
+      expect(providers).toEqual([]);
     });
 
     it("returns cached data within TTL", async () => {
@@ -117,7 +104,7 @@ describe("usage", () => {
 
       // Should be different array reference
       expect(second).not.toBe(first);
-      expect(second).toHaveLength(6);
+      expect(second).toHaveLength(0);
     });
   });
 
@@ -133,9 +120,8 @@ describe("usage", () => {
 
       const providers = await fetchAllProviderUsage();
       const copilot = providers.find((p) => p.name === "GitHub Copilot");
-      expect(copilot).toBeDefined();
-      expect(copilot!.status).toBe("no-auth");
-      expect(copilot!.error).toContain("not authenticated");
+
+      expect(copilot).toBeUndefined();
     });
 
     it("returns ok with plan when gh api succeeds", async () => {
@@ -248,9 +234,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const claude = providers.find((p) => p.name === "Claude");
 
-      expect(claude).toBeDefined();
-      expect(claude!.status).toBe("no-auth");
-      expect(claude!.error).toContain("No Claude CLI credentials");
+      expect(claude).toBeUndefined();
     });
 
     it("reads credentials from macOS keychain when file paths fail", async () => {
@@ -332,8 +316,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const claude = providers.find((p) => p.name === "Claude");
 
-      expect(claude!.status).toBe("no-auth");
-      expect(claude!.error).toContain("user:profile scope");
+      expect(claude).toBeUndefined();
     });
 
     it("parses usage data from API response", async () => {
@@ -1606,9 +1589,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const codex = providers.find((p) => p.name === "Codex");
 
-      expect(codex).toBeDefined();
-      expect(codex!.status).toBe("no-auth");
-      expect(codex!.error).toContain("No Codex credentials");
+      expect(codex).toBeUndefined();
     });
 
     it("parses usage data from API response", async () => {
@@ -1781,9 +1762,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const gemini = providers.find((p) => p.name === "Gemini");
 
-      expect(gemini).toBeDefined();
-      expect(gemini!.status).toBe("no-auth");
-      expect(gemini!.error).toContain("No Gemini credentials");
+      expect(gemini).toBeUndefined();
     });
 
     it("parses usage buckets from API response", async () => {
@@ -1940,9 +1919,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const minimax = providers.find((p) => p.name === "Minimax");
 
-      expect(minimax).toBeDefined();
-      expect(minimax!.status).toBe("no-auth");
-      expect(minimax!.error).toContain("No Minimax credentials");
+      expect(minimax).toBeUndefined();
     });
 
     it("detects no auth when minimax entry has no key", async () => {
@@ -1961,8 +1938,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const minimax = providers.find((p) => p.name === "Minimax");
 
-      expect(minimax!.status).toBe("no-auth");
-      expect(minimax!.error).toContain("No Minimax credentials");
+      expect(minimax).toBeUndefined();
     });
 
     it("detects no auth when minimax entry is missing entirely", async () => {
@@ -1979,8 +1955,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const minimax = providers.find((p) => p.name === "Minimax");
 
-      expect(minimax!.status).toBe("no-auth");
-      expect(minimax!.error).toContain("No Minimax credentials");
+      expect(minimax).toBeUndefined();
     });
 
     it("parses usage data from coding_plan/remains API response", async () => {
@@ -2295,9 +2270,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const zai = providers.find((p) => p.name === "Zai");
 
-      expect(zai).toBeDefined();
-      expect(zai!.status).toBe("no-auth");
-      expect(zai!.error).toContain("No Zai credentials");
+      expect(zai).toBeUndefined();
     });
 
     it("detects no auth when zai entry has no key", async () => {
@@ -2316,8 +2289,7 @@ describe("usage", () => {
       const providers = await fetchAllProviderUsage();
       const zai = providers.find((p) => p.name === "Zai");
 
-      expect(zai!.status).toBe("no-auth");
-      expect(zai!.error).toContain("No Zai credentials");
+      expect(zai).toBeUndefined();
     });
 
     it("parses usage data from Z.ai quota API response", async () => {

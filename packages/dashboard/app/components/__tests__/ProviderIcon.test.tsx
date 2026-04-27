@@ -73,6 +73,12 @@ describe("ProviderIcon", () => {
     expect(screen.getByLabelText("Google Gemini")).toBeInTheDocument();
   });
 
+  it("renders Gemini brand icon for google-antigravity provider", () => {
+    render(<ProviderIcon provider="google-antigravity" />);
+    expect(screen.getByTestId("gemini-icon")).toBeInTheDocument();
+    expect(screen.getByLabelText("Google Gemini")).toBeInTheDocument();
+  });
+
   it("renders Ollama brand icon for ollama provider", () => {
     render(<ProviderIcon provider="ollama" />);
     expect(screen.getByTestId("ollama-icon")).toBeInTheDocument();
@@ -105,6 +111,13 @@ describe("ProviderIcon", () => {
     expect(wrapper).toHaveAttribute("data-provider", "anthropic");
   });
 
+  it("normalizes Google-Antigravity (capitalized) to google-antigravity", () => {
+    render(<ProviderIcon provider="Google-Antigravity" />);
+    expect(screen.getByTestId("gemini-icon")).toBeInTheDocument();
+    const wrapper = screen.getByTestId("gemini-icon").parentElement;
+    expect(wrapper).toHaveAttribute("data-provider", "google-antigravity");
+  });
+
   it("applies provider-specific color for anthropic", () => {
     render(<ProviderIcon provider="anthropic" />);
     const icon = screen.getByTestId("anthropic-icon").parentElement;
@@ -119,6 +132,12 @@ describe("ProviderIcon", () => {
 
   it("applies provider-specific color for google", () => {
     render(<ProviderIcon provider="google" />);
+    const icon = screen.getByTestId("gemini-icon").parentElement;
+    expect(icon).toHaveStyle({ color: "var(--provider-gemini)" });
+  });
+
+  it("applies provider-specific color for google-antigravity", () => {
+    render(<ProviderIcon provider="google-antigravity" />);
     const icon = screen.getByTestId("gemini-icon").parentElement;
     expect(icon).toHaveStyle({ color: "var(--provider-gemini)" });
   });
@@ -195,6 +214,14 @@ describe("ProviderIcon", () => {
 
   it("passes correct color to SVG fill for gemini", () => {
     render(<ProviderIcon provider="gemini" />);
+    const svg = screen.getByTestId("gemini-icon");
+    const paths = svg.querySelectorAll("path");
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths[0]).toHaveAttribute("fill", "var(--provider-gemini)");
+  });
+
+  it("passes correct color to SVG fill for google-antigravity", () => {
+    render(<ProviderIcon provider="google-antigravity" />);
     const svg = screen.getByTestId("gemini-icon");
     const paths = svg.querySelectorAll("path");
     expect(paths.length).toBeGreaterThan(0);

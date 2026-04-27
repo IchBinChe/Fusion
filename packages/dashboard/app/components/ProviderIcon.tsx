@@ -300,6 +300,7 @@ const providerConfig: Record<
 
   google: { component: GeminiIcon, color: "var(--provider-gemini)" },
   gemini: { component: GeminiIcon, color: "var(--provider-gemini)" }, // Gemini alias family
+  "google-antigravity": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Gemini" },
 
   // Monochrome marks use theme-aware text color for dark/light safety.
   ollama: { component: OllamaIcon, color: "var(--text)" },

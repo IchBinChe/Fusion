@@ -286,7 +286,7 @@ function getProviderIconKey(providerName: string): string {
   if (normalized.includes('codex') || normalized.includes('openai') || normalized.includes('gpt')) {
     return 'openai';
   }
-  if (normalized.includes('gemini') || normalized.includes('google')) {
+  if (normalized.includes('gemini') || normalized.includes('google') || normalized.includes('antigravity')) {
     return 'google';
   }
   if (normalized.includes('ollama')) {

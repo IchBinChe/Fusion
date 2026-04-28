@@ -703,11 +703,6 @@ function HelpOverlay() {
 
 const PANEL_ORDER: SectionId[] = ["system", "logs", "utilities", "stats", "settings"];
 
-// Number-key mapping (1-5) — kept distinct from PANEL_ORDER/SECTION_ORDER so
-// the visual/cycle order stays unchanged while [3]/[4] address Stats/Utilities
-// in the swapped order requested.
-const NUMBER_KEY_ORDER: SectionId[] = ["system", "logs", "stats", "utilities", "settings"];
-
 function StatusModeGrid({
   state,
   controller,
@@ -3947,15 +3942,6 @@ export function DashboardApp({ controller }: DashboardAppProps) {
     if (key.return && state.activeSection === "system" && state.systemInfo) {
       const url = state.systemInfo.tokenizedUrl ?? state.systemInfo.baseUrl;
       openInBrowser(url);
-      return;
-    }
-
-    // Number keys switch panels (status mode)
-    if (input >= "1" && input <= "5") {
-      const section = NUMBER_KEY_ORDER[parseInt(input, 10) - 1];
-      if (section) {
-        controller.setActiveSection(section);
-      }
       return;
     }
 

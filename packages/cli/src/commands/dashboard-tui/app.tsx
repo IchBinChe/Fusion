@@ -778,8 +778,8 @@ function StatusModeSingle({
   // entries than fit. Chrome accounting (chrome=6 base, +1 if narrow spacer):
   //   header(1) + statusbar(1) +
   //   panel border top(1) + panel title(1) + panel border bottom(1) +
-  //   filter row(1) = 6, plus 1 if cols<68 spacer is present.
-  const logsAvailableRows = Math.max(1, rows - (cols < 68 ? 7 : 6));
+  //   filter row(1) = 6, plus 1 if cols<72 spacer is present.
+  const logsAvailableRows = Math.max(1, rows - (cols < 71 ? 7 : 6));
   tuiDebug("StatusModeSingle", { cols, rows, logsAvailableRows, focused });
 
   const activePanel = () => {
@@ -792,12 +792,12 @@ function StatusModeSingle({
     }
   };
 
-  // Below cols=68 the layout shifts up by 1 (Yoga edge case at very narrow
+  // Below cols=72 the layout shifts up by 1 (Yoga edge case at narrow
   // widths) and the panel's top line ends up under the header overlay. A
-  // 1-row spacer compensates ONLY for those widths. From 68 onwards the
+  // 1-row spacer compensates ONLY for those widths. From 72 onwards the
   // panel sits in the right place naturally and the spacer is just dead
-  // space the user explicitly asked us to remove.
-  const needsSpacer = cols < 68;
+  // space.
+  const needsSpacer = cols < 71;
   return (
     <Box flexDirection="column" flexGrow={1}>
       {needsSpacer && <Box height={1} flexShrink={0} />}

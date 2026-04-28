@@ -284,9 +284,8 @@ export class InProcessRuntime
           this.recordActivity();
           runtimeLog.log(`Scheduled task ${task.id}`);
         },
-        onBlocked: (task, blockedBy) => {
-          runtimeLog.log(`Task ${task.id} blocked by: ${blockedBy.join(", ")}`);
-        },
+        onBlocked: () => {},
+
       });
 
       // 5b. Initialize TaskExecutor

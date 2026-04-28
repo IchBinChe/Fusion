@@ -1034,7 +1034,6 @@ export class HeartbeatMonitor {
 
             const previousBlockedState = await this.store.getLastBlockedState(agentId);
             if (previousBlockedState && isBlockedStateDuplicate(currentBlockedState, previousBlockedState)) {
-              heartbeatLog.log(`Task ${resolvedTaskId} is still blocked by ${blockedBy} (duplicate state) — skipping comment`);
               await this.completeRun(agentId, run.id, {
                 status: "completed",
                 resultJson: { reason: "blocked_duplicate", taskId: resolvedTaskId, blockedBy },

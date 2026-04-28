@@ -37,6 +37,31 @@ type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createFnAgent: any = engineCreateFnAgent;
 
+// ── Notification Integration ────────────────────────────────────────────
+//
+// The planning module sends "planning-awaiting-input" notifications when an
+// AI planning session needs user input. Currently this uses ntfy-specific
+// helpers loaded dynamically from @fusion/engine.
+//
+// The engine now exposes a pluggable NotificationService abstraction
+// (NotificationService + NotificationProvider interface) that dispatches
+// events to registered providers (ntfy, webhook, etc.). The planning module
+// will migrate to using NotificationService.dispatch() for a provider-
+// agnostic flow once the broader notification integration is complete.
+//
+// For now, the ntfy-specific path remains active because "planning-awaiting-input"
+// is only supported by the ntfy provider and is not dispatched through the
+// NotificationService event listeners (which handle task:moved, task:updated,
+// task:merged, settings:updated).
+
+/**
+ * Configuration for planning session notifications.
+ *
+ * Currently drives ntfy-specific notifications for the "planning-awaiting-input" event.
+ * This will be generalized to support the pluggable NotificationService abstraction
+ * (from @fusion/engine) once additional providers support planning events.
+ * Kept as "Ntfy" in the name for backward compatibility with existing call sites.
+ */
 interface PlanningNtfyConfig {
   enabled: boolean;
   topic?: string;
@@ -45,6 +70,13 @@ interface PlanningNtfyConfig {
   ntfyBaseUrl?: string;
 }
 
+/**
+ * Ntfy-specific helper functions loaded from @fusion/engine at runtime.
+ *
+ * These wrap the engine's exported notification helpers. In the future, this
+ * will be replaced by direct use of NotificationService.dispatch() for a
+ * provider-agnostic notification flow.
+ */
 interface PlanningNtfyHelpers {
   isNtfyEventEnabled: (events: NtfyNotificationEvent[] | undefined, event: NtfyNotificationEvent) => boolean;
   buildNtfyClickUrl: (options: { dashboardHost?: string; projectId?: string; taskId?: string }) => string | undefined;
@@ -58,6 +90,7 @@ interface PlanningNtfyHelpers {
   }) => Promise<void>;
 }
 
+/** Cached notification helpers. Loaded lazily by ensureNtfyHelpersReady(). */
 let planningNtfyHelpers: PlanningNtfyHelpers | undefined;
 
 /**
@@ -102,6 +135,10 @@ async function ensureNtfyHelpersReady(): Promise<void> {
 
   try {
     const engine = await import("@fusion/engine");
+
+    const hasNotificationService = "NotificationService" in engine
+      && typeof engine.NotificationService === "function";
+
     const hasAllHelpers =
       "isNtfyEventEnabled" in engine
       && "buildNtfyClickUrl" in engine
@@ -119,6 +156,13 @@ async function ensureNtfyHelpersReady(): Promise<void> {
       buildNtfyClickUrl: engine.buildNtfyClickUrl,
       sendNtfyNotification: engine.sendNtfyNotification,
     };
+
+    if (hasNotificationService) {
+      diagnostics.info(
+        "NotificationService abstraction detected in engine",
+        { operation: "notification-service-detection" },
+      );
+    }
   } catch {
     // Optional notifier helpers unavailable in this runtime/test context.
   }

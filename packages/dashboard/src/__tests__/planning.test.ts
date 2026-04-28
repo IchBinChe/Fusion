@@ -682,6 +682,56 @@ describe("planning module", () => {
       );
     });
 
+    it("detects NotificationService abstraction in engine while using ntfy helpers for planning notifications", async () => {
+      const firstQuestion = JSON.stringify({
+        type: "question",
+        data: { id: "q-1", type: "text", question: "First question?", description: "one" },
+      });
+
+      setupMockStreamingAgent({ responses: [firstQuestion] });
+      const { sendNtfyNotification, isNtfyEventEnabled, buildNtfyClickUrl } = setupMockPlanningNtfyHelpers({
+        enabledEvent: true,
+        clickUrl: "http://localhost:4040/?project=proj-123",
+      });
+
+      await createSessionWithAgent(
+        getUniqueIp(),
+        "Build auth system",
+        TEST_ROOT_DIR,
+        undefined,
+        undefined,
+        undefined,
+        {
+          projectId: "proj-123",
+          ntfyConfig: {
+            enabled: true,
+            topic: "planning-topic",
+            dashboardHost: "http://localhost:4040/",
+            events: ["planning-awaiting-input"],
+          },
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(sendNtfyNotification).toHaveBeenCalledTimes(1);
+      });
+
+      expect(sendNtfyNotification).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          topic: "planning-topic",
+          priority: "high",
+          clickUrl: "http://localhost:4040/?project=proj-123",
+        }),
+      );
+
+      expect(isNtfyEventEnabled).toHaveBeenCalledWith(["planning-awaiting-input"], "planning-awaiting-input");
+      expect(buildNtfyClickUrl).toHaveBeenCalledWith({
+        dashboardHost: "http://localhost:4040/",
+        projectId: "proj-123",
+      });
+    });
+
     it("suppresses planning awaiting-input notifications when event is disabled", async () => {
       setupMockStreamingAgent({ responses: STANDARD_QUESTION_RESPONSES });
       const { sendNtfyNotification } = setupMockPlanningNtfyHelpers({ enabledEvent: false });

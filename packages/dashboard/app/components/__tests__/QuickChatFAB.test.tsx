@@ -187,7 +187,7 @@ describe("QuickChatFAB", () => {
     expect(screen.queryByTestId("quick-chat-agent-select")).toBeNull();
   });
 
-  it("auto-selects configured default model when no agents exist", async () => {
+  it("auto-selects configured default model when no agents exist and enables input", async () => {
     mockAgentsHook([]);
     mockFetchModels.mockResolvedValue({
       models: mockModels,
@@ -197,15 +197,24 @@ describe("QuickChatFAB", () => {
       defaultModelId: "gpt-4o",
     });
 
-    render(<QuickChatFAB addToast={addToast} />);
+    render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
 
     await waitFor(() => {
       expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("GPT-4o");
+      expect(mockCreateChatSession).toHaveBeenCalledWith(
+        {
+          agentId: "__fn_agent__",
+          modelProvider: "openai",
+          modelId: "gpt-4o",
+        },
+        "proj-123",
+      );
+      expect(screen.getByTestId("quick-chat-input")).not.toBeDisabled();
     });
   });
 
-  it("auto-selects configured default model and switches to model mode when agents exist", async () => {
+  it("auto-selects configured default model with agents present and enables input", async () => {
     mockAgentsHook(mockAgents);
     mockFetchModels.mockResolvedValue({
       models: mockModels,
@@ -215,12 +224,62 @@ describe("QuickChatFAB", () => {
       defaultModelId: "gpt-4o",
     });
 
-    render(<QuickChatFAB addToast={addToast} />);
+    render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));
 
     await waitFor(() => {
       expect(screen.getByTestId("quick-chat-model-select")).toBeDefined();
       expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("GPT-4o");
+      expect(mockCreateChatSession).toHaveBeenCalledWith(
+        {
+          agentId: "__fn_agent__",
+          modelProvider: "openai",
+          modelId: "gpt-4o",
+        },
+        "proj-123",
+      );
+      expect(screen.getByTestId("quick-chat-input")).not.toBeDisabled();
+    });
+  });
+
+  it("keeps input disabled until default-model session initialization completes", async () => {
+    mockAgentsHook([]);
+    mockFetchModels.mockResolvedValue({
+      models: mockModels,
+      favoriteProviders: [],
+      favoriteModels: [],
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+    });
+
+    let resolveSessionCreation: ((value: { session: ChatSession }) => void) | null = null;
+    mockCreateChatSession.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSessionCreation = resolve;
+      }),
+    );
+
+    render(<QuickChatFAB addToast={addToast} projectId="proj-123" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-model-tag")).toHaveTextContent("GPT-4o");
+    });
+
+    expect(screen.getByTestId("quick-chat-input")).toBeDisabled();
+
+    resolveSessionCreation?.({
+      session: {
+        ...mockSession,
+        id: "session-002",
+        agentId: "__fn_agent__",
+        modelProvider: "openai",
+        modelId: "gpt-4o",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-input")).not.toBeDisabled();
     });
   });
 

@@ -474,6 +474,43 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("nodeId persistence", () => {
+    it("creates a task with nodeId when provided", async () => {
+      const task = await store.createTask({
+        description: "Node-targeted task",
+        nodeId: "node-123",
+      });
+
+      expect(task.nodeId).toBe("node-123");
+
+      const detail = await store.getTask(task.id);
+      expect(detail.nodeId).toBe("node-123");
+    });
+
+    it("updates and clears nodeId via updateTask", async () => {
+      const task = await store.createTask({ description: "Task to mutate nodeId" });
+
+      const updated = await store.updateTask(task.id, { nodeId: "node-456" });
+      expect(updated.nodeId).toBe("node-456");
+
+      const cleared = await store.updateTask(task.id, { nodeId: null });
+      expect(cleared.nodeId).toBeUndefined();
+    });
+
+    it("returns nodeId values from listTasks", async () => {
+      const assignedNode = await store.createTask({
+        description: "Task with node in list",
+        nodeId: "node-list",
+      });
+      await store.createTask({ description: "Task without node in list" });
+
+      const tasks = await store.listTasks();
+      const listed = tasks.find((t) => t.id === assignedNode.id);
+
+      expect(listed?.nodeId).toBe("node-list");
+    });
+  });
+
   describe("selectNextTaskForAgent", () => {
     it("returns null when no tasks exist", async () => {
       await expect(store.selectNextTaskForAgent("agent-1")).resolves.toBeNull();

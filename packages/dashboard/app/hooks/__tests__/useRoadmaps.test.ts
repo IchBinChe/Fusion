@@ -1679,8 +1679,8 @@ describe("useRoadmaps", () => {
       rerender({ projectId: "proj-2" });
 
       // Resolve the promise
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      resolveHandoff!(mockHandoffPayload);
+      expect(resolveHandoff).not.toBeNull();
+      resolveHandoff?.(mockHandoffPayload);
       await fetchPromise;
 
       // Handoff should NOT be set because we're in a different project now

@@ -843,6 +843,8 @@ export interface Task {
   executionMode?: ExecutionMode;
   /** Explicitly assigned agent ID for task-agent linking. Distinct from Agent.taskId active execution state. */
   assignedAgentId?: string;
+  /** Per-task node override. When set, this task routes to the specified node instead of the project's default node. Undefined means use the project default. Use empty string to explicitly clear. */
+  nodeId?: string;
   /** Explicitly assigned user ID for task-user linking. Used during review handoff to indicate
    *  which user should review the task. The sentinel value "requesting-user" indicates the
    *  user who created or steered the task. */
@@ -929,6 +931,8 @@ export interface TaskCreateInput {
   sliceId?: string;
   /** Optional explicit agent assignment for this task */
   assignedAgentId?: string;
+  /** Per-task node override. When set, this task routes to the specified node instead of the project's default node. Undefined means use the project default. Use empty string to explicitly clear. */
+  nodeId?: string;
   /** Optional explicit user assignment for this task (used during review handoff) */
   assigneeUserId?: string;
   /** Review level for task execution — controls review rigor: 0=None, 1=Plan Only, 2=Plan and Code, 3=Full */

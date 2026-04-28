@@ -1845,6 +1845,13 @@ export class Database {
       });
     }
 
+    // Per-task node override for remote/local execution routing selection.
+    if (version < 49) {
+      this.applyMigration(49, () => {
+        this.addColumnIfMissing("tasks", "nodeId", "TEXT");
+      });
+    }
+
   }
 
   /**

@@ -542,10 +542,12 @@ describe("FileBrowserModal", () => {
       const maxHeightValue = blockMatch![1].trim();
 
       // The max-height must use calc() with the overlay-padding-top variable
-      // so the modal fits within the visible viewport (100vh minus top+bottom padding)
+      // so the modal fits within the visible viewport. We accept either
+      // 100vh or 100dvh (the latter accounts for mobile dynamic viewport
+      // chrome and is preferred for the resize-aware modals).
       expect(maxHeightValue).toContain("calc(");
       expect(maxHeightValue).toContain("--overlay-padding-top");
-      expect(maxHeightValue).toContain("100vh");
+      expect(maxHeightValue).toMatch(/100d?vh/);
     });
 
     it("height and max-height together do not exceed viewport on desktop", async () => {

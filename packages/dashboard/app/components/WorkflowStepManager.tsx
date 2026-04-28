@@ -1,5 +1,5 @@
 import "./WorkflowStepManager.css";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { WorkflowStep, WorkflowStepInput, WorkflowStepMode, WorkflowStepPhase } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
@@ -16,6 +16,7 @@ import {
   type ModelInfo,
 } from "../api";
 import type { ToastType } from "../hooks/useToast";
+import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import {
   X,
   Plus,
@@ -134,6 +135,9 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
   const [addingTemplateId, setAddingTemplateId] = useState<string | null>(null);
   const [availableScripts, setAvailableScripts] = useState<Record<string, string>>({});
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalResizePersist(modalRef, isOpen, "fusion:workflow-steps-modal-size");
 
   const loadSteps = useCallback(async () => {
     try {
@@ -373,6 +377,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
   return (
     <div className="modal-overlay open" onClick={onClose} data-testid="workflow-step-manager">
       <div
+        ref={modalRef}
         className="modal workflow-step-manager-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"

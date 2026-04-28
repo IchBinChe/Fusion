@@ -1,12 +1,19 @@
 /* === Workflow Step Manager Modal === */
 .modal.workflow-step-manager-modal {
-  width: min(900px, calc(100vw - 32px));
+  width: min(900px, 95vw);
+  max-width: 95vw;
+  min-width: 480px;
+  height: 80vh;
+  min-height: 480px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
   overflow: hidden;
+  resize: both;
 }
 
 .wfm-body {
   padding: var(--space-md);
-  max-height: 70vh;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 

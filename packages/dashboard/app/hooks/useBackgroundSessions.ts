@@ -250,9 +250,24 @@ export function useBackgroundSessions(projectId?: string): UseBackgroundSessions
     const handleDeleted = (e: MessageEvent) => {
       try {
         const id = JSON.parse(e.data) as string;
+        const deletionTimestamp = Date.now();
+
+        // Record a tombstone so the merge effect cannot re-materialize this
+        // session from syncedSessions after deletion. Without this, the sync
+        // store still holds the session with its last non-terminal status and
+        // the merge effect (which reads knownTimestamp=0 after the delete below)
+        // would re-add the session on the next render, causing the stale badge.
+        dismissedSessionTimestampsRef.current.set(id, deletionTimestamp);
+        sessionTimestampsRef.current.set(
+          id,
+          Math.max(sessionTimestampsRef.current.get(id) ?? 0, deletionTimestamp),
+        );
+
+        // Mark the session as terminal in the cross-tab sync store so that
+        // other consumers and sibling tabs also see it as completed.
+        broadcastCompleted({ sessionId: id, status: "complete", timestamp: deletionTimestamp });
+
         setSessions((prev) => prev.filter((s) => s.id !== id));
-        sessionTimestampsRef.current.delete(id);
-        dismissedSessionTimestampsRef.current.delete(id);
       } catch {
         // ignore malformed payload
       }

@@ -480,6 +480,74 @@ describe("useBackgroundSessions", () => {
     });
   });
 
+  it("does not resurrect a session after ai_session:deleted when a stale sync update arrives", async () => {
+    // Regression: handleDeleted cleared sessionTimestampsRef without setting a
+    // dismissed tombstone or calling broadcastCompleted. The merge effect then
+    // saw knownTimestamp=0 for the deleted session, accepted the still-live
+    // syncedSessions entry (non-terminal status), and re-added it — causing the
+    // stale badge count even when the DB was empty.
+    mockFetchAiSessions.mockResolvedValueOnce([
+      makeSession({ id: "delete-resurface", status: "generating", type: "planning" }),
+    ]);
+
+    const { result } = renderHook(() => useBackgroundSessions());
+    const { result: syncResult } = renderHook(() => useAiSessionSync());
+
+    await waitFor(() => {
+      expect(result.current.sessions.map((session) => session.id)).toEqual(["delete-resurface"]);
+    });
+
+    // Simulate a sibling tab broadcasting the session as active in the sync store.
+    act(() => {
+      syncResult.current.broadcastUpdate({
+        sessionId: "delete-resurface",
+        status: "generating",
+        needsInput: false,
+        type: "planning",
+        title: "Deleted Resurface",
+        updatedAt: "2026-04-08T00:00:01.000Z",
+        timestamp: Date.parse("2026-04-08T00:00:01.000Z"),
+      });
+    });
+
+    // Session is in sync store with non-terminal status at this point.
+    await waitFor(() => {
+      expect(result.current.sessions.map((session) => session.id)).toEqual(["delete-resurface"]);
+    });
+
+    // Server fires ai_session:deleted — the session is gone from the DB.
+    const eventSource = MockEventSource.instances[0]!;
+    act(() => {
+      eventSource._emit("ai_session:deleted", "delete-resurface");
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessions).toEqual([]);
+      expect(result.current.planningSessions).toEqual([]);
+    });
+
+    // Now a stale sync update arrives (same timestamp as before, non-terminal).
+    // Without the fix this re-materialized the session in the UI.
+    act(() => {
+      syncResult.current.broadcastUpdate({
+        sessionId: "delete-resurface",
+        status: "generating",
+        needsInput: false,
+        type: "planning",
+        title: "Deleted Resurface",
+        updatedAt: "2026-04-08T00:00:01.000Z",
+        timestamp: Date.parse("2026-04-08T00:00:01.000Z"),
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessions).toEqual([]);
+      expect(result.current.planningSessions).toEqual([]);
+      expect(result.current.generating).toBe(0);
+      expect(result.current.needsInput).toBe(0);
+    });
+  });
+
   it("dismissSession calls cancelSubtaskBreakdown for subtask sessions", async () => {
     mockFetchAiSessions.mockResolvedValueOnce([
       makeSession({ id: "subtask-session", status: "generating", type: "subtask" }),

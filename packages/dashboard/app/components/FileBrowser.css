@@ -1,9 +1,13 @@
 /* === File Browser === */
 .modal.file-browser-modal {
   width: 90vw;
-  max-width: 1600px;
+  max-width: 95vw;
+  min-width: 360px;
   height: 80vh;
-  max-height: calc(100vh - 2 * var(--overlay-padding-top, 10vh));
+  min-height: 320px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
+  overflow: hidden;
+  resize: both;
   display: flex;
   flex-direction: column;
 }
@@ -584,9 +588,13 @@
 /* === File Browser === */
 .modal.file-browser-modal {
   width: 90vw;
-  max-width: 1600px;
+  max-width: 95vw;
+  min-width: 360px;
   height: 80vh;
-  max-height: calc(100vh - 2 * var(--overlay-padding-top, 10vh));
+  min-height: 320px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
+  overflow: hidden;
+  resize: both;
 }
 
 .file-browser-modal-header {

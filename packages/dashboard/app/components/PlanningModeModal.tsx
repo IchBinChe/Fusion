@@ -24,6 +24,7 @@ import {
   type AiSessionSummary,
 } from "../api";
 import { subscribeSse } from "../sse-bus";
+import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import {
   savePlanningDescription,
   getPlanningDescription,
@@ -148,62 +149,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const overlayMouseDownOnSelfRef = useRef(false);
   const thinkingOutputRef = useRef<HTMLDivElement>(null);
 
-  // Persist user-chosen modal size across opens. The CSS `resize: both` lets
-  // the user drag the bottom-right corner; we capture the resulting inline
-  // width/height via ResizeObserver and replay them on the next mount. Stored
-  // in localStorage as raw pixels — the CSS max-* / min-* still clamp at
-  // render time, so saving an out-of-range value on one viewport won't break
-  // the modal on a smaller one.
-  const SIZE_STORAGE_KEY = "fusion:planning-modal-size";
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const node = modalRef.current;
-    if (!node) return;
-
-    // Apply the persisted size on open.
-    try {
-      const raw = localStorage.getItem(SIZE_STORAGE_KEY);
-      if (raw) {
-        const { width, height } = JSON.parse(raw) as { width?: number; height?: number };
-        if (typeof width === "number" && width > 0) node.style.width = `${width}px`;
-        if (typeof height === "number" && height > 0) node.style.height = `${height}px`;
-      }
-    } catch {
-      // ignore corrupted entry
-    }
-
-    // jsdom (and very old browsers) lacks ResizeObserver — gracefully skip
-    // persistence rather than throw. Restoration above still runs.
-    if (typeof ResizeObserver === "undefined") return;
-
-    let lastSavedW = node.offsetWidth;
-    let lastSavedH = node.offsetHeight;
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const observer = new ResizeObserver(() => {
-      const w = node.offsetWidth;
-      const h = node.offsetHeight;
-      if (w === lastSavedW && h === lastSavedH) return;
-      lastSavedW = w;
-      lastSavedH = h;
-      // Debounce so we don't spam localStorage during the drag.
-      if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        try {
-          localStorage.setItem(SIZE_STORAGE_KEY, JSON.stringify({ width: w, height: h }));
-        } catch {
-          // quota / private mode — best-effort
-        }
-      }, 200);
-    });
-
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-      if (saveTimer) clearTimeout(saveTimer);
-    };
-  }, [isOpen]);
+  useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
 
   // Keep the streaming AI thinking pane pinned to the bottom as new tokens
   // arrive. If the user has scrolled up to read earlier output, we leave the
@@ -586,10 +532,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (resumeSessionId && resumeSessionId === selectedSessionId) return; // resume effect handles this case
     if (streamConnectionRef.current?.isConnected()) return;
     void loadSession(selectedSessionId);
-    // We intentionally do not depend on selectedSessionId here — handleSelectSession
-    // already drives loadSession when the user picks a different row. This effect
-    // only needs to fire on the open transition.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // We intentionally do not depend on selectedSessionId or loadSession here:
+    // handleSelectSession already drives loadSession when the user picks a
+    // different row, and this effect only needs to fire on the open
+    // transition. Listing them here would cause it to re-run mid-session.
   }, [isOpen]);
 
   // Load + maintain the planning sessions list (sidebar).

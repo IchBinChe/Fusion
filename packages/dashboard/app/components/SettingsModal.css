@@ -2,6 +2,18 @@
    Extracted from styles.css as part of the Sweep-3 CSS extraction effort.
    Imported by SettingsModal.tsx (and MemoryView.tsx for shared classes). */
 
+/* === Settings Modal: sizing + resizability === */
+.settings-modal {
+  width: min(95vw, 1100px);
+  max-width: 95vw;
+  min-width: 520px;
+  height: 80vh;
+  min-height: 480px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
+  overflow: hidden;
+  resize: both;
+}
+
 /* === Settings Layout === */
 .settings-modal-heading {
   display: flex;
@@ -582,6 +594,12 @@
 }
 
 /* === Auth Provider Cards === */
+
+/* Horizontal gutter wrapper for the auth section body, matching form-group padding */
+.auth-panel-body {
+  padding-inline: var(--space-xl);
+}
+
 .auth-section-hint {
   padding: 12px 16px;
   margin-bottom: 12px;
@@ -733,7 +751,8 @@
 .settings-description {
   font-size: 13px;
   color: var(--text-secondary);
-  margin-bottom: var(--space-md);
+  padding-inline: var(--space-xl);
+  margin-block: 0 var(--space-md);
   line-height: 1.5;
 }
 /* === Settings: Model Presets === */

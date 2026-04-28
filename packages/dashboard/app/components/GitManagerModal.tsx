@@ -4,6 +4,7 @@ import type { Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
+import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import type {
   GitStatus,
   GitCommit,
@@ -177,6 +178,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
   const [loading, setLoading] = useState(false);
   const [sectionError, setSectionError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  useModalResizePersist(modalRef, isOpen, "fusion:git-modal-size");
   const copyToClipboard = useCopyToClipboard(addToast);
 
   // ── Status state

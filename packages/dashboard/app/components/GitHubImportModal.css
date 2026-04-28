@@ -174,9 +174,14 @@
 
 /* Wider modal for two-pane layout */
 .modal.github-import-modal {
-  width: 90vw;
-  max-width: 1600px;
-  max-height: min(900px, calc(100vh - 64px));
+  width: min(90vw, 1200px);
+  max-width: 95vw;
+  min-width: 480px;
+  height: 80vh;
+  min-height: 480px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
+  overflow: hidden;
+  resize: both;
 }
 
 .github-import-modal__header {

@@ -13,6 +13,7 @@ import {
   type GitRemote,
 } from "../api";
 import { Loader2, RefreshCw, ArrowLeft, GitPullRequest, CircleDot } from "lucide-react";
+import { useModalResizePersist } from "../hooks/useModalResizePersist";
 
 interface GitHubImportModalProps {
   isOpen: boolean;
@@ -52,6 +53,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
   const [loadingRemotes, setLoadingRemotes] = useState(false);
   const [selectedRemoteName, setSelectedRemoteName] = useState<string>("");
   const mountedRef = useRef(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalResizePersist(modalRef, isOpen, "fusion:github-modal-size");
 
   // Mobile view state
   const [isMobile, setIsMobile] = useState(false);
@@ -350,7 +353,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
 
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
-      <div className="modal modal-lg github-import-modal">
+      <div className="modal modal-lg github-import-modal" ref={modalRef}>
         <div className="modal-header github-import-modal__header">
           <div>
             <h3>Import from GitHub</h3>

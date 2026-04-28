@@ -7,6 +7,44 @@
   padding: 0;
 }
 
+/* === Global Scrollbar Theme ===
+   Low-specificity wildcard rules so all scrollable surfaces pick up the
+   dark theme by default. Per-component overrides (e.g. .board, .column-body,
+   .settings-sidebar, .settings-content, .planning-modal *) remain unaffected
+   because their class-level selectors have higher specificity than * . */
+* {
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: var(--radius-sm);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox app-wide scrollbar via html element */
+html {
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+}
+
 /* === Utility Classes === */
 .visually-hidden {
   position: absolute;

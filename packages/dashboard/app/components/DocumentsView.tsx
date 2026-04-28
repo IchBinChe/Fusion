@@ -388,61 +388,63 @@ export function DocumentsView({ projectId, addToast, onOpenDetail }: DocumentsVi
           </span>
         </div>
 
-        <div className="documents-tab-bar" role="tablist" aria-label="Documents sections">
-          <button
-            className={`btn documents-tab${activeTab === "project" ? " active" : ""}`}
-            role="tab"
-            aria-selected={activeTab === "project"}
-            aria-label="Show project markdown files"
-            onClick={() => handleTabChange("project")}
-          >
-            Project Files
-            <span className="documents-tab-count">{projectFiles.length}</span>
-          </button>
-          <button
-            className={`btn documents-tab${activeTab === "tasks" ? " active" : ""}`}
-            role="tab"
-            aria-selected={activeTab === "tasks"}
-            aria-label="Show task documents"
-            onClick={() => handleTabChange("tasks")}
-          >
-            Task Documents
-            <span className="documents-tab-count">{groupedDocuments.length}</span>
-          </button>
-        </div>
-
-        {activeTab === "project" && (
-          <button
-            className="btn btn-sm documents-hidden-toggle"
-            onClick={() => setShowHiddenProjectFiles((prev) => !prev)}
-            aria-pressed={showHiddenProjectFiles}
-            aria-label={showHiddenProjectFiles ? "Hide hidden project files" : "Show hidden project files"}
-            title={showHiddenProjectFiles ? "Hide hidden files" : "Show hidden files"}
-          >
-            {showHiddenProjectFiles ? <EyeOff size={14} /> : <Eye size={14} />}
-            {showHiddenProjectFiles ? "Hide Hidden" : "Show Hidden"}
-          </button>
-        )}
-
-        <div className="documents-search">
-          <Search size={16} className="documents-search-icon" />
-          <input
-            type="text"
-            className="documents-search-input"
-            placeholder={searchPlaceholder}
-            value={searchQuery}
-            onChange={handleSearchChange}
-            aria-label={searchPlaceholder}
-          />
-          {searchQuery && (
+        <div className="documents-controls-row">
+          <div className="documents-tab-bar" role="tablist" aria-label="Documents sections">
             <button
-              className="documents-search-clear"
-              onClick={clearSearch}
-              aria-label="Clear search"
+              className={`btn documents-tab${activeTab === "project" ? " active" : ""}`}
+              role="tab"
+              aria-selected={activeTab === "project"}
+              aria-label="Show project markdown files"
+              onClick={() => handleTabChange("project")}
             >
-              <X size={16} />
+              Project Files
+              <span className="documents-tab-count">{projectFiles.length}</span>
+            </button>
+            <button
+              className={`btn documents-tab${activeTab === "tasks" ? " active" : ""}`}
+              role="tab"
+              aria-selected={activeTab === "tasks"}
+              aria-label="Show task documents"
+              onClick={() => handleTabChange("tasks")}
+            >
+              Task Documents
+              <span className="documents-tab-count">{groupedDocuments.length}</span>
+            </button>
+          </div>
+
+          {activeTab === "project" && (
+            <button
+              className="btn btn-sm documents-hidden-toggle"
+              onClick={() => setShowHiddenProjectFiles((prev) => !prev)}
+              aria-pressed={showHiddenProjectFiles}
+              aria-label={showHiddenProjectFiles ? "Hide hidden project files" : "Show hidden project files"}
+              title={showHiddenProjectFiles ? "Hide hidden files" : "Show hidden files"}
+            >
+              {showHiddenProjectFiles ? <EyeOff size={14} /> : <Eye size={14} />}
+              {showHiddenProjectFiles ? "Hide Hidden" : "Show Hidden"}
             </button>
           )}
+
+          <div className="documents-search">
+            <Search size={16} className="documents-search-icon" />
+            <input
+              type="text"
+              className="documents-search-input"
+              placeholder={searchPlaceholder}
+              value={searchQuery}
+              onChange={handleSearchChange}
+              aria-label={searchPlaceholder}
+            />
+            {searchQuery && (
+              <button
+                className="documents-search-clear"
+                onClick={clearSearch}
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

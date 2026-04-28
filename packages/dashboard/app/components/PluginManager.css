@@ -5,6 +5,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
+  padding-inline: var(--space-xl);
+  padding-block: var(--space-md);
 }
 
 .plugin-manager-header {
@@ -13,6 +15,14 @@
   justify-content: space-between;
   padding-bottom: var(--space-sm);
   border-bottom: var(--btn-border-width) solid var(--border);
+  gap: var(--space-sm);
+}
+
+.plugin-manager-header-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
 }
 
 .plugin-manager-actions {

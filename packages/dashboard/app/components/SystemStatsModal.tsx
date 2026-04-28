@@ -244,7 +244,7 @@ export function SystemStatsModal({ isOpen, onClose, projectId }: SystemStatsModa
             </span>
             <button
               type="button"
-              className="btn btn-icon"
+              className="btn-icon"
               onClick={() => void loadStats()}
               title="Refresh"
               aria-label="Refresh system stats"

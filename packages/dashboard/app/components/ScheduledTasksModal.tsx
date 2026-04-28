@@ -1,7 +1,7 @@
 // ScheduledTasksModal renders schedule/routine cards using .scheduling-*, .routine-*,
 // .schedule-form classes that live in ScriptsModal.css. Both modals share that file.
 import "./ScriptsModal.css";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Plus, Zap, Globe, Folder, X } from "lucide-react";
 import type { Routine, RoutineCreateInput } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -15,6 +15,7 @@ import {
 import { RoutineCard } from "./RoutineCard";
 import { RoutineEditor } from "./RoutineEditor";
 import type { ToastType } from "../hooks/useToast";
+import { useModalResizePersist } from "../hooks/useModalResizePersist";
 
 /** Polling interval for auto-refreshing the schedule/routine list (30 seconds). */
 const POLL_INTERVAL_MS = 30_000;
@@ -39,6 +40,9 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
   const [editingRoutine, setEditingRoutine] = useState<Routine | undefined>();
   const [runningRoutineId, setRunningRoutineId] = useState<string | null>(null);
   const [lastRunOutput, setLastRunOutput] = useState<Record<string, { output: string; error?: string; success: boolean }>>({});
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalResizePersist(modalRef, true, "fusion:automation-modal-size");
 
   // Build scope options for API calls
   const scopeOptions = useMemo(() => ({
@@ -286,7 +290,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId }: ScheduledT
     routineView === "list" && routines.length > 0;
   return (
     <div className="modal-overlay open" onClick={handleOverlayClick}>
-      <div className="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="schedules-modal-title">
+      <div ref={modalRef} className="modal modal-lg automation-modal" role="dialog" aria-modal="true" aria-labelledby="schedules-modal-title">
         <div className="modal-header">
           <div className="detail-title-row">
             <Zap size={20} className="icon-triage" />

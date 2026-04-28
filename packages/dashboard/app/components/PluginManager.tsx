@@ -498,6 +498,11 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
 
   const installedPluginIds = new Set(plugins.map((plugin) => plugin.id));
 
+  // Bundled runtime plugin IDs — these are shown in the dedicated section below,
+  // so we exclude them from the main plugin list to avoid duplication.
+  const bundledPluginIds = new Set(BUNDLED_RUNTIME_PLUGINS.map((p) => p.id));
+  const userInstalledPlugins = plugins.filter((p) => !bundledPluginIds.has(p.id));
+
   const renderBundledRuntimeSection = () => (
     <section className="plugin-bundled-runtime-section" aria-label="Bundled Runtime Plugins">
       <div className="plugin-bundled-runtime-header">
@@ -544,11 +549,13 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
   return (
     <div className="plugin-manager" data-testid="plugin-manager">
       <div className="plugin-manager-header">
+        <span className="plugin-manager-header-title">Installed Plugins</span>
         <div className="plugin-manager-actions">
-          <button className="btn-icon" onClick={loadPlugins} title="Refresh">
-            <RefreshCw size={16} className={loading ? "spin" : ""} />
+          <button className="btn btn-sm btn-ghost" onClick={loadPlugins} title="Refresh" aria-label="Refresh plugin list">
+            <RefreshCw size={14} className={loading ? "spin" : ""} />
+            Refresh
           </button>
-          <button className="btn btn-primary" onClick={() => setShowInstall(true)}>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowInstall(true)}>
             <Plus size={14} /> Install
           </button>
         </div>
@@ -585,7 +592,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
         <div className="settings-empty-state">Loading plugins...</div>
       ) : (
         <>
-          {plugins.length === 0 ? (
+          {userInstalledPlugins.length === 0 ? (
             <div className="settings-empty-state">
               <Package size={32} className="text-muted" />
               <p>No plugins installed.</p>
@@ -593,7 +600,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
             </div>
           ) : (
             <div className="plugin-list">
-              {plugins.map((plugin) => (
+              {userInstalledPlugins.map((plugin) => (
                 <div key={plugin.id} className="plugin-item">
                   <div className="plugin-info">
                     <span className="plugin-name">{plugin.name}</span>

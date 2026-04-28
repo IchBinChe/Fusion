@@ -497,6 +497,10 @@
   background: var(--surface);
 }
 
+.mailbox-view .mailbox-tabs {
+  padding-top: var(--space-sm);
+}
+
 .mailbox-view .mailbox-content {
   flex: 1;
   overflow: hidden;

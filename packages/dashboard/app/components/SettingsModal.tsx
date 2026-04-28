@@ -12,6 +12,7 @@ import { CustomModelDropdown } from "./CustomModelDropdown";
 import { FileEditor } from "./FileEditor";
 import { FileBrowser } from "./FileBrowser";
 import { useWorkspaceFileBrowser } from "../hooks/useWorkspaceFileBrowser";
+import { useModalResizePersist } from "../hooks/useModalResizePersist";
 const PluginManager = lazy(() => import("./PluginManager").then((m) => ({ default: m.PluginManager })));
 const PiExtensionsManager = lazy(() => import("./PiExtensionsManager").then((m) => ({ default: m.PiExtensionsManager })));
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
@@ -66,11 +67,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "notifications", label: "Notifications", scope: "global" },
   { id: "node-sync", label: "Node Sync", scope: "global" },
   { id: "global-models", label: "Models", scope: "global" },
+  { id: "updates", label: "Updates", scope: "global" },
 
   // Project group (specific to this project)
   { id: "__project_header", label: "Project", scope: undefined, isGroupHeader: true },
-  { id: "project-models", label: "Project Models", scope: "project" },
   { id: "general", label: "General", scope: "project" },
+  { id: "project-models", label: "Project Models", scope: "project" },
   { id: "scheduling", label: "Scheduling", scope: "project" },
   { id: "worktrees", label: "Worktrees", scope: "project" },
   { id: "commands", label: "Commands", scope: "project" },
@@ -185,6 +187,8 @@ export function SettingsModal({
   onReopenOnboarding,
 }: SettingsModalProps) {
   const { confirm } = useConfirm();
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalResizePersist(modalRef, true, "fusion:settings-modal-size");
   const [form, setForm] = useState<SettingsFormState>({
     maxConcurrent: 2,
     maxTriageConcurrent: 2,
@@ -1583,6 +1587,72 @@ export function SettingsModal({
               </small>
             </div>
 
+          </>
+        );
+      }
+
+      case "updates": {
+        return (
+          <>
+            {renderScopeBanner()}
+            <h4 className="settings-section-heading">Updates</h4>
+            <div className="form-group">
+              <label htmlFor="updateCheckEnabled" className="checkbox-label">
+                <input
+                  id="updateCheckEnabled"
+                  type="checkbox"
+                  checked={form.updateCheckEnabled !== false}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, updateCheckEnabled: e.target.checked }))
+                  }
+                />
+                Check for updates automatically
+              </label>
+              <small>
+                When enabled, Fusion checks npm daily for new versions of{" "}
+                <code>@runfusion/fusion</code> and shows update notices in the CLI and dashboard.
+              </small>
+            </div>
+            <div className="form-group">
+              <label>Check Now</label>
+              <div className="settings-update-check">
+                <button
+                  type="button"
+                  className="btn btn-sm settings-update-btn"
+                  onClick={() => {
+                    void handleCheckForUpdates();
+                  }}
+                  disabled={updateCheckLoading}
+                >
+                  <RefreshCw className={updateCheckLoading ? "spinning" : undefined} size={14} />
+                  {updateCheckLoading ? "Checking…" : "Check for updates"}
+                </button>
+                {updateCheckResult && (
+                  <span
+                    aria-live="polite"
+                    className={`settings-update-result ${
+                      updateCheckResult.error
+                        ? "settings-update-result--error"
+                        : updateCheckResult.updateAvailable
+                          ? "settings-update-result--available"
+                          : "settings-update-result--up-to-date"
+                    }`}
+                  >
+                    {updateCheckResult.error
+                      ? updateCheckResult.error
+                      : updateCheckResult.updateAvailable && updateCheckResult.latestVersion
+                        ? `v${updateCheckResult.latestVersion} available`
+                        : "You're up to date ✓"}
+                  </span>
+                )}
+              </div>
+              <small>Manually check for the latest version right now.</small>
+            </div>
+            <p className="settings-note">
+              Update frequency control (on-startup / daily / weekly) is not yet configurable here
+              — it requires a backend schema addition to <code>GlobalSettings</code>. The toggle
+              above enables or disables the daily automatic check entirely.
+            </p>
           </>
         );
       }
@@ -3867,7 +3937,7 @@ export function SettingsModal({
                 No providers available
               </div>
             ) : (
-              <>
+              <div className="auth-panel-body">
               {cliAuthProviders.some((p) => p.id === "claude-cli") && (
                 <ClaudeCliProviderCard
                   compact
@@ -4044,7 +4114,7 @@ export function SettingsModal({
                   ))}
                 </div>
               )}
-              </>
+              </div>
             )}
             <small className="auth-hint">
               Authentication changes take effect immediately — no need to save.
@@ -4072,7 +4142,7 @@ export function SettingsModal({
 
   return (
     <div className="modal-overlay open" onClick={handleOverlayClick} role="dialog" aria-modal="true">
-      <div className="modal modal-lg">
+      <div className="modal modal-lg settings-modal" ref={modalRef}>
         <div className="modal-header">
           <div className="settings-modal-heading">
             <h3>Settings</h3>

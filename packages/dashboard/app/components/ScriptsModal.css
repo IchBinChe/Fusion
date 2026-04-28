@@ -90,10 +90,23 @@
   white-space: nowrap;
 }
 
+/* === Automation (ScheduledTasksModal) === */
+.modal.automation-modal {
+  width: min(95vw, 720px);
+  max-width: 95vw;
+  min-width: 480px;
+  height: 80vh;
+  min-height: 480px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
+  overflow: hidden;
+  resize: both;
+}
+
 .schedule-modal-content {
   padding: var(--space-lg) var(--space-xl);
   overflow-y: auto;
-  max-height: 70vh;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Scheduling scope selector */
@@ -1708,12 +1721,16 @@
 
 /* Modal size override - flex layout for sidebar + content */
 .modal.gm-modal {
-  width: 1400px;
+  width: min(95vw, 1400px);
   max-width: 95vw;
-  max-height: 85vh;
+  min-width: 480px;
+  height: 92vh;
+  min-height: 480px;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  resize: both;
 }
 
 /* Main layout: sidebar + content */

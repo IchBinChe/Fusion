@@ -1,5 +1,17 @@
 # @runfusion/fusion
 
+## 0.8.4
+
+### Patch Changes
+
+- 1c4c08b: Verify and tighten npm bundle fixes from FN-2897: keep the vendored pi-claude-cli runtime on Node built-in child_process APIs (no cross-spawn dependency), confirm Claude CLI extension resolution works from the published dist/pi-claude-cli layout, and ensure prepack strips private @fusion/\* workspace devDependencies from the published package manifest.
+- 3202e57: Fix SQLite project and central database validation so dashboard and desktop startup handle corrupt database files more predictably.
+- 858e244: Fix the TUI startup update notice to use the same version source and cached update gating as the rest of the CLI.
+- 995165e: Fix the dashboard version label so it matches the version used by update notifications.
+- bd14cf8: Fix Windows path handling for worktree detection and home-directory lookups.
+- 995165e: Fix worktree creation failure when git reports "already checked out at" instead of "already used by worktree at"
+- 10d565e: Fix OAuth login redirect for non-localhost dashboard access (Tailscale, Cloudflare, LAN).
+
 ## 0.8.3
 
 ## 0.8.2

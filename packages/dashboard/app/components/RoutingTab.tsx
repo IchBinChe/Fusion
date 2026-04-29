@@ -5,6 +5,7 @@ import { getErrorMessage } from "@fusion/core";
 import { fetchNodes, updateTask } from "../api";
 import type { NodeInfo } from "../api";
 import type { ToastType } from "../hooks/useToast";
+import { NodeHealthDot } from "./NodeHealthDot";
 
 interface RoutingTabProps {
   task: Task | TaskDetail;
@@ -23,6 +24,8 @@ function getRoutingPolicyLabel(policy: RoutingSettings["unavailableNodePolicy"] 
   if (policy === "fallback-local") return "Fall back to local";
   return "Not configured";
 }
+
+const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging"]);
 
 function isUnhealthy(status: NodeInfo["status"] | undefined): boolean {
   return status !== undefined && status !== "online";
@@ -75,13 +78,13 @@ export function RoutingTab({ task, settings, addToast, onTaskUpdated }: RoutingT
 
   const effectiveNode = effectiveNodeId ? nodesById.get(effectiveNodeId) : undefined;
   const effectiveNodeName = effectiveNode
-    ? `${effectiveNode.name} (${effectiveNode.type}) — ${effectiveNode.status}`
+    ? `${effectiveNode.name} (${effectiveNode.type})`
     : effectiveNodeId
       ? `${effectiveNodeId} (node unavailable or unknown)`
       : "Local (no routing configured)";
 
-  const taskInProgress = task.column === "in-progress";
-  const selectorDisabled = taskInProgress || savingNode || loadingNodes;
+  const isTaskActive = task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string);
+  const selectorDisabled = isTaskActive || savingNode || loadingNodes;
 
   const handleNodeSelect = useCallback(
     async (nextValue: string) => {
@@ -129,6 +132,7 @@ export function RoutingTab({ task, settings, addToast, onTaskUpdated }: RoutingT
           <div className="routing-summary-row" role="listitem">
             <span className="routing-summary-label">Effective node</span>
             <span className="routing-summary-value">
+              {effectiveNode ? <NodeHealthDot status={effectiveNode.status} compact /> : null}
               {effectiveNodeName}
               {isUnhealthy(effectiveNode?.status) ? (
                 <span className="routing-summary-warning">Unhealthy</span>
@@ -144,18 +148,18 @@ export function RoutingTab({ task, settings, addToast, onTaskUpdated }: RoutingT
             <span className="routing-summary-value">{getRoutingPolicyLabel(routingSettings?.unavailableNodePolicy)}</span>
           </div>
         </div>
-        {taskInProgress && effectiveNodeId ? (
+        {isTaskActive && effectiveNodeId ? (
           <div className="routing-tab__info-banner">
-            Routing is locked while this task is active. Node override cannot be changed until the task leaves in-progress.
+            Routing is locked while this task is active. Node override cannot be changed until the task is no longer active.
           </div>
         ) : null}
       </section>
 
       <section className="routing-tab__section">
         <h5>Node Override</h5>
-        {taskInProgress ? (
+        {isTaskActive ? (
           <div className="routing-tab__warning-banner">
-            Node override cannot be changed while the task is in progress.
+            Node override cannot be changed while the task is active.
           </div>
         ) : null}
 
@@ -189,7 +193,7 @@ export function RoutingTab({ task, settings, addToast, onTaskUpdated }: RoutingT
             <button
               type="button"
               className="btn btn-sm"
-              disabled={taskInProgress || savingNode}
+              disabled={isTaskActive || savingNode}
               onClick={clearOverride}
             >
               Clear override

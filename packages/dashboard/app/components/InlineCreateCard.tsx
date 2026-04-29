@@ -9,6 +9,7 @@ import { fetchModels, uploadAttachment, fetchSettings, updateGlobalSettings, fet
 import type { ModelInfo, Agent, NodeInfo } from "../api";
 import { useNodes } from "../hooks/useNodes";
 import { ModelSelectionModal } from "./ModelSelectionModal";
+import { NodeHealthDot } from "./NodeHealthDot";
 import { applyPresetToSelection } from "../utils/modelPresets";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
 
@@ -47,13 +48,6 @@ function getNodeStatusLabel(status: NodeInfo["status"]): string {
   if (status === "connecting") return "Connecting";
   if (status === "error") return "Error";
   return "Offline";
-}
-
-function getNodeStatusClass(status: NodeInfo["status"]): string {
-  if (status === "online") return "inline-create-node-status--online";
-  if (status === "connecting") return "inline-create-node-status--connecting";
-  if (status === "error") return "inline-create-node-status--error";
-  return "inline-create-node-status--offline";
 }
 
 function getModelSelectionValue(provider?: string, modelId?: string): string {
@@ -878,12 +872,7 @@ export function InlineCreateCard({
               >
                 <Server size={12} style={{ verticalAlign: "middle" }} />
                 {selectedNode ? ` ${selectedNode.name}` : " Node"}
-                {selectedNode && (
-                  <span className={`inline-create-node-status ${getNodeStatusClass(selectedNode.status)}`}>
-                    <span className="inline-create-node-status__dot" aria-hidden="true" />
-                    {getNodeStatusLabel(selectedNode.status)}
-                  </span>
-                )}
+                {selectedNode && <NodeHealthDot status={selectedNode.status} showLabel />}
               </button>
               {showNodePicker && (
                 <div className="dep-dropdown node-picker-dropdown" onMouseDown={(e) => e.preventDefault()}>
@@ -908,9 +897,7 @@ export function InlineCreateCard({
                         setShowNodePicker(false);
                       }}
                     >
-                      <span className={`inline-create-node-status ${getNodeStatusClass(node.status)}`}>
-                        <span className="inline-create-node-status__dot" aria-hidden="true" />
-                      </span>
+                      <NodeHealthDot status={node.status} />
                       <span className="dep-dropdown-title">{node.name}</span>
                       <span className="node-picker-status-label">{getNodeStatusLabel(node.status)}</span>
                     </button>

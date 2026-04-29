@@ -2696,7 +2696,7 @@ export function SettingsModal({
                 if (!selectedNode) return null;
                 return (
                   <div className="settings-node-status">
-                    <span className="settings-node-status__prefix">Selected node:</span>
+                    <span>Selected node:</span>
                     <NodeHealthDot status={selectedNode.status} showLabel />
                   </div>
                 );

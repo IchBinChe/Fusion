@@ -56,6 +56,10 @@
   color: var(--text);
 }
 
+.routing-summary-value .node-health-dot {
+  flex-shrink: 0;
+}
+
 .routing-summary-warning {
   display: inline-flex;
   align-items: center;

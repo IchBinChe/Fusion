@@ -85,34 +85,6 @@
   gap: var(--space-sm);
 }
 
-.list-view-node-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.list-view-node-status__dot {
-  width: var(--space-sm);
-  height: var(--space-sm);
-  border-radius: var(--radius-pill);
-  background: var(--color-muted);
-}
-
-.list-view-node-status--online .list-view-node-status__dot {
-  background: var(--color-success);
-}
-
-.list-view-node-status--offline .list-view-node-status__dot,
-.list-view-node-status--error .list-view-node-status__dot {
-  background: var(--color-error);
-}
-
-.list-view-node-status--connecting .list-view-node-status__dot {
-  background: var(--color-warning);
-}
-
 .bulk-edit-dropdown .model-combobox-trigger {
   font-size: 12px;
   padding: 6px 10px;

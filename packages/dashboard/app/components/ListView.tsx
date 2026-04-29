@@ -7,6 +7,7 @@ import { batchUpdateTaskModels, fetchNodes } from "../api";
 import type { ModelInfo, NodeInfo } from "../api";
 import { QuickEntryBox } from "./QuickEntryBox";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { NodeHealthDot } from "./NodeHealthDot";
 import { isTaskStuck } from "../utils/taskStuck";
 import type { ToastType } from "../hooks/useToast";
 import { useViewportMode } from "../hooks/useViewportMode";
@@ -464,6 +465,10 @@ export function ListView({
   const [nodeOverride, setNodeOverride] = useState<string>("__no_change__");
   const [availableNodes, setAvailableNodes] = useState<NodeInfo[]>([]);
   const [isLoadingNodes, setIsLoadingNodes] = useState(false);
+  const selectedOverrideNode = useMemo(
+    () => (nodeOverride && nodeOverride !== "__no_change__" ? availableNodes.find((node) => node.id === nodeOverride) : undefined),
+    [availableNodes, nodeOverride],
+  );
   const [isApplying, setIsApplying] = useState(false);
 
   useEffect(() => {
@@ -768,7 +773,7 @@ export function ListView({
                 onToggleModelFavorite={onToggleModelFavorite}
               />
             </div>
-            <div className="bulk-edit-dropdown">
+            <div className="bulk-edit-dropdown bulk-edit-node-wrap">
               <select
                 className="select bulk-node-select"
                 value={nodeOverride}
@@ -784,6 +789,7 @@ export function ListView({
                   </option>
                 ))}
               </select>
+              {selectedOverrideNode ? <NodeHealthDot status={selectedOverrideNode.status} showLabel /> : null}
             </div>
             <button
               className="btn btn-primary btn-sm bulk-edit-apply-btn"

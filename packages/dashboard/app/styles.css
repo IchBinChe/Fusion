@@ -1165,26 +1165,6 @@ body {
   color: var(--text-muted);
 }
 
-.task-form-node-status__dot {
-  width: var(--space-sm);
-  height: var(--space-sm);
-  border-radius: var(--radius-pill);
-  background: var(--color-muted);
-}
-
-.task-form-node-status--online .task-form-node-status__dot {
-  background: var(--color-success);
-}
-
-.task-form-node-status--offline .task-form-node-status__dot,
-.task-form-node-status--error .task-form-node-status__dot {
-  background: var(--color-error);
-}
-
-.task-form-node-status--connecting .task-form-node-status__dot {
-  background: var(--color-warning);
-}
-
 /* === Heartbeat Multiplier === */
 .heartbeat-multiplier-group {
   display: flex;

@@ -76,7 +76,8 @@ describe("RoutingTab", () => {
 
     expect(await screen.findByText("Per-task override")).toBeInTheDocument();
     expect(screen.getByText(/Effective node/i)).toBeInTheDocument();
-    expect(screen.getAllByText("Alpha (local) — online")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha (local)")[0]).toBeInTheDocument();
+    expect(document.querySelector(".status-dot--online")).toBeInTheDocument();
   });
 
   it("renders selector options with status text", async () => {
@@ -98,6 +99,32 @@ describe("RoutingTab", () => {
     expect(await screen.findByText("Project default")).toBeInTheDocument();
     expect(screen.getByText(/Effective node/i)).toBeInTheDocument();
     expect(screen.getByText("Unhealthy")).toBeInTheDocument();
+  });
+
+  it("renders NodeHealthDot in routing summary for effective node", async () => {
+    render(
+      <RoutingTab
+        task={makeTask({ nodeId: "node-a" })}
+        settings={makeSettings()}
+        addToast={addToast}
+      />,
+    );
+
+    await screen.findByText("Alpha (local)");
+    expect(document.querySelector(".status-dot--online")).toBeInTheDocument();
+  });
+
+  it("renders NodeHealthDot and Unhealthy badge for offline effective node", async () => {
+    render(
+      <RoutingTab
+        task={makeTask()}
+        settings={makeSettings({ defaultNodeId: "node-b" })}
+        addToast={addToast}
+      />,
+    );
+
+    await screen.findByText("Unhealthy");
+    expect(document.querySelector(".status-dot--offline")).toBeInTheDocument();
   });
 
   it("renders no-routing summary when no override or project default exists", async () => {
@@ -128,11 +155,19 @@ describe("RoutingTab", () => {
 
     const selector = await screen.findByLabelText("Select execution node");
     expect(selector).toBeDisabled();
-    expect(screen.getByText("Node override cannot be changed while the task is in progress.")).toBeInTheDocument();
+    expect(screen.getByText("Node override cannot be changed while the task is active.")).toBeInTheDocument();
   });
 
-  it("enables node selector for non-in-progress tasks", async () => {
-    render(<RoutingTab task={makeTask({ column: "todo" })} settings={makeSettings()} addToast={addToast} />);
+  it("disables node selector for active task statuses", async () => {
+    render(<RoutingTab task={makeTask({ column: "todo", status: "executing" })} settings={makeSettings()} addToast={addToast} />);
+
+    const selector = await screen.findByLabelText("Select execution node");
+    expect(selector).toBeDisabled();
+    expect(screen.getByText("Node override cannot be changed while the task is active.")).toBeInTheDocument();
+  });
+
+  it("enables node selector for non-active tasks", async () => {
+    render(<RoutingTab task={makeTask({ column: "todo", status: "pending" })} settings={makeSettings()} addToast={addToast} />);
 
     const selector = await screen.findByLabelText("Select execution node");
     expect(selector).toBeEnabled();

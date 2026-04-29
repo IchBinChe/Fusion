@@ -36,6 +36,9 @@ type MockTask = {
   status: string | null;
   error: string | null;
   verificationFailureCount?: number;
+  mergeConflictBounceCount?: number;
+  branch?: string;
+  worktree?: string;
   updatedAt: string;
   log: Array<{ action?: string }>;
 };
@@ -158,20 +161,36 @@ describe("ProjectEngine merge error recovery", () => {
     logSpy = vi.spyOn(runtimeLog, "log").mockImplementation(() => undefined);
   });
 
-  it("clears status when conflict retries are exhausted and recovery update succeeds", async () => {
+  it("bounces task to in-progress when conflict retries are exhausted (under bounce cap)", async () => {
     const store = makeStore({
-      tasks: [makeTask({ mergeRetries: 2 }), makeTask({ mergeRetries: 3 })],
+      tasks: [makeTask({ mergeRetries: 2 }), makeTask({ mergeRetries: 3, branch: "fusion/fn-2084" })],
     });
     vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
 
-    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, { status: null });
-    expect(hasErrorLog(errorSpy, "failed to clear status on")).toBe(false);
+    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, {
+      status: null,
+      mergeRetries: 0,
+      error: null,
+      mergeConflictBounceCount: 1,
+    });
+    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "in-progress");
+    expect(store.addTaskComment).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.stringContaining("Bouncing back to in-progress"),
+      "agent",
+    );
+    expect(store.logEntry).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.stringContaining("bounced to in-progress"),
+      "MergeConflictBounce",
+    );
+    expect(hasErrorLog(errorSpy, "failed to bounce")).toBe(false);
   });
 
-  it("logs when clearing status fails after conflict retries are exhausted", async () => {
+  it("logs when bouncing fails after conflict retries are exhausted", async () => {
     const store = makeStore({
       tasks: [makeTask({ mergeRetries: 2 }), makeTask({ mergeRetries: 3 })],
       updateTask: vi.fn(async () => {
@@ -183,8 +202,34 @@ describe("ProjectEngine merge error recovery", () => {
     const engine = createEngine(store);
     await expect(runMergeCycle(engine)).resolves.toBeUndefined();
 
-    expect(hasErrorLog(errorSpy, `failed to clear status on ${TASK_ID}`)).toBe(true);
+    expect(hasErrorLog(errorSpy, `failed to bounce ${TASK_ID}`)).toBe(true);
     expect(hasErrorLog(errorSpy, "db write failed")).toBe(true);
+  });
+
+  it("parks task and creates follow-up when conflict bounce cap is exceeded", async () => {
+    // Already bounced twice (cap is 2) — next bounce would be 3, exceeding cap
+    const store = makeStore({
+      tasks: [
+        makeTask({ mergeRetries: 2, mergeConflictBounceCount: 2, branch: "fusion/fn-2084" }),
+        makeTask({ mergeRetries: 3, mergeConflictBounceCount: 2, branch: "fusion/fn-2084" }),
+      ],
+    });
+    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+
+    const engine = createEngine(store);
+    await runMergeCycle(engine);
+
+    expect(store.moveTask).not.toHaveBeenCalledWith(TASK_ID, "in-progress");
+    expect(store.updateTask).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({
+        status: "failed",
+        mergeRetries: 3,
+      }),
+    );
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ column: "triage", priority: "high" }),
+    );
   });
 
   it("stores terminal merge metadata for non-conflict direct merge errors", async () => {
@@ -195,7 +240,7 @@ describe("ProjectEngine merge error recovery", () => {
     await runMergeCycle(engine);
 
     expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, {
-      status: null,
+      status: "failed",
       mergeRetries: 3,
       error: "remote branch missing",
     });
@@ -238,7 +283,7 @@ describe("ProjectEngine merge error recovery", () => {
 
     expect(processPullRequestMerge).toHaveBeenCalledTimes(1);
     expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, {
-      status: null,
+      status: "failed",
       mergeRetries: 3,
       error: "PR API timeout",
     });

@@ -914,6 +914,14 @@ export interface Task {
    *  follow-up triage task is created so a human / fresh agent can investigate
    *  rather than endlessly re-attempting the same fix. */
   verificationFailureCount?: number;
+  /** Number of times this task has bounced from `in-review` back to `in-progress`
+   *  due to auto-merge conflict-retry exhaustion. Incremented by the auto-merge
+   *  error handler (project-engine.ts) when conflicts can't be auto-resolved
+   *  within `MAX_AUTO_MERGE_RETRIES`. When this reaches
+   *  `MAX_MERGE_CONFLICT_BOUNCES`, the task is parked in `in-review` with
+   *  `status="failed"` and a follow-up triage task is created — preventing the
+   *  cooldown sweep from re-attempting the same impossible merge forever. */
+  mergeConflictBounceCount?: number;
   /** ISO-8601 timestamp indicating when the task becomes eligible for the next
    *  recovery retry. Scheduler and triage processor skip tasks whose
    *  `nextRecoveryAt` is still in the future. Cleared alongside `recoveryRetryCount`. */

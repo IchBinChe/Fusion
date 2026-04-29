@@ -86,7 +86,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 51;
+const SCHEMA_VERSION = 52;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -1946,6 +1946,16 @@ export class Database {
         if (this.hasTable("chat_messages")) {
           this.addColumnIfMissing("chat_messages", "attachments", "TEXT");
         }
+      });
+    }
+
+    // Outer auto-merge bounce counter so the cooldown sweep can't loop forever
+    // on a task whose conflicts can't be auto-resolved. Capped by
+    // MAX_MERGE_CONFLICT_BOUNCES in project-engine.ts; once reached, the task
+    // is parked in in-review with status="failed" and a follow-up is created.
+    if (version < 52) {
+      this.applyMigration(52, () => {
+        this.addColumnIfMissing("tasks", "mergeConflictBounceCount", "INTEGER DEFAULT 0");
       });
     }
 

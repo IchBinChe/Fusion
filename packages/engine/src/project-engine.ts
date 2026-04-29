@@ -174,6 +174,12 @@ export class ProjectEngine {
    *  a follow-up triage task so a fresh agent (or human) can investigate
    *  the underlying flake/regression instead of looping forever. */
   private static readonly MAX_VERIFICATION_FAILURE_BOUNCES = 3;
+  /** Cap on outer in-review→in-progress bounces caused by auto-merge conflict
+   *  retries being exhausted. After this many bounces the task is parked in
+   *  in-review with status=failed and a follow-up task is created, so the
+   *  30-minute cooldown sweep cannot loop forever on a merge that requires
+   *  human intervention. */
+  private static readonly MAX_MERGE_CONFLICT_BOUNCES = 2;
   /** 30-minute cooldown before a retry-exhausted task gets another sweep attempt */
   private static readonly AUTO_MERGE_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -938,6 +944,10 @@ export class ProjectEngine {
     // Already-confirmed merges always eligible — just need to move to done
     if (task.mergeDetails?.mergeConfirmed) return true;
     if (this.options.getTaskMergeBlocker?.(task as Task)) return false;
+    // Terminal failure: don't let the cooldown sweep re-attempt a merge that
+    // already gave up (verification cap, conflict-bounce cap, or non-conflict
+    // error). The task is parked for human/follow-up intervention.
+    if (task.status === "failed") return false;
     return (
       (task.mergeRetries ?? 0) < ProjectEngine.MAX_AUTO_MERGE_RETRIES ||
       this.hasAutoHealableVerificationBufferFailure(task) ||
@@ -1153,6 +1163,20 @@ export class ProjectEngine {
 
           runtimeLog.error(`${manualResolver ? "Manual" : "Auto"}-merge failed for ${taskId}: ${errorMsg}`);
 
+          // Surface every merge failure on the task log so the dashboard shows
+          // *why* a merge didn't complete instead of silently looping.
+          await store
+            .logEntry(
+              taskId,
+              `${manualResolver ? "Manual" : "Auto"}-merge failed: ${errorMsg}`,
+              err instanceof Error ? err.name : undefined,
+            )
+            .catch((logErr: unknown) => {
+              runtimeLog.warn(
+                `Auto-merge: failed to log merge-failure entry on ${taskId}: ${logErr instanceof Error ? logErr.message : String(logErr)}`,
+              );
+            });
+
           // If this was a manual merge, reject the promise and skip auto-retry logic
           if (manualResolver) {
             this.manualMergeResolvers.delete(taskId);
@@ -1276,23 +1300,122 @@ export class ProjectEngine {
                   if (!this.shuttingDown) this.internalEnqueueMerge(taskId);
                 }, delayMs);
               } else {
-                // Max retries exceeded or auto-resolve disabled
-                try {
-                  await store.updateTask(taskId, { status: null });
-                } catch (recoveryErr) {
-                  runtimeLog.error(
-                    `Auto-merge: failed to clear status on ${taskId} after max retries exceeded: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)}`,
-                  );
+                // Conflict retries exhausted (or auto-resolve disabled).
+                // Previous behavior: silently clear status, leaving the task in
+                // in-review with mergeRetries=MAX. The 30-min cooldown sweep
+                // would then reset retries and re-attempt the same impossible
+                // merge forever, with no error surface for the user.
+                //
+                // New behavior: bounce the task back to in-progress so the
+                // executor can rebase against the latest main and retry. Cap
+                // bounces at MAX_MERGE_CONFLICT_BOUNCES — past that, park in
+                // in-review with status=failed and create a follow-up task so
+                // a human can resolve the conflict manually.
+                const previousBounces = taskOnErr.mergeConflictBounceCount ?? 0;
+                const nextBounces = previousBounces + 1;
+                const bounceCap = ProjectEngine.MAX_MERGE_CONFLICT_BOUNCES;
+                const autoResolveDisabled =
+                  (settingsOnErr as Settings).autoResolveConflicts === false;
+
+                if (autoResolveDisabled || nextBounces > bounceCap) {
+                  // Park for human intervention.
+                  const reason = autoResolveDisabled
+                    ? "autoResolveConflicts is disabled"
+                    : `merge-conflict bounce cap reached (${nextBounces - 1}/${bounceCap})`;
+                  try {
+                    await store.updateTask(taskId, {
+                      status: "failed",
+                      mergeRetries: ProjectEngine.MAX_AUTO_MERGE_RETRIES,
+                      error: `Auto-merge gave up: ${reason}. ${errorMsg}`,
+                    });
+                    await store.addTaskComment(
+                      taskId,
+                      `Auto-merge gave up after ${ProjectEngine.MAX_AUTO_MERGE_RETRIES} conflict-resolution retries (${reason}). ` +
+                        `Resolve the conflict on branch \`${taskOnErr.branch ?? "?"}\` manually, then unpause/retry.`,
+                      "agent",
+                    );
+                    await store.logEntry(
+                      taskId,
+                      `Auto-merge gave up after conflict retries exhausted (${reason}); task parked for human intervention`,
+                      "MergeConflictGiveUp",
+                    );
+                    if (!autoResolveDisabled) {
+                      // Create a follow-up only when we capped on bounces; if
+                      // auto-resolve is just disabled, the user is presumed to
+                      // be handling merges manually and a follow-up is noise.
+                      try {
+                        const followUp = await store.createTask({
+                          description:
+                            `Resolve auto-merge conflict on ${taskId} (${taskOnErr.title || "untitled"}). ` +
+                            `Auto-merge attempted to rebase + resolve ${nextBounces - 1} times against main and exhausted retries each pass. ` +
+                            `Branch: \`${taskOnErr.branch ?? "?"}\`. Worktree: \`${taskOnErr.worktree ?? "?"}\`. ` +
+                            `Last merge error: ${errorMsg}`,
+                          column: "triage",
+                          priority: "high",
+                        });
+                        await store.addTaskComment(
+                          taskId,
+                          `Created follow-up ${followUp.id} to track manual conflict resolution.`,
+                          "agent",
+                        );
+                      } catch (followUpErr) {
+                        runtimeLog.warn(
+                          `Auto-merge: failed to create follow-up for ${taskId}: ${followUpErr instanceof Error ? followUpErr.message : String(followUpErr)}`,
+                        );
+                      }
+                    }
+                  } catch (recoveryErr) {
+                    runtimeLog.error(
+                      `Auto-merge: failed to park ${taskId} after conflict-bounce cap: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)}`,
+                    );
+                  }
+                } else {
+                  // Bounce to in-progress for a fresh rebase + retry pass.
+                  try {
+                    await store.addTaskComment(
+                      taskId,
+                      `Auto-merge could not resolve conflicts within ${ProjectEngine.MAX_AUTO_MERGE_RETRIES} retries (bounce ${nextBounces}/${bounceCap}). ` +
+                        `Bouncing back to in-progress for a fresh rebase against main; the executor will re-run quality gates and re-attempt the merge.`,
+                      "agent",
+                    );
+                    await store.updateTask(taskId, {
+                      status: null,
+                      mergeRetries: 0,
+                      error: null,
+                      mergeConflictBounceCount: nextBounces,
+                    });
+                    await store.moveTask(taskId, "in-progress");
+                    await store.logEntry(
+                      taskId,
+                      `Auto-merge conflicts unresolved (${ProjectEngine.MAX_AUTO_MERGE_RETRIES}/${ProjectEngine.MAX_AUTO_MERGE_RETRIES}) — bounced to in-progress for re-rebase (bounce ${nextBounces}/${bounceCap})`,
+                      "MergeConflictBounce",
+                    );
+                    runtimeLog.log(
+                      `Auto-merge: ${taskId} conflict retries exhausted — bounced to in-progress (${nextBounces}/${bounceCap})`,
+                    );
+                  } catch (recoveryErr) {
+                    runtimeLog.error(
+                      `Auto-merge: failed to bounce ${taskId} after conflict exhaustion: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)}`,
+                    );
+                  }
                 }
               }
             } else {
-              // Non-conflict error — stop retrying until user intervenes
+              // Non-conflict error — stop retrying until user intervenes.
+              // Mark status=failed so the cooldown sweep won't silently
+              // re-attempt; the catch-block-top logEntry already recorded the
+              // failure on the task log.
               try {
                 await store.updateTask(taskId, {
-                  status: null,
+                  status: "failed",
                   mergeRetries: ProjectEngine.MAX_AUTO_MERGE_RETRIES,
                   error: errorMsg,
                 });
+                await store.addTaskComment(
+                  taskId,
+                  `Auto-merge failed with a non-conflict error and stopped retrying: ${errorMsg}`,
+                  "agent",
+                );
               } catch (recoveryErr) {
                 runtimeLog.error(
                   `Auto-merge: failed to update ${taskId} after non-conflict error: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)}`,
@@ -1300,9 +1423,11 @@ export class ProjectEngine {
               }
             }
           } else {
+            // Non-direct merge strategy (e.g. pull-request) errored — park as
+            // failed so the cooldown sweep stops re-attempting silently.
             try {
               await store.updateTask(taskId, {
-                status: null,
+                status: "failed",
                 mergeRetries: ProjectEngine.MAX_AUTO_MERGE_RETRIES,
                 error: errorMsg,
               });

@@ -231,15 +231,19 @@
 
 .chat-message-render-toggle {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: auto;
   width: calc(var(--space-md) * 3);
   height: calc(var(--space-md) * 3);
   min-width: calc(var(--space-md) * 3);
   min-height: calc(var(--space-md) * 3);
   padding: 0;
+  border: none;
   color: var(--text-muted);
   background: transparent;
-  border-color: transparent;
+  cursor: pointer;
+  outline: none;
 }
 
 .chat-message--assistant .chat-message-render-toggle {

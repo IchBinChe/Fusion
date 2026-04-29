@@ -1276,7 +1276,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                         {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
                         <button
                           type="button"
-                          className={`btn btn-icon chat-message-render-toggle${forcePlain ? " chat-message-render-toggle--plain" : ""}`}
+                          className={`chat-message-render-toggle${forcePlain ? " chat-message-render-toggle--plain" : ""}`}
                           data-testid="chat-message-render-toggle"
                           aria-label={forcePlain ? "Show rendered markdown" : "Show plain text"}
                           onClick={() => toggleMessageRenderMode(message.id)}
@@ -1307,7 +1307,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                     {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
                     <button
                       type="button"
-                      className={`btn btn-icon chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " chat-message-render-toggle--plain" : ""}`}
+                      className={`chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " chat-message-render-toggle--plain" : ""}`}
                       data-testid="chat-message-render-toggle"
                       aria-label={plainTextMessageIds.has("__streaming__") ? "Show rendered markdown" : "Show plain text"}
                       onClick={() => toggleMessageRenderMode("__streaming__")}

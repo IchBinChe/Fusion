@@ -1,5 +1,16 @@
 # @fusion/dashboard
 
+## 0.8.3
+
+### Patch Changes
+
+- 9850bfa: Fix TUI token rendering, memory tracking fix, and other minor improvements
+  - @fusion/core@0.8.3
+  - @fusion/engine@0.8.3
+  - @fusion-plugin-examples/hermes-runtime@0.2.5
+  - @fusion-plugin-examples/openclaw-runtime@0.2.5
+  - @fusion-plugin-examples/paperclip-runtime@0.2.5
+
 ## 0.8.2
 
 ### Patch Changes

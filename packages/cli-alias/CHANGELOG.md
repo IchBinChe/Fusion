@@ -1,5 +1,11 @@
 # runfusion.ai
 
+## 0.8.3
+
+### Patch Changes
+
+- @runfusion/fusion@0.8.3
+
 ## 0.8.2
 
 ### Patch Changes

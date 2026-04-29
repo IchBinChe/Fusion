@@ -7824,9 +7824,12 @@ describe("POST /tasks/:id/spec/revise", () => {
     }
   });
 
-  it("returns 400 when task is in in-review", async () => {
+  it("allows spec revision when task is in in-review (in-review can transition to triage)", async () => {
     const inReviewTask = { ...FAKE_TASK_DETAIL, column: "in-review" as const };
+    const movedTask = { ...FAKE_TASK_DETAIL, column: "triage" as const };
     (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(inReviewTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
 
     const res = await REQUEST(
       buildApp(),
@@ -7836,10 +7839,9 @@ describe("POST /tasks/:id/spec/revise", () => {
       { "Content-Type": "application/json" }
     );
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("in-review");
-    expect(res.body.error).toContain("Move task to 'todo' or 'in-progress' first");
-    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage");
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
   });
 
   it("allows spec revision when task is in done (done can transition to triage)", async () => {
@@ -8059,15 +8061,18 @@ describe("POST /tasks/:id/spec/rebuild", () => {
     }
   });
 
-  it("returns 400 when task is in in-review (cannot transition to triage)", async () => {
+  it("allows spec rebuild when task is in in-review (in-review can transition to triage)", async () => {
     const inReviewTask = { ...FAKE_TASK_DETAIL, column: "in-review" as const };
+    const movedTask = { ...FAKE_TASK_DETAIL, column: "triage" as const };
     (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(inReviewTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
 
     const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/spec/rebuild");
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("in-review");
-    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage");
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
   });
 
   it("returns 404 when task not found", async () => {

@@ -5991,6 +5991,45 @@ Task with acceptance criteria
       expect(retried.recoveryRetryCount).toBeUndefined();
       expect(retried.nextRecoveryAt).toBeUndefined();
     });
+
+    it("allows respec'ing in-review tasks back to triage and clears transient fields", async () => {
+      const task = await store.createTask({ description: "test respec in-review task to triage" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, {
+        status: "completed",
+        error: "stale error",
+        worktree: "stale-worktree",
+        blockedBy: "FN-456",
+        branch: "fn/stale-branch",
+        baseBranch: "main",
+        baseCommitSha: "abc123",
+        summary: "stale summary from prior attempt",
+        recoveryRetryCount: 2,
+        nextRecoveryAt: new Date().toISOString(),
+        workflowStepResults: [{
+          workflowStepId: "wf-1",
+          workflowStepName: "Workflow step 1",
+          status: "passed",
+          startedAt: new Date().toISOString(),
+        }],
+      });
+
+      const respec = await store.moveTask(task.id, "triage");
+      expect(respec.column).toBe("triage");
+      expect(respec.status).toBeUndefined();
+      expect(respec.error).toBeUndefined();
+      expect(respec.worktree).toBeUndefined();
+      expect(respec.blockedBy).toBeUndefined();
+      expect(respec.workflowStepResults).toBeUndefined();
+      expect(respec.branch).toBeUndefined();
+      expect(respec.baseBranch).toBeUndefined();
+      expect(respec.baseCommitSha).toBeUndefined();
+      expect(respec.summary).toBeUndefined();
+      expect(respec.recoveryRetryCount).toBeUndefined();
+      expect(respec.nextRecoveryAt).toBeUndefined();
+    });
   });
 
   describe("columnMovedAt", () => {

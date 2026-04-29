@@ -79,7 +79,7 @@ describe("board", () => {
     });
 
     it("returns correct transitions for in-review", () => {
-      expect(getValidTransitions("in-review")).toEqual(["done", "in-progress", "todo"]);
+      expect(getValidTransitions("in-review")).toEqual(["done", "in-progress", "todo", "triage"]);
     });
 
     it("returns correct transitions for done", () => {

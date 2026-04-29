@@ -2640,15 +2640,16 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // Clear workflow step results when reopening from review/completed states.
       // This ensures fresh workflow step runs on retry
       if (
-        (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress"))
+        (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
         || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
       ) {
         task.workflowStepResults = undefined;
       }
 
-      // Full reset when sending an in-review task back to todo: discard prior
-      // branch/summary/recovery state so the next run starts from scratch.
-      if (fromColumn === "in-review" && toColumn === "todo") {
+      // Full reset when sending an in-review task back to todo or triage
+      // (respec): discard prior branch/summary/recovery state so the next run
+      // starts from scratch.
+      if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
         task.branch = undefined;
         task.baseBranch = undefined;
         task.baseCommitSha = undefined;

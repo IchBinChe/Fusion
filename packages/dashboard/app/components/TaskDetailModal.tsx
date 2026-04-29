@@ -1188,8 +1188,8 @@ export function TaskDetailModal({
       onClose();
     } catch (err) {
       const msg = getErrorMessage(err);
-      if (msg.includes("in-review") || msg.includes("done")) {
-        addToast("Cannot request revision: Task must be in 'todo' or 'in-progress' column.", "error");
+      if (msg.includes("done") || msg.includes("archived")) {
+        addToast("Cannot request revision: Task must be in 'triage', 'todo', 'in-progress', or 'in-review' column.", "error");
       } else {
         addToast(msg, "error");
       }

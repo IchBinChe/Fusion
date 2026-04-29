@@ -1875,6 +1875,134 @@ function quoteArg(value: string): string {
 }
 
 /**
+ * Resolve a non-empty commit body for fallback merge commits. Used by sites
+ * that would otherwise emit `-m ""` when the branch's commit log is empty
+ * (no unique commits, `git log` failed, etc.).
+ *
+ * Cascade — most informative first, deterministic fallback at the end so
+ * the function NEVER returns an empty string and NEVER throws:
+ *   1. The branch's commit log if non-empty.
+ *   2. AI-generated body, summarized from the diff stat. Bounded by
+ *      `aiTimeoutMs` (default 30s); any failure / timeout / empty response
+ *      falls through.
+ *   3. The diff stat formatted as a "Files changed" listing.
+ *   4. A synthetic `- merge <branch>` placeholder.
+ */
+async function resolveSafeCommitBody(opts: {
+  rootDir: string;
+  taskId: string;
+  branch: string;
+  commitLog: string;
+  diffStat: string;
+  settings: Settings;
+  signal?: AbortSignal;
+  aiTimeoutMs?: number;
+}): Promise<string> {
+  const cleanLog = opts.commitLog.trim();
+  if (cleanLog.length > 0) return cleanLog;
+
+  const cleanStat = opts.diffStat.trim();
+  if (cleanStat.length > 0) {
+    const ai = await aiGenerateCommitBody({
+      rootDir: opts.rootDir,
+      taskId: opts.taskId,
+      branch: opts.branch,
+      diffStat: cleanStat,
+      settings: opts.settings,
+      signal: opts.signal,
+      timeoutMs: opts.aiTimeoutMs ?? 30_000,
+    }).catch(() => null);
+    if (ai && ai.trim().length > 0) return ai.trim();
+    return `Files changed:\n\n${cleanStat}`;
+  }
+
+  return `- merge ${opts.branch}`;
+}
+
+/**
+ * Try to summarize a diff stat into a short commit body via a fresh
+ * readonly AI session. Returns null on any failure (no runtime,
+ * timeout, empty response, error). Bounded so it can't stall a merge.
+ */
+async function aiGenerateCommitBody(opts: {
+  rootDir: string;
+  taskId: string;
+  branch: string;
+  diffStat: string;
+  settings: Settings;
+  signal?: AbortSignal;
+  timeoutMs: number;
+}): Promise<string | null> {
+  const truncatedStat = truncateWithEllipsis(opts.diffStat, 4000);
+  const systemPrompt =
+    `You write concise commit message bodies. Output ONLY the body text — no code fences, no preamble, no subject line. ` +
+    `2–6 short bullet points starting with "- ". Be specific about what changed; reference filenames where helpful.`;
+  const userPrompt =
+    `Branch: ${opts.branch}\nTask: ${opts.taskId}\n\nFiles changed (\`git diff --stat\`):\n${truncatedStat}\n\n` +
+    `Write the commit body now.`;
+
+  const aborter = new AbortController();
+  const timer = setTimeout(() => aborter.abort(), opts.timeoutMs);
+  if (opts.signal) {
+    if (opts.signal.aborted) aborter.abort();
+    else opts.signal.addEventListener("abort", () => aborter.abort(), { once: true });
+  }
+
+  let session: Awaited<ReturnType<typeof createResolvedAgentSession>>["session"] | undefined;
+  try {
+    const created = await createResolvedAgentSession({
+      sessionPurpose: "merger",
+      cwd: opts.rootDir,
+      systemPrompt,
+      tools: "readonly",
+      defaultProvider: opts.settings.defaultProviderOverride && opts.settings.defaultModelIdOverride
+        ? opts.settings.defaultProviderOverride
+        : opts.settings.defaultProvider,
+      defaultModelId: opts.settings.defaultProviderOverride && opts.settings.defaultModelIdOverride
+        ? opts.settings.defaultModelIdOverride
+        : opts.settings.defaultModelId,
+    });
+    session = created.session;
+    await session.prompt(userPrompt);
+    if (aborter.signal.aborted) return null;
+
+    const messages = (session.state?.messages ?? []) as Array<{
+      role?: string;
+      content?: unknown;
+    }>;
+    const last = messages.filter((m) => m.role === "assistant").pop();
+    if (!last || !last.content) return null;
+
+    let text = "";
+    if (typeof last.content === "string") {
+      text = last.content;
+    } else if (Array.isArray(last.content)) {
+      for (const block of last.content) {
+        if (
+          block &&
+          typeof block === "object" &&
+          "text" in block &&
+          typeof (block as { text: unknown }).text === "string"
+        ) {
+          text += (block as { text: string }).text;
+        }
+      }
+    }
+    text = text.trim();
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    try {
+      session?.dispose?.();
+    } catch {
+      // ignore disposal errors
+    }
+  }
+}
+
+/**
  * Compute `git patch-id` for a single commit. Returns the patch-id string on
  * success or undefined when the commit has no diff (root, empty merge) or the
  * pipeline failed. Patch-ids are stable across squash/cherry-pick operations
@@ -3977,7 +4105,20 @@ async function executeMergeAttempt(
 
           if (staged !== "0") {
             throwIfAborted(options.signal, taskId);
-            const escapedLog = commitLog.replace(/"/g, '\\"');
+            // Body cascade: branch's commit log → AI summary of diff stat →
+            // diff stat itself → synthetic placeholder. Guarantees the
+            // merge commit carries a non-empty body even when the branch
+            // has no unique commits to summarize.
+            const safeBody = await resolveSafeCommitBody({
+              rootDir,
+              taskId,
+              branch,
+              commitLog,
+              diffStat,
+              settings: settings as Settings,
+              signal: options.signal,
+            });
+            const escapedLog = safeBody.replace(/"/g, '\\"');
             const fallbackPrefix = includeTaskId ? `feat(${taskId})` : "feat";
             const authorArg = getCommitAuthorArg(settings);
             const trailerArg = buildTaskIdTrailerArg(taskId);
@@ -4216,7 +4357,7 @@ async function attemptWithSideStrategy(
   side: "theirs" | "ours" = "theirs",
   aiTracker?: AiInvocationTracker,
 ): Promise<boolean> {
-  const { rootDir, branch, commitLog, includeTaskId, sourceIssueRef, taskId, store, settings, testCommand, buildCommand, testSource, buildSource } = params;
+  const { rootDir, branch, commitLog, diffStat, includeTaskId, sourceIssueRef, taskId, store, settings, testCommand, buildCommand, testSource, buildSource } = params;
 
   mergerLog.log(`${taskId}: attempting merge with -X ${side} strategy`);
 
@@ -4264,9 +4405,21 @@ async function attemptWithSideStrategy(
       return true;
     }
 
-    // Commit with fallback message
+    // Commit with fallback message. Body cascade: branch's commit log →
+    // AI summary of diff stat → diff stat itself → synthetic placeholder.
+    // Guarantees the merge commit carries a non-empty body that downstream
+    // consumers (release notes, dashboard summaries) can rely on.
     throwIfAborted(params.options.signal, taskId);
-    const escapedLog = commitLog.replace(/"/g, '\\"');
+    const safeBody = await resolveSafeCommitBody({
+      rootDir,
+      taskId,
+      branch,
+      commitLog,
+      diffStat,
+      settings: settings as Settings,
+      signal: params.options.signal,
+    });
+    const escapedLog = safeBody.replace(/"/g, '\\"');
     const fallbackPrefix = includeTaskId ? `feat(${taskId})` : "feat";
     const authorArg = getCommitAuthorArg(settings);
     const trailerArg = buildTaskIdTrailerArg(taskId);
@@ -4580,7 +4733,20 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
       if (!buildCommand) {
         throwIfAborted(options.signal, taskId);
         mergerLog.log("Agent didn't commit — committing with fallback message");
-        const escapedLog = commitLog.replace(/"/g, '\\"');
+        // Body cascade: branch's commit log → AI summary of diff stat →
+        // diff stat itself → synthetic placeholder. Guarantees the merge
+        // commit carries a non-empty body even when the AI agent didn't
+        // commit and the branch has no unique commits to summarize.
+        const safeBody = await resolveSafeCommitBody({
+          rootDir,
+          taskId,
+          branch,
+          commitLog,
+          diffStat,
+          settings: settings as Settings,
+          signal: options.signal,
+        });
+        const escapedLog = safeBody.replace(/"/g, '\\"');
         const fallbackPrefix = includeTaskId ? `feat(${taskId})` : "feat";
         const authorArg = getCommitAuthorArg(settings);
         const trailerArg = buildTaskIdTrailerArg(taskId);

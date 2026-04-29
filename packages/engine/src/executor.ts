@@ -4530,14 +4530,20 @@ and show an appropriate message to the user.\`
       // exit non-zero → staged changes exist, proceed to commit.
     }
 
-    const message = `chore(${taskId}): import dependency content from ${label}\n\n` +
+    // Always non-empty (subject + body via two -m args). Drop
+    // --allow-empty-message: we never want git to silently accept an empty
+    // message — a missing message here would make the commit hard to
+    // attribute / explain in `git log` and break downstream consumers that
+    // parse merge metadata from commit messages.
+    const subject = `chore(${taskId}): import dependency content from ${label}`;
+    const body =
       `Squash-imported the working tree of ${label} as a single commit so this ` +
       `branch carries the dep's content without inheriting its individual commits. ` +
       `If the dep is later squash-merged to main, this commit's patch-id should ` +
       `match the merge and rebase cleanly.`;
     try {
       await execAsync(
-        `git commit --allow-empty-message -m ${this.quoteShellArg(message)}`,
+        `git commit -m ${this.quoteShellArg(subject)} -m ${this.quoteShellArg(body)}`,
         { cwd: worktreePath },
       );
     } catch (commitErr) {

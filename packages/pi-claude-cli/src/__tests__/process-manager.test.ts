@@ -47,6 +47,8 @@ import {
   captureStderr,
   validateCliPresence,
   validateCliAuth,
+  validateCliPresenceAsync,
+  validateCliAuthAsync,
   forceKillProcess,
   registerProcess,
   killAllProcesses,
@@ -400,6 +402,94 @@ describe("validateCliAuth", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     expect(validateCliAuth()).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("not authenticated"),
+    );
+    warnSpy.mockRestore();
+  });
+});
+
+describe("validateCliPresenceAsync", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves ok=true when claude --version exits 0", async () => {
+    const EventEmitter = require("node:events");
+    (spawn as any).mockImplementationOnce(() => {
+      const proc = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => proc.emit("exit", 0));
+      return proc;
+    });
+
+    const result = await validateCliPresenceAsync();
+    expect(result).toEqual({ ok: true });
+    const args = (spawn as any).mock.calls[0][1] as string[];
+    expect(args).toEqual(["--version"]);
+  });
+
+  it("resolves ok=false with install message when spawn errors", async () => {
+    const EventEmitter = require("node:events");
+    (spawn as any).mockImplementationOnce(() => {
+      const proc = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => proc.emit("error", new Error("ENOENT")));
+      return proc;
+    });
+
+    const result = await validateCliPresenceAsync();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("Claude Code CLI not found");
+      expect(result.error.message).toContain("npm install");
+    }
+  });
+
+  it("resolves ok=false when claude --version exits non-zero", async () => {
+    const EventEmitter = require("node:events");
+    (spawn as any).mockImplementationOnce(() => {
+      const proc = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => proc.emit("exit", 1));
+      return proc;
+    });
+
+    const result = await validateCliPresenceAsync();
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("validateCliAuthAsync", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves true when claude auth status exits 0", async () => {
+    const EventEmitter = require("node:events");
+    (spawn as any).mockImplementationOnce(() => {
+      const proc = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => proc.emit("exit", 0));
+      return proc;
+    });
+
+    expect(await validateCliAuthAsync()).toBe(true);
+    const args = (spawn as any).mock.calls[0][1] as string[];
+    expect(args).toEqual(["auth", "status"]);
+  });
+
+  it("resolves false and warns when claude auth status fails", async () => {
+    const EventEmitter = require("node:events");
+    (spawn as any).mockImplementationOnce(() => {
+      const proc = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => proc.emit("exit", 1));
+      return proc;
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await validateCliAuthAsync()).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("not authenticated"),
     );

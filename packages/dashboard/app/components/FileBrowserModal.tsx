@@ -12,6 +12,10 @@ import { FileEditor } from "./FileEditor";
 import { WorkspaceSelector } from "./WorkspaceSelector";
 
 const MOBILE_BREAKPOINT = 768;
+const SIDEBAR_DEFAULT_WIDTH = 280;
+const SIDEBAR_MIN_WIDTH = 180;
+const SIDEBAR_MAX_WIDTH = 500;
+const SIDEBAR_STORAGE_KEY = "fusion:file-browser-sidebar-width";
 
 /**
  * Image file extensions that should be rendered as image previews.
@@ -69,6 +73,7 @@ export function FileBrowserModal({
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "editor">("list");
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
 
   const {
     entries,
@@ -112,6 +117,20 @@ export function FileBrowserModal({
   }, [selectedFile]);
 
   useEffect(() => {
+    try {
+      const rawWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+      if (!rawWidth) return;
+      const parsedWidth = Number.parseInt(rawWidth, 10);
+      if (!Number.isNaN(parsedWidth)) {
+        const clampedWidth = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, parsedWidth));
+        setSidebarWidth(clampedWidth);
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
@@ -149,6 +168,73 @@ export function FileBrowserModal({
     setMobileView("list");
     onWorkspaceChange?.(workspace);
   }, [onWorkspaceChange]);
+
+  const persistSidebarWidth = useCallback((width: number) => {
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(width));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
+  const handleResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const resizeHandle = event.currentTarget;
+    if (typeof resizeHandle.setPointerCapture === "function") {
+      resizeHandle.setPointerCapture(event.pointerId);
+    }
+
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    let latestWidth = startWidth;
+
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, startWidth + deltaX));
+      latestWidth = nextWidth;
+      setSidebarWidth(nextWidth);
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (typeof resizeHandle.releasePointerCapture === "function") {
+        resizeHandle.releasePointerCapture(upEvent.pointerId);
+      }
+
+      document.body.style.userSelect = "";
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      persistSidebarWidth(latestWidth);
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
+
+  const handleResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isMobile) {
+      return;
+    }
+
+    const step = 20;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+
+    event.preventDefault();
+
+    const delta = event.key === "ArrowLeft" ? -step : step;
+    const nextWidth = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, sidebarWidth + delta));
+    setSidebarWidth(nextWidth);
+    persistSidebarWidth(nextWidth);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
 
   const workspaceLabel = useMemo(() => {
     if (currentWorkspace === "project") {
@@ -199,7 +285,10 @@ export function FileBrowserModal({
         </div>
 
         <div className="file-browser-body">
-          <div className={`file-browser-sidebar ${isMobile ? "mobile" : ""} ${mobileView === "list" ? "active" : ""}`}>
+          <div
+            className={`file-browser-sidebar ${isMobile ? "mobile" : ""} ${mobileView === "list" ? "active" : ""}`}
+            style={isMobile ? undefined : { width: `${sidebarWidth}px` }}
+          >
             <FileBrowser
               entries={entries}
               currentPath={currentPath}
@@ -213,6 +302,21 @@ export function FileBrowserModal({
               projectId={projectId}
             />
           </div>
+
+          {!isMobile && (
+            <div
+              className="file-browser-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={SIDEBAR_MIN_WIDTH}
+              aria-valuemax={SIDEBAR_MAX_WIDTH}
+              aria-valuenow={sidebarWidth}
+              aria-label="Resize sidebar"
+              tabIndex={0}
+              onPointerDown={handleResizeStart}
+              onKeyDown={handleResizeKeyDown}
+            />
+          )}
 
           <div className={`file-browser-content ${isMobile ? "mobile" : ""} ${mobileView === "editor" ? "active" : ""}`}>
             {selectedFile ? (

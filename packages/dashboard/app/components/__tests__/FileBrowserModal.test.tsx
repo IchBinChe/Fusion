@@ -69,6 +69,7 @@ describe("FileBrowserModal", () => {
   });
 
   afterEach(() => {
+    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -307,6 +308,200 @@ describe("FileBrowserModal", () => {
     expect(screen.getByText(".env.example")).toBeInTheDocument();
     expect(screen.getByText(".github")).toBeInTheDocument();
     expect(screen.getByText("src")).toBeInTheDocument();
+  });
+
+  describe("resizable sidebar split", () => {
+    it("renders desktop resize handle with separator ARIA attributes", () => {
+      render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      expect(handle).toHaveAttribute("aria-orientation", "vertical");
+      expect(handle).toHaveAttribute("aria-valuemin", "180");
+      expect(handle).toHaveAttribute("aria-valuemax", "500");
+      expect(handle).toHaveAttribute("aria-valuenow", "280");
+      expect(handle).toHaveAttribute("tabindex", "0");
+    });
+
+    it("updates sidebar width while dragging the resize handle", () => {
+      const { container } = render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      const sidebar = container.querySelector(".file-browser-sidebar");
+      expect(sidebar).not.toBeNull();
+
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+      fireEvent.pointerMove(document, { pointerId: 1, clientX: 360 });
+
+      expect(sidebar).toHaveStyle({ width: "360px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "360");
+    });
+
+    it("does not render resize handle in mobile view", () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 375,
+      });
+
+      render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      fireEvent(window, new Event("resize"));
+      expect(screen.queryByRole("separator", { name: "Resize sidebar" })).not.toBeInTheDocument();
+    });
+
+    it("clamps sidebar width between min and max bounds", () => {
+      const { container } = render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      const sidebar = container.querySelector(".file-browser-sidebar");
+      expect(sidebar).not.toBeNull();
+
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+      fireEvent.pointerMove(document, { pointerId: 1, clientX: -1000 });
+      expect(sidebar).toHaveStyle({ width: "180px" });
+
+      fireEvent.pointerMove(document, { pointerId: 1, clientX: 2000 });
+      expect(sidebar).toHaveStyle({ width: "500px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "500");
+    });
+
+    it("persists final sidebar width to localStorage on pointer up", () => {
+      let onPointerMove: ((event: PointerEvent) => void) | null = null;
+      let onPointerUp: ((event: PointerEvent) => void) | null = null;
+      const addEventListenerSpy = vi.spyOn(document, "addEventListener");
+
+      addEventListenerSpy.mockImplementation((type, listener, options) => {
+        if (type === "pointermove") {
+          onPointerMove = listener as (event: PointerEvent) => void;
+        }
+        if (type === "pointerup") {
+          onPointerUp = listener as (event: PointerEvent) => void;
+        }
+        return EventTarget.prototype.addEventListener.call(document, type, listener as EventListener, options);
+      });
+
+      render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: 280 });
+
+      expect(onPointerMove).not.toBeNull();
+      expect(onPointerUp).not.toBeNull();
+
+      act(() => {
+        onPointerMove?.({ clientX: 345, pointerId: 1 } as PointerEvent);
+        onPointerUp?.({ pointerId: 1 } as PointerEvent);
+      });
+
+      expect(localStorage.getItem("fusion:file-browser-sidebar-width")).toBe("345");
+    });
+
+    it("supports keyboard resize with arrow keys and persists updated width", () => {
+      const { container } = render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      const sidebar = container.querySelector(".file-browser-sidebar");
+      expect(sidebar).not.toBeNull();
+
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+      expect(sidebar).toHaveStyle({ width: "300px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "300");
+      expect(localStorage.getItem("fusion:file-browser-sidebar-width")).toBe("300");
+
+      fireEvent.keyDown(handle, { key: "ArrowLeft" });
+      expect(sidebar).toHaveStyle({ width: "280px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "280");
+      expect(localStorage.getItem("fusion:file-browser-sidebar-width")).toBe("280");
+    });
+
+    it("clamps keyboard resize within min and max bounds", () => {
+      const { container } = render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      const sidebar = container.querySelector(".file-browser-sidebar");
+      expect(sidebar).not.toBeNull();
+
+      for (let i = 0; i < 30; i += 1) {
+        fireEvent.keyDown(handle, { key: "ArrowLeft" });
+      }
+      expect(sidebar).toHaveStyle({ width: "180px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "180");
+
+      for (let i = 0; i < 30; i += 1) {
+        fireEvent.keyDown(handle, { key: "ArrowRight" });
+      }
+      expect(sidebar).toHaveStyle({ width: "500px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "500");
+    });
+
+    it("ignores non-arrow keys when resizing from keyboard", () => {
+      const { container } = render(
+        <FileBrowserModal
+          initialWorkspace="project"
+          isOpen={true}
+          onClose={mockOnClose}
+        />,
+      );
+
+      const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+      const sidebar = container.querySelector(".file-browser-sidebar");
+      expect(sidebar).not.toBeNull();
+
+      fireEvent.keyDown(handle, { key: "Enter" });
+
+      expect(sidebar).toHaveStyle({ width: "280px" });
+      expect(handle).toHaveAttribute("aria-valuenow", "280");
+      expect(localStorage.getItem("fusion:file-browser-sidebar-width")).toBeNull();
+    });
+
+    it("defines focus-visible styling for the resize handle", async () => {
+      const { loadAllAppCss } = await import("../../test/cssFixture");
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/\.file-browser-resize-handle:focus-visible\s*\{[^}]*box-shadow:\s*var\(--focus-ring-strong\);/);
+    });
   });
 
   describe("image file preview", () => {

@@ -15,7 +15,7 @@ export function UpdateAvailableBanner({ latestVersion, currentVersion, onDismiss
         update. {" "}
         <a
           className="update-available-banner__link"
-          href="https://github.com/Runfusion/Fusion/releases"
+          href="https://github.com/Runfusion/Fusion/blob/main/CHANGELOG.md"
           target="_blank"
           rel="noreferrer"
         >

@@ -13,7 +13,7 @@ describe("UpdateAvailableBanner", () => {
     expect(screen.getByText("npm i -g @runfusion/fusion")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Release notes" })).toHaveAttribute(
       "href",
-      "https://github.com/Runfusion/Fusion/releases",
+      "https://github.com/Runfusion/Fusion/blob/main/CHANGELOG.md",
     );
     expect(screen.getByRole("link", { name: "Learn more" })).toHaveAttribute("href", "https://runfusion.ai");
   });

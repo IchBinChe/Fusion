@@ -142,6 +142,15 @@ describe("NtfyNotifier", () => {
   });
 
   describe("gridlock notifications", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it("sends notification when gridlock event is enabled", async () => {
       store.setSettings({ ntfyEnabled: true, ntfyTopic: "test-topic", ntfyEvents: ["gridlock"] });
       fetchMock.mockResolvedValue({ ok: true });
@@ -186,7 +195,7 @@ describe("NtfyNotifier", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("deduplicates by blocked task set", async () => {
+    it("suppresses repeated gridlock notifications during the 15-minute cooldown even when blocked set changes", async () => {
       store.setSettings({ ntfyEnabled: true, ntfyTopic: "test-topic", ntfyEvents: ["gridlock"] });
       fetchMock.mockResolvedValue({ ok: true });
       notifier = new NtfyNotifier(store);
@@ -198,15 +207,43 @@ describe("NtfyNotifier", () => {
         blockedTaskIds: ["FN-003", "FN-001"],
         blockingTaskIds: ["FN-002"],
       });
+
+      vi.advanceTimersByTime(5 * 60 * 1000);
       notifier.notifyGridlock({
-        blockedTaskCount: 2,
-        reasons: { "FN-001": "dependency", "FN-003": "dependency" },
-        blockedTaskIds: ["FN-001", "FN-003"],
-        blockingTaskIds: ["FN-002"],
+        blockedTaskCount: 3,
+        reasons: { "FN-001": "dependency", "FN-003": "dependency", "FN-004": "overlap" },
+        blockedTaskIds: ["FN-001", "FN-003", "FN-004"],
+        blockingTaskIds: ["FN-002", "FN-005"],
       });
 
       await flushAsyncWork();
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows a new gridlock notification immediately after resolution reset", async () => {
+      store.setSettings({ ntfyEnabled: true, ntfyTopic: "test-topic", ntfyEvents: ["gridlock"] });
+      fetchMock.mockResolvedValue({ ok: true });
+      notifier = new NtfyNotifier(store);
+      await notifier.start();
+
+      notifier.notifyGridlock({
+        blockedTaskCount: 1,
+        reasons: { "FN-001": "dependency" },
+        blockedTaskIds: ["FN-001"],
+        blockingTaskIds: ["FN-002"],
+      });
+
+      vi.advanceTimersByTime(60_000);
+      notifier.notifyGridlock(null);
+      notifier.notifyGridlock({
+        blockedTaskCount: 1,
+        reasons: { "FN-009": "overlap" },
+        blockedTaskIds: ["FN-009"],
+        blockingTaskIds: ["FN-010"],
+      });
+
+      await flushAsyncWork();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 

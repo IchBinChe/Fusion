@@ -14,24 +14,31 @@ type ProviderApiType = CustomProvider["apiType"];
 
 const API_TYPES: ProviderApiType[] = ["openai-compatible", "anthropic-compatible"];
 
-function normalizeProviders(result: Awaited<ReturnType<typeof fetchCustomProviders>>): CustomProvider[] {
-  const legacyProviders = Array.isArray(result)
-    ? result
-    : Array.isArray((result as { providers?: unknown }).providers)
-      ? (result as { providers: (typeof result)[number][] }).providers
-      : [];
+type LegacyProvider = {
+  id: string;
+  name?: string;
+  baseUrl: string;
+  api: "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
+  apiKey?: string;
+  models?: Array<{ id: string; name?: string }>;
+};
 
-  return legacyProviders.map((provider) => {
+function normalizeProviders(result: Awaited<ReturnType<typeof fetchCustomProviders>>): CustomProvider[] {
+  const providerRecords: Array<CustomProvider | LegacyProvider> = Array.isArray(result)
+    ? (result as Array<CustomProvider | LegacyProvider>)
+    : ((result as { providers?: Array<CustomProvider | LegacyProvider> }).providers ?? []);
+
+  return providerRecords.map((provider) => {
     if ("apiType" in provider) {
-      return provider as unknown as CustomProvider;
+      return provider;
     }
 
     return {
       id: provider.id,
-      name: provider.name ?? provider.id,
+      name: provider.name?.trim() || provider.id,
+      apiType: provider.api === "anthropic-messages" ? "anthropic-compatible" : "openai-compatible",
       baseUrl: provider.baseUrl,
       ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
-      apiType: provider.api === "anthropic-messages" ? "anthropic-compatible" : "openai-compatible",
       models: (provider.models ?? []).map((model) => ({
         id: model.id,
         name: model.name ?? model.id,

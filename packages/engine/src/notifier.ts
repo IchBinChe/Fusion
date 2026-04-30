@@ -13,6 +13,7 @@ export interface NtfyNotifierOptions {
 export type NtfyNotificationPriority = "low" | "default" | "high" | "urgent";
 
 const DEFAULT_NTFY_BASE_URL = "https://ntfy.sh";
+const GRIDLOCK_NOTIFICATION_COOLDOWN_MS = 15 * 60 * 1000;
 
 export const DEFAULT_NTFY_EVENTS: readonly NtfyNotificationEvent[] = [
   "in-review",
@@ -176,8 +177,8 @@ export class NtfyNotifier {
   private ntfyBaseUrl: string;
   private readonly defaultNtfyBaseUrl: string;
   private readonly projectId?: string;
-  private notifiedEvents: Set<string> = new Set();
   private abortController: AbortController | null = null;
+  private lastGridlockNotificationAt: number | null = null;
 
   constructor(
     private store: NtfyNotifierStore,
@@ -230,10 +231,23 @@ export class NtfyNotifier {
     this.ntfyBaseUrl = resolveNtfyBaseUrl(settings.ntfyBaseUrl, this.defaultNtfyBaseUrl);
   }
 
-  notifyGridlock(event: GridlockEvent): void {
+  notifyGridlock(event: GridlockEvent | null): void {
+    if (event === null) {
+      this.lastGridlockNotificationAt = null;
+      return;
+    }
+
     if (!this.config.enabled || !this.config.topic || !this.isEventEnabled("gridlock")) return;
 
-    const blockedTasks = event.blockedTaskIds.sort();
+    const now = Date.now();
+    if (
+      this.lastGridlockNotificationAt !== null
+      && now - this.lastGridlockNotificationAt < GRIDLOCK_NOTIFICATION_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    const blockedTasks = [...event.blockedTaskIds].sort();
     const reasonSummary = Object.values(event.reasons).reduce((acc, reason) => {
       acc[reason] = (acc[reason] ?? 0) + 1;
       return acc;
@@ -248,33 +262,22 @@ export class NtfyNotifier {
       projectId: this.projectId,
     });
 
-    const dedupKey = `gridlock:${blockedTasks.join(",")}`;
-    this.maybeNotifyByKey(dedupKey, () =>
-      sendNtfyNotification({
-        ntfyBaseUrl: this.ntfyBaseUrl,
-        topic: this.config.topic!,
-        title: "Pipeline gridlocked",
-        message: `${event.blockedTaskCount} todo tasks are blocked (${reasons.join(", ")}). Blocked: ${blockedTasks.join(", ")}. Blocking: ${event.blockingTaskIds.join(", ") || "none"}.`,
-        priority: "high",
-        clickUrl,
-        signal: this.abortController?.signal,
-      }),
-    );
+    this.lastGridlockNotificationAt = now;
+    sendNtfyNotification({
+      ntfyBaseUrl: this.ntfyBaseUrl,
+      topic: this.config.topic!,
+      title: "Pipeline gridlocked",
+      message: `${event.blockedTaskCount} todo tasks are blocked (${reasons.join(", ")}). Blocked: ${blockedTasks.join(", ")}. Blocking: ${event.blockingTaskIds.join(", ") || "none"}.`,
+      priority: "high",
+      clickUrl,
+      signal: this.abortController?.signal,
+    }).catch(() => {
+      // sendNtfyNotification already logs; notifier must stay best-effort
+    });
   }
 
   private isEventEnabled(event: AnyNotificationEvent): boolean {
     return isNtfyEventEnabled(this.config.events, event);
-  }
-
-  private maybeNotifyByKey(key: string, notifyFn: () => Promise<void>): void {
-    if (this.notifiedEvents.has(key)) {
-      return;
-    }
-
-    this.notifiedEvents.add(key);
-    notifyFn().catch(() => {
-      // sendNtfyNotification already logs; notifier must stay best-effort
-    });
   }
 
   getConfig(): NtfyConfig {

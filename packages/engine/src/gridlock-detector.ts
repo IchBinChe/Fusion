@@ -15,6 +15,7 @@ export interface GridlockDetectorOptions {
   pollIntervalMs?: number;
   missionStore?: MissionStore;
   onGridlock?: (event: GridlockEvent) => void;
+  onGridlockCleared?: () => void;
 }
 
 export class GridlockDetector {
@@ -22,6 +23,7 @@ export class GridlockDetector {
   private readonly pollIntervalMs: number;
   private readonly missionStore?: MissionStore;
   private readonly onGridlock?: (event: GridlockEvent) => void;
+  private readonly onGridlockCleared?: () => void;
   private lastGridlockKey: string | null = null;
 
   constructor(
@@ -31,6 +33,7 @@ export class GridlockDetector {
     this.pollIntervalMs = options.pollIntervalMs ?? 30_000;
     this.missionStore = options.missionStore;
     this.onGridlock = options.onGridlock;
+    this.onGridlockCleared = options.onGridlockCleared;
   }
 
   start(): void {
@@ -65,13 +68,13 @@ export class GridlockDetector {
     });
 
     if (schedulable.length === 0) {
-      this.lastGridlockKey = null;
+      this.clearGridlockState();
       return null;
     }
 
     const active = tasks.filter((task) => task.column === "in-progress" || (task.column === "in-review" && Boolean(task.worktree)));
     if (active.length === 0) {
-      this.lastGridlockKey = null;
+      this.clearGridlockState();
       return null;
     }
 
@@ -117,7 +120,7 @@ export class GridlockDetector {
 
     const blockedTaskIds = Object.keys(reasons).sort();
     if (blockedTaskIds.length !== schedulable.length) {
-      this.lastGridlockKey = null;
+      this.clearGridlockState();
       return null;
     }
 
@@ -136,6 +139,13 @@ export class GridlockDetector {
     }
 
     return event;
+  }
+
+  private clearGridlockState(): void {
+    if (this.lastGridlockKey !== null) {
+      this.lastGridlockKey = null;
+      this.onGridlockCleared?.();
+    }
   }
 
   private isMissionBlocked(task: Task): boolean {

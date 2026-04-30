@@ -35,6 +35,7 @@ describe("GridlockDetector", () => {
   let settings: Settings;
   let scopes: Record<string, string[]>;
   let onGridlock: ReturnType<typeof vi.fn>;
+  let onGridlockCleared: ReturnType<typeof vi.fn>;
   let store: TaskStore;
   let detector: GridlockDetector;
 
@@ -43,12 +44,13 @@ describe("GridlockDetector", () => {
     settings = createSettings();
     scopes = {};
     onGridlock = vi.fn();
+    onGridlockCleared = vi.fn();
     store = {
       listTasks: vi.fn(async () => tasks),
       getSettings: vi.fn(async () => settings),
       parseFileScopeFromPrompt: vi.fn(async (taskId: string) => scopes[taskId] ?? []),
     } as unknown as TaskStore;
-    detector = new GridlockDetector(store, { onGridlock });
+    detector = new GridlockDetector(store, { onGridlock, onGridlockCleared });
   });
 
   afterEach(() => {
@@ -162,6 +164,7 @@ describe("GridlockDetector", () => {
     await detector.detectGridlock();
 
     expect(onGridlock).toHaveBeenCalledTimes(2);
+    expect(onGridlockCleared).toHaveBeenCalledTimes(1);
   });
 
   it("respects paused and recovery-backoff tasks as non-schedulable", async () => {

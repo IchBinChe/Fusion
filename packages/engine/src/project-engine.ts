@@ -282,6 +282,7 @@ export class ProjectEngine {
 
     this.gridlockDetector = new GridlockDetector(store, {
       onGridlock: (event) => this.notifier?.notifyGridlock(event),
+      onGridlockCleared: () => this.notifier?.notifyGridlock(null),
     });
     this.gridlockDetector.start();
 

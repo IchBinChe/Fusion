@@ -11,7 +11,7 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { AgentStore, AgentState, AgentCapability, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus } from "@fusion/core";
+import type { AgentStore, AgentState, AgentCapability, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, Agent } from "@fusion/core";
 import { dailyMemoryPath, ensureOpenClawMemoryFiles, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, resolveMemoryBackend, resolveResearchSettings, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ResearchProviderRegistry } from "./research/provider-registry.js";
@@ -1325,6 +1325,82 @@ export function createReadMessagesTool(messageStore: MessageStore, agentId: stri
           details: {},
         };
       }
+    },
+  };
+}
+
+/** Arguments for {@link createIdentityTool}. */
+export interface CreateIdentityToolArgs {
+  /** The agent record for this heartbeat run. */
+  agent: Agent;
+  /** The resolved instructions string (from resolveAgentInstructionsWithRatings). */
+  resolvedInstructions: string;
+}
+
+/**
+ * Create the `fn_identity` tool for heartbeat sessions.
+ *
+ * When called, it returns a structured summary of which soul, instructions, and
+ * memory are currently loaded for this tick.  The agent is expected to call this
+ * as its FIRST tool action so operators (via dashboard run logs) can verify
+ * correct identity was applied.
+ */
+export function createIdentityTool({ agent, resolvedInstructions }: CreateIdentityToolArgs): ToolDefinition {
+  const identityParams = Type.Object({});
+  return {
+    name: "fn_identity",
+    label: "Identity Check",
+    description: "Return a structured summary of which soul, instructions, and memory are loaded for this heartbeat tick. Call this FIRST before any other tool.",
+    parameters: identityParams,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    execute: async (_id: string, _params: Static<typeof identityParams>, _signal?: any, _onUpdate?: any, _ctx?: any) => {
+      const PREVIEW_CHARS = 500;
+      const INSTRUCTIONS_PREVIEW_CHARS = 1000;
+      const MEMORY_PREVIEW_CHARS = 1000;
+
+      const soulPresent = typeof agent.soul === "string" && agent.soul.trim().length > 0;
+      const instructionsPresent = resolvedInstructions.trim().length > 0;
+      const memoryPresent = typeof agent.memory === "string" && agent.memory.trim().length > 0;
+
+      const soulPreview = soulPresent ? (agent.soul as string).slice(0, PREVIEW_CHARS) : "";
+      const instructionsPreview = instructionsPresent ? resolvedInstructions.slice(0, INSTRUCTIONS_PREVIEW_CHARS) : "";
+      const memoryPreview = memoryPresent ? (agent.memory as string).slice(0, MEMORY_PREVIEW_CHARS) : "";
+
+      const result = {
+        agentId: agent.id,
+        name: agent.name,
+        role: agent.role,
+        soulPresent,
+        instructionsPresent,
+        memoryPresent,
+        soulPreview,
+        instructionsPreview,
+        memoryPreview,
+      };
+
+      const lines = [
+        `agentId: ${result.agentId}`,
+        `name: ${result.name}`,
+        `role: ${result.role}`,
+        `soul: ${result.soulPresent ? "loaded" : "absent"}`,
+        `instructions: ${result.instructionsPresent ? "loaded" : "absent"}`,
+        `memory: ${result.memoryPresent ? "loaded" : "absent"}`,
+      ];
+
+      if (result.soulPresent && result.soulPreview) {
+        lines.push(`\nSoul preview (first ${PREVIEW_CHARS} chars):\n${result.soulPreview}`);
+      }
+      if (result.instructionsPresent && result.instructionsPreview) {
+        lines.push(`\nInstructions preview (first ${INSTRUCTIONS_PREVIEW_CHARS} chars):\n${result.instructionsPreview}`);
+      }
+      if (result.memoryPresent && result.memoryPreview) {
+        lines.push(`\nMemory preview (first ${MEMORY_PREVIEW_CHARS} chars):\n${result.memoryPreview}`);
+      }
+
+      return {
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+        details: result,
+      };
     },
   };
 }

@@ -1,4 +1,4 @@
-import type { TaskStore, AgentRole } from "@fusion/core";
+import type { TaskStore, AgentLogEntry, AgentRole } from "@fusion/core";
 import { createLogger } from "./logger.js";
 
 /** Default byte threshold before an automatic flush. */
@@ -35,12 +35,24 @@ export function summarizeToolArgs(name: string, args?: Record<string, unknown>):
 
 /**
  * Options for creating an {@link AgentLogger}.
+ *
+ * Two sink modes are supported:
+ * 1. **Task-store mode** (original): provide `store` + `taskId`. Writes go to
+ *    `store.appendAgentLog(taskId, ...)`.
+ * 2. **Callback mode**: provide `appendLog`. Writes go to the callback instead.
+ *    When both are provided, both sinks receive every entry.
  */
 export interface AgentLoggerOptions {
-  /** The task store used to persist agent log entries. */
-  store: TaskStore;
-  /** The task ID this logger is associated with. */
-  taskId: string;
+  /** The task store used to persist agent log entries (task-store mode). */
+  store?: TaskStore;
+  /** The task ID this logger is associated with (task-store mode). */
+  taskId?: string;
+  /**
+   * Optional alternative sink callback. When provided, every flushed entry is
+   * forwarded here in addition to (or instead of) `store.appendAgentLog`.
+   * Use this for run-scoped logging where there is no task.
+   */
+  appendLog?: (entry: AgentLogEntry) => Promise<void>;
   /** Which agent role is producing log entries (persisted on every entry). */
   agent?: AgentRole;
   /** Optional callback invoked alongside text logging (e.g. for SSE streaming). */
@@ -85,8 +97,9 @@ export class AgentLogger {
   private thinkingFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly flushSizeBytes: number;
   private readonly flushIntervalMs: number;
-  private readonly store: TaskStore;
+  private readonly store?: TaskStore;
   private readonly taskId: string;
+  private readonly appendLogCb?: (entry: AgentLogEntry) => Promise<void>;
   private readonly agent?: AgentRole;
   private readonly externalTextCb?: (taskId: string, delta: string) => void;
   private readonly externalToolCb?: (taskId: string, toolName: string) => void;
@@ -94,7 +107,8 @@ export class AgentLogger {
 
   constructor(options: AgentLoggerOptions) {
     this.store = options.store;
-    this.taskId = options.taskId;
+    this.taskId = options.taskId ?? "";
+    this.appendLogCb = options.appendLog;
     this.agent = options.agent;
     this.externalTextCb = options.onAgentText;
     this.externalToolCb = options.onAgentTool;
@@ -149,9 +163,7 @@ export class AgentLogger {
     if (this.thinkingFlushTimer) { clearTimeout(this.thinkingFlushTimer); this.thinkingFlushTimer = null; }
     this.flushThinkingBuffer();
     const detail = summarizeToolArgs(name, args);
-    this.store.appendAgentLog(this.taskId, name, "tool", detail, this.agent).catch((err) => {
-      this.log.warn(`Failed to log tool start "${name}" for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    this.writeEntry(name, "tool", detail, `Failed to log tool start "${name}" for ${this.taskId}`);
   }
 
   /**
@@ -168,9 +180,7 @@ export class AgentLogger {
     if (result !== undefined && result !== null) {
       detail = typeof result === "string" ? result : JSON.stringify(result);
     }
-    this.store.appendAgentLog(this.taskId, name, type, detail, this.agent).catch((err) => {
-      this.log.warn(`Failed to log tool end "${name}" (${type}) for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    this.writeEntry(name, type, detail, `Failed to log tool end "${name}" (${type}) for ${this.taskId}`);
   }
 
   /**
@@ -186,22 +196,99 @@ export class AgentLogger {
 
   // ── Internal helpers ───────────────────────────────────────────────
 
+  /**
+   * Write a single structured entry through whichever sink(s) are configured.
+   * When both `store`+`taskId` and `appendLogCb` are set, both receive the entry.
+   * When only `appendLogCb` is set (no store/taskId), only the callback is used.
+   * @param storeWarnMsg - Warning message prefix used when the task-store write fails.
+   */
+  private writeEntry(text: string, type: AgentLogEntry["type"], detail: string | undefined, storeWarnMsg: string): void {
+    const entry: AgentLogEntry = {
+      timestamp: new Date().toISOString(),
+      taskId: this.taskId,
+      text,
+      type,
+      ...(detail !== undefined && { detail }),
+      ...(this.agent !== undefined && { agent: this.agent }),
+    };
+
+    if (this.store && this.taskId) {
+      this.store.appendAgentLog(this.taskId, text, type, detail, this.agent).catch((err) => {
+        this.log.warn(`${storeWarnMsg}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+
+    if (this.appendLogCb) {
+      this.appendLogCb(entry).catch((err) => {
+        this.log.warn(`appendLog callback failed for entry (${type}): ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  }
+
   private flushTextBuffer(): Promise<void> {
     if (this.textBuffer.length === 0) return Promise.resolve();
     const chunk = this.textBuffer;
     this.textBuffer = "";
-    return this.store.appendAgentLog(this.taskId, chunk, "text", undefined, this.agent).catch((err) => {
-      this.log.warn(`Failed to flush text buffer for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    const entry: AgentLogEntry = {
+      timestamp: new Date().toISOString(),
+      taskId: this.taskId,
+      text: chunk,
+      type: "text",
+      ...(this.agent !== undefined && { agent: this.agent }),
+    };
+
+    const promises: Promise<void>[] = [];
+
+    if (this.store && this.taskId) {
+      promises.push(
+        this.store.appendAgentLog(this.taskId, chunk, "text", undefined, this.agent).catch((err) => {
+          this.log.warn(`Failed to flush text buffer for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+        }),
+      );
+    }
+
+    if (this.appendLogCb) {
+      promises.push(
+        this.appendLogCb(entry).catch((err) => {
+          this.log.warn(`appendLog callback failed for text flush: ${err instanceof Error ? err.message : String(err)}`);
+        }),
+      );
+    }
+
+    return Promise.all(promises).then(() => undefined);
   }
 
   private flushThinkingBuffer(): Promise<void> {
     if (this.thinkingBuffer.length === 0) return Promise.resolve();
     const chunk = this.thinkingBuffer;
     this.thinkingBuffer = "";
-    return this.store.appendAgentLog(this.taskId, chunk, "thinking", undefined, this.agent).catch((err) => {
-      this.log.warn(`Failed to flush thinking buffer for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    const entry: AgentLogEntry = {
+      timestamp: new Date().toISOString(),
+      taskId: this.taskId,
+      text: chunk,
+      type: "thinking",
+      ...(this.agent !== undefined && { agent: this.agent }),
+    };
+
+    const promises: Promise<void>[] = [];
+
+    if (this.store && this.taskId) {
+      promises.push(
+        this.store.appendAgentLog(this.taskId, chunk, "thinking", undefined, this.agent).catch((err) => {
+          this.log.warn(`Failed to flush thinking buffer for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+        }),
+      );
+    }
+
+    if (this.appendLogCb) {
+      promises.push(
+        this.appendLogCb(entry).catch((err) => {
+          this.log.warn(`appendLog callback failed for thinking flush: ${err instanceof Error ? err.message : String(err)}`);
+        }),
+      );
+    }
+
+    return Promise.all(promises).then(() => undefined);
   }
 
   private scheduleFlush(): void {

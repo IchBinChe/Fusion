@@ -21,7 +21,7 @@ import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHea
 import { buildExecutionMemoryInstructions, isEphemeralAgent, hasAgentIdentity } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@mariozechner/pi-ai";
-import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createListAgentsTool, createDelegateTaskTool, createSendMessageTool, createReadMessagesTool, createMemoryTools, taskCreateParams } from "./agent-tools.js";
+import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createListAgentsTool, createDelegateTaskTool, createSendMessageTool, createReadMessagesTool, createMemoryTools, createIdentityTool, taskCreateParams } from "./agent-tools.js";
 import { AgentLogger } from "./agent-logger.js";
 import { resolveAgentInstructionsWithRatings, buildSystemPromptWithInstructions, resolveAgentHeartbeatProcedure } from "./agent-instructions.js";
 import { heartbeatLog, formatError } from "./logger.js";
@@ -292,9 +292,9 @@ export const HEARTBEAT_SYSTEM_PROMPT_NO_TASK = HEARTBEAT_NO_TASK_SYSTEM_PROMPT;
  */
 export const HEARTBEAT_PROCEDURE = `## Heartbeat Procedure (run every tick, in order)
 
-1. **Identity & context** — review your soul, instructions, and memory (already
-   loaded in the system prompt). Confirm who you are and what you're responsible
-   for before continuing prior work.
+1. **Identity & context** — call fn_identity FIRST to confirm which soul,
+   instructions, and memory loaded for this tick. Echo your role and any
+   anomalies in your first text output before doing anything else.
 2. **Inbox** — when fn_read_messages is available, call it. Process any pending
    messages first; reply with reply_to_message_id when answering.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
@@ -320,6 +320,15 @@ a bug. Do not loop on the same plan across heartbeats without recording why.`;
 const heartbeatDoneParams = Type.Object({
   summary: Type.Optional(Type.String({ description: "Summary of what was accomplished this heartbeat" })),
 });
+
+/**
+ * Truncate a string to `maxChars`, appending a marker so callers can see
+ * content was clipped.  Returns the original string unchanged when it fits.
+ */
+function truncatePrompt(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n\n... (truncated, ${text.length} chars)`;
+}
 
 async function getHeartbeatMemorySettings(taskStore: TaskStore): Promise<Settings | undefined> {
   const maybeGetSettings = (taskStore as { getSettings?: () => Promise<Settings> }).getSettings;
@@ -1297,17 +1306,6 @@ export class HeartbeatMonitor {
           const message = memorySettingsError instanceof Error ? memorySettingsError.message : String(memorySettingsError);
           heartbeatLog.warn(`Failed to configure heartbeat memory tools for ${agentId}: ${message}`);
         }
-        heartbeatTools.push(heartbeatDoneTool);
-
-        // AgentLogger requires a taskId — only create for task-scoped runs
-        if (!isNoTaskRun && taskId) {
-          agentLogger = new AgentLogger({
-            store: taskStore,
-            taskId,
-            agent: agent.role as AgentRole,
-          });
-        }
-
         // Build skill selection context for heartbeat session (uses waking agent's skills, no role fallback)
         const skillContext = buildSessionSkillContextSync(agent, "heartbeat", rootDir);
 
@@ -1315,8 +1313,10 @@ export class HeartbeatMonitor {
           ? HEARTBEAT_NO_TASK_SYSTEM_PROMPT
           : HEARTBEAT_SYSTEM_PROMPT;
         const baseHeartbeatSystemPrompt = systemPrompt;
+        let resolvedInstructionsForIdentity = "";
         try {
           const agentInstructions = await resolveAgentInstructionsWithRatings(agent, rootDir, this.store);
+          resolvedInstructionsForIdentity = agentInstructions;
           const memoryInstructions = memorySettings?.memoryEnabled === false
             ? ""
             : buildExecutionMemoryInstructions(rootDir, memorySettings);
@@ -1328,6 +1328,28 @@ export class HeartbeatMonitor {
           systemPrompt = baseHeartbeatSystemPrompt;
           const message = instructionError instanceof Error ? instructionError.message : String(instructionError);
           heartbeatLog.warn(`Failed to enrich heartbeat system prompt for ${agentId}: ${message}`);
+        }
+
+        // Register fn_identity tool before fn_heartbeat_done (which must stay last)
+        heartbeatTools.push(createIdentityTool({ agent, resolvedInstructions: resolvedInstructionsForIdentity }));
+
+        // fn_heartbeat_done must be the last tool in the array (stable terminal signal)
+        heartbeatTools.push(heartbeatDoneTool);
+
+        // Always-on AgentLogger: no-task runs use the callback sink wired to run-scoped JSONL;
+        // task-scoped runs write to both the task store AND the run-scoped JSONL.
+        if (isNoTaskRun) {
+          agentLogger = new AgentLogger({
+            appendLog: (entry) => this.store.appendRunLog(agentId, run.id, entry),
+            agent: agent.role as AgentRole,
+          });
+        } else if (taskId) {
+          agentLogger = new AgentLogger({
+            store: taskStore,
+            taskId,
+            agent: agent.role as AgentRole,
+            appendLog: (entry) => this.store.appendRunLog(agentId, run.id, entry),
+          });
         }
 
         // Create agent session
@@ -1430,6 +1452,10 @@ export class HeartbeatMonitor {
               "Run the Heartbeat Procedure (below) before doing anything else — even a",
               "timer-only wake should re-check messages, memory, and project state.",
               "",
+              "You MUST call fn_identity as your first tool action this tick before reading any task content or calling any other tool.",
+              "",
+              heartbeatProcedureText,
+              "",
               "**No assigned task** — This heartbeat run has no task assignment.",
               "",
               "You have identity (soul, instructions, and/or memory) loaded, which means you can perform",
@@ -1453,8 +1479,6 @@ export class HeartbeatMonitor {
               "",
               "Your soul, instructions, and memory are already loaded in the system prompt.",
               "Focus on work that benefits the project without requiring a specific task context.",
-              "",
-              heartbeatProcedureText,
               "",
               "Call fn_heartbeat_done when finished.",
             ].join("\n");
@@ -1530,6 +1554,10 @@ export class HeartbeatMonitor {
               "decide what action this delta requires. Your assigned task is one input",
               "to the procedure — not the only thing to consider.",
               "",
+              "You MUST call fn_identity as your first tool action this tick before reading any task content or calling any other tool.",
+              "",
+              heartbeatProcedureText,
+              "",
               "Task description:",
               taskDetail!.description,
               "",
@@ -1537,10 +1565,24 @@ export class HeartbeatMonitor {
               ...triggeringCommentLines,
               ...pendingMessagesLines,
               "",
-              heartbeatProcedureText,
-              "",
               "Run the Heartbeat Procedure above. Call fn_heartbeat_done when finished.",
             ].join("\n");
+          }
+
+          // Persist prompts on the run record before executing so they are
+          // observable in the dashboard even if execution fails partway through.
+          try {
+            const runWithPrompts: AgentHeartbeatRun = {
+              ...run,
+              systemPrompt: truncatePrompt(systemPrompt, 100_000),
+              executionPrompt: truncatePrompt(executionPrompt, 100_000),
+              heartbeatProcedureSource: customProcedure ? "custom" : "default",
+            };
+            await this.store.saveRun(runWithPrompts);
+            // Update local run reference so completeRun merges correctly
+            Object.assign(run, { systemPrompt: runWithPrompts.systemPrompt, executionPrompt: runWithPrompts.executionPrompt, heartbeatProcedureSource: runWithPrompts.heartbeatProcedureSource });
+          } catch (promptPersistErr) {
+            heartbeatLog.warn(`Failed to persist prompts for ${agentId}/${run.id}: ${promptPersistErr instanceof Error ? promptPersistErr.message : String(promptPersistErr)}`);
           }
 
           // Execute

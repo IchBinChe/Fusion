@@ -7,7 +7,7 @@
  * edited as normal project files.
  */
 
-import { mkdir, readFile, writeFile, readdir, unlink, rename, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, unlink, rename, access, appendFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
@@ -36,6 +36,7 @@ import type {
   AgentRatingSummary,
   AgentRatingInput,
   Task,
+  AgentLogEntry,
 } from "./types.js";
 import { AGENT_VALID_TRANSITIONS, agentToConfigSnapshot, diffConfigSnapshots, isEphemeralAgent, CheckoutConflictError, DEFAULT_HEARTBEAT_PROCEDURE_PATH, getDefaultHeartbeatProcedurePath } from "./types.js";
 import type { RunMutationContext } from "./types.js";
@@ -1788,6 +1789,70 @@ export class AgentStore extends EventEmitter {
     return rows
       .map((row) => this.parseJson<AgentHeartbeatRun | null>(row.data, null))
       .filter((run): run is AgentHeartbeatRun => run !== null);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Run-scoped log storage (JSONL files alongside run JSON in agentsDir)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Maximum byte size for any single log entry field (64 KB) to bound disk growth. */
+  private static readonly RUN_LOG_ENTRY_MAX_BYTES = 64 * 1024;
+
+  /** Return the path to the JSONL run-log file for a given agent/run pair. */
+  private runLogPath(agentId: string, runId: string): string {
+    return join(this.agentsDir, `${agentId}-runlogs-${runId}.jsonl`);
+  }
+
+  /**
+   * Append a single {@link AgentLogEntry} to the JSONL run log for the given run.
+   * Individual `text` and `detail` fields are capped at 64 KB so one large tool
+   * result cannot grow the file unboundedly.
+   * @param agentId - The agent ID
+   * @param runId - The run ID
+   * @param entry - The log entry to append
+   */
+  async appendRunLog(agentId: string, runId: string, entry: AgentLogEntry): Promise<void> {
+    const cap = AgentStore.RUN_LOG_ENTRY_MAX_BYTES;
+    const safeEntry: AgentLogEntry = {
+      ...entry,
+      text: entry.text.length > cap ? `${entry.text.slice(0, cap)}\n\n... (truncated, ${entry.text.length} chars)` : entry.text,
+      ...(entry.detail !== undefined && {
+        detail: entry.detail.length > cap ? `${entry.detail.slice(0, cap)}\n\n... (truncated, ${entry.detail.length} chars)` : entry.detail,
+      }),
+    };
+    const line = JSON.stringify(safeEntry) + "\n";
+    await appendFile(this.runLogPath(agentId, runId), line, "utf-8");
+  }
+
+  /**
+   * Read all log entries for a given run from its JSONL file.
+   * Returns an empty array when the file does not exist (e.g., the run had no
+   * logs or was recorded before this feature was added).
+   * @param agentId - The agent ID
+   * @param runId - The run ID
+   * @param opts.limit - Optional maximum number of entries to return (newest-first capped)
+   */
+  async getRunLogs(agentId: string, runId: string, opts?: { limit?: number }): Promise<AgentLogEntry[]> {
+    const filePath = this.runLogPath(agentId, runId);
+    let raw: string;
+    try {
+      raw = await readFile(filePath, "utf-8");
+    } catch {
+      return [];
+    }
+    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+    const entries: AgentLogEntry[] = [];
+    for (const line of lines) {
+      try {
+        entries.push(JSON.parse(line) as AgentLogEntry);
+      } catch {
+        // Skip malformed lines — append-only means partial writes can occur on crash
+      }
+    }
+    if (opts?.limit !== undefined && entries.length > opts.limit) {
+      return entries.slice(entries.length - opts.limit);
+    }
+    return entries;
   }
 
   /**

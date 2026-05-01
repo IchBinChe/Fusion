@@ -2769,6 +2769,12 @@ export interface AgentHeartbeatRun {
   stdoutExcerpt?: string;
   /** Excerpt of stderr output */
   stderrExcerpt?: string;
+  /** Full assembled system prompt sent to the LLM for this run (truncated to 100,000 chars). */
+  systemPrompt?: string;
+  /** Full per-tick execution prompt sent to the LLM for this run (truncated to 100,000 chars). */
+  executionPrompt?: string;
+  /** Whether a custom heartbeat procedure was loaded ("custom") or the built-in default was used ("default"). */
+  heartbeatProcedureSource?: "default" | "custom";
 }
 
 /** Capabilities/roles an agent can have */

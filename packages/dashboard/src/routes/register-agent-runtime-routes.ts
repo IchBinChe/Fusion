@@ -1114,6 +1114,15 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
         throw notFound("Run not found");
       }
 
+      // Prefer run-scoped JSONL logs (written by the always-on AgentLogger).
+      // These exist for both no-task and task-scoped runs from this version onward.
+      const runLogs = await agentStore.getRunLogs(req.params.id, req.params.runId);
+      if (runLogs.length > 0) {
+        res.json(runLogs);
+        return;
+      }
+
+      // Legacy fallback: use the run's context snapshot task ID to query task-scoped logs.
       // Only use the run's context snapshot for task ID — do not fall back
       // to agent.taskId since that represents the agent's *current* task,
       // not the task active during a historical run.

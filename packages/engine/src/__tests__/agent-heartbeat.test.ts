@@ -1329,6 +1329,7 @@ describe("HeartbeatMonitor", () => {
         getLastBlockedState: vi.fn().mockResolvedValue(null),
         setLastBlockedState: vi.fn().mockResolvedValue(undefined),
         clearLastBlockedState: vi.fn().mockResolvedValue(undefined),
+        appendRunLog: vi.fn().mockResolvedValue(undefined),
       } as unknown as AgentStore;
     }
 
@@ -2831,8 +2832,8 @@ describe("HeartbeatMonitor", () => {
         expect(callArgs.systemPrompt).toContain("fn_task_document_write");
         expect(callArgs.tools).toBe("readonly");
         // Tools: fn_task_create, fn_task_log, fn_task_document_write, fn_task_document_read, fn_list_agents, fn_delegate_task,
-        // fn_memory_search, fn_memory_get, fn_memory_append, fn_heartbeat_done
-        expect(callArgs.customTools).toHaveLength(10);
+        // fn_memory_search, fn_memory_get, fn_memory_append, fn_identity, fn_heartbeat_done
+        expect(callArgs.customTools).toHaveLength(11);
         expect(callArgs.customTools![0]!.name).toBe("fn_task_create");
         expect(callArgs.customTools![1]!.name).toBe("fn_task_log");
         expect(callArgs.customTools![2]!.name).toBe("fn_task_document_write");
@@ -2842,8 +2843,10 @@ describe("HeartbeatMonitor", () => {
         expect(callArgs.customTools![6]!.name).toBe("fn_memory_search");
         expect(callArgs.customTools![7]!.name).toBe("fn_memory_get");
         expect(callArgs.customTools![8]!.name).toBe("fn_memory_append");
+        // fn_identity appears before fn_heartbeat_done
+        expect(callArgs.customTools![9]!.name).toBe("fn_identity");
         // fn_heartbeat_done is last (terminal tool)
-        expect(callArgs.customTools![9]!.name).toBe("fn_heartbeat_done");
+        expect(callArgs.customTools![10]!.name).toBe("fn_heartbeat_done");
       });
 
       it("includes memory instructions even when agent has no custom instructions", async () => {
@@ -5612,6 +5615,7 @@ describe("executeHeartbeat — skill selection resolver contract (FN-1510/FN-151
       getLastBlockedState: vi.fn().mockResolvedValue(null),
       setLastBlockedState: vi.fn().mockResolvedValue(undefined),
       clearLastBlockedState: vi.fn().mockResolvedValue(undefined),
+      appendRunLog: vi.fn().mockResolvedValue(undefined),
     } as unknown as AgentStore;
   }
 
@@ -5799,6 +5803,7 @@ describe("executeHeartbeat — skill selection non-fatal (FN-1510/FN-1511)", () 
       getLastBlockedState: vi.fn().mockResolvedValue(null),
       setLastBlockedState: vi.fn().mockResolvedValue(undefined),
       clearLastBlockedState: vi.fn().mockResolvedValue(undefined),
+      appendRunLog: vi.fn().mockResolvedValue(undefined),
     } as unknown as AgentStore;
   }
 
@@ -5858,5 +5863,230 @@ describe("executeHeartbeat — skill selection non-fatal (FN-1510/FN-1511)", () 
       expect(result.status).toBe("completed");
       expect(mockedCreateFnAgent).toHaveBeenCalled();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New observability tests (FN-3xxx sweep)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("HeartbeatMonitor observability — prompt persistence + run-scoped logs", () => {
+  // These tests use the same mock infrastructure as the main executeHeartbeat suite.
+  let mockTaskStore: TaskStore;
+  let mockAgent: Agent;
+
+  function createMockAgentSession() {
+    return {
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      subscribe: vi.fn(),
+      model: { provider: "mock", id: "mock-model" },
+    };
+  }
+
+  function createMockTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
+    return {
+      getTask: vi.fn().mockResolvedValue({
+        id: "FN-001",
+        title: "Test Task",
+        description: "Test task description",
+        prompt: "# Test PROMPT.md\nSome content",
+        steps: [],
+        column: "todo",
+        dependencies: [],
+        log: [],
+        attachments: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as unknown as TaskDetail),
+      selectNextTaskForAgent: vi.fn().mockResolvedValue(null),
+      createTask: vi.fn().mockResolvedValue({ id: "FN-002", description: "Created task", dependencies: [], column: "triage" }),
+      logEntry: vi.fn().mockResolvedValue({}),
+      addComment: vi.fn().mockResolvedValue({}),
+      appendAgentLog: vi.fn().mockResolvedValue(undefined),
+      upsertTaskDocument: vi.fn().mockResolvedValue({}),
+      getTaskDocument: vi.fn().mockResolvedValue(null),
+      getTaskDocuments: vi.fn().mockResolvedValue([]),
+      ...overrides,
+    } as unknown as TaskStore;
+  }
+
+  function createStoreWithAgent(agentData: Partial<Agent> = {}): AgentStore {
+    mockAgent = {
+      id: "agent-001",
+      name: "Test Agent",
+      role: "executor",
+      state: "active",
+      taskId: "FN-001",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      metadata: {},
+      ...agentData,
+    } as Agent;
+
+    const savedRuns: Map<string, AgentHeartbeatRun> = new Map();
+
+    return {
+      recordHeartbeat: vi.fn().mockResolvedValue(undefined),
+      updateAgentState: vi.fn().mockResolvedValue(undefined),
+      updateAgent: vi.fn().mockResolvedValue(undefined),
+      getAgent: vi.fn().mockResolvedValue(mockAgent),
+      assignTask: vi.fn().mockImplementation(async (_agentId: string, taskId: string | undefined) => {
+        mockAgent.taskId = taskId;
+        return mockAgent;
+      }),
+      startHeartbeatRun: vi.fn().mockResolvedValue({
+        id: "run-obs-001",
+        agentId: "agent-001",
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+        status: "active",
+      } as AgentHeartbeatRun),
+      saveRun: vi.fn().mockImplementation(async (run: AgentHeartbeatRun) => {
+        savedRuns.set(run.id, run);
+      }),
+      getRunDetail: vi.fn().mockImplementation(async (_agentId: string, runId: string) => {
+        return savedRuns.get(runId) ?? {
+          id: runId,
+          agentId: "agent-001",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          status: "completed" as const,
+        };
+      }),
+      getRatingSummary: vi.fn().mockResolvedValue(undefined),
+      endHeartbeatRun: vi.fn().mockResolvedValue(undefined),
+      getBudgetStatus: vi.fn().mockResolvedValue(createBudgetStatus()),
+      getCachedAgent: vi.fn().mockReturnValue(null),
+      getLastBlockedState: vi.fn().mockResolvedValue(null),
+      setLastBlockedState: vi.fn().mockResolvedValue(undefined),
+      clearLastBlockedState: vi.fn().mockResolvedValue(undefined),
+      appendRunLog: vi.fn().mockResolvedValue(undefined),
+    } as unknown as AgentStore;
+  }
+
+  beforeEach(() => {
+    mockTaskStore = createMockTaskStore();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("no-task heartbeat run persists systemPrompt and executionPrompt on the run record", async () => {
+    // Identity agent (has soul) so a no-task run is triggered
+    const store = createStoreWithAgent({ taskId: undefined, soul: "I am the ambient coordinator." });
+    const mockSession = createMockAgentSession();
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+    const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+    const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+    // saveRun should have been called with both prompt fields populated
+    const saveRunCalls = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls;
+    // Find the call that includes systemPrompt (the prompt-persistence saveRun)
+    const promptRunCall = saveRunCalls.find(
+      (args: unknown[]) => typeof (args[0] as AgentHeartbeatRun).systemPrompt === "string" && ((args[0] as AgentHeartbeatRun).systemPrompt?.length ?? 0) > 0
+    );
+    expect(promptRunCall).toBeDefined();
+    const savedRun = promptRunCall![0] as AgentHeartbeatRun;
+    expect(savedRun.systemPrompt).toBeDefined();
+    expect(typeof savedRun.systemPrompt).toBe("string");
+    expect(savedRun.executionPrompt).toBeDefined();
+    expect(typeof savedRun.executionPrompt).toBe("string");
+    // heartbeatProcedureSource should be "default" (no custom procedure file)
+    expect(savedRun.heartbeatProcedureSource).toBe("default");
+
+    // The execution prompt should contain the procedure text before the no-task action menu
+    expect(savedRun.executionPrompt).toContain("fn_identity");
+    expect(savedRun.executionPrompt).toContain("Heartbeat Procedure");
+    // The wake delta header should appear before the action menu items
+    const procedureIdx = savedRun.executionPrompt!.indexOf("Heartbeat Procedure");
+    const actionMenuIdx = savedRun.executionPrompt!.indexOf("No assigned task");
+    expect(procedureIdx).toBeLessThan(actionMenuIdx);
+
+    expect(result.status).toBe("completed");
+  });
+
+  it("no-task heartbeat run-scoped logs receive at least one entry after a simulated tick", async () => {
+    const store = createStoreWithAgent({ taskId: undefined, soul: "I observe the project." });
+    const mockSession = createMockAgentSession();
+    let capturedOnText: ((delta: string) => void) | undefined;
+
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+      capturedOnText = opts.onText;
+      return { session: mockSession as any };
+    });
+
+    // Simulate the session emitting a text delta during prompt
+    mockSession.prompt = vi.fn().mockImplementation(async () => {
+      capturedOnText?.("I am reviewing the project state.");
+    });
+
+    const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+    await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+    // appendRunLog should have been called on the AgentStore at least once
+    const appendRunLogCalls = (store.appendRunLog as ReturnType<typeof vi.fn>).mock.calls;
+    expect(appendRunLogCalls.length).toBeGreaterThanOrEqual(1);
+
+    // Verify the entry shape: agentId, runId, entry
+    const [callAgentId, callRunId, callEntry] = appendRunLogCalls[0] as [string, string, unknown];
+    expect(callAgentId).toBe("agent-001");
+    expect(callRunId).toBe("run-obs-001");
+    expect(callEntry).toMatchObject({ type: expect.stringMatching(/^(text|thinking|tool|tool_result|tool_error)$/) });
+  });
+
+  it("task-scoped heartbeat persists systemPrompt and executionPrompt with procedure before task content", async () => {
+    const store = createStoreWithAgent({ taskId: "FN-001" });
+    const mockSession = createMockAgentSession();
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+    const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+    const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+    const saveRunCalls = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls;
+    const promptRunCall = saveRunCalls.find(
+      (args: unknown[]) => typeof (args[0] as AgentHeartbeatRun).systemPrompt === "string" && ((args[0] as AgentHeartbeatRun).systemPrompt?.length ?? 0) > 0
+    );
+    expect(promptRunCall).toBeDefined();
+    const savedRun = promptRunCall![0] as AgentHeartbeatRun;
+
+    // The execution prompt should have procedure before task description
+    const procedureIdx = savedRun.executionPrompt!.indexOf("Heartbeat Procedure");
+    const taskDescIdx = savedRun.executionPrompt!.indexOf("Task description:");
+    expect(procedureIdx).toBeGreaterThanOrEqual(0);
+    expect(taskDescIdx).toBeGreaterThanOrEqual(0);
+    expect(procedureIdx).toBeLessThan(taskDescIdx);
+
+    // fn_identity instruction should appear in the execution prompt
+    expect(savedRun.executionPrompt).toContain("fn_identity");
+
+    expect(result.status).toBe("completed");
+  });
+
+  it("fn_identity tool returns correct agent identity information", async () => {
+    const store = createStoreWithAgent({ soul: "I am a senior executor.", memory: "Always log blockers." });
+    let capturedIdentityTool: any;
+    const mockSession = createMockAgentSession();
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+      capturedIdentityTool = opts.customTools?.find((t: any) => t.name === "fn_identity");
+      return { session: mockSession as any };
+    });
+
+    const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+    await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+    expect(capturedIdentityTool).toBeDefined();
+    expect(capturedIdentityTool.name).toBe("fn_identity");
+
+    // Call the tool and verify output structure
+    const toolResult = await capturedIdentityTool.execute("call-1", {});
+    expect(toolResult.content[0].text).toContain("agentId: agent-001");
+    expect(toolResult.content[0].text).toContain("name: Test Agent");
+    expect(toolResult.details.soulPresent).toBe(true);
+    expect(toolResult.details.memoryPresent).toBe(true);
+    expect(toolResult.details.soulPreview).toContain("I am a senior executor.");
   });
 });

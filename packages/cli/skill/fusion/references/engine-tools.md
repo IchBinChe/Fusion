@@ -55,4 +55,5 @@ These tools are **not** part of the pi extension's user-invokable `extension.ts`
 
 | Tool | Purpose | Parameters |
 |---|---|---|
+| `fn_identity` | Return loaded soul/instructions/memory summary for this heartbeat tick (must be called first) | none |
 | `fn_heartbeat_done` | Signal end of heartbeat run with optional summary | `summary?` (string) |

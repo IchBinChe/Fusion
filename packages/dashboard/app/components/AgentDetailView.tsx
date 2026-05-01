@@ -1288,6 +1288,11 @@ function RunsTab({
                 <StatusIcon size={14} className={statusInfo.color} style={run.status === "active" ? { color: statusInfo.color } : undefined} />
                 {run.status}
               </span>
+              {run.heartbeatProcedureSource === "custom" && (
+                <span className="badge" style={{ fontSize: "10px", padding: "1px 6px" }}>
+                  Heartbeat: custom
+                </span>
+              )}
             </div>
           </div>
           <div className="run-details">
@@ -1312,6 +1317,30 @@ function RunsTab({
               </div>
             ) : detailRun && (
               <div className="run-output-sections">
+                {/* System Prompt */}
+                <div className="run-output-section">
+                  <details>
+                    <summary className="run-output-label" style={{ cursor: "pointer", userSelect: "none" }}>System Prompt</summary>
+                    {detailRun.systemPrompt ? (
+                      <pre className="run-output-panel">{detailRun.systemPrompt}</pre>
+                    ) : (
+                      <div className="text-muted run-output-empty">System prompt not captured for this run</div>
+                    )}
+                  </details>
+                </div>
+
+                {/* Execution Prompt */}
+                <div className="run-output-section">
+                  <details>
+                    <summary className="run-output-label" style={{ cursor: "pointer", userSelect: "none" }}>Execution Prompt</summary>
+                    {detailRun.executionPrompt ? (
+                      <pre className="run-output-panel">{detailRun.executionPrompt}</pre>
+                    ) : (
+                      <div className="text-muted run-output-empty">Execution prompt not captured for this run</div>
+                    )}
+                  </details>
+                </div>
+
                 {/* Token Usage */}
                 {detailRun.usageJson && (
                   <div className="run-output-section">

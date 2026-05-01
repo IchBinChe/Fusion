@@ -54,6 +54,11 @@ describe("TaskStore", () => {
   });
 
   afterEach(async () => {
+    // Ensure teardown always runs on real timers. Some tests in this file use
+    // timeout/retry-based fs cleanup paths that can stall indefinitely if fake
+    // timers were left enabled by a preceding test.
+    vi.useRealTimers();
+
     // Some watcher/polling tests can leave an in-flight poll tick queued right
     // before teardown. Stop watching first and yield once so pending callbacks
     // settle before removing temp dirs.

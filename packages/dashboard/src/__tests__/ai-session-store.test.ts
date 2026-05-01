@@ -319,6 +319,81 @@ describe("AiSessionStore", () => {
     expect(projectA.every((session) => session.projectId === "project-a")).toBe(true);
   });
 
+  describe("archive / unarchive / listAll", () => {
+    it("archive only flips terminal sessions and emits updated", () => {
+      seedSession({ id: "S-complete", status: "complete" });
+      seedSession({ id: "S-error", status: "error" });
+      seedSession({ id: "S-generating", status: "generating" });
+      seedSession({ id: "S-awaiting", status: "awaiting_input" });
+
+      const updated: string[] = [];
+      store.on("ai_session:updated", (summary) => updated.push(summary.id));
+
+      expect(store.archive("S-complete")).toBe(true);
+      expect(store.archive("S-error")).toBe(true);
+      expect(store.archive("S-generating")).toBe(false);
+      expect(store.archive("S-awaiting")).toBe(false);
+      expect(store.archive("missing")).toBe(false);
+
+      expect(store.get("S-complete")?.archived).toBe(1);
+      expect(store.get("S-error")?.archived).toBe(1);
+      expect(store.get("S-generating")?.archived ?? 0).toBe(0);
+      expect(updated.sort()).toEqual(["S-complete", "S-error"]);
+    });
+
+    it("unarchive flips archived sessions back and emits updated only when changed", () => {
+      seedSession({ id: "S-complete", status: "complete" });
+      store.archive("S-complete");
+
+      const updated: string[] = [];
+      store.on("ai_session:updated", (summary) => updated.push(summary.id));
+
+      expect(store.unarchive("S-complete")).toBe(true);
+      expect(store.get("S-complete")?.archived ?? 0).toBe(0);
+      expect(updated).toEqual(["S-complete"]);
+
+      // No-op unarchive of an already-unarchived row still updates the row
+      // (touches updatedAt) — this test pins the current behavior so the
+      // route handler can rely on `get()` for the authoritative state.
+      updated.length = 0;
+      expect(store.unarchive("S-complete")).toBe(true);
+      expect(store.get("S-complete")?.archived ?? 0).toBe(0);
+
+      expect(store.unarchive("missing")).toBe(false);
+    });
+
+    it("listAll excludes archived rows by default and includes them when requested", () => {
+      seedSession({ id: "S-active", status: "generating" });
+      seedSession({ id: "S-done-visible", status: "complete" });
+      seedSession({ id: "S-done-hidden", status: "complete" });
+      store.archive("S-done-hidden");
+
+      const visible = store.listAll();
+      expect(visible.map((s) => s.id).sort()).toEqual(["S-active", "S-done-visible"]);
+
+      const all = store.listAll(undefined, { includeArchived: true });
+      expect(all.map((s) => s.id).sort()).toEqual(["S-active", "S-done-hidden", "S-done-visible"]);
+    });
+
+    it("listAll filters by projectId with and without archived", () => {
+      seedSession({ id: "S-a-active", status: "generating", projectId: "project-a" });
+      seedSession({ id: "S-a-done", status: "complete", projectId: "project-a" });
+      seedSession({ id: "S-a-archived", status: "complete", projectId: "project-a" });
+      seedSession({ id: "S-b-done", status: "complete", projectId: "project-b" });
+      store.archive("S-a-archived");
+
+      const projectA = store.listAll("project-a");
+      expect(projectA.map((s) => s.id).sort()).toEqual(["S-a-active", "S-a-done"]);
+
+      const projectAWithArchived = store.listAll("project-a", { includeArchived: true });
+      expect(projectAWithArchived.map((s) => s.id).sort()).toEqual([
+        "S-a-active",
+        "S-a-archived",
+        "S-a-done",
+      ]);
+    });
+  });
+
   it("ping updates updatedAt for existing sessions without emitting updates", () => {
     seedSession({ id: "S-ping", status: "awaiting_input" });
 

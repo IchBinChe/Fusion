@@ -736,7 +736,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         setMobileShowDetail(false);
       }
     },
-    [planningSessions, resetDetailState, selectedSessionId, showArchived],
+    [planningSessions, resetDetailState, selectedSessionId, setMobileShowDetail, showArchived],
   );
 
   // Reset hasAutoStarted when modal closes

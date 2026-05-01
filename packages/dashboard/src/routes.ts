@@ -3455,8 +3455,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     if (session.status !== "complete" && session.status !== "error") {
       throw badRequest("Only completed or errored sessions can be archived");
     }
-    const ok = aiSessionStore.archive(req.params.id);
-    res.json({ archived: ok });
+    aiSessionStore.archive(req.params.id);
+    const after = aiSessionStore.get(req.params.id);
+    res.json({ archived: Number(after?.archived ?? 0) === 1 });
   });
 
   /**
@@ -3470,8 +3471,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     if (!aiSessionStore.get(req.params.id)) {
       throw notFound("Session not found");
     }
-    const ok = aiSessionStore.unarchive(req.params.id);
-    res.json({ archived: !ok });
+    aiSessionStore.unarchive(req.params.id);
+    const after = aiSessionStore.get(req.params.id);
+    res.json({ archived: Number(after?.archived ?? 0) === 1 });
   });
 
   router.post("/ai-sessions/:id/lock", (req, res) => {
@@ -4007,7 +4009,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   // Scripts and messaging routes are registered by registerMessagingScriptRoutes().
 
-  router.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
       next(err);
       return;

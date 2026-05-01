@@ -452,7 +452,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@fusion/core", () => ({
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createCliCoreMock } = await import("../../test/mockCoreEngine");
+  return createCliCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
   TaskStore: mocks.taskStoreCtor,
   AutomationStore: mocks.automationStoreCtor,
   AgentStore: mocks.agentStoreCtor,
@@ -474,7 +476,8 @@ vi.mock("@fusion/core", () => ({
   syncInsightExtractionAutomation: mocks.syncInsightExtractionAutomationMock,
   INSIGHT_EXTRACTION_SCHEDULE_NAME: "Memory Insight Extraction",
   processAndAuditInsightExtraction: mocks.processAndAuditInsightExtractionMock,
-}));
+  });
+});
 
 vi.mock("@fusion/dashboard", () => ({
   createServer: mocks.createServerMock,
@@ -484,7 +487,9 @@ vi.mock("@fusion/dashboard", () => ({
   loadTlsCredentialsFromEnv: vi.fn().mockReturnValue(undefined),
 }));
 
-vi.mock("@fusion/engine", () => ({
+vi.mock("@fusion/engine", async (importOriginal) => {
+  const { createCliEngineMock } = await import("../../test/mockCoreEngine");
+  return createCliEngineMock(() => importOriginal<typeof import("@fusion/engine")>(), {
   ProjectEngine: mocks.projectEngineCtor,
   ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, options: any) => {
     const engines = new Map<string, any>();
@@ -546,7 +551,8 @@ vi.mock("@fusion/engine", () => ({
   createAiPromptExecutor: mocks.createAiPromptExecutorMock,
   HeartbeatMonitor: mocks.heartbeatMonitorCtor,
   HeartbeatTriggerScheduler: mocks.heartbeatTriggerSchedulerCtor,
-}));
+  });
+});
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   AuthStorage: {

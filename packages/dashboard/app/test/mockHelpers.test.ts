@@ -27,6 +27,16 @@ describe("dashboard test mock helpers", () => {
     expect(rendered.props.className).toBe("x");
   });
 
+  it("preserves real non-function exports and respects overrides", async () => {
+    const module = await createDashboardApiMock(
+      async () => ({ API_VERSION: "v1", fetchTasks: async () => ["real"] }),
+      { fetchTasks: vi.fn().mockResolvedValue(["mocked"]) },
+    );
+
+    expect(module.API_VERSION).toBe("v1");
+    await expect((module.fetchTasks as () => Promise<string[]>)()).resolves.toEqual(["mocked"]);
+  });
+
   it("keeps canonical dashboard api mocks resettable", () => {
     dashboardApiMocks.fetchSettings.mockResolvedValueOnce({ hello: "world" });
     resetDashboardApiMockState();

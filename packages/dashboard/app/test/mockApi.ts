@@ -3,6 +3,12 @@
  *
  * Add new `app/api.ts` or `app/api/legacy.ts` exports here first before
  * introducing ad-hoc per-test `vi.mock("../../api", …)` export lists.
+ *
+ * Behavior contract:
+ * - preserve real exports by default
+ * - apply canonical/common test mocks
+ * - allow per-suite overrides
+ * - auto-synthesize stable fallback fns for missing callable exports
  */
 import { vi, type Mock } from "vitest";
 

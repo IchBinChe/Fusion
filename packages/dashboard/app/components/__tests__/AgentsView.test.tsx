@@ -6,26 +6,29 @@ import type { Agent, AgentState, AgentCapability, OrgTreeNode } from "../../api"
 import { scopedKey } from "../../utils/projectStorage";
 
 // Mock the API module
-vi.mock("../../api", () => ({
-  fetchAgents: vi.fn(),
-  fetchAgentStats: vi.fn(),
-  createAgent: vi.fn(),
-  updateAgent: vi.fn(),
-  updateAgentState: vi.fn(),
-  deleteAgent: vi.fn(),
-  startAgentRun: vi.fn(),
-  fetchOrgTree: vi.fn(),
-  fetchSettings: vi.fn().mockResolvedValue({ heartbeatMultiplier: 1 }),
-  updateSettings: vi.fn().mockResolvedValue({}),
-  fetchModels: vi.fn().mockResolvedValue({ models: [] }),
-  fetchPluginRuntimes: vi.fn().mockResolvedValue([]),
-  fetchDiscoveredSkills: vi.fn().mockResolvedValue([]),
-  startAgentOnboardingStreaming: vi.fn().mockResolvedValue({ sessionId: "onb-1" }),
-  respondToAgentOnboarding: vi.fn().mockResolvedValue({ type: "question", data: { id: "q1", type: "text", question: "?" } }),
-  retryAgentOnboardingSession: vi.fn().mockResolvedValue({ success: true, sessionId: "onb-1" }),
-  stopAgentOnboardingGeneration: vi.fn().mockResolvedValue({ success: true }),
-  cancelAgentOnboarding: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("../../api", async (importOriginal) => {
+  const { createDashboardApiMock } = await import("../../test/mockApi");
+  return createDashboardApiMock(() => importOriginal<typeof import("../../api")>(), {
+    fetchAgents: vi.fn(),
+    fetchAgentStats: vi.fn(),
+    createAgent: vi.fn(),
+    updateAgent: vi.fn(),
+    updateAgentState: vi.fn(),
+    deleteAgent: vi.fn(),
+    startAgentRun: vi.fn(),
+    fetchOrgTree: vi.fn(),
+    fetchSettings: vi.fn().mockResolvedValue({ heartbeatMultiplier: 1 }),
+    updateSettings: vi.fn().mockResolvedValue({}),
+    fetchModels: vi.fn().mockResolvedValue({ models: [] }),
+    fetchPluginRuntimes: vi.fn().mockResolvedValue([]),
+    fetchDiscoveredSkills: vi.fn().mockResolvedValue([]),
+    startAgentOnboardingStreaming: vi.fn().mockResolvedValue({ sessionId: "onb-1" }),
+    respondToAgentOnboarding: vi.fn().mockResolvedValue({ type: "question", data: { id: "q1", type: "text", question: "?" } }),
+    retryAgentOnboardingSession: vi.fn().mockResolvedValue({ success: true, sessionId: "onb-1" }),
+    stopAgentOnboardingGeneration: vi.fn().mockResolvedValue({ success: true }),
+    cancelAgentOnboarding: vi.fn().mockResolvedValue(undefined),
+  });
+});
 
 vi.mock("../AgentDetailView", () => ({
   AgentDetailView: ({ agentId }: { agentId: string }) => <div data-testid="agent-detail-view">Agent detail: {agentId}</div>,

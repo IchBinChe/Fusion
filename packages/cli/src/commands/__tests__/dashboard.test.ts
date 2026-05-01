@@ -105,7 +105,9 @@ function makeMockStore() {
 
 // ── Mock @fusion/core ──────────────────────────────────────────────────
 
-vi.mock("@fusion/core", () => ({
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createCliCoreMock } = await import("../../test/mockCoreEngine");
+  return createCliCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
   TaskStore: vi.fn().mockImplementation(() => makeMockStore()),
   CentralCore: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
@@ -205,7 +207,8 @@ vi.mock("@fusion/core", () => ({
     }
     return undefined;
   }),
-}));
+  });
+});
 
 // ── Hoisted shared mocks ───────────────────────────────────────────
 
@@ -305,6 +308,7 @@ const { WorktreePool } = await import("@fusion/engine");
 
 vi.mock("@fusion/engine", async (importOriginal) => {
   const original = await importOriginal<typeof import("@fusion/engine")>();
+  const { createCliEngineMock } = await import("../../test/mockCoreEngine");
   const TriageProcessor = vi.fn().mockImplementation(() => ({
     start: vi.fn(),
     stop: vi.fn(),
@@ -610,8 +614,7 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     }
   }
 
-  return {
-    ...original,
+  return createCliEngineMock(async () => original, {}, {
     // Keep real WorktreePool & AgentSemaphore
     WorktreePool: original.WorktreePool,
     AgentSemaphore: original.AgentSemaphore,
@@ -681,7 +684,7 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     })),
     scanIdleWorktrees: vi.fn().mockResolvedValue([]),
     cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
-  };
+  });
 });
 
 // ── Mock @mariozechner/pi-coding-agent ──────────────────────────────

@@ -1,8 +1,8 @@
 /**
- * Canonical @fusion/core and @fusion/engine mock helpers for dashboard server tests.
+ * Canonical @fusion/core and @fusion/engine mock helpers for CLI command tests.
  *
- * If a route test starts failing with "No \"X\" export is defined", update this
- * helper first instead of adding another full inline export map in the test file.
+ * When a new commonly-mocked export is added, update defaults here instead of
+ * copying large inline export lists into command suites.
  */
 import { vi, type Mock } from "vitest";
 
@@ -12,12 +12,14 @@ type AnyMock = Mock;
 const fallbackFns = new Map<string, AnyMock>();
 
 function getFallback(name: string): AnyMock {
-  if (!fallbackFns.has(name)) fallbackFns.set(name, vi.fn());
+  if (!fallbackFns.has(name)) {
+    fallbackFns.set(name, vi.fn());
+  }
   return fallbackFns.get(name)!;
 }
 
-function withFallbackFunctions(actual: AnyModule, moduleValue: AnyModule): AnyModule {
-  return new Proxy(moduleValue, {
+function withFallbackFunctions(actual: AnyModule, mocked: AnyModule): AnyModule {
+  return new Proxy(mocked, {
     get(target, prop, receiver) {
       if (typeof prop !== "string") return Reflect.get(target, prop, receiver);
       if (Reflect.has(target, prop)) return Reflect.get(target, prop, receiver);
@@ -34,23 +36,24 @@ function withFallbackFunctions(actual: AnyModule, moduleValue: AnyModule): AnyMo
   });
 }
 
-export async function createCoreMock(
+export async function createCliCoreMock(
   importActual: () => Promise<AnyModule>,
+  defaults: AnyModule = {},
   overrides: AnyModule = {},
 ): Promise<AnyModule> {
   const actual = await importActual();
-  return withFallbackFunctions(actual, { ...actual, ...overrides });
+  return withFallbackFunctions(actual, { ...actual, ...defaults, ...overrides });
 }
 
-export function createEngineMock(overrides: AnyModule = {}): AnyModule {
-  const actual: AnyModule = {};
-  return withFallbackFunctions(actual, {
-    createFnAgent: vi.fn(),
-    promptWithFallback: vi.fn(),
-    ...overrides,
-  });
+export async function createCliEngineMock(
+  importActual: () => Promise<AnyModule>,
+  defaults: AnyModule = {},
+  overrides: AnyModule = {},
+): Promise<AnyModule> {
+  const actual = await importActual();
+  return withFallbackFunctions(actual, { ...actual, ...defaults, ...overrides });
 }
 
-export function resetDashboardServerMockState(): void {
+export function resetCliCoreEngineMockState(): void {
   for (const fn of fallbackFns.values()) fn.mockReset();
 }

@@ -609,7 +609,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setSelectedSessionId(resumeSessionId);
     setMobileShowDetail(true);
     void loadSession(resumeSessionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, resumeSessionId]);
 
   // Re-sync the selected session whenever the modal is reopened. Without this,

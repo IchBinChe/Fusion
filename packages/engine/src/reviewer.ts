@@ -343,6 +343,7 @@ export async function reviewStep(
         onAgentText: options.onText
           ? (_id, delta) => options.onText!(delta)
           : undefined,
+        persistAgentToolOutput: liveSettings?.persistAgentToolOutput,
       })
     : null;
 

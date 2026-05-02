@@ -416,6 +416,50 @@ describe("SettingsModal", () => {
     });
   });
 
+  describe("Global General", () => {
+    it("defaults persistAgentToolOutput checkbox to checked", async () => {
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).toBeChecked();
+    });
+
+    it("reflects persisted unchecked value from global settings", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        persistAgentToolOutput: false,
+      });
+      mockFetchSettingsByScope.mockResolvedValue({
+        global: { ...defaultSettings, persistAgentToolOutput: false },
+        project: {},
+      });
+
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).not.toBeChecked();
+    });
+
+    it("saves persistAgentToolOutput only via global settings payload", async () => {
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("checkbox", { name: "Save tool output in agent logs" }));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalled();
+      });
+
+      const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(globalPayload.persistAgentToolOutput).toBe(false);
+      if (mockUpdateSettings.mock.calls.length > 0) {
+        const projectPayload = mockUpdateSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(projectPayload.persistAgentToolOutput).toBeUndefined();
+      }
+    });
+  });
+
   describe("Appearance", () => {
     it("renders dashboard font size options with saved value", async () => {
       const onDashboardFontScaleChange = vi.fn();

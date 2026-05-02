@@ -155,6 +155,24 @@ describe("AgentLogger", () => {
     expect(store.appendAgentLog).toHaveBeenCalledWith("FN-004", "Read", "tool", "src/index.ts", undefined);
   });
 
+  it("omits tool detail when persistAgentToolOutput is disabled", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({
+      store,
+      taskId: "FN-004B",
+      persistAgentToolOutput: false,
+    });
+
+    logger.onToolStart("Read", { path: "src/index.ts" });
+    logger.onToolEnd("Read", false, "ok");
+    logger.onToolEnd("Read", true, "err");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(1, "FN-004B", "Read", "tool", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-004B", "Read", "tool_result", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(3, "FN-004B", "Read", "tool_error", undefined, undefined);
+  });
+
   it("logs tool with undefined detail for unknown args", async () => {
     const store = createMockStore();
     const logger = new AgentLogger({ store, taskId: "FN-005" });

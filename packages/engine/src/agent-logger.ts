@@ -44,6 +44,8 @@ export function summarizeToolArgs(name: string, args?: Record<string, unknown>):
  *    When both are provided, both sinks receive every entry.
  */
 export interface AgentLoggerOptions {
+  /** When false, omit `detail` payloads for tool entries while preserving the rows. */
+  persistAgentToolOutput?: boolean;
   /** The task store used to persist agent log entries (task-store mode). */
   store?: TaskStore;
   /** The task ID this logger is associated with (task-store mode). */
@@ -107,6 +109,7 @@ export class AgentLogger {
   private readonly externalTextCb?: (taskId: string, delta: string) => void;
   private readonly externalToolCb?: (taskId: string, toolName: string) => void;
   private readonly log = createLogger("agent-logger");
+  private readonly persistAgentToolOutput: boolean;
 
   constructor(options: AgentLoggerOptions) {
     this.store = options.store;
@@ -117,6 +120,7 @@ export class AgentLogger {
     this.externalToolCb = options.onAgentTool;
     this.flushSizeBytes = options.flushSizeBytes ?? FLUSH_SIZE_BYTES;
     this.flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
+    this.persistAgentToolOutput = options.persistAgentToolOutput !== false;
 
     // Bind callbacks so they can be passed directly as function references
     this.onText = this.onText.bind(this);
@@ -208,12 +212,14 @@ export class AgentLogger {
    * @param storeWarnMsg - Warning message prefix used when the task-store write fails.
    */
   private writeEntry(text: string, type: AgentLogEntry["type"], detail: string | undefined, _storeWarnMsg: string, immediate = false): void {
+    const isToolEntry = type === "tool" || type === "tool_result" || type === "tool_error";
+    const includeDetail = !isToolEntry || this.persistAgentToolOutput;
     const entry: AgentLogEntry = {
       timestamp: new Date().toISOString(),
       taskId: this.taskId,
       text,
       type,
-      ...(detail !== undefined && { detail }),
+      ...(detail !== undefined && includeDetail && { detail }),
       ...(this.agent !== undefined && { agent: this.agent }),
     };
 

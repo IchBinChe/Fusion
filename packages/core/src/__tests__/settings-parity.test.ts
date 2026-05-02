@@ -55,6 +55,8 @@ describe("settings key parity", () => {
     expect(isGlobalSettingsKey("researchGlobalDefaults")).toBe(true);
     expect(isProjectSettingsKey("themeMode")).toBe(false);
     expect(isGlobalSettingsKey("remoteAccess")).toBe(true);
+    expect(isGlobalSettingsKey("persistAgentToolOutput")).toBe(true);
+    expect(isProjectSettingsKey("persistAgentToolOutput")).toBe(false);
     expect(isGlobalSettingsKey("researchSettings")).toBe(false);
   });
 

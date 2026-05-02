@@ -2679,6 +2679,7 @@ export class TaskExecutor {
         store: this.store,
         taskId: task.id,
         agent: "executor",
+        persistAgentToolOutput: settings.persistAgentToolOutput,
         onAgentText: (taskId, delta) => {
           lastAssistantText += delta;
           stuckDetector?.recordActivity(taskId);
@@ -4762,6 +4763,7 @@ and show an appropriate message to the user.\`
       store: this.store,
       taskId: task.id,
       agent: "reviewer",
+      persistAgentToolOutput: settings.persistAgentToolOutput,
       onAgentText: (taskId, delta) => {
         this.options.onAgentText?.(taskId, delta);
       },

@@ -67,6 +67,8 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   // Dashboard TUI memory guard
   vitestAutoKillEnabled: true,
   vitestKillThresholdPct: 90,
+  // Agent log persistence controls
+  persistAgentToolOutput: true,
   researchGlobalDefaults: {
     searchProvider: undefined,
     synthesisProvider: undefined,

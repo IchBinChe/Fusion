@@ -1417,6 +1417,7 @@ export class HeartbeatMonitor {
           agentLogger = new AgentLogger({
             appendLog: (entry) => this.store.appendRunLog(agentId, run.id, entry),
             agent: agent.role as AgentRole,
+            persistAgentToolOutput: memorySettings?.persistAgentToolOutput,
           });
         } else if (taskId) {
           agentLogger = new AgentLogger({
@@ -1424,6 +1425,7 @@ export class HeartbeatMonitor {
             taskId,
             agent: agent.role as AgentRole,
             appendLog: (entry) => this.store.appendRunLog(agentId, run.id, entry),
+            persistAgentToolOutput: memorySettings?.persistAgentToolOutput,
           });
         }
 

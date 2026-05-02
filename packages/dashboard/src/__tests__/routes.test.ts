@@ -15066,6 +15066,23 @@ describe("PUT /settings/global", () => {
     expect(store.updateGlobalSettings).toHaveBeenCalledWith({ themeMode: "light" });
   });
 
+  it("accepts persistAgentToolOutput in global updates", async () => {
+    const updatedMerged = { persistAgentToolOutput: false };
+    (store.updateGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedMerged);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings/global",
+      JSON.stringify({ persistAgentToolOutput: false }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ persistAgentToolOutput: false });
+    expect(res.body.persistAgentToolOutput).toBe(false);
+  });
+
   it("returns 500 on update error", async () => {
     (store.updateGlobalSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Write failed"));
 
@@ -15200,7 +15217,7 @@ describe("GET /settings/scopes", () => {
 
   it("returns settings separated by scope", async () => {
     (store.getSettingsByScope as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: { themeMode: "dark", defaultProvider: "anthropic" },
+      global: { themeMode: "dark", defaultProvider: "anthropic", persistAgentToolOutput: true },
       project: { maxConcurrent: 4, autoMerge: false },
     });
 
@@ -15209,8 +15226,10 @@ describe("GET /settings/scopes", () => {
     expect(res.status).toBe(200);
     expect(res.body.global.themeMode).toBe("dark");
     expect(res.body.global.defaultProvider).toBe("anthropic");
+    expect(res.body.global.persistAgentToolOutput).toBe(true);
     expect(res.body.project.maxConcurrent).toBe(4);
     expect(res.body.project.autoMerge).toBe(false);
+    expect(res.body.project.persistAgentToolOutput).toBeUndefined();
   });
 
   it("returns exact response envelope shape with only global and project keys", async () => {

@@ -1441,6 +1441,11 @@ export interface GlobalSettings {
    *  triggers a vitest auto-kill. Clamped to [50, 99] in the UI.
    *  Default: 90. */
   vitestKillThresholdPct?: number;
+  /** When true (default), persist detailed tool argument/result payloads in
+   *  task agent logs (`agent.log`) for `tool`, `tool_result`, and
+   *  `tool_error` entries. When false, tool timeline rows are still stored,
+   *  but their verbose `detail` payload is omitted to reduce log size/noise. */
+  persistAgentToolOutput?: boolean;
   /** Research defaults shared across all projects.
    * Project settings may override these via `researchSettings`. */
   researchGlobalDefaults?: ResearchGlobalDefaults;

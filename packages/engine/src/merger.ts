@@ -896,6 +896,7 @@ async function attemptInMergeVerificationFix(
       store,
       taskId,
       agent: "merger",
+      persistAgentToolOutput: settings.persistAgentToolOutput,
       onAgentText: options.onAgentText,
       onAgentTool: options.onAgentTool,
     });
@@ -2275,6 +2276,7 @@ You are assisting with a paused \`git pull --rebase\`.
     store,
     taskId,
     agent: "merger",
+    persistAgentToolOutput: settings.persistAgentToolOutput,
     onAgentText: options?.onAgentText
       ? (_id, delta) => options.onAgentText?.(delta)
       : undefined,
@@ -4707,6 +4709,7 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     store,
     taskId,
     agent: "merger",
+    persistAgentToolOutput: settings.persistAgentToolOutput,
     onAgentText: options.onAgentText
       ? (_id, delta) => options.onAgentText!(delta)
       : undefined,
@@ -5298,6 +5301,7 @@ If issues are found that need attention, describe them clearly and include concr
     store,
     taskId,
     agent: "merger",
+    persistAgentToolOutput: settings.persistAgentToolOutput,
   });
 
   try {

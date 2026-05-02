@@ -911,6 +911,7 @@ export class StepSessionExecutor {
           store: this.store,
           taskId: taskDetail.id,
           agent: "executor",
+          persistAgentToolOutput: settings.persistAgentToolOutput,
         });
         let session: AgentSession | null = null;
 

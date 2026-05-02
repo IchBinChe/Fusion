@@ -241,6 +241,8 @@ describe("AgentLogViewer", () => {
   it("does not render detail toggle when detail is absent", () => {
     const entries = [
       makeEntry({ text: "Bash", type: "tool" }),
+      makeEntry({ text: "Bash", type: "tool_result" }),
+      makeEntry({ text: "Bash", type: "tool_error" }),
     ];
     render(<AgentLogViewer entries={entries} loading={false} />);
     expect(screen.queryByTestId("tool-detail-toggle")).toBeNull();

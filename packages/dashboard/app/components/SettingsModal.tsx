@@ -1847,6 +1847,22 @@ export function SettingsModal({
             </div>
             <CliBinaryPanel />
             <div className="form-group">
+              <label htmlFor="persistAgentToolOutput" className="checkbox-label">
+                <input
+                  id="persistAgentToolOutput"
+                  type="checkbox"
+                  checked={form.persistAgentToolOutput !== false}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, persistAgentToolOutput: e.target.checked }))
+                  }
+                />
+                Save tool output in agent logs
+              </label>
+              <div className="settings-field-help">
+                When disabled, tool rows are still logged but detailed tool payloads are omitted.
+              </div>
+            </div>
+            <div className="form-group">
               <label htmlFor="fnBinaryCheckEnabled" className="checkbox-label">
                 <input
                   id="fnBinaryCheckEnabled"

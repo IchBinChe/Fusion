@@ -694,6 +694,12 @@
     max-height: 100vh;
     max-height: 100dvh;
     max-height: var(--vv-height, 100dvh);
+    /* Follow iOS's visual viewport offset. Without this, on the second
+       focus after a keyboard dismiss, vv.offsetTop becomes non-zero and
+       the position:fixed panel (anchored to layout top:0) renders above
+       the visible area — only the bottom of the panel (the input bar)
+       pokes into view near the top of the screen. */
+    transform: translateY(var(--vv-offset-top, 0px));
     border-radius: 0;
     border: none;
     z-index: 1100;

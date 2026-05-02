@@ -11,6 +11,7 @@
 import { DatabaseSync } from "./sqlite-adapter.js";
 import { isAbsolute, join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
 import type { SteeringComment, TaskComment } from "./types.js";
 
@@ -695,6 +696,8 @@ CREATE INDEX IF NOT EXISTS idxTodoItemsSortOrder ON todo_items(listId, sortOrder
 export class Database {
   private db: DatabaseSync;
   private readonly dbPath: string;
+  private readonly inMemory: boolean;
+  corruptionDetected = false;
   /** Tracks transaction nesting depth for savepoint-based nested transactions. */
   private transactionDepth = 0;
   private readonly _fts5Available: boolean;
@@ -707,6 +710,7 @@ export class Database {
     // never sets this — it's plumbed through TaskStore for tests that
     // don't need cross-instance persistence.
     const inMemory = options?.inMemory === true;
+    this.inMemory = inMemory;
     this.dbPath = inMemory ? ":memory:" : join(fusionDir, "fusion.db");
 
     if (!inMemory && !isAbsolute(fusionDir)) {
@@ -741,14 +745,23 @@ export class Database {
     }
 
     // WAL is meaningless for `:memory:` connections — SQLite ignores it
-    // and there's no other writer to coordinate with — so we skip it. The
-    // remaining pragmas apply uniformly.
+    // and there's no other writer to coordinate with — so we skip WAL-only
+    // tuning there.
     if (!inMemory) {
       // Enable WAL mode for concurrent reader/writer access
       this.db.exec("PRAGMA journal_mode = WAL");
+      // Wait up to 5s for locks to clear before returning SQLITE_BUSY
+      this.db.exec("PRAGMA busy_timeout = 5000");
+      // In WAL mode NORMAL is nearly as durable as FULL with much lower fsync cost.
+      this.db.exec("PRAGMA synchronous = NORMAL");
+      // Checkpoint aggressively to avoid large WAL growth under bursty writes.
+      this.db.exec("PRAGMA wal_autocheckpoint = 100");
+      // Bound WAL growth between checkpoints/maintenance cycles.
+      this.db.exec("PRAGMA journal_size_limit = 4194304");
+    } else {
+      // Wait up to 5s for locks to clear before returning SQLITE_BUSY
+      this.db.exec("PRAGMA busy_timeout = 5000");
     }
-    // Wait up to 5s for locks to clear before returning SQLITE_BUSY
-    this.db.exec("PRAGMA busy_timeout = 5000");
     // Enable foreign key enforcement
     this.db.exec("PRAGMA foreign_keys = ON");
 
@@ -845,6 +858,47 @@ export class Database {
     }
   }
 
+  integrityCheck(): { ok: true } | { ok: false; errors: string[] } {
+    if (this.inMemory) {
+      return { ok: true };
+    }
+
+    const rows = this.db
+      .prepare("PRAGMA integrity_check(100)")
+      .all() as Array<Record<string, unknown>>;
+    const errors = rows
+      .map((row) => row.integrity_check)
+      .filter((value): value is string => typeof value === "string" && value !== "ok");
+
+    if (errors.length > 0) {
+      return { ok: false, errors };
+    }
+
+    return { ok: true };
+  }
+
+  recoverDatabase(outputPath: string): boolean {
+    if (this.inMemory) {
+      return false;
+    }
+
+    const recoveredSql = spawnSync("sqlite3", ["-cmd", ".recover main", this.dbPath], {
+      encoding: "utf-8",
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (recoveredSql.status !== 0 || !recoveredSql.stdout) {
+      return false;
+    }
+
+    const rebuilt = spawnSync("sqlite3", [outputPath], {
+      input: recoveredSql.stdout,
+      encoding: "utf-8",
+      maxBuffer: 50 * 1024 * 1024,
+    });
+
+    return rebuilt.status === 0;
+  }
+
   /**
    * Initialize the database: create tables if they don't exist
    * and seed meta values.
@@ -871,6 +925,12 @@ export class Database {
     this.db.exec(
       `INSERT OR IGNORE INTO config (id, nextId, nextWorkflowStepId, settings, workflowSteps, updatedAt) VALUES (1, 1, 1, '${JSON.stringify(DEFAULT_PROJECT_SETTINGS)}', '[]', '${configNow}')`,
     );
+
+    const integrity = this.integrityCheck();
+    if (!integrity.ok) {
+      this.corruptionDetected = true;
+      console.warn("[fusion:db] Database integrity check FAILED — corruption detected");
+    }
   }
 
   /**

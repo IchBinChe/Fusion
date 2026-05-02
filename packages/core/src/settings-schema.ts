@@ -204,7 +204,8 @@ export const DEFAULT_PROJECT_SETTINGS = {
   maxPostReviewFixes: 1,
   maxSpawnedAgentsPerParent: 5,
   maxSpawnedAgentsGlobal: 20,
-  maintenanceIntervalMs: 900_000,
+  // Run maintenance (including WAL checkpointing) every 5 minutes by default.
+  maintenanceIntervalMs: 300_000,
   autoArchiveDoneTasksEnabled: true,
   autoArchiveDoneAfterMs: 48 * 60 * 60 * 1000,
   archiveAgentLogMode: "compact",

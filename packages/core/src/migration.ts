@@ -10,7 +10,7 @@
  * @module migration
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve, basename, dirname } from "node:path";
 import type { CentralCore } from "./central-core.js";
@@ -191,16 +191,44 @@ export class FirstRunDetector {
     const visited = new Set<string>();
 
     let current = resolve(startDir);
-    const home = getHomeDir();
+    const home = resolve(getHomeDir());
     const root = dirname(current) === current ? current : "/"; // Handle Windows vs Unix root
     // Also stop at the OS temp directory — it is a shared system boundary and
     // should never itself host a project; stopping here prevents the walk from
     // picking up stale .fusion/ directories left by other processes in /tmp.
     const systemTmp = resolve(tmpdir());
 
-    while (current !== home && current !== root && current !== systemTmp) {
+    const normalizePath = (path: string): string => {
+      try {
+        return realpathSync(path);
+      } catch {
+        return resolve(path);
+      }
+    };
+
+    const normalizedHome = normalizePath(home);
+    const normalizedSystemTmp = normalizePath(systemTmp);
+
+    const normalizedStartDir = normalizePath(current);
+
+    while (true) {
       if (visited.has(current)) break;
       visited.add(current);
+
+      const normalizedCurrent = normalizePath(current);
+      const isRootBoundary = current === root;
+      const isHomeBoundary = normalizedCurrent === normalizedHome;
+      const isTmpBoundary = normalizedCurrent === normalizedSystemTmp;
+      const isStopBoundary = isRootBoundary || isHomeBoundary || isTmpBoundary;
+
+      // Never inspect root/tmp boundaries. Home is checked only when it is the
+      // explicit starting directory (covers cwd===home tests).
+      if (
+        (isRootBoundary || isTmpBoundary) ||
+        (isHomeBoundary && normalizedCurrent !== normalizedStartDir)
+      ) {
+        break;
+      }
 
       if (this.hasFusionProject(current)) {
         const name = await this.generateProjectName(current);
@@ -210,6 +238,10 @@ export class FirstRunDetector {
           hasDb: true,
         });
         // Only detect one project - stop at first match
+        break;
+      }
+
+      if (isStopBoundary) {
         break;
       }
 

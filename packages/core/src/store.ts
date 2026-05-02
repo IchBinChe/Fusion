@@ -4525,6 +4525,51 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.emit("agent:log", entry);
   }
 
+  async appendAgentLogBatch(
+    entries: Array<{
+      taskId: string;
+      text: string;
+      type: AgentLogEntry["type"];
+      detail?: string;
+      agent?: AgentLogEntry["agent"];
+    }>,
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    this.db.transaction(() => {
+      for (const entry of entries) {
+        stmt.run(
+          entry.taskId,
+          timestamp,
+          entry.text,
+          entry.type,
+          entry.detail ?? null,
+          entry.agent ?? null,
+        );
+      }
+    });
+
+    this.db.bumpLastModified();
+    for (const entry of entries) {
+      this.emit("agent:log", {
+        timestamp,
+        taskId: entry.taskId,
+        text: entry.text,
+        type: entry.type,
+        ...(entry.detail !== undefined && { detail: entry.detail }),
+        ...(entry.agent !== undefined && { agent: entry.agent }),
+      });
+    }
+  }
+
   private mapAgentLogRow(row: Record<string, unknown>): AgentLogEntry {
     return {
       timestamp: row.timestamp as string,

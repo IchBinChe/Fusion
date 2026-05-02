@@ -51,6 +51,29 @@ describe("Database", () => {
       expect(row.foreign_keys).toBe(1);
     });
 
+    it("sets WAL tuning pragmas for disk-backed databases", () => {
+      const synchronous = db.prepare("PRAGMA synchronous").get() as { synchronous: number };
+      const autoCheckpoint = db.prepare("PRAGMA wal_autocheckpoint").get() as { wal_autocheckpoint: number };
+      const journalSizeLimit = db.prepare("PRAGMA journal_size_limit").get() as { journal_size_limit: number };
+
+      expect(synchronous.synchronous).toBe(1); // NORMAL
+      expect(autoCheckpoint.wal_autocheckpoint).toBe(100);
+      expect(journalSizeLimit.journal_size_limit).toBe(4_194_304);
+    });
+
+    it("does not force WAL tuning pragmas for in-memory databases", () => {
+      const memDb = new Database(fusionDir, { inMemory: true });
+      memDb.init();
+
+      const autoCheckpoint = memDb.prepare("PRAGMA wal_autocheckpoint").get() as { wal_autocheckpoint: number };
+      const journalSizeLimit = memDb.prepare("PRAGMA journal_size_limit").get() as { journal_size_limit: number };
+
+      expect(autoCheckpoint.wal_autocheckpoint).toBe(1000);
+      expect(journalSizeLimit.journal_size_limit).toBe(-1);
+
+      memDb.close();
+    });
+
     it("creates all expected tables", () => {
       const tables = db.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -406,6 +429,28 @@ describe("Database", () => {
       // Heartbeats should be cascade-deleted
       const heartbeats = db.prepare("SELECT * FROM agentHeartbeats WHERE agentId = 'agent-1'").all();
       expect(heartbeats).toHaveLength(0);
+    });
+  });
+
+  describe("integrity check", () => {
+    it("returns ok for healthy databases and leaves corruption flag false", () => {
+      expect(db.corruptionDetected).toBe(false);
+      expect(db.integrityCheck()).toEqual({ ok: true });
+    });
+
+    it("keeps corruptionDetected false after init for healthy database", () => {
+      const diskDb = new Database(fusionDir);
+      diskDb.init();
+      expect(diskDb.corruptionDetected).toBe(false);
+      diskDb.close();
+    });
+
+    it("skips integrity check side effects for in-memory databases", () => {
+      const memDb = new Database(fusionDir, { inMemory: true });
+      memDb.init();
+      expect(memDb.integrityCheck()).toEqual({ ok: true });
+      expect(memDb.corruptionDetected).toBe(false);
+      memDb.close();
     });
   });
 

@@ -5,6 +5,7 @@ import { createLogger } from "./logger.js";
 const FLUSH_SIZE_BYTES = 1024;
 /** Default timer interval (ms) for periodic flush of small writes. */
 const FLUSH_INTERVAL_MS = 500;
+const ENTRY_BATCH_SIZE = 50;
 
 /**
  * Produce a human-readable summary from tool arguments.
@@ -95,6 +96,8 @@ export class AgentLogger {
   private thinkingBuffer = "";
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private thinkingFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private entryFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingEntries: AgentLogEntry[] = [];
   private readonly flushSizeBytes: number;
   private readonly flushIntervalMs: number;
   private readonly store?: TaskStore;
@@ -190,8 +193,10 @@ export class AgentLogger {
   async flush(): Promise<void> {
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
     if (this.thinkingFlushTimer) { clearTimeout(this.thinkingFlushTimer); this.thinkingFlushTimer = null; }
+    if (this.entryFlushTimer) { clearTimeout(this.entryFlushTimer); this.entryFlushTimer = null; }
     await this.flushTextBuffer();
     await this.flushThinkingBuffer();
+    await this.flushPendingEntries();
   }
 
   // ── Internal helpers ───────────────────────────────────────────────
@@ -202,7 +207,7 @@ export class AgentLogger {
    * When only `appendLogCb` is set (no store/taskId), only the callback is used.
    * @param storeWarnMsg - Warning message prefix used when the task-store write fails.
    */
-  private writeEntry(text: string, type: AgentLogEntry["type"], detail: string | undefined, storeWarnMsg: string): void {
+  private writeEntry(text: string, type: AgentLogEntry["type"], detail: string | undefined, _storeWarnMsg: string, immediate = false): void {
     const entry: AgentLogEntry = {
       timestamp: new Date().toISOString(),
       taskId: this.taskId,
@@ -212,83 +217,42 @@ export class AgentLogger {
       ...(this.agent !== undefined && { agent: this.agent }),
     };
 
-    if (this.store && this.taskId) {
-      this.store.appendAgentLog(this.taskId, text, type, detail, this.agent).catch((err) => {
-        this.log.warn(`${storeWarnMsg}: ${err instanceof Error ? err.message : String(err)}`);
-      });
+    this.pendingEntries.push(entry);
+    if (immediate || (type !== "text" && type !== "thinking")) {
+      if (this.entryFlushTimer) {
+        clearTimeout(this.entryFlushTimer);
+        this.entryFlushTimer = null;
+      }
+      void this.flushPendingEntries();
+      return;
     }
 
-    if (this.appendLogCb) {
-      this.appendLogCb(entry).catch((err) => {
-        this.log.warn(`appendLog callback failed for entry (${type}): ${err instanceof Error ? err.message : String(err)}`);
-      });
+    if (this.pendingEntries.length >= ENTRY_BATCH_SIZE) {
+      if (this.entryFlushTimer) {
+        clearTimeout(this.entryFlushTimer);
+        this.entryFlushTimer = null;
+      }
+      void this.flushPendingEntries();
+      return;
     }
+
+    this.scheduleEntryFlush();
   }
 
   private flushTextBuffer(): Promise<void> {
     if (this.textBuffer.length === 0) return Promise.resolve();
     const chunk = this.textBuffer;
     this.textBuffer = "";
-    const entry: AgentLogEntry = {
-      timestamp: new Date().toISOString(),
-      taskId: this.taskId,
-      text: chunk,
-      type: "text",
-      ...(this.agent !== undefined && { agent: this.agent }),
-    };
-
-    const promises: Promise<void>[] = [];
-
-    if (this.store && this.taskId) {
-      promises.push(
-        this.store.appendAgentLog(this.taskId, chunk, "text", undefined, this.agent).catch((err) => {
-          this.log.warn(`Failed to flush text buffer for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-        }),
-      );
-    }
-
-    if (this.appendLogCb) {
-      promises.push(
-        this.appendLogCb(entry).catch((err) => {
-          this.log.warn(`appendLog callback failed for text flush: ${err instanceof Error ? err.message : String(err)}`);
-        }),
-      );
-    }
-
-    return Promise.all(promises).then(() => undefined);
+    this.writeEntry(chunk, "text", undefined, `Failed to flush text buffer for ${this.taskId}`, true);
+    return this.flushPendingEntries();
   }
 
   private flushThinkingBuffer(): Promise<void> {
     if (this.thinkingBuffer.length === 0) return Promise.resolve();
     const chunk = this.thinkingBuffer;
     this.thinkingBuffer = "";
-    const entry: AgentLogEntry = {
-      timestamp: new Date().toISOString(),
-      taskId: this.taskId,
-      text: chunk,
-      type: "thinking",
-      ...(this.agent !== undefined && { agent: this.agent }),
-    };
-
-    const promises: Promise<void>[] = [];
-
-    if (this.store && this.taskId) {
-      promises.push(
-        this.store.appendAgentLog(this.taskId, chunk, "thinking", undefined, this.agent).catch((err) => {
-          this.log.warn(`Failed to flush thinking buffer for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-        }),
-      );
-    }
-
-    if (this.appendLogCb) {
-      promises.push(
-        this.appendLogCb(entry).catch((err) => {
-          this.log.warn(`appendLog callback failed for thinking flush: ${err instanceof Error ? err.message : String(err)}`);
-        }),
-      );
-    }
-
-    return Promise.all(promises).then(() => undefined);
+    this.writeEntry(chunk, "thinking", undefined, `Failed to flush thinking buffer for ${this.taskId}`, true);
+    return this.flushPendingEntries();
   }
 
   private scheduleFlush(): void {
@@ -305,5 +269,58 @@ export class AgentLogger {
       this.thinkingFlushTimer = null;
       this.flushThinkingBuffer();
     }, this.flushIntervalMs);
+  }
+
+  private scheduleEntryFlush(): void {
+    if (this.entryFlushTimer) return;
+    this.entryFlushTimer = setTimeout(() => {
+      this.entryFlushTimer = null;
+      void this.flushPendingEntries();
+    }, this.flushIntervalMs);
+  }
+
+  private async flushPendingEntries(): Promise<void> {
+    if (this.pendingEntries.length === 0) {
+      return;
+    }
+
+    const entries = this.pendingEntries;
+    this.pendingEntries = [];
+
+    if (this.store && this.taskId) {
+      if (typeof (this.store as TaskStore & { appendAgentLogBatch?: unknown }).appendAgentLogBatch === "function") {
+        await this.store
+          .appendAgentLogBatch(
+            entries.map((entry) => ({
+              taskId: entry.taskId,
+              text: entry.text,
+              type: entry.type,
+              detail: entry.detail,
+              agent: entry.agent,
+            })),
+          )
+          .catch((err) => {
+            this.log.warn(`Failed to flush agent log batch for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      } else {
+        await Promise.all(
+          entries.map((entry) =>
+            this.store!.appendAgentLog(entry.taskId, entry.text, entry.type, entry.detail, entry.agent).catch((err) => {
+              this.log.warn(`Failed to flush agent log entry for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+            }),
+          ),
+        );
+      }
+    }
+
+    if (this.appendLogCb) {
+      await Promise.all(
+        entries.map((entry) =>
+          this.appendLogCb!(entry).catch((err) => {
+            this.log.warn(`appendLog callback failed for entry (${entry.type}): ${err instanceof Error ? err.message : String(err)}`);
+          }),
+        ),
+      );
+    }
   }
 }

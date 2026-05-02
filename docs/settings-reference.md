@@ -200,7 +200,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `maxPostReviewFixes` | `number` | `1` | Max auto-revival attempts for in-review tasks failing pre-merge workflow steps. |
 | `maxSpawnedAgentsPerParent` | `number` | `5` | Max child agents per parent task. |
 | `maxSpawnedAgentsGlobal` | `number` | `20` | Max spawned agents across one executor instance. |
-| `maintenanceIntervalMs` | `number` | `900000` | Periodic maintenance interval in ms (15 min). |
+| `maintenanceIntervalMs` | `number` | `300000` | Periodic maintenance interval in ms (5 min). |
 | `autoArchiveDoneTasksEnabled` | `boolean` | `true` | Enable periodic auto-archiving of done tasks. |
 | `autoArchiveDoneAfterMs` | `number` | `172800000` | Age in ms after entering done before auto-archive (48h). |
 | `archiveAgentLogMode` | `"none" \| "compact" \| "full"` | `"compact"` | Agent log retention strategy for cold archive snapshots. |

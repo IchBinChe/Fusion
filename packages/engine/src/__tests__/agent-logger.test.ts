@@ -53,9 +53,10 @@ describe("summarizeToolArgs", () => {
 
 // ── AgentLogger tests ────────────────────────────────────────────────
 
-function createMockStore() {
+function createMockStore(withBatch = false) {
   return {
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
+    ...(withBatch ? { appendAgentLogBatch: vi.fn().mockResolvedValue(undefined) } : {}),
   } as unknown as TaskStore;
 }
 
@@ -67,6 +68,24 @@ describe("AgentLogger", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("uses appendAgentLogBatch when available", async () => {
+    const store = createMockStore(true) as unknown as TaskStore & { appendAgentLogBatch: ReturnType<typeof vi.fn> };
+    const logger = new AgentLogger({
+      store,
+      taskId: "FN-BATCH",
+      flushSizeBytes: 4,
+      flushIntervalMs: 500,
+    });
+
+    logger.onText("hello");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.appendAgentLogBatch).toHaveBeenCalledWith([
+      { taskId: "FN-BATCH", text: "hello", type: "text", detail: undefined, agent: undefined },
+    ]);
+    expect((store.appendAgentLog as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
   it("buffers text and flushes on size threshold", async () => {
@@ -383,7 +402,7 @@ describe("AgentLogger", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(loggerWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to log tool start \"Bash\" for FN-2090-TOOL-START"),
+        expect.stringContaining("Failed to flush agent log entry for FN-2090-TOOL-START"),
       );
     });
 
@@ -397,7 +416,7 @@ describe("AgentLogger", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(loggerWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to log tool end \"Bash\" (tool_result) for FN-2090-TOOL-END"),
+        expect.stringContaining("Failed to flush agent log entry for FN-2090-TOOL-END"),
       );
     });
 
@@ -415,7 +434,7 @@ describe("AgentLogger", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(loggerWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to flush text buffer for FN-2090-TEXT"),
+        expect.stringContaining("Failed to flush agent log entry for FN-2090-TEXT"),
       );
     });
 
@@ -433,7 +452,7 @@ describe("AgentLogger", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(loggerWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to flush thinking buffer for FN-2090-THINKING"),
+        expect.stringContaining("Failed to flush agent log entry for FN-2090-THINKING"),
       );
     });
   });

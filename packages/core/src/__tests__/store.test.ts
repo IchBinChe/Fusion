@@ -4141,6 +4141,31 @@ Task with acceptance criteria
       expect(events[0].taskId).toBe(task.id);
     });
 
+    it("appendAgentLogBatch inserts all entries and emits per-entry events", async () => {
+      const task = await createTestTask();
+      const events: any[] = [];
+      store.on("agent:log", (entry) => events.push(entry));
+
+      await store.appendAgentLogBatch([
+        { taskId: task.id, text: "batch 1", type: "text" },
+        { taskId: task.id, text: "tool", type: "tool", detail: "read file", agent: "executor" },
+      ]);
+
+      const logs = await store.getAgentLogs(task.id);
+      expect(logs).toHaveLength(2);
+      expect(logs.map((entry) => entry.text)).toEqual(["batch 1", "tool"]);
+      expect(events).toHaveLength(2);
+      expect(events[1]).toMatchObject({ text: "tool", type: "tool", detail: "read file", agent: "executor" });
+    });
+
+    it("appendAgentLogBatch with empty entries is a no-op", async () => {
+      const task = await createTestTask();
+
+      await store.appendAgentLogBatch([]);
+
+      expect(await store.getAgentLogCount(task.id)).toBe(0);
+    });
+
     it("appendAgentLog writes detail when provided", async () => {
       const task = await createTestTask();
 

@@ -1,6 +1,6 @@
 import "./ListView.css";
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap } from "lucide-react";
 import type { Task, TaskDetail, Column, TaskCreateInput } from "@fusion/core";
 import { COLUMN_LABELS, COLUMNS, getErrorMessage } from "@fusion/core";
 import { batchUpdateTaskModels, fetchNodes } from "../api";
@@ -938,7 +938,14 @@ export function ListView({
                               <div className="list-card-row">
                                 <span className="list-card-id">{task.id}</span>
                                 {task.executionMode === "fast" && (
-                                  <span className="list-execution-mode-badge list-execution-mode-badge--fast">Fast</span>
+                                  <span
+                                    className="list-execution-mode-badge list-execution-mode-badge--fast"
+                                    title="Fast mode"
+                                    aria-label="Fast mode"
+                                  >
+                                    <Zap aria-hidden="true" />
+                                    <span className="visually-hidden">Fast mode</span>
+                                  </span>
                                 )}
                                 <span className="list-card-spacer" />
                                 {isStuckState ? (
@@ -1121,7 +1128,14 @@ export function ListView({
                                   <td className="list-cell list-cell-title">
                                     <div className="list-title-content">
                                       {task.executionMode === "fast" && (
-                                        <span className="list-execution-mode-badge list-execution-mode-badge--fast">Fast</span>
+                                        <span
+                                          className="list-execution-mode-badge list-execution-mode-badge--fast"
+                                          title="Fast mode"
+                                          aria-label="Fast mode"
+                                        >
+                                          <Zap aria-hidden="true" />
+                                          <span className="visually-hidden">Fast mode</span>
+                                        </span>
                                       )}
                                       <span className="list-title-text">{task.title || task.description}</span>
                                     </div>

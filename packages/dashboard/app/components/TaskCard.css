@@ -225,12 +225,15 @@
 .card-execution-mode-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 0.625rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 2px 8px;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
   border-radius: var(--radius-pill);
+}
+
+.card-execution-mode-badge svg {
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .card-execution-mode-badge--fast {

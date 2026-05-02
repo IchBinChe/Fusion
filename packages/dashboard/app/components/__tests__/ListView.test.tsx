@@ -133,8 +133,11 @@ describe("ListView", () => {
 
     const fastRow = container.querySelector('tr[data-id="FN-001"]') as HTMLElement;
     const standardRow = container.querySelector('tr[data-id="FN-002"]') as HTMLElement;
+    const fastBadge = fastRow.querySelector(".list-execution-mode-badge");
 
-    expect(fastRow.querySelector(".list-execution-mode-badge")?.textContent).toBe("Fast");
+    expect(fastBadge).not.toBeNull();
+    expect(fastBadge?.getAttribute("aria-label")).toBe("Fast mode");
+    expect(fastBadge?.querySelector("svg")).not.toBeNull();
     expect(standardRow.querySelector(".list-execution-mode-badge")).toBeNull();
   });
 
@@ -2367,8 +2370,11 @@ describe("ListView - Bulk Selection", () => {
 
       const fastCard = container.querySelector('.list-card[data-id="FN-001"]') as HTMLElement;
       const standardCard = container.querySelector('.list-card[data-id="FN-002"]') as HTMLElement;
+      const fastBadge = fastCard.querySelector(".list-execution-mode-badge");
 
-      expect(fastCard.querySelector(".list-execution-mode-badge")?.textContent).toBe("Fast");
+      expect(fastBadge).not.toBeNull();
+      expect(fastBadge?.getAttribute("aria-label")).toBe("Fast mode");
+      expect(fastBadge?.querySelector("svg")).not.toBeNull();
       expect(standardCard.querySelector(".list-execution-mode-badge")).toBeNull();
     });
 

@@ -17,6 +17,7 @@ vi.mock("lucide-react", () => ({
   Bot: () => null,
   Trash2: () => null,
   RotateCw: () => null,
+  Zap: () => <svg data-testid="icon-zap" />,
 }));
 
 vi.mock("../ProviderIcon", () => ({
@@ -97,7 +98,10 @@ describe("TaskCard", () => {
       <TaskCard task={makeTask({ executionMode: "fast" })} onOpenDetail={noop} addToast={noop} />,
     );
 
-    expect(container.querySelector(".card-execution-mode-badge")?.textContent).toBe("Fast");
+    const fastBadge = container.querySelector(".card-execution-mode-badge");
+    expect(fastBadge).not.toBeNull();
+    expect(screen.getByTestId("icon-zap")).toBeDefined();
+    expect(fastBadge?.getAttribute("aria-label")).toBe("Fast mode");
 
     rerender(
       <TaskCard task={makeTask({ executionMode: "standard" })} onOpenDetail={noop} addToast={noop} />,
@@ -117,7 +121,8 @@ describe("TaskCard", () => {
       <TaskCard task={makeTask({ executionMode: "fast" })} onOpenDetail={noop} addToast={noop} />,
     );
 
-    expect(container.querySelector(".card-execution-mode-badge")?.textContent).toBe("Fast");
+    expect(container.querySelector(".card-execution-mode-badge")).not.toBeNull();
+    expect(screen.getByTestId("icon-zap")).toBeDefined();
   });
 
   describe("retry button on failed tasks", () => {

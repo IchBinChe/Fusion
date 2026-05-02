@@ -1,6 +1,6 @@
 import "./TaskCard.css";
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
-import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw } from "lucide-react";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap } from "lucide-react";
 import type { Task, TaskDetail, Column, PrInfo, IssueInfo, TaskPriority } from "@fusion/core";
 import { COLUMN_LABELS, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, VALID_TRANSITIONS, getErrorMessage } from "@fusion/core";
 import { fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent } from "../api";
@@ -1313,7 +1313,14 @@ function TaskCardComponent({
           </span>
         )}
         {task.executionMode === "fast" && (
-          <span className="card-execution-mode-badge card-execution-mode-badge--fast">Fast</span>
+          <span
+            className="card-execution-mode-badge card-execution-mode-badge--fast"
+            title="Fast mode"
+            aria-label="Fast mode"
+          >
+            <Zap aria-hidden="true" />
+            <span className="visually-hidden">Fast mode</span>
+          </span>
         )}
         {task.missionId && (
           <span

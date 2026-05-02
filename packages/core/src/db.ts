@@ -713,6 +713,20 @@ export class Database {
       throw new Error(`[fusion] Database constructor requires an absolute fusionDir path, got: ${fusionDir}`);
     }
 
+    // Defensive: a fusionDir whose last two path segments are both ".fusion"
+    // indicates a caller mistakenly passed a `.fusion` directory where a
+    // project root was expected (a Store class joined `.fusion` onto a path
+    // that already ended in `.fusion`). Failing fast here surfaces the bug
+    // at the originating call site rather than silently creating a stray
+    // `.fusion/.fusion/` tree under the project.
+    if (!inMemory && /\.fusion[\\/]\.fusion(?:[\\/]|$)/.test(fusionDir)) {
+      throw new Error(
+        `[fusion] Refusing to open Database at nested .fusion/.fusion path: ${fusionDir}\n` +
+        "This means a caller passed a .fusion directory where a project root was expected. " +
+        "Audit the call site for an extra `join(rootDir, '.fusion')` step.",
+      );
+    }
+
     // Ensure .fusion directory exists (only meaningful for disk-backed mode;
     // in-memory mode never touches the filesystem here).
     if (!inMemory && !existsSync(fusionDir)) {

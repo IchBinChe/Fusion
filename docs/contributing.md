@@ -131,7 +131,7 @@ Additional audited suite:
 pnpm --filter @runfusion/fusion test:extension-integration
 ```
 
-`test:extension-integration` enables `FUSION_TEST_EXTENSION_INTEGRATION=1` and runs the full fn pi extension integration suite. It is intentionally excluded from the default slow lane until FN-3204 stabilizes that suite against current extension behavior.
+`test:extension-integration` enables `FUSION_TEST_EXTENSION_INTEGRATION=1` and runs the full fn pi extension integration suite. It remains an explicit opt-in lane so default workspace verification stays fast, while still providing a discoverable command for full extension-tool integration coverage.
 
 ## Release Process
 

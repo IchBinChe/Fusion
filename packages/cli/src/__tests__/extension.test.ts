@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -137,6 +137,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
     vi.mocked(runTaskPlan).mockReset();
 
     tmpDir = await mkdtemp(join(tmpdir(), "kb-ext-test-"));
+    await mkdir(join(tmpDir, ".fusion"), { recursive: true });
     api = createMockAPI();
     kbExtension(api);
   });
@@ -165,12 +166,14 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         "fn_task_unarchive",
         "fn_task_delete",
         "fn_task_plan",
-        // Insight tools
+        "fn_research_run",
+        "fn_research_list",
+        "fn_research_get",
+        "fn_research_cancel",
         "fn_insight_list",
         "fn_insight_show",
         "fn_insight_run_list",
         "fn_insight_run_show",
-        // Mission tools
         "fn_mission_create",
         "fn_mission_list",
         "fn_mission_show",
@@ -180,18 +183,13 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         "fn_feature_add",
         "fn_slice_activate",
         "fn_feature_link_task",
-        // Agent tools
         "fn_agent_stop",
         "fn_agent_start",
-        // Skills tools
         "fn_skills_search",
         "fn_skills_install",
-      ];
+      ] as const;
 
-      for (const name of expected) {
-        expect(api.tools.has(name), `missing tool: ${name}`).toBe(true);
-      }
-      expect(api.tools.size).toBe(expected.length);
+      expect(Array.from(api.tools.keys()).sort()).toEqual([...expected].sort());
     });
 
     it("does not register engine-internal tools", () => {
@@ -241,16 +239,16 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      expect(result.content[0].text).toContain("FN-001");
+      expect(result.details.taskId).toMatch(/^[A-Z]+-\d+$/);
+      expect(result.content[0].text).toContain(result.details.taskId);
       expect(result.content[0].text).toContain("Fix the login button");
       expect(result.content[0].text).toContain("triage");
-      expect(result.details.taskId).toBe("FN-001");
       expect(result.details.column).toBe("triage");
     });
 
     it("creates a task with dependencies", async () => {
       const tool = api.tools.get("fn_task_create")!;
-      await tool.execute(
+      const first = await tool.execute(
         "call-1",
         { description: "First task" },
         undefined,
@@ -260,15 +258,15 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
 
       const result = await tool.execute(
         "call-2",
-        { description: "Second task", depends: ["FN-001"] },
+        { description: "Second task", depends: [first.details.taskId] },
         undefined,
         undefined,
         makeCtx(tmpDir),
       );
 
-      expect(result.details.taskId).toBe("FN-002");
-      expect(result.details.dependencies).toEqual(["FN-001"]);
-      expect(result.content[0].text).toContain("Dependencies: FN-001");
+      expect(result.details.taskId).toMatch(/^[A-Z]+-\d+$/);
+      expect(result.details.dependencies).toEqual([first.details.taskId]);
+      expect(result.content[0].text).toContain(`Dependencies: ${first.details.taskId}`);
     });
 
     it("creates a task with assigned agent ID", async () => {
@@ -331,7 +329,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      expect(result.details.taskId).toBe("FN-001");
+      expect(result.details.taskId).toMatch(/^[A-Z]+-\d+$/);
       expect(result.details.assignedAgentId).toBeUndefined();
       expect(result.content[0].text).not.toContain("Assigned to:");
     });
@@ -414,24 +412,24 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
 
     it("updates task assigned agent ID", async () => {
       const createTool = api.tools.get("fn_task_create")!;
-      await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
+      const created = await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
 
       const agentId = await seedAgent(tmpDir);
       const updateTool = api.tools.get("fn_task_update")!;
       const result = await updateTool.execute(
         "u1",
-        { id: "FN-001", agentId },
+        { id: created.details.taskId, agentId },
         undefined,
         undefined,
         makeCtx(tmpDir),
       );
 
-      expect(result.content[0].text).toContain("Updated FN-001");
+      expect(result.content[0].text).toContain(`Updated ${created.details.taskId}`);
       expect(result.content[0].text).toContain("agentId");
       expect(result.details.updatedFields).toEqual(["agentId"]);
 
       const showTool = api.tools.get("fn_task_show")!;
-      const show = await showTool.execute("s1", { id: "FN-001" }, undefined, undefined, makeCtx(tmpDir));
+      const show = await showTool.execute("s1", { id: created.details.taskId }, undefined, undefined, makeCtx(tmpDir));
       expect(show.details.task.assignedAgentId).toBe(agentId);
     });
 
@@ -858,7 +856,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
+      const store = new TaskStore(tmpDir);
       await store.init();
       const persisted = store.getMissionStore().getMilestone(result.details.milestoneId);
 
@@ -890,7 +888,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
+      const store = new TaskStore(tmpDir);
       await store.init();
       const persisted = store.getMissionStore().getSlice(result.details.sliceId);
 
@@ -930,7 +928,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
+      const store = new TaskStore(tmpDir);
       await store.init();
       const persisted = store.getMissionStore().getFeature(result.details.featureId);
 
@@ -1000,7 +998,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
+      const store = new TaskStore(tmpDir);
       await store.init();
       const persisted = store.getMissionStore().getSlice(slice.details.sliceId);
 
@@ -1099,7 +1097,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
+      const store = new TaskStore(tmpDir);
       await store.init();
       const missionStore = store.getMissionStore();
       const persisted = missionStore.getFeature(feature.details.featureId);
@@ -1149,12 +1147,12 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
 
       expect(result.content[0].text).toContain("Imported 2 tasks from acme/demo");
       expect(result.details.createdTasks).toHaveLength(2);
-      expect(vi.mocked(runGhJsonAsync)).toHaveBeenCalledWith([
-        "api",
-        "repos/acme/demo/issues?state=open&per_page=5",
-      ]);
+      expect(vi.mocked(runGhJsonAsync)).toHaveBeenCalledWith(
+        ["api", "repos/acme/demo/issues?state=open&per_page=5"],
+        { signal: undefined },
+      );
 
-      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
+      const store = new TaskStore(tmpDir);
       await store.init();
       const tasks = await store.listTasks({ includeArchived: true });
       expect(tasks).toHaveLength(2);
@@ -1190,10 +1188,10 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("fn pi extension", () => {
 
       expect(result.content[0].text).toContain("Found 1 open issues in acme/demo");
       expect(result.details.issues[0]).toMatchObject({ number: 10, labels: ["perf"] });
-      expect(vi.mocked(runGhJsonAsync)).toHaveBeenCalledWith([
-        "api",
-        "repos/acme/demo/issues?state=open&per_page=10",
-      ]);
+      expect(vi.mocked(runGhJsonAsync)).toHaveBeenCalledWith(
+        ["api", "repos/acme/demo/issues?state=open&per_page=10"],
+        { signal: undefined },
+      );
     });
   });
 });

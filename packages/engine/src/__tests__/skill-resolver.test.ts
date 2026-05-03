@@ -18,6 +18,7 @@ vi.mock("../logger.js", () => ({
 
 import {
   resolveSessionSkills,
+  resolveProjectRoot,
   createSkillsOverrideFromSelection,
   type SkillSelectionResult,
 } from "../skill-resolver.js";
@@ -26,13 +27,14 @@ import {
 
 // In-memory file system for tests - using a proxy to intercept fs calls
 const mockFiles = new Map<string, string>();
+const mockDirs = new Set<string>();
 let mockDirCounter = 0;
 
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
   return {
     ...actual,
-    existsSync: (path: unknown) => mockFiles.has(String(path)),
+    existsSync: (path: unknown) => mockFiles.has(String(path)) || mockDirs.has(String(path)),
     readFileSync: (path: unknown) => mockFiles.get(String(path)) ?? "{}",
     mkdtempSync: () => `/tmp/skill-resolver-mock-${++mockDirCounter}`,
     writeFileSync: (path: unknown, content: unknown) => mockFiles.set(String(path), String(content)),
@@ -50,6 +52,7 @@ vi.mock("node:fs", async () => {
 function createMockProjectDir(settings: Record<string, unknown> | null): string {
   const dir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
   if (settings !== null) {
+    mockDirs.add(`${dir}/.fusion`);
     mockFiles.set(`${dir}/.fusion/settings.json`, JSON.stringify(settings));
   }
   return dir;
@@ -57,9 +60,58 @@ function createMockProjectDir(settings: Record<string, unknown> | null): string 
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
+describe("resolveProjectRoot", () => {
+  beforeEach(() => {
+    mockFiles.clear();
+    mockDirs.clear();
+    mockDirCounter = 0;
+  });
+
+  it("returns cwd directly when cwd contains .fusion", () => {
+    const dir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+    mockDirs.add(`${dir}/.fusion`);
+
+    expect(resolveProjectRoot(dir)).toBe(dir);
+  });
+
+  it("walks up from worktree path to find project root", () => {
+    const projectDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+    const worktreeDir = `${projectDir}/.worktrees/swift-falcon`;
+    mockDirs.add(`${projectDir}/.fusion`);
+
+    expect(resolveProjectRoot(worktreeDir)).toBe(projectDir);
+  });
+
+  it("walks up from deeply nested path", () => {
+    const projectDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+    const nestedDir = `${projectDir}/.worktrees/task-branch/src/components`;
+    mockDirs.add(`${projectDir}/.fusion`);
+
+    expect(resolveProjectRoot(nestedDir)).toBe(projectDir);
+  });
+
+  it("returns cwd when no .fusion directory found anywhere", () => {
+    const dir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+
+    // No .fusion set up anywhere
+    expect(resolveProjectRoot(dir)).toBe(dir);
+  });
+
+  it("returns cwd when .fusion is in a sibling directory (not ancestor)", () => {
+    const parentDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+    const dir = `${parentDir}/my-project`;
+    const siblingDir = `${parentDir}/other-project`;
+    mockDirs.add(`${siblingDir}/.fusion`);
+
+    // Walking up from dir should not find sibling's .fusion
+    expect(resolveProjectRoot(dir)).toBe(dir);
+  });
+});
+
 describe("resolveSessionSkills", () => {
   beforeEach(() => {
     mockFiles.clear();
+    mockDirs.clear();
     mockDirCounter = 0;
   });
 
@@ -321,6 +373,45 @@ describe("resolveSessionSkills", () => {
       });
 
       expect(result.allowedSkillPaths.has("skills/fusion/SKILL.md")).toBe(true);
+    });
+
+    it("resolves project root from worktree path", () => {
+      const projectDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+      const worktreeDir = `${projectDir}/.worktrees/branch-name`;
+
+      // Set up project root with .fusion directory and settings
+      mockDirs.add(`${projectDir}/.fusion`);
+      mockFiles.set(`${projectDir}/.fusion/settings.json`, JSON.stringify({
+        skills: ["+skills/fusion/SKILL.md"],
+      }));
+
+      // Call with the worktree path (not the project root)
+      const result = resolveSessionSkills({
+        projectRootDir: worktreeDir,
+      });
+
+      // Should have resolved to the project root and read settings correctly
+      expect(result.filterActive).toBe(true);
+      expect(result.allowedSkillPaths.has("skills/fusion/SKILL.md")).toBe(true);
+    });
+
+    it("resolves project root from deeply nested worktree subdirectory", () => {
+      const projectDir = `/tmp/skill-resolver-mock-${++mockDirCounter}`;
+      const worktreeSubdir = `${projectDir}/.worktrees/task-branch/src/components`;
+
+      mockDirs.add(`${projectDir}/.fusion`);
+      mockFiles.set(`${projectDir}/.fusion/settings.json`, JSON.stringify({
+        skills: ["+skills/review/SKILL.md", "+skills/lint/SKILL.md"],
+      }));
+
+      const result = resolveSessionSkills({
+        projectRootDir: worktreeSubdir,
+      });
+
+      expect(result.filterActive).toBe(true);
+      expect(result.allowedSkillPaths.size).toBe(2);
+      expect(result.allowedSkillPaths.has("skills/review/SKILL.md")).toBe(true);
+      expect(result.allowedSkillPaths.has("skills/lint/SKILL.md")).toBe(true);
     });
   });
 

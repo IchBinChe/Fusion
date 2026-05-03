@@ -1103,11 +1103,17 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
   // Detect if this is a worktree session and apply path boundaries
   const worktreePath = options.cwd;
-  const projectRoot = getProjectRootFromWorktree(worktreePath);
-  if (projectRoot) {
-    await assertValidWorktreeSession(worktreePath, projectRoot);
+  const worktreeProjectRoot = getProjectRootFromWorktree(worktreePath);
+  if (worktreeProjectRoot) {
+    await assertValidWorktreeSession(worktreePath, worktreeProjectRoot);
   }
-  const wrappedTools = wrapToolsWithBoundary(tools, worktreePath, projectRoot);
+  const wrappedTools = wrapToolsWithBoundary(tools, worktreePath, worktreeProjectRoot);
+
+  // Resolve the project root for resource discovery (skills, settings, extensions).
+  // When cwd is a worktree (e.g., /project/.worktrees/task-branch) or any other
+  // subdirectory, we walk up to find the project root containing .fusion/.
+  // This ensures skill/settings discovery works regardless of session cwd.
+  const resolvedProjectRoot = worktreeProjectRoot ?? resolvePiExtensionProjectRoot(options.cwd);
 
   // Compaction is explicitly enabled to prevent context-window overflow during
   // long-running agent conversations (triage, execution, review, merge).
@@ -1138,7 +1144,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   if (!effectiveSkillSelection && options.skills && options.skills.length > 0) {
     piLog.log(`Using skills from convenience parameter: [${options.skills.join(", ")}]`);
     effectiveSkillSelection = {
-      projectRootDir: options.cwd,
+      projectRootDir: resolvedProjectRoot,
       requestedSkillNames: options.skills,
       sessionPurpose: "executor",
     };
@@ -1174,7 +1180,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   }
 
   const resourceLoader = new DefaultResourceLoader({
-    cwd: options.cwd,
+    cwd: resolvedProjectRoot,
     agentDir: getFusionAgentDir(),
     settingsManager,
     systemPromptOverride: () => options.systemPrompt,

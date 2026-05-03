@@ -401,6 +401,26 @@ describe("createFnAgent skills parameter", () => {
     );
   });
 
+  it("resolves project root via resolvePiExtensionProjectRoot for non-worktree paths", async () => {
+    // When cwd is a regular directory (not a .worktrees/ path),
+    // resolvePiExtensionProjectRoot is used to walk up to .fusion.
+    // Since no .fusion exists in test filesystem, it returns cwd as-is.
+    const options: AgentOptions = {
+      cwd: "/project/subdirectory",
+      systemPrompt: "Test",
+      skills: ["fusion"],
+    };
+
+    await createFnAgent(options);
+
+    // resolvePiExtensionProjectRoot walks up from /project/subdirectory.
+    // No .fusion is found in the test filesystem, so it returns /project/subdirectory.
+    expect(mockResolveSessionSkills).toHaveBeenCalledTimes(1);
+    const callArgs = mockResolveSessionSkills.mock.calls[0]![0];
+    expect(callArgs.projectRootDir).toBe("/project/subdirectory");
+    expect(callArgs.requestedSkillNames).toEqual(["fusion"]);
+  });
+
   it("skills without corresponding discovered skills produces diagnostics", async () => {
     // Mock to return diagnostics for missing skill
     mockResolveSessionSkills.mockReturnValue({

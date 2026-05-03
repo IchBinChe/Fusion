@@ -452,6 +452,40 @@ describe("createFnAgent", () => {
     expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
   });
 
+  it("resolves project root from worktree cwd for convenience skills parameter", async () => {
+    existsSyncMock.mockImplementation((path) => {
+      const value = String(path);
+      return value === "/project/.worktrees/task-branch" ||
+        value === "/project/.worktrees/task-branch/.git";
+    });
+    execSyncMock.mockImplementation((cmd) => {
+      if (cmd === "git rev-parse --show-toplevel") {
+        return "/project/.worktrees/task-branch\n";
+      }
+      return "worktree /project\nHEAD abc123\nbranch refs/heads/main\n\n" +
+        "worktree /project/.worktrees/task-branch\nHEAD def456\nbranch refs/heads/fusion/fn-001\n";
+    });
+
+    const { createFnAgent } = await import("../pi.js");
+
+    // Pass skills parameter with a worktree cwd.
+    // getProjectRootFromWorktree extracts /project from the .worktrees path,
+    // which is passed as projectRootDir to resolveSessionSkills.
+    // resolveSessionSkills then calls resolveProjectRoot which walks up
+    // looking for .fusion — since existsSync returns false for all paths
+    // except the worktree itself, it falls back to /project.
+    // The session should be created successfully.
+    await createFnAgent({
+      cwd: "/project/.worktrees/task-branch",
+      systemPrompt: "test",
+      tools: "coding",
+      skills: ["fusion"],
+    });
+
+    // Verify the session was created (no crash)
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+  });
+
   it("registers extension providers before resolving configured models", async () => {
     packageManagerResolveMock.mockResolvedValueOnce({
       extensions: [{ enabled: true, path: "/extensions/zai-provider" }],

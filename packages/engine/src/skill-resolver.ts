@@ -10,9 +10,34 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { ResourceDiagnostic, Skill } from "@mariozechner/pi-coding-agent";
 import { piLog } from "./logger.js";
+
+// ── Project Root Resolution ──────────────────────────────────────────────────
+
+/**
+ * Resolve the project root directory by walking up from `cwd` looking for
+ * a directory containing `.fusion/`. This handles worktree paths (e.g.,
+ * `/project/.worktrees/task-branch`) and any other subdirectory by walking
+ * up to the actual project root.
+ *
+ * Falls back to `cwd` if no `.fusion/` directory is found (mirrors
+ * `resolvePiExtensionProjectRoot` from `@fusion/core`).
+ */
+export function resolveProjectRoot(cwd: string): string {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".fusion"))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return resolve(cwd);
+    }
+    current = parent;
+  }
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -161,7 +186,12 @@ function isExclusionPattern(pattern: string): boolean {
  *    - Requested names not matching any discovered skill (warning)
  */
 export function resolveSessionSkills(context: SkillSelectionContext): SkillSelectionResult {
-  const { projectRootDir, requestedSkillNames } = context;
+  const { requestedSkillNames } = context;
+
+  // Resolve project root from the given projectRootDir — it may be a
+  // worktree path (e.g., /project/.worktrees/task-branch) which doesn't
+  // contain .fusion/settings.json. Walk up to find the real project root.
+  const projectRootDir = resolveProjectRoot(context.projectRootDir);
 
   // Read project settings
   const settings = readProjectSettings(projectRootDir);

@@ -2635,6 +2635,84 @@ export interface DockerContainerInspectResult {
   };
 }
 
+/** Configuration for the Fusion Docker image to use for provisioning */
+export interface DockerNodeImageConfig {
+  /** Image name (e.g., "runfusion/fusion" or "ghcr.io/runfusion/fusion") */
+  image: string;
+  /** Image tag (e.g., "latest", "0.14.1") */
+  tag: string;
+  /** Whether to pull the image before creating the container */
+  pullImage: boolean;
+  /** Optional registry authentication — username */
+  registryUsername?: string;
+  /** Optional registry authentication — password/token */
+  registryPassword?: string;
+}
+
+/** Resource constraints for a provisioned Docker container */
+export interface DockerNodeResourceConfig {
+  /** CPU limit in cores (e.g., 2 = 2 CPUs). Undefined = unlimited */
+  cpuLimit?: number;
+  /** Memory limit in megabytes. Undefined = unlimited */
+  memoryLimitMb?: number;
+  /** Memory swap limit in megabytes. -1 = unlimited swap. Undefined = default */
+  memorySwapMb?: number;
+}
+
+/** Input for provisioning a new Docker-based Fusion node */
+export interface DockerProvisionInput {
+  /** Display name for the node (must be unique) */
+  nodeName: string;
+  /** Docker host configuration — where to create the container */
+  hostConfig: DockerHostConfig;
+  /** Image configuration — which Fusion image to use */
+  imageConfig: DockerNodeImageConfig;
+  /** Resource constraints for the container */
+  resourceConfig?: DockerNodeResourceConfig;
+  /** Environment variables to set in the container (KEY=VALUE strings) */
+  environment?: string[];
+  /** Volume mount specifications (e.g., ["fusion-data:/data", "/host/path:/container/path"]) */
+  volumeMounts?: string[];
+  /** Named volume for persistent Fusion data storage. If provided, mounted at /data */
+  persistentVolume?: string;
+  /** Optional extra CLI tools to include in the container (e.g., ["claude", "droid"]) */
+  extraClis?: string[];
+  /** The URL/hostname where this node will be reachable by other nodes */
+  reachableUrl?: string;
+  /** Whether to auto-generate an API key for this node */
+  autoGenerateApiKey: boolean;
+  /** Explicit API key to use (if autoGenerateApiKey is false) */
+  apiKey?: string;
+  /** Maximum concurrent tasks for this node (default: 2) */
+  maxConcurrent?: number;
+  /** Optional Docker network to attach the container to */
+  network?: string;
+  /** Optional container labels (key-value pairs) */
+  labels?: Record<string, string>;
+}
+
+/** Result of a Docker node provisioning operation */
+export interface DockerProvisionResult {
+  /** Whether provisioning succeeded */
+  success: boolean;
+  /** The container ID created by Docker */
+  containerId?: string;
+  /** The container name (generated or specified) */
+  containerName?: string;
+  /** The registered node ID in CentralCore */
+  nodeId?: string;
+  /** The API key generated or assigned for this node */
+  apiKey?: string;
+  /** The port mapping (if applicable) */
+  portMapping?: string;
+  /** Error message if provisioning failed */
+  error?: string;
+  /** The stage at which failure occurred (for error reporting) */
+  failedStage?: "image-pull" | "container-create" | "container-start" | "node-register" | "config-apply";
+  /** Duration of the provisioning operation in ms */
+  durationMs?: number;
+}
+
 /** A single plugin's version information for sync comparison */
 export interface PluginVersionEntry {
   /** Plugin ID (matches PluginManifest.id) */

@@ -152,6 +152,18 @@ export class DockerClientService {
     }
   }
 
+  /**
+   * Get a Docker instance for the given host config.
+   * If no host config is provided, uses the default config (cached).
+   * Otherwise creates a fresh instance for the custom config.
+   */
+  async getDockerInstance(hostConfig?: DockerHostConfig): Promise<Docker> {
+    if (!hostConfig || hostConfig === this.defaultHostConfig) {
+      return this.getInstance();
+    }
+    return this.createDockerInstance(hostConfig);
+  }
+
   async getContainerInfo(containerId: string): Promise<DockerContainerInspectResult | null> {
     try {
       const docker = await this.getInstance();

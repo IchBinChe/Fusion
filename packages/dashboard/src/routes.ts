@@ -99,6 +99,7 @@ import { registerAgentsProjectsNodesRoutes } from "./routes/register-agents-proj
 import { registerProjectRoutes } from "./routes/register-project-routes.js";
 import { registerNodeRoutes } from "./routes/register-node-routes.js";
 import { registerDockerNodeRoutes } from "./routes/register-docker-node-routes.js";
+import { registerDockerProvisioningRoutes } from "./routes/register-docker-provisioning-routes.js";
 import { registerSettingsSyncRoutes } from "./routes/register-settings-sync-routes.js";
 import { registerMeshRoutes } from "./routes/register-mesh-routes.js";
 import { registerDiscoveryRoutes } from "./routes/register-discovery-routes.js";
@@ -3855,6 +3856,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   registerNodeRoutes(routeContext);
   registerDockerNodeRoutes(routeContext);
+  registerDockerProvisioningRoutes(routeContext);
 
   // ── Remote Node Settings Sync Routes ──────────────────────────────────────
 

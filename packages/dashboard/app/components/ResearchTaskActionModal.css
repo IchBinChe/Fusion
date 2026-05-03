@@ -20,8 +20,6 @@
   flex-direction: column;
   gap: var(--space-xs);
   color: var(--text-muted);
-  font-size: 0.75rem;
-  letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
@@ -33,5 +31,23 @@
 @media (max-width: 768px) {
   .research-task-action-modal {
     width: min(100%, calc(100vw - (var(--space-md) * 2)));
+  }
+
+  .research-task-action-modal__body {
+    gap: var(--space-lg);
+  }
+
+  .research-task-action-modal__preview {
+    padding: var(--space-lg);
+  }
+
+  .research-task-action-modal .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .research-task-action-modal .modal-actions .btn {
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   }
 }

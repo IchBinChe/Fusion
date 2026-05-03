@@ -92,10 +92,6 @@
 }
 
 .research-view__history-item {
-  border: var(--btn-border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
   text-align: left;
   padding: var(--space-sm);
   min-height: calc(var(--space-lg) * 2 + var(--space-xs));
@@ -104,22 +100,6 @@
   justify-content: center;
   gap: var(--space-xs);
   cursor: pointer;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast);
-}
-
-.research-view__history-item:hover {
-  background: var(--card-hover);
-  border-color: var(--todo);
-}
-
-.research-view__history-item:focus-visible {
-  outline: none;
-  border-color: var(--todo);
-  box-shadow: var(--focus-ring-strong);
-}
-
-.research-view__history-item:active {
-  transform: scale(0.97);
 }
 
 .research-view__history-item--active {
@@ -208,12 +188,10 @@
 .research-view__stat-label {
   color: var(--text-muted);
   text-transform: uppercase;
-  font-size: 0.6875rem;
 }
 
 .research-view__stat-value {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
 }
 
 .research-view__state--error {

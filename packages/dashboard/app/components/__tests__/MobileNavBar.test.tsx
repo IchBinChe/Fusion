@@ -161,6 +161,50 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-plugin-fusion-plugin-dependency-graph-queue")).toBeDefined();
   });
 
+  it("marks dependency graph plugin tab active when viewing its canonical plugin task-view", () => {
+    render(
+      <MobileNavBar
+        {...createDefaultProps()}
+        view="plugin:fusion-plugin-dependency-graph:graph"
+        pluginDashboardViews={[
+          {
+            pluginId: "fusion-plugin-dependency-graph",
+            view: { viewId: "graph", label: "Graph", componentPath: "./GraphView", icon: "Map", placement: "more" },
+          },
+          {
+            pluginId: "fusion-plugin-dependency-graph",
+            view: { viewId: "queue", label: "Queue", componentPath: "./QueueView", icon: "Workflow" },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("mobile-nav-tab-plugin-fusion-plugin-dependency-graph-graph").className).toContain("mobile-nav-tab--active");
+    expect(screen.getByTestId("mobile-nav-tab-more").className).not.toContain("mobile-nav-tab--active");
+  });
+
+  it("marks More active when current plugin view is overflow-only", () => {
+    render(
+      <MobileNavBar
+        {...createDefaultProps()}
+        view="plugin:fusion-plugin-dependency-graph:queue"
+        pluginDashboardViews={[
+          {
+            pluginId: "fusion-plugin-dependency-graph",
+            view: { viewId: "graph", label: "Graph", componentPath: "./GraphView", icon: "Map", placement: "more" },
+          },
+          {
+            pluginId: "fusion-plugin-dependency-graph",
+            view: { viewId: "queue", label: "Queue", componentPath: "./QueueView", icon: "Workflow" },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("mobile-nav-tab-more").className).toContain("mobile-nav-tab--active");
+    expect(screen.getByTestId("mobile-nav-tab-plugin-fusion-plugin-dependency-graph-graph").className).not.toContain("mobile-nav-tab--active");
+  });
+
   it("active tab is highlighted for mailbox", () => {
     render(<MobileNavBar {...createDefaultProps()} view="mailbox" />);
     expect(screen.getByTestId("mobile-nav-tab-mailbox").className).toContain("mobile-nav-tab--active");

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { GitManagerModal } from "../GitManagerModal";
 import type { Task } from "@fusion/core";
+import { loadAllAppCss } from "../../test/cssFixture";
 
 // Mock the API module with all functions
 vi.mock("../../api", async () => {
@@ -1225,20 +1226,59 @@ describe("GitManagerModal", () => {
 
   // ── Remote Management Tests ───────────────────────────────────
 
-  it("shows list of remotes with URLs", async () => {
+  it("shows selector/detail split and selected highlight in remotes tab", async () => {
     (fetchGitRemotesDetailed as any).mockResolvedValue([
       { name: "origin", fetchUrl: "https://github.com/dustinbyrne/kb.git", pushUrl: "https://github.com/dustinbyrne/kb.git" },
       { name: "upstream", fetchUrl: "https://github.com/upstream/kb.git", pushUrl: "git@github.com:upstream/kb.git" },
     ]);
 
-    render(
+    const user = userEvent.setup();
+    const { container } = render(
       <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
     );
     fireEvent.click(screen.getByRole("tab", { name: /remotes/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("origin")).toBeInTheDocument();
-      expect(screen.getByText("upstream")).toBeInTheDocument();
+      expect(screen.getByTestId("remote-selector")).toBeInTheDocument();
+      expect(screen.getByTestId("remote-detail-panel")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const selectedOrigin = container.querySelector(".gm-remote-selector-item.selected");
+      expect(selectedOrigin).toBeTruthy();
+      expect(selectedOrigin?.textContent ?? "").toContain("origin");
+    });
+
+    const remoteSelector = screen.getByTestId("remote-selector");
+    const upstreamButton = within(remoteSelector).getByText("upstream").closest(".gm-remote-selector-item");
+    expect(upstreamButton).toBeTruthy();
+    await user.click(upstreamButton as HTMLElement);
+
+    await waitFor(() => {
+      const selectedUpstream = container.querySelector(".gm-remote-selector-item.selected");
+      expect(selectedUpstream).toBeTruthy();
+      expect(selectedUpstream?.textContent ?? "").toContain("upstream");
+    });
+  });
+
+  it("renders full URL in selected detail card and not in selector row", async () => {
+    (fetchGitRemotesDetailed as any).mockResolvedValue([
+      { name: "origin", fetchUrl: "https://github.com/dustinbyrne/kb.git", pushUrl: "https://github.com/dustinbyrne/kb.git" },
+      { name: "upstream", fetchUrl: "https://example.com/some/very/long/path/repository-name.git", pushUrl: "https://example.com/some/very/long/path/repository-name.git" },
+    ]);
+
+    const user = userEvent.setup();
+    render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /remotes/i }));
+
+    await user.click(await screen.findByText("upstream"));
+
+    await waitFor(() => {
+      const detailCard = screen.getByTestId("remote-detail-card");
+      expect(within(detailCard).getByText("https://example.com/some/very/long/path/repository-name.git")).toBeInTheDocument();
+      expect(screen.getByText("example.com")).toBeInTheDocument();
     });
   });
 
@@ -2531,6 +2571,26 @@ describe("GitManagerModal", () => {
       await waitFor(() => {
         expect(updateGitRemoteUrl).toHaveBeenCalledWith("origin", "https://new-url.com/repo.git", "proj-abc");
       });
+    });
+  });
+
+  describe("remotes CSS regression coverage", () => {
+    it("includes remotes layout selectors and mobile rules", () => {
+      const css = loadAllAppCss();
+      expect(css).toContain(".gm-remotes-layout");
+      expect(css).toContain(".gm-remote-selector");
+      expect(css).toContain(".gm-remote-detail");
+      expect(css).toContain(".gm-remote-sync-card");
+      expect(css).toContain(".gm-remote-detail-card");
+      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.gm-remotes-layout[\s\S]*?\.gm-remote-selector[\s\S]*?\}/);
+    });
+
+    it("keeps remotes-specific status/surface styles tokenized", () => {
+      const css = loadAllAppCss();
+      const remoteSection = css.slice(css.indexOf("/* ── Remote Panel ── */"), css.indexOf("/* ── Commit Items (shared) ── */"));
+      expect(remoteSection).toContain("color-mix(");
+      expect(remoteSection).not.toMatch(/rgba\(/i);
+      expect(remoteSection).not.toMatch(/#[0-9a-f]{3,8}/i);
     });
   });
 });

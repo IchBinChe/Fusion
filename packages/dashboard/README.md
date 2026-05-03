@@ -372,6 +372,8 @@ The Git Manager provides comprehensive repository visualization and management d
 - Track free/used worktree count
 
 **Remotes Tab**: Perform remote operations with commit visibility:
+- Selector/detail presentation: remotes are listed in a dedicated selector column while sync status, URLs, and commit inspection render in a focused detail panel for the selected remote
+- Responsive flow: at mobile widths, remotes keep the same selector/detail workflow in a stacked layout so fetch/pull/push and edit actions remain reachable without horizontal crowding
 - Fetch from origin
 - Pull latest changes
 - Push current branch

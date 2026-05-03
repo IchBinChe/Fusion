@@ -370,7 +370,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     } catch (err) {
       addToast(getErrorMessage(err) || "Failed to discard changes", "error");
     }
-  }, [addToast, projectId, confirm]);
+  }, [addToast, projectId, confirmContext]);
 
   const handleCommit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -565,7 +565,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     } finally {
       setLoading(false);
     }
-  }, [addToast, projectId, confirm]);
+  }, [addToast, projectId, confirmContext]);
 
   const filteredBranches = useMemo(() => {
     if (!branchSearch.trim()) return branches;
@@ -678,7 +678,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     } finally {
       setStashLoading(null);
     }
-  }, [addToast, projectId, confirm]);
+  }, [addToast, projectId, confirmContext]);
 
   // ── Remote Handlers ─────────────────────────────────────────────
 
@@ -2062,7 +2062,7 @@ function RemotesPanel({
                 value={newRemoteName}
                 onChange={(e) => setNewRemoteName(e.target.value)}
                 disabled={remoteActionLoading === "add"}
-                className="gm-input"
+                className="input gm-input"
               />
               <input
                 type="text"
@@ -2070,7 +2070,7 @@ function RemotesPanel({
                 value={newRemoteUrl}
                 onChange={(e) => setNewRemoteUrl(e.target.value)}
                 disabled={remoteActionLoading === "add"}
-                className="gm-input gm-input-url"
+                className="input gm-input gm-input-url"
               />
               <button
                 type="submit"
@@ -2103,20 +2103,26 @@ function RemotesPanel({
                 onClick={() => setSelectedRemote(remote.name)}
                 role="button"
                 tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedRemote(remote.name);
+                  }
+                }}
               >
                 <div className="gm-remote-selector-info">
                   <span className="gm-remote-selector-name">
-                    {remote.name}
+                    <span className="gm-remote-selector-name-text">{remote.name}</span>
                     {remote.name === "origin" && (
                       <span className="gm-remote-default-badge">default</span>
                     )}
                   </span>
-                  <span className="gm-remote-selector-host">
+                  <span className="gm-remote-selector-host" title={remote.fetchUrl}>
                     {getHostFromUrl(remote.fetchUrl)}
                   </span>
                 </div>
                 <button
-                  className="btn btn-icon btn-sm"
+                  className="btn btn-icon btn-sm gm-remote-remove-btn"
                   onClick={(e) => { e.stopPropagation(); handleRemoveRemote(remote.name); }}
                   disabled={remoteActionLoading !== null}
                   title="Remove remote"
@@ -2140,12 +2146,14 @@ function RemotesPanel({
                     <div className="gm-remote-status">
                       {status.ahead > 0 && (
                         <div className="gm-remote-indicator ahead">
+                          <span className="status-dot status-dot--online" aria-hidden="true" />
                           <ArrowUp size={14} />
                           {status.ahead} to push
                         </div>
                       )}
                       {status.behind > 0 && (
                         <div className="gm-remote-indicator behind">
+                          <span className="status-dot status-dot--pending" aria-hidden="true" />
                           <ArrowDown size={14} />
                           {status.behind} to pull
                         </div>
@@ -2205,7 +2213,7 @@ function RemotesPanel({
                           type="text"
                           value={editUrlValue}
                           onChange={(e) => setEditUrlValue(e.target.value)}
-                          className="gm-input"
+                          className="input gm-input"
                           autoFocus
                         />
                         <button
@@ -2230,23 +2238,25 @@ function RemotesPanel({
                     ) : (
                       <>
                         <span className="gm-url-value" title={selectedRemoteData.fetchUrl}>
-                          {selectedRemoteData.fetchUrl}
+                          <bdo dir="ltr">{selectedRemoteData.fetchUrl}</bdo>
                         </span>
-                        <button
-                          className="btn btn-icon btn-sm"
-                          onClick={() => copyToClipboard(selectedRemoteData.fetchUrl, "fetch URL")}
-                          title="Copy fetch URL"
-                        >
-                          <Copy size={14} />
-                        </button>
-                        <button
-                          className="btn btn-icon btn-sm"
-                          onClick={() => startEditingUrl(selectedRemoteData)}
-                          disabled={remoteActionLoading !== null}
-                          title="Edit remote URL"
-                        >
-                          <Pencil size={14} />
-                        </button>
+                        <div className="gm-remote-inline-actions">
+                          <button
+                            className="btn btn-icon btn-sm"
+                            onClick={() => copyToClipboard(selectedRemoteData.fetchUrl, "fetch URL")}
+                            title="Copy fetch URL"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button
+                            className="btn btn-icon btn-sm"
+                            onClick={() => startEditingUrl(selectedRemoteData)}
+                            disabled={remoteActionLoading !== null}
+                            title="Edit remote URL"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        </div>
                       </>
                     )}
                   </div>
@@ -2256,15 +2266,17 @@ function RemotesPanel({
                     <div className="gm-remote-detail-url-row">
                       <span className="gm-url-label">Push:</span>
                       <span className="gm-url-value" title={selectedRemoteData.pushUrl}>
-                        {selectedRemoteData.pushUrl}
+                        <bdo dir="ltr">{selectedRemoteData.pushUrl}</bdo>
                       </span>
-                      <button
-                        className="btn btn-icon btn-sm"
-                        onClick={() => copyToClipboard(selectedRemoteData.pushUrl!, "push URL")}
-                        title="Copy push URL"
-                      >
-                        <Copy size={14} />
-                      </button>
+                      <div className="gm-remote-inline-actions">
+                        <button
+                          className="btn btn-icon btn-sm"
+                          onClick={() => copyToClipboard(selectedRemoteData.pushUrl!, "push URL")}
+                          title="Copy push URL"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2277,7 +2289,7 @@ function RemotesPanel({
                         type="text"
                         value={editNameValue}
                         onChange={(e) => setEditNameValue(e.target.value)}
-                        className="gm-input"
+                        className="input gm-input"
                         autoFocus
                       />
                       <button
@@ -2335,6 +2347,12 @@ function RemotesPanel({
                             onClick={() => handleCompactCommitClick(commit.hash, "ahead")}
                             role="button"
                             tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                handleCompactCommitClick(commit.hash, "ahead");
+                              }
+                            }}
                             title="Click to view diff"
                           >
                             <div className="gm-commit-compact-hash">
@@ -2416,6 +2434,12 @@ function RemotesPanel({
                           onClick={() => handleCompactCommitClick(commit.hash, "remote")}
                           role="button"
                           tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleCompactCommitClick(commit.hash, "remote");
+                            }
+                          }}
                           title="Click to view diff"
                         >
                           <div className="gm-commit-compact-hash">

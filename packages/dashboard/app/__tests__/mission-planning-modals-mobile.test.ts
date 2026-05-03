@@ -51,9 +51,9 @@ function extractMaxWidthMediaBlocks(maxWidthPx: number): string[] {
 const mobileBlocks = extractMaxWidthMediaBlocks(768);
 
 function findMobileBlockContaining(needle: string): string {
-  const block = mobileBlocks.find((candidate) => candidate.includes(needle));
-  expect(block, `Expected a 768px mobile block containing "${needle}"`).toBeTruthy();
-  return block ?? "";
+  const matchingBlocks = mobileBlocks.filter((candidate) => candidate.includes(needle));
+  expect(matchingBlocks.length, `Expected a 768px mobile block containing "${needle}"`).toBeGreaterThan(0);
+  return matchingBlocks.join("\n");
 }
 
 describe("mission + planning modal mobile CSS", () => {

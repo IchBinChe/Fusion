@@ -411,6 +411,12 @@
   margin: 0 auto;
 }
 
+.planning-advanced-disclosure .onboarding-disclosure-content {
+  padding-inline-start: 0;
+  display: flex;
+  justify-content: center;
+}
+
 .planning-advanced-content {
   display: flex;
   flex-direction: column;

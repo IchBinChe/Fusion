@@ -338,6 +338,11 @@ describe("PlanningModeModal", () => {
         />
       );
 
+      expect(screen.getByRole("button", { name: "Advanced planning settings" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Planning Model" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
+
       const modelTrigger = screen.getByRole("button", { name: "Planning Model" });
       expect(modelTrigger).toBeDefined();
 
@@ -362,8 +367,8 @@ describe("PlanningModeModal", () => {
         expect(mockFetchModels).toHaveBeenCalledTimes(1);
       });
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       expect(screen.getByText("openai/gpt-4o")).toBeDefined();
-
       fireEvent.click(screen.getByRole("button", { name: "Planning Model" }));
       fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet 4.5/ }));
 
@@ -385,6 +390,7 @@ describe("PlanningModeModal", () => {
         expect(mockFetchModels).toHaveBeenCalledTimes(1);
       });
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       fireEvent.click(screen.getByRole("button", { name: "Planning Model" }));
       fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet 4.5/ }));
 
@@ -403,7 +409,7 @@ describe("PlanningModeModal", () => {
       });
     });
 
-    it("renders advanced disclosure controls in the initial view", async () => {
+    it("keeps advanced disclosure collapsed by default and reveals controls when expanded", async () => {
       render(
         <PlanningModeModal
           isOpen={true}
@@ -420,6 +426,13 @@ describe("PlanningModeModal", () => {
       const disclosure = disclosureButton.closest(".onboarding-disclosure");
       expect(disclosure).not.toBeNull();
       const disclosureScope = within(disclosure as HTMLElement);
+
+      expect(disclosureButton.getAttribute("aria-expanded")).toBe("false");
+      expect(disclosureScope.queryByRole("button", { name: "Planning Model" })).toBeNull();
+      expect(disclosureScope.queryByText(/Selects which model runs the planning interview/)).toBeNull();
+
+      fireEvent.click(disclosureButton);
+      expect(disclosureButton.getAttribute("aria-expanded")).toBe("true");
 
       expect(disclosureScope.getByRole("button", { name: "Planning Model" })).toBeDefined();
       await waitFor(() => {
@@ -444,6 +457,7 @@ describe("PlanningModeModal", () => {
         />
       );
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       fireEvent.click(screen.getByRole("button", { name: "Large" }));
       fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "7" } });
       fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
@@ -606,6 +620,18 @@ describe("PlanningModeModal", () => {
       expect(maxHeightValue).toContain("calc(");
       expect(maxHeightValue).toContain("100dvh");
       expect(maxHeightValue).toContain("--overlay-padding-top");
+    });
+
+    it("uses planning-scoped disclosure overrides to remove inherited content indent", async () => {
+      const { loadAllAppCssBaseOnly } = await import("../../test/cssFixture");
+      const css = loadAllAppCssBaseOnly();
+
+      const blockMatch = css.match(
+        /\.planning-advanced-disclosure\s+\.onboarding-disclosure-content\s*\{[^}]*\}/,
+      );
+      expect(blockMatch).toBeTruthy();
+      expect(blockMatch![0]).toContain("padding-inline-start: 0;");
+      expect(blockMatch![0]).toContain("justify-content: center;");
     });
   });
 
@@ -2547,6 +2573,7 @@ describe("PlanningModeModal", () => {
         expect(mockFetchModels).toHaveBeenCalled();
       });
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       fireEvent.click(screen.getByRole("button", { name: "Planning Model" }));
 
       await waitFor(() => {
@@ -2587,6 +2614,7 @@ describe("PlanningModeModal", () => {
         expect(mockFetchModels).toHaveBeenCalled();
       });
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       fireEvent.click(screen.getByRole("button", { name: "Planning Model" }));
 
       await waitFor(() => {
@@ -2628,6 +2656,7 @@ describe("PlanningModeModal", () => {
         expect(mockFetchModels).toHaveBeenCalled();
       });
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       fireEvent.click(screen.getByRole("button", { name: "Planning Model" }));
 
       await waitFor(() => {
@@ -2666,6 +2695,7 @@ describe("PlanningModeModal", () => {
         expect(mockFetchModels).toHaveBeenCalled();
       });
 
+      fireEvent.click(screen.getByRole("button", { name: "Advanced planning settings" }));
       fireEvent.click(screen.getByRole("button", { name: "Planning Model" }));
 
       await waitFor(() => {

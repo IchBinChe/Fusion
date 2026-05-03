@@ -1568,7 +1568,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                   </div>
                 </div>
 
-                <OnboardingDisclosure summary="Advanced planning settings" className="planning-advanced-disclosure" defaultOpen>
+                <OnboardingDisclosure summary="Advanced planning settings" className="planning-advanced-disclosure">
                   <div className="planning-advanced-content">
                     <div className="planning-advanced-section planning-model-select-group">
                     <label htmlFor="planning-modal-model" className="form-label">

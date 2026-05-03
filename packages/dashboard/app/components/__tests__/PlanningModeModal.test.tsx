@@ -187,6 +187,32 @@ class MockEventSource {
   }
 }
 
+function getMediaBlocks(css: string, mediaQuery: string): string[] {
+  const blocks: string[] = [];
+  let searchStart = 0;
+
+  while (searchStart < css.length) {
+    const start = css.indexOf(mediaQuery, searchStart);
+    if (start === -1) break;
+
+    const blockStart = css.indexOf("{", start);
+    if (blockStart === -1) break;
+
+    let depth = 1;
+    let cursor = blockStart + 1;
+    while (cursor < css.length && depth > 0) {
+      if (css[cursor] === "{") depth += 1;
+      else if (css[cursor] === "}") depth -= 1;
+      cursor += 1;
+    }
+
+    blocks.push(css.slice(start, cursor));
+    searchStart = cursor;
+  }
+
+  return blocks;
+}
+
 describe("PlanningModeModal", () => {
   const mockOnClose = vi.fn();
   const mockOnTaskCreated = vi.fn();
@@ -632,6 +658,17 @@ describe("PlanningModeModal", () => {
       expect(blockMatch).toBeTruthy();
       expect(blockMatch![0]).toContain("padding-inline-start: 0;");
       expect(blockMatch![0]).toContain("justify-content: center;");
+    });
+
+    it("keeps mobile question view top spacing compact", async () => {
+      const { loadAllAppCss } = await import("../../test/cssFixture");
+      const css = loadAllAppCss();
+      const mobileBlocks = getMediaBlocks(css, "@media (max-width: 768px)");
+      const mobileCss = mobileBlocks.join("\n");
+
+      expect(mobileCss).toContain(".planning-question-scroll");
+      expect(mobileCss).toContain("padding-top: var(--space-sm);");
+      expect(mobileCss).toContain("gap: var(--space-md);");
     });
   });
 

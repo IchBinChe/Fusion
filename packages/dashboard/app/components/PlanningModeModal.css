@@ -1309,7 +1309,12 @@
 
   .planning-view-scroll {
     padding: var(--space-lg);
-    gap: 20px;
+    gap: var(--space-lg);
+  }
+
+  .planning-question-scroll {
+    padding-top: var(--space-sm);
+    gap: var(--space-md);
   }
 
   .planning-view-footer,

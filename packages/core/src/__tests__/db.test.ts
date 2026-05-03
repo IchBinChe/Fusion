@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Database, createDatabase, toJson, toJsonNullable, fromJson, normalizeTaskComments } from "../db.js";
 import { DEFAULT_PROJECT_SETTINGS } from "../types.js";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -237,9 +237,13 @@ describe("Database", () => {
       const freshFusionDir = join(freshDir, ".fusion");
       const freshDb = new Database(freshFusionDir);
 
-      // init includes the integrity check — should not throw
-      expect(() => freshDb.init()).not.toThrow();
-      freshDb.close();
+      try {
+        // init includes the integrity check — should not throw
+        expect(() => freshDb.init()).not.toThrow();
+      } finally {
+        freshDb.close();
+        rmSync(freshDir, { recursive: true, force: true });
+      }
     });
   });
 

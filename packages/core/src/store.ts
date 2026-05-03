@@ -3752,9 +3752,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   async deleteTask(id: string, options?: { removeDependencyReferences?: boolean }): Promise<Task> {
-    // Flush buffered agent logs so FK cascade deletes can find them.
-    this.flushAgentLogBuffer();
     return this.withTaskLock(id, async () => {
+      // Flush buffered agent logs inside the lock so no new appends for this
+      // task can sneak in between flush and DELETE.
+      this.flushAgentLogBuffer();
       const task = this.readTaskFromDb(id);
       if (!task) {
         throw new Error(`Task ${id} not found`);
@@ -4727,7 +4728,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Flush all buffered agent log entries in a single transaction.
    * Called when the buffer is full or on a timer.
    */
-  flushAgentLogBuffer(): void {
+  private flushAgentLogBuffer(): void {
     if (this.agentLogFlushTimer) {
       clearTimeout(this.agentLogFlushTimer);
       this.agentLogFlushTimer = null;
@@ -4740,21 +4741,37 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const batch = this.agentLogBuffer.slice();
     const flushCount = batch.length;
 
-    this.db.transaction(() => {
-      const stmt = this.db.prepare(`
-        INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-      for (const entry of batch) {
-        stmt.run(entry.taskId, entry.timestamp, entry.text, entry.type, entry.detail, entry.agent);
+    try {
+      // Filter out entries for deleted tasks to prevent FK violations
+      // from poisoning the entire buffer.
+      const liveTaskIds = new Set(
+        (this.db.prepare("SELECT id FROM tasks").all() as Array<{ id: string }>).map((r) => r.id),
+      );
+      const validEntries = batch.filter((e) => liveTaskIds.has(e.taskId));
+      const dropped = batch.length - validEntries.length;
+      if (dropped > 0) {
+        console.warn(
+          `[fusion] Dropped ${dropped} buffered agent log entries for deleted tasks (${this.db.path})`,
+        );
       }
-      this.db.bumpLastModified();
-    });
 
-    // Remove only the flushed entries. If appendAgentLog added entries
-    // during the transaction (can't happen in single-threaded Node, but
-    // defensive), they remain in the buffer.
-    this.agentLogBuffer.splice(0, flushCount);
+      if (validEntries.length > 0) {
+        this.db.transaction(() => {
+          const stmt = this.db.prepare(`
+            INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `);
+          for (const entry of validEntries) {
+            stmt.run(entry.taskId, entry.timestamp, entry.text, entry.type, entry.detail, entry.agent);
+          }
+          this.db.bumpLastModified();
+        });
+      }
+    } finally {
+      // Always drain the flushed slice so a failed transaction doesn't
+      // cause the same entries to block every future flush.
+      this.agentLogBuffer.splice(0, flushCount);
+    }
   }
 
   async appendAgentLogBatch(
@@ -5522,6 +5539,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     startIso: string,
     endIso: string | null,
   ): Promise<AgentLogEntry[]> {
+    // Ensure buffered entries are visible before reading.
+    this.flushAgentLogBuffer();
     const end = endIso ?? new Date().toISOString();
     const selectClause = this.getAgentLogSelectClause();
     const rows = this.db.prepare(`

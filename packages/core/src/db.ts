@@ -910,20 +910,8 @@ export class Database {
    * and seed meta values.
    */
   init(): void {
-    this.db.exec(SCHEMA_SQL);
-
-    // Seed schemaVersion and lastModified idempotently
-    this.db.exec(
-      `INSERT OR IGNORE INTO __meta (key, value) VALUES ('schemaVersion', '1')`,
-    );
-    this.db.exec(
-      `INSERT OR IGNORE INTO __meta (key, value) VALUES ('lastModified', '${Date.now()}')`,
-    );
-
-    // Startup integrity check — run BEFORE migrations and seeds to avoid
-    // writing to a corrupted database and making it worse. Uses the
-    // structured integrityCheck() method and attempts WAL checkpoint
-    // recovery on failure.
+    // Startup integrity check — run BEFORE any writes to avoid
+    // compounding corruption. Attempts WAL checkpoint recovery on failure.
     const integrity = this.integrityCheck();
     if (!integrity.ok) {
       this.corruptionDetected = true;
@@ -941,13 +929,24 @@ export class Database {
             `Run: sqlite3 ${this.dbPath} ".recover" | sqlite3 ${this.dbPath}.recovered`,
           );
         }
-      } catch {
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         console.error(
-          `[fusion:db] Database corruption detected for ${this.dbPath} and checkpoint recovery failed. ` +
+          `[fusion:db] Database corruption detected for ${this.dbPath} and checkpoint recovery failed: ${errMsg}. ` +
           "Manual recovery required.",
         );
       }
     }
+
+    this.db.exec(SCHEMA_SQL);
+
+    // Seed schemaVersion and lastModified idempotently
+    this.db.exec(
+      `INSERT OR IGNORE INTO __meta (key, value) VALUES ('schemaVersion', '1')`,
+    );
+    this.db.exec(
+      `INSERT OR IGNORE INTO __meta (key, value) VALUES ('lastModified', '${Date.now()}')`,
+    );
 
     // Run schema migrations
     this.migrate();

@@ -4884,9 +4884,11 @@ Task with acceptance criteria
           await store.appendAgentLog(task.id, `entry ${i}`, "text");
         }
 
-        // All 50 should be in the DB now (auto-flush at buffer size)
-        const count = await store.getAgentLogCount(task.id);
-        expect(count).toBe(50);
+        // Validate DB persistence without invoking read-path auto-flush helpers.
+        const row = (store as any).db
+          .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
+          .get(task.id) as { count: number };
+        expect(row.count).toBe(50);
       });
 
       it("auto-flushes buffered entries when getAgentLogs is called", async () => {
@@ -4971,7 +4973,7 @@ Task with acceptance criteria
         expect(events[0].taskId).toBe(task.id);
       });
 
-      it("groups entries from multiple tasks into a single flush", async () => {
+      it("flushes interleaved entries from multiple tasks correctly", async () => {
         const taskA = await createTestTask();
         const taskB = await store.createTask({ description: "Task B" });
 

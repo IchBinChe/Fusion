@@ -698,6 +698,8 @@ export class Database {
   private db: DatabaseSync;
   private readonly dbPath: string;
   private readonly inMemory: boolean;
+  /** Returns the database file path (or ":memory:" for in-memory databases). */
+  get path(): string { return this.dbPath; }
   corruptionDetected = false;
   /** Tracks transaction nesting depth for savepoint-based nested transactions. */
   private transactionDepth = 0;

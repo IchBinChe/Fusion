@@ -4701,7 +4701,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.emit("agent:log", entry);
 
     if (this.agentLogBuffer.length >= TaskStore.AGENT_LOG_BUFFER_SIZE) {
-      this.flushAgentLogBuffer();
+      try {
+        this.flushAgentLogBuffer();
+      } catch (err) {
+        // Size-triggered flush failed — log but don't crash the caller.
+        console.error(`[fusion] Size-triggered agent log flush failed (${this.db.path}):`, err);
+      }
     } else if (!this.agentLogFlushTimer) {
       this.agentLogFlushTimer = setTimeout(
         () => {
@@ -4709,7 +4714,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             this.flushAgentLogBuffer();
           } catch (err) {
             // Timer-triggered flush failed — log but don't crash the process.
-            console.error("[fusion] Timer-triggered agent log flush failed:", err);
+            console.error(`[fusion] Timer-triggered agent log flush failed (${this.db.path}):`, err);
           }
         },
         TaskStore.AGENT_LOG_FLUSH_MS,
@@ -4743,13 +4748,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       for (const entry of batch) {
         stmt.run(entry.taskId, entry.timestamp, entry.text, entry.type, entry.detail, entry.agent);
       }
+      this.db.bumpLastModified();
     });
 
     // Remove only the flushed entries. If appendAgentLog added entries
     // during the transaction (can't happen in single-threaded Node, but
     // defensive), they remain in the buffer.
     this.agentLogBuffer.splice(0, flushCount);
-    this.db.bumpLastModified();
   }
 
   async appendAgentLogBatch(
@@ -4764,6 +4769,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (entries.length === 0) {
       return;
     }
+
+    // Flush buffered single-entry appends so they land before batch entries,
+    // preserving insertion order (same-timestamp entries are ordered by rowid).
+    this.flushAgentLogBuffer();
 
     const timestamp = new Date().toISOString();
     const normalizedEntries = entries.map((entry) => ({
@@ -4786,9 +4795,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           entry.agent ?? null,
         );
       }
+      this.db.bumpLastModified();
     });
 
-    this.db.bumpLastModified();
     for (const entry of normalizedEntries) {
       this.emit("agent:log", {
         timestamp,
@@ -6125,7 +6134,7 @@ ${stepsSection}`;
       } catch (err) {
         // Best-effort flush — entries for deleted tasks will fail FK check.
         // Log the error instead of silently swallowing it.
-        console.warn("[fusion] Could not flush remaining agent log entries on close:", err);
+        console.warn(`[fusion] Could not flush remaining agent log entries on close (${this.db.path}):`, err);
       }
     }
     if (this._db) {

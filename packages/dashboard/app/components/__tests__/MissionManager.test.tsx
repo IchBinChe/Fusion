@@ -3275,4 +3275,56 @@ describe("MissionManager", () => {
       expect(getComputedStyle(sidebarList).overflowY).toBe("auto");
     });
   });
+
+  describe("two-panel layout test IDs", () => {
+    it("renders sidebar and empty detail pane on desktop via test IDs", async () => {
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mission-sidebar")).toBeInTheDocument();
+        expect(screen.getByTestId("mission-empty-detail")).toBeInTheDocument();
+      });
+    });
+
+    it("shows mission detail in right pane when mission is selected from sidebar", async () => {
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+      });
+
+      const sidebar = screen.getByTestId("mission-sidebar");
+      fireEvent.click(within(sidebar).getByText("Build Auth System"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mission-sidebar")).toBeInTheDocument();
+        expect(within(sidebar).getByText("API Redesign")).toBeInTheDocument();
+        expect(screen.getByTestId("mission-tab-structure")).toBeInTheDocument();
+      });
+    });
+
+    it("applies desktop class to shell on desktop viewport", async () => {
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        const dialog = screen.getByTestId("mission-manager-dialog");
+        expect(dialog.className).toContain("mission-manager--desktop");
+      });
+    });
+
+    it("works in inline mode with split layout", async () => {
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} isInline={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        const dialog = screen.getByTestId("mission-manager-dialog");
+        expect(dialog.className).toContain("mission-manager--inline");
+        expect(dialog.className).toContain("mission-manager--desktop");
+        expect(screen.getByTestId("mission-sidebar")).toBeInTheDocument();
+      });
+    });
+  });
 });

@@ -3789,7 +3789,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         </div>
       ) : (
         <div className="mission-manager__split">
-          <div className="mission-manager__sidebar">
+          <aside className="mission-manager__sidebar" data-testid="mission-sidebar" aria-label="Mission list">
             <div className="mission-manager__sidebar-header">
               <span className="mission-manager__sidebar-title">Missions</span>
               <div className="mission-manager__sidebar-actions">
@@ -3821,7 +3821,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 renderMissionListContent({ hideBottomButtons: true })
               )}
             </div>
-          </div>
+          </aside>
 
           <div className="mission-manager__detail-pane">
             {detailLoading ? (
@@ -3832,7 +3832,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             ) : selectedMission ? (
               renderMissionDetailContent()
             ) : (
-              <div className="mission-manager__detail-pane-empty">
+              <div className="mission-manager__detail-pane-empty" data-testid="mission-empty-detail">
                 <Target size={32} />
                 <span>Select a mission to view details</span>
               </div>

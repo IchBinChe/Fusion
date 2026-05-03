@@ -82,3 +82,83 @@ describe("MissionManager mobile styles", () => {
     expect(desktopBlock).toContain("display: none");
   });
 });
+
+describe("desktop two-panel split CSS", () => {
+  it("defines sidebar with fixed width, border, and scroll", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager__sidebar {");
+    // Sidebar width uses token-based calc instead of hardcoded px
+    expect(css).toContain("flex-shrink: 0;");
+    expect(css).toContain("border-right");
+    expect(css).toContain("var(--border)");
+  });
+
+  it("defines detail pane with flex: 1 and overflow", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager__detail-pane {");
+    expect(css).toContain("flex: 1;");
+    expect(css).toContain("overflow-y: auto;");
+  });
+
+  it("hides back button on desktop", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager--desktop .mission-manager__back-btn {");
+    expect(css).toContain("display: none;");
+  });
+
+  it("toggles header title variants on desktop", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager__title-text--desktop {");
+    expect(css).toContain(".mission-manager__title-text--mobile {");
+  });
+
+  it("defines sidebar list with overflow scroll", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager__sidebar-list {");
+    expect(css).toContain("overflow-y: auto;");
+  });
+
+  it("defines split container as flex row", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager__split {");
+    expect(css).toContain("flex-direction: row;");
+  });
+
+  it("defines empty detail pane placeholder", () => {
+    const css = loadAllAppCss();
+    expect(css).toContain(".mission-manager__detail-pane-empty {");
+    expect(css).toContain("var(--text-muted)");
+  });
+});
+
+describe("mobile split reversal CSS", () => {
+  it("hides desktop split on mobile", () => {
+    const css = loadAllAppCss();
+    const section = getMissionMobileSection(css);
+    expect(section).toContain(".mission-manager__split {");
+    expect(section).toContain("display: none;");
+  });
+
+  it("restores stacked body on mobile", () => {
+    const css = loadAllAppCss();
+    const section = getMissionMobileSection(css);
+    expect(section).toContain(".mission-manager__body--stacked {");
+    expect(section).toContain("display: block;");
+  });
+
+  it("restores back button on mobile", () => {
+    const css = loadAllAppCss();
+    const section = getMissionMobileSection(css);
+    const mobileRule = section.match(/\.mission-manager--desktop \.mission-manager__back-btn\s*\{[^}]*\}/)?.[0];
+    expect(mobileRule).toContain("display: inline-flex;");
+  });
+
+  it("restores dynamic title on mobile", () => {
+    const css = loadAllAppCss();
+    const section = getMissionMobileSection(css);
+    const mobileBlock = section.match(/\.mission-manager__title-text--mobile\s*\{[^}]*\}/)?.[0];
+    const desktopBlock = section.match(/\.mission-manager__title-text--desktop\s*\{[^}]*\}/)?.[0];
+    expect(mobileBlock).toContain("display: inline");
+    expect(desktopBlock).toContain("display: none");
+  });
+});

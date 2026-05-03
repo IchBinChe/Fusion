@@ -7,6 +7,7 @@ interface OnboardingDisclosureProps {
   children: React.ReactNode;
   className?: string;
   onToggle?: (isOpen: boolean) => void;
+  defaultOpen?: boolean;
 }
 
 export function OnboardingDisclosure({
@@ -14,8 +15,9 @@ export function OnboardingDisclosure({
   children,
   className = "",
   onToggle,
+  defaultOpen = false,
 }: OnboardingDisclosureProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
     <div className={`onboarding-disclosure ${className}`.trim()}>

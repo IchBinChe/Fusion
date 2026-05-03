@@ -127,7 +127,10 @@ export function NodeDetailModal({
     return getProjectsForNode(projects, node);
   }, [node, projects]);
 
-  const isManagedDockerNode = useMemo(() => node?.capabilities?.includes("docker-managed") ?? false, [node]);
+  const isManagedDockerNode = useMemo(
+    () => (node?.capabilities as readonly string[] | undefined)?.includes("docker-managed") ?? false,
+    [node],
+  );
 
   const handleHealthCheck = useCallback(async () => {
     if (!node) return;

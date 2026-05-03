@@ -410,6 +410,8 @@ describe("PlanningModeModal", () => {
         />
       );
 
+      expect(screen.getByRole("button", { name: "Advanced planning settings" })).toBeDefined();
+      expect(screen.getByText(/Choose the planning model and tune plan depth/)).toBeDefined();
       expect(screen.getByRole("button", { name: "Small" })).toBeDefined();
       expect(screen.getByRole("button", { name: "Medium" }).getAttribute("aria-pressed")).toBe("true");
       expect(screen.getByRole("button", { name: "Large" })).toBeDefined();

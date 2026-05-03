@@ -1556,91 +1556,97 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                   </div>
                 </div>
 
-                <div className="planning-model-select-group">
-                  <label htmlFor="planning-modal-model" className="form-label">
-                    Planning Model
-                    {modelsLoading && (
-                      <span className="text-muted text-muted-sm">
-                        Loading models…
-                      </span>
+                <OnboardingDisclosure summary="Advanced planning settings" className="planning-advanced-disclosure" defaultOpen>
+                  <p className="planning-advanced-blurb">
+                    Choose the planning model and tune plan depth to control how detailed the AI interview should be.
+                  </p>
+
+                  <div className="planning-model-select-group">
+                    <label htmlFor="planning-modal-model" className="form-label">
+                      Planning Model
+                      {modelsLoading && (
+                        <span className="text-muted text-muted-sm">
+                          Loading models…
+                        </span>
+                      )}
+                    </label>
+                    <CustomModelDropdown
+                      id="planning-modal-model"
+                      label="Planning Model"
+                      value={planningSelectionValue}
+                      onChange={(value) => {
+                        const { provider, modelId } = parseModelSelection(value);
+                        setPlanningModelProvider(provider);
+                        setPlanningModelId(modelId);
+                      }}
+                      models={loadedModels}
+                      disabled={modelsLoading}
+                      favoriteProviders={favoriteProviders}
+                      onToggleFavorite={handleToggleFavoriteProvider}
+                      favoriteModels={favoriteModels}
+                      onToggleModelFavorite={handleToggleFavoriteModel}
+                    />
+                    {modelsError && (
+                      <div className="form-hint form-hint-error">
+                        {modelsError}{" "}
+                        <button
+                          type="button"
+                          className="text-link-btn"
+                          onClick={() => {
+                            void loadModels();
+                          }}
+                        >
+                          Retry
+                        </button>
+                      </div>
                     )}
-                  </label>
-                  <CustomModelDropdown
-                    id="planning-modal-model"
-                    label="Planning Model"
-                    value={planningSelectionValue}
-                    onChange={(value) => {
-                      const { provider, modelId } = parseModelSelection(value);
-                      setPlanningModelProvider(provider);
-                      setPlanningModelId(modelId);
-                    }}
-                    models={loadedModels}
-                    disabled={modelsLoading}
-                    favoriteProviders={favoriteProviders}
-                    onToggleFavorite={handleToggleFavoriteProvider}
-                    favoriteModels={favoriteModels}
-                    onToggleModelFavorite={handleToggleFavoriteModel}
-                  />
-                  {modelsError && (
-                    <div className="form-hint form-hint-error">
-                      {modelsError}{" "}
-                      <button
-                        type="button"
-                        className="text-link-btn"
-                        onClick={() => {
-                          void loadModels();
-                        }}
+                    <div className="model-selector-current model-selector-current--spaced">
+                      <span
+                        className={`model-badge ${
+                          planningModelProvider && planningModelId
+                            ? "model-badge-custom"
+                            : "model-badge-default"
+                        }`}
                       >
-                        Retry
-                      </button>
+                        {getModelBadgeLabel(planningModelProvider, planningModelId)}
+                      </span>
                     </div>
-                  )}
-                  <div className="model-selector-current model-selector-current--spaced">
-                    <span
-                      className={`model-badge ${
-                        planningModelProvider && planningModelId
-                          ? "model-badge-custom"
-                          : "model-badge-default"
-                      }`}
-                    >
-                      {getModelBadgeLabel(planningModelProvider, planningModelId)}
-                    </span>
                   </div>
-                </div>
-              </div>
 
-              <div className="planning-depth-selector">
-                <div className="planning-depth-chip-group" role="group" aria-label="Planning depth">
-                  {([
-                    { value: "small", label: "Small" },
-                    { value: "medium", label: "Medium" },
-                    { value: "large", label: "Large" },
-                  ] as const).map((depthOption) => (
-                    <button
-                      key={depthOption.value}
-                      type="button"
-                      className={`planning-depth-chip btn ${planningDepth === depthOption.value ? "btn-primary planning-depth-chip-active" : ""}`}
-                      onClick={() => setPlanningDepth(depthOption.value)}
-                      aria-pressed={planningDepth === depthOption.value}
-                    >
-                      {depthOption.label}
-                    </button>
-                  ))}
-                </div>
+                  <div className="planning-depth-selector">
+                    <div className="planning-depth-chip-group" role="group" aria-label="Planning depth">
+                      {([
+                        { value: "small", label: "Small" },
+                        { value: "medium", label: "Medium" },
+                        { value: "large", label: "Large" },
+                      ] as const).map((depthOption) => (
+                        <button
+                          key={depthOption.value}
+                          type="button"
+                          className={`planning-depth-chip btn ${planningDepth === depthOption.value ? "btn-primary planning-depth-chip-active" : ""}`}
+                          onClick={() => setPlanningDepth(depthOption.value)}
+                          aria-pressed={planningDepth === depthOption.value}
+                        >
+                          {depthOption.label}
+                        </button>
+                      ))}
+                    </div>
 
-                <label className="planning-depth-question-count" htmlFor="planning-depth-questions">
-                  <span>Questions</span>
-                  <input
-                    id="planning-depth-questions"
-                    className="input planning-depth-question-input"
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={customQuestionCount}
-                    onChange={(e) => setCustomQuestionCount(e.target.value)}
-                    placeholder="Auto"
-                  />
-                </label>
+                    <label className="planning-depth-question-count" htmlFor="planning-depth-questions">
+                      <span>Questions</span>
+                      <input
+                        id="planning-depth-questions"
+                        className="input planning-depth-question-input"
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={customQuestionCount}
+                        onChange={(e) => setCustomQuestionCount(e.target.value)}
+                        placeholder="Auto"
+                      />
+                    </label>
+                  </div>
+                </OnboardingDisclosure>
               </div>
 
               <div className="planning-view-footer">

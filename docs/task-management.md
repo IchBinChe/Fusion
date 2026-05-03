@@ -19,8 +19,10 @@ Use the inline input on board/list view:
 Use the 💡 button to open planning mode:
 
 - AI asks clarifying questions
+- AI reasoning (thinking output) is preserved and visible throughout the session — expand the reasoning toggle to review the model's analysis before answering each question or accepting the summary
 - Produces summary + key deliverables
 - Create one task or **Break into Tasks** (multi-task generation with dependencies)
+- Sessions persist when the modal is closed — resume from the sidebar list at any time; reasoning context is restored automatically
 
 ### 3) Todo item → Plan Mode
 

@@ -1576,6 +1576,346 @@ describe("PlanningModeModal", () => {
     });
   });
 
+  describe("Initial-turn reasoning visibility (FN-3274)", () => {
+    it("preserves reasoning in conversation history when first question arrives after thinking", async () => {
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      // Wait for loading state to appear
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      // Simulate thinking output arriving during loading
+      act(() => {
+        streamHandlers.onThinking?.("Analyzing the plan requirements...");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+      });
+
+      // Transition to question view
+      act(() => {
+        streamHandlers.onQuestion?.(mockQuestion);
+      });
+
+      // Question should be visible
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      // The reasoning should now be in conversation history as an expandable entry
+      expect(screen.getByTestId("conversation-history")).toBeDefined();
+      expect(screen.getByText("AI Reasoning")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: /Show AI reasoning/i }));
+      expect(screen.getByText("Analyzing the plan requirements...")).toBeDefined();
+
+      // avoid dangling handlers reference lint
+      expect(streamHandlers).toBeDefined();
+    });
+
+    it("preserves reasoning in conversation history when summary arrives after thinking", async () => {
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      // Simulate thinking output arriving
+      act(() => {
+        streamHandlers.onThinking?.("Finalizing the planning summary...");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+      });
+
+      // Transition directly to summary view
+      act(() => {
+        streamHandlers.onSummary?.(mockSummary);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Planning Complete!")).toBeDefined();
+      });
+
+      // The reasoning should be visible in the Q&A disclosure
+      fireEvent.click(screen.getByRole("button", { name: "Show user Q&A" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("conversation-history")).toBeDefined();
+      });
+      expect(screen.getByText("AI Reasoning")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: /Show AI reasoning/i }));
+      expect(screen.getByText("Finalizing the planning summary...")).toBeDefined();
+
+      expect(streamHandlers).toBeDefined();
+    });
+
+    it("restores persisted thinkingOutput as conversation history when resuming awaiting_input session", async () => {
+      mockConnectPlanningStream.mockImplementationOnce(() => ({
+        close: vi.fn(),
+        isConnected: vi.fn().mockReturnValue(true),
+      }));
+
+      const resumedQuestion: PlanningQuestion = {
+        id: "q-current",
+        type: "text",
+        question: "What should we prioritize next?",
+      };
+
+      const restoredHistory = [
+        {
+          question: {
+            id: "q1",
+            type: "single_select",
+            question: "What scope?",
+            options: [{ id: "small", label: "Small" }],
+          },
+          response: { q1: "small" },
+        },
+      ];
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-awaiting-reasoning",
+        type: "planning",
+        status: "awaiting_input",
+        title: "Resume with reasoning",
+        inputPayload: JSON.stringify({ initialPlan: "Build planning with reasoning" }),
+        conversationHistory: JSON.stringify(restoredHistory),
+        currentQuestion: JSON.stringify(resumedQuestion),
+        result: null,
+        thinkingOutput: "Server-side reasoning captured during generation",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-awaiting-reasoning"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("What should we prioritize next?")).toBeDefined();
+      });
+
+      // The persisted thinkingOutput should appear as a conversation history entry
+      const history = screen.getByTestId("conversation-history");
+      expect(history).toBeDefined();
+
+      // Should show the existing Q&A plus the AI Reasoning entry
+      expect(screen.getByText("What scope?")).toBeDefined();
+      expect(screen.getByText("AI Reasoning")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: /Show AI reasoning/i }));
+      expect(screen.getByText("Server-side reasoning captured during generation")).toBeDefined();
+    });
+
+    it("does not create duplicate reasoning entries on repeated transitions", async () => {
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementation((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const secondQuestion: PlanningQuestion = {
+        id: "q-second",
+        type: "text",
+        question: "Any additional requirements?",
+      };
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      // Emit thinking then question
+      act(() => {
+        streamHandlers.onThinking?.("First reasoning block");
+      });
+      act(() => {
+        streamHandlers.onQuestion?.(mockQuestion);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      // Answer the question
+      fireEvent.click(screen.getByText("Medium"));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalled();
+      });
+
+      // Simulate thinking for second question then emit second question
+      act(() => {
+        streamHandlers.onThinking?.("Second reasoning block");
+      });
+      act(() => {
+        streamHandlers.onQuestion?.(secondQuestion);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Any additional requirements?")).toBeDefined();
+      });
+
+      // Conversation history should contain both reasoning entries without duplicates
+      const history = screen.getByTestId("conversation-history");
+      expect(history).toBeDefined();
+
+      // Should have Q1, reasoning1, reasoning2 entries
+      const reasoningButtons = screen.getAllByRole("button", { name: /Show AI reasoning/i });
+      // First reasoning button should be next to Q1, second should be standalone
+      // There should be exactly 2 reasoning entries (not duplicated)
+      expect(reasoningButtons.length).toBe(2);
+
+      expect(streamHandlers).toBeDefined();
+    });
+
+    it("preserves reasoning when answer submission transitions back to loading then question", async () => {
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementation((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const secondQuestion: PlanningQuestion = {
+        id: "q-requirements",
+        type: "text",
+        question: "What are the key requirements?",
+      };
+
+      mockRespondToPlanning.mockImplementation(async () => {
+        // Simulate thinking then second question via the existing stream
+        setTimeout(() => {
+          streamHandlers?.onThinking?.("Thinking about requirements...");
+          streamHandlers?.onQuestion?.(secondQuestion);
+        }, 10);
+        return { sessionId: "session-123", currentQuestion: null, summary: null };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      // Wait for first thinking and question
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onThinking?.("Initial analysis...");
+      });
+      act(() => {
+        streamHandlers.onQuestion?.(mockQuestion);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      // Answer the first question
+      fireEvent.click(screen.getByText("Medium"));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+      // Wait for second question to arrive
+      await waitFor(() => {
+        expect(screen.getByText("What are the key requirements?")).toBeDefined();
+      }, { timeout: 3000 });
+
+      // Conversation history should contain the first Q&A pair and initial reasoning
+      const history = screen.getByTestId("conversation-history");
+      expect(history).toBeDefined();
+      expect(screen.getByText("What is the scope?")).toBeDefined();
+      expect(screen.getByText("Medium")).toBeDefined();
+
+      expect(streamHandlers).toBeDefined();
+    });
+  });
+
   describe("Question view", () => {
     it("renders single_select question with options", async () => {
       const { container } = render(

@@ -172,6 +172,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // target is the overlay and would dismiss the modal mid-resize.
   const overlayMouseDownOnSelfRef = useRef(false);
   const thinkingOutputRef = useRef<HTMLDivElement>(null);
+  // Mirrors `streamingOutput` state for reading inside callbacks without
+  // stale closure issues (e.g. capturing reasoning before onQuestion clears it).
+  const streamingOutputRef = useRef<string>("" );
   const draftSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncedDraftRef = useRef<{
     sessionId: string;
@@ -182,6 +185,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
   const viewportMode = useViewportMode();
+
+  // Mirror streamingOutput into a ref so SSE handlers can read the latest
+  // value without stale closure issues.
+  useEffect(() => {
+    streamingOutputRef.current = streamingOutput;
+  }, [streamingOutput]);
 
   // Keep the streaming AI thinking pane pinned to the bottom as new tokens
   // arrive. If the user has scrolled up to read earlier output, we leave the
@@ -375,6 +384,23 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           setIsReconnecting(false);
           setIsRetrying(false);
           clearPlanningDescription(projectId);
+
+          // Preserve reasoning accumulated during the loading turn as a
+          // visible conversation-history entry so the user can expand it
+          // from the question view. Without this, setStreamingOutput("")
+          // would silently discard everything the model produced before the
+          // first question arrived.
+          const capturedThinking = streamingOutputRef.current.trim();
+          if (capturedThinking) {
+            setConversationHistory((prev) => {
+              // De-duplicate: if the last entry already carries this exact
+              // thinking text (e.g. from a prior transition or resume), skip.
+              const lastEntry = prev[prev.length - 1];
+              if (lastEntry?.thinkingOutput === capturedThinking) return prev;
+              return [...prev, { thinkingOutput: capturedThinking }];
+            });
+          }
+
           setView({
             type: "question",
             session: { sessionId, currentQuestion: question, summary: null },
@@ -396,6 +422,17 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           setIsReconnecting(false);
           setIsRetrying(false);
           clearPlanningDescription(projectId);
+
+          // Preserve reasoning accumulated during the loading turn.
+          const capturedThinking = streamingOutputRef.current.trim();
+          if (capturedThinking) {
+            setConversationHistory((prev) => {
+              const lastEntry = prev[prev.length - 1];
+              if (lastEntry?.thinkingOutput === capturedThinking) return prev;
+              return [...prev, { thinkingOutput: capturedThinking }];
+            });
+          }
+
           setView({
             type: "summary",
             session: { sessionId, currentQuestion: null, summary },
@@ -661,7 +698,20 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           clearPlanningDescription(projectId);
           const question = JSON.parse(session.currentQuestion);
           setView({ type: "question", session: { sessionId, currentQuestion: question, summary: null } });
-          if (session.thinkingOutput) setStreamingOutput(session.thinkingOutput);
+          // Transfer persisted thinking into conversation history so it's
+          // visible as expandable reasoning in the question view, instead of
+          // setting streamingOutput which is only rendered in the loading
+          // state.
+          if (session.thinkingOutput) {
+            const trimmed = session.thinkingOutput.trim();
+            if (trimmed) {
+              setConversationHistory((prev) => {
+                const lastEntry = prev[prev.length - 1];
+                if (lastEntry?.thinkingOutput === trimmed) return prev;
+                return [...prev, { thinkingOutput: trimmed }];
+              });
+            }
+          }
           connectToPlanningStream(sessionId);
         } else if (session.status === "complete" && session.result) {
           clearPlanningDescription(projectId);
@@ -1174,13 +1224,25 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       // the frontend disconnects and reconnects after the API call.
 
       setResponseHistory((prev) => [...prev, responses]);
-      setConversationHistory((prev) => [
-        ...prev,
-        {
-          question: activeQuestion,
-          response: responses,
-        },
-      ]);
+      setConversationHistory((prev) => {
+        // Capture any reasoning that accumulated since the last question
+        // (e.g. thinking streamed while the user was reading the question).
+        const currentThinking = streamingOutputRef.current.trim();
+        let updated = prev;
+        if (currentThinking) {
+          const lastEntry = updated[updated.length - 1];
+          if (lastEntry?.thinkingOutput !== currentThinking) {
+            updated = [...updated, { thinkingOutput: currentThinking }];
+          }
+        }
+        return [
+          ...updated,
+          {
+            question: activeQuestion,
+            response: responses,
+          },
+        ];
+      });
       setView({ type: "loading" });
       setStreamingOutput(""); // Clear old thinking output when entering loading state
 
@@ -1264,6 +1326,16 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               type: "question",
               session: { sessionId: session.id, currentQuestion: question, summary: null },
             });
+            if (session.thinkingOutput) {
+              const trimmed = session.thinkingOutput.trim();
+              if (trimmed) {
+                setConversationHistory((prev) => {
+                  const lastEntry = prev[prev.length - 1];
+                  if (lastEntry?.thinkingOutput === trimmed) return prev;
+                  return [...prev, { thinkingOutput: trimmed }];
+                });
+              }
+            }
             if (!streamConnectionRef.current?.isConnected()) {
               connectToPlanningStream(session.id);
             }

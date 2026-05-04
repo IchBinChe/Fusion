@@ -247,6 +247,44 @@ describe("Scheduler", () => {
       expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
     });
 
+    it("resets mergeRetries when dispatching a task to in-progress", async () => {
+      // Regression: a task whose previous run exhausted its merge budget
+      // (mergeRetries = MAX) would, after status was cleared, land back in
+      // in-review with the merger refusing it (canMergeTask false) and the
+      // ghost-review fallback bouncing it back every taskStuckTimeoutMs —
+      // infinite loop. Each fresh execution must get a fresh merge budget.
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const listTasksMock = vi.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([
+          createMockTask({ id: "FN-001", column: "todo", dependencies: [], mergeRetries: 3 }),
+        ]);
+
+      const store = createMockStore({
+        listTasks: listTasksMock,
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4 }),
+        updateTask: vi.fn().mockResolvedValue(undefined),
+        moveTask: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const scheduler = new Scheduler(store);
+      scheduler.start();
+      await flushAsyncWork();
+
+      const onCalls = (store.on as any).mock.calls;
+      const createdHandler = onCalls.find((call: any) => call[0] === "task:created")?.[1];
+      await createdHandler(createMockTask({ id: "FN-001", column: "todo", mergeRetries: 3 }));
+      await flushAsyncWork();
+
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ mergeRetries: 0 }),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
+    });
+
     it("registers task:moved event listener", () => {
       const store = createMockStore();
       new Scheduler(store);
@@ -820,6 +858,7 @@ describe("Scheduler", () => {
         worktree: "/test/project/.worktrees/fn-010",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
+        mergeRetries: 0,
       });
       expect(moveTask).toHaveBeenCalledWith("FN-010", "in-progress");
       expect(updateTask.mock.invocationCallOrder[0]).toBeLessThan(moveTask.mock.invocationCallOrder[0]);
@@ -858,6 +897,7 @@ describe("Scheduler", () => {
         worktree: "/test/project/.worktrees/amber-aspen",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
+        mergeRetries: 0,
       });
       expect(updateTask).toHaveBeenNthCalledWith(2, "FN-012", {
         status: null,
@@ -866,6 +906,7 @@ describe("Scheduler", () => {
         worktree: "/test/project/.worktrees/amber-aspen-2",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
+        mergeRetries: 0,
       });
 
       randomSpy.mockRestore();

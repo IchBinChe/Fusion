@@ -824,7 +824,13 @@ export class Scheduler {
           }
         }
 
-        // Clear status, reserve worktree path, and then move to in-progress
+        // Clear status, reserve worktree path, and then move to in-progress.
+        // Reset mergeRetries so a fresh execution gets a fresh merge budget —
+        // otherwise a task whose previous run exhausted its 3 retries (e.g.
+        // verification failure that was later cleared) lands back in in-review
+        // with mergeRetries=MAX, the merger refuses it (canMergeTask false),
+        // and the ghost-review fallback bounces it back to todo every 10 min
+        // before the 30-min cooldown can elapse — infinite loop. See FN-3305.
         schedulerLog.log(`Starting ${task.id}: ${task.title || task.id} (deps satisfied)`);
         await this.store.updateTask(task.id, {
           status: null,
@@ -833,6 +839,7 @@ export class Scheduler {
           worktree: plannedWorktree,
           effectiveNodeId: effectiveNode.nodeId ?? null,
           effectiveNodeSource: effectiveNode.source,
+          mergeRetries: 0,
         });
         await this.store.moveTask(task.id, "in-progress");
         this.wasNodeBlocked.delete(task.id);

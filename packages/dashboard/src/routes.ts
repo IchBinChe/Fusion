@@ -1013,7 +1013,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const storeRoot = resolve(scopedStore.getRootDir());
       for (const engine of engineManager.getAllEngines().values()) {
         if (resolve(engine.getWorkingDirectory()) === storeRoot) {
-          return engine.getHeartbeatMonitor() ?? undefined;
+          return (engine.getHeartbeatMonitor() ?? undefined) as ServerOptions["heartbeatMonitor"];
         }
       }
     } catch {

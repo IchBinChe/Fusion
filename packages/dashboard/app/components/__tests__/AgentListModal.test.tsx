@@ -25,6 +25,7 @@ const mockFetchAgents = vi.mocked(apiModule.fetchAgents);
 const mockCreateAgent = vi.mocked(apiModule.createAgent);
 const mockUpdateAgentState = vi.mocked(apiModule.updateAgentState);
 const mockDeleteAgent = vi.mocked(apiModule.deleteAgent);
+const mockClipboardWriteText = vi.fn();
 
 import { loadAllAppCss } from "../../test/cssFixture";
 const readStyles = () => loadAllAppCss();
@@ -78,6 +79,11 @@ describe("AgentListModal", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockClipboardWriteText.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mockClipboardWriteText },
+    });
     mockConfirm.mockReset();
     mockConfirm.mockResolvedValue(true);
     mockFetchAgents.mockResolvedValue(mockAgents);
@@ -310,6 +316,39 @@ describe("AgentListModal", () => {
         // Active agent with heartbeat should show "Healthy"
         expect(screen.getByText("Healthy")).toBeTruthy();
       });
+    });
+
+    it("renders collapsible error display for error agents in list view", async () => {
+      mockFetchAgents.mockResolvedValueOnce([
+        {
+          ...mockAgents[0],
+          id: "agent-error",
+          name: "Error Agent",
+          state: "error",
+          lastError: "modal failure",
+        },
+      ]);
+
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByText("modal failure").length).toBeGreaterThan(0);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand error" }));
+      expect(screen.getByRole("button", { name: "Collapse error" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy error to clipboard" }));
+      await waitFor(() => {
+        expect(mockClipboardWriteText).toHaveBeenCalledWith("modal failure");
+      });
+      expect(screen.getByRole("button", { name: "Copied error to clipboard" })).toBeTruthy();
     });
 
     it("renders health badges via data attributes instead of inline color styles", async () => {

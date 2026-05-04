@@ -1,6 +1,6 @@
 import "./AgentsView.css";
 import { useState, useEffect, useCallback, useRef, useMemo, useId, lazy, Suspense } from "react";
-import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronLeft, Filter, Upload, Network, SlidersHorizontal } from "lucide-react";
+import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Filter, Upload, Network, SlidersHorizontal, Copy, Check } from "lucide-react";
 import type { Agent, AgentCapability, AgentOnboardingSummary, AgentState, OrgTreeNode } from "../api";
 import { updateAgent, updateAgentState, deleteAgent, startAgentRun, fetchOrgTree, fetchSettings, updateSettings } from "../api";
 
@@ -99,6 +99,59 @@ function getStateCardClass(
     default:
       return `${prefix}--idle`;
   }
+}
+
+export function CollapsibleErrorDisplay({
+  errorText,
+  className,
+}: {
+  errorText: string;
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(errorText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Ignore clipboard errors
+    }
+  }, [errorText]);
+
+  return (
+    <div className={`agent-card-error${className ? ` ${className}` : ""}`}>
+      <div className="agent-card-error-header">
+        <span className="agent-card-error-preview" title={errorText}>
+          {errorText}
+        </span>
+        <div className="agent-card-error-actions">
+          <button
+            type="button"
+            className="btn-icon touch-target agent-card-error-copy-btn"
+            onClick={() => void handleCopy()}
+            title={copied ? "Copied" : "Copy error"}
+            aria-label={copied ? "Copied error to clipboard" : "Copy error to clipboard"}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          <button
+            type="button"
+            className="btn-icon touch-target agent-card-error-toggle"
+            onClick={() => setExpanded((value) => !value)}
+            title={expanded ? "Collapse error" : "Expand error"}
+            aria-label={expanded ? "Collapse error" : "Expand error"}
+            aria-expanded={expanded}
+          >
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
+      </div>
+      {expanded ? <pre className="agent-card-error-full">{errorText}</pre> : null}
+    </div>
+  );
 }
 
 function OrgChartNode({
@@ -1072,6 +1125,9 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                   </div>
 
                   <div className="agent-card-body">
+                    {agent.state === "error" && agent.lastError ? (
+                      <CollapsibleErrorDisplay errorText={agent.lastError} />
+                    ) : null}
                     {agent.taskId && (
                       <div className="agent-task">
                         <span className="text-secondary">Working on:</span>

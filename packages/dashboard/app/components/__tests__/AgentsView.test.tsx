@@ -61,6 +61,7 @@ const mockFetchOrgTree = vi.mocked((apiModule as any).fetchOrgTree);
 const mockFetchAgentStats = vi.mocked((apiModule as any).fetchAgentStats);
 const mockFetchSettings = vi.mocked((apiModule as any).fetchSettings);
 const mockUpdateSettings = vi.mocked((apiModule as any).updateSettings);
+const mockClipboardWriteText = vi.fn();
 
 describe("AgentsView", () => {
   const mockAddToast = vi.fn();
@@ -117,6 +118,11 @@ describe("AgentsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockViewportMode.mockReturnValue("desktop");
+    mockClipboardWriteText.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mockClipboardWriteText },
+    });
     mockConfirm.mockReset();
     mockConfirm.mockResolvedValue(true);
     localStorage.clear();
@@ -973,6 +979,54 @@ describe("AgentsView", () => {
         expect.stringContaining("greater than 0"),
         "error",
       );
+    });
+
+    it("renders collapsible error display and supports expand/copy", async () => {
+      const errorAgent: Agent = {
+        ...mockAgents[0],
+        id: "agent-error",
+        name: "Error Agent",
+        state: "error",
+        lastError: "something broke",
+      };
+      mockFetchAgents.mockResolvedValueOnce([errorAgent]);
+      mockFetchAgentStats.mockResolvedValueOnce({ total: 1, byState: { error: 1 }, byRole: { executor: 1 } });
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("something broke").length).toBeGreaterThan(0);
+      });
+
+      const expandButton = screen.getByRole("button", { name: "Expand error" });
+      fireEvent.click(expandButton);
+      expect(screen.getByRole("button", { name: "Collapse error" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Collapse error" }));
+      expect(screen.getByRole("button", { name: "Expand error" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy error to clipboard" }));
+      await waitFor(() => {
+        expect(mockClipboardWriteText).toHaveBeenCalledWith("something broke");
+      });
+      expect(screen.getByRole("button", { name: "Copied error to clipboard" })).toBeTruthy();
+    });
+
+    it("does not render error display without error state and lastError", async () => {
+      mockFetchAgents.mockResolvedValueOnce([
+        { ...mockAgents[0], id: "error-no-text", name: "Error No Text", state: "error", lastError: undefined },
+        { ...mockAgents[0], id: "active-with-text", name: "Active With Text", state: "active", lastError: "should not show" },
+      ]);
+      mockFetchAgentStats.mockResolvedValueOnce({ total: 2, byState: { error: 1, active: 1 }, byRole: { executor: 2 } });
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Error No Text")).toBeTruthy();
+        expect(screen.getByText("Active With Text")).toBeTruthy();
+      });
+
+      expect(screen.queryByText("should not show")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Copy error to clipboard" })).toBeNull();
     });
 
     it("shows refresh button", async () => {

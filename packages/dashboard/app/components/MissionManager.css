@@ -283,6 +283,7 @@
 }
 
 /* ── Status Badge ── */
+/* Fine-grained badge paddings stay pixel-specific for compact legibility. */
 .mission-status-badge {
   display: inline-flex;
   align-items: center;
@@ -308,7 +309,7 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 6px;
+  padding: calc(var(--space-xs) + (var(--space-xs) / 2));
   border-radius: var(--radius-md);
   transition:
     color var(--transition-fast),
@@ -338,8 +339,8 @@
 .mission-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: calc(var(--space-xs) + (var(--space-xs) / 2));
+  padding: calc(var(--space-xs) + (var(--space-xs) / 2)) calc(var(--space-md) + (var(--space-xs) / 2));
   border-radius: var(--radius-md);
   font-size: 13px;
   cursor: pointer;
@@ -476,7 +477,7 @@
 .mission-form-card textarea,
 .mission-form-card select {
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-sm) calc(var(--space-sm) + (var(--space-xs) / 2));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -515,7 +516,7 @@
 .mission-checkbox {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(var(--space-xs) + (var(--space-xs) / 2));
   font-size: 13px;
   color: var(--text-muted);
   cursor: pointer;
@@ -559,7 +560,7 @@
 
 .mission-confirm-panel__content input[type="text"] {
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-sm) calc(var(--space-sm) + (var(--space-xs) / 2));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -594,12 +595,12 @@
 .mission-task-suggestions__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
 }
 
 .mission-task-suggestions__item {
   text-align: left;
-  padding: 6px 10px;
+  padding: calc(var(--space-xs) + (var(--space-xs) / 2)) calc(var(--space-sm) + (var(--space-xs) / 2));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -698,14 +699,14 @@
 .mission-list__item-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
   flex-shrink: 0;
 }
 
 .mission-list__item-summary {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-md);
   margin-top: var(--space-xs);
 }
 
@@ -782,7 +783,7 @@
 }
 
 .mission-list__item-active-slice {
-  margin: 4px 0 0;
+  margin: var(--space-xs) 0 0;
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   color: var(--text-muted);
 }
@@ -838,7 +839,7 @@
 .mission-detail__meta-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
   font-size: 11px;
   color: var(--color-success);
   background: var(--meta-badge-bg);
@@ -900,7 +901,7 @@
   height: 6px;
   border-radius: 50%;
   background: var(--autopilot-pulse);
-  margin-right: 4px;
+  margin-right: var(--space-xs);
   animation: autopilot-pulse 2s ease-in-out infinite;
 }
 
@@ -917,13 +918,13 @@
 .mission-detail__title-text {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(var(--space-xs) + (var(--space-xs) / 2));
 }
 
 .mission-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
   cursor: pointer;
   min-height: 44px;
 }
@@ -979,7 +980,7 @@
 .mission-toggle__label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
@@ -988,7 +989,7 @@
 .mission-btn--sm {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
   padding: 2px 8px;
   font-size: 11px;
   min-height: 0;
@@ -1011,7 +1012,7 @@
   background: var(--surface);
   color: var(--text-muted);
   border-radius: var(--radius-pill);
-  padding: 6px 12px;
+  padding: calc(var(--space-xs) + (var(--space-xs) / 2)) var(--space-md);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -1046,7 +1047,7 @@
 .mission-detail__activity-filter {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-xs);
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   color: var(--text-muted);
 }
@@ -1080,7 +1081,7 @@
   padding: var(--space-md);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(var(--space-xs) + (var(--space-xs) / 2));
 }
 
 .mission-event__header {
@@ -1142,7 +1143,7 @@
 .mission-event__metadata {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(var(--space-xs) + (var(--space-xs) / 2));
 }
 
 .mission-event__metadata-content {
@@ -1263,7 +1264,7 @@
 .mission-milestone__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
   flex-shrink: 0;
   margin-left: var(--space-xs);
 }
@@ -1345,7 +1346,7 @@
 .mission-slice__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
   flex-shrink: 0;
   margin-left: var(--space-xs);
 }
@@ -1590,7 +1591,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
   padding: var(--space-xs);
 }
 
@@ -1707,7 +1708,7 @@
 .mission-feature__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
   flex-shrink: 0;
 }
 
@@ -1850,7 +1851,7 @@
 
 .mission-run__status--error {
   background: var(--color-error) !important;
-  color: white !important;
+  color: var(--cta-text) !important;
 }
 
 .mission-run__time {
@@ -1923,7 +1924,7 @@
   display: block;
   font-family: var(--font-mono);
   font-size: 10px;
-  margin-top: 2px;
+  margin-top: calc(var(--space-xs) / 2);
 }
 
 .mission-run__no-failures {

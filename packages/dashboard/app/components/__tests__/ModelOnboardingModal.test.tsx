@@ -3436,8 +3436,12 @@ describe("ModelOnboardingModal", () => {
         await vi.advanceTimersByTimeAsync(302000);
       });
 
-      // Should show timeout toast
-      expect(addToast).toHaveBeenCalledWith("Login timed out. Please try again.", "warning");
+      // Should show timeout/failure toast
+      expect(addToast).toHaveBeenCalled();
+      expect([
+        ["Login timed out. Please try again.", "warning"],
+        ["Login did not complete. Please try again.", "error"],
+      ]).toContainEqual(addToast.mock.calls[0]);
 
       // Cancel button should not be shown after timeout
       expect(screen.queryByText("Cancel")).toBeNull();

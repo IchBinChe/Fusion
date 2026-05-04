@@ -320,22 +320,28 @@ describe("Board", () => {
         expect(ipTasks.map((t: Task) => t.id)).toEqual(["FN-010", "FN-030", "FN-050"]);
       });
 
-      it("normalizes missing priority values to normal", () => {
+      it("normalizes missing and invalid legacy priority values to normal", () => {
         const noPriorityTask = createTask({ id: "FN-060", description: "No priority", column: "todo" });
         delete noPriorityTask.priority;
+
+        const legacyPriorityTask = {
+          ...createTask({ id: "FN-059", description: "Legacy priority", column: "todo", priority: "normal" }),
+          priority: "critical" as unknown as Task["priority"],
+        };
 
         const tasks: Task[] = [
           noPriorityTask,
           createTask({ id: "FN-061", description: "Explicit normal", column: "todo", priority: "normal" }),
+          legacyPriorityTask,
           createTask({ id: "FN-062", description: "Urgent", column: "todo", priority: "urgent" }),
         ];
 
         renderBoard({ tasks });
 
         const todoTasks = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]") as Task[];
-        // FN-060 (missing → normal) and FN-061 (explicit normal) are same priority,
-        // so they sort by numeric ID ascending
-        expect(todoTasks.map((t: Task) => t.id)).toEqual(["FN-062", "FN-060", "FN-061"]);
+        // FN-060 (missing), FN-059 (legacy invalid), and FN-061 (explicit normal) normalize to normal,
+        // so they sort by numeric ID ascending after urgent tasks.
+        expect(todoTasks.map((t: Task) => t.id)).toEqual(["FN-062", "FN-059", "FN-060", "FN-061"]);
       });
 
       it("uses localeCompare fallback for non-numeric task IDs", () => {

@@ -91,8 +91,9 @@ export function useDeepLink(options: UseDeepLinkOptions): UseDeepLinkResult {
       const params = new URLSearchParams(window.location.search);
       params.delete("task");
       const query = params.toString();
+      const existingState = window.history.state ?? {};
       window.history.replaceState(
-        null,
+        existingState,
         "",
         query ? `${window.location.pathname}?${query}` : window.location.pathname,
       );

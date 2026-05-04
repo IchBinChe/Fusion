@@ -142,11 +142,15 @@ describe("useDeepLink", () => {
     });
   });
 
-  it("cleans task query param when deep-linked modal closes", async () => {
+  it("cleans task query param when deep-linked modal closes and preserves history state", async () => {
     Object.defineProperty(window, "location", {
       configurable: true,
       value: new URL("http://localhost:3000/?project=proj_123&task=FN-123"),
     });
+    const replaceStateMock = window.history.replaceState as ReturnType<typeof vi.fn>;
+    window.history.replaceState = originalReplaceState;
+    window.history.replaceState({ navIndex: 2, existing: "value" }, "");
+    window.history.replaceState = replaceStateMock;
 
     const { result, closeTaskDetail } = renderUseDeepLink();
 
@@ -157,7 +161,7 @@ describe("useDeepLink", () => {
     result.current.handleDetailClose();
 
     expect(window.history.replaceState).toHaveBeenCalledWith(
-      null,
+      { navIndex: 2, existing: "value" },
       "",
       "/?project=proj_123",
     );

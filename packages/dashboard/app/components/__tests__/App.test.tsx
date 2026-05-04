@@ -936,7 +936,7 @@ describe("App deep link handling", () => {
     // Should have cleaned the task param from the URL via replaceState
     await waitFor(() => {
       expect(window.history.replaceState).toHaveBeenCalledWith(
-        null,
+        expect.any(Object),
         "",
         "/",
       );
@@ -972,7 +972,7 @@ describe("App deep link handling", () => {
     // Should have removed only the task param, keeping project param
     await waitFor(() => {
       expect(window.history.replaceState).toHaveBeenCalledWith(
-        null,
+        expect.any(Object),
         "",
         "/?project=proj_456",
       );

@@ -36,6 +36,7 @@ vi.mock("../../api", () => ({
   fetchModels: vi.fn(),
   fetchPluginRuntimes: vi.fn(),
   upgradeAgentHeartbeatProcedure: vi.fn(),
+  updateGlobalSettings: vi.fn(),
 }));
 
 vi.mock("../AgentLogViewer", () => ({
@@ -56,7 +57,7 @@ vi.mock("../AgentLogViewer", () => ({
 }));
 
 vi.mock("../CustomModelDropdown", () => ({
-  CustomModelDropdown: ({ models, value, onChange, disabled, label, placeholder, id }: {
+  CustomModelDropdown: ({ models, value, onChange, disabled, label, placeholder, id, favoriteProviders = [], favoriteModels = [] }: {
     models: Array<{ provider: string; id: string }> ;
     value: string;
     onChange: (v: string) => void;
@@ -64,10 +65,14 @@ vi.mock("../CustomModelDropdown", () => ({
     label: string;
     placeholder?: string;
     id?: string;
+    favoriteProviders?: string[];
+    onToggleFavorite?: (provider: string) => void;
+    favoriteModels?: string[];
+    onToggleModelFavorite?: (modelId: string) => void;
   }) => {
     const selectId = id ?? "custom-model-dropdown";
     return (
-      <div data-testid="custom-model-dropdown">
+      <div data-testid="custom-model-dropdown" data-favorite-providers={favoriteProviders.join(",")} data-favorite-models={favoriteModels.join(",")}>
         <label htmlFor={selectId}>{label}</label>
         <select
           id={selectId}
@@ -112,7 +117,7 @@ vi.mock("../../hooks/useConfirm", () => ({
   useConfirm: () => ({ confirm: mockConfirm }),
 }));
 
-import { fetchAgent, fetchAgents, updateAgent, updateAgentState, deleteAgent, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchDiscoveredSkills, fetchModels, fetchPluginRuntimes, fetchAgentLogsWithMeta, upgradeAgentHeartbeatProcedure } from "../../api";
+import { fetchAgent, fetchAgents, updateAgent, updateAgentState, deleteAgent, fetchAgentChildren, fetchAgentRunLogs, fetchAgentRuns, fetchAgentRunDetail, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchDiscoveredSkills, fetchModels, fetchPluginRuntimes, fetchAgentLogsWithMeta, upgradeAgentHeartbeatProcedure, updateGlobalSettings } from "../../api";
 import { subscribeSse } from "../../sse-bus";
 
 const mockFetchAgent = vi.mocked(fetchAgent);
@@ -138,6 +143,7 @@ const mockFetchModels = vi.mocked(fetchModels);
 const mockFetchPluginRuntimes = vi.mocked(fetchPluginRuntimes);
 const mockFetchAgentLogsWithMeta = vi.mocked(fetchAgentLogsWithMeta);
 const mockUpgradeAgentHeartbeatProcedure = vi.mocked(upgradeAgentHeartbeatProcedure);
+const mockUpdateGlobalSettings = vi.mocked(updateGlobalSettings);
 const mockSubscribeSse = vi.mocked(subscribeSse);
 
 const MOCK_SKILLS = [
@@ -239,6 +245,7 @@ describe("AgentDetailView", () => {
       heartbeatProcedurePath: ".fusion/agents/agent-001/HEARTBEAT.md",
       procedureFileSeeded: true,
     });
+    mockUpdateGlobalSettings.mockResolvedValue({} as any);
   });
 
   it("shows loading state initially", () => {
@@ -1673,6 +1680,31 @@ describe("AgentDetailView", () => {
 
       const modelSelect = await screen.findByLabelText("Agent Model") as HTMLSelectElement;
       expect(modelSelect.value).toBe("openai/gpt-4o");
+    });
+
+    it("passes favorited providers and models to model dropdown", async () => {
+      mockFetchModels.mockResolvedValueOnce({
+        models: [
+          { provider: "openai", id: "gpt-4o", name: "gpt-4o", reasoning: false, contextWindow: 128000 },
+        ],
+        favoriteProviders: ["openai"],
+        favoriteModels: ["openai/gpt-4o"],
+      });
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />
+      );
+
+      await navigateToSettings(user);
+
+      const dropdown = await screen.findByTestId("custom-model-dropdown");
+      expect(dropdown).toHaveAttribute("data-favorite-providers", "openai");
+      expect(dropdown).toHaveAttribute("data-favorite-models", "openai/gpt-4o");
     });
 
     it("shows runtime mode selected when agent runtimeConfig has runtimeHint", async () => {

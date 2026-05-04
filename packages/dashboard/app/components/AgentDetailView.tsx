@@ -9,7 +9,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus, ModelInfo, MemoryFileInfo, AgentCapability, PluginRuntimeInfo } from "../api";
-import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchPluginRuntimes, fetchAgents, upgradeAgentHeartbeatProcedure } from "../api";
+import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchPluginRuntimes, fetchAgents, upgradeAgentHeartbeatProcedure, updateGlobalSettings } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry, Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -2878,6 +2878,8 @@ function ConfigTab({
   // Model/runtime selector state
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [favoriteProviders, setFavoriteProviders] = useState<string[]>([]);
+  const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   const [availableRuntimes, setAvailableRuntimes] = useState<PluginRuntimeInfo[]>([]);
   const [runtimesLoading, setRuntimesLoading] = useState(false);
 
@@ -2936,12 +2938,48 @@ function ConfigTab({
   useEffect(() => {
     setModelsLoading(true);
     fetchModels()
-      .then((response) => setAvailableModels(response.models))
+      .then((response) => {
+        setAvailableModels(response.models);
+        setFavoriteProviders(response.favoriteProviders);
+        setFavoriteModels(response.favoriteModels);
+      })
       .catch(() => {
         // Gracefully handle unavailable models endpoint
       })
       .finally(() => setModelsLoading(false));
   }, []);
+
+  const handleToggleFavorite = useCallback(async (provider: string) => {
+    const currentFavorites = favoriteProviders;
+    const isFavorite = currentFavorites.includes(provider);
+    const newFavorites = isFavorite
+      ? currentFavorites.filter((p) => p !== provider)
+      : [provider, ...currentFavorites];
+
+    setFavoriteProviders(newFavorites);
+
+    try {
+      await updateGlobalSettings({ favoriteProviders: newFavorites, favoriteModels });
+    } catch {
+      setFavoriteProviders(currentFavorites);
+    }
+  }, [favoriteProviders, favoriteModels]);
+
+  const handleToggleModelFavorite = useCallback(async (modelId: string) => {
+    const currentFavorites = favoriteModels;
+    const isFavorite = currentFavorites.includes(modelId);
+    const newFavorites = isFavorite
+      ? currentFavorites.filter((m) => m !== modelId)
+      : [modelId, ...currentFavorites];
+
+    setFavoriteModels(newFavorites);
+
+    try {
+      await updateGlobalSettings({ favoriteProviders, favoriteModels: newFavorites });
+    } catch {
+      setFavoriteModels(currentFavorites);
+    }
+  }, [favoriteProviders, favoriteModels]);
 
   useEffect(() => {
     setRuntimesLoading(true);
@@ -3496,6 +3534,10 @@ function ConfigTab({
                 placeholder="Use global default"
                 label="Agent Model"
                 disabled={modelsLoading}
+                favoriteProviders={favoriteProviders}
+                onToggleFavorite={handleToggleFavorite}
+                favoriteModels={favoriteModels}
+                onToggleModelFavorite={handleToggleModelFavorite}
               />
             </div>
           ) : (

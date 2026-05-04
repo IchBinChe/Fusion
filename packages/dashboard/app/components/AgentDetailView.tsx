@@ -4,7 +4,7 @@ import {
   Bot, Heart, Activity, Pause, Play, Square, Trash2, RefreshCw, 
   Settings, FileText, ActivitySquare, X, Copy, 
   ExternalLink, CheckCircle, XCircle, Loader2, GitBranch, ListChecks,
-  ChevronDown, ChevronRight, BarChart3, BookOpen, Eye, FileEdit
+  ChevronDown, ChevronRight, ChevronLeft, BarChart3, BookOpen, Eye, FileEdit
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -62,6 +62,7 @@ interface AgentDetailViewProps {
   addToast: (message: string, type?: "success" | "error") => void;
   onChildClick?: (childId: string) => void;
   inline?: boolean;
+  showInlineBackButton?: boolean;
   initialTab?: TabId;
   initialRunId?: string | null;
   preferActiveRun?: boolean;
@@ -122,7 +123,7 @@ function pickDefaultAgentMemoryPath(files: MemoryFileInfo[], currentPath: string
     ?? "";
 }
 
-export function AgentDetailView({ agentId, projectId, onClose, addToast, onChildClick, inline = false, initialTab, initialRunId, preferActiveRun = false }: AgentDetailViewProps) {
+export function AgentDetailView({ agentId, projectId, onClose, addToast, onChildClick, inline = false, showInlineBackButton = false, initialTab, initialRunId, preferActiveRun = false }: AgentDetailViewProps) {
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const { confirm } = useConfirm();
   const [logs, setLogs] = useState<AgentLogEntry[]>([]);
@@ -493,6 +494,17 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
         <div className="agent-detail-header">
           {/* Identity area: icon + name + badges */}
           <div className="agent-detail-identity">
+            {inline && showInlineBackButton ? (
+              <button
+                type="button"
+                className="btn agent-detail-inline-back"
+                onClick={onClose}
+                aria-label="Back to agents"
+              >
+                <ChevronLeft size={16} />
+                Agents
+              </button>
+            ) : null}
             <div className="agent-detail-icon">
               <Bot size={20} />
             </div>

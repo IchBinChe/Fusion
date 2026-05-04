@@ -276,7 +276,31 @@ describe("AgentDetailView", () => {
 
     expect(document.querySelector(".agent-detail-overlay")).toBeNull();
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to agents" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Test Agent" })).toBeInTheDocument();
+  });
+
+  it("renders inline mobile back affordance inside detail header when enabled", async () => {
+    const onClose = vi.fn();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={onClose}
+        addToast={vi.fn()}
+        inline
+        showInlineBackButton
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Back to agents")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByLabelText("Back to agents"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const identityContainer = document.querySelector(".agent-detail-identity");
+    expect(identityContainer?.querySelector(".agent-detail-inline-back")).toBeTruthy();
   });
 
   it("keeps modal mode as dialog with close button", async () => {
@@ -848,14 +872,20 @@ describe("AgentDetailView", () => {
     });
   });
 
-  it("keeps desktop header actions on one row and mobile wraps them safely", () => {
+  it("keeps desktop header actions on one row and mobile uses explicit two-row header contracts", () => {
     const stylesContent = loadAllAppCss();
 
     expect(stylesContent).toContain(".agent-detail-header-actions {");
     expect(stylesContent).toContain("justify-content: flex-end;");
+    expect(stylesContent).toContain(".agent-detail-inline-back {");
 
-    const mobileHeaderActionsBlock = /@media \(max-width: 768px\)\s*\{[\s\S]*?\.agent-detail-header-actions\s*\{[\s\S]*?flex-wrap: wrap;[\s\S]*?\}/;
-    expect(stylesContent).toMatch(mobileHeaderActionsBlock);
+    expect(stylesContent).toContain("@media (max-width: 768px)");
+    expect(stylesContent).toContain(".agent-detail-header {");
+    expect(stylesContent).toContain("grid-template-rows: auto auto;");
+    expect(stylesContent).toContain(".agent-detail-identity {");
+    expect(stylesContent).toContain("grid-row: 1;");
+    expect(stylesContent).toContain(".agent-detail-header-actions {");
+    expect(stylesContent).toContain("grid-row: 2;");
   });
 
   it("shows statistics section on dashboard", async () => {

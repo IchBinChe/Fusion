@@ -1178,16 +1178,6 @@
     display: none;
   }
 
-  .agents-mobile-back-row {
-    padding: var(--space-md);
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-
-  .agents-mobile-back-btn {
-    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
-  }
-
   .agents-view-content {
     min-height: 0;
     overflow-y: auto;

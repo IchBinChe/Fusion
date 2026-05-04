@@ -1,6 +1,6 @@
 import "./AgentsView.css";
 import { useState, useEffect, useCallback, useRef, useMemo, useId, lazy, Suspense } from "react";
-import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Filter, Upload, Network, SlidersHorizontal, Copy, Check } from "lucide-react";
+import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, ChevronDown, ChevronUp, Filter, Upload, Network, SlidersHorizontal, Copy, Check } from "lucide-react";
 import type { Agent, AgentCapability, AgentOnboardingSummary, AgentState, OrgTreeNode } from "../api";
 import { updateAgent, updateAgentState, deleteAgent, startAgentRun, fetchOrgTree, fetchSettings, updateSettings } from "../api";
 
@@ -1409,18 +1409,11 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
         </div>
 
         <div className={`agents-split-detail${isMobileViewport && !selectedAgentId ? " agents-split-detail--hidden-mobile" : ""}`}>
-          {isMobileDetailOpen && (
-            <div className="agents-mobile-back-row">
-              <button className="btn agents-mobile-back-btn" onClick={handleCloseDetail}>
-                <ChevronLeft size={16} />
-                Agents
-              </button>
-            </div>
-          )}
           {selectedAgentId ? (
             <Suspense fallback={null}>
               <AgentDetailView
                 inline
+                showInlineBackButton={isMobileViewport}
                 agentId={selectedAgentId}
                 projectId={projectId}
                 onClose={handleCloseDetail}

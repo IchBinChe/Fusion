@@ -31,8 +31,11 @@ vi.mock("../../api", async (importOriginal) => {
 });
 
 vi.mock("../AgentDetailView", () => ({
-  AgentDetailView: ({ agentId, inline, initialTab, initialRunId, preferActiveRun }: { agentId: string; inline?: boolean; initialTab?: string; initialRunId?: string | null; preferActiveRun?: boolean }) => (
+  AgentDetailView: ({ agentId, inline, onClose, showInlineBackButton, initialTab, initialRunId, preferActiveRun }: { agentId: string; inline?: boolean; onClose?: () => void; showInlineBackButton?: boolean; initialTab?: string; initialRunId?: string | null; preferActiveRun?: boolean }) => (
     <div data-testid="agent-detail-view" data-inline={inline ? "true" : "false"} data-initial-tab={initialTab ?? "dashboard"} data-initial-run-id={initialRunId ?? ""} data-prefer-active-run={preferActiveRun ? "true" : "false"}>
+      {showInlineBackButton ? (
+        <button type="button" aria-label="Back to agents" onClick={onClose}>Agents</button>
+      ) : null}
       Agent detail: {agentId}
     </div>
   ),
@@ -325,14 +328,14 @@ describe("AgentsView", () => {
       fireEvent.click(await screen.findByRole("button", { name: "View details for Test Agent 1" }));
 
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: "Agents" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Back to agents" })).toBeTruthy();
         expect(screen.getByTestId("agent-detail-view")).toHaveAttribute("data-inline", "true");
       });
 
       expect(container.querySelector(".agents-split-sidebar--hidden-mobile")).toBeTruthy();
       expect(container.querySelector(".agents-split-detail--hidden-mobile")).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "Agents" }));
+      fireEvent.click(screen.getByRole("button", { name: "Back to agents" }));
 
       await waitFor(() => {
         expect(screen.getByText("Select an agent")).toBeInTheDocument();

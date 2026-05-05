@@ -136,6 +136,35 @@ function formatRelativeTime(iso?: string | null): string {
   return `${formatDuration(elapsed)} ago`;
 }
 
+function isAutoClaimRelevantTasksEnabled(agent: Agent): boolean {
+  const runtimeConfig = (agent.runtimeConfig ?? {}) as Record<string, unknown>;
+  return runtimeConfig.autoClaimRelevantTasks !== false;
+}
+
+function taskRelevanceScore(agent: Agent, task: TaskDetail): number {
+  const haystack = `${task.title ?? ""} ${task.description}`.toLowerCase();
+  let score = 0;
+
+  const role = agent.role.toLowerCase();
+  if (haystack.includes(role)) {
+    score += 3;
+  }
+
+  const soulWords = (agent.soul ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4)
+    .slice(0, 8);
+
+  for (const word of soulWords) {
+    if (haystack.includes(word)) {
+      score += 1;
+    }
+  }
+
+  return score;
+}
+
 /** Compare blocked-state snapshots to decide whether blocked messaging is duplicate noise. */
 export function isBlockedStateDuplicate(current: BlockedStateSnapshot, previous: BlockedStateSnapshot): boolean {
   return current.blockedBy === previous.blockedBy && current.contextHash === previous.contextHash;
@@ -1157,6 +1186,52 @@ export class HeartbeatMonitor {
           engineRunContext.taskId = taskId;
         }
 
+        let autoClaimCandidates: TaskDetail[] = [];
+        const autoClaimEnabled = isAutoClaimRelevantTasksEnabled(agent);
+        if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled) {
+          const listTasks = (taskStore as TaskStore & { listTasks?: (options?: { slim?: boolean }) => Promise<TaskDetail[]> }).listTasks;
+          if (typeof listTasks === "function") {
+            try {
+              const allTasks = await listTasks.call(taskStore, { slim: true });
+              const tasksById = new Map(allTasks.map((candidate) => [candidate.id, candidate]));
+              const openCandidates = allTasks
+                .filter((candidate) => (
+                  candidate.column === "todo"
+                  && candidate.paused !== true
+                  && !candidate.assignedAgentId
+                  && !candidate.checkedOutBy
+                  && candidate.dependencies.every((dependencyId) => {
+                    const dependency = tasksById.get(dependencyId);
+                    return dependency?.column === "done" || dependency?.column === "archived";
+                  })
+                ))
+                .sort((a, b) => {
+                  const aSortAt = a.columnMovedAt ?? a.createdAt;
+                  const bSortAt = b.columnMovedAt ?? b.createdAt;
+                  return aSortAt.localeCompare(bSortAt);
+                })
+                .slice(0, 10);
+
+              autoClaimCandidates = openCandidates;
+              const ranked = openCandidates
+                .map((candidate) => ({ candidate, score: taskRelevanceScore(agent, candidate as TaskDetail) }))
+                .filter((entry) => entry.score > 0)
+                .sort((a, b) => b.score - a.score || (a.candidate.columnMovedAt ?? a.candidate.createdAt).localeCompare(b.candidate.columnMovedAt ?? b.candidate.createdAt));
+
+              if (ranked.length > 0) {
+                const claimResult = await this.store.claimTaskForAgent(agentId, ranked[0].candidate.id, runContext);
+                if (claimResult.ok) {
+                  taskId = ranked[0].candidate.id;
+                  heartbeatLog.log(`Agent ${agentId} auto-claimed relevant task ${taskId}`);
+                } else {
+                  heartbeatLog.log(`Agent ${agentId} auto-claim skipped (${claimResult.reason})`);
+                }
+              }
+            } catch (autoClaimError) {
+              heartbeatLog.warn(`Auto-claim scan failed for ${agentId}: ${autoClaimError instanceof Error ? autoClaimError.message : String(autoClaimError)}`);
+            }
+          }
+        }
         if (!taskId) {
           // Agents with identity (soul, instructions, memory) should run a full heartbeat
           // session even without a task, so they can do ambient work like messaging,
@@ -1545,6 +1620,14 @@ export class HeartbeatMonitor {
               );
             }
 
+            const candidateLines = autoClaimCandidates.length > 0
+              ? [
+                "",
+                "Open Task Candidates (auto-claim scan):",
+                ...autoClaimCandidates.slice(0, 10).map((candidate) => `- ${candidate.id}: ${candidate.title ?? candidate.description.slice(0, 80)}`),
+              ]
+              : ["", "Open Task Candidates (auto-claim scan): none found"];
+
             executionPrompt = [
               `Heartbeat execution for agent "${agent.name}" (ID: ${agent.id})`,
               `Source: ${source}${triggerDetail ? ` (${triggerDetail})` : ""}`,
@@ -1556,6 +1639,7 @@ export class HeartbeatMonitor {
               `- wake reason: ${wakeReason}`,
               `- assigned task: none`,
               `- pending messages: ${pendingMessages.length}`,
+              `- auto-claim relevant tasks: ${autoClaimEnabled ? "enabled" : "disabled"}`,
               "",
               "Treat this wake delta as the highest-priority change for this heartbeat.",
               "This is an autonomous heartbeat run (manual or automatic): re-anchor on",
@@ -1584,6 +1668,10 @@ export class HeartbeatMonitor {
               "",
               "5. **Monitor project flow** — Review board/project signals and surface issues",
               "   by creating or delegating follow-up work as appropriate.",
+              "",
+              "When auto-claim relevant tasks is enabled, review Open Task Candidates above and",
+              "prioritize tasks that align with your role and soul before creating net-new tasks.",
+              ...candidateLines,
               ...pendingMessagesLines,
               "",
               "Your soul, instructions, and memory are already loaded in the system prompt.",

@@ -71,6 +71,7 @@ describe("executeHeartbeat", () => {
         updatedAt: new Date().toISOString(),
       } as unknown as TaskDetail),
       selectNextTaskForAgent: vi.fn().mockResolvedValue(null),
+      listTasks: vi.fn().mockResolvedValue([]),
       createTask: vi.fn().mockResolvedValue({
         id: "FN-002",
         description: "Created task",
@@ -132,6 +133,10 @@ describe("executeHeartbeat", () => {
         mockAgent.taskId = taskId;
         return mockAgent;
       }),
+      claimTaskForAgent: vi.fn().mockImplementation(async (_agentId: string, _taskId: string) => ({
+        ok: false,
+        reason: "task_not_found",
+      })),
       startHeartbeatRun: vi.fn().mockResolvedValue({
         id: "run-001",
         agentId: "agent-001",
@@ -421,6 +426,94 @@ describe("executeHeartbeat", () => {
       expect(mockedCreateFnAgent).toHaveBeenCalledOnce();
       // Reason should indicate identity run
       expect(result.resultJson).toEqual(expect.objectContaining({ reason: "no_assignment_identity_run" }));
+    });
+
+    it("auto-claim disabled skips candidate claiming during no-task runs", async () => {
+      const store = createStoreWithAgentForExec({
+        taskId: undefined,
+        soul: "I am a coordinator",
+        runtimeConfig: { autoClaimRelevantTasks: false },
+      });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+      mockTaskStore = createMockTaskStore({
+        listTasks: vi.fn().mockResolvedValue([
+          {
+            id: "FN-CANDIDATE",
+            description: "executor workflow cleanup",
+            title: "Executor cleanup",
+            prompt: "",
+            steps: [],
+            column: "todo",
+            dependencies: [],
+            log: [],
+            attachments: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as unknown as TaskDetail,
+        ]),
+      });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      expect((store.claimTaskForAgent as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+      const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(executionPrompt).toContain("auto-claim relevant tasks: disabled");
+    });
+
+    it("auto-claim enabled attempts to claim relevant no-task candidates", async () => {
+      const store = createStoreWithAgentForExec({ taskId: undefined, soul: "executor reliability owner" });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+      mockTaskStore = createMockTaskStore({
+        listTasks: vi.fn().mockResolvedValue([
+          {
+            id: "FN-CANDIDATE",
+            description: "executor reliability follow-up",
+            title: "Executor reliability",
+            prompt: "",
+            steps: [],
+            column: "todo",
+            dependencies: [],
+            log: [],
+            attachments: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as unknown as TaskDetail,
+        ]),
+        getTask: vi.fn().mockImplementation(async (id: string) => ({
+          id,
+          title: "Executor reliability",
+          description: "executor reliability follow-up",
+          prompt: "# PROMPT",
+          steps: [],
+          column: "todo",
+          dependencies: [],
+          log: [],
+          attachments: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as TaskDetail)),
+      });
+
+      (store.claimTaskForAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        task: { id: "FN-CANDIDATE" },
+      });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      expect(store.claimTaskForAgent).toHaveBeenCalledWith(
+        "agent-001",
+        "FN-CANDIDATE",
+        expect.objectContaining({ agentId: "agent-001", source: "timer" }),
+      );
+      const toolNames = mockedCreateFnAgent.mock.calls[0]![0]!.customTools!.map((tool: any) => tool.name);
+      expect(toolNames).toContain("fn_task_log");
     });
 
     it("agent WITH instructionsText but no task creates session and completes successfully", async () => {

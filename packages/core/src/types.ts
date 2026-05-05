@@ -3572,6 +3572,8 @@ export type MessageResponseMode = "immediate" | "on-heartbeat";
 export interface AgentHeartbeatConfig {
   /** Whether heartbeat triggers are enabled for this agent (default: true) */
   enabled?: boolean;
+  /** Whether this agent should auto-claim relevant unowned tasks during no-task heartbeats (default: true when unset). */
+  autoClaimRelevantTasks?: boolean;
   /** Polling interval in ms (default: 30000). Min: 1000 */
   heartbeatIntervalMs?: number;
   /** Heartbeat timeout in ms (default: 60000). Min: 5000 */

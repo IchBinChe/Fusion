@@ -217,6 +217,7 @@ The `runtimeConfig` field on agents supports the following options:
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Whether heartbeat triggers are enabled for this agent |
 | `heartbeatIntervalMs` | `number` | — | How often the agent should wake up for heartbeat checks (ms) |
+| `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
 | `messageResponseMode` | `"immediate" \| "on-heartbeat"` | `"immediate"` | Whether agent wakes immediately on message (immediate) or processes during heartbeat (on-heartbeat). See [Heartbeat Run Mailbox Checking](#heartbeat-run-mailbox-checking) |
@@ -226,6 +227,18 @@ The `runtimeConfig` field on agents supports the following options:
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
 Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat intervals globally; per-agent `heartbeatIntervalMs` remains the base interval before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
+
+### No-task auto-claim behavior
+
+When an identity-bearing, non-ephemeral agent wakes with no assigned task and `runtimeConfig.autoClaimRelevantTasks !== false`, the heartbeat monitor scans open todo tasks and may claim one before constructing the prompt run.
+
+Guardrails:
+- Only unpaused, unassigned, unchecked-out todo tasks with satisfied dependencies are considered
+- Claims are rejected for terminal/paused/owned/conflicting tasks
+- Checkout safety is preserved (`checkout_conflict` paths are non-fatal skips)
+- On successful claim, the same heartbeat run switches into task-scoped execution (no nested run re-entry)
+
+Operators can disable this per agent in **Agent Detail → Settings → Heartbeat Settings → Auto-Claim Relevant Tasks**.
 
 ## Agent Instructions (Dashboard)
 

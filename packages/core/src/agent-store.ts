@@ -181,6 +181,9 @@ function resolveCreationRuntimeConfig(
   if (typeof rc.enabled !== "boolean") {
     rc.enabled = true;
   }
+  if (typeof rc.autoClaimRelevantTasks !== "boolean") {
+    rc.autoClaimRelevantTasks = true;
+  }
   if (typeof rc.heartbeatIntervalMs !== "number" || !Number.isFinite(rc.heartbeatIntervalMs)) {
     rc.heartbeatIntervalMs = DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS;
   }
@@ -1224,6 +1227,70 @@ export class AgentStore extends EventEmitter {
       this.emit("agent:updated", updated);
       return updated;
     });
+  }
+
+  /**
+   * Claim task ownership for the calling agent with safety guards.
+   *
+   * Guards:
+   * - task must exist and not be paused
+   * - task must not be in terminal columns (done/archived)
+   * - task must not already be assigned to another agent
+   * - task checkout must be unheld or already held by this agent
+   *
+   * On success, updates both durable task assignment (assignedAgentId) and the
+   * agent's active execution linkage (agent.taskId). Task linkage is only updated
+   * after ownership + checkout checks pass.
+   */
+  async claimTaskForAgent(agentId: string, taskId: string, runContext?: RunMutationContext): Promise<{ ok: true; task: Task } | { ok: false; reason: string; task?: Task }> {
+    if (!this.taskStore) {
+      throw new Error("TaskStore not configured for task-claim operations");
+    }
+
+    const agent = await this.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+
+    let task: Task | null = null;
+    try {
+      task = await this.taskStore.getTask(taskId);
+    } catch {
+      task = null;
+    }
+    if (!task) {
+      return { ok: false, reason: "task_not_found" };
+    }
+
+    if (task.paused) {
+      return { ok: false, reason: "paused", task };
+    }
+
+    if (task.column === "done" || task.column === "archived") {
+      return { ok: false, reason: "terminal", task };
+    }
+
+    if (task.assignedAgentId && task.assignedAgentId !== agentId) {
+      return { ok: false, reason: "assigned_to_other", task };
+    }
+
+    if (task.checkedOutBy && task.checkedOutBy !== agentId) {
+      return { ok: false, reason: "checkout_conflict", task };
+    }
+
+    try {
+      await this.checkoutTask(agentId, taskId, runContext);
+    } catch (error) {
+      if (error instanceof CheckoutConflictError) {
+        return { ok: false, reason: "checkout_conflict", task };
+      }
+      throw error;
+    }
+
+    const claimedTask = await this.taskStore.updateTask(taskId, { assignedAgentId: agentId }, runContext);
+    await this.syncExecutionTaskLink(agentId, taskId);
+
+    return { ok: true, task: claimedTask };
   }
 
   /**

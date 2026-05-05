@@ -2613,6 +2613,10 @@ function deriveHeartbeatEnabled(runtimeConfig: AgentDetail["runtimeConfig"] | un
   return runtimeConfig?.enabled !== false;
 }
 
+function deriveAutoClaimRelevantTasksEnabled(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): boolean {
+  return runtimeConfig?.autoClaimRelevantTasks !== false;
+}
+
 function deriveBudgetValues(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): Record<string, string> {
   const bc = (runtimeConfig ?? {}).budgetConfig as Record<string, unknown> | undefined;
   const nextValues: Record<string, string> = {};
@@ -2967,6 +2971,9 @@ function ConfigTab({
   const [heartbeatEnabled, setHeartbeatEnabled] = useState<boolean>(
     () => deriveHeartbeatEnabled(agent.runtimeConfig),
   );
+  const [autoClaimRelevantTasksEnabled, setAutoClaimRelevantTasksEnabled] = useState<boolean>(
+    () => deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig),
+  );
 
   // Budget config state initialised from agent.runtimeConfig.budgetConfig
   const [budgetValues, setBudgetValues] = useState<Record<string, string>>(
@@ -3167,6 +3174,7 @@ function ConfigTab({
     // Check heartbeat values
     const rc = agent.runtimeConfig ?? {};
     if (heartbeatEnabled !== deriveHeartbeatEnabled(agent.runtimeConfig)) return true;
+    if (autoClaimRelevantTasksEnabled !== deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig)) return true;
     for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns", "messageResponseMode"] as const) {
       const current = heartbeatValues[key]?.trim() ?? "";
       let persisted = rc[key] !== undefined && rc[key] !== null ? String(rc[key]) : "";
@@ -3240,6 +3248,7 @@ function ConfigTab({
     previousAgentRuntimeSyncRef.current = nextSnapshot;
     setHeartbeatValues(deriveHeartbeatValues(agent.runtimeConfig));
     setHeartbeatEnabled(deriveHeartbeatEnabled(agent.runtimeConfig));
+    setAutoClaimRelevantTasksEnabled(deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig));
     setBudgetValues(deriveBudgetValues(agent.runtimeConfig));
     setModelValue(initialModelValue);
     setSelectedRuntimeId(initialRuntimeHint);
@@ -3385,6 +3394,7 @@ function ConfigTab({
     // Build the runtimeConfig payload — only include non-empty values
     const newRuntimeConfig: Record<string, unknown> = { ...agent.runtimeConfig };
     newRuntimeConfig.enabled = heartbeatEnabled;
+    newRuntimeConfig.autoClaimRelevantTasks = autoClaimRelevantTasksEnabled;
     for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns"] as const) {
       const raw = heartbeatValues[key]?.trim();
       if (!raw) {
@@ -3480,7 +3490,7 @@ function ConfigTab({
       runtimeConfig: newRuntimeConfig,
       bundleConfig: newBundleConfig,
     };
-  }, [agent.metadata, agent.runtimeConfig, budgetValues, bundleEntryFile, bundleExternalPath, bundleFiles, bundleMode, formValues, heartbeatEnabled, heartbeatValues, iconValue, modelValue, nameValue, reportsToValue, roleValue, runtimeMode, selectedRuntimeId, selectedSkills, titleValue, validationErrors]);
+  }, [agent.metadata, agent.runtimeConfig, autoClaimRelevantTasksEnabled, budgetValues, bundleEntryFile, bundleExternalPath, bundleFiles, bundleMode, formValues, heartbeatEnabled, heartbeatValues, iconValue, modelValue, nameValue, reportsToValue, roleValue, runtimeMode, selectedRuntimeId, selectedSkills, titleValue, validationErrors]);
 
   const persistSettings = useCallback(async (showValidationToast: boolean, source: "auto" | "manual") => {
     const payload = buildSavePayload();
@@ -3763,6 +3773,19 @@ function ConfigTab({
               Heartbeat Enabled
             </label>
             <span className="config-hint">When enabled, this agent receives scheduled heartbeat runs based on its interval.</span>
+          </div>
+
+          <div className="config-field">
+            <label className="checkbox-label" htmlFor="hb-autoClaimRelevantTasks">
+              <input
+                id="hb-autoClaimRelevantTasks"
+                type="checkbox"
+                checked={autoClaimRelevantTasksEnabled}
+                onChange={(e) => setAutoClaimRelevantTasksEnabled(e.target.checked)}
+              />
+              Auto-Claim Relevant Tasks
+            </label>
+            <span className="config-hint">When enabled (default), no-task heartbeats scan open unowned work and auto-claim tasks aligned with this agent&apos;s role and soul.</span>
           </div>
 
           <div className="config-field">

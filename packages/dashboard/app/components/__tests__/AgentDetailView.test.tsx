@@ -2042,6 +2042,29 @@ describe("AgentDetailView", () => {
       });
     });
 
+    it("defaults auto-claim toggle to enabled when runtimeConfig.autoClaimRelevantTasks is missing", async () => {
+      mockFetchAgent.mockResolvedValue(createMockAgent({
+        runtimeConfig: {
+          heartbeatIntervalMs: 30000,
+        },
+      }));
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />
+      );
+
+      await navigateToSettings(user);
+
+      await waitFor(() => {
+        expect((screen.getByLabelText("Auto-Claim Relevant Tasks") as HTMLInputElement).checked).toBe(true);
+      });
+    });
+
     it("shows Save Settings button disabled when no changes", async () => {
       mockFetchAgent.mockResolvedValue(createMockAgent({ metadata: {} }));
 
@@ -2251,6 +2274,42 @@ describe("AgentDetailView", () => {
           "agent-001",
           expect.objectContaining({
             runtimeConfig: expect.objectContaining({ enabled: false, heartbeatIntervalMs: 30000 }),
+          }),
+          undefined,
+        );
+      });
+    });
+
+    it("persists auto-claim toggle changes on save", async () => {
+      mockFetchAgent.mockResolvedValue(createMockAgent({
+        runtimeConfig: {
+          enabled: true,
+          autoClaimRelevantTasks: true,
+          heartbeatIntervalMs: 30000,
+        },
+      }));
+      mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
+
+      const user = userEvent.setup();
+      render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />
+      );
+
+      await navigateToSettings(user);
+
+      const autoClaimInput = await screen.findByLabelText("Auto-Claim Relevant Tasks");
+      await user.click(autoClaimInput);
+      await user.click(screen.getByText("Save Settings"));
+
+      await waitFor(() => {
+        expect(mockUpdateAgent).toHaveBeenCalledWith(
+          "agent-001",
+          expect.objectContaining({
+            runtimeConfig: expect.objectContaining({ autoClaimRelevantTasks: false }),
           }),
           undefined,
         );

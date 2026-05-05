@@ -208,6 +208,7 @@ describe("AgentStore", () => {
       expect(agent.metadata).toEqual({});
       expect(agent.runtimeConfig).toMatchObject({
         enabled: true,
+        autoClaimRelevantTasks: true,
       });
       expect(new Date(agent.createdAt).getTime()).not.toBeNaN();
       expect(new Date(agent.updatedAt).getTime()).not.toBeNaN();
@@ -232,6 +233,27 @@ describe("AgentStore", () => {
       const expectedDir = getCanonicalAgentAssetDirectoryName(agent.name, agent.id);
       expect(expectedDir).toContain("agent-");
       expect(agent.heartbeatProcedurePath).toBe(`.fusion/agents/${expectedDir}/HEARTBEAT.md`);
+    });
+
+    it("defaults autoClaimRelevantTasks to true when unset", async () => {
+      const agent = await store.createAgent({
+        name: "Auto Claim Default",
+        role: "executor",
+      });
+
+      const runtimeConfig = agent.runtimeConfig as Record<string, unknown>;
+      expect(runtimeConfig.autoClaimRelevantTasks).toBe(true);
+    });
+
+    it("preserves explicit autoClaimRelevantTasks=false", async () => {
+      const agent = await store.createAgent({
+        name: "Auto Claim Disabled",
+        role: "executor",
+        runtimeConfig: { autoClaimRelevantTasks: false },
+      });
+
+      const runtimeConfig = agent.runtimeConfig as Record<string, unknown>;
+      expect(runtimeConfig.autoClaimRelevantTasks).toBe(false);
     });
 
     it("preserves custom metadata", async () => {
@@ -932,6 +954,7 @@ describe("AgentStore", () => {
       // whatever the caller supplied.
       expect(result.agent.runtimeConfig).toEqual({
         enabled: true,
+        autoClaimRelevantTasks: true,
         heartbeatTimeoutMs: 60000,
         heartbeatIntervalMs: 3_600_000,
       });
@@ -1774,6 +1797,65 @@ describe("AgentStore", () => {
 
       await store.checkoutTask(holderId, taskId);
       expect(await store.getCheckedOutBy(taskId)).toBe(holderId);
+    });
+
+    it("claimTaskForAgent claims unowned task and syncs agent task link", async () => {
+      const result = await store.claimTaskForAgent(holderId, taskId);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const claimedTask = await taskStore.getTask(taskId);
+      const claimedAgent = await store.getAgent(holderId);
+
+      expect(claimedTask?.assignedAgentId).toBe(holderId);
+      expect(claimedTask?.checkedOutBy).toBe(holderId);
+      expect(claimedAgent?.taskId).toBe(taskId);
+    });
+
+    it("claimTaskForAgent rejects paused task", async () => {
+      await taskStore.updateTask(taskId, { paused: true });
+
+      const result = await store.claimTaskForAgent(holderId, taskId);
+      expect(result).toMatchObject({ ok: false, reason: "paused" });
+
+      const claimedAgent = await store.getAgent(holderId);
+      expect(claimedAgent?.taskId).toBeUndefined();
+    });
+
+    it("claimTaskForAgent rejects tasks in terminal columns", async () => {
+      const doneTask = await taskStore.createTask({ description: "done task", column: "done" });
+
+      const result = await store.claimTaskForAgent(holderId, doneTask.id);
+      expect(result).toMatchObject({ ok: false, reason: "terminal" });
+
+      const claimedAgent = await store.getAgent(holderId);
+      expect(claimedAgent?.taskId).toBeUndefined();
+    });
+
+    it("claimTaskForAgent returns task_not_found when task is missing", async () => {
+      const result = await store.claimTaskForAgent(holderId, "FN-404");
+      expect(result).toMatchObject({ ok: false, reason: "task_not_found" });
+      expect("task" in result).toBe(false);
+
+      const claimedAgent = await store.getAgent(holderId);
+      expect(claimedAgent?.taskId).toBeUndefined();
+    });
+
+    it("claimTaskForAgent rejects task already assigned to another agent", async () => {
+      await taskStore.updateTask(taskId, { assignedAgentId: otherAgentId });
+
+      const result = await store.claimTaskForAgent(holderId, taskId);
+      expect(result).toMatchObject({ ok: false, reason: "assigned_to_other" });
+    });
+
+    it("claimTaskForAgent rejects checkout conflicts", async () => {
+      await store.checkoutTask(otherAgentId, taskId);
+
+      const result = await store.claimTaskForAgent(holderId, taskId);
+      expect(result).toMatchObject({ ok: false, reason: "checkout_conflict" });
+
+      const claimedAgent = await store.getAgent(holderId);
+      expect(claimedAgent?.taskId).toBeUndefined();
     });
   });
 

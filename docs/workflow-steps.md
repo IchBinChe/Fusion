@@ -49,6 +49,15 @@ The **Browser Verification** template uses browser automation style checks and i
 
 The **Frontend UX Design** template verifies visual polish and consistency with existing UI patterns and design tokens, including visual hierarchy, spacing/typography consistency, color/token consistency, component reuse, responsive behavior, and fit with existing design language.
 
+## Creating Workflow Steps in the Dashboard
+
+From **Settings → Workflow Steps**, clicking **Add Workflow Step** now opens a chooser first:
+
+- **Built-in templates** are shown immediately so you can add review/QA steps with one click
+- **Custom workflow step** opens the manual form for fully custom prompt/script steps
+
+The custom path is always available, even while templates are still loading or if template loading fails.
+
 ## Model Overrides for Prompt Steps
 
 A prompt-mode workflow step can set its own model with:

@@ -129,6 +129,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
   const [activeTab, setActiveTab] = useState<TabId>("my-steps");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [showCreateChooser, setShowCreateChooser] = useState(false);
   const [form, setForm] = useState<StepFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [refining, setRefining] = useState(false);
@@ -192,6 +193,14 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
   }, [isOpen, loadSteps, loadTemplates, loadScripts, loadModels]);
 
   const handleCreate = useCallback(() => {
+    setShowCreateChooser(true);
+    setIsCreating(false);
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+  }, []);
+
+  const handleCreateCustom = useCallback(() => {
+    setShowCreateChooser(false);
     setIsCreating(true);
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -217,6 +226,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
   const handleCancel = useCallback(() => {
     setEditingId(null);
     setIsCreating(false);
+    setShowCreateChooser(false);
     setForm(EMPTY_FORM);
   }, []);
 
@@ -359,6 +369,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       await loadSteps();
       // Switch to "My Workflow Steps" tab to show the newly added step
       setActiveTab("my-steps");
+      setShowCreateChooser(false);
     } catch (err) {
       const msg = getErrorMessage(err);
       if (msg?.includes("already exists")) {
@@ -428,7 +439,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
               )}
 
               {/* My Workflow Steps Tab */}
-              {activeTab === "my-steps" && !isEditing && (
+              {activeTab === "my-steps" && !isEditing && !showCreateChooser && (
                 <>
                   {steps.length === 0 && (
                     <div className="wfm-empty" data-testid="empty-state">
@@ -515,7 +526,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
               )}
 
               {/* Templates Tab */}
-              {activeTab === "templates" && !isEditing && (
+              {activeTab === "templates" && !isEditing && !showCreateChooser && (
                 <>
                   {templatesLoading ? (
                     <div className="wfm-loading">
@@ -586,6 +597,84 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     </div>
                   )}
                 </>
+              )}
+
+              {/* Create chooser */}
+              {showCreateChooser && !isEditing && (
+                <div className="wfm-create-chooser" data-testid="workflow-step-create-chooser">
+                  <h3 className="wfm-form-title">How would you like to create this workflow step?</h3>
+                  <p className="wfm-create-chooser-hint">
+                    Start from a built-in template or create a fully custom workflow step.
+                  </p>
+
+                  <button
+                    className="btn wfm-create-custom-btn"
+                    onClick={handleCreateCustom}
+                    data-testid="create-custom-step"
+                  >
+                    <Plus size={14} />
+                    Custom workflow step
+                  </button>
+
+                  {templatesLoading ? (
+                    <div className="wfm-loading" data-testid="create-chooser-template-loading">
+                      <Loader2 size={24} className="spin wfm-spinner" />
+                      Loading built-in templates...
+                    </div>
+                  ) : templates.length === 0 ? (
+                    <div className="wfm-empty" data-testid="create-chooser-no-templates">
+                      No built-in templates are available right now. You can still create a custom step.
+                    </div>
+                  ) : (
+                    <div className="wfm-template-list" data-testid="create-chooser-templates">
+                      {templates.map((template) => {
+                        const IconComponent = getTemplateIcon(template.icon);
+                        const categoryClassName = getCategoryClassName(template.category);
+                        const isAdding = addingTemplateId === template.id;
+
+                        return (
+                          <div
+                            key={template.id}
+                            className="wfm-template-card"
+                            data-testid={`chooser-template-${template.id}`}
+                          >
+                            <div className="wfm-template-inner">
+                              <div className="wfm-template-icon">
+                                <IconComponent size={20} />
+                              </div>
+
+                              <div className="wfm-template-content">
+                                <div className="wfm-template-title-row">
+                                  <span className="wfm-template-name">{template.name}</span>
+                                  <span className={categoryClassName}>{template.category}</span>
+                                </div>
+                                <div className="wfm-template-desc">{template.description}</div>
+                                <button
+                                  className="btn btn-primary wfm-template-add-btn"
+                                  onClick={() => handleAddTemplate(template)}
+                                  disabled={isAdding}
+                                  data-testid={`chooser-add-template-${template.id}`}
+                                >
+                                  {isAdding ? (
+                                    <>
+                                      <Loader2 size={12} className="spin" />
+                                      Adding...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Plus size={12} />
+                                      Add template
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Edit / Create form */}
@@ -813,7 +902,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         </div>
 
         {/* Footer */}
-        {!isEditing && (
+        {!isEditing && !showCreateChooser && (
           <div className="wfm-footer">
             <button
               className="btn btn-primary wfm-footer-add-btn"

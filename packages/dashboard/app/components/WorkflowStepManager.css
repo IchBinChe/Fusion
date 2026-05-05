@@ -228,6 +228,29 @@
   gap: 4px;
 }
 
+/* Create chooser */
+.wfm-create-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.wfm-create-chooser-hint {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.wfm-create-custom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
 /* Edit/create form */
 .wfm-form {
   padding: var(--space-md);
@@ -487,6 +510,10 @@
   }
 
   .wfm-form-actions .btn {
+    width: 100%;
+  }
+
+  .wfm-create-custom-btn {
     width: 100%;
   }
 

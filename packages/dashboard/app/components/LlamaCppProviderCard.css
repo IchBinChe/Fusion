@@ -1,7 +1,11 @@
-.llama-cpp-provider-card {
+.llama-cpp-provider-card--full {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+}
+
+.llama-cpp-provider-card--compact .auth-provider-cli-actions {
+  margin-left: auto;
 }
 
 .llama-cpp-status {
@@ -13,7 +17,7 @@
 }
 
 @media (max-width: 768px) {
-  .llama-cpp-provider-card {
+  .llama-cpp-provider-card--full {
     gap: var(--space-xs);
   }
 }

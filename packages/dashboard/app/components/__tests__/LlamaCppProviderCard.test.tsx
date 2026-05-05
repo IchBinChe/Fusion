@@ -27,4 +27,16 @@ describe("LlamaCppProviderCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
     await waitFor(() => expect(setLlamaCppEnabled).toHaveBeenCalledWith(true));
   });
+
+  it("uses shared auth card layout in compact settings mode", async () => {
+    render(<LlamaCppProviderCard authenticated={false} compact />);
+
+    const card = await screen.findByTestId("llama-cpp-provider-card");
+    expect(card.className).toContain("auth-provider-card");
+
+    expect(card.querySelector(".auth-provider-header")).toBeTruthy();
+    expect(card.querySelector(".auth-provider-info")).toBeTruthy();
+    expect(card.querySelector(".auth-provider-cli-actions")).toBeTruthy();
+    expect(card.querySelector(".auth-hint.llama-cpp-status")).toBeTruthy();
+  });
 });

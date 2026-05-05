@@ -1886,18 +1886,25 @@ describe("AgentsView", () => {
       });
     });
 
-    it("does not show Delete button for active or paused agents", async () => {
+    it("does not show Delete button for active agents", async () => {
       render(<AgentsView addToast={mockAddToast} />);
 
       await waitFor(() => {
-        // Find the active agent card (agent-002)
         const allCards = Array.from(document.querySelectorAll(".agent-card"));
         const activeCard = allCards.find((card) => card.textContent?.includes("agent-002")) ?? null;
+
+        expect((activeCard as Element | null)?.querySelector('[title="Delete"]')).toBeFalsy();
+      });
+    });
+
+    it("shows Delete button for paused agents", async () => {
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        const allCards = Array.from(document.querySelectorAll(".agent-card"));
         const pausedCard = allCards.find((card) => card.textContent?.includes("agent-003")) ?? null;
 
-        // Active and paused agents should not have delete buttons
-        expect((activeCard as Element | null)?.querySelector('[title="Delete"]')).toBeFalsy();
-        expect((pausedCard as Element | null)?.querySelector('[title="Delete"]')).toBeFalsy();
+        expect((pausedCard as Element | null)?.querySelector('[title="Delete"]')).toBeTruthy();
       });
     });
 
@@ -1984,6 +1991,23 @@ describe("AgentsView", () => {
         expect.stringContaining("deleted"),
         "success"
       );
+    });
+
+    it("deletes paused agent after confirmation (from default view)", async () => {
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        const pausedCard = Array.from(document.querySelectorAll(".agent-card")).find(
+          (card) => card.textContent?.includes("agent-003"),
+        ) ?? null;
+        const pausedDeleteBtn = (pausedCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
+        expect(pausedDeleteBtn).toBeTruthy();
+        fireEvent.click(pausedDeleteBtn);
+      });
+
+      await waitFor(() => {
+        expect(mockDeleteAgent).toHaveBeenCalledWith("agent-003", undefined);
+      });
     });
   });
 

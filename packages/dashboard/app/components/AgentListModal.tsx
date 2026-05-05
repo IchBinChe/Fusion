@@ -416,6 +416,13 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
                           >
                             <Square size={14} />
                           </button>
+                          <button
+                            className="btn btn--sm btn--danger"
+                            onClick={() => void handleDelete(agent.id, agent.name)}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </>
                       )}
                       {agent.state === "running" && (
@@ -608,6 +615,13 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
                             title="Stop"
                           >
                             <Square size={14} /> Stop
+                          </button>
+                          <button
+                            className="btn btn--sm btn--danger"
+                            onClick={() => void handleDelete(agent.id, agent.name)}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} /> Delete
                           </button>
                         </>
                       )}

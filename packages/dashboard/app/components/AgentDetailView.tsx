@@ -551,10 +551,16 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                 </button>
               )}
               {agent.state === "paused" && (
-                <button className="btn btn-task-create btn--compact agent-detail-mobile-icon-control" onClick={() => void handleStateChange("active")} disabled={isTransitioning} aria-label="Resume">
-                  <Play size={14} />
-                  <span className="agent-detail-control-label">Resume</span>
-                </button>
+                <>
+                  <button className="btn btn-task-create btn--compact agent-detail-mobile-icon-control" onClick={() => void handleStateChange("active")} disabled={isTransitioning} aria-label="Resume">
+                    <Play size={14} />
+                    <span className="agent-detail-control-label">Resume</span>
+                  </button>
+                  <button className="btn btn--danger btn--compact" onClick={handleDelete}>
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </>
               )}
               {agent.state === "running" && (
                 <>
@@ -3122,7 +3128,7 @@ function ConfigTab({
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [justSaved, setJustSaved] = useState(false);
   const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
-  const isDeletableState = agent.state === "idle" || agent.state === "terminated";
+  const isDeletableState = agent.state === "idle" || agent.state === "terminated" || agent.state === "paused";
   const justSavedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousAgentRuntimeSyncRef = useRef<{ id: string; updatedAt: string } | null>(null);
   const lastSavedSignatureRef = useRef<string | null>(null);
@@ -4148,7 +4154,7 @@ function ConfigTab({
             <span className="config-danger-note">
               {isDeletableState
                 ? "Deletion is permanent and cannot be undone."
-                : `Agent deletion is only available when state is idle or terminated (current state: ${agent.state}).`}
+                : `Agent deletion is only available when state is idle, terminated, or paused (current state: ${agent.state}).`}
             </span>
           </div>
         </div>

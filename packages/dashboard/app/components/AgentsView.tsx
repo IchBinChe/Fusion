@@ -1363,13 +1363,15 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                     >
                       View Details
                     </button>
-                    <button
-                      className="btn btn--sm btn--danger"
-                      onClick={() => void handleDelete(agent.id, agent.name)}
-                      title="Delete"
-                    >
-                      <Trash2 size={14} /> Delete
-                    </button>
+                    {(agent.state === "idle" || agent.state === "terminated" || agent.state === "paused") && (
+                      <button
+                        className="btn btn--sm btn--danger"
+                        onClick={() => void handleDelete(agent.id, agent.name)}
+                        title="Delete"
+                      >
+                        <Trash2 size={14} /> Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               );

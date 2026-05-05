@@ -544,7 +544,7 @@ describe("AgentListModal", () => {
       });
 
       // Find the agent card for the active agent (agent-002)
-      const activeCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const activeCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-002")
       ) ?? null;
       expect(activeCard).toBeTruthy();
@@ -571,7 +571,7 @@ describe("AgentListModal", () => {
       });
 
       // Find the agent card for the active agent (agent-002)
-      const activeCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const activeCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-002")
       ) ?? null;
       expect(activeCard).toBeTruthy();
@@ -600,7 +600,7 @@ describe("AgentListModal", () => {
       });
 
       // Find the agent card for the active agent (agent-002)
-      const activeCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const activeCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-002")
       ) ?? null;
       expect(activeCard).toBeTruthy();
@@ -857,6 +857,42 @@ describe("AgentListModal", () => {
       expect(screen.queryByText("Test Agent 4")).toBeNull();
     });
 
+    it("shows Delete button for paused agents in list view", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />,
+      );
+
+      await waitFor(() => {
+        const pausedCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
+          (card) => card.textContent?.includes("agent-003"),
+        ) ?? null;
+        expect((pausedCard as Element | null)?.querySelector('[title="Delete"]')).toBeTruthy();
+      });
+    });
+
+    it("shows Delete button for paused agents in board view", async () => {
+      render(
+        <AgentListModal
+          isOpen={true}
+          onClose={mockOnClose}
+          addToast={mockAddToast}
+        />,
+      );
+
+      fireEvent.click(screen.getByTitle("Board view"));
+
+      await waitFor(() => {
+        const pausedBoardCard = Array.from(document.querySelectorAll(".agent-board-card")).find(
+          (card) => card.textContent?.includes("agent-003"),
+        ) ?? null;
+        expect((pausedBoardCard as Element | null)?.querySelector('[title="Delete"]')).toBeTruthy();
+      });
+    });
+
     it("shows Delete button for terminated agents when explicitly filtered", async () => {
       render(
         <AgentListModal
@@ -880,12 +916,12 @@ describe("AgentListModal", () => {
         expect(screen.getAllByTitle("Delete").length).toBeGreaterThanOrEqual(1);
       });
 
-      // Verify Start button appears for terminated agent
-      const terminatedCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      // Verify terminated agent exposes delete action
+      const terminatedCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-004")
       ) ?? null;
-      const terminatedStartBtn = (terminatedCard as Element | null)?.querySelector('[title="Start"]');
-      expect(terminatedStartBtn).toBeTruthy();
+      const terminatedDeleteBtn = (terminatedCard as Element | null)?.querySelector('[title="Delete"]');
+      expect(terminatedDeleteBtn).toBeTruthy();
     });
 
     it("confirms before deleting terminated agent (from terminated filter)", async () => {
@@ -913,7 +949,7 @@ describe("AgentListModal", () => {
       });
 
       // Find delete button for terminated agent (agent-004)
-      const terminatedCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const terminatedCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-004")
       ) ?? null;
       const terminatedDeleteBtn = (terminatedCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
@@ -950,7 +986,7 @@ describe("AgentListModal", () => {
       });
 
       // Find delete button for terminated agent (agent-004)
-      const terminatedCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const terminatedCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-004")
       ) ?? null;
       const terminatedDeleteBtn = (terminatedCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
@@ -984,7 +1020,7 @@ describe("AgentListModal", () => {
       });
 
       // Find delete button for idle agent (agent-001)
-      const idleCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const idleCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-001")
       ) ?? null;
       const idleDeleteBtn = (idleCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;
@@ -1018,7 +1054,7 @@ describe("AgentListModal", () => {
       });
 
       // Click the idle agent's delete button
-      const idleCard = Array.from(document.querySelectorAll(".agent-card")).find(
+      const idleCard = Array.from(document.querySelectorAll(".agent-card, .agent-board-card")).find(
         (card) => card.textContent?.includes("agent-001")
       ) ?? null;
       const idleDeleteBtn = (idleCard as Element | null)?.querySelector('[title="Delete"]') as HTMLElement;

@@ -792,6 +792,22 @@ describe("AgentDetailView", () => {
     });
   });
 
+  it("shows Delete button for paused agent", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({ state: "paused" }));
+
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete")).toBeInTheDocument();
+    });
+  });
+
   it("shows Delete button for terminated agent", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({ state: "terminated" }));
 
@@ -1476,7 +1492,7 @@ describe("AgentDetailView", () => {
       await user.click(screen.getByText("Settings"));
     };
 
-    it("shows settings delete control for idle and terminated agents", async () => {
+    it("shows settings delete control for idle, terminated, and paused agents", async () => {
       const user = userEvent.setup();
 
       mockFetchAgent.mockResolvedValue(createMockAgent({ state: "idle" }));
@@ -1493,6 +1509,19 @@ describe("AgentDetailView", () => {
       idleRender.unmount();
 
       mockFetchAgent.mockResolvedValue(createMockAgent({ state: "terminated" }));
+      const terminatedRender = render(
+        <AgentDetailView
+          agentId="agent-001"
+          onClose={vi.fn()}
+          addToast={vi.fn()}
+        />,
+      );
+
+      await navigateToSettings(user);
+      expect(await screen.findByRole("button", { name: "Delete Agent" })).toBeEnabled();
+      terminatedRender.unmount();
+
+      mockFetchAgent.mockResolvedValue(createMockAgent({ state: "paused" }));
       render(
         <AgentDetailView
           agentId="agent-001"
@@ -1578,7 +1607,7 @@ describe("AgentDetailView", () => {
 
       expect(await screen.findByRole("button", { name: "Delete Agent" })).toBeDisabled();
       expect(
-        screen.getByText("Agent deletion is only available when state is idle or terminated (current state: active)."),
+        screen.getByText("Agent deletion is only available when state is idle, terminated, or paused (current state: active)."),
       ).toBeInTheDocument();
     });
 

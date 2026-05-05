@@ -117,6 +117,10 @@ interface LandedTaskCommit {
   deletions?: number;
 }
 
+function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
+  return body.includes(`Fusion-Task-Id: ${taskId}`) || subject.includes(taskId);
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
@@ -193,12 +197,14 @@ export class SelfHealingManager {
       { name: "stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks().then(() => undefined) },
       { name: "failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps().then(() => undefined) },
       { name: "interrupted-merging", fn: () => this.recoverInterruptedMergingTasks().then(() => undefined) },
+      { name: "done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata().then(() => undefined) },
       { name: "misclassified-failures", fn: () => this.recoverMisclassifiedFailures().then(() => undefined) },
       { name: "partial-progress-no-task-done", fn: () => this.recoverPartialProgressNoTaskDoneFailures().then(() => undefined) },
       { name: "orphaned-executions", fn: () => this.recoverOrphanedExecutions().then(() => undefined) },
       { name: "approved-triage", fn: () => this.recoverApprovedTriageTasks().then(() => undefined) },
       { name: "orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks().then(() => undefined) },
       { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents().then(() => undefined) },
+      { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
     ];
 
     for (const step of steps) {
@@ -467,18 +473,16 @@ export class SelfHealingManager {
     const storedSha = task.mergeDetails?.commitSha;
     if (storedSha) {
       try {
-        // Reachable from HEAD? Use --quiet --exit-code on rev-list.
         await execAsync(
           `git merge-base --is-ancestor ${shellQuote(storedSha)} HEAD`,
           { cwd: this.options.rootDir },
         );
-        // Yes — fetch its subject + stats.
         const { stdout } = await execAsync(
-          `git log -1 --format=%H%x1f%s ${shellQuote(storedSha)}`,
+          `git log -1 --format=%H%x1f%s%x1f%b ${shellQuote(storedSha)}`,
           { cwd: this.options.rootDir, maxBuffer: 1024 * 1024 },
         );
-        const [sha, subject] = stdout.trim().split("\x1f");
-        if (sha) {
+        const [sha, subject = "", body = ""] = stdout.trim().split("\x1f");
+        if (sha && commitOwnedByTask(task.id, subject, body)) {
           const commit: LandedTaskCommit = { sha, subject };
           try {
             const stats = await execAsync(`git show --shortstat --format= ${shellQuote(sha)}`, {
@@ -644,6 +648,7 @@ export class SelfHealingManager {
           { name: "recover-stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks() },
           { name: "recover-failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps() },
           { name: "recover-interrupted-merging", fn: () => this.recoverInterruptedMergingTasks() },
+          { name: "recover-done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata() },
           { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
           { name: "recover-merged-review", fn: () => this.recoverMergedReviewTasks() },
           { name: "recover-misclassified-failures", fn: () => this.recoverMisclassifiedFailures() },
@@ -654,6 +659,7 @@ export class SelfHealingManager {
           { name: "recover-orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks() },
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
           { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents() },
+          { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
         ];
         for (const fn of batch2Fns) {
           try {
@@ -1218,6 +1224,59 @@ export class SelfHealingManager {
     }
   }
 
+  async recoverDoneTaskMergeMetadata(): Promise<number> {
+    try {
+      const tasks = await this.store.listTasks({ column: "done", slim: true });
+      const candidates = tasks.filter((task) => task.column === "done" && !task.paused && Boolean(task.mergeDetails?.commitSha));
+      if (candidates.length === 0) return 0;
+
+      let repaired = 0;
+      for (const task of candidates) {
+        try {
+          const landed = await this.findLandedTaskCommit(task);
+          if (!landed) {
+            if (task.mergeDetails?.mergeConfirmed === false) {
+              await this.store.updateTask(task.id, { mergeDetails: undefined });
+              await this.store.logEntry(task.id, "Auto-recovered: cleared unowned done-task mergeDetails commitSha");
+              repaired++;
+            }
+            continue;
+          }
+
+          const needsRepair =
+            task.mergeDetails?.commitSha !== landed.sha ||
+            task.mergeDetails?.mergeConfirmed !== true ||
+            task.mergeDetails?.filesChanged === undefined;
+
+          if (!needsRepair) continue;
+
+          await this.store.updateTask(task.id, {
+            mergeDetails: {
+              ...task.mergeDetails,
+              commitSha: landed.sha,
+              filesChanged: landed.filesChanged,
+              insertions: landed.insertions,
+              deletions: landed.deletions,
+              mergeCommitMessage: landed.subject,
+              mergedAt: task.mergeDetails?.mergedAt ?? new Date().toISOString(),
+              mergeConfirmed: true,
+              prNumber: task.prInfo?.number,
+            },
+          });
+          await this.store.logEntry(task.id, `Auto-recovered: reconciled done-task mergeDetails to owned commit ${landed.sha.slice(0, 8)}`);
+          repaired++;
+        } catch (err: unknown) {
+          log.error(`Failed done-task merge metadata recovery for ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      return repaired;
+    } catch (err: unknown) {
+      log.error(`Done-task merge metadata recovery failed: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
+  }
+
   // ── Misclassified failure recovery ───────────────────────────────
 
   /**
@@ -1460,6 +1519,104 @@ export class SelfHealingManager {
       log.error(`Orphaned agent recovery failed: ${errorMessage}`);
       return 0;
     }
+  }
+
+  /**
+   * Default cap (in ms) on how long an active heartbeat run from the current
+   * process is allowed to remain open before self-healing will terminate it.
+   * Six hours is well past any legitimate heartbeat tick (default 1 h
+   * interval, configurable up to a few hours) so reaching this threshold
+   * means the run record was never closed — typically a process that died
+   * without our watchdog catching it.
+   */
+  private static readonly STALE_ACTIVE_RUN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+  /**
+   * Terminate orphaned `agentRuns` rows left in `status = 'active'` by a
+   * process that crashed before calling endHeartbeatRun(). These rows
+   * silently break heartbeat scheduling: HeartbeatTriggerScheduler.onTimerTick
+   * skips every tick that finds an active run, so the agent never gets called
+   * again until something cleans up.
+   *
+   * A run is considered stale when:
+   *  - `processPid` was recorded and does not match the current `process.pid`
+   *    (i.e., the writer process is gone — guaranteed orphan), or
+   *  - `processPid` is missing (legacy data), or
+   *  - the run has been active for longer than STALE_ACTIVE_RUN_MAX_AGE_MS,
+   *    even from the current process (defense in depth against a writer that
+   *    leaks the row without crashing the whole runtime).
+   *
+   * The matching `processPid` + young run case is left alone — that is a
+   * legitimately in-flight heartbeat.
+   */
+  async recoverStaleHeartbeatRuns(): Promise<number> {
+    const agentStore = this.options.agentStore;
+    if (!agentStore) {
+      return 0;
+    }
+
+    let activeRuns;
+    try {
+      activeRuns = await agentStore.listActiveHeartbeatRuns();
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Stale heartbeat run recovery — listing failed: ${errorMessage}`);
+      return 0;
+    }
+
+    if (activeRuns.length === 0) {
+      return 0;
+    }
+
+    const now = Date.now();
+    const currentPid = process.pid;
+    const maxAgeMs = SelfHealingManager.STALE_ACTIVE_RUN_MAX_AGE_MS;
+    let recovered = 0;
+
+    for (const run of activeRuns) {
+      const startedMs = Date.parse(run.startedAt);
+      const ageMs = Number.isFinite(startedMs) ? Math.max(0, now - startedMs) : Infinity;
+      const recordedPid = run.processPid;
+
+      const pidMismatch = typeof recordedPid === "number" && recordedPid !== currentPid;
+      const pidMissing = typeof recordedPid !== "number";
+      const tooOld = ageMs >= maxAgeMs;
+
+      if (!pidMismatch && !pidMissing && !tooOld) {
+        continue;
+      }
+
+      const reason = pidMismatch
+        ? `writer pid ${recordedPid} is no longer this process (current pid ${currentPid})`
+        : pidMissing
+          ? `no processPid recorded`
+          : `active for ${Math.round(ageMs / 1000)}s (>= ${Math.round(maxAgeMs / 1000)}s threshold)`;
+
+      try {
+        const detail = await agentStore.getRunDetail(run.agentId, run.id);
+        if (detail) {
+          await agentStore.saveRun({
+            ...detail,
+            endedAt: new Date().toISOString(),
+            status: "terminated",
+            stderrExcerpt: `Auto-recovered orphaned heartbeat run: ${reason}`,
+          });
+        }
+        await agentStore.endHeartbeatRun(run.id, "terminated");
+        log.log(
+          `Auto-recovered: orphan heartbeat run ${run.id} for ${run.agentId} (${reason})`,
+        );
+        recovered++;
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        log.error(`Failed to recover stale heartbeat run ${run.id} for ${run.agentId}: ${errorMessage}`);
+      }
+    }
+
+    if (recovered > 0) {
+      log.log(`Recovered ${recovered} stale heartbeat run(s)`);
+    }
+    return recovered;
   }
 
   /**

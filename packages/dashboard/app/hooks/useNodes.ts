@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { DockerNodeConfig, NodeCreateInput, NodeInfo, NodeUpdateInput } from "../api";
+import type { DockerNodeConfigInfo as DockerNodeConfig, NodeCreateInput, NodeInfo, NodeUpdateInput } from "../api";
 import {
   fetchDockerConfigDiff,
   fetchDockerNodeConfig,

@@ -196,7 +196,14 @@ export function PostOnboardingRecommendations({
               );
             })}
           </ul>
-          <PluginSlot slotId="post-onboarding-recommendation" renderPlaceholder={false} />
+          <PluginSlot
+            slotId="post-onboarding-recommendation"
+            renderPlaceholder={false}
+            actions={{
+              openSettingsSection: onOpenSettings,
+              openModelOnboarding: onOpenModelOnboarding,
+            }}
+          />
         </div>
       </div>
       <button

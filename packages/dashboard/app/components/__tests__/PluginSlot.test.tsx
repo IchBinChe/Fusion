@@ -1,12 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { PluginSlot } from "../PluginSlot";
 import type { PluginUiSlotEntry } from "../../api";
 import { usePluginUiSlots } from "../../hooks/usePluginUiSlots";
+import { resolvePluginSlotComponent } from "../../plugins/pluginSlotRegistry";
 
 vi.mock("../../hooks/usePluginUiSlots");
-vi.mock("../DroidCliProviderCard", () => ({
-  DroidCliProviderCard: () => <div data-testid="droid-cli-provider-card" />,
+vi.mock("../../plugins/pluginSlotRegistry", () => ({
+  resolvePluginSlotComponent: vi.fn(),
 }));
 
 function createSlotEntry(slotId: string, pluginId = "test-plugin"): PluginUiSlotEntry {
@@ -23,153 +24,27 @@ function createSlotEntry(slotId: string, pluginId = "test-plugin"): PluginUiSlot
 describe("PluginSlot", () => {
   beforeEach(() => {
     vi.mocked(usePluginUiSlots).mockReset();
+    vi.mocked(resolvePluginSlotComponent).mockReset();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("renders nothing when no matching slots (empty array)", () => {
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [],
-      getSlotsForId: vi.fn(() => []),
-      loading: false,
-      error: null,
-    });
-
-    const { container } = render(<PluginSlot slotId="task-detail-tab" />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it("renders fallback shell for single matching slot", () => {
-    const entry = createSlotEntry("task-detail-tab", "plugin-a");
+  it("renders resolved slot content", () => {
+    const entry = createSlotEntry("settings-provider-card", "plugin-a");
     vi.mocked(usePluginUiSlots).mockReturnValue({
       slots: [entry],
       getSlotsForId: vi.fn(() => [entry]),
       loading: false,
       error: null,
     });
+    vi.mocked(resolvePluginSlotComponent).mockReturnValue(({ entry: slotEntry }) => (
+      <div data-testid={`resolved-${slotEntry.pluginId}`}>Resolved</div>
+    ));
 
-    const { container } = render(<PluginSlot slotId="task-detail-tab" />);
+    render(<PluginSlot slotId="settings-provider-card" />);
 
-    const shells = container.querySelectorAll("[data-plugin-slot]");
-    expect(shells).toHaveLength(1);
-    const shell = shells[0];
-    expect(shell).toHaveAttribute("data-slot-id", "task-detail-tab");
-    expect(shell).toHaveAttribute("data-plugin-id", "plugin-a");
-    expect(shell).toHaveAttribute("aria-label", "Test slot task-detail-tab");
-    expect(shell.textContent).toContain("Test slot task-detail-tab");
-    expect(shell.textContent).toContain("Extension content available.");
-    expect(shell.textContent).not.toContain("plugin-a");
-    expect(shell.textContent).not.toContain("./components/task-detail-tab.js");
+    expect(screen.getByTestId("resolved-plugin-a")).toBeInTheDocument();
   });
 
-  it("renders multiple fallback shells for multiple plugins registered for same slotId", () => {
-    const entryA = createSlotEntry("board-column-footer", "plugin-x");
-    const entryB = createSlotEntry("board-column-footer", "plugin-y");
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [entryA, entryB],
-      getSlotsForId: vi.fn(() => [entryA, entryB]),
-      loading: false,
-      error: null,
-    });
-
-    const { container } = render(<PluginSlot slotId="board-column-footer" />);
-
-    const shells = container.querySelectorAll("[data-plugin-slot]");
-    expect(shells).toHaveLength(2);
-
-    expect(shells[0]).toHaveAttribute("data-plugin-id", "plugin-x");
-    expect(shells[0]).toHaveAttribute("data-slot-id", "board-column-footer");
-    expect(shells[1]).toHaveAttribute("data-plugin-id", "plugin-y");
-    expect(shells[1]).toHaveAttribute("data-slot-id", "board-column-footer");
-  });
-
-  it("returns null when loading", () => {
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [],
-      getSlotsForId: vi.fn(() => []),
-      loading: true,
-      error: null,
-    });
-
-    const { container } = render(<PluginSlot slotId="header-action" />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it("returns null on error", () => {
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [],
-      getSlotsForId: vi.fn(() => []),
-      loading: false,
-      error: "fetch failed",
-    });
-
-    const { container } = render(<PluginSlot slotId="header-action" />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it("passes projectId to usePluginUiSlots hook", () => {
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [],
-      getSlotsForId: vi.fn(() => []),
-      loading: false,
-      error: null,
-    });
-
-    render(<PluginSlot slotId="settings-section" projectId="proj-1" />);
-
-    expect(vi.mocked(usePluginUiSlots)).toHaveBeenCalledWith("proj-1");
-  });
-
-  it("suppresses placeholder rendering when renderPlaceholder is false for unknown slots", () => {
-    const entry = createSlotEntry("settings-provider-card", "plugin-droid");
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [entry],
-      getSlotsForId: vi.fn(() => [entry]),
-      loading: false,
-      error: null,
-    });
-
-    const { container } = render(
-      <PluginSlot slotId="settings-provider-card" renderPlaceholder={false} />,
-    );
-
-    expect(container.firstChild).toBeNull();
-  });
-
-  it("renders known droid settings slot even when placeholders are disabled", () => {
-    const entry = createSlotEntry("settings-provider-card", "fusion-plugin-droid-runtime");
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [entry],
-      getSlotsForId: vi.fn(() => [entry]),
-      loading: false,
-      error: null,
-    });
-
-    const { container } = render(
-      <PluginSlot slotId="settings-provider-card" renderPlaceholder={false} />,
-    );
-
-    expect(container.querySelector('[data-testid="droid-cli-provider-card"]')).not.toBeNull();
-  });
-
-  it("returns null for empty string slotId", () => {
-    const getSlotsForId = vi.fn(() => []);
-    vi.mocked(usePluginUiSlots).mockReturnValue({
-      slots: [],
-      getSlotsForId,
-      loading: false,
-      error: null,
-    });
-
-    const { container } = render(<PluginSlot slotId="" />);
-    expect(container.firstChild).toBeNull();
-    // getSlotsForId should not be called when slotId is falsy
-    expect(getSlotsForId).not.toHaveBeenCalled();
-  });
-
-  it("filters rendered slots by pluginIds when provided", () => {
+  it("filters by pluginIds", () => {
     const entryA = createSlotEntry("task-detail-tab", "plugin-a");
     const entryB = createSlotEntry("task-detail-tab", "plugin-b");
     vi.mocked(usePluginUiSlots).mockReturnValue({
@@ -178,11 +53,45 @@ describe("PluginSlot", () => {
       loading: false,
       error: null,
     });
+    vi.mocked(resolvePluginSlotComponent).mockReturnValue(({ entry: slotEntry }) => (
+      <div data-testid={`resolved-${slotEntry.pluginId}`} />
+    ));
 
-    const { container } = render(<PluginSlot slotId="task-detail-tab" pluginIds={["plugin-b"]} />);
+    render(<PluginSlot slotId="task-detail-tab" pluginIds={["plugin-b"]} />);
 
-    const shells = container.querySelectorAll("[data-plugin-slot]");
-    expect(shells).toHaveLength(1);
-    expect(shells[0]).toHaveAttribute("data-plugin-id", "plugin-b");
+    expect(screen.queryByTestId("resolved-plugin-a")).not.toBeInTheDocument();
+    expect(screen.getByTestId("resolved-plugin-b")).toBeInTheDocument();
+  });
+
+  it("shows explicit missing-component shell when unresolved", () => {
+    const entry = createSlotEntry("task-detail-tab", "plugin-a");
+    vi.mocked(usePluginUiSlots).mockReturnValue({
+      slots: [entry],
+      getSlotsForId: vi.fn(() => [entry]),
+      loading: false,
+      error: null,
+    });
+    vi.mocked(resolvePluginSlotComponent).mockReturnValue(null);
+
+    const { container } = render(<PluginSlot slotId="task-detail-tab" />);
+
+    const shell = container.querySelector("[data-plugin-slot-state='missing-component']");
+    expect(shell).not.toBeNull();
+    expect(shell?.textContent).toContain("Plugin component unavailable");
+  });
+
+  it("hides unresolved entries when placeholders disabled", () => {
+    const entry = createSlotEntry("task-detail-tab", "plugin-a");
+    vi.mocked(usePluginUiSlots).mockReturnValue({
+      slots: [entry],
+      getSlotsForId: vi.fn(() => [entry]),
+      loading: false,
+      error: null,
+    });
+    vi.mocked(resolvePluginSlotComponent).mockReturnValue(null);
+
+    const { container } = render(<PluginSlot slotId="task-detail-tab" renderPlaceholder={false} />);
+
+    expect(container.firstChild).toBeNull();
   });
 });

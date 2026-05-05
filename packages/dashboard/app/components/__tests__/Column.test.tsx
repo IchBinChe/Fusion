@@ -38,6 +38,7 @@ vi.mock("lucide-react", () => ({
   ChevronUp: () => null,
   Archive: () => null,
   MoreVertical: () => null,
+  AlertTriangle: () => null,
 }));
 
 // Mock usePluginUiSlots hook

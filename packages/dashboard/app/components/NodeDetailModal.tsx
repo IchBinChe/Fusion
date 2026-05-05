@@ -15,7 +15,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { ContainerStatusInfo, DockerNodeConfig, ManagedDockerNodeInfo, NodeInfo, NodeUpdateInput, ProjectInfo } from "../api";
+import type { ContainerStatusInfo, DockerNodeConfigInfo as DockerNodeConfig, ManagedDockerNodeInfo, NodeInfo, NodeUpdateInput, ProjectInfo } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { getProjectsForNode } from "../utils/nodeProjectAssignment";
 import type { ComputedNodeSyncStatus } from "../hooks/useNodeSettingsSync";
@@ -623,7 +623,7 @@ export function NodeDetailModal({
                             <option value="volume">volume</option>
                             <option value="bind">bind</option>
                           </select>
-                          <button className="btn btn-sm" onClick={() => setDockerConfigDraft({ ...dockerConfigDraft, volumeMounts: dockerConfigDraft.volumeMounts.filter((_, i) => i !== index) })}>Remove</button>
+                          <button className="btn btn-sm" onClick={() => setDockerConfigDraft({ ...dockerConfigDraft, volumeMounts: dockerConfigDraft.volumeMounts.filter((_, i: number) => i !== index) })}>Remove</button>
                         </div>
                       ))}
                       <button className="btn btn-sm" onClick={() => setDockerConfigDraft({ ...dockerConfigDraft, volumeMounts: [...dockerConfigDraft.volumeMounts, { hostPath: "", containerPath: "", mode: "rw", type: "volume" }] })}>Add Mount</button>
@@ -633,7 +633,7 @@ export function NodeDetailModal({
                   <details>
                     <summary>Environment Variables</summary>
                     <div className="node-detail-modal__docker-list">
-                      {Object.entries(dockerConfigDraft.environment).map(([key, value]) => {
+                      {Object.entries(dockerConfigDraft.environment as Record<string, string>).map(([key, value]: [string, string]) => {
                         const masked = SENSITIVE_ENV_KEY_PATTERN.test(key) && !dockerEnvReveal[key];
                         return (
                           <div key={key} className="node-detail-modal__docker-row">
@@ -643,7 +643,7 @@ export function NodeDetailModal({
                               next[event.target.value] = value;
                               setDockerConfigDraft({ ...dockerConfigDraft, environment: next });
                             }} />
-                            <input className="input" value={masked ? "***" : value} onChange={(event) => setDockerConfigDraft({ ...dockerConfigDraft, environment: { ...dockerConfigDraft.environment, [key]: event.target.value } })} />
+                            <input className="input" value={masked ? "***" : String(value)} onChange={(event) => setDockerConfigDraft({ ...dockerConfigDraft, environment: { ...dockerConfigDraft.environment, [key]: event.target.value } })} />
                             <button className="btn btn-sm" onClick={() => setDockerEnvReveal((prev) => ({ ...prev, [key]: !prev[key] }))}>
                               {dockerEnvReveal[key] ? <EyeOff size={14} /> : <Eye size={14} />}
                             </button>
@@ -693,7 +693,7 @@ export function NodeDetailModal({
                             next[index] = event.target.value;
                             setDockerConfigDraft({ ...dockerConfigDraft, extraClis: next });
                           }} />
-                          <button className="btn btn-sm" onClick={() => setDockerConfigDraft({ ...dockerConfigDraft, extraClis: (dockerConfigDraft.extraClis ?? []).filter((_, i) => i !== index) })}>Remove</button>
+                          <button className="btn btn-sm" onClick={() => setDockerConfigDraft({ ...dockerConfigDraft, extraClis: (dockerConfigDraft.extraClis ?? []).filter((_, i: number) => i !== index) })}>Remove</button>
                         </div>
                       ))}
                       <button className="btn btn-sm" onClick={() => setDockerConfigDraft({ ...dockerConfigDraft, extraClis: [...(dockerConfigDraft.extraClis ?? []), ""] })}>Add CLI</button>

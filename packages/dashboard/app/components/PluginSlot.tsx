@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { usePluginUiSlots } from "../hooks/usePluginUiSlots";
+import { resolvePluginSlotComponent, type PluginSlotHostActions } from "../plugins/pluginSlotRegistry";
 import "./PluginSlot.css";
 
 interface PluginSlotProps {
@@ -11,22 +11,35 @@ interface PluginSlotProps {
   projectId?: string;
   /** Optional plugin IDs to restrict rendering to a subset of matching entries */
   pluginIds?: string[];
-  /** Render fallback shell placeholders while dynamic slot component mounting is unavailable */
+  /** Render unresolved entry shell states for unregistered slot components */
   renderPlaceholder?: boolean;
+  /** Optional host-controlled callbacks that slot components can call */
+  actions?: PluginSlotHostActions;
 }
 
-function renderKnownPluginSlot(slotId: string, pluginId: string): ReactNode | null {
-  if (pluginId === "fusion-plugin-droid-runtime" && slotId === "settings-provider-card") {
-    return <DroidCliProviderCard compact authenticated={false} />;
-  }
-
-  return null;
+function PluginSlotMissingComponent({ slotId, pluginId }: { slotId: string; pluginId: string }): ReactNode {
+  return (
+    <section
+      className="plugin-slot-shell"
+      data-plugin-slot
+      data-slot-id={slotId}
+      data-plugin-id={pluginId}
+      data-plugin-slot-state="missing-component"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="plugin-slot-shell__title">Plugin component unavailable</p>
+      <p className="plugin-slot-shell__message">
+        The dashboard could not resolve this plugin surface from the static host registry.
+      </p>
+    </section>
+  );
 }
 
 /**
  * Renders plugin slot registrations for a host surface.
  */
-export function PluginSlot({ slotId, projectId, pluginIds, renderPlaceholder = true }: PluginSlotProps): ReactNode {
+export function PluginSlot({ slotId, projectId, pluginIds, renderPlaceholder = true, actions }: PluginSlotProps): ReactNode {
   const { getSlotsForId, loading, error } = usePluginUiSlots(projectId);
 
   if (loading || error || !slotId) {
@@ -45,28 +58,18 @@ export function PluginSlot({ slotId, projectId, pluginIds, renderPlaceholder = t
     <ErrorBoundary level="page">
       <>
         {matchingEntries.map((entry, index) => {
-          const knownSlot = renderKnownPluginSlot(entry.slot.slotId, entry.pluginId);
-          if (knownSlot) {
-            return <div key={`${entry.pluginId}-${entry.slot.slotId}-${index}`}>{knownSlot}</div>;
+          const key = `${entry.pluginId}-${entry.slot.slotId}-${index}`;
+          const SlotComponent = resolvePluginSlotComponent(entry);
+
+          if (SlotComponent) {
+            return <SlotComponent key={key} entry={entry} actions={actions} />;
           }
 
           if (!renderPlaceholder) {
             return null;
           }
 
-          return (
-            <section
-              key={`${entry.pluginId}-${entry.slot.slotId}-${index}`}
-              className="plugin-slot-shell"
-              data-plugin-slot
-              data-slot-id={entry.slot.slotId}
-              data-plugin-id={entry.pluginId}
-              aria-label={entry.slot.label}
-            >
-              <p className="plugin-slot-shell__title">{entry.slot.label}</p>
-              <p className="plugin-slot-shell__message">Extension content available.</p>
-            </section>
-          );
+          return <PluginSlotMissingComponent key={key} slotId={entry.slot.slotId} pluginId={entry.pluginId} />;
         })}
       </>
     </ErrorBoundary>

@@ -69,6 +69,10 @@ vi.mock("../CustomProviderForm", () => ({
   ),
 }));
 
+vi.mock("../PluginSlot", () => ({
+  PluginSlot: ({ slotId }: { slotId: string }) => <div data-testid={`plugin-slot-${slotId}`}>Plugin slot: {slotId}</div>,
+}));
+
 // Mock model-onboarding-state
 const mockGetOnboardingState = vi.fn();
 const mockSaveOnboardingState = vi.fn();
@@ -220,6 +224,10 @@ describe("ModelOnboardingModal", () => {
       await waitFor(() => {
         expect(screen.getByText("Set Up AI")).toBeTruthy();
       });
+
+      expect(screen.getByTestId("plugin-slot-onboarding-provider-card")).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-slot-onboarding-recommendation-card")).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-slot-onboarding-setup-help")).toBeInTheDocument();
 
       // Check step indicators
       expect(screen.getByText("AI Setup")).toBeTruthy();

@@ -450,10 +450,12 @@ Plugins declare `uiSlots` in their `FusionPlugin` definition. The dashboard disc
 | `settings-section` | Settings modal | Section added to the settings panel | Available |
 | `settings-provider-card` | Settings → Authentication | Provider card contribution in Authentication section | Available |
 | `settings-integration-card` | Settings → Authentication | Integration/help card contribution in Authentication section | Available |
+| `onboarding-provider-card` | Onboarding modal → AI setup | Provider card content rendered before host fallback cards | Available |
+| `onboarding-recommendation-card` | Onboarding modal → AI setup | Recommendation/help content rendered near setup intro | Available |
+| `onboarding-setup-help` | Onboarding modal → AI setup | Additional setup-help content rendered below provider sections | Available |
+| `post-onboarding-recommendation` | Dashboard post-onboarding card | Recommendation item rendered in host-owned next-steps container | Available |
 | `task-card-badge` | Task card on the board | Small badge displayed on task cards (e.g., CI status indicator) | Planned |
 | `board-column-footer` | Board column | Footer area below the last card in a column | Planned |
-
-> **Note:** Slots marked "Planned" are defined in the type system but dashboard rendering is not yet implemented. You can register for these slots now and they will render once the dashboard integration is complete.
 
 ### Defining UI Slots
 
@@ -494,19 +496,18 @@ const plugin: FusionPlugin = {
 | `icon` | `string` | No | Lucide icon name for visual identification |
 | `componentPath` | `string` | Yes | Path to the JS module exporting the component, relative to the plugin root |
 
-### Component Module Format
+### Component Module Format and Host Resolution
 
-The `componentPath` should point to a JS module that exports the component. For the current implementation, the dashboard renders placeholder `div` elements with `data-plugin-slot`, `data-slot-id`, `data-plugin-id`, and `data-component-path` attributes. Full dynamic component loading will be added in a future iteration.
+`componentPath` is part of the plugin contract, but dashboard rendering is intentionally host-resolved through a **static slot registry** (`pluginId + slotId + componentPath`).
 
-Plugin authors should create the component file at the declared path so it's ready when dynamic loading is implemented:
+Important implications:
 
-```javascript
-// ./components/ci-badge.js
-// Component file (dashboard placeholder rendering for now)
-export default function CiBadge() {
-  return null; // Placeholder — dynamic loading coming soon
-}
-```
+- The dashboard does **not** load arbitrary plugin modules at runtime from `componentPath`.
+- To render in dashboard flows, your slot entry must match a host-registered mapping.
+- Unknown/unmapped entries degrade safely to a visible “missing component” shell (or render nothing when the host sets `renderPlaceholder={false}`).
+- Host flows still own modal structure, navigation, callbacks, and fallback content when no slot entry exists.
+
+For this reason, plugin authors should still provide stable `componentPath` values in manifests, but coordinate with dashboard host maintainers when adding new UI surfaces or module paths that need mapping.
 
 ---
 

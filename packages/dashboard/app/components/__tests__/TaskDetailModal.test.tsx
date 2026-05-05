@@ -61,6 +61,7 @@ vi.mock("lucide-react", () => ({
   XCircle: () => null,
   GitMerge: () => null,
   GitBranch: () => null,
+  AlertTriangle: () => null,
 }));
 
 vi.mock("../../hooks/useAgentLogs", () => ({

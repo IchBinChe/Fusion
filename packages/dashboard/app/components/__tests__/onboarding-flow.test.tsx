@@ -85,12 +85,8 @@ vi.mock("../ClaudeCliProviderCard", () => ({
   ),
 }));
 
-vi.mock("../DroidCliProviderCard", () => ({
-  DroidCliProviderCard: ({ authenticated }: { authenticated: boolean }) => (
-    <div data-testid="droid-cli-provider-card" data-authenticated={authenticated ? "true" : "false"}>
-      Factory AI — via Droid CLI
-    </div>
-  ),
+vi.mock("../PluginSlot", () => ({
+  PluginSlot: ({ slotId }: { slotId: string }) => <div data-testid={`plugin-slot-${slotId}`}>Plugin slot: {slotId}</div>,
 }));
 
 vi.mock("lucide-react", async (importOriginal) => {
@@ -367,6 +363,7 @@ describe("onboarding flow integration", () => {
       const aiSetupIndicator = screen.getByText("AI Setup").closest(".model-onboarding-step-indicator");
       expect(aiSetupIndicator).toHaveClass("active");
       expect(screen.getByText("Set Up AI")).toBeInTheDocument();
+      expect(screen.getByTestId("plugin-slot-onboarding-recommendation-card")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Next →" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Skip for now" })).toBeInTheDocument();
     });

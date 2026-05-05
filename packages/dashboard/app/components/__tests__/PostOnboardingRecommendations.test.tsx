@@ -21,6 +21,15 @@ vi.mock("../model-onboarding-state", () => ({
   ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
 }));
 
+vi.mock("../PluginSlot", () => ({
+  PluginSlot: ({ slotId, actions }: { slotId: string; actions?: { openSettingsSection?: (section: string) => void; openModelOnboarding?: () => void } }) => (
+    <div data-testid={`plugin-slot-${slotId}`}>
+      <button type="button" onClick={() => actions?.openSettingsSection?.("authentication")}>plugin-open-settings</button>
+      <button type="button" onClick={() => actions?.openModelOnboarding?.()}>plugin-open-onboarding</button>
+    </div>
+  ),
+}));
+
 vi.mock("lucide-react", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return {
@@ -205,6 +214,24 @@ describe("PostOnboardingRecommendations", () => {
     fireEvent.click(dismissButton);
 
     expect(mockDismissPostOnboardingRecommendations).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes host callbacks to plugin recommendation slot", async () => {
+    mockFetchAuthStatus.mockResolvedValue({
+      providers: [
+        { id: "anthropic", name: "Anthropic", authenticated: false },
+        { id: "github", name: "GitHub", authenticated: true },
+      ],
+    });
+
+    renderComponent();
+
+    await screen.findByTestId("plugin-slot-post-onboarding-recommendation");
+    fireEvent.click(screen.getByRole("button", { name: "plugin-open-settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "plugin-open-onboarding" }));
+
+    expect(onOpenSettings).toHaveBeenCalledWith("authentication");
+    expect(onOpenModelOnboarding).toHaveBeenCalledTimes(1);
   });
 
   it("returns null on API error", async () => {

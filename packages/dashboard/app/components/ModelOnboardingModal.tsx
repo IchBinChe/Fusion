@@ -23,7 +23,6 @@ import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
-import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { LlamaCppProviderCard } from "./LlamaCppProviderCard";
 import { LoginInstructions } from "./LoginInstructions";
 import { OAuthManualCodeForm } from "./OAuthManualCodeForm";
@@ -1760,18 +1759,6 @@ export function ModelOnboardingModal({
       loginOutcomes[provider.id] === "cancelled";
     const showRemoteLoginInProgress = provider.loginInProgress && !hasTerminalLoginOutcome;
 
-    if (provider.id === "droid-cli" && provider.type === "cli") {
-      return (
-        <DroidCliProviderCard
-          key={provider.id}
-          authenticated={provider.authenticated}
-          onToggled={() => {
-            void loadAuthStatus();
-          }}
-        />
-      );
-    }
-
     if (provider.id === "llama-cpp" && provider.type === "cli") {
       return (
         <LlamaCppProviderCard
@@ -2130,7 +2117,12 @@ export function ModelOnboardingModal({
                 </div>
               ) : (
                 <>
-                  <PluginSlot slotId="onboarding-provider-card" projectId={projectId} renderPlaceholder={false} />
+                  <PluginSlot
+                    slotId="onboarding-provider-card"
+                    projectId={projectId}
+                    renderPlaceholder={false}
+                    actions={{ refreshAuthProviders: () => { void loadAuthStatus(); } }}
+                  />
 
                   <section className="onboarding-provider-section" data-testid="onboarding-quick-start-providers">
                     <h3 className="onboarding-section-title">Quick start providers</h3>

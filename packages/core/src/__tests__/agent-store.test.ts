@@ -760,6 +760,27 @@ describe("AgentStore", () => {
       expect(persisted?.memory).toBe("Avoids broad rewrites; prefers incremental changes.");
     });
 
+    it("round-trips imageUrl through create, read, and update", async () => {
+      const created = await store.createAgent({
+        name: "Avatar Agent",
+        role: "executor",
+        imageUrl: "/api/agents/avatar-agent/avatar",
+      });
+
+      expect(created.imageUrl).toBe("/api/agents/avatar-agent/avatar");
+
+      const persisted = await store.getAgent(created.id);
+      expect(persisted?.imageUrl).toBe("/api/agents/avatar-agent/avatar");
+
+      const updated = await store.updateAgent(created.id, {
+        imageUrl: "/api/agents/avatar-agent/avatar?t=1",
+      });
+      expect(updated.imageUrl).toBe("/api/agents/avatar-agent/avatar?t=1");
+
+      const persistedAfterUpdate = await store.getAgent(created.id);
+      expect(persistedAfterUpdate?.imageUrl).toBe("/api/agents/avatar-agent/avatar?t=1");
+    });
+
     it("does not clear soul when updates.soul is undefined", async () => {
       const created = await store.createAgent({
         name: "Stable Soul",

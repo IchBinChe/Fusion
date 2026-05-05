@@ -17,6 +17,7 @@ Every first-class editable agent field has a defined create/edit/import/template
 | `metadata` | ✓ | ✓ | ✓ | Arbitrary key-value data |
 | `title` | ✓ | ✓ | ✓ (from manifest) | Job title/description |
 | `icon` | ✓ | ✓ | ✓ (from manifest) | Emoji or icon identifier |
+| `imageUrl` | ✗ (set by avatar upload endpoint) | ✓ | ✗ | Uploaded avatar image URL (`/api/agents/:id/avatar`) |
 | `reportsTo` | ✓ | ✓ | ✓ (from manifest) | Parent agent ID |
 | `runtimeConfig` | ✓ | ✓ | ✗ | Heartbeat/budget config |
 | `permissions` | ✓ | ✓ | ✗ | Capability flags |
@@ -371,7 +372,7 @@ When `experimentalFeatures.agentOnboarding` is disabled, the original `NewAgentD
 
 The dashboard provides quick-start presets for common agent roles. Each preset includes:
 
-- **Name and icon** - Display identification
+- **Name, icon, and avatar** - Display identification (`imageUrl` takes priority over `icon` in UI rendering)
 - **Professional title** - Descriptive role title
 - **Soul** - Personality and operating principles defining how the agent thinks and communicates
 - **Instructions** - Actionable behavioral guidelines

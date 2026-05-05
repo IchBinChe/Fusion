@@ -27,6 +27,7 @@ import {
 import { isEphemeralAgent, getErrorMessage } from "@fusion/core";
 import { formatAgentSkillBadgeLabel } from "../utils/agentSkills";
 import { resolveOrgChartLayoutMode, type OrgChartLayoutMode } from "./agentsOrgChartLayout";
+import { AgentAvatar } from "./AgentAvatar";
 
 export interface AgentsViewProps {
   addToast: (message: string, type?: "success" | "error") => void;
@@ -189,7 +190,7 @@ function OrgChartNode({
         }}
       >
         <div className="org-chart-node__header">
-          <span className="org-chart-node__icon">{getRoleIcon(agent.role)}</span>
+          <span className="org-chart-node__icon"><AgentAvatar agent={agent} size={20} /></span>
           <span className="org-chart-node__name">{agent.name}</span>
         </div>
         <div className="org-chart-node__meta">
@@ -1127,7 +1128,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                       }}
                     >
                       <div className="agent-board-header">
-                        <span className="agent-board-icon">{getRoleIcon(agent.role)}</span>
+                        <span className="agent-board-icon"><AgentAvatar agent={agent} size={20} /></span>
                         <span className="agent-board-badge badge text-secondary">{getRoleLabel(agent.role)}</span>
                         <span className={`agent-board-badge badge ${stateBadgeClass}`}>{agent.state}</span>
                       </div>
@@ -1205,7 +1206,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                             }
                           }}
                         >
-                          {getRoleIcon(agent.role)}
+                          <AgentAvatar agent={agent} size={20} />
                         </span>
                       )}
                       <div className="agent-meta">

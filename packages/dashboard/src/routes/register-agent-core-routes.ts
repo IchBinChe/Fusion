@@ -1,3 +1,5 @@
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { Request, Response } from "express";
 import type { Agent, AgentCapability, AgentUpdateInput, TaskStore } from "@fusion/core";
 import { getDefaultHeartbeatProcedurePath } from "@fusion/core";
@@ -8,7 +10,16 @@ import { ensureDefaultHeartbeatProcedureFile, HEARTBEAT_PROCEDURE } from "@fusio
 interface AgentCoreRouteDeps {
   sanitizeAgentTaskLinks: (agents: Agent[], scopedStore: TaskStore) => Promise<Agent[]>;
   validateAgentInstructionsPayload: (instructionsPath: unknown, instructionsText: unknown) => boolean;
+  upload: import("multer").Multer;
 }
+
+const AVATAR_MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
 function isCompatibleDefaultHeartbeatPath(path: string | undefined, agent: Agent): boolean {
   const trimmed = path?.trim();
@@ -210,7 +221,7 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
 
 export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRouteDeps): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
-  const { sanitizeAgentTaskLinks, validateAgentInstructionsPayload } = deps;
+  const { sanitizeAgentTaskLinks, validateAgentInstructionsPayload, upload } = deps;
 
   /**
    * GET /api/agents/stats
@@ -328,6 +339,142 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
   });
 
   /**
+   * POST /api/agents/:id/avatar
+   * Upload agent avatar image.
+   */
+  router.post("/agents/:id/avatar", upload.single("file") as import("express").RequestHandler, async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!agentId) {
+        throw badRequest("Agent id is required");
+      }
+      const agent = await agentStore.getAgent(agentId);
+      if (!agent) {
+        throw notFound("Agent not found");
+      }
+      if (!req.file) {
+        throw badRequest("No file provided");
+      }
+      if (req.file.size > MAX_AVATAR_BYTES) {
+        throw badRequest("File too large (max 2MB)");
+      }
+      const ext = AVATAR_MIME_TO_EXT[req.file.mimetype];
+      if (!ext) {
+        throw badRequest("Invalid mime type");
+      }
+
+      const agentDir = path.join(scopedStore.getFusionDir(), "agents", agent.id);
+      await mkdir(agentDir, { recursive: true });
+      const entries = await readdir(agentDir);
+      await Promise.all(entries.filter((entry) => entry.startsWith("avatar.")).map((entry) => rm(path.join(agentDir, entry), { force: true })));
+      await writeFile(path.join(agentDir, `avatar.${ext}`), req.file.buffer);
+
+      const updated = await agentStore.updateAgent(agent.id, { imageUrl: `/api/agents/${agent.id}/avatar` });
+      res.setHeader("Cache-Control", "no-store");
+      res.json(updated);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err instanceof Error ? err.message : String(err)).includes("not found")) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * GET /api/agents/:id/avatar
+   * Serve agent avatar image.
+   */
+  router.get("/agents/:id/avatar", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!agentId) {
+        throw badRequest("Agent id is required");
+      }
+      const agent = await agentStore.getAgent(agentId);
+      if (!agent) {
+        throw notFound("Agent not found");
+      }
+
+      const agentDir = path.join(scopedStore.getFusionDir(), "agents", agent.id);
+      const entries = await readdir(agentDir).catch(() => [] as string[]);
+      const avatarFile = entries.find((entry) => entry.startsWith("avatar."));
+      if (!avatarFile) {
+        throw notFound("Avatar not found");
+      }
+
+      const ext = avatarFile.split(".").pop() ?? "";
+      const mimeType = Object.entries(AVATAR_MIME_TO_EXT).find(([, value]) => value === ext)?.[0];
+      if (!mimeType) {
+        throw notFound("Avatar not found");
+      }
+
+      const fileBuffer = await readFile(path.join(agentDir, avatarFile));
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(fileBuffer);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err instanceof Error ? err.message : String(err)).includes("not found")) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * DELETE /api/agents/:id/avatar
+   * Remove agent avatar image.
+   */
+  router.delete("/agents/:id/avatar", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      if (!agentId) {
+        throw badRequest("Agent id is required");
+      }
+      const agent = await agentStore.getAgent(agentId);
+      if (!agent) {
+        throw notFound("Agent not found");
+      }
+
+      const agentDir = path.join(scopedStore.getFusionDir(), "agents", agent.id);
+      const entries = await readdir(agentDir).catch(() => [] as string[]);
+      await Promise.all(entries.filter((entry) => entry.startsWith("avatar.")).map((entry) => rm(path.join(agentDir, entry), { force: true })));
+
+      const updated = await agentStore.updateAgent(agent.id, { imageUrl: undefined });
+      res.setHeader("Cache-Control", "no-store");
+      res.json(updated);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err instanceof Error ? err.message : String(err)).includes("not found")) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
    * PATCH /api/agents/:id
    * Update agent fields.
    */
@@ -369,6 +516,13 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
           throw badRequest("icon must be a string");
         }
         updates.icon = body.icon ?? undefined;
+      }
+
+      if ("imageUrl" in body) {
+        if (body.imageUrl !== null && typeof body.imageUrl !== "string") {
+          throw badRequest("imageUrl must be a string");
+        }
+        updates.imageUrl = body.imageUrl ?? undefined;
       }
 
       if ("reportsTo" in body) {

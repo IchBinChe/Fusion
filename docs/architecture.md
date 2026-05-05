@@ -791,6 +791,7 @@ Fusion has two complementary agent models:
 - `.fusion/agents/{id}-heartbeats.jsonl`
 - `.fusion/agents/{id}-keys.jsonl`
 - `.fusion/agents/{id}-revisions.jsonl`
+- `.fusion/agents/{id}/avatar.{ext}` (uploaded avatar image file, served via `/api/agents/:id/avatar`)
 
 ### Agent spawning from executor
 `TaskExecutor` supports hierarchical child agents via:

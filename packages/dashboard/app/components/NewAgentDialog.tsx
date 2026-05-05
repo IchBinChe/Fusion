@@ -9,6 +9,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { AgentGenerationModal } from "./AgentGenerationModal";
 import { AGENT_PRESETS, type AgentPreset } from "./agent-presets";
 import { SkillMultiselect } from "./SkillMultiselect";
+import { AgentAvatar } from "./AgentAvatar";
 
 export interface NewAgentDialogProps {
   isOpen: boolean;
@@ -469,7 +470,7 @@ export function NewAgentDialog({ isOpen, onClose, onCreated, projectId, prefillD
                           onClick={() => handlePresetSelect(preset)}
                           title={preset.title}
                         >
-                          <span className="agent-preset-icon">{preset.icon}</span>
+                          <span className="agent-preset-icon"><AgentAvatar agent={{ id: preset.id, icon: preset.icon, name: preset.name }} size={28} /></span>
                           <span className="agent-preset-name">{preset.name}</span>
                           <span className="agent-preset-role">{preset.role}</span>
                           {preset.description && (

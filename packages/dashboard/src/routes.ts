@@ -3057,6 +3057,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   registerAgentCoreListCreateRoutes(routeContext, {
     sanitizeAgentTaskLinks,
     validateAgentInstructionsPayload,
+    upload,
   });
 
   registerAgentImportExportRoutes(routeContext);
@@ -3064,6 +3065,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   registerAgentCoreRoutes(routeContext, {
     sanitizeAgentTaskLinks,
     validateAgentInstructionsPayload,
+    upload,
   });
 
   registerAgentRuntimeRoutes(routeContext, {

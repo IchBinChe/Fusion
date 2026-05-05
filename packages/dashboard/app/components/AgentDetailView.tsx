@@ -10,7 +10,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus, ModelInfo, MemoryFileInfo, AgentCapability, PluginRuntimeInfo, SkillContent } from "../api";
-import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchPluginRuntimes, fetchAgents, upgradeAgentHeartbeatProcedure, updateGlobalSettings, fetchSkillContent } from "../api";
+import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchPluginRuntimes, fetchAgents, upgradeAgentHeartbeatProcedure, updateGlobalSettings, fetchSkillContent, uploadAgentAvatar, deleteAgentAvatar } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry, Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -26,6 +26,7 @@ import { CustomModelDropdown } from "./CustomModelDropdown";
 import { useConfirm } from "../hooks/useConfirm";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { AgentImportModal } from "./AgentImportModal";
+import { AgentAvatar } from "./AgentAvatar";
 
 /**
  * Simple className utility - joins class names conditionally
@@ -522,7 +523,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
               </button>
             ) : null}
             <div className="agent-detail-icon">
-              <Bot size={20} />
+              <AgentAvatar agent={agent} size={36} />
             </div>
             <div className="agent-detail-info">
               <h2>{agent.name}</h2>
@@ -2985,6 +2986,8 @@ function ConfigTab({
   const [reportsToValue, setReportsToValue] = useState(agent.reportsTo ?? "");
   const [managerOptions, setManagerOptions] = useState<Agent[]>([]);
   const [isLoadingManagers, setIsLoadingManagers] = useState(false);
+  const [isAvatarPending, setIsAvatarPending] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Local form state initialised from agent.metadata
   const [formValues, setFormValues] = useState<Record<string, string>>(() => {
@@ -3613,6 +3616,35 @@ function ConfigTab({
     return () => clearTimeout(timeout);
   }, [hasChanges, isSaving, persistSettings, validationErrors]);
 
+  const handleAvatarUpload = useCallback(async (file: File) => {
+    setIsAvatarPending(true);
+    try {
+      await uploadAgentAvatar(agent.id, file, projectId);
+      await onSaved();
+      addToast("Avatar uploaded", "success");
+    } catch (error: unknown) {
+      addToast(getErrorMessage(error), "error");
+    } finally {
+      setIsAvatarPending(false);
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = "";
+      }
+    }
+  }, [addToast, agent.id, onSaved, projectId]);
+
+  const handleAvatarDelete = useCallback(async () => {
+    setIsAvatarPending(true);
+    try {
+      await deleteAgentAvatar(agent.id, projectId);
+      await onSaved();
+      addToast("Avatar removed", "success");
+    } catch (error: unknown) {
+      addToast(getErrorMessage(error), "error");
+    } finally {
+      setIsAvatarPending(false);
+    }
+  }, [addToast, agent.id, onSaved, projectId]);
+
   const saveStatusLabel = isSaving
     ? "Saving changes…"
     : autoSaveError
@@ -3673,6 +3705,42 @@ function ConfigTab({
               onChange={(e) => setTitleValue(e.target.value)}
               onBlur={() => { void scheduleAutoSave(); }}
             />
+          </div>
+
+          <div className="config-field">
+            <label>Avatar</label>
+            <div className="agent-avatar-editor">
+              <AgentAvatar agent={agent} size={64} className="agent-avatar-editor-preview" />
+              <div className="agent-avatar-editor-actions">
+                <input
+                  ref={avatarInputRef}
+                  id="agent-avatar-upload"
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  className="visually-hidden"
+                  disabled={isAvatarPending}
+                  onChange={(event) => {
+                    const selectedFile = event.target.files?.[0];
+                    if (selectedFile) {
+                      void handleAvatarUpload(selectedFile);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={isAvatarPending}
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  Upload Avatar
+                </button>
+                {agent.imageUrl ? (
+                  <button type="button" className="btn btn-sm" onClick={() => void handleAvatarDelete()} disabled={isAvatarPending}>
+                    Remove Avatar
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div className="config-field">

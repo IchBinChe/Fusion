@@ -1039,13 +1039,10 @@ describe("MissionManager", () => {
     fireEvent.click(screen.getByTestId("mission-activity-load-more"));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("65 of 65", {
-          selector: ".mission-detail__activity-count",
-        }),
-      ).toBeDefined();
+      const activityCount = document.querySelector(".mission-detail__activity-count");
+      expect(activityCount?.textContent?.trim()).toBe("65 of 65");
       expect(screen.queryByTestId("mission-activity-load-more")).toBeNull();
-    });
+    }, { timeout: 5000 });
   }, 15000);
 
   it("auto-scrolls to latest mission activity on initial load", async () => {

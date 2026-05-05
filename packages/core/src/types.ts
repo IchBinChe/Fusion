@@ -3543,6 +3543,8 @@ export interface Agent {
   title?: string;
   /** Custom icon identifier */
   icon?: string;
+  /** Uploaded avatar image URL */
+  imageUrl?: string;
   /** Agent ID this agent reports to (org hierarchy) */
   reportsTo?: string;
   /** Runtime configuration. Supports: AgentHeartbeatConfig keys (heartbeatIntervalMs, heartbeatTimeoutMs, maxConcurrentRuns) */
@@ -3674,6 +3676,7 @@ export interface AgentCreateInput {
   metadata?: Record<string, unknown>;
   title?: string;
   icon?: string;
+  imageUrl?: string;
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   permissions?: Record<string, boolean>;
@@ -3692,6 +3695,7 @@ export interface AgentUpdateInput {
   metadata?: Record<string, unknown>;
   title?: string;
   icon?: string;
+  imageUrl?: string;
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   pauseReason?: string;
@@ -3789,6 +3793,7 @@ export interface AgentConfigSnapshot {
   role: AgentCapability;
   title?: string;
   icon?: string;
+  imageUrl?: string;
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   permissions?: Record<string, boolean>;
@@ -3917,6 +3922,7 @@ export function agentToConfigSnapshot(agent: Agent): AgentConfigSnapshot {
     role: agent.role,
     title: agent.title,
     icon: agent.icon,
+    imageUrl: agent.imageUrl,
     reportsTo: agent.reportsTo,
     runtimeConfig: agent.runtimeConfig ? { ...agent.runtimeConfig } : undefined,
     permissions: agent.permissions ? { ...agent.permissions } : undefined,
@@ -3945,6 +3951,7 @@ export function diffConfigSnapshots(
     "role",
     "title",
     "icon",
+    "imageUrl",
     "reportsTo",
     "runtimeConfig",
     "permissions",

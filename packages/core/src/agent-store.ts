@@ -119,6 +119,7 @@ interface AgentData {
   metadata: Record<string, unknown>;
   title?: string;
   icon?: string;
+  imageUrl?: string;
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   pauseReason?: string;
@@ -571,6 +572,7 @@ export class AgentStore extends EventEmitter {
       metadata,
       ...(input.title && { title: input.title }),
       ...(input.icon && { icon: input.icon }),
+      ...(input.imageUrl && { imageUrl: input.imageUrl }),
       ...(input.reportsTo && { reportsTo: input.reportsTo }),
       ...(runtimeConfig && { runtimeConfig }),
       ...(input.permissions && { permissions: input.permissions }),
@@ -1021,6 +1023,7 @@ export class AgentStore extends EventEmitter {
         updatedAt,
         ...("title" in updates && { title: updates.title }),
         ...("icon" in updates && { icon: updates.icon }),
+        ...("imageUrl" in updates && { imageUrl: updates.imageUrl }),
         ...("reportsTo" in updates && { reportsTo: updates.reportsTo }),
         ...("runtimeConfig" in updates && { runtimeConfig: updates.runtimeConfig }),
         ...("pauseReason" in updates && { pauseReason: updates.pauseReason }),
@@ -2152,6 +2155,7 @@ export class AgentStore extends EventEmitter {
     | "role"
     | "title"
     | "icon"
+    | "imageUrl"
     | "reportsTo"
     | "runtimeConfig"
     | "permissions"
@@ -2168,6 +2172,7 @@ export class AgentStore extends EventEmitter {
       role: snapshot.role,
       title: snapshot.title,
       icon: snapshot.icon,
+      imageUrl: snapshot.imageUrl,
       reportsTo: snapshot.reportsTo,
       runtimeConfig: snapshot.runtimeConfig ? { ...snapshot.runtimeConfig } : undefined,
       permissions: snapshot.permissions ? { ...snapshot.permissions } : undefined,
@@ -2450,6 +2455,7 @@ export class AgentStore extends EventEmitter {
       metadata: data.metadata ?? {},
       title: data.title,
       icon: data.icon,
+      imageUrl: data.imageUrl,
       reportsTo: data.reportsTo,
       runtimeConfig: data.runtimeConfig,
       pauseReason: data.pauseReason,
@@ -2479,6 +2485,7 @@ export class AgentStore extends EventEmitter {
       metadata: agent.metadata,
       title: agent.title,
       icon: agent.icon,
+      imageUrl: agent.imageUrl,
       reportsTo: agent.reportsTo,
       runtimeConfig: agent.runtimeConfig,
       pauseReason: agent.pauseReason,

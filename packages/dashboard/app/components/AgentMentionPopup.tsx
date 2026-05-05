@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Bot } from "lucide-react";
+import { AgentAvatar } from "./AgentAvatar";
 import "./AgentMentionPopup.css";
 import type { Agent } from "@fusion/core";
 
@@ -60,7 +60,7 @@ export function AgentMentionPopup({
             role="option"
             aria-selected={index === highlightedIndex}
           >
-            <Bot size={14} aria-hidden="true" />
+            <AgentAvatar agent={agent} size={20} />
             <span className="agent-mention-name">{agent.name}</span>
             <span className="agent-mention-role">{agent.role}</span>
           </button>

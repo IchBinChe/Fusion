@@ -941,6 +941,23 @@
   font-weight: 500;
 }
 
+.agent-avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.agent-avatar-editor-preview {
+  background: var(--card);
+}
+
+.agent-avatar-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
 .config-runtime-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1706,6 +1723,19 @@
 
 /* === Agent Dialog Mobile Responsive === */
 @media (max-width: 768px) {
+  .agent-avatar-editor {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .agent-avatar-editor-actions {
+    width: 100%;
+  }
+
+  .agent-avatar-editor-actions .btn {
+    min-height: calc(var(--space-lg) * 2 + var(--space-xs));
+  }
+
   .agent-dialog-overlay {
     padding: 0;
     align-items: stretch;

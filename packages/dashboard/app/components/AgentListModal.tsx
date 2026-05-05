@@ -13,6 +13,7 @@ import { getErrorMessage } from "@fusion/core";
 import type { AgentHealthStatus } from "../utils/agentHealth";
 import { useConfirm } from "../hooks/useConfirm";
 import { CollapsibleErrorDisplay } from "./AgentsView";
+import { AgentAvatar } from "./AgentAvatar";
 
 interface AgentListModalProps {
   isOpen: boolean;
@@ -208,7 +209,6 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
   };
 
   const getRoleLabel = (role: AgentCapability) => AGENT_ROLES.find(r => r.value === role)?.label ?? role;
-  const getRoleIcon = (role: AgentCapability) => AGENT_ROLES.find(r => r.value === role)?.icon ?? "◆";
 
   // Use centralized health status utility for consistent labels across all views
   // This fixes the previous hardcoded 60s timeout that was inconsistent with other views
@@ -343,7 +343,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
                 return (
                   <div key={agent.id} className="agent-board-card" data-state={agent.state}>
                     <div className="agent-board-header">
-                      <span className="agent-board-icon">{getRoleIcon(agent.role)}</span>
+                      <span className="agent-board-icon"><AgentAvatar agent={agent} size={20} /></span>
                       <span
                         className="agent-board-badge"
                         data-state={agent.state}
@@ -516,7 +516,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
                               }
                             }}
                           >
-                            {getRoleIcon(agent.role)}
+                            <AgentAvatar agent={agent} size={20} />
                           </span>
                         )}
                         <div className="agent-meta">

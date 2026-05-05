@@ -4606,6 +4606,29 @@ export function updateAgent(agentId: string, updates: AgentUpdateInput, projectI
   });
 }
 
+/** Upload an agent avatar image. */
+export async function uploadAgentAvatar(agentId: string, file: File, projectId?: string): Promise<Agent> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(buildApiUrl(withProjectId(`/agents/${encodeURIComponent(agentId)}/avatar`, projectId)), {
+    method: "POST",
+    headers: withTokenHeader(),
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || "Avatar upload failed");
+  }
+  return data as Agent;
+}
+
+/** Delete an agent avatar image. */
+export function deleteAgentAvatar(agentId: string, projectId?: string): Promise<Agent> {
+  return api<Agent>(withProjectId(`/agents/${encodeURIComponent(agentId)}/avatar`, projectId), {
+    method: "DELETE",
+  });
+}
+
 /** Backfill an existing agent onto the default heartbeat procedure file. */
 export function upgradeAgentHeartbeatProcedure(
   agentId: string,

@@ -36,20 +36,7 @@ export default defineConfig({
     },
   },
   test: {
-    // `app/**` is React UI — needs jsdom + CSS. `src/**` is the Express
-    // backend, mostly Node-only logic; running it in node env trims jsdom
-    // env+CSS-include cost. The handful of src tests that genuinely need DOM
-    // opt-in via `// @vitest-environment jsdom`.
-    environment: "node",
-    environmentMatchGlobs: [
-      ["app/**", "jsdom"],
-    ],
-    // Process CSS imports only for jsdom-based tests that assert on
-    // getComputedStyle. Node-env tests under src/** don't need CSS rules and
-    // skipping the transform there cuts a large slice of total wall time.
-    css: { include: [/app\//] },
     globals: true,
-    include: ["app/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
     setupFiles: [
       resolve(__dirname, "../core/src/__test-utils__/vitest-setup.ts"),
       "./vitest.setup.ts",
@@ -66,6 +53,28 @@ export default defineConfig({
     // 5s default under workspace-concurrent runs.
     testTimeout: 15_000,
     hookTimeout: 15_000,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "dashboard-app",
+          environment: "jsdom",
+          include: ["app/**/*.test.{ts,tsx}"],
+          // Process CSS imports only for jsdom tests that assert on
+          // getComputedStyle. Node API tests do not need CSS transforms.
+          css: { include: [/app\//] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dashboard-api",
+          environment: "node",
+          include: ["src/**/*.test.{ts,tsx}"],
+          css: { include: [] },
+        },
+      },
+    ],
     coverage: {
       enabled: false,
       reporter: ["text", "html", "json"],

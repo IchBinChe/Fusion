@@ -307,8 +307,8 @@ function getSharedGitTestRepo(): GitTestRepo {
   const repoDir = join(root, "repo");
 
   mkdirSync(repoDir, { recursive: true });
-  execFileSync("git", ["init", "--bare", remoteDir], { stdio: "pipe" });
-  execFileSync("git", ["init", repoDir], { stdio: "pipe" });
+  execFileSync("git", ["init", "--bare", "--initial-branch=main", remoteDir], { stdio: "pipe" });
+  execFileSync("git", ["init", "--initial-branch=main", repoDir], { stdio: "pipe" });
   execFileSync("git", ["-C", repoDir, "config", "user.email", "kb-tests@example.com"], { stdio: "pipe" });
   execFileSync("git", ["-C", repoDir, "config", "user.name", "KB Tests"], { stdio: "pipe" });
   writeFileSync(join(repoDir, "README.md"), "# Test Repo\n");
@@ -1485,4 +1485,3 @@ describe("Workspace File Routes", () => {
     });
   });
 });
-

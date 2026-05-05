@@ -716,7 +716,7 @@ describe("POST /api/projects route handler", () => {
     const cloneDestination = join(tempRoot, "cloned-project");
 
     try {
-      execFileSync("git", ["init", "--bare", bareRepo]);
+      execFileSync("git", ["init", "--bare", "--initial-branch=main", bareRepo]);
 
       const res = await request(
         app,

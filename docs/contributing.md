@@ -71,7 +71,7 @@ GitHub Actions now runs deterministic test sharding via `pnpm test:ci:shard --sh
 - `pnpm test:full` remains the canonical full local suite.
 - `pnpm verify:workspace` remains the canonical local lint -> test -> build gate.
 
-`test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that partitions a fixed package list by shard index modulo total shard count so coverage is deterministic and reproducible.
+`test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that partitions workspace packages with `test` scripts by shard index modulo total shard count so coverage is deterministic and reproducible.
 
 `pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected workspaces from `pnpm-workspace.yaml` (both `packages/*` and `plugins/**`) using safe package-first filtering (`pnpm --filter <pkg> test`). It automatically falls back to the full suite when the run is forced (CI / `--full`), the git comparison base or diff cannot be resolved, no changes are detected, shared/root test infrastructure changes, or changed workspace paths cannot be resolved to a workspace package (fail-safe coverage behavior).
 
@@ -158,6 +158,19 @@ pnpm --filter @runfusion/fusion test:extension-integration
 ```
 
 `test:extension-integration` enables `FUSION_TEST_EXTENSION_INTEGRATION=1` and runs the full fn pi extension integration suite. It remains an explicit opt-in lane so default workspace verification stays fast, while still providing a discoverable command for full extension-tool integration coverage.
+
+## Dashboard Test Lanes
+
+Dashboard tests are split into explicit local lanes. The default dashboard package gate runs the app/API tests; the built-client contract remains a separate lane because it performs its own production build:
+
+```bash
+pnpm --filter @fusion/dashboard test:app            # React/jsdom app tests
+pnpm --filter @fusion/dashboard test:api            # Node API/server tests
+pnpm --filter @fusion/dashboard test:browser-smoke  # local browser layout smoke
+pnpm --filter @fusion/dashboard test:build          # built client output contract
+```
+
+Use these lanes for local iteration before PRs. The full workspace test gate runs the default dashboard app/API suite, `pnpm build` remains an explicit PR gate, and PR test shards avoid a redundant pre-test workspace build to save GitHub Actions minutes.
 
 ## Release Process
 

@@ -171,10 +171,21 @@ describe("PR checks workflow (.github/workflows/pr-checks.yml)", () => {
   it("uses the same deterministic test sharding command as manual CI", () => {
     expect(workflow.jobs?.lint).toBeDefined();
     expect(workflow.jobs?.typecheck).toBeDefined();
+    expect(workflow.jobs?.build).toBeDefined();
     expect(workflow.jobs?.["test-shards"]).toBeDefined();
     expect(workflow.jobs?.["test-shards"]?.strategy?.matrix?.shard).toEqual([1, 2, 3]);
     expect(content).toContain("pnpm test:ci:shard --shard ${{ matrix.shard }} --total 3");
     expect(content).not.toContain("run: pnpm test\n");
+  });
+
+  it("keeps build coverage as an explicit PR gate", () => {
+    const buildSteps = workflow.jobs?.build?.steps ?? [];
+    expect(buildSteps.some((step: any) => step.name === "Build" && step.run === "pnpm build")).toBe(true);
+  });
+
+  it("does not spend PR action minutes on a pre-test workspace build", () => {
+    const testSteps = workflow.jobs?.["test-shards"]?.steps ?? [];
+    expect(testSteps.some((step: any) => step.name === "Build" || step.run === "pnpm build")).toBe(false);
   });
 });
 

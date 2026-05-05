@@ -6,6 +6,7 @@ const COMPONENTS_DIR = join(APP_DIR, "components");
 
 let cached: string | null = null;
 let stylesCached: string | null = null;
+let baseOnlyCached: string | null = null;
 
 export function loadStylesCss(): string {
   if (stylesCached !== null) return stylesCached;
@@ -40,6 +41,7 @@ export function loadAllAppCss(): string {
  * against @media overrides that happen to come earlier in the source order.
  */
 export function loadAllAppCssBaseOnly(): string {
+  if (baseOnlyCached !== null) return baseOnlyCached;
   const src = loadAllAppCss();
   // Walk and excise any top-level @<rule> { ... } block (e.g. @media, @supports)
   let out = "";
@@ -60,5 +62,6 @@ export function loadAllAppCssBaseOnly(): string {
     }
     out += src[i++];
   }
-  return out;
+  baseOnlyCached = out;
+  return baseOnlyCached;
 }

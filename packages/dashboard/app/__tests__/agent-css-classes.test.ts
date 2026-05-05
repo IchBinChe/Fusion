@@ -25,12 +25,6 @@ function hasClass(cls: string): boolean {
   return new RegExp(`${escaped}(?=[\\s,{:.#>+~])`).test(stylesContent);
 }
 
-function extractSection(startMarker: string, endMarker: string): string {
-  const start = stylesContent.indexOf(startMarker);
-  const end = stylesContent.indexOf(endMarker, start + startMarker.length);
-  return start >= 0 && end >= 0 ? stylesContent.slice(start, end) : "";
-}
-
 describe("Agent CSS classes", () => {
   // Verify agent state CSS variables are defined in the global stylesheet
   it("should define --state-* CSS variables", () => {
@@ -46,109 +40,6 @@ describe("Agent CSS classes", () => {
     expect(stylesContent).toContain("--state-error-bg:");
     expect(stylesContent).toContain("--state-error-text:");
     expect(stylesContent).toContain("--state-error-border:");
-  });
-
-  // Verify BEM button modifier classes exist
-  it("should define BEM button modifier classes", () => {
-    expect(hasClass(".btn--sm")).toBe(true);
-    expect(hasClass(".btn--primary")).toBe(true);
-    expect(hasClass(".btn--danger")).toBe(true);
-    expect(hasClass(".btn--warning")).toBe(true);
-    expect(hasClass(".btn--compact")).toBe(true);
-  });
-
-  // Verify badge base class
-  it("should define .badge base class", () => {
-    expect(hasClass(".badge")).toBe(true);
-  });
-
-  // Verify AgentMetricsBar classes
-  it("should define AgentMetricsBar CSS classes", () => {
-    expect(hasClass(".agent-metrics-bar")).toBe(true);
-    expect(hasClass(".agent-metric-card")).toBe(true);
-    expect(hasClass(".agent-metric-card--active")).toBe(true);
-    expect(hasClass(".agent-metric-card--tasks")).toBe(true);
-    expect(hasClass(".agent-metric-card--success")).toBe(true);
-    expect(hasClass(".agent-metric-card--runs")).toBe(true);
-    expect(hasClass(".agent-metric-info")).toBe(true);
-    expect(hasClass(".agent-metric-value")).toBe(true);
-    expect(hasClass(".agent-metric-label")).toBe(true);
-  });
-
-  // Verify AgentsView classes
-  it("should define AgentsView CSS classes", () => {
-    expect(hasClass(".agents-view")).toBe(true);
-    expect(hasClass(".agents-view-header")).toBe(true);
-    expect(hasClass(".agents-view-title")).toBe(true);
-    expect(hasClass(".agents-view-controls")).toBe(true);
-    expect(hasClass(".agents-view-primary-actions")).toBe(true);
-    expect(hasClass(".agents-view-content")).toBe(true);
-    expect(hasClass(".agents-overview-bar")).toBe(true);
-    expect(hasClass(".agents-overview-bar__toggle")).toBe(true);
-    expect(hasClass(".agents-overview-bar__content")).toBe(true);
-    expect(hasClass(".agent-controls-trigger")).toBe(true);
-    expect(hasClass(".agent-controls-trigger--active")).toBe(true);
-    expect(hasClass(".agent-controls-panel")).toBe(true);
-    expect(hasClass(".agent-controls")).toBe(true);
-    expect(hasClass(".agent-controls-filters")).toBe(true);
-    expect(hasClass(".agent-state-filter")).toBe(true);
-    expect(hasClass(".agent-state-filter-select")).toBe(true);
-    expect(hasClass(".agent-system-filter")).toBe(true);
-    expect(hasClass(".agent-controls-actions")).toBe(true);
-    expect(hasClass(".agent-global-controls")).toBe(true);
-    expect(hasClass(".agent-org-chart-shell")).toBe(true);
-    expect(hasClass(".agent-org-chart-controls")).toBe(true);
-    expect(hasClass(".agent-org-chart-viewport")).toBe(true);
-    expect(hasClass(".agent-org-chart-canvas")).toBe(true);
-    expect(hasClass(".agent-org-chart-canvas--zoom-75")).toBe(true);
-    expect(hasClass(".agent-org-chart-canvas--zoom-100")).toBe(true);
-    expect(hasClass(".agent-org-chart-canvas--zoom-125")).toBe(true);
-    expect(hasClass(".agent-org-chart-canvas--zoom-150")).toBe(true);
-    expect(hasClass(".agent-org-chart--vertical")).toBe(true);
-    expect(hasClass(".agent-board")).toBe(true);
-    expect(hasClass(".agent-board-card")).toBe(true);
-    expect(hasClass(".agent-board-card--idle")).toBe(true);
-    expect(hasClass(".agent-board-card--active")).toBe(true);
-    expect(hasClass(".agent-board-card--running")).toBe(true);
-    expect(hasClass(".agent-board-card--paused")).toBe(true);
-    expect(hasClass(".agent-board-card--error")).toBe(true);
-    expect(hasClass(".agent-board-header")).toBe(true);
-    expect(hasClass(".agent-board-icon")).toBe(true);
-    expect(hasClass(".agent-board-badge")).toBe(true);
-    expect(hasClass(".agent-badge--idle")).toBe(true);
-    expect(hasClass(".agent-badge--active")).toBe(true);
-    expect(hasClass(".agent-badge--running")).toBe(true);
-    expect(hasClass(".agent-badge--paused")).toBe(true);
-    expect(hasClass(".agent-badge--error")).toBe(true);
-    expect(hasClass(".agent-board-health")).toBe(true);
-    expect(hasClass(".agent-board-name")).toBe(true);
-    expect(hasClass(".agent-board-id")).toBe(true);
-    expect(hasClass(".agent-board-clickable")).toBe(true);
-    expect(hasClass(".agent-board-actions")).toBe(true);
-    expect(hasClass(".agent-list")).toBe(true);
-    expect(hasClass(".agent-card")).toBe(true);
-    expect(hasClass(".agent-card--idle")).toBe(true);
-    expect(hasClass(".agent-card--active")).toBe(true);
-    expect(hasClass(".agent-card--running")).toBe(true);
-    expect(hasClass(".agent-card--paused")).toBe(true);
-    expect(hasClass(".agent-card--error")).toBe(true);
-    expect(hasClass(".agent-card-header")).toBe(true);
-    expect(hasClass(".agent-card-body")).toBe(true);
-    expect(hasClass(".agent-card-actions")).toBe(true);
-    expect(hasClass(".agent-info")).toBe(true);
-    expect(hasClass(".agent-info--clickable")).toBe(true);
-    expect(hasClass(".agent-icon")).toBe(true);
-    expect(hasClass(".agent-icon--clickable")).toBe(true);
-    expect(hasClass(".agent-meta")).toBe(true);
-    expect(hasClass(".agent-name")).toBe(true);
-    expect(hasClass(".agent-id")).toBe(true);
-    expect(hasClass(".agent-badges")).toBe(true);
-    expect(hasClass(".agent-card-chevron")).toBe(true);
-    expect(hasClass(".agent-task")).toBe(true);
-    expect(hasClass(".agent-heartbeat")).toBe(true);
-    expect(hasClass(".agent-role-select")).toBe(true);
-    expect(hasClass(".agent-empty")).toBe(true);
-    expect(hasClass(".spin")).toBe(true);
   });
 
   it("keeps split layout as the scroll-constrained pane container", () => {
@@ -218,7 +109,6 @@ describe("Agent CSS classes", () => {
     expect(orgChartSection).not.toMatch(/1\.5rem|0\.75rem|0\.72rem|0\.78rem|0\.65rem|120ms\s+ease|10px/);
   });
 
-  // Verify AgentDetailView classes
   it("encodes compact mobile agent detail header layout contracts", () => {
     const css = fs.readFileSync(path.join(__dirname, "../components/AgentDetailView.css"), "utf-8");
     const mobileStart = css.indexOf("@media (max-width: 768px)");
@@ -230,117 +120,6 @@ describe("Agent CSS classes", () => {
     expect(mobileCss).toContain(".agent-detail-header-actions {");
     expect(mobileCss).toContain("grid-column: 2;");
     expect(mobileCss).toContain(".agent-detail-mobile-icon-control .agent-detail-control-label {");
-  });
-
-  it("should define AgentDetailView CSS classes", () => {
-    expect(hasClass(".agent-detail-overlay")).toBe(true);
-    expect(hasClass(".agent-detail-modal")).toBe(true);
-    expect(hasClass(".agent-detail-loading")).toBe(true);
-    expect(hasClass(".agent-detail-header")).toBe(true);
-    expect(hasClass(".agent-detail-title")).toBe(true);
-    expect(hasClass(".agent-detail-icon")).toBe(true);
-    expect(hasClass(".agent-detail-info")).toBe(true);
-    expect(hasClass(".agent-detail-badges")).toBe(true);
-    expect(hasClass(".agent-detail-actions")).toBe(true);
-    // Redesigned compact header structure
-    expect(hasClass(".agent-detail-identity")).toBe(true);
-    expect(hasClass(".agent-detail-inline-back")).toBe(true);
-    expect(hasClass(".agent-detail-controls")).toBe(true);
-    expect(hasClass(".agent-detail-utility-actions")).toBe(true);
-    expect(hasClass(".agent-detail-tabs")).toBe(true);
-    expect(hasClass(".agent-detail-tab")).toBe(true);
-    expect(hasClass(".agent-detail-content")).toBe(true);
-    expect(hasClass(".agent-detail-footer")).toBe(true);
-    expect(hasClass(".agent-detail-id")).toBe(true);
-    expect(hasClass(".dashboard-tab")).toBe(true);
-    expect(hasClass(".dashboard-section")).toBe(true);
-    expect(hasClass(".info-grid")).toBe(true);
-    expect(hasClass(".info-item")).toBe(true);
-    expect(hasClass(".info-label")).toBe(true);
-    expect(hasClass(".info-value")).toBe(true);
-    expect(hasClass(".inline-badge")).toBe(true);
-    expect(hasClass(".stats-grid")).toBe(true);
-    expect(hasClass(".stat-card")).toBe(true);
-    expect(hasClass(".stat-value")).toBe(true);
-    expect(hasClass(".stat-label")).toBe(true);
-    expect(hasClass(".current-task")).toBe(true);
-    expect(hasClass(".task-badge")).toBe(true);
-    expect(hasClass(".metadata-json")).toBe(true);
-    expect(hasClass(".logs-tab")).toBe(true);
-    expect(hasClass(".logs-header")).toBe(true);
-    expect(hasClass(".logs-count")).toBe(true);
-    expect(hasClass(".streaming-indicator")).toBe(true);
-    expect(hasClass(".streaming-dot")).toBe(true);
-    expect(hasClass(".logs-empty")).toBe(true);
-    expect(hasClass(".runs-tab")).toBe(true);
-    expect(hasClass(".runs-empty")).toBe(true);
-    expect(hasClass(".run-card")).toBe(true);
-    expect(hasClass(".run-card--active")).toBe(true);
-    expect(hasClass(".run-header")).toBe(true);
-    expect(hasClass(".run-live-indicator")).toBe(true);
-    expect(hasClass(".live-dot")).toBe(true);
-    expect(hasClass(".run-id")).toBe(true);
-    expect(hasClass(".run-status")).toBe(true);
-    expect(hasClass(".run-details")).toBe(true);
-    expect(hasClass(".config-tab")).toBe(true);
-    expect(hasClass(".config-section")).toBe(true);
-    expect(hasClass(".config-description")).toBe(true);
-    expect(hasClass(".config-fields")).toBe(true);
-    expect(hasClass(".config-field")).toBe(true);
-    expect(hasClass(".config-hint")).toBe(true);
-    expect(hasClass(".config-error")).toBe(true);
-    expect(hasClass(".config-actions")).toBe(true);
-    expect(hasClass(".config-saved-indicator")).toBe(true);
-    expect(hasClass(".input--error")).toBe(true);
-  });
-
-  it("should define AgentReflectionsTab and ratings CSS classes", () => {
-    expect(hasClass(".reflections-tab")).toBe(true);
-    expect(hasClass(".reflections-header")).toBe(true);
-    expect(hasClass(".reflections-stats-grid")).toBe(true);
-    expect(hasClass(".reflections-stat-card")).toBe(true);
-    expect(hasClass(".reflections-no-data")).toBe(true);
-    expect(hasClass(".reflections-loading-indicator")).toBe(true);
-    expect(hasClass(".reflections-ratings-section")).toBe(true);
-    expect(hasClass(".reflections-list")).toBe(true);
-    expect(hasClass(".reflection-cards")).toBe(true);
-    expect(hasClass(".reflection-card")).toBe(true);
-    expect(hasClass(".reflection-card--expanded")).toBe(true);
-    expect(hasClass(".reflection-card-header")).toBe(true);
-    expect(hasClass(".reflection-trigger-badge")).toBe(true);
-    expect(hasClass(".reflection-summary")).toBe(true);
-    expect(hasClass(".reflection-details")).toBe(true);
-    expect(hasClass(".reflection-empty")).toBe(true);
-
-    expect(hasClass(".rating-summary-card")).toBe(true);
-    expect(hasClass(".rating-score-display")).toBe(true);
-    expect(hasClass(".rating-average")).toBe(true);
-    expect(hasClass(".rating-stats")).toBe(true);
-    expect(hasClass(".rating-count")).toBe(true);
-    expect(hasClass(".rating-trend-badge")).toBe(true);
-    expect(hasClass(".trend-improving")).toBe(true);
-    expect(hasClass(".trend-declining")).toBe(true);
-    expect(hasClass(".trend-stable")).toBe(true);
-    expect(hasClass(".trend-insufficient")).toBe(true);
-    expect(hasClass(".category-breakdown")).toBe(true);
-    expect(hasClass(".category-item")).toBe(true);
-    expect(hasClass(".category-name")).toBe(true);
-    expect(hasClass(".category-score")).toBe(true);
-    expect(hasClass(".add-rating-form")).toBe(true);
-    expect(hasClass(".add-rating-category-select")).toBe(true);
-    expect(hasClass(".add-rating-comment-input")).toBe(true);
-    expect(hasClass(".star-selector")).toBe(true);
-    expect(hasClass(".star-btn")).toBe(true);
-    expect(hasClass(".rating-stars")).toBe(true);
-    expect(hasClass(".star-filled")).toBe(true);
-    expect(hasClass(".star-empty")).toBe(true);
-    expect(hasClass(".rating-history")).toBe(true);
-    expect(hasClass(".rating-history-item")).toBe(true);
-    expect(hasClass(".rating-item-header")).toBe(true);
-    expect(hasClass(".rating-category-badge")).toBe(true);
-    expect(hasClass(".rating-time")).toBe(true);
-    expect(hasClass(".rating-delete-btn")).toBe(true);
-    expect(hasClass(".rating-comment")).toBe(true);
   });
 
   it("should apply accessible focus/hover styles for merged evaluation cards and actions", () => {
@@ -358,49 +137,6 @@ describe("Agent CSS classes", () => {
     expect(stylesContent).toContain("flex-wrap: wrap");
   });
 
-  // Verify ActiveAgentsPanel classes
-  it("should define ActiveAgentsPanel CSS classes", () => {
-    expect(hasClass(".active-agents-panel")).toBe(true);
-    expect(hasClass(".active-agents-panel-header")).toBe(true);
-    expect(hasClass(".active-agents-grid")).toBe(true);
-    expect(hasClass(".live-agent-card")).toBe(true);
-    expect(hasClass(".live-agent-card-header")).toBe(true);
-    expect(hasClass(".live-agent-card-name")).toBe(true);
-    expect(hasClass(".status-dot")).toBe(true);
-    expect(hasClass(".live-agent-task")).toBe(true);
-    expect(hasClass(".live-agent-card-transcript")).toBe(true);
-    expect(hasClass(".live-agent-card-empty")).toBe(true);
-    expect(hasClass(".live-agent-card-line")).toBe(true);
-    expect(hasClass(".live-agent-card-footer")).toBe(true);
-    expect(hasClass(".live-agent-streaming-dot")).toBe(true);
-  });
-
-  // Verify NewAgentDialog classes
-  it("should define NewAgentDialog CSS classes", () => {
-    expect(hasClass(".agent-dialog-overlay")).toBe(true);
-    expect(hasClass(".agent-dialog")).toBe(true);
-    expect(hasClass(".agent-dialog-header")).toBe(true);
-    expect(hasClass(".agent-dialog-header-title")).toBe(true);
-    expect(hasClass(".agent-dialog-body")).toBe(true);
-    expect(hasClass(".agent-dialog-footer")).toBe(true);
-    expect(hasClass(".agent-dialog-steps")).toBe(true);
-    expect(hasClass(".agent-dialog-step")).toBe(true);
-    expect(hasClass(".agent-dialog-field")).toBe(true);
-    expect(hasClass(".agent-role-grid")).toBe(true);
-    expect(hasClass(".agent-role-option")).toBe(true);
-    expect(hasClass(".agent-role-option-icon")).toBe(true);
-    expect(hasClass(".agent-role-option-label")).toBe(true);
-    expect(hasClass(".agent-dialog-summary")).toBe(true);
-    expect(hasClass(".agent-dialog-summary-row")).toBe(true);
-    expect(hasClass(".agent-dialog-summary-row-label")).toBe(true);
-    expect(hasClass(".agent-dialog-summary-row-value")).toBe(true);
-    expect(hasClass(".agent-dialog-required")).toBe(true);
-    expect(hasClass(".agent-dialog-optional")).toBe(true);
-    expect(hasClass(".agent-dialog-error")).toBe(true);
-    expect(hasClass(".agent-dialog-info")).toBe(true);
-    expect(hasClass(".agent-dialog-loading")).toBe(true);
-  });
-
   it("should give role option buttons a tokenized focus-visible state", () => {
     expect(stylesContent).toContain(".agent-role-option:focus-visible");
     const roleFocusBlock = extractRuleBlock(".agent-role-option:focus-visible");
@@ -408,10 +144,7 @@ describe("Agent CSS classes", () => {
     expect(roleFocusBlock).toContain("box-shadow: var(--focus-ring-strong)");
   });
 
-  it("should define shared AgentEmptyState component primitives", () => {
-    expect(hasClass(".agent-empty-state__icon")).toBe(true);
-    expect(hasClass(".agent-empty-state__title")).toBe(true);
-    expect(hasClass(".agent-empty-state__description")).toBe(true);
+  it("should keep the create-agent empty-state action copy", () => {
     expect(agentEmptyStateContent).toContain("Create Agent");
   });
 

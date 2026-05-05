@@ -42,7 +42,7 @@ describe("Session files endpoint", () => {
     mkdirSync(testWorktree, { recursive: true });
 
     // Initialize git repo
-    execSync("git init", { cwd: testWorktree });
+    execSync("git init --initial-branch=main", { cwd: testWorktree });
     execSync("git config user.email test@test.com", { cwd: testWorktree });
     execSync("git config user.name Test", { cwd: testWorktree });
 

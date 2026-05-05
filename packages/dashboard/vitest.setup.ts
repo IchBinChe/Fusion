@@ -12,6 +12,7 @@ const clearDaemonAuthEnv = () => {
 clearDaemonAuthEnv();
 
 const noisyOutputMarkers = [
+  "ExperimentalWarning: SQLite is an experimental feature",
   "Subagent result watcher failed",
   "pi-async-subagent-results",
   "[pi] createFnAgent called",

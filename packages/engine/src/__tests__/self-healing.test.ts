@@ -594,6 +594,108 @@ describe("SelfHealingManager", () => {
     });
   });
 
+  describe("recoverStaleHeartbeatRuns", () => {
+    function createMockAgentStore(activeRuns: Array<{ id: string; agentId: string; startedAt: string; processPid?: number; status?: string }>): {
+      store: AgentStore;
+      ended: Array<{ runId: string; status: string }>;
+      saved: Array<Partial<{ id: string; status: string; stderrExcerpt: string }>>;
+    } {
+      const ended: Array<{ runId: string; status: string }> = [];
+      const saved: Array<Partial<{ id: string; status: string; stderrExcerpt: string }>> = [];
+      const detailById = new Map<string, any>();
+      for (const r of activeRuns) {
+        detailById.set(r.id, { id: r.id, agentId: r.agentId, startedAt: r.startedAt, endedAt: null, status: r.status ?? "active", processPid: r.processPid });
+      }
+      const agentStore = {
+        listActiveHeartbeatRuns: vi.fn().mockResolvedValue(
+          activeRuns.map((r) => ({ id: r.id, agentId: r.agentId, startedAt: r.startedAt, endedAt: null, status: "active" as const, processPid: r.processPid })),
+        ),
+        getRunDetail: vi.fn().mockImplementation((_agentId: string, runId: string) => Promise.resolve(detailById.get(runId) ?? null)),
+        saveRun: vi.fn().mockImplementation((run: any) => {
+          saved.push({ id: run.id, status: run.status, stderrExcerpt: run.stderrExcerpt });
+          return Promise.resolve();
+        }),
+        endHeartbeatRun: vi.fn().mockImplementation((runId: string, status: string) => {
+          ended.push({ runId, status });
+          return Promise.resolve();
+        }),
+      } as unknown as AgentStore;
+      return { store: agentStore, ended, saved };
+    }
+
+    it("returns 0 when no agentStore is configured", async () => {
+      const result = await manager.recoverStaleHeartbeatRuns();
+      expect(result).toBe(0);
+    });
+
+    it("terminates active runs whose processPid does not match this process", async () => {
+      const { store: agentStore, ended, saved } = createMockAgentStore([
+        { id: "run-orphan", agentId: "agent-a", startedAt: new Date().toISOString(), processPid: 999_999 },
+      ]);
+      const m = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await m.recoverStaleHeartbeatRuns();
+
+      expect(result).toBe(1);
+      expect(ended).toEqual([{ runId: "run-orphan", status: "terminated" }]);
+      expect(saved[0]?.status).toBe("terminated");
+      expect(saved[0]?.stderrExcerpt).toMatch(/Auto-recovered orphaned heartbeat run/);
+      m.stop();
+    });
+
+    it("leaves young runs from the current process alone", async () => {
+      const { store: agentStore, ended } = createMockAgentStore([
+        { id: "run-mine", agentId: "agent-b", startedAt: new Date().toISOString(), processPid: process.pid },
+      ]);
+      const m = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await m.recoverStaleHeartbeatRuns();
+
+      expect(result).toBe(0);
+      expect(ended).toEqual([]);
+      m.stop();
+    });
+
+    it("terminates legacy active runs that have no recorded processPid", async () => {
+      const { store: agentStore, ended } = createMockAgentStore([
+        { id: "run-legacy", agentId: "agent-c", startedAt: new Date().toISOString() },
+      ]);
+      const m = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await m.recoverStaleHeartbeatRuns();
+
+      expect(result).toBe(1);
+      expect(ended[0]?.runId).toBe("run-legacy");
+      m.stop();
+    });
+
+    it("terminates current-process runs that exceed the max-age threshold", async () => {
+      const tooOld = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(); // 7h ago
+      const { store: agentStore, ended } = createMockAgentStore([
+        { id: "run-stuck", agentId: "agent-d", startedAt: tooOld, processPid: process.pid },
+      ]);
+      const m = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await m.recoverStaleHeartbeatRuns();
+
+      expect(result).toBe(1);
+      expect(ended[0]?.runId).toBe("run-stuck");
+      m.stop();
+    });
+
+    it("runStartupRecovery includes the stale heartbeat runs step", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({
+        globalPause: false,
+        enginePaused: false,
+      } as unknown as Settings);
+      const spy = vi.spyOn(manager, "recoverStaleHeartbeatRuns").mockResolvedValue(0);
+
+      await manager.runStartupRecovery();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("recoverNoProgressNoTaskDoneFailures", () => {
     it("requeues clean in-progress no-task_done failures with no step progress", async () => {
       const managerWithRecovery = new SelfHealingManager(store, {
@@ -3254,13 +3356,14 @@ describe("maintenance cycle concurrency", () => {
     makeSlow("recoverOrphanedPlanningTasks");
     makeSlow("recoverGhostReviewTasks");
     makeSlow("recoverOrphanedAgents");
+    makeSlow("recoverStaleHeartbeatRuns");
 
     await (manager as any).runMaintenance();
 
     // Operations run sequentially (one at a time), not in parallel.
     expect(maxConcurrent).toBe(1);
     // All operations should have run (including last one)
-    expect(executionOrder[executionOrder.length - 1]).toBe("recoverOrphanedAgents");
+    expect(executionOrder[executionOrder.length - 1]).toBe("recoverStaleHeartbeatRuns");
   });
 
   it("one failing batch 2 operation does not abort the batch", async () => {
@@ -3278,6 +3381,7 @@ describe("maintenance cycle concurrency", () => {
       "recoverOrphanedPlanningTasks",
       "recoverGhostReviewTasks",
       "recoverOrphanedAgents",
+      "recoverStaleHeartbeatRuns",
     ] as const;
 
     // Make one operation fail

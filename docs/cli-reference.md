@@ -371,6 +371,42 @@ fn task create "Investigate flaky runner" --node edge-runner
 fn task plan "Design a new authentication flow"
 ```
 
+For AI-guided task specification, see [Planning mode](#planning-mode).
+
+### Planning mode
+
+Use planning mode to turn a rough idea into a triage task through an interactive AI-guided Q&A flow.
+
+```bash
+fn task plan [description]
+```
+
+`description` is optional. If you omit it, the CLI prompts for an initial idea (`Describe your idea:`) before creating the planning session.
+
+Planning questions are interactive and use these types:
+- `text` (multi-line; finish with `DONE` on its own line)
+- `single_select` (pick one option)
+- `multi_select` (pick one or more comma-separated options)
+- `confirm` (`[Y/n]`, Enter defaults to yes)
+
+Planning flow:
+1. Create planning session from your description/idea.
+2. Answer the current question.
+3. Receive either a follow-up question or completion summary.
+4. Review summary (title, description, suggested size, dependencies, key deliverables).
+5. Confirm creation (or skip confirmation with `--yes`).
+6. Task is created in `triage` when confirmed.
+
+- With `--yes`, final confirmation is skipped and the task is created immediately.
+- Without `--yes`, the CLI asks `Create this task? [Y/n]:`; answering no cancels creation.
+
+| Option | Description |
+|---|---|
+| `--yes` | Skip final confirmation before creating the planned task. |
+| `--project <name>`, `-P <name>` | Run planning mode against a specific registered project. |
+
+Planning session limit: maximum **1000 planning sessions per hour**.
+
 ### Query and logs
 
 ```bash

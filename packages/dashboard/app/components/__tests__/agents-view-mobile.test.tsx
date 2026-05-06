@@ -222,7 +222,7 @@ describe("AgentsView mobile adaptations", () => {
     expect(select).toBeTruthy();
 
     const optionValues = Array.from(select.options).map((option) => option.value);
-    expect(optionValues).toEqual(["all", "idle", "active", "running", "paused", "error", "terminated"]);
+    expect(optionValues).toEqual(["all", "idle", "active", "running", "paused", "error"]);
   });
 });
 

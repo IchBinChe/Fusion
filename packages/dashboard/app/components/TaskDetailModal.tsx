@@ -2136,7 +2136,7 @@ export function TaskDetailContent({
                 {showAgentPicker && (
                   <div className="agent-picker-dropdown">
                     {agentsLoading && <div className="agent-picker-loading">Loading agents...</div>}
-                    {!agentsLoading && agents.filter((a) => true).map((a) => (
+                    {!agentsLoading && agents.map((a) => (
                       <button
                         key={a.id}
                         className={`agent-picker-item${task.assignedAgentId === a.id ? " selected" : ""}`}
@@ -2147,7 +2147,7 @@ export function TaskDetailContent({
                         <span className="agent-picker-role">{a.role}</span>
                       </button>
                     ))}
-                    {!agentsLoading && agents.filter((a) => true).length === 0 && (
+                    {!agentsLoading && agents.length === 0 && (
                       <div className="agent-picker-empty">No agents available</div>
                     )}
                   </div>

@@ -865,23 +865,6 @@ describe("NewTaskModal", () => {
       });
     });
 
-    it("excludes terminated agents from picker", async () => {
-      const { fetchAgents } = await import("../../api");
-      vi.mocked(fetchAgents).mockResolvedValueOnce([
-        { id: "agent-1", name: "Active Agent", role: "executor", state: "active" as const, metadata: {}, createdAt: "", updatedAt: "" },
-        { id: "agent-2", name: "Terminated Agent", role: "executor", state: "terminated" as const, metadata: {}, createdAt: "", updatedAt: "" },
-      ]);
-
-      renderNewTaskModal();
-
-      fireEvent.click(screen.getByTestId("new-task-agent-button"));
-
-      await waitFor(() => {
-        expect(screen.getByText("Active Agent")).toBeTruthy();
-        expect(screen.queryByText("Terminated Agent")).toBeNull();
-      });
-    });
-
     it("shows selected agent name in button", async () => {
       const { fetchAgents } = await import("../../api");
       vi.mocked(fetchAgents).mockResolvedValueOnce([

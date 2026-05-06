@@ -36,28 +36,6 @@ describe("getAgentHealthStatus", () => {
     vi.useRealTimers();
   });
 
-  // ── Terminal states ──────────────────────────────────────────────────────
-
-  describe("terminated state", () => {
-    it('returns "Terminated" for terminated agents', () => {
-      const agent = makeAgent({ state: "terminated" });
-      const status = getAgentHealthStatus(agent);
-      expect(status.label).toBe("Terminated");
-      expect(status.stateDerived).toBe(true);
-      expect(status.color).toBe("var(--state-error-text)");
-    });
-
-    it("ignores heartbeat data for terminated agents", () => {
-      const agent = makeAgent({
-        state: "terminated",
-        lastHeartbeatAt: new Date(FIXED_NOW - 1000).toISOString(),
-      });
-      const status = getAgentHealthStatus(agent);
-      expect(status.label).toBe("Terminated");
-      expect(status.stateDerived).toBe(true);
-    });
-  });
-
   describe("error state", () => {
     it('returns "Error" for error agents without lastError', () => {
       const agent = makeAgent({ state: "error" });
@@ -217,13 +195,6 @@ describe("getAgentHealthStatus", () => {
       expect(status.color).toBe("var(--text-secondary)");
     });
 
-    it('returns "Idle" for terminated agents without heartbeat (edge case)', () => {
-      // Although terminated state takes precedence, testing the fallback
-      const agent = makeAgent({ state: "idle", lastHeartbeatAt: undefined });
-      const status = getAgentHealthStatus(agent);
-      expect(status.label).toBe("Idle");
-      expect(status.stateDerived).toBe(false);
-    });
   });
 
   // ── Healthy vs Unresponsive ───────────────────────────────────────────────
@@ -373,12 +344,6 @@ describe("getAgentHealthStatus", () => {
         expectedStateDerived: false,
       },
       {
-        name: "terminated",
-        agent: makeAgent({ state: "terminated" }),
-        expectedLabel: "Terminated",
-        expectedStateDerived: true,
-      },
-      {
         name: "healthy",
         agent: makeAgent({ state: "active", lastHeartbeatAt: new Date(FIXED_NOW - 10_000).toISOString() }),
         expectedLabel: "Healthy",
@@ -461,7 +426,6 @@ describe("getAgentHealthStatus", () => {
 
     it("returns consistent icons for all states", () => {
       const testCases: Array<{ agent: ReturnType<typeof makeAgent>; expectedIconType: string }> = [
-        { agent: makeAgent({ state: "terminated" }), expectedIconType: "Square" },
         { agent: makeAgent({ state: "error" }), expectedIconType: "Activity" },
         { agent: makeAgent({ state: "paused" }), expectedIconType: "Pause" },
         { agent: makeAgent({ state: "running" }), expectedIconType: "Activity" },
@@ -509,14 +473,14 @@ describe("getAgentHealthColorVar", () => {
   });
 
   it("extracts CSS variable name from health status color", () => {
-    const agent = makeAgent({ state: "terminated" });
+    const agent = makeAgent({ state: "error" });
     const colorVar = getAgentHealthColorVar(agent);
     expect(colorVar).toBe("--state-error-text");
   });
 
   it("returns full color for non-variable colors (fallback)", () => {
     // This shouldn't happen in practice, but testing the fallback
-    const agent = makeAgent({ state: "terminated" });
+    const agent = makeAgent({ state: "error" });
     const status = getAgentHealthStatus(agent);
     // The function should return the variable name in var() format
     expect(getAgentHealthColorVar(agent)).toBe(status.color.replace(/var\((--[^)]+)\)/, "$1"));
@@ -557,7 +521,6 @@ describe("AgentHealthStatus reason field", () => {
   });
 
   it.each([
-    { name: "terminated", agent: makeAgent({ state: "terminated" }) },
     { name: "error", agent: makeAgent({ state: "error" }) },
     { name: "paused", agent: makeAgent({ state: "paused" }) },
     { name: "running", agent: makeAgent({ state: "running" }) },

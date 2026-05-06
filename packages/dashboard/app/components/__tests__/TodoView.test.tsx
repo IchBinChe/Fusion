@@ -73,7 +73,6 @@ describe("TodoView", () => {
     mockCreateTask.mockResolvedValue({ id: "FN-999" });
     mockFetchAgents.mockResolvedValue([
       { id: "agent-1", name: "Builder", role: "engineer", state: "active" },
-      { id: "agent-2", name: "Terminated", role: "reviewer", state: "terminated" },
     ]);
     mockUseTodoLists.mockReturnValue(createMockTodoLists());
   });
@@ -460,7 +459,6 @@ describe("TodoView", () => {
       expect(mockFetchAgents).toHaveBeenCalledWith(undefined, "project-1");
     });
     expect(screen.getByText("Builder")).toBeInTheDocument();
-    expect(screen.queryByText("Terminated")).not.toBeInTheDocument();
   });
 
   it("selecting an agent creates task assigned to that agent", async () => {

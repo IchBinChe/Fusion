@@ -926,7 +926,7 @@ export function InlineCreateCard({
                 <div className="dep-dropdown agent-picker-dropdown" onMouseDown={(e) => e.preventDefault()}>
                   <div className="dep-dropdown-search-header">Select agent</div>
                   {agentsLoading && <div className="dep-dropdown-empty">Loading agents...</div>}
-                  {!agentsLoading && agents.filter((a) => true).map((a) => (
+                  {!agentsLoading && agents.map((a) => (
                     <div
                       key={a.id}
                       className={`dep-dropdown-item${selectedAgentId === a.id ? " selected" : ""}`}
@@ -941,7 +941,7 @@ export function InlineCreateCard({
                       <span className="dep-dropdown-title">{a.name}</span>
                     </div>
                   ))}
-                  {!agentsLoading && agents.filter((a) => true).length === 0 && (
+                  {!agentsLoading && agents.length === 0 && (
                     <div className="dep-dropdown-empty">No agents available</div>
                   )}
                   {selectedAgentId && (

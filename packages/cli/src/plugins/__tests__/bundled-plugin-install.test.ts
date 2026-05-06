@@ -221,7 +221,7 @@ describe("ensureBundledDependencyGraphPluginInstalled", () => {
     expect(result).toBe("already-installed");
     expect(store.updatePlugin).not.toHaveBeenCalled();
     expect(store.registerPlugin).not.toHaveBeenCalled();
-    expect(loader.loadPlugin).not.toHaveBeenCalled();
+    expect(loader.loadPlugin).toHaveBeenCalledWith(BUNDLED_PLUGIN_ID);
   });
 
   it("already installed with stale path → updates path to current bundled path", async () => {

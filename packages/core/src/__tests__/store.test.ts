@@ -505,6 +505,29 @@ describe("TaskStore", () => {
       const detail = await store.getTask(task.id);
       expect(detail.pausedByAgentId).toBeUndefined();
     });
+
+    it("auto-unpauses a task when the pausing agent is unassigned", async () => {
+      const task = await store.createTask({ description: "Auto-unpause on unassign", assignedAgentId: "agent-7" });
+      await store.pauseTask(task.id, true, undefined, { pausedByAgentId: "agent-7" });
+
+      const beforeUnassign = await store.getTask(task.id);
+      expect(beforeUnassign.paused).toBe(true);
+      expect(beforeUnassign.pausedByAgentId).toBe("agent-7");
+
+      const updated = await store.updateTask(task.id, { assignedAgentId: null });
+      expect(updated.paused).toBeFalsy();
+      expect(updated.pausedByAgentId).toBeUndefined();
+      expect(updated.assignedAgentId).toBeUndefined();
+    });
+
+    it("does not auto-unpause when the pause was set by a different agent", async () => {
+      const task = await store.createTask({ description: "Different agent paused", assignedAgentId: "agent-current" });
+      await store.pauseTask(task.id, true, undefined, { pausedByAgentId: "agent-other" });
+
+      const updated = await store.updateTask(task.id, { assignedAgentId: null });
+      expect(updated.paused).toBe(true);
+      expect(updated.pausedByAgentId).toBe("agent-other");
+    });
   });
 
   describe("nodeId persistence", () => {

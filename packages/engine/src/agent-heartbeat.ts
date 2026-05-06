@@ -122,12 +122,21 @@ export interface HeartbeatExecutionOptions {
 export interface PauseAgentOptions {
   pauseReason?: string;
   stopActiveRun?: boolean;
+  /**
+   * When true (default), assigned tasks are also paused with `pausedByAgentId`
+   * set to this agent. Set to false for internal/recovery flows that should
+   * not visibly pause user-facing tasks (e.g. heartbeat-unresponsive recovery,
+   * which immediately calls resumeAgent afterward).
+   */
+  cascadeToTasks?: boolean;
 }
 
 export interface ResumeAgentOptions {
   triggerDetail?: string;
   triggerSource?: string;
   clearPauseReason?: boolean;
+  /** When true (default), unpauses tasks paused by this agent. */
+  cascadeToTasks?: boolean;
 }
 
 /** Session interface for disposing agent resources */
@@ -979,7 +988,7 @@ export class HeartbeatMonitor {
   }
 
   async pauseAgent(agentId: string, options: PauseAgentOptions = {}): Promise<Agent> {
-    const { pauseReason, stopActiveRun = false } = options;
+    const { pauseReason, stopActiveRun = false, cascadeToTasks = true } = options;
 
     if (stopActiveRun) {
       try {
@@ -1003,7 +1012,7 @@ export class HeartbeatMonitor {
       updated = await this.store.updateAgent(agentId, { pauseReason });
     }
 
-    if (this.taskStore) {
+    if (this.taskStore && cascadeToTasks) {
       const assignedTasks = await this.taskStore.getTasksByAssignedAgent(agentId, { excludeArchived: true });
       const toPause = assignedTasks.filter((task) => task.paused !== true);
       const results = await Promise.allSettled(
@@ -1024,6 +1033,7 @@ export class HeartbeatMonitor {
       triggerDetail = "Triggered from state resume",
       triggerSource = "state-resume",
       clearPauseReason = true,
+      cascadeToTasks = true,
     } = options;
 
     const current = await this.store.getAgent(agentId);
@@ -1040,7 +1050,7 @@ export class HeartbeatMonitor {
       updated = await this.store.updateAgent(agentId, { pauseReason: undefined });
     }
 
-    if (this.taskStore) {
+    if (this.taskStore && cascadeToTasks) {
       const pausedTasks = await this.taskStore.getTasksByAssignedAgent(agentId, {
         pausedOnly: true,
         excludeArchived: true,
@@ -2428,8 +2438,10 @@ export class HeartbeatMonitor {
     // Canonically end the run record. Without this, dispose() relies on the
     // in-flight execution self-completing — which never happens when the run
     // is actually hung. completeRun also updates agent state, but we still
-    // call pauseAgent below to set `pauseReason="heartbeat-unresponsive"`
-    // and pause assigned tasks. The double state transition is harmless.
+    // call pauseAgent below to set `pauseReason="heartbeat-unresponsive"`.
+    // We pass cascadeToTasks:false on both pause and resume — this is an
+    // internal recovery cycle, not a user-initiated pause, and shouldn't
+    // visibly toggle the user's task pause state.
     try {
       await this.completeRun(tracked.agentId, runIdToTerminate, {
         status: "terminated",
@@ -2440,7 +2452,11 @@ export class HeartbeatMonitor {
     }
 
     try {
-      await this.pauseAgent(tracked.agentId, { pauseReason: "heartbeat-unresponsive", stopActiveRun: false });
+      await this.pauseAgent(tracked.agentId, {
+        pauseReason: "heartbeat-unresponsive",
+        stopActiveRun: false,
+        cascadeToTasks: false,
+      });
     } catch (err) {
       heartbeatLog.warn(`Error pausing unresponsive agent ${tracked.agentId}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -2450,6 +2466,7 @@ export class HeartbeatMonitor {
         triggerDetail: "unresponsive-recovery",
         triggerSource: "heartbeat-unresponsive",
         clearPauseReason: true,
+        cascadeToTasks: false,
       });
     } catch (err) {
       heartbeatLog.warn(`Error resuming unresponsive agent ${tracked.agentId}: ${err instanceof Error ? err.message : String(err)}`);

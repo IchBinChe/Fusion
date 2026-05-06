@@ -2,6 +2,7 @@
 import { readdirSync, statSync, existsSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const BASELINE_FILE = join(tmpdir(), ".fusion-isolation-baseline");
 
@@ -87,13 +88,36 @@ function snapshotProtectedFusion() {
   }));
 }
 
+function sleepMs(ms) {
+  // Cross-platform enough for CI and local dev; fall back to best-effort no-op.
+  spawnSync(process.platform === "win32" ? "powershell" : "sleep", process.platform === "win32" ? ["-NoProfile", "-Command", `Start-Sleep -Milliseconds ${ms}`] : [String(ms / 1000)], { stdio: "ignore" });
+}
+
 function recordBaseline() {
+  const firstProtected = snapshotProtectedFusion();
+  sleepMs(250);
+  const secondProtected = snapshotProtectedFusion();
+
+  const unstableProtectedDirs = [];
+  for (const first of firstProtected) {
+    const second = secondProtected.find((entry) => entry.dir === first.dir);
+    if (!second) continue;
+    if (JSON.stringify(first.entries) !== JSON.stringify(second.entries)) {
+      unstableProtectedDirs.push(first.dir);
+    }
+  }
+
   const payload = {
     tmpNames: snapshotTmp().map((e) => e.name),
-    protectedFusion: snapshotProtectedFusion(),
+    protectedFusion: secondProtected,
+    unstableProtectedDirs,
   };
   writeFileSync(BASELINE_FILE, JSON.stringify(payload));
   console.log(`[test-isolation] Baseline recorded: ${payload.tmpNames.length} temp dir(s), ${payload.protectedFusion.length} protected .fusion root(s).`);
+  if (unstableProtectedDirs.length > 0) {
+    console.log(`[test-isolation] Ignoring ${unstableProtectedDirs.length} externally-active protected dir(s):`);
+    for (const dir of unstableProtectedDirs) console.log(`  ${dir}`);
+  }
 }
 
 function checkAgainstBaseline() {
@@ -110,9 +134,11 @@ function checkAgainstBaseline() {
   const leaks = snapshotTmp().filter((e) => !baselineNames.has(e.name));
 
   const baselineByDir = new Map((baseline.protectedFusion ?? []).map((entry) => [entry.dir, entry]));
+  const unstableProtectedDirs = new Set(baseline.unstableProtectedDirs ?? []);
   const currentProtected = snapshotProtectedFusion();
   const protectedViolations = [];
   for (const current of currentProtected) {
+    if (unstableProtectedDirs.has(current.dir)) continue;
     const base = baselineByDir.get(current.dir) ?? { exists: false, entries: [] };
     const changedExistence = Boolean(base.exists) !== Boolean(current.exists);
     const changedEntries = JSON.stringify(base.entries) !== JSON.stringify(current.entries);

@@ -195,7 +195,7 @@ export function resolveAffectedPackages(changedFiles, packageNameByDir) {
  * @returns {string}
  */
 export function cacheFilePath() {
-  return path.join(rootDir, ".fusion", "test-cache.json");
+  return path.join(rootDir, "node_modules", ".cache", "fusion", "test-cache.json");
 }
 
 /**

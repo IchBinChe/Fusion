@@ -1,5 +1,91 @@
 # @runfusion/fusion
 
+## 0.22.0
+
+### Minor Changes
+
+- e658e8e: Decouple permanent agent heartbeats from task state, and add per-agent `allowParallelExecution` setting.
+
+  Heartbeats now run for permanent agents regardless of bound-task block state — the prior early-exit on `queued + blockedBy` is removed along with its dead state-tracking machinery. `HEARTBEAT_SYSTEM_PROMPT` is rewritten to scope heartbeats to ambient coordination (messaging, memory, finding work, delegation, surfacing/chasing blockers, status); task body work continues to run via the executor path. Ephemeral agents are unchanged — they don't run heartbeats and their blocked-task gating in the scheduler is untouched.
+
+  New `allowParallelExecution` flag (default `true`, permanent agents only) on `AgentHeartbeatConfig`. When `false`, the heartbeat and task executor paths serialize symmetrically: a heartbeat will not start while the agent's bound task has an active executor session, and an executor session will not start while the agent has an active heartbeat run. Either side re-dispatches the other's deferred work on completion via `resumeTaskForAgent` and the in-process runtime's `onRunCompleted` hook.
+
+  UI toggle surfaces in the agent's Heartbeat Settings tab alongside `runMissedHeartbeatOnStartup`.
+
+- 041eb89: Per-agent setting `runMissedHeartbeatOnStartup` (default off): when enabled, the engine fires a single catch-up heartbeat at server startup if the agent's `lastHeartbeatAt` is older than its configured interval — i.e. a scheduled tick was missed because the server was down.
+
+  The check runs in the same startup pass that arms heartbeat timers (`packages/cli/src/commands/dashboard.ts`), so agents whose state isn't `active`/`running` or who have heartbeats disabled never trigger. Catch-up runs use the existing `executeHeartbeat` path with `source="timer"` and `triggerDetail="startup-missed-heartbeat-catchup"` so per-agent serialization, budget enforcement, and missed/recovered tracking continue to apply. UI toggle lives in the agent's Heartbeat Settings tab.
+
+- 8eb5c3d: Remove the `terminated` AgentState. The agent lifecycle now runs through `idle | active | running | paused | error`, with `paused` (carrying a `pauseReason`) absorbing every former `terminated` use case (manual stop, heartbeat run termination, spawned-child cleanup). Run status is unchanged — heartbeat runs still report `terminated` independently of the agent state.
+
+  Migration: existing `agents` rows where `state = 'terminated'` are rewritten to `state = 'paused'` with `pauseReason: 'migrated-from-terminated'` on first store init (`__meta` key `removeTerminatedAgentState`). The dashboard "Terminated" filter option, badge, and CSS rules are gone; "Stop" buttons now transition the agent to `paused`. The `dashboard.READMEs` "Terminated agent filtering" behavior in the agents list is also dropped — paused/error agents are visible by default, and AgentListModal/AgentsView no longer hide them in "All States."
+
+### Patch Changes
+
+- 7d41271: Three small UX fixes on the agent list card.
+
+  - **Optimistic Run Now**: clicking the Run Now button now flips the card's state badge to `running` immediately. The `startAgentRun` API call can take several seconds, and the prior code awaited it before any visual feedback, leaving users unsure whether the click registered. Mirrors the existing `handleStateChange` pattern — stamp the override, await the API, refresh on success, roll back on failure.
+  - **Whole-card clickable**: the entire `.agent-card` body opens the agent detail view, not just the name/icon area. Clicks on action buttons (Run Now, Pause, Details, Delete), the role-edit select, and the role-icon button keep their dedicated behaviors via a target check that bails on interactive descendants. `role="button"`, `tabIndex`, and Enter/Space handling preserve keyboard access; a `--focus-ring` outline shows the focus state.
+  - **Single-row card actions**: renamed "View Details" → "Details" and switched `.agent-card-actions` to `flex-wrap: nowrap` with per-button `flex-shrink: 0; white-space: nowrap` so Run Now / Pause / Details stay on one row regardless of card width.
+
+- c76db06: Agent list color now signals run status only: `running` is green, `error` is red, and `idle` / `active` / `paused` all use the neutral gray. Previously `active` shared green with `running` and `paused` was yellow, which made the list visually busy and obscured which agents were actually executing. Applies to the badge, list card border, board card border, and org-chart node card across all agent views.
+- b2aed0f: Engine stop now tears down in-progress merger and triager agent sessions
+  that previously kept streaming past shutdown.
+
+  **Triager**: `TriageProcessor.stop()` previously only halted the polling
+  loop, leaving any in-flight specify session and its reviewer subagents
+  streaming LLM tokens and tool calls past shutdown. It now aborts and
+  disposes them via the same path the global-pause handler uses.
+
+  **Merger**: `aiMergeTask` creates up to three distinct agent sessions
+  during a merge — autostash conflict resolver, in-merge verification fix
+  agent, and pull-rebase conflict resolver — but only the autostash session
+  was registered via `onSession` for the engine to track. The fix-agent and
+  rebase-resolver sessions are now also registered, so
+  `ProjectEngine.stop()` actually disposes whichever merger session is
+  running when shutdown lands.
+
+- d47501f: Fix two related agent-lifecycle leaks and extract the coordinator into a reusable class.
+
+  **Stuck-in-running bug.** `executeHeartbeat`'s governance-skip paths (budget exhausted, budget threshold, global pause, engine paused) called `startRun` first — flipping the agent to `running` — then short-circuited with `skipStateTransition: true`, leaving the agent permanently stuck at `running` with no active run. Removed the `skipStateTransition` flag from those four paths so they flow through the normal `running → active` transition. Added `HeartbeatMonitor.reconcileOrphanedRunningAgents()` on startup to recover any agents already trapped in this state from older versions.
+
+  **Ephemeral task-worker pile-up.** Runtime-spawned `executor-FN-XXXX` workers leaked across runtime restarts because the in-memory `taskAgentMap` reset every process and there was no on-disk fallback. A task started in one session and completed in another would orphan its worker; over time hundreds piled up. The startup sweep also only deleted ephemerals in halt states, ignoring the no-`taskId` case that accounted for nearly every zombie. Now: spawn dedup via `findAgentByName` lookup before create, on-disk fallback in completion/error paths, and the startup sweep deletes any ephemeral not bound to an in-progress task.
+
+  **`EphemeralWorkerManager` extraction.** The lifecycle logic is now a single class (`packages/engine/src/ephemeral-worker-manager.ts`) owning `taskAgentMap`, `pendingDeletions`, the halt-state listener, and the startup sweep. `InProcessRuntime` shrinks by ~140 lines and delegates via `workerManager.onTaskStart` / `.onTaskComplete` / `.onTaskError` / `.attachStateChangeListener` / `.reconcileOrphaned`. Future runtimes that drive `TaskExecutor` directly inherit the same lifecycle. Durable assigned agents now return to `active` after task completion (was `terminated` in the old contract).
+
+- 12193d2: Auto-install bundled runtime plugins (Hermes / OpenClaw / Paperclip) on first Save in Settings, and ship them inside the published CLI so npx-installed Fusion can load them. Previously the runtime cards rendered but `Save` / `Save and Test` failed with `Plugin "fusion-plugin-…-runtime" not found`, and the plugins were unavailable when the CLI was installed via npm/npx because their workspace `@fusion/plugin-sdk` dependency wasn't bundled. Each runtime plugin is now bundled at CLI build time into a self-contained `dist/plugins/<id>/bundled.js`, and `PUT /api/plugins/:id/settings` lazily registers a bundled runtime via the new `ServerOptions.ensureBundledPluginInstalled` hook the first time the user saves.
+- ff66c20: Clarify runtime memory guidance so agents explicitly distinguish private `scope="agent"` memory from shared `scope="project"` memory in prompts and tool metadata.
+- bb6169a: Improve dashboard agent error UX by replacing inline stack-trace dumps with compact error indicators that open a shared details modal, including copy-to-clipboard and a prefilled GitHub issue shortcut.
+- 12b4a4a: Expose task creator provenance in agent-facing task tools by adding source summaries to `fn_task_show` and concise `[via: …]` labels in `fn_task_list`, including agent-name preference from `sourceMetadata.agentName` with `sourceAgentId` fallback.
+- 89fd7a9: Mission sidebar follow-ups for card density and CTA prominence.
+
+  - **Wider title in the sidebar**: stack mission cards vertically inside the
+    sidebar so the title row spans the full card width instead of competing
+    with the action buttons. Action buttons now sit on their own row below.
+  - **Activity on its own row**: the `Activity X ago` label moved out of the
+    cramped stats line into its own row.
+  - **Full-width progress bar**: the completion bar moved out of the stats
+    row onto its own line and now scales to the full card width instead of
+    competing with stat labels for horizontal space.
+  - **Centered "Plan New Mission" CTA**: the sidebar header now hosts a
+    full-width primary-styled button (matches the chat sidebar's "New Chat"
+    affordance) with the Sparkles icon and "Plan New Mission" text — replacing
+    the dashed-outline icon-only buttons. Mobile footer uses the same label.
+  - **Auto-select first mission (inline desktop)**: the inline mission view
+    now opens with the first mission preloaded into the detail pane instead
+    of an empty placeholder. Falls back to the existing empty-pane copy when
+    no missions exist. Standalone-modal usage is unchanged.
+  - **Richer empty state**: when no missions exist, the list now explains
+    what missions are and surfaces a primary "Plan New Mission" CTA inline.
+
+- f04ade0: Mission view sidebar and list-card UX fixes.
+
+  - **Resizable mission sidebar**: the desktop split sidebar is now drag-resizable via a vertical handle (also keyboard-accessible with arrow keys). Width persists to `localStorage` (`fusion:mission-sidebar-width`), bounded 220–560px, default 300px. Previously fixed at ~284px with `flex-shrink: 0`.
+  - **Mission card title no longer truncates aggressively**: tags (autopilot zap, health badge, status pill) moved to a second row below the title so the title can use the full card width. Removed the redundant overflow-prone `Active: …` line that was sometimes spilling outside the card.
+  - **Single AI-driven create flow**: removed the manual `+ New Mission` button from the sidebar header and bottom footer. The Sparkles button (now labeled "Create New Mission") is the only entry point — the dead `handleCreateMission` callback and unused `activeSliceLabel` were removed too.
+
+- b312ca4: Fix terminal input/output doubling triggered by creating a new tab. The connect-effect's `contextChanged` dependency flips true→false in the same render cycle as the new connection, re-running the effect and closing the still-CONNECTING WebSocket. Because `cleanup()` and `connect()`'s pre-close paths weren't nulling `ws.onopen`/`onmessage`/`onclose`/`onerror`, the ghost socket's `onmessage` continued to fire on the shared callback Set, delivering each pty data chunk (including keystroke echo) twice to xterm.
+
 ## 0.21.0
 
 ### Minor Changes

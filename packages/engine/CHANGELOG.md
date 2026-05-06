@@ -1,5 +1,44 @@
 # @fusion/engine
 
+## 0.22.0
+
+### Minor Changes
+
+- e658e8e: Decouple permanent agent heartbeats from task state, and add per-agent `allowParallelExecution` setting.
+
+  Heartbeats now run for permanent agents regardless of bound-task block state — the prior early-exit on `queued + blockedBy` is removed along with its dead state-tracking machinery. `HEARTBEAT_SYSTEM_PROMPT` is rewritten to scope heartbeats to ambient coordination (messaging, memory, finding work, delegation, surfacing/chasing blockers, status); task body work continues to run via the executor path. Ephemeral agents are unchanged — they don't run heartbeats and their blocked-task gating in the scheduler is untouched.
+
+  New `allowParallelExecution` flag (default `true`, permanent agents only) on `AgentHeartbeatConfig`. When `false`, the heartbeat and task executor paths serialize symmetrically: a heartbeat will not start while the agent's bound task has an active executor session, and an executor session will not start while the agent has an active heartbeat run. Either side re-dispatches the other's deferred work on completion via `resumeTaskForAgent` and the in-process runtime's `onRunCompleted` hook.
+
+  UI toggle surfaces in the agent's Heartbeat Settings tab alongside `runMissedHeartbeatOnStartup`.
+
+### Patch Changes
+
+- aecc050: Make the merger's autostash recovery robust against silent data loss. When `rootDir` is the developer's primary checkout, the merger stashes uncommitted edits before running its hard resets and applies them back at the end. Previously a pop conflict logged a single warning and silently left the stash in place — and a subsequent merge would push another autostash on top, burying the first.
+
+  Three changes:
+
+  1. **AI auto-resolve on apply conflict.** When the autostash apply hits a conflict, the merger now spawns a focused fix-agent (same `createResolvedAgentSession` path used for the in-merge verification fix-agent) to resolve conflict markers in the working tree. On success the stash is dropped and the resolution is recorded in `MergeResult.autostash`. On failure the stash is left intact for manual recovery.
+  2. **Outcome surfaced on `MergeResult.autostash`** (new field of type `AutostashOutcome`). Consumers (dashboard, CLI, daemon) can now show the developer whether their work was reapplied cleanly, AI-resolved, or needs manual recovery — instead of relying on a buried log warning.
+  3. **Deterministic stash identity via `git stash create` + `git stash store`.** Replaces the previous `git stash push` + label-grep flow that raced against any other tool stashing concurrently. The stash SHA is captured atomically with snapshot creation and used for apply/drop, so the operation is robust to stash list reordering.
+
+  Also: orphaned `fusion-merger-autostash:*` entries from prior failed runs are now detected at merge entry and surfaced as a warning so they cannot be silently buried again.
+
+- 6ee3225: Fix agents stuck in `state="running"` after a missed-heartbeat termination.
+
+  The unresponsive-agent recovery path disposed the session and called `pauseAgent`, but never explicitly ended the run via `completeRun` — relying on the in-flight execution to self-complete via its catch handler, which doesn't happen when the run is genuinely hung. The run record could still be terminated through other paths (safety-net or supersede-on-startRun), but those bypass the agent-state transition, leaving the agent permanently displayed as "running" with no active run.
+
+  Two fixes:
+
+  - `recoverUnresponsiveAgent` now calls `completeRun(..., status: "terminated")` so the canonical state transition runs alongside the existing `pauseAgent`/`resumeAgent` sequence.
+  - `reconcileOrphanedRunningAgents` is broadened to also catch agents with stale `lastHeartbeatAt` (> 3× timeout) that aren't in the in-memory tracked set, terminating their stale run record. It now runs every poll instead of only at monitor start, so any pre-existing stuck rows from older versions self-heal within one poll interval after upgrade.
+
+- 81bf882: Route skill-selection diagnostics by their declared severity instead of always logging at warn. Info-level messages like "Requested skill: <name>" now log at info level.
+- Updated dependencies [e658e8e]
+- Updated dependencies [aecc050]
+  - @fusion/core@0.22.0
+  - @fusion/pi-claude-cli@0.22.0
+
 ## 0.21.0
 
 ### Patch Changes

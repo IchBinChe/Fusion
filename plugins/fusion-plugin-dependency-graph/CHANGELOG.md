@@ -1,5 +1,14 @@
 # @fusion-plugin-examples/dependency-graph
 
+## 0.1.11
+
+### Patch Changes
+
+- Updated dependencies [e658e8e]
+- Updated dependencies [aecc050]
+  - @fusion/core@0.22.0
+  - @fusion/plugin-sdk@0.22.0
+
 ## 0.1.10
 
 ### Patch Changes

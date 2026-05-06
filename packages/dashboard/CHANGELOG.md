@@ -1,5 +1,36 @@
 # @fusion/dashboard
 
+## 0.22.0
+
+### Minor Changes
+
+- e658e8e: Decouple permanent agent heartbeats from task state, and add per-agent `allowParallelExecution` setting.
+
+  Heartbeats now run for permanent agents regardless of bound-task block state — the prior early-exit on `queued + blockedBy` is removed along with its dead state-tracking machinery. `HEARTBEAT_SYSTEM_PROMPT` is rewritten to scope heartbeats to ambient coordination (messaging, memory, finding work, delegation, surfacing/chasing blockers, status); task body work continues to run via the executor path. Ephemeral agents are unchanged — they don't run heartbeats and their blocked-task gating in the scheduler is untouched.
+
+  New `allowParallelExecution` flag (default `true`, permanent agents only) on `AgentHeartbeatConfig`. When `false`, the heartbeat and task executor paths serialize symmetrically: a heartbeat will not start while the agent's bound task has an active executor session, and an executor session will not start while the agent has an active heartbeat run. Either side re-dispatches the other's deferred work on completion via `resumeTaskForAgent` and the in-process runtime's `onRunCompleted` hook.
+
+  UI toggle surfaces in the agent's Heartbeat Settings tab alongside `runMissedHeartbeatOnStartup`.
+
+- bb32765: Add a "Tools: On/Off" toggle next to the existing "Markdown/Plain" toggle in the agent log viewer (used by both agent logs and task agent logs). When tool output is off, entries of type `tool` / `tool_result` / `tool_error` are hidden — only agent text and thinking are shown. Both toggles now persist globally across sessions via `localStorage` (`fn-agent-log-markdown`, `fn-agent-log-tool-output`).
+
+### Patch Changes
+
+- 9d13295: Move the agent Import button to the global agents header, next to "New Agent", and remove it from individual agent detail pages and the controls panel.
+- 11e5f69: Show provider icons in chat: small icon next to the model name in the sidebar session list, and replace the generic robot icon in the chat thread header and assistant message avatars with the active provider icon.
+- 24017b8: Drop residual `terminated` AgentState references that the merger autostash dropped during FN-3530 cleanup: `[data-state="terminated"]` selectors in `AgentListModal.css`, `--terminated` CSS-class assertions in `agent-css-classes.test.ts`, and a `state: "terminated"` test fixture in `routes-agents.test.ts` (now `paused`, which is correctly rejected as paused→paused is not a valid transition).
+- Updated dependencies [e658e8e]
+- Updated dependencies [aecc050]
+- Updated dependencies [6ee3225]
+- Updated dependencies [81bf882]
+  - @fusion/core@0.22.0
+  - @fusion/engine@0.22.0
+  - @fusion-plugin-examples/dependency-graph@0.1.11
+  - @fusion-plugin-examples/droid-runtime@0.1.6
+  - @fusion-plugin-examples/hermes-runtime@0.2.30
+  - @fusion-plugin-examples/openclaw-runtime@0.2.30
+  - @fusion-plugin-examples/paperclip-runtime@0.2.30
+
 ## 0.21.0
 
 ### Patch Changes

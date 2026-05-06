@@ -6722,7 +6722,8 @@ Task with acceptance criteria
       // Full reset: prior branch/summary/recovery state discarded so the next
       // run starts from scratch.
       expect(retried.branch).toBeUndefined();
-      expect(retried.baseBranch).toBeUndefined();
+      expect(retried.baseBranch).toBe("main");
+      expect(retried.executionStartBranch).toBeUndefined();
       expect(retried.baseCommitSha).toBeUndefined();
       expect(retried.summary).toBeUndefined();
       expect(retried.recoveryRetryCount).toBeUndefined();
@@ -6761,7 +6762,8 @@ Task with acceptance criteria
       expect(respec.blockedBy).toBeUndefined();
       expect(respec.workflowStepResults).toBeUndefined();
       expect(respec.branch).toBeUndefined();
-      expect(respec.baseBranch).toBeUndefined();
+      expect(respec.baseBranch).toBe("main");
+      expect(respec.executionStartBranch).toBeUndefined();
       expect(respec.baseCommitSha).toBeUndefined();
       expect(respec.summary).toBeUndefined();
       expect(respec.recoveryRetryCount).toBeUndefined();
@@ -7093,13 +7095,13 @@ Task with acceptance criteria
       expect(duplicated.blockedBy).toBeUndefined();
     });
 
-    it("does NOT copy baseBranch", async () => {
+    it("copies baseBranch", async () => {
       const task = await store.createTask({ description: "Test task" });
       await store.updateTask(task.id, { baseBranch: "some-branch" });
 
       const duplicated = await store.duplicateTask(task.id);
 
-      expect(duplicated.baseBranch).toBeUndefined();
+      expect(duplicated.baseBranch).toBe("some-branch");
     });
   });
 
@@ -11238,39 +11240,39 @@ describe("RunMutationContext", () => {
     });
   });
 
-  describe("clearStaleBaseBranchReferences (FN-2165)", () => {
+  describe("clearStaleExecutionStartBranchReferences (FN-2165)", () => {
     it("nulls baseBranch on live tasks that reference a deleted branch", async () => {
       const upstream = await store.createTask({ description: "Upstream" });
       const dependent = await store.createTask({ description: "Dependent" });
       await store.updateTask(dependent.id, {
-        baseBranch: `fusion/${upstream.id.toLowerCase()}-2`,
+        executionStartBranch: `fusion/${upstream.id.toLowerCase()}-2`,
       });
 
-      const cleared = store.clearStaleBaseBranchReferences([
+      const cleared = store.clearStaleExecutionStartBranchReferences([
         `fusion/${upstream.id.toLowerCase()}-2`,
       ]);
 
       expect(cleared).toEqual([dependent.id]);
       const reloaded = await store.getTask(dependent.id);
-      expect(reloaded.baseBranch).toBeUndefined();
+      expect(reloaded.executionStartBranch).toBeUndefined();
     });
 
     it("excludes the owner task so archival doesn't null its own baseBranch", async () => {
       const upstream = await store.createTask({ description: "Upstream" });
-      await store.updateTask(upstream.id, { baseBranch: "fusion/some-base" });
+      await store.updateTask(upstream.id, { executionStartBranch: "fusion/some-base" });
 
-      const cleared = store.clearStaleBaseBranchReferences(
+      const cleared = store.clearStaleExecutionStartBranchReferences(
         ["fusion/some-base"],
         upstream.id,
       );
 
       expect(cleared).toEqual([]);
       const reloaded = await store.getTask(upstream.id);
-      expect(reloaded.baseBranch).toBe("fusion/some-base");
+      expect(reloaded.executionStartBranch).toBe("fusion/some-base");
     });
 
     it("returns [] and is a no-op when no branches given", () => {
-      expect(store.clearStaleBaseBranchReferences([])).toEqual([]);
+      expect(store.clearStaleExecutionStartBranchReferences([])).toEqual([]);
     });
 
     it("clears baseBranch on multiple dependents in one call", async () => {
@@ -11279,18 +11281,18 @@ describe("RunMutationContext", () => {
         store.createTask({ description: "B" }),
         store.createTask({ description: "C" }),
       ]);
-      await store.updateTask(a.id, { baseBranch: "fusion/gone-a" });
-      await store.updateTask(b.id, { baseBranch: "fusion/gone-b" });
-      await store.updateTask(c.id, { baseBranch: "fusion/still-alive" });
+      await store.updateTask(a.id, { executionStartBranch: "fusion/gone-a" });
+      await store.updateTask(b.id, { executionStartBranch: "fusion/gone-b" });
+      await store.updateTask(c.id, { executionStartBranch: "fusion/still-alive" });
 
-      const cleared = store.clearStaleBaseBranchReferences([
+      const cleared = store.clearStaleExecutionStartBranchReferences([
         "fusion/gone-a",
         "fusion/gone-b",
       ]);
 
       expect(cleared.sort()).toEqual([a.id, b.id].sort());
       const cReloaded = await store.getTask(c.id);
-      expect(cReloaded.baseBranch).toBe("fusion/still-alive");
+      expect(cReloaded.executionStartBranch).toBe("fusion/still-alive");
     });
   });
 });

@@ -883,19 +883,19 @@ export interface Task {
   paused?: boolean;
   /** When set, this task was paused because the agent with this ID was paused. Cleared when the agent resumes. Distinct from user-initiated pause. */
   pausedByAgentId?: string;
-  /** Git branch name (or task ID) to use as the starting point when
-   *  creating this task's worktree. Set by the scheduler when a task's
-   *  explicit dependency or `blockedBy` task is in-review with an
-   *  unmerged branch. The executor reads this to branch from the
-   *  dependency's branch instead of HEAD. Cleared after worktree creation. */
+  /** Configured merge target/base branch for this task (task intent).
+   *  Defaults to the project default branch when omitted. */
   baseBranch?: string;
-  /** Actual git branch name used for this task's worktree. May differ from
+  /** Actual git working branch name used for this task's worktree. May differ from
    *  the conventional `fn/{task-id}` when conflict recovery generated a
-   *  unique suffixed name (e.g., `fn/fn-042-2`). The merger and PR systems
-   *  read this field instead of deriving the branch from the task ID. */
+   *  unique suffixed name (e.g., `fn/fn-042-2`). */
   branch?: string;
-  /** Base commit SHA for creating this task's worktree. Used with baseBranch
-   *  to establish the exact starting point for the worktree. */
+  /** Internal execution-only provenance for dependency-start handoff.
+   *  When set, the scheduler asked executor to start from an upstream dependency
+   *  branch. This is transient execution state and should be cleared after use. */
+  executionStartBranch?: string;
+  /** Base commit SHA for creating this task's worktree. Used with the start ref
+   *  chosen for the worktree to establish the exact starting point. */
   baseCommitSha?: string;
   /** List of files modified by this task (populated during execution) */
   modifiedFiles?: string[];

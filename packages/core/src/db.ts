@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   paused INTEGER DEFAULT 0,
   baseBranch TEXT,
   branch TEXT,
+  executionStartBranch TEXT,
   baseCommitSha TEXT,
   modelPresetId TEXT,
   modelProvider TEXT,
@@ -1144,6 +1145,10 @@ export class Database {
 
   private migrate(): void {
     const version = this.getSchemaVersion() || 1;
+
+    if (this.hasTable("tasks")) {
+      this.addColumnIfMissing("tasks", "executionStartBranch", "TEXT");
+    }
 
     if (version >= SCHEMA_VERSION) return;
 

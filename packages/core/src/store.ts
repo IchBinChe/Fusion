@@ -42,6 +42,7 @@ interface TaskRow {
   blockedBy: string | null;
   paused: number | null;
   baseBranch: string | null;
+  executionStartBranch: string | null;
   branch: string | null;
   baseCommitSha: string | null;
   modelPresetId: string | null;
@@ -673,6 +674,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       blockedBy: row.blockedBy || undefined,
       paused: row.paused ? true : undefined,
       baseBranch: row.baseBranch || undefined,
+      executionStartBranch: row.executionStartBranch || undefined,
       branch: row.branch || undefined,
       baseCommitSha: row.baseCommitSha || undefined,
       modelPresetId: row.modelPresetId || undefined,
@@ -997,7 +999,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return [
       "id", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "paused", "baseBranch", "branch", "baseCommitSha",
+      "worktree", "blockedBy", "paused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1046,7 +1048,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
     const columns = [
       "id", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "paused", "baseBranch", "branch", "baseCommitSha",
+      "worktree", "blockedBy", "paused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1091,7 +1093,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, paused, baseBranch, branch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, paused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, verificationFailureCount, mergeConflictBounceCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
@@ -1102,7 +1104,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
         mergeDetails, breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
@@ -1118,6 +1120,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         paused = excluded.paused,
         baseBranch = excluded.baseBranch,
         branch = excluded.branch,
+        executionStartBranch = excluded.executionStartBranch,
         baseCommitSha = excluded.baseCommitSha,
         modelPresetId = excluded.modelPresetId,
         modelProvider = excluded.modelProvider,
@@ -1200,6 +1203,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.paused ? 1 : 0,
       task.baseBranch ?? null,
       task.branch ?? null,
+      task.executionStartBranch ?? null,
       task.baseCommitSha ?? null,
       task.modelPresetId ?? null,
       task.modelProvider ?? null,
@@ -2354,8 +2358,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       columnMovedAt: now,
       createdAt: now,
       updatedAt: now,
-      // Explicitly NOT copied: worktree, status, blockedBy, paused, baseBranch,
+      // Explicitly NOT copied: worktree, status, blockedBy, paused, executionStartBranch,
       // attachments, comments, prInfo, agent logs, size, reviewLevel
+      baseBranch: sourceTask.baseBranch,
     };
 
     const newDir = this.taskDir(newId);
@@ -2947,7 +2952,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // starts from scratch.
       if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
         task.branch = undefined;
-        task.baseBranch = undefined;
+        task.executionStartBranch = undefined;
         task.baseCommitSha = undefined;
         task.summary = undefined;
         task.recoveryRetryCount = undefined;
@@ -2995,7 +3000,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; assigneeUserId?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; assigneeUserId?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -3122,6 +3127,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.branch = undefined;
       } else if (updates.branch !== undefined) {
         task.branch = updates.branch;
+      }
+      if (updates.executionStartBranch === null) {
+        task.executionStartBranch = undefined;
+      } else if (updates.executionStartBranch !== undefined) {
+        task.executionStartBranch = updates.executionStartBranch;
       }
       if (updates.baseCommitSha === null) {
         task.baseCommitSha = undefined;
@@ -3997,7 +4007,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
     }
     if (deleted.length > 0) {
-      this.clearStaleBaseBranchReferences(deleted, task.id);
+      this.clearStaleExecutionStartBranchReferences(deleted, task.id);
     }
     return deleted;
   }
@@ -4015,11 +4025,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    *
    * @returns IDs of tasks whose baseBranch was cleared
    */
-  clearStaleBaseBranchReferences(deletedBranches: string[], ownerTaskId?: string): string[] {
+  clearStaleExecutionStartBranchReferences(deletedBranches: string[], ownerTaskId?: string): string[] {
     if (deletedBranches.length === 0) return [];
     const placeholders = deletedBranches.map(() => "?").join(",");
     const params: string[] = [...deletedBranches];
-    let whereClause = `baseBranch IN (${placeholders})`;
+    let whereClause = `executionStartBranch IN (${placeholders})`;
     if (ownerTaskId) {
       whereClause += ` AND id != ?`;
       params.push(ownerTaskId);
@@ -4030,7 +4040,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     if (rows.length === 0) return [];
     const update = this.db.prepare(
-      `UPDATE tasks SET baseBranch = NULL, updatedAt = ? WHERE id = ?`,
+      `UPDATE tasks SET executionStartBranch = NULL, updatedAt = ? WHERE id = ?`,
     );
     const now = new Date().toISOString();
     const clearedIds: string[] = [];
@@ -4040,7 +4050,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (this.isWatching) {
         const cached = this.taskCache.get(row.id);
         if (cached) {
-          cached.baseBranch = undefined;
+          cached.executionStartBranch = undefined;
           cached.updatedAt = now;
         }
       }
@@ -5900,7 +5910,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       planningModelId: entry.planningModelId,
       breakIntoSubtasks: entry.breakIntoSubtasks,
       modifiedFiles: entry.modifiedFiles,
-      // Intentionally NOT restoring: worktree, status, blockedBy, paused, baseBranch, baseCommitSha, error
+      // Intentionally NOT restoring: worktree, status, blockedBy, paused, executionStartBranch, baseCommitSha, error
     };
 
     // Write task.json

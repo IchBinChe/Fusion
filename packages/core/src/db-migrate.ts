@@ -217,7 +217,7 @@ async function migrateTasks(fusionDir: string, db: Database): Promise<void> {
   const insertStmt = db.prepare(`
     INSERT OR REPLACE INTO tasks (
       id, title, description, priority, "column", status, size, reviewLevel, currentStep,
-      worktree, blockedBy, paused, baseBranch, baseCommitSha, modelPresetId,
+      worktree, blockedBy, paused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId,
       modelProvider, modelId, validatorModelProvider, validatorModelId,
       mergeRetries, recoveryRetryCount, nextRecoveryAt,
       error, summary, thinkingLevel, createdAt, updatedAt,
@@ -226,8 +226,8 @@ async function migrateTasks(fusionDir: string, db: Database): Promise<void> {
       sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
       mergeDetails, breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, sliceId
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `);
 
@@ -260,6 +260,8 @@ async function migrateTasks(fusionDir: string, db: Database): Promise<void> {
         task.blockedBy ?? null,
         task.paused ? 1 : 0,
         task.baseBranch ?? null,
+        task.branch ?? null,
+        task.executionStartBranch ?? null,
         task.baseCommitSha ?? null,
         task.modelPresetId ?? null,
         task.modelProvider ?? null,

@@ -2165,7 +2165,7 @@ export class TaskExecutor {
       let acquiredFromPool = false;
 
       // Resolve the base branch — set by the scheduler when a dep is in-review
-      const baseBranch = task.baseBranch || null;
+      const baseBranch = task.executionStartBranch || null;
 
       if (task.worktree && isResume && !await isUsableTaskWorktree(this.rootDir, worktreePath)) {
         const invalidWorktreePath = worktreePath;
@@ -4227,7 +4227,7 @@ export class TaskExecutor {
     }
     if (branchDeleted) {
       // FN-2165 regression guard: null baseBranch on any task that stored this branch
-      try { this.store.clearStaleBaseBranchReferences([branch], taskId); } catch { /* best-effort */ }
+      try { this.store.clearStaleExecutionStartBranchReferences([branch], taskId); } catch { /* best-effort */ }
     }
 
     // Clear worktree tracking
@@ -5438,7 +5438,7 @@ and show an appropriate message to the user.\`
         // Stored baseBranch no longer exists (e.g., upstream dep merged and branch
         // deleted while this task sat queued/stuck). Clear it on the task so any
         // subsequent retry branches from the default base, and proceed from HEAD.
-        await this.store.updateTask(taskId, { baseBranch: null });
+        await this.store.updateTask(taskId, { executionStartBranch: null });
       } else {
         resolvedStartPoint = resolved;
       }
@@ -6163,7 +6163,7 @@ and show an appropriate message to the user.\`
         });
         await this.store.logEntry(taskId, `Deleted branch`, branch);
         // FN-2165 regression guard: null baseBranch on any task that stored this branch
-        this.store.clearStaleBaseBranchReferences([branch], taskId);
+        this.store.clearStaleExecutionStartBranchReferences([branch], taskId);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         executorLog.warn(`${taskId}: failed to delete conflicting branch ${branch}: ${msg}`);
@@ -6210,7 +6210,7 @@ and show an appropriate message to the user.\`
       });
       await this.store.logEntry(taskId, `Removed stale branch`, branch);
       // FN-2165 regression guard: null baseBranch on any task that stored this branch
-      try { this.store.clearStaleBaseBranchReferences([branch], taskId); } catch { /* best-effort */ }
+      try { this.store.clearStaleExecutionStartBranchReferences([branch], taskId); } catch { /* best-effort */ }
       return true;
     } catch (branchDeleteError: unknown) {
       const branchDeleteErrorMessage = branchDeleteError instanceof Error ? branchDeleteError.message : String(branchDeleteError);
@@ -6229,7 +6229,7 @@ and show an appropriate message to the user.\`
       });
       await this.store.logEntry(taskId, `Force-removed stale branch reference via update-ref`, refPath);
       // FN-2165 regression guard: null baseBranch on any task that stored this branch
-      try { this.store.clearStaleBaseBranchReferences([branch], taskId); } catch { /* best-effort */ }
+      try { this.store.clearStaleExecutionStartBranchReferences([branch], taskId); } catch { /* best-effort */ }
       return true;
     } catch (updateRefError: unknown) {
       const updateRefErrorMessage = updateRefError instanceof Error ? updateRefError.message : String(updateRefError);

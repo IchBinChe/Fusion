@@ -269,7 +269,7 @@ function createMockStore() {
     setPluginWorkflowStepTemplates: vi.fn(),
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
     getFusionDir: vi.fn().mockReturnValue("/tmp/test/.fusion"),
-    clearStaleBaseBranchReferences: vi.fn().mockReturnValue([]),
+    clearStaleExecutionStartBranchReferences: vi.fn().mockReturnValue([]),
   };
   return store as any;
 }
@@ -1057,7 +1057,7 @@ describe("TaskExecutor worktree recovery", () => {
     );
   });
 
-  it("falls back to default base and clears task.baseBranch when the configured base ref is missing (FN-2165)", async () => {
+  it("falls back to default base and clears task.executionStartBranch when the configured base ref is missing (FN-2165)", async () => {
     const store = createMockStore();
 
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
@@ -1074,7 +1074,7 @@ describe("TaskExecutor worktree recovery", () => {
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
-    await executor.execute({ ...makeTask(), baseBranch: "fusion/missing-base" });
+    await executor.execute({ ...makeTask(), executionStartBranch: "fusion/missing-base" });
 
     // Should log the soft fallback, not a terminal failure
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -1085,7 +1085,7 @@ describe("TaskExecutor worktree recovery", () => {
     // Should clear baseBranch on the task so retries use the default
     expect(store.updateTask).toHaveBeenCalledWith(
       "FN-050",
-      expect.objectContaining({ baseBranch: null }),
+      expect.objectContaining({ executionStartBranch: null }),
     );
     // Should proceed to create a worktree from HEAD (no startPoint)
     const worktreeAddCalls = mockedExecSync.mock.calls.filter(
@@ -1342,7 +1342,7 @@ describe("TaskExecutor worktree recovery", () => {
     mockedGenerateWorktreeName.mockReturnValueOnce("jade-finch");
 
     const executor = new TaskExecutor(store, "/tmp/test");
-    await executor.execute({ ...makeTask(), baseBranch: "fusion/fn-049" });
+    await executor.execute({ ...makeTask(), executionStartBranch: "fusion/fn-049" });
 
     // Should log that we're trying a new path
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -1805,7 +1805,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
 
     await executor.execute(makeTask({
       id: "FN-060",
-      baseBranch: "fusion/fn-059",
+      executionStartBranch: "fusion/fn-059",
     }));
 
     // The git worktree add command should include the startPoint
@@ -1843,7 +1843,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
 
     await executor.execute(makeTask({
       id: "FN-062",
-      baseBranch: "fusion/fn-061",
+      executionStartBranch: "fusion/fn-061",
     }));
 
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -1969,7 +1969,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
 
     await executor.execute(makeTask({
       id: "FN-064",
-      baseBranch: "fusion/fn-063",
+      executionStartBranch: "fusion/fn-063",
     }));
 
     expect(prepareSpy).toHaveBeenCalledWith(

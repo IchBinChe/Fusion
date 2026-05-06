@@ -105,6 +105,16 @@ fn task archive FN-001
 fn task unarchive FN-001
 ```
 
+### Branch metadata semantics
+
+Task branch fields are intentionally distinct:
+
+- `task.branch` — the actual working branch used for the task worktree (for example `fusion/fn-1234` or a conflict-suffixed variant).
+- `task.baseBranch` — the task's configured merge target/base branch intent.
+- `task.executionStartBranch` — internal execution provenance used when scheduler/executor temporarily start from a dependency branch; this is transient and cleared during execution resets/recovery.
+
+`PrInfo.baseBranch` is unchanged and continues to represent pull-request target branch metadata.
+
 ### Dependency reconciliation guidance
 
 When a task was created to resolve a temporary failure state in another task (for example, a preserved `in-review/failed` merge condition), its dependency contract may become stale after recovery.

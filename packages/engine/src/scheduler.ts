@@ -835,7 +835,7 @@ export class Scheduler {
         await this.store.updateTask(task.id, {
           status: null,
           blockedBy: null,
-          baseBranch: baseBranch ?? undefined,
+          executionStartBranch: baseBranch ?? undefined,
           worktree: plannedWorktree,
           effectiveNodeId: effectiveNode.nodeId ?? null,
           effectiveNodeSource: effectiveNode.source,

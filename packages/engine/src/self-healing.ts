@@ -2079,7 +2079,7 @@ export class SelfHealingManager {
         // FN-2165 regression guard: if any dependent task stored one of these
         // now-gone branches as its baseBranch, null it so the task doesn't
         // hard-fail at worktree creation time.
-        const cleared = this.store.clearStaleBaseBranchReferences(deletedBranches);
+        const cleared = this.store.clearStaleExecutionStartBranchReferences(deletedBranches);
         if (cleared.length > 0) {
           log.log(`Cleared stale baseBranch on ${cleared.length} task(s): ${cleared.join(", ")}`);
         }

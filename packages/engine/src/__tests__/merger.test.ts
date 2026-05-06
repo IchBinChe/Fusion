@@ -187,7 +187,7 @@ function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = [
     getActiveMergingTask: vi.fn().mockReturnValue(null),
     emit: vi.fn(),
     on: vi.fn(),
-    clearStaleBaseBranchReferences: vi.fn().mockReturnValue([]),
+    clearStaleExecutionStartBranchReferences: vi.fn().mockReturnValue([]),
     getVerificationCacheHit: vi.fn().mockReturnValue(null),
     recordVerificationCachePass: vi.fn(),
   } as unknown as TaskStore;
@@ -834,7 +834,7 @@ describe("aiMergeTask — pre-merge rebase abort observability", () => {
     ).toBe(true);
   });
 
-  it("Layer 1 recovery: surgically drops dep commits via rebase --onto when baseBranch is set and primary rebase aborted", async () => {
+  it("Layer 1 recovery: surgically drops dep commits via rebase --onto when executionStartBranch is set and primary rebase aborted", async () => {
     // Scenario: FN-2849 declared baseBranch=fusion/fn-2729 (a dep). The
     // worktree was forked off FN-2729's tip and inherited its raw commits.
     // FN-2729 was later squash-merged to main. Now the primary rebase onto
@@ -845,7 +845,7 @@ describe("aiMergeTask — pre-merge rebase abort observability", () => {
     const store = createMockStore(
       {
         id: "FN-2849",
-        baseBranch: "fusion/fn-2729",
+        executionStartBranch: "fusion/fn-2729",
         branch: "fusion/fn-2849",
         worktree: "/tmp/root/.worktrees/coral-stone",
       },

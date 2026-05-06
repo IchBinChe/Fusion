@@ -854,7 +854,7 @@ describe("Scheduler", () => {
       expect(updateTask).toHaveBeenCalledWith("FN-010", {
         status: null,
         blockedBy: null,
-        baseBranch: undefined,
+        executionStartBranch: undefined,
         worktree: "/test/project/.worktrees/fn-010",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
@@ -893,7 +893,7 @@ describe("Scheduler", () => {
       expect(updateTask).toHaveBeenNthCalledWith(1, "FN-011", {
         status: null,
         blockedBy: null,
-        baseBranch: undefined,
+        executionStartBranch: undefined,
         worktree: "/test/project/.worktrees/amber-aspen",
         effectiveNodeId: null,
         effectiveNodeSource: "local",
@@ -902,7 +902,7 @@ describe("Scheduler", () => {
       expect(updateTask).toHaveBeenNthCalledWith(2, "FN-012", {
         status: null,
         blockedBy: null,
-        baseBranch: undefined,
+        executionStartBranch: undefined,
         worktree: "/test/project/.worktrees/amber-aspen-2",
         effectiveNodeId: null,
         effectiveNodeSource: "local",

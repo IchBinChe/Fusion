@@ -3482,19 +3482,19 @@ export async function aiMergeTask(
     }
 
     // Layer 1: surgical drop of declared-dependency commits.
-    // When `task.baseBranch` is a non-main branch (a sibling task's branch),
+    // When `task.executionStartBranch` is a non-main branch (a sibling task's branch),
     // the dependent worktree was forked off it and inherited its commits.
     // If the dep was later squash-merged to main, those raw commits are now
     // orphans whose content already exists in main. Re-rebase the task
     // branch onto main using `git rebase --onto <target> <dep-tip> <branch>`,
     // which peels off the dep's commits cleanly.
-    if (rebaseTarget && task.baseBranch && task.baseBranch !== "main") {
+    if (rebaseTarget && task.executionStartBranch && task.executionStartBranch !== "main") {
       // Resolve the dep's tip — prefer the live branch ref, fall back to
       // the recorded baseCommitSha if the branch was already deleted.
       let depTip: string | undefined;
       try {
         const { stdout } = await execAsync(
-          `git rev-parse --verify "${task.baseBranch}^{commit}"`,
+          `git rev-parse --verify "${task.executionStartBranch}^{commit}"`,
           { cwd: rootDir, encoding: "utf-8" },
         );
         depTip = stdout.trim() || undefined;
@@ -3528,11 +3528,11 @@ export async function aiMergeTask(
           preferMainRebaseFailureMessage = undefined;
           rebaseHappened = true;
           mergerLog.log(
-            `${taskId}: Layer 1 recovery — rebased ${branch} --onto ${rebaseTarget.slice(0, 8)} dropping commits up to dep tip ${depTip.slice(0, 8)} (baseBranch=${task.baseBranch})`,
+            `${taskId}: Layer 1 recovery — rebased ${branch} --onto ${rebaseTarget.slice(0, 8)} dropping commits up to dep tip ${depTip.slice(0, 8)} (executionStartBranch=${task.executionStartBranch})`,
           );
           await store.logEntry(
             taskId,
-            `Pre-merge recovery (Layer 1): dropped dependency commits from ${task.baseBranch} via rebase --onto ${rebaseTarget.slice(0, 8)} ${depTip.slice(0, 8)} ${branch}; the merge will proceed against the cleaned branch`,
+            `Pre-merge recovery (Layer 1): dropped dependency commits from ${task.executionStartBranch} via rebase --onto ${rebaseTarget.slice(0, 8)} ${depTip.slice(0, 8)} ${branch}; the merge will proceed against the cleaned branch`,
           );
         } catch (layer1Err) {
           rethrowIfMergeAborted(layer1Err);
@@ -4348,7 +4348,7 @@ export async function aiMergeTask(
     // conflict-suffixed branch), null it so the dependent task doesn't
     // hard-fail at worktree creation once this branch is gone.
     try {
-      const cleared = store.clearStaleBaseBranchReferences([branch], taskId);
+      const cleared = store.clearStaleExecutionStartBranchReferences([branch], taskId);
       if (cleared.length > 0) {
         mergerLog.log(`${taskId}: cleared stale baseBranch on ${cleared.length} dependent task(s): ${cleared.join(", ")}`);
       }

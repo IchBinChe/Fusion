@@ -238,6 +238,15 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
 
     if (wsRef.current) {
       isManualCloseRef.current = true;
+      // Null handlers before close so any in-flight `onopen`/`onmessage`
+      // from a still-connecting socket can't fire on the shared callback
+      // Set after we've moved on. Without this, a new tab's reconnect
+      // cycle leaves a ghost socket whose onmessage doubles every output
+      // chunk (the echoed keystroke shows up twice → "aa" per 'a').
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -258,10 +267,17 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
       return;
     }
 
-    // Clean up any existing connection
+    // Clean up any existing connection. Null handlers before close so a
+    // still-connecting socket can't fire onopen/onmessage on the shared
+    // callback Set after we've moved on (would double output).
     if (wsRef.current) {
       isManualCloseRef.current = true;
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
       wsRef.current.close();
+      wsRef.current = null;
     }
 
     isManualCloseRef.current = false;

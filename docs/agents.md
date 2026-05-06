@@ -354,6 +354,8 @@ For long-form prompt authoring, **Soul**, **Agent Memory**, and **Inline Instruc
 - Plain/edit mode and Markdown preview mode
 - Fullscreen expand/collapse editing for long content (safe-area-aware on mobile)
 
+In Agent Detail → **Agent Memory** → **Memory Files**, selected file content now also supports the same **Edit/Preview** markdown toggle. Preview renders the current in-memory draft (including unsaved edits), while save/edit controls remain gated by agent read-only state.
+
 These controls are also available on the editable review step, so prompt content can be reviewed and refined with the same markdown and fullscreen behavior before submit.
 
 ### Final review edits (step 2)

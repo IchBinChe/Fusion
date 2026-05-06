@@ -128,4 +128,36 @@ describe("NotificationService", () => {
     expect(initSpy).not.toHaveBeenCalled();
     initSpy.mockRestore();
   });
+
+  it("duplicates merged dispatch when multiple NotificationService instances subscribe to the same store", async () => {
+    const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const provider: NotificationProvider = {
+      getProviderId: () => "mock",
+      isEventSupported: () => true,
+      sendNotification,
+    };
+
+    const first = new NotificationService(store as any);
+    const second = new NotificationService(store as any);
+    first.registerProvider(provider);
+    second.registerProvider(provider);
+    await first.start();
+    await second.start();
+
+    // Confirms duplication is from duplicate listener graphs, not duplicate task:merged payloads.
+    store.emit("task:merged", {
+      task: task(),
+      branch: "fusion/fn-1",
+      merged: true,
+      worktreeRemoved: true,
+      branchDeleted: true,
+    });
+    await Promise.resolve();
+
+    expect(sendNotification).toHaveBeenCalledTimes(2);
+
+    await first.stop();
+    await second.stop();
+  });
 });

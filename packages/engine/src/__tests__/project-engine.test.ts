@@ -288,6 +288,22 @@ describe("ProjectEngine notification ownership wiring", () => {
     expect(mocks.notificationServiceStop).toHaveBeenCalledTimes(1);
     expect(mocks.notifierStop).toHaveBeenCalledTimes(1);
   });
+
+  it("does not recreate notification listeners on repeated start calls, preventing duplicate merged delivery", async () => {
+    const engine = createEngine({ skipNotifier: false, projectId: "proj_for_notifier" });
+
+    await engine.start();
+    await engine.start();
+
+    // Root cause guard: if ProjectEngine.start is called more than once, it should not
+    // wire a second NotificationService/NtfyNotifier pair for the same store.
+    expect(NotificationService).toHaveBeenCalledTimes(1);
+    expect(NtfyNotifier).toHaveBeenCalledTimes(1);
+    expect(mocks.notificationServiceStart).toHaveBeenCalledTimes(1);
+    expect(mocks.notifierStart).toHaveBeenCalledTimes(1);
+
+    await engine.stop();
+  });
 });
 
 describe("ProjectEngine PR monitoring wiring", () => {

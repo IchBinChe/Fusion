@@ -1093,7 +1093,7 @@ describe("NtfyNotifier", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("emits a single merged notification when notifier shares an already-started NotificationService", async () => {
+    it("emits a single merged notification when notifier shares the same already-started NotificationService (ProjectEngine wiring)", async () => {
       const sharedService = new NotificationService(store, { projectId: "proj-1" });
       await sharedService.start();
 

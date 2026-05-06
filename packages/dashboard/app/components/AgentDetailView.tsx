@@ -1957,6 +1957,7 @@ function MemoryTab({
   const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showFilePreview, setShowFilePreview] = useState(false);
 
   const [memoryFiles, setMemoryFiles] = useState<MemoryFileInfo[]>([]);
   const [memoryFilesLoading, setMemoryFilesLoading] = useState(false);
@@ -2027,6 +2028,7 @@ function MemoryTab({
     setMemory(agent.memory ?? "");
     setJustSaved(false);
     setShowPreview(false);
+    setShowFilePreview(false);
     setFileSwitchHint("");
     setSelectedFileJustSaved(false);
     void loadMemoryFiles();
@@ -2220,19 +2222,58 @@ function MemoryTab({
               </div>
             )}
 
-            <textarea
-              className="input config-textarea-mono config-textarea-top-spacing"
-              rows={14}
-              placeholder="Select a memory file to view and edit its content..."
-              value={selectedFileContent}
-              readOnly={isReadOnly || !selectedFilePath || selectedFileLoading}
-              onChange={(e) => {
-                setSelectedFileContent(e.target.value);
-                setSelectedFileDirty(true);
-                setSelectedFileJustSaved(false);
-                setFileSwitchHint("");
-              }}
-            />
+            <div className="agent-content-toolbar config-textarea-top-spacing">
+              <div className="agent-content-mode-toggle">
+                {!isReadOnly && (
+                  <button
+                    className={`btn btn-sm ${!showFilePreview ? "btn-primary" : ""}`}
+                    onClick={() => setShowFilePreview(false)}
+                    disabled={!showFilePreview}
+                    aria-label="Memory file edit mode"
+                  >
+                    <FileEdit size={14} />
+                    Edit
+                  </button>
+                )}
+                <button
+                  className={`btn btn-sm ${showFilePreview ? "btn-primary" : ""}`}
+                  onClick={() => setShowFilePreview(true)}
+                  disabled={showFilePreview}
+                  aria-label="Memory file preview mode"
+                >
+                  <Eye size={14} />
+                  Preview
+                </button>
+              </div>
+            </div>
+
+            {showFilePreview ? (
+              selectedFileContent.trim() ? (
+                <div className="agent-content-preview markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {selectedFileContent}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div className="agent-content-preview agent-content-placeholder">
+                  No memory file content yet. Switch to Edit mode to add content.
+                </div>
+              )
+            ) : (
+              <textarea
+                className="input config-textarea-mono"
+                rows={14}
+                placeholder="Select a memory file to view and edit its content..."
+                value={selectedFileContent}
+                readOnly={isReadOnly || !selectedFilePath || selectedFileLoading}
+                onChange={(e) => {
+                  setSelectedFileContent(e.target.value);
+                  setSelectedFileDirty(true);
+                  setSelectedFileJustSaved(false);
+                  setFileSwitchHint("");
+                }}
+              />
+            )}
 
             {selectedFileLoading && (
               <span className="config-hint config-hint--inline-loader">
@@ -2269,23 +2310,25 @@ function MemoryTab({
               )}
             </button>
           )}
-          <button
-            className="btn"
-            disabled={!selectedFileDirty || savingSelectedFile || !selectedFilePath || isReadOnly}
-            onClick={() => void handleSaveSelectedMemoryFile()}
-          >
-            {savingSelectedFile ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Saving file…
-              </>
-            ) : (
-              <>
-                <CheckCircle size={16} />
-                Save Memory File
-              </>
-            )}
-          </button>
+          {!showFilePreview && (
+            <button
+              className="btn"
+              disabled={!selectedFileDirty || savingSelectedFile || !selectedFilePath || isReadOnly}
+              onClick={() => void handleSaveSelectedMemoryFile()}
+            >
+              {savingSelectedFile ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Saving file…
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={16} />
+                  Save Memory File
+                </>
+              )}
+            </button>
+          )}
           {!hasInlineChanges && justSaved && (
             <span className="config-saved-indicator">
               <CheckCircle size={14} />

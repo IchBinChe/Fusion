@@ -438,6 +438,7 @@ See [Memory Plugin Contract](./memory-plugin-contract.md) for the full plan.
 - `RunAudit` (`run-audit.ts`) — mutation audit tracking (DB/git/filesystem)
 - `Notifier` (`notifier.ts`) — legacy ntfy compatibility shim (`NtfyNotifier`) plus shared ntfy helpers
   - Runtime ownership: `NtfyNotifier` no longer owns an independent task-lifecycle listener graph; `ProjectEngine` injects the canonical `NotificationService` instance so task lifecycle notifications (`task:moved`, `task:updated`, `task:merged`) are emitted through a single path.
+  - Merge dedup safety: `ProjectEngine.start()` is idempotent, so repeated start calls do not wire a second `NotificationService`/`NtfyNotifier` pair. A successful merge therefore emits exactly one canonical `merged` ntfy lifecycle notification per task.
   - Compatibility scope: `NtfyNotifier` remains responsible for gridlock-only compatibility notifications (`notifyGridlock`) and legacy helper APIs.
   - Legacy gridlock ntfy delivery is cooldown-throttled: first detection notifies immediately, subsequent detections are suppressed for 15 minutes (even if blocked-task membership changes), and the cooldown resets as soon as gridlock fully clears.
 - `NotificationService` (`notification/notification-service.ts`) — provider lifecycle + event dispatch orchestration

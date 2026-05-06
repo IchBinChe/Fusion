@@ -139,6 +139,7 @@ export interface ProjectEngineOptions {
  */
 export class ProjectEngine {
   private runtime: InProcessRuntime;
+  private started = false;
   private prMonitor?: PrMonitor;
   private prCommentHandler?: PrCommentHandler;
   private notifier?: NtfyNotifier;
@@ -243,6 +244,10 @@ export class ProjectEngine {
    * Start the engine: initialize the runtime and all auxiliary subsystems.
    */
   async start(): Promise<void> {
+    if (this.started) {
+      return;
+    }
+
     // 1. Start the core runtime (TaskStore, Scheduler, Executor, Triage, etc.)
     await this.runtime.start();
 
@@ -422,6 +427,7 @@ export class ProjectEngine {
     // 8. Start periodic merge retry sweep
     this.scheduleMergeRetry(store);
 
+    this.started = true;
     runtimeLog.log(`ProjectEngine started for ${this.config.projectId}`);
   }
 
@@ -433,6 +439,10 @@ export class ProjectEngine {
    * promptly without continuing git/verification work after shutdown starts.
    */
   async stop(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+
     this.shuttingDown = true;
 
     // Stop merge retry timer
@@ -518,6 +528,8 @@ export class ProjectEngine {
     // Stop the core runtime (Triage, Scheduler, Executor, etc.)
     await this.runtime.stop();
 
+    this.started = false;
+    this.shuttingDown = false;
     runtimeLog.log(`ProjectEngine stopped for ${this.config.projectId}`);
   }
 

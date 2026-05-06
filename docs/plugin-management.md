@@ -109,19 +109,79 @@ Expected outcome: Plugin is enabled or disabled by ID.
 
 Expected outcome: Plugin-defined settings are persisted and used by that plugin at runtime.
 
-## 6) Verify plugin is working
+## 6) Use post-install plugin capabilities
+
+After a plugin is installed/enabled, these are the current user-visible capability surfaces.
+
+### A) Plugin-contributed skills (runtime behavior)
+
+Plugin-contributed skills are merged into agent sessions automatically at runtime when enabled.
+
+1. Install + enable the plugin.
+2. Run a task through an agent flow (triage/executor/reviewer/merger).
+3. Check agent output/logs for skill-driven behavior from that plugin.
+
+Expected outcome: plugin skills affect session behavior, but there is no dedicated "plugin skills" management panel in Fusion Plugins.
+
+> Note: **Skills view** shows discovered execution skills and toggles, but plugin-contributed skills are documented as runtime session behavior here (not a plugin-manager-specific skills UI).
+
+### B) Plugin-contributed workflow step templates (dashboard + API)
+
+Plugin templates are visible in the workflow-step chooser.
+
+1. Open **Settings → Workflow Steps**.
+2. Click **Add Workflow Step**.
+3. In the templates chooser, find plugin-contributed templates (grouped/labeled with plugin attribution).
+4. Add the template and configure phase/mode as needed.
+
+Expected outcome: plugin templates appear alongside built-in templates and run like any other workflow step.
+
+See also: [Workflow Steps](./workflow-steps.md) and [Plugin Authoring §16](./PLUGIN_AUTHORING.md#16-registering-workflow-steps).
+
+### C) Plugin prompt contributions (runtime-only)
+
+Prompt contributions modify agent prompts at runtime on supported surfaces (for example executor/triage/reviewer/heartbeat).
+
+1. Install + enable the plugin.
+2. Run the relevant agent flow.
+3. Validate behavior via agent output/logs (for example extra instructions being followed).
+
+Expected outcome: prompt modifications apply during agent runs. There is no verified dedicated dashboard UI to inspect/edit plugin prompt contributions directly.
+
+See: [Plugin Authoring §17](./PLUGIN_AUTHORING.md#17-contributing-prompt-modifications).
+
+### D) Optional plugin binary setup (currently CLI-driven)
+
+Some plugins expose optional setup hooks for managed binaries/runtimes.
+
+1. Ensure the plugin is installed and enabled.
+2. Check setup status:
+   ```bash
+   fn plugin setup-status <id>
+   ```
+3. Trigger install or uninstall:
+   ```bash
+   fn plugin setup <id> --action install
+   fn plugin setup <id> --action uninstall
+   ```
+
+Expected outcome: setup status and setup actions run via CLI. Current behavior is CLI-driven; do not assume a dedicated dashboard setup control exists.
+
+See: [Plugin Authoring §18](./PLUGIN_AUTHORING.md#18-plugin-binary-setup-hooks).
+
+## 7) Verify plugin is working
 
 After installing/enabling, verify success signals relevant to that plugin:
 
-- New agent tools become available in runtime/tooling surfaces
-- Plugin routes are reachable through plugin API paths
-- Plugin UI slots/views appear in dashboard surfaces (tabs, sections, cards, nav entries)
-- Runtime-providing plugins become available for runtime hint selection/usage
 - Plugin state remains `started` (not `error`)
+- Plugin tools/routes/UI/runtime contributions appear where that plugin declares them
+- Plugin-contributed workflow templates are available in **Settings → Workflow Steps**
+- Plugin-contributed skills and prompt contributions are observable during agent runtime behavior/logs
+- Optional setup-capable plugins report expected setup status via CLI
 
 If you need capability-level details for a specific plugin, check its README and [Plugin Authoring](./PLUGIN_AUTHORING.md).
 
-## 7) Update plugins
+## 8) Update plugins
 
 Fusion does not use a dedicated `fn plugin update` command. Update by reinstalling the desired plugin version/source.
 
@@ -143,7 +203,7 @@ Fusion does not use a dedicated `fn plugin update` command. Update by reinstalli
 
 Expected outcome: Updated plugin build/version is installed and operational.
 
-## 8) Uninstall plugins
+## 9) Uninstall plugins
 
 ### Dashboard
 
@@ -165,7 +225,7 @@ Expected outcome: Plugin is removed from the installed list and no longer active
 
 Expected outcome: Plugin is removed by ID.
 
-## 9) Dashboard vs CLI mapping
+## 10) Dashboard vs CLI mapping
 
 | Workflow | Dashboard path | CLI command |
 |---|---|---|
@@ -174,9 +234,12 @@ Expected outcome: Plugin is removed by ID.
 | Enable plugin | Settings → Plugins → Fusion Plugins → Enable toggle | `fn plugin enable <id>` |
 | Disable plugin | Settings → Plugins → Fusion Plugins → Disable toggle | `fn plugin disable <id>` |
 | Uninstall plugin | Settings → Plugins → Fusion Plugins → Uninstall | `fn plugin uninstall <id> --force` |
+| Check plugin setup status | CLI-only in current user flow | `fn plugin setup-status <id>` |
+| Install/uninstall plugin setup binary/runtime | CLI-only in current user flow | `fn plugin setup <id> --action install|uninstall` |
+| Add plugin workflow step template | Settings → Workflow Steps → Add Workflow Step | `POST /api/workflow-step-templates/:id/create` (API) |
 | Scaffold new plugin (authoring) | n/a (developer workflow) | `fn plugin create <name>` |
 
-## 10) Troubleshooting
+## 11) Troubleshooting
 
 ### Plugin is in `error` state
 
@@ -188,14 +251,34 @@ Expected outcome: Plugin is removed by ID.
 ### Plugin installed but features are not visible
 
 1. Confirm plugin state is `started`.
-2. Verify what that plugin actually contributes (tools/routes/UI/runtime) in plugin docs.
-3. Confirm you are checking the correct dashboard surface (for example nav view vs settings section vs task detail slot).
+2. Verify what that plugin actually contributes (tools/routes/UI/runtime/skills/workflow templates/prompt contributions/setup hooks) in plugin docs.
+3. Confirm you are checking the correct surface:
+   - Workflow templates: **Settings → Workflow Steps**
+   - Skills/prompt contributions: runtime agent behavior/logs
+   - Setup hooks: CLI commands (`setup-status`, `setup`)
+   - UI routes/slots: dashboard nav/sections/cards according to plugin design
 
 ### Confusion between Fusion Plugins and Pi Extensions
 
 1. Use **Fusion Plugins** for Fusion plugin lifecycle management.
 2. Use **Pi Extensions** only for pi extension sources/extensions/skills/prompts/themes.
 
+### Plugin has setup requirements but dashboard has no setup control
+
+Use CLI setup commands:
+
+```bash
+fn plugin setup-status <id>
+fn plugin setup <id> --action install
+fn plugin setup <id> --action uninstall
+```
+
 ### Need implementation/API details
 
 Use [Plugin Authoring](./PLUGIN_AUTHORING.md) for manifest fields, lifecycle hook signatures, UI/runtime contribution contracts, and SDK examples.
+
+For sections referenced in this guide:
+- Skills: [§15](./PLUGIN_AUTHORING.md#15-registering-skills)
+- Workflow templates: [§16](./PLUGIN_AUTHORING.md#16-registering-workflow-steps)
+- Prompt contributions: [§17](./PLUGIN_AUTHORING.md#17-contributing-prompt-modifications)
+- Binary setup hooks: [§18](./PLUGIN_AUTHORING.md#18-plugin-binary-setup-hooks)

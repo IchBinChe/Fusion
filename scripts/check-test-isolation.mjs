@@ -186,7 +186,6 @@ function checkAgainstBaseline() {
   const baselineByDir = new Map((baseline.protectedFusion ?? []).map((entry) => [entry.dir, entry]));
   const unstableProtectedDirs = new Set(baseline.unstableProtectedDirs ?? []);
   const currentProtected = snapshotProtectedFusion();
-
   const candidateViolations = [];
   for (const current of currentProtected) {
     if (unstableProtectedDirs.has(current.dir)) continue;

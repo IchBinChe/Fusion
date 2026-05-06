@@ -106,7 +106,7 @@ Runtime-created ephemeral agents are removed immediately after terminal cleanup 
 - Spawned child agents created by `TaskExecutor` are deleted immediately inside `terminateChildAgent()` after terminal cleanup state update.
 - User-managed non-ephemeral agents are never auto-deleted by these pathways.
 
-Because deletion is immediate, paused runtime helper agents should not remain visible in the dashboard or `AgentStore` after cleanup completes.
+Because deletion is immediate, runtime helper agents should not remain visible in the dashboard or `AgentStore` after cleanup completes once paused-state cleanup (or run-level termination) finishes.
 
 ## Agents View (Dashboard)
 
@@ -700,7 +700,7 @@ Heartbeat timers are armed for agents in valid working states and remain armed a
 - `paused` — Agent is paused (e.g., by budget exhaustion, manual stop, or manual pause)
 
 Lifecycle notes:
-- Agent lifecycle is `idle | active | running | paused | error`.
+- Agent lifecycle is `idle | active | running | paused | error` (there is no `terminated` `AgentState`).
 - Stop/termination flows land the agent in `paused`; `terminated` is reserved for heartbeat run status only.
 
 **Key behaviors:**
@@ -735,7 +735,7 @@ The dashboard displays agent health status in AgentsView, AgentListModal, and Ag
 | **Error** | Agent state is "error" (uses lastError if available) |
 | **Paused** | Agent state is "paused" (uses pauseReason if available) |
 | **Running** | Agent state is "running" (task workers with `active` state also display "Running") |
-| **Disabled** | `runtimeConfig.enabled === false` |
+| **Heartbeat Disabled** | `runtimeConfig.enabled === false` |
 | **Starting...** | State is "active" with no lastHeartbeatAt |
 | **Idle** | Non-active state with no lastHeartbeatAt |
 | **Healthy** | Heartbeat is fresh within the resolved interval-based staleness threshold |

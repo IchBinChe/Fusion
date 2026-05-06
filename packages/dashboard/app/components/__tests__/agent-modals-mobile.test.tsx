@@ -257,12 +257,12 @@ describe("agent modal mobile CSS structure", () => {
       expect(within(controls).getByRole("button", { name: "Stop" })).toBeInTheDocument();
     });
 
-    it("shows terminated controls for terminated agents", async () => {
+    it("shows paused controls for paused agents", async () => {
       mockFetchAgent.mockResolvedValueOnce({
-        id: "agent-terminated",
-        name: "Terminated Agent",
+        id: "agent-paused",
+        name: "Paused Agent",
         role: "executor",
-        state: "terminated",
+        state: "paused",
         taskId: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -273,7 +273,7 @@ describe("agent modal mobile CSS structure", () => {
         completedRuns: [],
       } as any);
 
-      render(<AgentDetailView agentId="agent-terminated" onClose={vi.fn()} addToast={vi.fn()} />);
+      render(<AgentDetailView agentId="agent-paused" onClose={vi.fn()} addToast={vi.fn()} />);
 
       const controls = await waitFor(() => {
         const node = document.querySelector(".agent-detail-controls");
@@ -281,7 +281,7 @@ describe("agent modal mobile CSS structure", () => {
         return node as HTMLElement;
       });
 
-      expect(within(controls).getByRole("button", { name: "Reactivate" })).toBeInTheDocument();
+      expect(within(controls).getByRole("button", { name: "Resume" })).toBeInTheDocument();
       expect(within(controls).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     });
   });

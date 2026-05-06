@@ -60,8 +60,6 @@ function getStateBadgeClass(state: AgentState): string {
       return "agent-badge--paused";
     case "error":
       return "agent-badge--error";
-    case "terminated":
-      return "agent-badge--terminated";
     case "idle":
     default:
       return "agent-badge--idle";
@@ -81,8 +79,6 @@ function getStateCardClass(
       return `${prefix}--paused`;
     case "error":
       return `${prefix}--error`;
-    case "terminated":
-      return `${prefix}--terminated`;
     case "idle":
     default:
       return `${prefix}--idle`;
@@ -298,7 +294,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
 
 
   // Filter agents for display. "All States" means all non-ephemeral agents,
-  // including disabled/terminated agents that still carry configuration.
+  // including paused/error agents and heartbeat-disabled agents that still carry configuration.
   // When "Show system agents" is enabled, include ephemeral/internal agents.
   const displayAgents = useMemo(() => {
     return optimisticAgents.filter((agent) => showSystemAgents || !isEphemeralAgent(agent));
@@ -850,7 +846,6 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                   <option value="running">Running</option>
                   <option value="paused">Paused</option>
                   <option value="error">Error</option>
-                  <option value="terminated">Terminated</option>
                 </select>
               </div>
 

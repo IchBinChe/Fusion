@@ -36,16 +36,6 @@ describe("getAgentHealthStatus", () => {
     vi.useRealTimers();
   });
 
-  describe("terminated state", () => {
-    it('returns "Terminated" for terminated agents', () => {
-      const agent = makeAgent({ state: "terminated" });
-      const status = getAgentHealthStatus(agent);
-      expect(status.label).toBe("Terminated");
-      expect(status.stateDerived).toBe(true);
-      expect(status.color).toBe("var(--state-paused-text)");
-    });
-  });
-
   describe("error state", () => {
     it('returns "Error" for error agents without lastError', () => {
       const agent = makeAgent({ state: "error" });
@@ -342,12 +332,6 @@ describe("getAgentHealthStatus", () => {
         expectedStateDerived: true,
       },
       {
-        name: "terminated",
-        agent: makeAgent({ state: "terminated" }),
-        expectedLabel: "Terminated",
-        expectedStateDerived: true,
-      },
-      {
         name: "error without lastError",
         agent: makeAgent({ state: "error" }),
         expectedLabel: "Error",
@@ -445,7 +429,6 @@ describe("getAgentHealthStatus", () => {
         { agent: makeAgent({ state: "error" }), expectedIconType: "Activity" },
         { agent: makeAgent({ state: "paused" }), expectedIconType: "Pause" },
         { agent: makeAgent({ state: "running" }), expectedIconType: "Activity" },
-        { agent: makeAgent({ state: "terminated" }), expectedIconType: "Pause" },
         { agent: makeAgent({ state: "idle" }), expectedIconType: "Bot" },
         { agent: makeAgent({ state: "active", runtimeConfig: { enabled: false } }), expectedIconType: "Pause" },
         {
@@ -541,7 +524,6 @@ describe("AgentHealthStatus reason field", () => {
     { name: "error", agent: makeAgent({ state: "error" }) },
     { name: "paused", agent: makeAgent({ state: "paused" }) },
     { name: "running", agent: makeAgent({ state: "running" }) },
-    { name: "terminated", agent: makeAgent({ state: "terminated" }) },
     { name: "idle", agent: makeAgent({ state: "idle" }) },
     {
       name: "healthy",

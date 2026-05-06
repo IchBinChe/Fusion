@@ -725,23 +725,23 @@ describe("HeartbeatTriggerScheduler", () => {
       expect(callback).toHaveBeenCalledOnce();
     });
 
-    it("timer is unregistered when agent becomes terminated (should clear timer)", async () => {
+    it("timer is unregistered when agent becomes paused (should clear timer)", async () => {
       scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
       expect(scheduler.getRegisteredAgents()).toContain("agent-001");
 
-      // Update to terminated state
+      // Update to paused state
       (eventStore.getAgent as ReturnType<typeof vi.fn>).mockImplementation((agentId: string) => ({
         id: agentId,
         name: `Agent ${agentId}`,
         role: "executor" as const,
-        state: "terminated" as const,
+        state: "paused" as const,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         metadata: {},
       }));
-      eventStore.emit("agent:updated", { id: "agent-001", state: "terminated", metadata: {} } as import("@fusion/core").Agent);
+      eventStore.emit("agent:updated", { id: "agent-001", state: "paused", metadata: {} } as import("@fusion/core").Agent);
 
-      // Timer should be cleared for terminated agents
+      // Timer should be cleared for paused agents
       expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
 
       await vi.advanceTimersByTimeAsync(10000);

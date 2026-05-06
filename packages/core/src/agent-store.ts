@@ -262,6 +262,7 @@ export class AgentStore extends EventEmitter {
     void this.db;
     await mkdir(this.agentsDir, { recursive: true });
     await this.importLegacyFileDataOnce();
+    await this.migrateTerminatedAgentStateOnce();
     await this.migrateHeartbeatProcedurePathOnce();
   }
 
@@ -474,6 +475,48 @@ export class AgentStore extends EventEmitter {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(migrationKey, migrationVersion);
     this.db.bumpLastModified();
+  }
+
+  /**
+   * One-shot migration that rewrites legacy `state = "terminated"` agents to
+   * `state = "paused"` and preserves the origin via
+   * `pauseReason = "migrated-from-terminated"`.
+   *
+   * Heartbeat run rows intentionally keep their independent `terminated`
+   * terminal status; this migration only normalizes the agent lifecycle state.
+   */
+  private async migrateTerminatedAgentStateOnce(): Promise<void> {
+    const migrationKey = "removeTerminatedAgentState";
+    const migrationVersion = "1";
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(migrationKey) as
+      | { value: string }
+      | undefined;
+    if (row?.value === migrationVersion) {
+      return;
+    }
+
+    const rows = this.db.prepare("SELECT * FROM agents WHERE state = 'terminated'").all() as unknown as AgentRow[];
+    let migratedCount = 0;
+    for (const row of rows) {
+      const agent = this.mapAgentRow(row);
+      const updated: Agent = {
+        ...agent,
+        state: "paused",
+        pauseReason: "migrated-from-terminated",
+        updatedAt: new Date().toISOString(),
+      };
+      await this.writeAgent(updated);
+      migratedCount += 1;
+    }
+
+    this.db.prepare(`
+      INSERT INTO __meta (key, value)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(migrationKey, migrationVersion);
+    if (migratedCount > 0) {
+      this.db.bumpLastModified();
+    }
   }
 
   /**
@@ -1172,13 +1215,6 @@ export class AgentStore extends EventEmitter {
         ...agent,
         state: newState,
         updatedAt: new Date().toISOString(),
-        // Clear lastError when leaving terminated for an actionable state so
-        // resumed agents do not carry stale error badges.
-        ...(
-          currentState === "terminated" &&
-          (newState === "idle" || newState === "active" || newState === "running") &&
-          { lastError: undefined }
-        ),
       };
 
       await this.writeAgent(updated);

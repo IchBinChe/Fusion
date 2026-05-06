@@ -102,11 +102,11 @@ Execution-ownership sync intentionally avoids assignment-trigger side effects (`
 
 Runtime-created ephemeral agents are removed immediately after terminal cleanup paths run:
 
-- Task-worker agents created by `InProcessRuntime` are deleted as soon as they reach `terminated` through completion, error, or `agent:stateChanged` fallback cleanup.
-- Spawned child agents created by `TaskExecutor` are deleted immediately inside `terminateChildAgent()` after terminal state update.
+- Task-worker agents created by `InProcessRuntime` are deleted as soon as they reach paused cleanup paths after completion, error, or `agent:stateChanged` fallback cleanup.
+- Spawned child agents created by `TaskExecutor` are deleted immediately inside `terminateChildAgent()` after terminal cleanup state update.
 - User-managed non-ephemeral agents are never auto-deleted by these pathways.
 
-Because deletion is immediate, terminated runtime helper agents should not remain visible in the dashboard or `AgentStore` after cleanup completes.
+Because deletion is immediate, paused runtime helper agents should not remain visible in the dashboard or `AgentStore` after cleanup completes.
 
 ## Agents View (Dashboard)
 
@@ -157,7 +157,7 @@ Agent deletion is available from both the detail header lifecycle controls and t
 - The Settings-tab delete button reuses the same delete flow as the header action.
 - Deletion still requires confirmation before calling `DELETE /api/agents/:id`.
 - On successful deletion, the dashboard shows a success toast and closes the detail view.
-- Deletion availability is intentionally restricted to agents in `idle` or `terminated` state.
+- Deletion availability is intentionally restricted to agents in `idle` or `paused` state.
 
 ![Agents view](./screenshots/agents-view.png)
 
@@ -696,13 +696,12 @@ Heartbeat timers are armed for agents in valid working states and remain armed a
 - `idle` — Agent is between tasks, waiting for work
 
 **States where timers are cleared:**
-- `terminated` — Agent has completed or been stopped (non-tickable until explicitly reactivated)
 - `error` — Agent encountered an unrecoverable error
-- `paused` — Agent is paused (e.g., by budget exhaustion or manual action)
+- `paused` — Agent is paused (e.g., by budget exhaustion, manual stop, or manual pause)
 
 Lifecycle notes:
-- Agents can enter `terminated` from `active`, `running`, `paused`, or `error`.
-- From `terminated`, agents can be explicitly reactivated to `idle`, `active`, or `running`.
+- Agent lifecycle is `idle | active | running | paused | error`.
+- Stop/termination flows land the agent in `paused`; `terminated` is reserved for heartbeat run status only.
 
 **Key behaviors:**
 - Timers remain armed when agents transition between `active`, `running`, and `idle` states
@@ -723,7 +722,7 @@ Effects:
 - `pauseReason` is set to `heartbeat-unresponsive` during recovery and cleared on resume
 - Assigned tasks are auto-paused with `pausedByAgentId` during pause, then only those same tasks are auto-unpaused on resume
 - Resume triggers one on-demand heartbeat restart only when `runtimeConfig.enabled !== false`
-- `onTerminated` is reserved for true termination flows and is not used by unresponsive recovery
+- `onTerminated` is a run-level callback for terminated heartbeat runs and is not used by unresponsive recovery
 
 ## Dashboard Health Status
 
@@ -733,29 +732,29 @@ The dashboard displays agent health status in AgentsView, AgentListModal, and Ag
 
 | Label | Condition |
 |-------|-----------|
-| **Terminated** | Agent state is "terminated" |
 | **Error** | Agent state is "error" (uses lastError if available) |
 | **Paused** | Agent state is "paused" (uses pauseReason if available) |
 | **Running** | Agent state is "running" (task workers with `active` state also display "Running") |
 | **Disabled** | `runtimeConfig.enabled === false` |
 | **Starting...** | State is "active" with no lastHeartbeatAt |
 | **Idle** | Non-active state with no lastHeartbeatAt |
-| **Healthy** | Heartbeat is fresh within configured timeout |
-| **Unresponsive** | Heartbeat exceeded configured timeout |
+| **Healthy** | Heartbeat is fresh within the resolved interval-based staleness threshold |
+| **Unresponsive** | Heartbeat exceeded the resolved interval-based staleness threshold |
 
 ### Timeout Configuration
 
-Health status uses a timeout-based evaluation:
+Health status uses interval-based staleness evaluation:
 
-1. If `runtimeConfig.heartbeatTimeoutMs` is set on the agent, use that value
-2. Otherwise, use the default 60-second (60000ms) timeout
+1. Resolve the effective heartbeat interval from `runtimeConfig.heartbeatIntervalMs` (or the default 1 hour interval)
+2. Multiply that interval by the dashboard grace multiplier (`4×`)
+3. Apply a minimum staleness floor of 5 minutes
 
 ### Key Behaviors
 
 - **Monitoring disabled**: Agents with `runtimeConfig.enabled === false` display "Disabled" — they are NOT falsely labeled as "Unresponsive"
 - **Consistent across views**: All dashboard surfaces use the same centralized utility, ensuring consistent health labels everywhere
 - **Auto-refresh**: Health status is refreshed every 30 seconds while views are open to keep status current
-- **State-first evaluation**: Terminal states (terminated, error, paused, running) take priority over timeout-based evaluation
+- **State-first evaluation**: Explicit non-idle states (error, paused, running) take priority over timeout-based evaluation
 
 ## Heartbeat Run Lifecycle
 
@@ -787,7 +786,7 @@ When an agent already has an active run, attempts to start a new run return **40
 POST /api/agents/:id/runs → 409 { error: "Agent already has an active run", details: { runId } }
 ```
 
-After a run is completed (or terminated), a new run can be started successfully:
+After a run is completed (or terminated at the run level), a new run can be started successfully:
 
 ```
 POST /api/agents/:id/runs → 201 { id: "run-xxx", status: "active", ... }

@@ -879,7 +879,7 @@ describe("AgentDetailView", () => {
     });
   });
 
-  it("transitions running agent to terminated when Stop is clicked", async () => {
+  it("transitions running agent to paused when Stop is clicked", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({ state: "running" }));
 
     render(
@@ -893,7 +893,7 @@ describe("AgentDetailView", () => {
     await userEvent.click(await screen.findByText("Stop"));
 
     await waitFor(() => {
-      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "terminated", undefined);
+      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "paused", undefined);
     });
   });
 
@@ -914,7 +914,7 @@ describe("AgentDetailView", () => {
     });
   });
 
-  it("transitions error agent to terminated when Stop is clicked", async () => {
+  it("transitions error agent to paused when Stop is clicked", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({ state: "error" }));
 
     render(
@@ -928,7 +928,7 @@ describe("AgentDetailView", () => {
     await userEvent.click(await screen.findByText("Stop"));
 
     await waitFor(() => {
-      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "terminated", undefined);
+      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "paused", undefined);
     });
   });
 

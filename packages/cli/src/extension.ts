@@ -2227,7 +2227,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use to pause an agent that is currently running or active",
       "Stopped agents can be resumed with fn_agent_start",
-      "Agents in 'idle', 'error', or 'terminated' state cannot be stopped",
+      "Agents in 'idle', 'error', or already-paused state cannot be stopped",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Agent ID to stop (e.g., agent-abc123)" }),

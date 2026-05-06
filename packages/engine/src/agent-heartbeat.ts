@@ -14,7 +14,7 @@
  * Callback pattern (not EventEmitter):
  * - onMissed: Called when an agent misses its heartbeat
  * - onRecovered: Called when an agent recovers after a missed heartbeat
- * - onTerminated: Called when an unresponsive agent is terminated
+ * - onTerminated: Called when a heartbeat run is terminated
  */
 
 import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent, InboxTask, RunMutationContext, Settings, AgentConfigRevision, ReflectionStore } from "@fusion/core";
@@ -69,7 +69,7 @@ export interface HeartbeatMonitorOptions {
   onMissed?: (agentId: string, reason: string) => void;
   /** Callback when an agent recovers after a missed heartbeat */
   onRecovered?: (agentId: string) => void;
-  /** Callback when an unresponsive agent is terminated */
+  /** Callback when a heartbeat run is terminated (run status only; agent state is handled separately). */
   onTerminated?: (agentId: string, reason: string) => void;
   /** Callback when a run starts */
   onRunStarted?: (agentId: string, run: AgentHeartbeatRun) => void;
@@ -902,7 +902,7 @@ export class HeartbeatMonitor {
           await this.store.updateAgentState(agentId, "error");
           await this.store.updateAgent(agentId, { lastError: completionResult.stderrExcerpt ?? "Run failed" });
         } else if (completionResult.status === "terminated") {
-          await this.store.updateAgentState(agentId, "terminated");
+          await this.store.updateAgentState(agentId, "paused");
         } else {
           // Completed successfully - back to active
           await this.store.updateAgentState(agentId, "active");
@@ -2543,7 +2543,6 @@ const OVERDUE_FIRE_JITTER_MS = 5_000;
  * States where timers should be cleared:
  * - "paused" — Agent is paused by budget exhaustion or manual action
  * - "error" — Agent encountered an error
- * - "terminated" — Agent was explicitly stopped/terminated
  */
 function isTickableState(state: Agent["state"]): boolean {
   return state === "active" || state === "running" || state === "idle";

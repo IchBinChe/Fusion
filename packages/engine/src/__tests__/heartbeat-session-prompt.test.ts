@@ -560,7 +560,7 @@ describe("Budget Governance", () => {
     expect(store.updateAgent).not.toHaveBeenCalledWith("agent-001", { pauseReason: "budget-exhausted" });
   });
 
-  it("does not pause agent when run is terminated", async () => {
+  it("keeps terminated as a run status while pausing the agent", async () => {
     const store = createCompleteRunBudgetStore({
       budgetStatus: createBudgetStatus({ isOverBudget: true, isOverThreshold: true }),
     });
@@ -572,7 +572,7 @@ describe("Budget Governance", () => {
     });
 
     expect(store.getBudgetStatus).not.toHaveBeenCalled();
-    expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "terminated");
+    expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "paused");
     expect(store.updateAgent).not.toHaveBeenCalledWith("agent-001", { pauseReason: "budget-exhausted" });
   });
 

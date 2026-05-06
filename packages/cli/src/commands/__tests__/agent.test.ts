@@ -16,11 +16,10 @@ vi.mock("@fusion/core", () => ({
   })),
   AGENT_VALID_TRANSITIONS: {
     idle: ["active"],
-    active: ["running", "paused", "terminated"],
-    running: ["active", "paused", "error", "terminated"],
-    paused: ["active", "terminated"],
-    error: ["active", "terminated"],
-    terminated: ["idle", "active", "running"],
+    active: ["running", "paused"],
+    running: ["active", "paused", "error"],
+    paused: ["active"],
+    error: ["active"],
   },
 }));
 
@@ -124,14 +123,6 @@ describe("runAgentStop", () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("cannot transition to 'paused'"));
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
-
-  it("should reject stopping a terminated agent (invalid transition)", async () => {
-    mockGetAgent.mockResolvedValue(makeAgent("terminated"));
-
-    await expect(runAgentStop("agent-test123")).rejects.toThrow("process.exit");
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("cannot transition to 'paused'"));
-    expect(exitSpy).toHaveBeenCalledWith(1);
-  });
 });
 
 describe("runAgentStart", () => {
@@ -146,16 +137,6 @@ describe("runAgentStart", () => {
   });
 
   it("should start a paused agent", async () => {
-    await runAgentStart("agent-test123");
-
-    expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-test123", "active");
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("✓ Agent agent-test123 started"));
-  });
-
-  it("should start a terminated agent", async () => {
-    mockGetAgent.mockResolvedValue(makeAgent("terminated"));
-    mockUpdateAgentState.mockResolvedValue(makeAgent("active"));
-
     await runAgentStart("agent-test123");
 
     expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-test123", "active");

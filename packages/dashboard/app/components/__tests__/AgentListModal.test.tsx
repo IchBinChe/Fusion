@@ -595,7 +595,7 @@ describe("AgentListModal", () => {
       fireEvent.click(stopButton);
 
       await waitFor(() => {
-        expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-002", "terminated", undefined);
+        expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-002", "paused", undefined);
       });
     });
 

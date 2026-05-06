@@ -758,8 +758,7 @@
   border: 1px solid var(--state-idle-border);
 }
 
-.agent-badge--error,
-.agent-badge--terminated {
+.agent-badge--error {
   background: var(--state-error-bg);
   color: var(--state-error-text);
   border: 1px solid var(--state-error-border);
@@ -772,8 +771,7 @@
   border-top-color: var(--state-active-border);
   background: var(--state-active-bg);
 }
-.agent-board-card--error,
-.agent-board-card--terminated { border-top-color: var(--state-error-border); }
+.agent-board-card--error { border-top-color: var(--state-error-border); }
 
 .agent-card--idle,
 .agent-card--active,
@@ -786,8 +784,7 @@
 .agent-card--running:hover {
   background: color-mix(in srgb, var(--state-active-border) 20%, var(--card-hover));
 }
-.agent-card--error,
-.agent-card--terminated { border-left-color: var(--state-error-border); }
+.agent-card--error { border-left-color: var(--state-error-border); }
 
 .spin {
   animation: spin 1s linear infinite;

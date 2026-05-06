@@ -1258,8 +1258,8 @@ describe("InProcessRuntime", () => {
     });
   });
 
-  describe("ephemeral termination cleanup", () => {
-    it("auto-deletes ephemeral agent when it transitions to terminated via agent:stateChanged", async () => {
+  describe("ephemeral paused-state cleanup", () => {
+    it("auto-deletes ephemeral agent when it transitions to paused via agent:stateChanged", async () => {
       vi.useFakeTimers();
 
       try {
@@ -1284,7 +1284,7 @@ describe("InProcessRuntime", () => {
         let agents = await store.listAgents({ includeEphemeral: true });
         expect(agents.some((a: Agent) => a.id === agent.id)).toBe(true);
 
-        // Emit agent:stateChanged event to trigger termination
+        // Emit agent:stateChanged event to trigger cleanup
         store.emit("agent:stateChanged", agent.id, "running", "paused");
 
         // Wait for async handler
@@ -1302,7 +1302,7 @@ describe("InProcessRuntime", () => {
       }
     }, 30000);
 
-    it("does not auto-delete non-ephemeral agent when it transitions to terminated", async () => {
+    it("does not auto-delete non-ephemeral agent when it transitions to paused", async () => {
       vi.useFakeTimers();
 
       try {
@@ -1323,7 +1323,7 @@ describe("InProcessRuntime", () => {
         let agents = await store.listAgents();
         expect(agents.some((a: Agent) => a.id === agent.id)).toBe(true);
 
-        // Emit agent:stateChanged event to trigger termination
+        // Emit agent:stateChanged event to trigger cleanup
         store.emit("agent:stateChanged", agent.id, "active", "paused");
 
         // Wait for async handler
@@ -1593,12 +1593,12 @@ describe("InProcessRuntime", () => {
   });
 
   describe("startup ephemeral sweep", () => {
-    it("cleans terminated ephemeral agents on startup", async () => {
+    it("cleans paused ephemeral agents on startup", async () => {
       const { AgentStore } = await import("@fusion/core");
       const preStore = new AgentStore({ rootDir: join(testDir, ".fusion") });
       await preStore.init();
       const orphan = await preStore.createAgent({
-        name: "orphan-terminated",
+        name: "orphan-paused",
         role: "executor",
         metadata: { agentKind: "task-worker" },
         runtimeConfig: { enabled: false },

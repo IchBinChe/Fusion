@@ -93,7 +93,6 @@ const STATE_COLORS: Record<AgentState, { bg: string; text: string; border: strin
   active: { bg: "var(--state-active-bg)", text: "var(--state-active-text)", border: "var(--state-active-border)" },
   running: { bg: "var(--state-active-bg)", text: "var(--state-active-text)", border: "var(--state-active-border)" },
   paused: { bg: "var(--state-paused-bg)", text: "var(--state-paused-text)", border: "var(--state-paused-border)" },
-  terminated: { bg: "var(--state-paused-bg)", text: "var(--state-paused-text)", border: "var(--state-paused-border)" },
   error: { bg: "var(--state-error-bg)", text: "var(--state-error-text)", border: "var(--state-error-border)" },
 };
 
@@ -563,7 +562,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                     <Pause size={14} />
                     <span className="agent-detail-control-label">Pause</span>
                   </button>
-                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
+                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
                     <Square size={14} />
                     Stop
                   </button>
@@ -574,10 +573,6 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                   <button className="btn btn-task-create btn--compact agent-detail-mobile-icon-control" onClick={() => void handleStateChange("active")} disabled={isTransitioning} aria-label="Resume">
                     <Play size={14} />
                     <span className="agent-detail-control-label">Resume</span>
-                  </button>
-                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
-                    <Square size={14} />
-                    Stop
                   </button>
                   <button className="btn btn--danger btn--compact" onClick={handleDelete}>
                     <Trash2 size={14} />
@@ -591,7 +586,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                     <Pause size={14} />
                     <span className="agent-detail-control-label">Pause</span>
                   </button>
-                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
+                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
                     <Square size={14} />
                     Stop
                   </button>
@@ -603,21 +598,9 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                     <Play size={14} />
                     Retry
                   </button>
-                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("terminated")} disabled={isTransitioning}>
+                  <button className="btn btn--danger btn--compact" onClick={() => void handleStateChange("paused")} disabled={isTransitioning}>
                     <Square size={14} />
                     Stop
-                  </button>
-                </>
-              )}
-              {agent.state === "terminated" && (
-                <>
-                  <button className="btn btn-task-create btn--compact" onClick={() => void handleStateChange("active")} disabled={isTransitioning}>
-                    <Play size={14} />
-                    Reactivate
-                  </button>
-                  <button className="btn btn--danger btn--compact" onClick={handleDelete}>
-                    <Trash2 size={14} />
-                    Delete
                   </button>
                 </>
               )}

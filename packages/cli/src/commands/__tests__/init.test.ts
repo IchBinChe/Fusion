@@ -52,14 +52,12 @@ async function git(command: string, cwd: string): Promise<string> {
 describe("init command", () => {
   let tempProjectDir: string;
   let tempHomeDir: string;
-  let originalHome: string | undefined;
-  let originalUserProfile: string | undefined;
+  const isolatedHome = process.env.HOME;
+  const isolatedUserProfile = process.env.USERPROFILE;
 
   beforeEach(() => {
     tempProjectDir = tempDir("fn-init-test-");
     tempHomeDir = tempDir("fn-init-home-");
-    originalHome = process.env.HOME;
-    originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tempHomeDir;
     process.env.USERPROFILE = tempHomeDir;
     mockCentralInit.mockResolvedValue(undefined);
@@ -81,15 +79,15 @@ describe("init command", () => {
   });
 
   afterEach(() => {
-    if (originalHome === undefined) {
+    if (isolatedHome === undefined) {
       delete process.env.HOME;
     } else {
-      process.env.HOME = originalHome;
+      process.env.HOME = isolatedHome;
     }
-    if (originalUserProfile === undefined) {
+    if (isolatedUserProfile === undefined) {
       delete process.env.USERPROFILE;
     } else {
-      process.env.USERPROFILE = originalUserProfile;
+      process.env.USERPROFILE = isolatedUserProfile;
     }
 
     if (existsSync(tempProjectDir)) {

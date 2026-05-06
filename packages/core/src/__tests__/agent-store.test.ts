@@ -132,6 +132,43 @@ describe("AgentStore", () => {
       const persisted = await store.getAgent(agent.id);
       expect((persisted?.runtimeConfig as Record<string, unknown> | undefined)?.enabled).toBe(false);
     });
+
+    it("migrates persisted terminated agents to paused once", async () => {
+      store.close();
+      store = new AgentStore({ rootDir });
+      await store.init();
+
+      const agent = await store.createAgent({
+        name: "Legacy Terminated Agent",
+        role: "executor",
+      });
+      await store.updateAgent(agent.id, {
+        lastError: "legacy stop",
+      });
+      const testDb = (store as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown; get?: (key: string) => { value?: string } | undefined } } }).db;
+      testDb.prepare("UPDATE agents SET state = ? WHERE id = ?").run("terminated", agent.id);
+      testDb.prepare("DELETE FROM __meta WHERE key = ?").run("removeTerminatedAgentState");
+
+      store.close();
+      store = new AgentStore({ rootDir });
+      await store.init();
+
+      const migrated = await store.getAgent(agent.id);
+      expect(migrated?.state).toBe("paused");
+      expect(migrated?.pauseReason).toBe("migrated-from-terminated");
+      expect(migrated?.lastError).toBe("legacy stop");
+
+      const metaRow = (store as unknown as { db: { prepare: (sql: string) => { get: (key: string) => { value?: string } | undefined } } }).db
+        .prepare("SELECT value FROM __meta WHERE key = ?")
+        .get("removeTerminatedAgentState");
+      expect(metaRow?.value).toBe("1");
+
+      const reopenedDb = (store as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } } }).db;
+      reopenedDb.prepare("UPDATE agents SET state = ?, data = json_set(COALESCE(data, '{}'), '$.pauseReason', null) WHERE id = ?").run("terminated", agent.id);
+      await store.init();
+      const stillTerminated = await store.getAgent(agent.id);
+      expect(stillTerminated?.state).toBe("terminated");
+    });
   });
 
   // ── createAgent ───────────────────────────────────────────────────
@@ -1525,67 +1562,37 @@ describe("AgentStore", () => {
       expect(updated.state).toBe("active");
     });
 
-    it("active → terminated transition succeeds", async () => {
-      const agent = await createReadyAgent(store, "ActiveToTerminated");
+    it("running → paused transition succeeds", async () => {
+      const agent = await createReadyAgent(store, "RunningToPaused");
       await store.updateAgentState(agent.id, "active");
-      const updated = await store.updateAgentState(agent.id, "terminated");
-      expect(updated.state).toBe("terminated");
+      await store.updateAgentState(agent.id, "running");
+      const updated = await store.updateAgentState(agent.id, "paused");
+      expect(updated.state).toBe("paused");
     });
 
-    it("paused → terminated transition succeeds", async () => {
+    it("error → active transition succeeds", async () => {
+      const agent = await createReadyAgent(store, "ErrorToActive");
+      await store.updateAgentState(agent.id, "active");
+      await store.updateAgentState(agent.id, "error");
+      const updated = await store.updateAgentState(agent.id, "active");
+      expect(updated.state).toBe("active");
+    });
+
+    it("rejects active → terminated transition", async () => {
+      const agent = await createReadyAgent(store, "ActiveToTerminated");
+      await store.updateAgentState(agent.id, "active");
+      await expect(
+        store.updateAgentState(agent.id, "terminated" as never)
+      ).rejects.toThrow("Invalid state transition: active -> terminated");
+    });
+
+    it("rejects paused → terminated transition", async () => {
       const agent = await createReadyAgent(store, "PausedToTerminated");
       await store.updateAgentState(agent.id, "active");
       await store.updateAgentState(agent.id, "paused");
-      const updated = await store.updateAgentState(agent.id, "terminated");
-      expect(updated.state).toBe("terminated");
-    });
-
-    it("error → terminated transition succeeds", async () => {
-      const agent = await createReadyAgent(store, "ErrorToTerminated");
-      await store.updateAgentState(agent.id, "active");
-      await store.updateAgentState(agent.id, "error");
-      const updated = await store.updateAgentState(agent.id, "terminated");
-      expect(updated.state).toBe("terminated");
-    });
-
-    it("running → terminated transition succeeds", async () => {
-      const agent = await createReadyAgent(store, "RunningToTerminated");
-      await store.updateAgentState(agent.id, "active");
-      await store.updateAgentState(agent.id, "running");
-      const updated = await store.updateAgentState(agent.id, "terminated");
-      expect(updated.state).toBe("terminated");
-    });
-
-    it("terminated → idle|active|running transitions succeed", async () => {
-      const idleAgent = await createReadyAgent(store, "TerminatedToIdle");
-      await store.updateAgentState(idleAgent.id, "active");
-      await store.updateAgentState(idleAgent.id, "terminated");
-      expect((await store.updateAgentState(idleAgent.id, "idle")).state).toBe("idle");
-
-      const activeAgent = await createReadyAgent(store, "TerminatedToActive");
-      await store.updateAgentState(activeAgent.id, "active");
-      await store.updateAgentState(activeAgent.id, "terminated");
-      expect((await store.updateAgentState(activeAgent.id, "active")).state).toBe("active");
-
-      const runningAgent = await createReadyAgent(store, "TerminatedToRunning");
-      await store.updateAgentState(runningAgent.id, "active");
-      await store.updateAgentState(runningAgent.id, "terminated");
-      expect((await store.updateAgentState(runningAgent.id, "running")).state).toBe("running");
-    });
-
-    it("clears lastError when leaving terminated for actionable states", async () => {
-      const agent = await createReadyAgent(store, "TerminatedClearsError");
-      await store.updateAgentState(agent.id, "active");
-      await store.updateAgentState(agent.id, "terminated");
-      await store.updateAgent(agent.id, { lastError: "old error" });
-
-      const toActive = await store.updateAgentState(agent.id, "active");
-      expect(toActive.lastError).toBeUndefined();
-
-      await store.updateAgentState(agent.id, "terminated");
-      await store.updateAgent(agent.id, { lastError: "old error again" });
-      const toRunning = await store.updateAgentState(agent.id, "running");
-      expect(toRunning.lastError).toBeUndefined();
+      await expect(
+        store.updateAgentState(agent.id, "terminated" as never)
+      ).rejects.toThrow("Invalid state transition: paused -> terminated");
     });
 
     it("same-state transition returns agent unchanged (no-op)", async () => {
@@ -1893,8 +1900,8 @@ describe("AgentStore", () => {
   // ── resetAgent ────────────────────────────────────────────────────
 
   describe("resetAgent", () => {
-    // Helper: create an agent and transition it to terminated with error/task
-    async function createTerminatedAgent(s: AgentStore, name: string) {
+    // Helper: create a paused agent with error/task state to verify reset semantics.
+    async function createPausedAgent(s: AgentStore, name: string) {
       const agent = await s.createAgent({ name, role: "executor" });
       await s.recordHeartbeat(agent.id, "ok");
       await s.recordHeartbeat(agent.id, "missed");
@@ -1905,12 +1912,11 @@ describe("AgentStore", () => {
         lastError: "something broke",
       });
       await s.updateAgentState(agent.id, "paused");
-      await s.updateAgentState(agent.id, "terminated");
       return agent;
     }
 
-    it("transitions terminated agent to idle", async () => {
-      const agent = await createTerminatedAgent(store, "ResetToIdle");
+    it("transitions paused agent to idle", async () => {
+      const agent = await createPausedAgent(store, "ResetToIdle");
       const reset = await store.resetAgent(agent.id);
 
       expect(reset.state).toBe("idle");
@@ -1935,28 +1941,28 @@ describe("AgentStore", () => {
     });
 
     it("clears lastError", async () => {
-      const agent = await createTerminatedAgent(store, "ResetClearsError");
+      const agent = await createPausedAgent(store, "ResetClearsError");
       const reset = await store.resetAgent(agent.id);
 
       expect(reset.lastError).toBeUndefined();
     });
 
     it("clears pauseReason", async () => {
-      const agent = await createTerminatedAgent(store, "ResetClearsPause");
+      const agent = await createPausedAgent(store, "ResetClearsPause");
       const reset = await store.resetAgent(agent.id);
 
       expect(reset.pauseReason).toBeUndefined();
     });
 
     it("clears taskId", async () => {
-      const agent = await createTerminatedAgent(store, "ResetClearsTask");
+      const agent = await createPausedAgent(store, "ResetClearsTask");
       const reset = await store.resetAgent(agent.id);
 
       expect(reset.taskId).toBeUndefined();
     });
 
     it("starts fresh heartbeat tracking on subsequent active transition", async () => {
-      const agent = await createTerminatedAgent(store, "ResetHeartbeat");
+      const agent = await createPausedAgent(store, "ResetHeartbeat");
       await store.resetAgent(agent.id);
 
       // After reset, explicitly start a heartbeat run (as the caller would)

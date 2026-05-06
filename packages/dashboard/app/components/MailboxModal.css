@@ -879,6 +879,29 @@
   color: var(--color-error);
 }
 
+.message-composer-field--wake {
+  margin-top: 4px;
+}
+
+.message-composer-wake-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary, var(--text-muted));
+  cursor: pointer;
+}
+
+.message-composer-wake-label input[type="checkbox"] {
+  margin: 0;
+}
+
+.message-composer-wake-hint {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .message-composer-error {
   display: flex;
   align-items: center;

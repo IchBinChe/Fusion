@@ -43,6 +43,7 @@ export function MessageComposer({
   const [toId, setToId] = useState(recipient?.id ?? "");
   const [toType, setToType] = useState<ParticipantType>(recipient?.type ?? "agent");
   const [content, setContent] = useState("");
+  const [wakeRecipient, setWakeRecipient] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,13 +57,21 @@ export function MessageComposer({
 
     try {
       const messageType: MessageType = toType === "agent" ? "user-to-agent" : "system";
+      const includeWake = wakeRecipient && toType === "agent";
+      const metadata =
+        replyContext || includeWake
+          ? {
+              ...(replyContext ? { replyTo: { messageId: replyContext.messageId } } : {}),
+              ...(includeWake ? { wakeRecipient: true } : {}),
+            }
+          : undefined;
       await sendMessage(
         {
           toId: toId.trim(),
           toType,
           content: content.trim(),
           type: messageType,
-          ...(replyContext ? { metadata: { replyTo: { messageId: replyContext.messageId } } } : {}),
+          ...(metadata ? { metadata } : {}),
         },
         projectId,
       );
@@ -74,7 +83,7 @@ export function MessageComposer({
     } finally {
       setIsSending(false);
     }
-  }, [isValid, isSending, toId, toType, content, replyContext, projectId, onSend, addToast]);
+  }, [isValid, isSending, toId, toType, content, wakeRecipient, replyContext, projectId, onSend, addToast]);
 
   const handleAgentSelect = useCallback((agentId: string) => {
     setToId(agentId);
@@ -163,6 +172,26 @@ export function MessageComposer({
             </span>
           </div>
         </div>
+
+        {/* Wake recipient toggle (agents only) */}
+        {toType === "agent" && (
+          <div className="message-composer-field message-composer-field--wake">
+            <label className="message-composer-wake-label">
+              <input
+                type="checkbox"
+                checked={wakeRecipient}
+                onChange={(e) => setWakeRecipient(e.target.checked)}
+                data-testid="message-composer-wake"
+              />
+              <span>
+                Wake recipient immediately
+                <span className="message-composer-wake-hint">
+                  (overrides their messageResponseMode)
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

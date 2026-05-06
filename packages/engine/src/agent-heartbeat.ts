@@ -1149,7 +1149,8 @@ export class HeartbeatMonitor {
     }
 
     const runtimeConfig = agent.runtimeConfig as AgentHeartbeatConfig | undefined;
-    if (runtimeConfig?.messageResponseMode !== "immediate") {
+    const senderForcedWake = message.metadata?.wakeRecipient === true;
+    if (!senderForcedWake && runtimeConfig?.messageResponseMode !== "immediate") {
       return;
     }
 
@@ -1161,7 +1162,7 @@ export class HeartbeatMonitor {
     void this.executeHeartbeat({
       agentId: message.toId,
       source: "on_demand",
-      triggerDetail: "wake-on-message",
+      triggerDetail: senderForcedWake ? "wake-on-message-forced" : "wake-on-message",
     }).catch((error) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       heartbeatLog.warn(`Wake-on-message heartbeat failed for ${message.toId}: ${errorMessage}`);
@@ -1774,6 +1775,7 @@ export class HeartbeatMonitor {
           const deriveWakeReason = (): string => {
             if (effectiveTriggeringCommentType) return `comment_${effectiveTriggeringCommentType}`;
             if (triggerDetail === "wake-on-message") return "message_received";
+            if (triggerDetail === "wake-on-message-forced") return "message_received_urgent";
             if (triggerDetail === "wake-on-comment") return "comment_mention";
             if (triggerDetail === "task-assigned") return "task_assigned";
             if (source === "timer") return "timer";

@@ -4289,6 +4289,12 @@ export interface MessageReplyReference {
 export interface MessageMetadata extends Record<string, unknown> {
   /** Optional link to the original message when this message is a reply. */
   replyTo?: MessageReplyReference;
+  /**
+   * If true, the recipient agent is woken immediately on receipt regardless
+   * of their own `messageResponseMode` setting. Sender-initiated override —
+   * use sparingly for urgent messages. Ignored when recipient is a user.
+   */
+  wakeRecipient?: boolean;
 }
 
 /** Message record stored in the system */
@@ -4349,16 +4355,22 @@ export interface MessageFilter {
 
 /** Validate mailbox metadata, including reply-link contract when present. */
 export function validateMessageMetadata(metadata: MessageMetadata | undefined): void {
-  if (!metadata || metadata.replyTo === undefined) {
+  if (!metadata) {
     return;
   }
 
-  if (typeof metadata.replyTo !== "object" || metadata.replyTo === null || Array.isArray(metadata.replyTo)) {
-    throw new Error("metadata.replyTo must be an object");
+  if (metadata.replyTo !== undefined) {
+    if (typeof metadata.replyTo !== "object" || metadata.replyTo === null || Array.isArray(metadata.replyTo)) {
+      throw new Error("metadata.replyTo must be an object");
+    }
+
+    if (typeof metadata.replyTo.messageId !== "string" || metadata.replyTo.messageId.trim().length === 0) {
+      throw new Error("metadata.replyTo.messageId must be a non-empty string");
+    }
   }
 
-  if (typeof metadata.replyTo.messageId !== "string" || metadata.replyTo.messageId.trim().length === 0) {
-    throw new Error("metadata.replyTo.messageId must be a non-empty string");
+  if (metadata.wakeRecipient !== undefined && typeof metadata.wakeRecipient !== "boolean") {
+    throw new Error("metadata.wakeRecipient must be a boolean");
   }
 }
 

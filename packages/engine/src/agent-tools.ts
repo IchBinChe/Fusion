@@ -113,6 +113,13 @@ export const sendMessageParams = Type.Object({
   reply_to_message_id: Type.Optional(
     Type.String({ description: "Optional ID of the message you are replying to (use IDs from fn_read_messages output)" }),
   ),
+  wake_recipient: Type.Optional(
+    Type.Boolean({
+      description:
+        "If true, wake the recipient agent immediately on receipt regardless of their messageResponseMode. " +
+        "Use sparingly for urgent messages. Ignored when the recipient is a user.",
+    }),
+  ),
 });
 
 export const readMessagesParams = Type.Object({
@@ -1410,7 +1417,8 @@ export function createSendMessageTool(messageStore: MessageStore, fromAgentId: s
     label: "Send Message",
     description:
       "Send a message to another agent or user. The recipient will be woken if they have " +
-      "`messageResponseMode: 'immediate'` configured. When replying to an existing message, " +
+      "`messageResponseMode: 'immediate'` configured, or if you set `wake_recipient: true` " +
+      "to override their setting for an urgent message. When replying to an existing message, " +
       "include `reply_to_message_id` to preserve threading.",
     parameters: sendMessageParams,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1445,6 +1453,15 @@ export function createSendMessageTool(messageStore: MessageStore, fromAgentId: s
           };
         }
 
+        const wakeRecipient = params.wake_recipient === true && recipient.type === "agent";
+        const metadata =
+          replyToMessageId || wakeRecipient
+            ? {
+                ...(replyToMessageId ? { replyTo: { messageId: replyToMessageId } } : {}),
+                ...(wakeRecipient ? { wakeRecipient: true } : {}),
+              }
+            : undefined;
+
         const message = messageStore.sendMessage({
           fromId: fromAgentId,
           fromType: "agent",
@@ -1452,7 +1469,7 @@ export function createSendMessageTool(messageStore: MessageStore, fromAgentId: s
           toType: recipient.type,
           content,
           type: messageType,
-          ...(replyToMessageId ? { metadata: { replyTo: { messageId: replyToMessageId } } } : {}),
+          ...(metadata ? { metadata } : {}),
         });
 
         return {

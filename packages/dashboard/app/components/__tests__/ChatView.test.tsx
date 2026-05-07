@@ -2741,7 +2741,7 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
-  it("mobile mode: applies --vv-height when keyboard opens with zero overlap (iOS last-resort signal)", async () => {
+  it("mobile mode: applies keyboard-active class for iOS fallback when viewport offset is present", async () => {
     const restoreMatchMedia = mockMobileViewport();
     const { listeners, mockVV } = mockMobileVisualViewport({
       innerHeight: 800,
@@ -2758,11 +2758,8 @@ describe("ChatView mobile behavior", () => {
 
       const thread = document.querySelector(".chat-thread") as HTMLDivElement;
       expect(thread).toBeInTheDocument();
-      expect(thread.style.getPropertyValue("--vv-height")).toBe("");
+      expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(false);
 
-      // Focus the chat textarea so the hook treats the active element as a
-      // keyboard-focusable target — this is what unlocks the iOS last-resort
-      // signal where viewport shrinks but offsetTop+height closes the gap.
       const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
       await act(async () => {
         textarea.focus();
@@ -2771,10 +2768,6 @@ describe("ChatView mobile behavior", () => {
         document.dispatchEvent(new Event("focusin"));
       });
 
-      // iOS scenario: vv.height shrinks by 16px, vv.offsetTop also = 16.
-      // Both chromeOverlap (innerHeight - offsetTop - height) and the gap
-      // measurement are 0, but baselineHeight - vv.height = 16 trips the
-      // "viewport shrank" branch with overlap=0, keyboardOpen=true.
       Object.defineProperty(mockVV, "height", { value: 784, writable: true, configurable: true });
       Object.defineProperty(mockVV, "offsetTop", { value: 16, writable: true, configurable: true });
 
@@ -2782,13 +2775,60 @@ describe("ChatView mobile behavior", () => {
         for (const cb of listeners.resize) cb();
       });
 
-      // The thread style is gated on keyboardOpen (not keyboardOverlap > 0),
-      // so --vv-height must still be applied even when the computed overlap
-      // collapses to zero. Regression guard for the gating change in
-      // ChatView.tsx:766.
       await waitFor(() => {
         expect(thread.style.getPropertyValue("--keyboard-overlap")).toBe("0px");
         expect(thread.style.getPropertyValue("--vv-height")).toBe("784px");
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(true);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: removes keyboard-active class immediately on blur even before visualViewport settles", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const { listeners, mockVV } = mockMobileVisualViewport({
+      innerHeight: 800,
+      vvHeight: 800,
+    });
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const thread = document.querySelector(".chat-thread") as HTMLDivElement;
+      expect(thread).toBeInTheDocument();
+
+      const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+      await act(async () => {
+        textarea.focus();
+      });
+      act(() => {
+        document.dispatchEvent(new Event("focusin"));
+      });
+
+      Object.defineProperty(mockVV, "height", { value: 560, writable: true, configurable: true });
+      Object.defineProperty(window, "innerHeight", { value: 560, writable: true, configurable: true });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(true);
+      });
+
+      textarea.blur();
+      act(() => {
+        document.dispatchEvent(new Event("focusout"));
+      });
+
+      await waitFor(() => {
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(false);
       });
     } finally {
       restoreMatchMedia.mockRestore();
@@ -3096,7 +3136,7 @@ describe("ChatView mobile CSS contract", () => {
   });
 
   it("mobile includes keyboard-aware chat-thread height rule", () => {
-    expect(css).toMatch(/\.chat-thread\[style\*=\"--keyboard-overlap\"\]\s*\{[^}]*--vv-height/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread--keyboard-active\s*\{[^}]*--vv-height/);
   });
 
   it("mobile widens chat bubbles for readability", () => {

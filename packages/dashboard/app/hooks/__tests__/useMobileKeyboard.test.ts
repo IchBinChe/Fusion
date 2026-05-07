@@ -361,6 +361,52 @@ describe("useMobileKeyboard", () => {
     input.remove();
   });
 
+  it("uses iOS gap fallback when viewport shrink occurs with offsetTop at 0", async () => {
+    const { listeners, mockVV } = setupMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    const input = document.createElement("input");
+    input.type = "text";
+    document.body.appendChild(input);
+
+    const { result } = renderHook(() => useMobileKeyboard());
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(false);
+    });
+
+    input.focus();
+    Object.defineProperty(mockVV, "height", {
+      value: 824,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(mockVV, "offsetTop", {
+      value: 0,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 824,
+      writable: true,
+      configurable: true,
+    });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOverlap).toBe(20);
+      expect(result.current.viewportOffsetTop).toBe(0);
+      expect(result.current.keyboardOpen).toBe(true);
+    });
+
+    input.remove();
+  });
+
   it("reports keyboardOpen=false the instant focus leaves an input even while visualViewport still reports keyboard-up size", async () => {
     // Regression for the ChatView "composer crawls down with the keyboard"
     // bug: on iOS the visualViewport keeps reporting the small mid-dismiss

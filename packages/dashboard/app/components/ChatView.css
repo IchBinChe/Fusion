@@ -1103,7 +1103,7 @@
     display: none;
   }
 
-  .chat-thread[style*="--keyboard-overlap"] {
+  .chat-thread--keyboard-active {
     height: calc(var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px))) - var(--header-height));
     max-height: calc(var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px))) - var(--header-height));
     /* useMobileKeyboard pins --vv-offset-top across pan-time scroll

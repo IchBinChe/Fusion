@@ -174,8 +174,8 @@
 
 .chat-session-delete-btn:focus {
   opacity: 1;
-  outline: 2px solid var(--focus-ring-strong);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 /* Context menu for session items */

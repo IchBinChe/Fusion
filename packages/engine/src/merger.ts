@@ -26,7 +26,7 @@ export {
   type VerificationResult,
 } from "./verification-utils.js";
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { hostname } from "node:os";
@@ -1101,7 +1101,14 @@ function writeActiveMergerStatus(rootDir: string, taskId: string): string | null
       hostname: hostname(),
       startedAt: new Date().toISOString(),
     };
-    writeFileSync(statusPath, JSON.stringify(payload, null, 2), "utf-8");
+    // Atomic write via temp + rename. Without this, a reader that hits
+    // existsSync() between `open` and the final flush sees a partial /
+    // empty file. JSON.parse rejects partial writes so we'd just return
+    // null, but that produces false "no merger active" advisories.
+    // POSIX guarantees rename is atomic on the same filesystem.
+    const tempPath = `${statusPath}.${process.pid}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf-8");
+    renameSync(tempPath, statusPath);
     return statusPath;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1192,17 +1199,30 @@ function runObservedDestructiveSyncOp(
   }
 }
 
-/** Parse `git status -z --porcelain` into a Set of paths. Matches the same
- *  three-class extraction as `snapshotDirtyFiles` (modified + staged +
- *  untracked) but synchronously. Each entry is `XY <path>\0`. */
-function parsePorcelainZ(raw: string): Set<string> {
+/** Parse `git status -z --porcelain` into a Set of paths.
+ *
+ *  Format per entry: `XY <space> <path>\0` where X = staged status, Y =
+ *  unstaged status. Renames and copies are special: they emit TWO
+ *  NUL-separated entries, `R  <new>\0<old>\0` (or `C  <new>\0<old>\0`).
+ *  We must consume the trailing `<old>` entry without treating it as a
+ *  separate path, otherwise observability code over-reports "cleared
+ *  paths" with the historical names of renames. */
+export function parsePorcelainZ(raw: string): Set<string> {
   const paths = new Set<string>();
-  for (const entry of raw.split("\0")) {
+  const entries = raw.split("\0");
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
     if (!entry) continue;
-    // Format: "XY path" where X = staged status, Y = unstaged status
     if (entry.length < 4) continue;
+    const status = entry.slice(0, 2);
     const path = entry.slice(3);
-    if (path) paths.add(path);
+    if (!path) continue;
+    paths.add(path);
+    // Rename/copy: the very next entry is the old path — skip it so it
+    // isn't mistaken for an independent dirty path.
+    if (status.charAt(0) === "R" || status.charAt(0) === "C") {
+      i++;
+    }
   }
   return paths;
 }
@@ -1344,6 +1364,13 @@ async function stashUnrelatedRootDirChanges(
       const newlyDirty = [...currentDirty].filter((p) => !primaryStashPaths.has(p));
       if (newlyDirty.length === 0) break;
       const rescueLabel = `${AUTOSTASH_LABEL_PREFIX}${taskId}:race-rescue-${attempt}:${Date.now()}`;
+      // Unstage before re-adding: `git stash create` snapshots the index
+      // but does NOT clear it, so a second iteration's `git add -A` would
+      // re-stage atop iteration-1 leftovers and produce a tree that
+      // differs from current dirt for stale-staging reasons rather than
+      // genuine new writes. The upcoming `git reset --hard HEAD` clears
+      // it eventually, but inside this loop we want a clean baseline.
+      await execAsync("git reset", { cwd: rootDir }).catch(() => undefined);
       await execAsync("git add -A", { cwd: rootDir });
       const { stdout: rescueOut } = await execAsync("git stash create", {
         cwd: rootDir,
@@ -1836,7 +1863,10 @@ export function deriveDeterministicSubjectSummary(commitLog: string): string | n
     l.replace(/^[a-z]+(?:\([^)]+\))?!?:\s*/i, "").trim();
   const cleaned = lines.map((l) => stripConventional(stripBullet(l)));
 
-  const stepRe = /^complete Step (\d+)\s*[—\-:]\s*(.+)$/i;
+  // Separator is em-dash (U+2014), ASCII hyphen, or colon. Spelled with
+  // explicit alternation rather than a character class so the em-dash
+  // intent is obvious to anyone auditing this regex.
+  const stepRe = /^complete Step (\d+)\s*(?:—|-|:)\s*(.+)$/i;
   let bestStep: { n: number; summary: string } | null = null;
   for (const c of cleaned) {
     const m = c.match(stepRe);

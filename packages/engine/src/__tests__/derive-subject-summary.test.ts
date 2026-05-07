@@ -40,4 +40,12 @@ describe("deriveDeterministicSubjectSummary", () => {
     ].join("\n");
     expect(deriveDeterministicSubjectSummary(log)).toBe("first thing (+1 more)");
   });
+
+  it("handles em-dash separator in Step lines", () => {
+    const log = [
+      "- feat: complete Step 2 — second thing",
+      "- feat: complete Step 1 — first thing",
+    ].join("\n");
+    expect(deriveDeterministicSubjectSummary(log)).toBe("first thing (+1 more)");
+  });
 });

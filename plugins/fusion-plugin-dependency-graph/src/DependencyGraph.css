@@ -15,9 +15,13 @@
   touch-action: none;
 }
 
-.dependency-graph__canvas {
+.graph-canvas-transform {
   position: relative;
   transform-origin: top left;
+}
+
+.graph-canvas-transform--animate {
+  transition: transform var(--transition-normal);
 }
 
 .dependency-graph__nodes-layer {
@@ -47,26 +51,8 @@
   height: 100%;
 }
 
-.dependency-graph__toolbar {
-  position: absolute;
-  right: var(--space-md);
-  bottom: var(--space-md);
-  display: flex;
-  gap: var(--space-xs);
-}
-
 @media (max-width: 768px) {
   .dependency-graph {
     padding: var(--space-sm);
-  }
-
-  .dependency-graph__toolbar {
-    right: var(--space-sm);
-    bottom: var(--space-sm);
-  }
-
-  .dependency-graph__toolbar .btn-icon {
-    min-width: calc(var(--space-xs) * 11);
-    min-height: calc(var(--space-xs) * 11);
   }
 }

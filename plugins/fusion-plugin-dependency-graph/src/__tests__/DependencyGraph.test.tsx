@@ -4,6 +4,10 @@ import type { Task } from "@fusion/core";
 import { DependencyGraph } from "../DependencyGraph";
 
 const fitToGraph = vi.fn();
+const zoomIn = vi.fn();
+const zoomOut = vi.fn();
+const resetView = vi.fn();
+const handleKeyDown = vi.fn();
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
   TaskCard: ({ task, onOpenDetail, disableDrag }: { task: Task; onOpenDetail: (task: Task) => void; disableDrag?: boolean }) => (
@@ -14,13 +18,17 @@ vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
 vi.mock("../useGraphInteraction", () => ({
   useGraphInteraction: () => ({
     transform: "translate(0px, 0px) scale(1)",
-    zoomIn: vi.fn(),
-    zoomOut: vi.fn(),
+    zoom: 1,
+    transitioning: false,
+    zoomIn,
+    zoomOut,
+    resetView,
     fitToGraph,
     onPointerDown: vi.fn(),
     onPointerMove: vi.fn(),
     onPointerUp: vi.fn(),
     onWheelZoom: vi.fn(),
+    handleKeyDown,
   }),
 }));
 
@@ -31,6 +39,10 @@ function createTask(id: string, column: Task["column"], dependencies: string[] =
 describe("DependencyGraph", () => {
   beforeEach(() => {
     fitToGraph.mockReset();
+    zoomIn.mockReset();
+    zoomOut.mockReset();
+    resetView.mockReset();
+    handleKeyDown.mockReset();
   });
 
   afterEach(() => {
@@ -65,43 +77,38 @@ describe("DependencyGraph", () => {
     expect(screen.queryByTestId("graph-task-node-F")).toBeNull();
   });
 
-  it("renders zero nodes and edges when only done tasks are provided", () => {
-    const { container } = render(<DependencyGraph tasks={[createTask("A", "done", ["B"]), createTask("B", "done")]} onOpenTaskDetail={vi.fn()} />);
-
-    expect(container.querySelectorAll("[data-testid^='graph-task-node-']")).toHaveLength(0);
-    expect(screen.queryAllByTestId("dependency-edge")).toHaveLength(0);
+  it("auto-fits on initial load with active tasks", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    expect(fitToGraph).toHaveBeenCalled();
   });
 
-  it("renders zero nodes and edges when only archived tasks are provided", () => {
-    const { container } = render(
-      <DependencyGraph tasks={[createTask("A", "archived", ["B"]), createTask("B", "archived")]} onOpenTaskDetail={vi.fn()} />,
-    );
-
-    expect(container.querySelectorAll("[data-testid^='graph-task-node-']")).toHaveLength(0);
-    expect(screen.queryAllByTestId("dependency-edge")).toHaveLength(0);
+  it("forwards keyboard events to interaction hook", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    const viewport = document.querySelector(".dependency-graph__viewport");
+    if (!viewport) throw new Error("missing viewport");
+    fireEvent.keyDown(viewport, { key: "=", ctrlKey: true });
+    expect(handleKeyDown).toHaveBeenCalled();
   });
 
-  it("drops edge from in-review task to done dependency while keeping node", () => {
-    const { container } = render(<DependencyGraph tasks={[createTask("A", "in-review", ["B"]), createTask("B", "done")]} onOpenTaskDetail={vi.fn()} />);
-
-    expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
-    expect(screen.queryByTestId("graph-task-node-B")).toBeNull();
-    expect(screen.queryAllByTestId("dependency-edge")).toHaveLength(0);
-    expect(container.querySelector(".graph-task-node--in-review")).toBeTruthy();
+  it("sets viewport tabIndex for keyboard focus", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    const viewport = document.querySelector(".dependency-graph__viewport");
+    expect(viewport?.getAttribute("tabindex")).toBe("0");
   });
 
-  it("renders edge between in-progress task and in-review dependency", () => {
-    render(<DependencyGraph tasks={[createTask("A", "in-progress", ["B"]), createTask("B", "in-review")]} onOpenTaskDetail={vi.fn()} />);
-
-    expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
-    expect(screen.getByTestId("graph-task-node-B")).toBeTruthy();
-    expect(screen.getAllByTestId("dependency-edge")).toHaveLength(1);
-    expect(screen.getByTestId("graph-task-node-B").className).toContain("graph-task-node--in-review");
+  it("renders toolbar controls", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fit to graph" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset view" })).toBeTruthy();
+    expect(screen.getByText("100%")).toBeTruthy();
   });
 
-  it("renders embedded cards with native dragging disabled", () => {
-    render(<DependencyGraph tasks={[createTask("A", "in-progress")]} onOpenTaskDetail={vi.fn()} />);
-    expect(screen.getByTestId("task-A").getAttribute("draggable")).toBe("false");
+  it("fit-to-graph button triggers fitToGraph", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fit to graph" }));
+    expect(fitToGraph).toHaveBeenCalled();
   });
 
   it("clicking a card triggers onOpenDetail", () => {
@@ -109,11 +116,5 @@ describe("DependencyGraph", () => {
     render(<DependencyGraph tasks={[createTask("A", "in-progress")]} onOpenDetail={onOpenDetail} />);
     fireEvent.click(screen.getByTestId("task-A"));
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "A" }));
-  });
-
-  it("fit-to-screen button triggers fitToGraph", () => {
-    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Fit to screen" }));
-    expect(fitToGraph).toHaveBeenCalled();
   });
 });

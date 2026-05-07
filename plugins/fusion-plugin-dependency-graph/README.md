@@ -9,8 +9,10 @@ Plugin-provided top-level **Graph** dashboard view for Fusion.
 - **Orphan dependency handling**: if a visible task depends on an excluded/missing dependency (for example `done`/`archived` after filtering), the missing edge is silently dropped and graph rendering continues without broken connectors
 - **Auto-layout**: Sugiyama-style layered layout (`computeAutoLayout`) groups nodes by dependency depth and spaces layers consistently
 - **Edge drawing**: SVG bezier curves from source bottom-center to target top-center, with arrowheads showing dependent → dependency direction
-- **Interaction**: pan, wheel zoom, pinch zoom, zoom-in/out controls, reset, and fit-to-screen
-- **Fit-to-screen**: computes node bounding box with layout node dimensions and applies zoom/pan so the graph fits in viewport with padding
+- **Interaction**: drag-to-pan canvas, cursor-centered wheel zoom, pinch-to-zoom with stationary midpoint, keyboard shortcuts, zoom toolbar, reset, and fit-to-graph
+- **Fit-to-graph**: computes node bounding box with layout node dimensions and applies zoom/pan so the graph fits in viewport with padding
+- **Initial auto-fit**: when no saved scoped positions exist, the first non-empty render auto-fits once; subsequent updates preserve user navigation state
+- **Animated transitions**: fit/reset operations animate `transform` (`var(--transition-normal)`), while continuous drag/wheel/pinch stays transition-free for responsiveness
 - **Node rendering**: each graph node renders the real dashboard `TaskCard` via `GraphTaskNode` (no duplicated card markup)
 - **In-progress behavior**: steps are visible by default and active-task glow (`agent-active`) is preserved because node cards reuse TaskCard directly
 - **Active-state indicator bar**: active nodes render a compact top bar (`.graph-task-active-indicator`) with the current execution status label (for example `Executing`, `Planning`) and pulsing `--in-progress` emphasis
@@ -22,8 +24,17 @@ Plugin-provided top-level **Graph** dashboard view for Fusion.
 
 ## Controls
 
-- **Fit to screen** (`Maximize`)
-- **Zoom in** (`ZoomIn`)
-- **Zoom out** (`ZoomOut`)
+### Toolbar (bottom-right)
 
-All controls are rendered as floating `.btn-icon` actions in the bottom-right corner, with mobile-friendly sizing in the `@media (max-width: 768px)` override.
+- **Zoom in** (`ZoomIn`) — button + `Ctrl+=` / `Cmd+=`
+- **Zoom out** (`ZoomOut`) — button + `Ctrl+-` / `Cmd+-`
+- **Zoom percent label** — live readout (for example `100%`, `75%`, `250%`)
+- **Fit to graph** (`Maximize`) — button + `Ctrl+Shift+F` / `Cmd+Shift+F`
+- **Reset view** (`RotateCcw`) — button + `Ctrl+0` / `Cmd+0`
+
+### Additional keyboard behavior
+
+- **Escape** resets to default view (`zoom=1`, `pan=0,0`)
+- Shortcuts are suppressed when focus is inside `input`, `textarea`, `select`, or `contentEditable` elements
+
+All controls are rendered as floating `.btn-icon` actions in the bottom-right corner, with mobile-friendly `44px` touch targets in the `@media (max-width: 768px)` override.

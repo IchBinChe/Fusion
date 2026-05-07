@@ -900,6 +900,31 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     }
   }, [contextMenu]);
 
+  // On mount and on visibility/page restore, if iOS thinks the keyboard is
+  // up but the textarea isn't actually focused (or vice versa), the
+  // visualViewport metrics get stuck in a half-state — composer pushed up
+  // or covered by a blank pane. Force a blur+refocus on the textarea to
+  // make iOS resync. Only runs on mobile and only when ChatView holds the
+  // active session (avoids stealing focus from other views).
+  useEffect(() => {
+    if (!isMobile || !activeSession) return;
+    const resync = () => {
+      const ta = inputRef.current;
+      if (!ta) return;
+      if (document.activeElement !== ta) return; // only if it was focused
+      ta.blur();
+      window.setTimeout(() => {
+        ta.focus({ preventScroll: true });
+      }, 0);
+    };
+    document.addEventListener("visibilitychange", resync);
+    window.addEventListener("pageshow", resync);
+    return () => {
+      document.removeEventListener("visibilitychange", resync);
+      window.removeEventListener("pageshow", resync);
+    };
+  }, [isMobile, activeSession]);
+
   // Fetch agents on mount for name resolution (project-scoped with stale-request protection)
   useEffect(() => {
     let cancelled = false;

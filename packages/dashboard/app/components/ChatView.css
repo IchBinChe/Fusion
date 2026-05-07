@@ -848,14 +848,12 @@
   line-height: 1.4;
   max-height: 120px;
   min-height: 40px;
-  /* iOS: any pan-y gesture on the textarea (including pan-y itself)
-     can drive an auto-scroll-into-view that lifts the composer up
-     off-screen even with body locked. touch-action: none blocks
-     gesture-driven panning while keeping tap-to-focus and typing
-     intact. Trade-off: loses gesture scroll within the textarea once
-     content exceeds max-height (~6 lines); arrow keys / caret moves
-     still work. */
-  touch-action: none;
+  /* touch-action: manipulation allows tap-to-focus (so iOS doesn't
+     auto-dismiss the keyboard between gesture frames) and blocks
+     double-tap zoom + pan/zoom gestures. We previously tried `none`
+     to lock the composer against pan, but that broke first-tap
+     focus on iOS. */
+  touch-action: manipulation;
   overscroll-behavior: contain;
 }
 

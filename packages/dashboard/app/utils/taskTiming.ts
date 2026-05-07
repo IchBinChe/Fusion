@@ -1,4 +1,4 @@
-import type { TaskLogEntry } from "@fusion/core";
+import type { TaskLogEntry, WorkflowStepResult } from "@fusion/core";
 
 export interface TimingEvent {
   timestamp: string;
@@ -46,4 +46,49 @@ export function getTimedDurationMs(logEntries: TaskLogEntry[] | undefined): numb
     counted += 1;
   }
   return counted > 0 ? total : null;
+}
+
+export function parseTimestampToMs(value?: string): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function getWorkflowRuntimeMs(results: WorkflowStepResult[] | undefined, nowMs: number): number | null {
+  if (!results || results.length === 0) return null;
+
+  let total = 0;
+  let counted = 0;
+  for (const step of results) {
+    if (!step.startedAt) continue;
+    const startedMs = parseTimestampToMs(step.startedAt);
+    if (startedMs == null) continue;
+
+    let endMs: number;
+    if (step.completedAt) {
+      const completedMs = parseTimestampToMs(step.completedAt);
+      if (completedMs == null || completedMs < startedMs) continue;
+      endMs = completedMs;
+    } else {
+      endMs = Math.max(startedMs, nowMs);
+    }
+
+    total += endMs - startedMs;
+    counted += 1;
+  }
+
+  return counted > 0 ? total : null;
+}
+
+export function getEndToEndDurationMs(
+  executionStartedAt: string | undefined,
+  executionCompletedAt: string | undefined,
+  nowMs: number,
+): number | null {
+  const startedMs = parseTimestampToMs(executionStartedAt);
+  if (startedMs == null) return null;
+
+  const completedMs = parseTimestampToMs(executionCompletedAt);
+  const endMs = completedMs != null && completedMs >= startedMs ? completedMs : nowMs;
+  return Math.max(0, endMs - startedMs);
 }

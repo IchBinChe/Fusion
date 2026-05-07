@@ -217,6 +217,10 @@ The task detail modal exposes multiple tabs:
 - **Log** — task event history
 - **Changes** — merge diff/change summary
 - **Workflow** — workflow step results (pass/fail/skip)
+- **Stats** — execution timing + token usage breakdown
+  - `Total execution time` prefers durable wall-clock execution window (`executionStartedAt` → `executionCompletedAt`)
+  - Fallback order for legacy tasks: `timedExecutionMs` when present, otherwise `[timing]` log sum + workflow runtime
+  - Workflow runtime is shown as a separate metric and is not double-counted into totals when `timedExecutionMs` is already available
 - **Comments** — collaboration thread + steering controls
 - **Model** — per-task model overrides and thinking level
 

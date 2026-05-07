@@ -1,5 +1,5 @@
 import type { Task, TaskTokenUsage, WorkflowStepResult } from "@fusion/core";
-import { extractTimingEvents, type TimingEvent } from "../utils/taskTiming";
+import { extractTimingEvents, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, type TimingEvent } from "../utils/taskTiming";
 import "./TaskTokenStatsPanel.css";
 
 interface TaskTokenStatsPanelProps {
@@ -26,6 +26,8 @@ interface TaskTokenStatsPanelProps {
     | "assignedAgentId"
     | "blockedBy"
     | "sessionFile"
+    | "executionStartedAt"
+    | "executionCompletedAt"
   >;
 }
 
@@ -71,7 +73,6 @@ function summarizeWorkflowTiming(results: WorkflowStepResult[]): WorkflowTimingS
       if (Number.isNaN(startedMs)) {
         return null;
       }
-      // Completed step → use completedAt. In-progress step → live elapsed.
       let endMs: number;
       if (step.completedAt) {
         const completedMs = new Date(step.completedAt).getTime();
@@ -89,7 +90,7 @@ function summarizeWorkflowTiming(results: WorkflowStepResult[]): WorkflowTimingS
     })
     .filter((value): value is { name: string; durationMs: number } => value !== null);
 
-  const totalDurationMs = timedResults.reduce((sum, step) => sum + step.durationMs, 0);
+  const totalDurationMs = getWorkflowRuntimeMs(results, nowMs) ?? 0;
   const longestStep = timedResults.reduce<{ name: string; durationMs: number } | undefined>((longest, step) => {
     if (!longest || step.durationMs > longest.durationMs) {
       return step;
@@ -105,10 +106,14 @@ function summarizeWorkflowTiming(results: WorkflowStepResult[]): WorkflowTimingS
 }
 
 export function TaskTokenStatsPanel({ tokenUsage, loading, task }: TaskTokenStatsPanelProps) {
+  const nowMs = Date.now();
   const timingEvents = extractTimingEvents(task?.log ?? []);
   const timedTimingEvents = timingEvents.filter((event) => typeof event.durationMs === "number");
   const logTimingDurationMs = timedTimingEvents.reduce((sum, event) => sum + (event.durationMs ?? 0), 0);
-  const totalTimingDurationMs = Math.max(logTimingDurationMs, task?.timedExecutionMs ?? 0);
+  const parsedTimingDurationMs = getTimedDurationMs(task?.log) ?? 0;
+  const totalTimingDurationMs = typeof task?.timedExecutionMs === "number"
+    ? task.timedExecutionMs
+    : Math.max(logTimingDurationMs, parsedTimingDurationMs);
   const longestTimingEvent = timedTimingEvents.reduce<TimingEvent | undefined>((longest, event) => {
     if (!longest || (event.durationMs ?? 0) > (longest.durationMs ?? 0)) {
       return event;
@@ -117,6 +122,15 @@ export function TaskTokenStatsPanel({ tokenUsage, loading, task }: TaskTokenStat
   }, undefined);
 
   const workflowTiming = summarizeWorkflowTiming(task?.workflowStepResults ?? []);
+  const endToEndDurationMs = getEndToEndDurationMs(task?.executionStartedAt, task?.executionCompletedAt, nowMs);
+  // Canonical fallback order for Task Detail Stats total runtime:
+  // 1) durable wall-clock execution window (`executionStartedAt` → `executionCompletedAt`),
+  // 2) server aggregate `timedExecutionMs` when present,
+  // 3) legacy local aggregate (`[timing]` sum + workflow runtime).
+  // This avoids double counting when workflow timings appear in both `[timing]`
+  // logs and `workflowStepResults`.
+  const totalExecutionMs = endToEndDurationMs
+    ?? (typeof task?.timedExecutionMs === "number" ? task.timedExecutionMs : totalTimingDurationMs + workflowTiming.totalDurationMs);
   const taskStepCount = task?.steps?.length ?? 0;
 
   return (
@@ -144,7 +158,7 @@ export function TaskTokenStatsPanel({ tokenUsage, loading, task }: TaskTokenStat
           </div>
           <div className="task-token-stats-panel__metric" role="listitem">
             <span className="task-token-stats-panel__label">Total execution time</span>
-            <span className="task-token-stats-panel__value">{formatDuration(totalTimingDurationMs + workflowTiming.totalDurationMs)}</span>
+            <span className="task-token-stats-panel__value">{formatDuration(totalExecutionMs)}</span>
           </div>
         </div>
 

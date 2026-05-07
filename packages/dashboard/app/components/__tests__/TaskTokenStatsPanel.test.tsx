@@ -133,4 +133,85 @@ describe("TaskTokenStatsPanel", () => {
     expect(screen.getByText("Timed duration")).toBeInTheDocument();
     expect(screen.getAllByText("4m 0s").length).toBeGreaterThan(0);
   });
+
+  it("uses end-to-end execution window for total execution time when available", () => {
+    render(
+      <TaskTokenStatsPanel
+        loading={false}
+        tokenUsage={undefined}
+        task={makeTask({
+          executionStartedAt: "2026-04-24T09:00:00.000Z",
+          executionCompletedAt: "2026-04-24T09:05:00.000Z",
+          timedExecutionMs: 120_000,
+          workflowStepResults: [
+            {
+              workflowStepId: "WS-900",
+              workflowStepName: "Review",
+              status: "passed",
+              startedAt: "2026-04-24T09:03:00.000Z",
+              completedAt: "2026-04-24T09:04:00.000Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Total execution time")).toBeInTheDocument();
+    expect(screen.getByText("5m 0s")).toBeInTheDocument();
+  });
+
+  it("does not double count workflow runtime when timedExecutionMs is present", () => {
+    render(
+      <TaskTokenStatsPanel
+        loading={false}
+        tokenUsage={undefined}
+        task={makeTask({
+          log: [
+            { timestamp: "2026-04-24T09:00:00.000Z", action: "[timing] AI execution completed in 120000ms" },
+          ],
+          timedExecutionMs: 120_000,
+          workflowStepResults: [
+            {
+              workflowStepId: "WS-200",
+              workflowStepName: "Workflow QA",
+              status: "passed",
+              startedAt: "2026-04-24T09:01:00.000Z",
+              completedAt: "2026-04-24T09:02:00.000Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const metric = screen.getByText("Total execution time").closest(".task-token-stats-panel__metric");
+    expect(metric).toHaveTextContent("2m 0s");
+    expect(screen.getByText("Workflow runtime").closest(".task-token-stats-panel__metric")).toHaveTextContent("1m 0s");
+  });
+
+  it("uses legacy timed plus workflow fallback when end-to-end and timedExecutionMs are unavailable", () => {
+    render(
+      <TaskTokenStatsPanel
+        loading={false}
+        tokenUsage={undefined}
+        task={makeTask({
+          timedExecutionMs: undefined,
+          log: [
+            { timestamp: "2026-04-24T09:00:00.000Z", action: "[timing] setup completed in 120000ms" },
+          ],
+          workflowStepResults: [
+            {
+              workflowStepId: "WS-300",
+              workflowStepName: "Workflow QA",
+              status: "passed",
+              startedAt: "2026-04-24T09:01:00.000Z",
+              completedAt: "2026-04-24T09:02:00.000Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const metric = screen.getByText("Total execution time").closest(".task-token-stats-panel__metric");
+    expect(metric).toHaveTextContent("3m 0s");
+  });
 });

@@ -13,7 +13,7 @@ import { getFreshBatchData } from "../hooks/useBatchBadgeFetch";
 import { useTaskDiffStats } from "../hooks/useTaskDiffStats";
 import { isTaskStuck } from "../utils/taskStuck";
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
-import { getTimedDurationMs } from "../utils/taskTiming";
+import { getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
 
@@ -124,12 +124,6 @@ function getTaskStatusLabel(status: string): string {
   return status;
 }
 
-function parseTimestampToMs(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function getDoneCompletionMs(task: Task): number | null {
   const completionMs = parseTimestampToMs(task.columnMovedAt ?? task.updatedAt);
   if (completionMs == null) return null;
@@ -153,13 +147,8 @@ function getInProgressElapsedMs(task: Task, nowMs: number): number | null {
 // timer reflects how long the task actually took, not just the time spent
 // inside instrumented code paths. Returns null on legacy tasks that completed
 // before `executionStartedAt` was tracked, so callers can fall back.
-function getEndToEndDurationMs(task: Task, nowMs: number): number | null {
-  const startedMs = parseTimestampToMs(task.executionStartedAt);
-  if (startedMs == null) return null;
-
-  const completedMs = parseTimestampToMs(task.executionCompletedAt);
-  const endMs = completedMs != null && completedMs >= startedMs ? completedMs : nowMs;
-  return Math.max(0, endMs - startedMs);
+function getTaskEndToEndDurationMs(task: Task, nowMs: number): number | null {
+  return getEndToEndDurationMs(task.executionStartedAt, task.executionCompletedAt, nowMs);
 }
 
 function getInReviewCompletionMs(task: Task): number | null {
@@ -176,7 +165,7 @@ function getMergeElapsedMs(task: Task, nowMs: number): number | null {
 }
 
 function getActiveMergeTotalMs(task: Task, nowMs: number): number | null {
-  const endToEndMs = getEndToEndDurationMs(task, nowMs);
+  const endToEndMs = getTaskEndToEndDurationMs(task, nowMs);
   if (endToEndMs != null) {
     return endToEndMs;
   }
@@ -190,43 +179,17 @@ function getActiveMergeTotalMs(task: Task, nowMs: number): number | null {
   return mergeElapsedMs;
 }
 
-// Mirrors summarizeWorkflowTiming in TaskTokenStatsPanel: completed steps use
-// completedAt-startedAt; in-progress steps contribute live elapsed (now-startedAt).
-function getWorkflowRuntimeMs(task: Task, nowMs: number): number | null {
-  const results = task.workflowStepResults;
-  if (!results || results.length === 0) return null;
-
-  let total = 0;
-  let counted = 0;
-  for (const step of results) {
-    if (!step.startedAt) continue;
-    const startedMs = parseTimestampToMs(step.startedAt);
-    if (startedMs == null) continue;
-
-    let endMs: number;
-    if (step.completedAt) {
-      const completedMs = parseTimestampToMs(step.completedAt);
-      if (completedMs == null || completedMs < startedMs) continue;
-      endMs = completedMs;
-    } else {
-      endMs = Math.max(startedMs, nowMs);
-    }
-    total += endMs - startedMs;
-    counted += 1;
-  }
-  return counted > 0 ? total : null;
-}
 
 function getInstrumentedDurationMs(task: Task, nowMs: number): number | null {
-  // Prefer the server-aggregated `timedExecutionMs` (populated for slim board
-  // listings, where `task.log` is stripped to keep the wire payload small).
-  // Fall back to client-side parsing of the full log for the detail-modal
-  // path where the slim aggregate is absent but the log is loaded.
-  const timed =
-    typeof task.timedExecutionMs === "number"
-      ? task.timedExecutionMs
-      : getTimedDurationMs(task.log);
-  const workflow = getWorkflowRuntimeMs(task, nowMs);
+  // Prefer server aggregate when present: it is the canonical persisted runtime
+  // and may already include workflow execution. Avoid adding workflow runtime
+  // again in that case.
+  if (typeof task.timedExecutionMs === "number") {
+    return task.timedExecutionMs;
+  }
+
+  const timed = getTimedDurationMs(task.log);
+  const workflow = getWorkflowRuntimeMs(task.workflowStepResults, nowMs);
   if (timed == null && workflow == null) return null;
   return (timed ?? 0) + (workflow ?? 0);
 }
@@ -777,7 +740,7 @@ function TaskCardComponent({
     const merging = task.status != null && ACTIVE_MERGE_STATUSES.has(task.status);
 
     if (task.column === "in-progress") {
-      const endToEndMs = getEndToEndDurationMs(task, Date.now());
+      const endToEndMs = getTaskEndToEndDurationMs(task, Date.now());
       const elapsedMs = getInProgressElapsedMs(task, Date.now());
       const instrumentedMs = getInstrumentedDurationMs(task, Date.now());
       if (endToEndMs == null && elapsedMs == null && instrumentedMs == null) {
@@ -786,7 +749,7 @@ function TaskCardComponent({
     }
 
     if (!merging && task.column === "in-review") {
-      const endToEndMs = getEndToEndDurationMs(task, Date.now());
+      const endToEndMs = getTaskEndToEndDurationMs(task, Date.now());
       const instrumentedMs = getInstrumentedDurationMs(task, Date.now());
       if (endToEndMs == null && instrumentedMs == null) {
         return;
@@ -833,7 +796,7 @@ function TaskCardComponent({
       // in-progress, never reset on retry-loop bounces). Fall back to the
       // columnMovedAt heuristic for legacy tasks predating the new field.
       const elapsedMs =
-        getEndToEndDurationMs(task, timeIndicatorNowMs)
+        getTaskEndToEndDurationMs(task, timeIndicatorNowMs)
         ?? getInProgressElapsedMs(task, timeIndicatorNowMs)
         ?? getInstrumentedDurationMs(task, timeIndicatorNowMs);
       if (elapsedMs == null) {
@@ -855,7 +818,7 @@ function TaskCardComponent({
     // in-review and done: show wall-clock end-to-end runtime. Falls back to
     // the instrumented `[timing]` aggregate for tasks completed before
     // `executionStartedAt`/`executionCompletedAt` were tracked.
-    const endToEndMs = getEndToEndDurationMs(task, timeIndicatorNowMs);
+    const endToEndMs = getTaskEndToEndDurationMs(task, timeIndicatorNowMs);
     const totalMs = endToEndMs ?? getInstrumentedDurationMs(task, timeIndicatorNowMs);
     if (totalMs == null) {
       return null;

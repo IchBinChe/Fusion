@@ -1144,6 +1144,37 @@ async function stashUnrelatedRootDirChanges(
       { cwd: rootDir },
     );
 
+    // Race-rescue: re-snapshot AFTER the stash is persisted but BEFORE the
+    // destructive `git reset --hard` below. If any new dirty paths showed up
+    // between our initial `git add -A` and now — concurrent dev edits, a
+    // parallel merger run interleaving its own ops, or test/build artifacts
+    // landing late — capture them in a SEPARATE rescue stash so they survive
+    // the wipe. Without this loop, late writers lose their work because the
+    // primary stash already snapshotted the earlier state. We loop a few
+    // times because each rescue stash creation itself races with new writes;
+    // bounded so a runaway writer can't pin us forever.
+    const rescueShas: string[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const stillDirty = await snapshotDirtyFiles(rootDir);
+      if (stillDirty.size === 0) break;
+      const rescueLabel = `${AUTOSTASH_LABEL_PREFIX}${taskId}:race-rescue-${attempt}:${Date.now()}`;
+      await execAsync("git add -A", { cwd: rootDir });
+      const { stdout: rescueOut } = await execAsync("git stash create", {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const rescueSha = String(rescueOut).trim();
+      if (!rescueSha) break;
+      await execAsync(
+        `git stash store -m ${quoteArg(rescueLabel)} ${rescueSha}`,
+        { cwd: rootDir },
+      );
+      rescueShas.push(rescueSha);
+      mergerLog.warn(
+        `${taskId}: race-rescue stash ${rescueSha.slice(0, 7)} captured ${stillDirty.size} late-dirty path(s) (${rescueLabel}) — recover with: cd ${rootDir} && git stash apply ${rescueSha}`,
+      );
+    }
+
     // Bring working tree back to HEAD so the merge can proceed. Reset
     // un-stages everything we just staged AND drops tracked-file
     // modifications. `git clean -fd` removes any untracked files / dirs
@@ -1151,8 +1182,11 @@ async function stashUnrelatedRootDirChanges(
     await execAsync("git reset --hard HEAD", { cwd: rootDir });
     await execAsync("git clean -fd", { cwd: rootDir });
 
+    const rescueSuffix = rescueShas.length > 0
+      ? ` + ${rescueShas.length} race-rescue stash(es): ${rescueShas.map((s) => s.slice(0, 7)).join(", ")}`
+      : "";
     mergerLog.log(
-      `${taskId}: stashed ${dirty.size} unrelated dirty path(s) in rootDir as ${sha.slice(0, 7)} (${label})`,
+      `${taskId}: stashed ${dirty.size} unrelated dirty path(s) in rootDir as ${sha.slice(0, 7)} (${label})${rescueSuffix}`,
     );
     return { sha, label };
   } catch (err: unknown) {
@@ -1583,13 +1617,18 @@ async function generateAiMergeSubject(
 
 /**
  * Derive a non-AI subject summary from the branch's step commit log. The log
- * is `- subj1\n- subj2\n…` (most recent first). We use the first subject with
- * its conventional-commit prefix stripped (to avoid `feat: feat(...): …`),
- * and tack on `(+N more)` when the branch has multiple step commits. This is
- * the fallback used when `summarizeCommitSubject` returns null — it conveys
- * what landed instead of the bare `merge <branch>` template.
+ * is `- subj1\n- subj2\n…` (most recent first). The naive "use lines[0]" choice
+ * is wrong in practice: when a quality-gate revision lands as the final commit
+ * (e.g. a token-cleanup fixup after Step 4), the most-recent subject describes
+ * the *fixup*, not the task. So we prefer, in order:
+ *   1. The lowest-numbered `complete Step N — …` commit (the headline step)
+ *   2. The oldest commit (lines[last]) — typically Step 1 / the first feat
+ *      commit on the branch
+ *
+ * Conventional-commit prefix is stripped to avoid `feat: feat(...): …`, and we
+ * tack on `(+N more)` when the branch has multiple step commits.
  */
-function deriveDeterministicSubjectSummary(commitLog: string): string | null {
+export function deriveDeterministicSubjectSummary(commitLog: string): string | null {
   const lines = commitLog
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -1599,12 +1638,24 @@ function deriveDeterministicSubjectSummary(commitLog: string): string | null {
   const stripBullet = (l: string) => l.replace(/^[-*]\s+/, "").trim();
   const stripConventional = (l: string) =>
     l.replace(/^[a-z]+(?:\([^)]+\))?!?:\s*/i, "").trim();
+  const cleaned = lines.map((l) => stripConventional(stripBullet(l)));
 
-  const first = stripConventional(stripBullet(lines[0]));
-  if (!first) return null;
+  const stepRe = /^complete Step (\d+)\s*[—\-:]\s*(.+)$/i;
+  let bestStep: { n: number; summary: string } | null = null;
+  for (const c of cleaned) {
+    const m = c.match(stepRe);
+    if (!m) continue;
+    const n = Number(m[1]);
+    const summary = m[2].trim();
+    if (!summary) continue;
+    if (!bestStep || n < bestStep.n) bestStep = { n, summary };
+  }
+
+  const headline = bestStep?.summary ?? cleaned[cleaned.length - 1];
+  if (!headline) return null;
 
   const extras = lines.length - 1;
-  const summary = extras > 0 ? `${first} (+${extras} more)` : first;
+  const summary = extras > 0 ? `${headline} (+${extras} more)` : headline;
   return summary;
 }
 

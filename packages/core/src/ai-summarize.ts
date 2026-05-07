@@ -336,6 +336,12 @@ Your ONLY job is to describe what the merge accomplishes based on the step commi
 ## Style
 - 1-3 concise sentences
 - Mention the most meaningful modules or behaviors touched
+- Weight by COMMIT THEMES, not by file size. If most step commits describe
+  feature X and a single tail-end commit is a small fixup (lint, design tokens,
+  doc tweaks) that happens to touch the largest file, lead with feature X and
+  mention the fixup only as a secondary clause if at all.
+- Do not let the most-recent commit alone dictate the summary — quality-gate
+  revisions land last and are typically the smallest theme on the branch.
 - Be factual and avoid inventing details
 - Readable and professional`;
 
@@ -641,7 +647,14 @@ Your ONLY job is to summarize what landed — using the branch's step commit sub
 - Imperative mood ("add X", "fix Y", "refactor Z") and lower-case first word
 - Hard cap: 60 characters; aim for 40–55
 - Be specific: name the most consequential module/feature/behavior that changed
-- If the branch has one clear theme, describe it; if it's mixed, lead with the largest change
+- Weight by COMMIT THEMES, not by file size. If 4 of 5 commits are about feature X
+  and the 5th is a small token/lint cleanup that happens to touch the largest CSS
+  file, the subject MUST describe feature X — not the cleanup.
+- The most recent commit is often a quality-gate revision or fixup (lint, tokens,
+  doc tweaks). Do NOT let the latest commit's subject dominate; prefer the
+  earliest \`complete Step N — …\` headline or the first feat/fix commit.
+- If genuinely mixed (no dominant theme across commit subjects), lead with the
+  earliest step's headline
 - Do not invent details that aren't in the input`;
 
 /** Maximum output length for the generated commit subject, in characters. */

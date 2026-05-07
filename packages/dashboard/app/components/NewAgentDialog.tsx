@@ -234,7 +234,10 @@ export function NewAgentDialog({
     setStep(1);
   }, []);
 
-  const applyDraft = useCallback((draft: AgentOnboardingSummary) => {
+  const applyDraftToForm = useCallback((draft: AgentOnboardingSummary) => {
+    const runtimeHint = draft.runtimeHint?.trim() ?? "";
+    const modelSelection = draft.model?.trim() || draft.modelHint?.trim() || "";
+
     setStep(1);
     setStepZeroTab("custom");
     setName(draft.name ?? "");
@@ -246,18 +249,26 @@ export function NewAgentDialog({
     setHeartbeatProcedurePath(draft.heartbeatProcedurePath ?? "");
     setSoul(draft.soul ?? "");
     setMemory(draft.memory ?? "");
-    setSelectedSkills(draft.skills ?? []);
+    setSelectedSkills(Array.isArray(draft.skills) ? draft.skills : []);
     setRuntimeConfig((current) => ({
       ...current,
+      model: runtimeHint ? "" : modelSelection,
       thinkingLevel: draft.thinkingLevel ?? current.thinkingLevel,
       maxTurns: draft.maxTurns ?? current.maxTurns,
     }));
+    if (runtimeHint) {
+      setRuntimeMode("runtime");
+      setSelectedRuntimeId(runtimeHint);
+    } else {
+      setRuntimeMode("model");
+      setSelectedRuntimeId("");
+    }
   }, []);
 
   useEffect(() => {
     if (!isOpen || !prefillDraft) return;
-    applyDraft(prefillDraft);
-  }, [isOpen, prefillDraft, applyDraft]);
+    applyDraftToForm(prefillDraft);
+  }, [isOpen, prefillDraft, applyDraftToForm]);
 
   if (!isOpen) return null;
 
@@ -892,7 +903,9 @@ export function NewAgentDialog({
         onClose={() => setIsInterviewOpen(false)}
         onUseDraft={(draft) => {
           onPrefillDraft?.(draft);
-          applyDraft(draft);
+          if (!onPrefillDraft) {
+            applyDraftToForm(draft);
+          }
           setIsInterviewOpen(false);
         }}
         projectId={projectId}

@@ -160,6 +160,12 @@ export function ExperimentalAgentOnboardingModal({
     }
   };
 
+  const handleConfirmDraft = async () => {
+    if (!summary) return;
+    onUseDraft(summary);
+    await handleClose();
+  };
+
   return (
     <div className="modal-overlay open" role="presentation">
       <div className="modal modal-lg experimental-agent-onboarding-modal" role="dialog" aria-modal="true" aria-label="AI Interview">
@@ -246,7 +252,7 @@ export function ExperimentalAgentOnboardingModal({
             </div>
             <div className="modal-actions">
               <button className="btn" onClick={() => void handleClose()}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => onUseDraft(summary)}>{isEditMode ? "Apply draft to settings form" : "Apply draft to agent form"}</button>
+              <button className="btn btn-primary" onClick={() => void handleConfirmDraft()}>{isEditMode ? "Apply draft to settings form" : "Apply draft to agent form"}</button>
             </div>
           </div>
         )}

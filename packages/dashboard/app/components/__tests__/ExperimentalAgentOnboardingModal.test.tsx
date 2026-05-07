@@ -52,10 +52,11 @@ describe("ExperimentalAgentOnboardingModal", () => {
 
   it("renders draft review and only applies after explicit confirmation", async () => {
     const onUseDraft = vi.fn();
+    const onClose = vi.fn();
     render(
       <ExperimentalAgentOnboardingModal
         isOpen={true}
-        onClose={vi.fn()}
+        onClose={onClose}
         onUseDraft={onUseDraft}
         existingAgents={[]}
       />,
@@ -104,6 +105,7 @@ describe("ExperimentalAgentOnboardingModal", () => {
 
     await waitFor(() => {
       expect(onUseDraft).toHaveBeenCalledWith(expect.objectContaining({ name: "Docs Reviewer" }));
+      expect(onClose).toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewAgentDialog } from "../NewAgentDialog";
@@ -276,15 +277,25 @@ describe("NewAgentDialog", () => {
     it("opens interview modal and applies draft back into the form", async () => {
       const user = userEvent.setup();
       const onPrefillDraft = vi.fn();
-      render(
-        <NewAgentDialog
-          isOpen={true}
-          onClose={mockOnClose}
-          onCreated={mockOnCreated}
-          agentOnboardingEnabled={true}
-          onPrefillDraft={onPrefillDraft}
-        />,
-      );
+
+      function Harness() {
+        const [draft, setDraft] = useState<any>(null);
+        return (
+          <NewAgentDialog
+            isOpen={true}
+            onClose={mockOnClose}
+            onCreated={mockOnCreated}
+            agentOnboardingEnabled={true}
+            prefillDraft={draft}
+            onPrefillDraft={(nextDraft) => {
+              onPrefillDraft(nextDraft);
+              setDraft(nextDraft);
+            }}
+          />
+        );
+      }
+
+      render(<Harness />);
 
       await user.click(screen.getByRole("button", { name: "AI Interview" }));
       expect(screen.getByRole("dialog", { name: "AI Interview" })).toBeInTheDocument();
@@ -297,8 +308,45 @@ describe("NewAgentDialog", () => {
         expect(screen.getByRole("button", { name: "Model" })).toBeInTheDocument();
       });
 
+      expect(mockCreateAgent).not.toHaveBeenCalled();
+
       await user.click(screen.getByRole("button", { name: "Back" }));
       expect((getStepZeroField(/Name/) as HTMLInputElement).value).toBe("Interview Draft");
+
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      expect(mockCreateAgent).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(mockCreateAgent).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("closing interview leaves current form state unchanged and does not create agent", async () => {
+      const user = userEvent.setup();
+      render(
+        <NewAgentDialog
+          isOpen={true}
+          onClose={mockOnClose}
+          onCreated={mockOnCreated}
+          agentOnboardingEnabled={true}
+        />,
+      );
+
+      await openCustomTab(user);
+      await user.type(screen.getByLabelText(/Name/), "Manual Name");
+      await user.type(screen.getByLabelText(/Title/), "Manual Title");
+
+      await user.click(screen.getByRole("button", { name: "AI Interview" }));
+      expect(screen.getByRole("dialog", { name: "AI Interview" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Close Interview" }));
+
+      expect(screen.queryByRole("dialog", { name: "AI Interview" })).toBeNull();
+      expect((getStepZeroField(/Name/) as HTMLInputElement).value).toBe("Manual Name");
+      expect((getStepZeroField(/Title/) as HTMLInputElement).value).toBe("Manual Title");
+      expect(mockCreateAgent).not.toHaveBeenCalled();
     });
   });
 
@@ -1881,7 +1929,7 @@ describe("NewAgentDialog", () => {
       );
 
       await waitFor(() => expect(mockFetchModels).toHaveBeenCalled());
-      expect(screen.getByRole("button", { name: "Model" })).toBeTruthy();
+      expect((screen.getByLabelText("Runtime") as HTMLSelectElement).value).toBe("openclaw");
       fireEvent.click(screen.getByText("Back"));
 
       expect((getStepZeroField(/Name/) as HTMLInputElement).value).toBe("Draft Agent");

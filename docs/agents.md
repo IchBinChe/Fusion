@@ -445,8 +445,9 @@ When **Settings → Experimental Features → Planning-style Agent Onboarding** 
 - **Agent detail → Settings** includes an **AI Interview** action for edit mode on existing agents.
 - The interview flow asks clarifying questions using repo-aware context (existing agents + preset/template options for create mode, plus current agent configuration for edit mode).
 - It generates a **draft** configuration summary for review, including identity fields, `soul`, starter `instructionsText`, starter `memory`, heartbeat guidance (`heartbeatProcedurePath`, `heartbeatIntervalMs`, `heartbeatEnabled`), and draft-only runtime/model suggestions (`runtimeHint`, `modelHint`).
-- In create mode, **Continue to agent form** prefills `NewAgentDialog`; in edit mode, **Apply draft to settings** updates local editable fields in the settings UI.
-- The interview flow does **not** auto-create or auto-save agents directly.
+- In create mode, confirming the summary (**Apply draft to agent form**) applies the generated draft into `NewAgentDialog`'s existing editable form fields (step 1 / custom flow) for manual review and edits before save.
+- In edit mode, **Apply draft to settings form** updates local editable fields in the settings UI.
+- The interview flow does **not** auto-create or auto-save agents directly; final persistence still happens only through the standard manual Create/Save action.
 
 When `experimentalFeatures.agentOnboarding` is disabled, the New Agent dialog still opens normally but the **AI Interview** entry point is hidden.
 

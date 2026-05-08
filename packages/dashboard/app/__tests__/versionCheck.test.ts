@@ -25,6 +25,12 @@ describe("isStaleChunkError", () => {
     expect(isStaleChunkError(new Error("Importing a module script failed"))).toBe(true);
     expect(isStaleChunkError(new Error("text/html is not a valid JavaScript MIME type"))).toBe(true);
     expect(isStaleChunkError(new Error("ChunkLoadError: loading chunk foo failed"))).toBe(true);
+    expect(
+      isStaleChunkError(new Error("Unable to preload CSS for /assets/AgentDetailView-BrlYt0xn.css")),
+    ).toBe(true);
+    expect(
+      isStaleChunkError(new Error("Unable to preload module for /assets/foo.js")),
+    ).toBe(true);
   });
 
   it("returns false for unrelated errors", () => {

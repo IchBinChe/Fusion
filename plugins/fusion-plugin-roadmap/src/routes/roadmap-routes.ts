@@ -14,7 +14,6 @@ import {
   validateFeatureSuggestionInput,
   validateSuggestionInput,
   ValidationError as SuggestionValidationError,
-  SUGGESTION_TIMEOUT_MS,
 } from "./roadmap-suggestions.js";
 
 const roadmapStoreCache = new WeakMap<object, RoadmapStore>();

@@ -5,7 +5,7 @@ import type {
   RoadmapFeatureReorderInput,
   RoadmapMilestone,
   RoadmapMilestoneReorderInput,
-} from "./roadmap-types.js";
+} from "../roadmap-types.js";
 
 /**
  * Pure ordering helpers for the standalone roadmap model.

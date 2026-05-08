@@ -408,8 +408,12 @@ describe("wrapToolsWithPermanentAgentGating", () => {
 
   it("requires approval for unknown tools and skips underlying tool", async () => {
     const tool = { name: "plugin_custom", label: "Plugin", description: "", parameters: {}, execute: vi.fn() };
+    const createApprovalRequest = vi.fn().mockResolvedValue({ id: "apr-1" });
+    const findPendingApprovalRequest = vi.fn().mockResolvedValue(null);
     const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
     const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      requester: { actorId: "agent-1", actorType: "agent", actorName: "Perm" },
+      taskId: "FN-1",
       permissionPolicy: {
         presetId: "unrestricted",
         rules: {
@@ -420,6 +424,8 @@ describe("wrapToolsWithPermanentAgentGating", () => {
           task_agent_mutation: "allow",
         },
       },
+      createApprovalRequest,
+      findPendingApprovalRequest,
     });
 
     const result = await (wrapped[0] as any).execute("t1", { value: 1 });
@@ -429,7 +435,86 @@ describe("wrapToolsWithPermanentAgentGating", () => {
       category: "none",
       toolName: "plugin_custom",
       requiresApproval: true,
+      approvalRequestId: "apr-1",
     }));
+    expect(findPendingApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(createApprovalRequest).toHaveBeenCalledWith(expect.objectContaining({
+      category: "command_execution",
+      toolName: "plugin_custom",
+    }));
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("requires approval for mutating fn_* tools and never executes mutation", async () => {
+    const tool = { name: "fn_task_create", label: "Task Create", description: "", parameters: {}, execute: vi.fn() };
+    const createApprovalRequest = vi.fn().mockResolvedValue({ id: "apr-fn-1" });
+    const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
+    const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      requester: { actorId: "agent-1", actorType: "agent", actorName: "Perm" },
+      taskId: "FN-1",
+      permissionPolicy: {
+        presetId: "approval-required",
+        rules: {
+          git_write: "require-approval",
+          file_write_delete: "require-approval",
+          command_execution: "require-approval",
+          network_api: "require-approval",
+          task_agent_mutation: "require-approval",
+        },
+      },
+      createApprovalRequest,
+      findPendingApprovalRequest: vi.fn().mockResolvedValue(null),
+    });
+
+    const result = await (wrapped[0] as any).execute("t1", { description: "create" });
+    expect((result as any).isError).toBe(true);
+    expect((result as any).details).toEqual(expect.objectContaining({
+      disposition: "require-approval",
+      category: "task_agent_mutation",
+      toolName: "fn_task_create",
+      approvalRequestId: "apr-fn-1",
+    }));
+    expect(createApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps read-only tools allowed without approval-request creation", async () => {
+    const tool = { name: "read", label: "Read", description: "", parameters: {}, execute: vi.fn().mockResolvedValue({ ok: true }) };
+    const createApprovalRequest = vi.fn();
+    const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
+    const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      permissionPolicy: {
+        presetId: "approval-required",
+        rules: {
+          git_write: "require-approval",
+          file_write_delete: "require-approval",
+          command_execution: "require-approval",
+          network_api: "require-approval",
+          task_agent_mutation: "require-approval",
+        },
+      },
+      createApprovalRequest,
+    });
+
+    await (wrapped[0] as any).execute("t1", { path: "a.ts" });
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+    expect(createApprovalRequest).not.toHaveBeenCalled();
+  });
+
+  it("does not create approval requests for policy-block outcomes", async () => {
+    const tool = { name: "write", label: "Write", description: "", parameters: {}, execute: vi.fn() };
+    const createApprovalRequest = vi.fn();
+    const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
+    const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      permissionPolicy: {
+        presetId: "locked-down",
+        rules: { file_write_delete: "block" },
+      },
+      createApprovalRequest,
+    });
+
+    await (wrapped[0] as any).execute("t1", { path: "a.ts" });
+    expect(createApprovalRequest).not.toHaveBeenCalled();
     expect(tool.execute).not.toHaveBeenCalled();
   });
 

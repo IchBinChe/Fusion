@@ -757,13 +757,45 @@ export class TaskExecutor {
     };
   }
 
-  private buildPermanentAgentGatingContext(agent: Agent | null | undefined): { permissionPolicy: ReturnType<typeof resolveEffectiveAgentPermissionPolicy> } | undefined {
+  private buildPermanentAgentGatingContext(taskId: string | undefined, agent: Agent | null | undefined): import("@fusion/core").PermanentAgentGatingContext | undefined {
     if (!agent || isEphemeralAgent(agent)) {
       return undefined;
     }
 
     return {
       permissionPolicy: resolveEffectiveAgentPermissionPolicy(agent.permissionPolicy),
+      requester: {
+        actorId: agent.id,
+        actorType: "agent",
+        actorName: agent.name,
+      },
+      taskId,
+      runId: this.currentRunContext?.runId,
+      createApprovalRequest: async ({ category, toolName, args }) => this.approvalRequestStore.create({
+        requester: {
+          actorId: agent.id,
+          actorType: "agent",
+          actorName: agent.name,
+        },
+        taskId,
+        runId: this.currentRunContext?.runId,
+        targetAction: {
+          category,
+          action: toolName,
+          summary: `Permanent-agent gated action for ${toolName}`,
+          resourceType: "tool",
+          resourceId: toolName,
+          context: {
+            toolName,
+            toolArgs: args,
+            source: "permanent-agent-gating",
+          },
+        },
+      }),
+      findPendingApprovalRequest: async (dedupeKey) => {
+        const pending = this.approvalRequestStore.list({ status: "pending", requesterActorId: agent.id, taskId, limit: 100 });
+        return pending.find((request) => request.targetAction.context?.approvalDedupeKey === dedupeKey) ?? null;
+      },
     };
   }
 
@@ -2459,7 +2491,7 @@ export class TaskExecutor {
           runtimeHint: stepSessionRuntimeHint,
           assignedAgentRuntimeConfig: (stepSessionAgent?.runtimeConfig ?? undefined) as Record<string, unknown> | undefined,
           actionGateContext: this.buildActionGateContext(task.id, stepSessionAgent),
-          permanentAgentGating: this.buildPermanentAgentGatingContext(stepSessionAgent),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, stepSessionAgent),
           // Pass skill selection context from the main executor session
           skillSelection: skillContext.skillSelectionContext,
           // Pass agentStore and messageStore for delegation and messaging tools
@@ -3017,7 +3049,7 @@ export class TaskExecutor {
           // Skill selection: use assigned agent skills if available, otherwise role fallback
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           actionGateContext: this.buildActionGateContext(task.id, assignedAgent),
-          permanentAgentGating: this.buildPermanentAgentGatingContext(assignedAgent),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, assignedAgent),
           taskId: task.id,
           taskTitle: detail.title,
           onFallbackModelUsed: createFallbackModelObserver({
@@ -3335,7 +3367,7 @@ export class TaskExecutor {
                 // Skill selection: use assigned agent skills if available, otherwise role fallback
                 ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
                 actionGateContext: this.buildActionGateContext(task.id, assignedAgent),
-                permanentAgentGating: this.buildPermanentAgentGatingContext(assignedAgent),
+                permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, assignedAgent),
               });
               if (retrySessionFile) {
                 this.store.updateTask(task.id, { sessionFile: retrySessionFile }).catch((err: unknown) => {

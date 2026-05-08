@@ -267,6 +267,27 @@ describe("executeHeartbeat", () => {
     expect(args.permanentAgentGating?.permissionPolicy?.presetId).toBe("unrestricted");
   });
 
+  it("omits permanent-agent gating context for ephemeral heartbeat agents", async () => {
+    const store = createStoreWithAgentForExec({
+      taskId: "FN-001",
+      metadata: { agentKind: "task-worker" },
+      name: "executor-ephemeral",
+      reportsTo: undefined,
+    });
+    const mockSession = createMockAgentSession();
+    mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+    const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+    await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+    const args = mockedCreateFnAgent.mock.calls[0]?.[0] as {
+      permanentAgentGating?: unknown;
+      actionGateContext?: unknown;
+    };
+    expect(args.permanentAgentGating).toBeUndefined();
+    expect(args.actionGateContext).toBeUndefined();
+  });
+
   describe("dependency validation", () => {
     it("throws when taskStore is not configured", async () => {
       const store = createStoreWithAgentForExec();

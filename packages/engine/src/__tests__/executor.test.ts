@@ -14455,7 +14455,7 @@ describe("allowParallelExecution heartbeat gate", () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test", { agentStore: agentStore as any });
 
-    const context = (executor as any).buildPermanentAgentGatingContext({
+    const context = (executor as any).buildPermanentAgentGatingContext("FN-GATE-2", {
       id: "agent-perm-1",
       name: "Perm Agent",
       type: "normal",
@@ -14472,6 +14472,9 @@ describe("allowParallelExecution heartbeat gate", () => {
     });
 
     expect(context?.permissionPolicy?.presetId).toBe("approval-required");
+    expect(context?.taskId).toBe("FN-GATE-2");
+    expect(typeof context?.createApprovalRequest).toBe("function");
+    expect(typeof context?.findPendingApprovalRequest).toBe("function");
   });
 
   it("omits permanent-agent gating context when no agent is assigned", async () => {

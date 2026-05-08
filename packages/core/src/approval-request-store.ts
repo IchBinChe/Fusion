@@ -3,6 +3,7 @@ import type { Database } from "./db.js";
 import { fromJson, toJsonNullable } from "./db.js";
 import {
   isValidApprovalRequestTransition,
+  normalizeApprovalRequestActionCategory,
   type ApprovalRequest,
   type ApprovalRequestActorSnapshot,
   type ApprovalRequestAuditEvent,
@@ -59,7 +60,9 @@ export class ApprovalRequestStore {
         actorName: row.requesterActorName,
       },
       targetAction: {
-        category: row.targetActionCategory as ApprovalRequest["targetAction"]["category"],
+        category: normalizeApprovalRequestActionCategory(
+          row.targetActionCategory as Parameters<typeof normalizeApprovalRequestActionCategory>[0],
+        ),
         action: row.targetActionOperation,
         summary: row.targetActionSummary,
         resourceType: row.targetResourceType,
@@ -130,7 +133,10 @@ export class ApprovalRequestStore {
       id: `apr-${randomUUID().slice(0, 8)}`,
       status: "pending",
       requester: input.requester,
-      targetAction: input.targetAction,
+      targetAction: {
+        ...input.targetAction,
+        category: normalizeApprovalRequestActionCategory(input.targetAction.category),
+      },
       taskId: input.taskId,
       runId: input.runId,
       requestedAt: now,

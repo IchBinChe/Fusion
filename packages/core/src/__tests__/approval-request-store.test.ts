@@ -8,6 +8,7 @@ import {
   APPROVAL_REQUEST_AUDIT_EVENT_TYPES,
   APPROVAL_REQUEST_STATUSES,
   AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
+  normalizeApprovalRequestActionCategory,
   isValidApprovalRequestTransition,
   type ApprovalRequest,
   type ApprovalRequestActorSnapshot,
@@ -33,6 +34,15 @@ describe("approval request domain contract", () => {
 
   it("reuses shared action-category vocabulary for target actions", () => {
     expect(AGENT_PERMISSION_POLICY_ACTION_CATEGORIES.length).toBeGreaterThan(0);
+  });
+
+  it("normalizes legacy action-category aliases", () => {
+    expect(normalizeApprovalRequestActionCategory("file_write")).toBe("file_write_delete");
+    expect(normalizeApprovalRequestActionCategory("file_delete")).toBe("file_write_delete");
+    expect(normalizeApprovalRequestActionCategory("command_execute")).toBe("command_execution");
+    expect(normalizeApprovalRequestActionCategory("network_access")).toBe("network_api");
+    expect(normalizeApprovalRequestActionCategory("task_mutation")).toBe("task_agent_mutation");
+    expect(normalizeApprovalRequestActionCategory("agent_mutation")).toBe("task_agent_mutation");
   });
 
   it("enforces the lifecycle transition matrix", () => {
@@ -114,6 +124,22 @@ describe("ApprovalRequestStore", () => {
     expect(fetched?.targetAction.context).toEqual({ branch: "fn/fn-3546" });
     expect(fetched?.taskId).toBe("FN-3546");
     expect(fetched?.runId).toBe("run-abc");
+  });
+
+  it("normalizes legacy category aliases on create/read", () => {
+    const created = store.create({
+      requester: REQUESTER,
+      targetAction: {
+        category: "file_write",
+        action: "write",
+        summary: "Write file",
+        resourceType: "file",
+        resourceId: "foo.ts",
+      },
+    });
+
+    const fetched = store.get(created.id);
+    expect(fetched?.targetAction.category).toBe("file_write_delete");
   });
 
   it("supports pending -> approved and approved -> completed with audit trail", () => {

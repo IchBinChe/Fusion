@@ -26,6 +26,21 @@ describe("permanent-agent-gating", () => {
     expect(classifyPermanentAgentToolCall("fn_research_get").category).toBe("none");
   });
 
+  it("uses only canonical action-category names", () => {
+    const categories = [
+      classifyPermanentAgentToolCall("bash", { command: "git commit -m x" }).category,
+      classifyPermanentAgentToolCall("write").category,
+      classifyPermanentAgentToolCall("bash", { command: "echo hi" }).category,
+      classifyPermanentAgentToolCall("fn_research_run").category,
+      classifyPermanentAgentToolCall("fn_task_create").category,
+      classifyPermanentAgentToolCall("read").category,
+    ];
+
+    expect(new Set(categories)).toEqual(
+      new Set(["git_write", "file_write_delete", "command_execution", "network_api", "task_agent_mutation", "none"]),
+    );
+  });
+
   it("uses unknown-tool fallback to approval-required", () => {
     const decision = resolvePermanentAgentToolDecision({
       toolName: "plugin_custom_tool",

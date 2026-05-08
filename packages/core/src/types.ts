@@ -3731,6 +3731,16 @@ export interface PermanentAgentGatingContext {
     presetId: string;
     rules: Partial<Record<PermanentAgentSensitiveActionCategory, AgentPermissionPolicyDisposition>>;
   };
+  requester?: ApprovalRequestActorSnapshot;
+  taskId?: string;
+  runId?: string;
+  sessionId?: string;
+  createApprovalRequest?: (input: {
+    category: AgentPermissionPolicyActionCategory;
+    toolName: string;
+    args: Record<string, unknown>;
+  }) => Promise<ApprovalRequest | null>;
+  findPendingApprovalRequest?: (dedupeKey: string) => Promise<ApprovalRequest | null>;
 }
 
 /** Built-in permission policy preset identifiers for permanent agents. */
@@ -3775,6 +3785,44 @@ export interface ApprovalRequestActorSnapshot {
   actorName: string;
 }
 
+/** Legacy action-category aliases accepted for backward compatibility. */
+export const LEGACY_AGENT_PERMISSION_POLICY_ACTION_CATEGORY_ALIASES = [
+  "file_write",
+  "file_delete",
+  "command_execute",
+  "network_access",
+  "task_mutation",
+  "agent_mutation",
+] as const;
+
+export type LegacyAgentPermissionPolicyActionCategory =
+  (typeof LEGACY_AGENT_PERMISSION_POLICY_ACTION_CATEGORY_ALIASES)[number];
+
+/** Canonical + compatibility action-category input accepted at boundaries. */
+export type ApprovalRequestActionCategoryInput =
+  | AgentPermissionPolicyActionCategory
+  | LegacyAgentPermissionPolicyActionCategory;
+
+/** Normalize legacy action-category aliases to canonical v1 categories. */
+export function normalizeApprovalRequestActionCategory(
+  category: ApprovalRequestActionCategoryInput,
+): AgentPermissionPolicyActionCategory {
+  switch (category) {
+    case "file_write":
+    case "file_delete":
+      return "file_write_delete";
+    case "command_execute":
+      return "command_execution";
+    case "network_access":
+      return "network_api";
+    case "task_mutation":
+    case "agent_mutation":
+      return "task_agent_mutation";
+    default:
+      return category;
+  }
+}
+
 /** Action payload gated by an approval request. */
 export interface ApprovalRequestTargetAction {
   category: AgentPermissionPolicyActionCategory;
@@ -3813,7 +3861,9 @@ export interface ApprovalRequest {
 /** Create input for a new pending approval request. */
 export interface ApprovalRequestCreateInput {
   requester: ApprovalRequestActorSnapshot;
-  targetAction: ApprovalRequestTargetAction;
+  targetAction: Omit<ApprovalRequestTargetAction, "category"> & {
+    category: ApprovalRequestActionCategoryInput;
+  };
   taskId?: string;
   runId?: string;
 }

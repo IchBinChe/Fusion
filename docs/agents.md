@@ -87,11 +87,11 @@ Unknown/unclassified tool fallback:
 - In permanent-agent sessions, unknown tools default to `require-approval` (fail-safe).
 - Category `none` only yields `allow` when the tool is positively recognized as read-only.
 
-Interim enforcement behavior (pre-persistence path):
+Interim enforcement behavior (persistence-integrated, pre-resume lifecycle):
 
-- Permanent-agent gating short-circuits `block` and `require-approval` actions before tool execution and returns structured tool errors.
-- `require-approval` is preserved as a distinct disposition for later approval workflow integration.
-- This v1 gating layer does **not** create approval requests, pause agents, or depend on approval-request persistence APIs.
+- Permanent-agent gating short-circuits `block` and `require-approval` actions before tool execution and returns structured non-success tool results.
+- For `require-approval`, the engine now creates durable approval requests (via `ApprovalRequestStore`) with requester identity, task/run context, and tool/action metadata; the original mutation is not executed.
+- Pause/resume execution, suspended-run continuation, and approve/deny continuation behavior remain deferred to FN-3548.
 
 Default and legacy fallback behavior:
 

@@ -35,7 +35,11 @@ import {
   type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import { getEnabledPiExtensionPaths, getFusionAgentDir, getLegacyPiAgentDir, reconcileClaudeCliPaths, reconcileDroidCliPaths, resolvePiExtensionProjectRoot } from "@fusion/core";
-import type { PermanentAgentGatingContext } from "@fusion/core";
+import type {
+  AgentPermissionPolicyActionCategory,
+  PermanentAgentActionCategory,
+  PermanentAgentGatingContext,
+} from "@fusion/core";
 import {
   resolveSessionSkills,
   createSkillsOverrideFromSelection,
@@ -1021,6 +1025,29 @@ function boundaryRejection(message: string, details?: Record<string, unknown>) {
   };
 }
 
+function normalizeApprovalRequestCategory(
+  category: PermanentAgentActionCategory,
+): AgentPermissionPolicyActionCategory {
+  if (category === "none") {
+    return "command_execution";
+  }
+  return category;
+}
+
+function buildPermanentAgentApprovalDedupeKey(input: {
+  requesterActorId?: string;
+  taskId?: string;
+  toolName: string;
+  category: PermanentAgentActionCategory;
+}): string {
+  return [
+    input.requesterActorId ?? "",
+    input.taskId ?? "",
+    input.toolName,
+    input.category,
+  ].join("|");
+}
+
 export function wrapToolsWithBoundary(
   tools: ToolDefinition[],
   worktreePath: string | null,
@@ -1107,6 +1134,29 @@ export function wrapToolsWithPermanentAgentGating(
           toolName: decision.toolName,
           ...(decision.disposition === "require-approval" ? { requiresApproval: true } : {}),
         };
+
+        if (decision.disposition === "require-approval") {
+          const dedupeKey = buildPermanentAgentApprovalDedupeKey({
+            requesterActorId: gating.requester?.actorId,
+            taskId: gating.taskId,
+            toolName: decision.toolName,
+            category: decision.category,
+          });
+          details.approvalDedupeKey = dedupeKey;
+
+          let approvalRequest = await gating.findPendingApprovalRequest?.(dedupeKey);
+          if (!approvalRequest && gating.createApprovalRequest) {
+            approvalRequest = await gating.createApprovalRequest({
+              category: normalizeApprovalRequestCategory(decision.category),
+              toolName: decision.toolName,
+              args: params,
+            });
+          }
+
+          if (approvalRequest?.id) {
+            details.approvalRequestId = approvalRequest.id;
+          }
+        }
 
         const reason = decision.disposition === "block"
           ? `Action blocked by permanent-agent policy (${decision.category}) for tool ${decision.toolName}`

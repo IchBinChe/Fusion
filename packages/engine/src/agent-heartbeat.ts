@@ -624,13 +624,37 @@ export class HeartbeatMonitor {
     };
   }
 
-  private buildPermanentAgentGatingContext(agent: Agent): { permissionPolicy: ReturnType<typeof resolveEffectiveAgentPermissionPolicy> } | undefined {
+  private buildPermanentAgentGatingContext(agent: Agent, taskId?: string, runId?: string): import("@fusion/core").PermanentAgentGatingContext | undefined {
     if (isEphemeralAgent(agent)) {
       return undefined;
     }
 
     return {
       permissionPolicy: resolveEffectiveAgentPermissionPolicy(agent.permissionPolicy),
+      requester: { actorId: agent.id, actorType: "agent", actorName: agent.name },
+      taskId,
+      runId,
+      createApprovalRequest: async ({ category, toolName, args }) => this.getApprovalRequestStore().create({
+        requester: { actorId: agent.id, actorType: "agent", actorName: agent.name },
+        taskId,
+        runId,
+        targetAction: {
+          category,
+          action: toolName,
+          summary: `Permanent-agent gated action for ${toolName}`,
+          resourceType: "tool",
+          resourceId: toolName,
+          context: {
+            toolName,
+            toolArgs: args,
+            source: "permanent-agent-gating",
+          },
+        },
+      }),
+      findPendingApprovalRequest: async (dedupeKey) => {
+        const pending = this.getApprovalRequestStore().list({ status: "pending", requesterActorId: agent.id, taskId, limit: 100 });
+        return pending.find((request) => request.targetAction.context?.approvalDedupeKey === dedupeKey) ?? null;
+      },
     };
   }
 
@@ -1845,7 +1869,7 @@ export class HeartbeatMonitor {
           // Skill selection: use waking agent's skills (heartbeat has no role fallback)
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           actionGateContext: this.buildActionGateContext(agent, taskId, run.id),
-          permanentAgentGating: this.buildPermanentAgentGatingContext(agent),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(agent, taskId, run.id),
         });
 
         // Track for monitoring

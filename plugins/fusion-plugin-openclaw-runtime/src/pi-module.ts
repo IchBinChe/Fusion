@@ -10,6 +10,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type {
   CliConfig,
   GatewayCallbacks,
@@ -101,15 +102,21 @@ export function resolveCliConfig(settings?: Record<string, unknown>): CliConfig 
  */
 export function buildOpenClawArgs(
   config: CliConfig,
-  sessionId: string,
+  session: Pick<GatewaySession, "sessionId" | "mcpProfile">,
   message: string,
 ): string[] {
-  const args: string[] = ["--no-color", "agent"];
+  const args: string[] = ["--no-color"];
+
+  if (session.mcpProfile) {
+    args.push("--profile", session.mcpProfile);
+  }
+
+  args.push("agent");
 
   if (!config.useGateway) args.push("--local");
 
   args.push("--json");
-  args.push("--session-id", sessionId);
+  args.push("--session-id", session.sessionId);
   args.push("--message", message);
   args.push("--agent", config.agentId);
 
@@ -152,6 +159,8 @@ export function createCliSession(opts: {
   systemPrompt: string;
   agentId?: string;
   callbacks?: GatewayCallbacks;
+  mcpProfile?: string;
+  mcpConfigPath?: string;
 }): GatewaySession {
   return {
     sessionId: randomUUID(),
@@ -161,7 +170,42 @@ export function createCliSession(opts: {
     lastModelDescription: `openclaw/${opts.agentId ?? DEFAULT_AGENT_ID}`,
     lastUsage: undefined,
     callbacks: opts.callbacks,
+    mcpProfile: opts.mcpProfile,
+    mcpConfigPath: opts.mcpConfigPath,
   };
+}
+
+// ---------------------------------------------------------------------------
+// configureOpenClawMcpServer — configure profile-scoped MCP server via CLI
+// ---------------------------------------------------------------------------
+
+export async function configureOpenClawMcpServer(opts: {
+  binaryPath: string;
+  profile: string;
+  serverName: string;
+  serverConfigPath: string;
+}): Promise<void> {
+  const serverValue = await readFile(opts.serverConfigPath, "utf-8");
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(opts.binaryPath, ["--no-color", "--profile", opts.profile, "mcp", "set", opts.serverName, serverValue], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
+
+    child.on("error", (err) => reject(new Error(`openclaw: failed to configure MCP server — ${err.message}`)));
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`openclaw: mcp set failed (${String(code)}): ${extractStderrError(stderr)}`));
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +219,7 @@ export async function promptCli(
   callbacks?: GatewayCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = buildOpenClawArgs(config, session.sessionId, message);
+  const args = buildOpenClawArgs(config, session, message);
   const cb: GatewayCallbacks = { ...session.callbacks, ...callbacks };
 
   cb.onToolStart?.("openclaw.agent", { sessionId: session.sessionId });

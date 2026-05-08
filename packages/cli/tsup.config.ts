@@ -214,6 +214,13 @@ export default defineConfig({
         logLevel: "warning",
       });
 
+      if (pluginId === "fusion-plugin-openclaw-runtime") {
+        const mcpServerAsset = join(pluginSrcDir, "src", "mcp-schema-server.cjs");
+        if (existsSync(mcpServerAsset)) {
+          cpSync(mcpServerAsset, join(pluginDestDir, "mcp-schema-server.cjs"));
+        }
+      }
+
       console.log(`Bundled runtime plugin ${pluginId} to dist/plugins/${pluginId}/bundled.js`);
     }
 

@@ -145,6 +145,14 @@ describe("OpenClaw runtime integration via engine resolution pipeline", () => {
       getRuntimeById: vi.fn().mockReturnValue(registration),
     });
 
+    const customTool = {
+      name: "fn_task_show",
+      label: "fn_task_show",
+      description: "show",
+      parameters: { type: "object" },
+      execute: vi.fn(),
+    } as any;
+
     const result = await createResolvedAgentSession({
       sessionPurpose: "executor",
       runtimeHint: "openclaw",
@@ -152,6 +160,7 @@ describe("OpenClaw runtime integration via engine resolution pipeline", () => {
       cwd: "/tmp/project",
       systemPrompt: "You are helpful",
       tools: "coding",
+      customTools: [customTool],
     });
 
     expect(result.runtimeId).toBe("openclaw");
@@ -162,6 +171,7 @@ describe("OpenClaw runtime integration via engine resolution pipeline", () => {
       cwd: "/tmp/project",
       systemPrompt: "You are helpful",
       tools: "coding",
+      customTools: [customTool],
     });
   });
 

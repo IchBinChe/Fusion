@@ -82,8 +82,13 @@ export {
   promptCli,
   describeCliModel,
   extractStderrError,
+  configureOpenClawMcpServer,
 } from "./pi-module.js";
 export type { CliConfig, GatewaySession, OpenClawAgentJson } from "./types.js";
+export {
+  toolsToMcpToolDefs,
+  writeOpenClawMcpBridgeFiles,
+} from "./mcp-config.js";
 
 // Probe re-export for the dashboard's runtime-provider-probes façade.
 export { probeOpenClawBinary } from "./probe.js";

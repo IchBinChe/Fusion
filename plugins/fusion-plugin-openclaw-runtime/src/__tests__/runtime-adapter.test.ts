@@ -7,11 +7,13 @@ const {
   mockCreateCliSession,
   mockPromptCli,
   mockDescribeCliModel,
+  mockConfigureOpenClawMcpServer,
 } = vi.hoisted(() => ({
   mockResolveCliConfig: vi.fn(),
   mockCreateCliSession: vi.fn(),
   mockPromptCli: vi.fn(),
   mockDescribeCliModel: vi.fn(),
+  mockConfigureOpenClawMcpServer: vi.fn(),
 }));
 
 vi.mock("../pi-module.js", () => ({
@@ -19,6 +21,7 @@ vi.mock("../pi-module.js", () => ({
   createCliSession: mockCreateCliSession,
   promptCli: mockPromptCli,
   describeCliModel: mockDescribeCliModel,
+  configureOpenClawMcpServer: mockConfigureOpenClawMcpServer,
 }));
 
 beforeEach(() => {
@@ -41,6 +44,7 @@ beforeEach(() => {
     callbacks,
   }));
   mockDescribeCliModel.mockReturnValue("openclaw/main");
+  mockConfigureOpenClawMcpServer.mockResolvedValue(undefined);
 });
 
 describe("OpenClawRuntimeAdapter — identity", () => {
@@ -58,6 +62,48 @@ describe("OpenClawRuntimeAdapter — identity", () => {
 });
 
 describe("OpenClawRuntimeAdapter — createSession", () => {
+  it("configures MCP bridge when custom tools are present", async () => {
+    const adapter = new OpenClawRuntimeAdapter({ agentId: "ops" });
+    await adapter.createSession({
+      cwd: "/repo",
+      systemPrompt: "You are helpful",
+      tools: [
+        { name: "read", description: "builtin", parameters: { type: "object" } },
+        { name: "fn_task_list", description: "list", parameters: { type: "object", properties: {} } },
+      ],
+    });
+
+    expect(mockConfigureOpenClawMcpServer).toHaveBeenCalledOnce();
+    expect(mockCreateCliSession).toHaveBeenCalledWith(
+      expect.objectContaining({ mcpProfile: expect.stringContaining("fusion-") }),
+    );
+  });
+
+  it("configures MCP bridge when tools arrive through customTools", async () => {
+    const adapter = new OpenClawRuntimeAdapter({ agentId: "ops" });
+    await adapter.createSession({
+      cwd: "/repo",
+      systemPrompt: "You are helpful",
+      customTools: [{ name: "fn_task_show", description: "custom", parameters: { type: "object" } }],
+    });
+
+    expect(mockConfigureOpenClawMcpServer).toHaveBeenCalledOnce();
+  });
+
+  it("does not configure MCP bridge when only built-in tools are provided", async () => {
+    const adapter = new OpenClawRuntimeAdapter({ agentId: "ops" });
+    await adapter.createSession({
+      cwd: "/repo",
+      systemPrompt: "You are helpful",
+      tools: [{ name: "read", description: "builtin", parameters: { type: "object" } }],
+    });
+
+    expect(mockConfigureOpenClawMcpServer).not.toHaveBeenCalled();
+    expect(mockCreateCliSession).toHaveBeenCalledWith(
+      expect.objectContaining({ mcpProfile: undefined }),
+    );
+  });
+
   it("delegates to createCliSession with systemPrompt + agentId + callbacks", async () => {
     const adapter = new OpenClawRuntimeAdapter({ agentId: "ops" });
     const onText = vi.fn();

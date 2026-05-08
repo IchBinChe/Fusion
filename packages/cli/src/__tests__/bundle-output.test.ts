@@ -180,6 +180,15 @@ describe("CLI bundle output", () => {
     expect(manifest.name?.length).toBeGreaterThan(0);
   });
 
+  it("dist/plugins/fusion-plugin-openclaw-runtime/ is staged with required bridge assets", () => {
+    const stagedRoot = join(cliRoot, "dist", "plugins", "fusion-plugin-openclaw-runtime");
+    const manifestPath = join(stagedRoot, "manifest.json");
+
+    expect(existsSync(manifestPath)).toBe(true);
+    expect(existsSync(join(stagedRoot, "bundled.js"))).toBe(true);
+    expect(existsSync(join(stagedRoot, "mcp-schema-server.cjs"))).toBe(true);
+  });
+
   it("dist/plugins/fusion-plugin-cursor-runtime/ is staged with a valid manifest", () => {
     const stagedRoot = join(cliRoot, "dist", "plugins", "fusion-plugin-cursor-runtime");
     const manifestPath = join(stagedRoot, "manifest.json");

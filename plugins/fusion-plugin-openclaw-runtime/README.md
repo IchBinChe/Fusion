@@ -16,6 +16,18 @@ For each `promptWithFallback(session, prompt)`:
 
 The previous HTTP `/v1/chat/completions` integration has been removed — that endpoint required a separate gateway daemon and was an OpenAI-compat shim. The CLI surface is the canonical OpenClaw API.
 
+## Fusion tool-control (MCP bridge)
+
+When a Fusion OpenClaw session includes custom tools, the runtime plugin now enables tool-control through OpenClaw's supported MCP configuration flow:
+
+1. Collect session tools and filter out built-ins: `read`, `write`, `edit`, `bash`, `grep`, `find`.
+2. Convert remaining tools into MCP-compatible schemas.
+3. Write a temporary schema file and MCP server config (`node mcp-schema-server.cjs <schema.json>`).
+4. Configure a profile-scoped MCP server using `openclaw --profile <id> mcp set fusion-custom-tools <json>`.
+5. Spawn the agent turn with `openclaw --profile <id> agent ...` so OpenClaw can see the configured MCP server.
+
+No private protocol is used — this is the verified OpenClaw CLI contract (`mcp set` + `--profile`).
+
 ## Prerequisites
 
 ```bash
@@ -46,6 +58,7 @@ Settings precedence: plugin settings → env var → default.
 
 - **No per-token streaming.** `--json` emits a single JSON document at process exit. `onText` is called exactly once.
 - **Default ignores the gateway.** With `useGateway: false` (default) we always pass `--local`, skipping the WebSocket connect attempt entirely. Most users want this.
+- **Built-in tools are intentionally excluded from MCP bridge.** `read`, `write`, `edit`, `bash`, `grep`, and `find` stay native to Fusion and are not duplicated through OpenClaw MCP.
 - **AbortSignal sends SIGTERM.** If the CLI ignores it (e.g. during a long model download), the hard-kill timer (`cliTimeoutMs`) eventually fires.
 
 ## Public API

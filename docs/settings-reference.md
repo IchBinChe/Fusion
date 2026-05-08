@@ -621,29 +621,37 @@ fn plugin install ./plugins/fusion-plugin-openclaw-runtime
 
 For more details, see the [Paperclip Runtime Plugin documentation](../plugins/fusion-plugin-paperclip-runtime/README.md), [Hermes Runtime Plugin documentation](../plugins/fusion-plugin-hermes-runtime/README.md), and [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
 
-### OpenClaw Gateway Configuration
+### OpenClaw Runtime Configuration
 
-The OpenClaw runtime plugin connects to a running OpenClaw gateway instance through its OpenAI-compatible HTTP API. You can configure the gateway connection using plugin settings or environment variables.
+The OpenClaw runtime plugin is CLI-first. Fusion invokes `openclaw agent --json` directly and defaults to embedded local mode (`--local`). Gateway mode is optional via `useGateway: true`.
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `gatewayUrl` | `string` | `http://127.0.0.1:18789` | URL of the OpenClaw gateway instance |
-| `gatewayToken` | `string` | (none) | Authentication token for the gateway |
-| `agentId` | `string` | `"main"` | OpenClaw agent ID to use for sessions |
+| `binaryPath` | `string` | `openclaw` | Path to the OpenClaw binary. |
+| `agentId` | `string` | `"main"` | OpenClaw agent ID used for `--agent`. |
+| `model` | `string` | (OpenClaw default) | Optional model override passed as `--model`. |
+| `thinking` | `string` | `"off"` | Thinking level passed as `--thinking`. |
+| `cliTimeoutSec` | `number` | `0` | OpenClaw-side timeout (`--timeout`, 0 = no OpenClaw timeout). |
+| `cliTimeoutMs` | `number` | `300000` | Fusion-side hard kill timeout for each subprocess turn. |
+| `useGateway` | `boolean` | `false` | When true, omit `--local` and allow OpenClaw's gateway path. |
 
 | Setting | Environment Variable | Default if Unset |
 |---|---|---|
-| `gatewayUrl` | `OPENCLAW_GATEWAY_URL` | `http://127.0.0.1:18789` |
-| `gatewayToken` | `OPENCLAW_GATEWAY_TOKEN` | (none — unauthenticated) |
+| `binaryPath` | `OPENCLAW_BIN` | `openclaw` |
 | `agentId` | `OPENCLAW_AGENT_ID` | `main` |
+| `model` | `OPENCLAW_MODEL` | (OpenClaw default) |
+| `thinking` | `OPENCLAW_THINKING` | `off` |
+| `cliTimeoutSec` | `OPENCLAW_TIMEOUT_SEC` | `0` |
+| `cliTimeoutMs` | `OPENCLAW_CLI_TIMEOUT_MS` | `300000` |
+| `useGateway` | `OPENCLAW_USE_GATEWAY` | `false` |
 
 Resolution priority is: plugin settings (`PluginContext.settings`) → environment variables → built-in defaults.
 
-> ℹ️ These are **plugin-level** settings configured when the OpenClaw runtime plugin is installed/enabled (for example in the dashboard Plugin Manager or plugin config). They are not agent-level `runtimeConfig` fields. Agents only need `runtimeConfig.runtimeHint: "openclaw"`; gateway connection details are handled by the plugin.
+> ℹ️ These are **plugin-level** settings configured when the OpenClaw runtime plugin is installed/enabled. They are not agent-level `runtimeConfig` fields. Agents only need `runtimeConfig.runtimeHint: "openclaw"`.
 
-> ⚠️ `gatewayToken` is a secret. Never log it or commit it to version control. For production, prefer setting `OPENCLAW_GATEWAY_TOKEN` in the environment.
+OpenClaw tool-control uses the supported MCP CLI surface (`openclaw mcp set` + profile-scoped `--profile` runs) when custom Fusion tools are present; built-ins (`read`, `write`, `edit`, `bash`, `grep`, `find`) remain filtered from that MCP bridge.
 
-For additional gateway/runtime details, see the [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
+For runtime details, see the [OpenClaw Runtime Plugin documentation](../plugins/fusion-plugin-openclaw-runtime/README.md).
 
 ---
 

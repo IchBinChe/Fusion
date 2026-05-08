@@ -12,6 +12,7 @@ import {
   extractStderrError,
   promptCli,
   resolveCliConfig,
+  configureOpenClawMcpServer,
 } from "../pi-module.js";
 import type { CliConfig, GatewaySession } from "../types.js";
 
@@ -169,23 +170,36 @@ describe("buildOpenClawArgs", () => {
   };
 
   it("puts --no-color first, then agent subcommand", () => {
-    const args = buildOpenClawArgs(baseConfig, "uuid-1", "hello");
+    const args = buildOpenClawArgs(baseConfig, { sessionId: "uuid-1" }, "hello");
     expect(args[0]).toBe("--no-color");
     expect(args[1]).toBe("agent");
   });
 
   it("includes --local when useGateway is false", () => {
-    const args = buildOpenClawArgs(baseConfig, "uuid-1", "hello");
+    const args = buildOpenClawArgs(baseConfig, { sessionId: "uuid-1" }, "hello");
     expect(args).toContain("--local");
   });
 
   it("omits --local when useGateway is true", () => {
-    const args = buildOpenClawArgs({ ...baseConfig, useGateway: true }, "uuid-1", "hello");
+    const args = buildOpenClawArgs({ ...baseConfig, useGateway: true }, { sessionId: "uuid-1" }, "hello");
     expect(args).not.toContain("--local");
   });
 
+  it("includes --profile before agent when MCP profile is configured", () => {
+    const args = buildOpenClawArgs(baseConfig, { sessionId: "my-uuid", mcpProfile: "fusion-profile" }, "test prompt");
+    expect(args[0]).toBe("--no-color");
+    expect(args).toContain("--profile");
+    expect(args[args.indexOf("--profile") + 1]).toBe("fusion-profile");
+    expect(args.indexOf("--profile")).toBeLessThan(args.indexOf("agent"));
+  });
+
+  it("omits --profile when no MCP profile is configured", () => {
+    const args = buildOpenClawArgs(baseConfig, { sessionId: "my-uuid" }, "test prompt");
+    expect(args).not.toContain("--profile");
+  });
+
   it("includes --json, --session-id, --message, --agent", () => {
-    const args = buildOpenClawArgs(baseConfig, "my-uuid", "test prompt");
+    const args = buildOpenClawArgs(baseConfig, { sessionId: "my-uuid" }, "test prompt");
     expect(args).toContain("--json");
     expect(args).toContain("--session-id");
     expect(args[args.indexOf("--session-id") + 1]).toBe("my-uuid");
@@ -196,24 +210,24 @@ describe("buildOpenClawArgs", () => {
   });
 
   it("includes --model when configured", () => {
-    const args = buildOpenClawArgs({ ...baseConfig, model: "anthropic/claude-opus-4-5" }, "u", "p");
+    const args = buildOpenClawArgs({ ...baseConfig, model: "anthropic/claude-opus-4-5" }, { sessionId: "u" }, "p");
     expect(args).toContain("--model");
     expect(args[args.indexOf("--model") + 1]).toBe("anthropic/claude-opus-4-5");
   });
 
   it("omits --model when not configured", () => {
-    const args = buildOpenClawArgs(baseConfig, "u", "p");
+    const args = buildOpenClawArgs(baseConfig, { sessionId: "u" }, "p");
     expect(args).not.toContain("--model");
   });
 
   it("includes --thinking with the configured level", () => {
-    const args = buildOpenClawArgs({ ...baseConfig, thinking: "high" }, "u", "p");
+    const args = buildOpenClawArgs({ ...baseConfig, thinking: "high" }, { sessionId: "u" }, "p");
     expect(args).toContain("--thinking");
     expect(args[args.indexOf("--thinking") + 1]).toBe("high");
   });
 
   it("includes --timeout with cliTimeoutSec", () => {
-    const args = buildOpenClawArgs({ ...baseConfig, cliTimeoutSec: 120 }, "u", "p");
+    const args = buildOpenClawArgs({ ...baseConfig, cliTimeoutSec: 120 }, { sessionId: "u" }, "p");
     expect(args).toContain("--timeout");
     expect(args[args.indexOf("--timeout") + 1]).toBe("120");
   });
@@ -238,6 +252,58 @@ describe("extractStderrError", () => {
   it("returns sentinel when both are empty", () => {
     const msg = extractStderrError("");
     expect(msg).toContain("non-zero");
+  });
+});
+
+describe("configureOpenClawMcpServer", () => {
+  it("spawns `openclaw mcp set` with profile", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockImplementation(() => {
+      setTimeout(() => child.emit("close", 0), 0);
+      return child;
+    });
+
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const os = await import("node:os");
+    const filePath = path.join(os.tmpdir(), `openclaw-mcp-config-${Date.now()}.json`);
+    await fs.writeFile(filePath, JSON.stringify({ command: "node", args: ["server.cjs", "schema.json"] }));
+
+    await configureOpenClawMcpServer({
+      binaryPath: "openclaw",
+      profile: "fusion-profile",
+      serverName: "fusion-custom-tools",
+      serverConfigPath: filePath,
+    });
+
+    const [, args] = spawnMock.mock.calls[0] as [string, string[]];
+    expect(args).toEqual(expect.arrayContaining(["--profile", "fusion-profile", "mcp", "set", "fusion-custom-tools"]));
+  });
+
+  it("throws when mcp set exits non-zero", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockImplementation(() => {
+      setTimeout(() => {
+        child.stderr.emit("data", Buffer.from("bad config"));
+        child.emit("close", 1);
+      }, 0);
+      return child;
+    });
+
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const os = await import("node:os");
+    const filePath = path.join(os.tmpdir(), `openclaw-mcp-config-${Date.now()}-err.json`);
+    await fs.writeFile(filePath, JSON.stringify({ command: "node", args: ["server.cjs", "schema.json"] }));
+
+    await expect(
+      configureOpenClawMcpServer({
+        binaryPath: "openclaw",
+        profile: "fusion-profile",
+        serverName: "fusion-custom-tools",
+        serverConfigPath: filePath,
+      }),
+    ).rejects.toThrow(/mcp set failed/);
   });
 });
 

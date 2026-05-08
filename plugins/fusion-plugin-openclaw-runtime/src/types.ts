@@ -53,6 +53,10 @@ export interface GatewaySession {
   lastModelDescription: string;
   /** Last-known token usage from the CLI JSON's `meta.agentMeta.usage`. */
   lastUsage?: Record<string, number>;
+  /** Optional profile that carries MCP server config for this session. */
+  mcpProfile?: string;
+  /** Optional path to the server JSON used to configure MCP for this session. */
+  mcpConfigPath?: string;
   callbacks?: GatewayCallbacks;
   dispose?: () => Promise<void> | void;
 }

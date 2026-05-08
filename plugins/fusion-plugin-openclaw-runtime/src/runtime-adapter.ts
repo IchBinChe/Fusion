@@ -20,11 +20,14 @@ import type {
   GatewaySession,
 } from "./types.js";
 import {
+  configureOpenClawMcpServer,
   createCliSession,
   describeCliModel,
   promptCli,
   resolveCliConfig,
 } from "./pi-module.js";
+import { toolsToMcpToolDefs, writeOpenClawMcpBridgeFiles, type ToolLike } from "./mcp-config.js";
+import { randomUUID } from "node:crypto";
 
 export class OpenClawRuntimeAdapter implements AgentRuntime {
   readonly id = "openclaw";
@@ -37,9 +40,32 @@ export class OpenClawRuntimeAdapter implements AgentRuntime {
   }
 
   async createSession(options: AgentRuntimeOptions): Promise<AgentSessionResult> {
+    const contextTools = [
+      ...(Array.isArray(options.tools) ? (options.tools as ToolLike[]) : []),
+      ...(Array.isArray(options.customTools) ? (options.customTools as ToolLike[]) : []),
+    ];
+    const toolDefs = toolsToMcpToolDefs(contextTools);
+
+    let mcpProfile: string | undefined;
+    let mcpConfigPath: string | undefined;
+
+    if (toolDefs.length > 0) {
+      const bridge = writeOpenClawMcpBridgeFiles(toolDefs, randomUUID());
+      mcpProfile = `fusion-${randomUUID()}`;
+      mcpConfigPath = bridge.serverConfigPath;
+      await configureOpenClawMcpServer({
+        binaryPath: this.config.binaryPath,
+        profile: mcpProfile,
+        serverName: bridge.serverName,
+        serverConfigPath: bridge.serverConfigPath,
+      });
+    }
+
     const session = createCliSession({
       systemPrompt: options.systemPrompt,
       agentId: this.config.agentId,
+      mcpProfile,
+      mcpConfigPath,
       callbacks: {
         onText: options.onText,
         onThinking: options.onThinking,

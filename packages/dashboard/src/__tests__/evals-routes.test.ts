@@ -45,8 +45,8 @@ describe("Evals routes", () => {
   });
 
   afterEach(async () => {
-    try { storeA.close(); } catch {}
-    try { storeB.close(); } catch {}
+    try { await storeA.close(); } catch { /* cleanup */ }
+    try { await storeB.close(); } catch { /* cleanup */ }
     await rm(rootA, { recursive: true, force: true });
     await rm(rootB, { recursive: true, force: true });
   });

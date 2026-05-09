@@ -152,6 +152,8 @@ describe("NotificationDispatcher", () => {
       "awaiting-approval",
       "awaiting-user-review",
       "planning-awaiting-input",
+      "message:agent-to-user",
+      "message:agent-to-agent",
       "gridlock",
       "fallback-used",
       "memory-dreams-processed",

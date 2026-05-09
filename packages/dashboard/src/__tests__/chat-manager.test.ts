@@ -1088,8 +1088,30 @@ describe("ChatManager.sendMessage", () => {
     expect(mockAgentStore.init).toHaveBeenCalledTimes(1);
     expect(mockAgentStore.getAgent).toHaveBeenCalledWith("agent-001");
     expect(createOptions.systemPrompt).toContain("Be calm and precise.");
-    expect(createOptions.systemPrompt).toContain("type: \"agent-to-user\"");
-    expect(createOptions.systemPrompt).toContain("to_id: \"dashboard\"");
+    expect(createOptions.systemPrompt).toContain("Your chat reply is the primary response to the user.");
+    expect(createOptions.systemPrompt).toContain("Only use `fn_send_message` when the user explicitly asks");
+  });
+
+  it("includes guidance to avoid double-sending mailbox copies by default", async () => {
+    let createOptions: any;
+    __setCreateFnAgent(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: {
+            messages: [{ role: "assistant", content: "Done" }],
+          },
+        },
+      };
+    });
+
+    const chatManager = createChatManager();
+    await chatManager.sendMessage("chat-001", "Hello");
+
+    expect(createOptions.systemPrompt).toContain("Do not also call `fn_send_message` with the same content");
+    expect(createOptions.systemPrompt).toContain("Only use `fn_send_message` when the user explicitly asks for mailbox/inbox/notification delivery");
   });
 
   it("passes enriched system prompt with agent memory when agent context is available", async () => {

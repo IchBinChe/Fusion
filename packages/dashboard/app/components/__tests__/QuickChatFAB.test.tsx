@@ -470,10 +470,12 @@ describe("QuickChatFAB session-first UX", () => {
 
     fireEvent.click(screen.getByTestId("quick-chat-jump-to-latest"));
     expect(scrollTopValue).toBe(1200);
-    expect(screen.queryByTestId("quick-chat-jump-to-latest")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByTestId("quick-chat-jump-to-latest")).toBeNull();
+    });
   });
 
-  it("snaps to bottom when first opened", async () => {
+  it("FN-3884: snaps to bottom when first opened", async () => {
     const deferredMessages = createDeferredPromise<{
       messages: Array<{ id: string; sessionId: string; role: "assistant"; content: string; createdAt: string }>;
     }>();
@@ -512,7 +514,82 @@ describe("QuickChatFAB session-first UX", () => {
     });
   });
 
-  it("snaps to bottom when switching sessions while open", async () => {
+  it("FN-3884: reopens same session and scrolls to latest again", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [{ id: "msg-1", sessionId: "session-model", role: "assistant", content: "hello", createdAt: new Date().toISOString() }],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    const fab = screen.getByTestId("quick-chat-fab");
+    fireEvent.click(fab);
+
+    let messages = await screen.findByTestId("quick-chat-messages");
+    let scrollTopValue = 0;
+    const installScrollDescriptors = (target: HTMLElement) => {
+      Object.defineProperty(target, "scrollHeight", { configurable: true, get: () => 1000 });
+      Object.defineProperty(target, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+    };
+    installScrollDescriptors(messages);
+
+    fireEvent.click(screen.getByTestId("quick-chat-close"));
+    scrollTopValue = 0;
+    fireEvent.click(fab);
+
+    messages = await screen.findByTestId("quick-chat-messages");
+    installScrollDescriptors(messages);
+
+    await waitFor(() => {
+      expect(scrollTopValue).toBe(1000);
+    });
+  });
+
+  it("FN-3884: retries anchor when quick chat thread height grows after open", async () => {
+    const originalRaf = window.requestAnimationFrame;
+    const rafQueue: FrameRequestCallback[] = [];
+    window.requestAnimationFrame = vi.fn((cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    });
+
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [{ id: "msg-1", sessionId: "session-model", role: "assistant", content: "hello", createdAt: new Date().toISOString() }],
+    });
+
+    try {
+      render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const messages = await screen.findByTestId("quick-chat-messages");
+      let scrollTopValue = 0;
+      let scrollHeightValue = 500;
+      Object.defineProperty(messages, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messages, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      scrollHeightValue = 900;
+      while (rafQueue.length > 0) {
+        const cb = rafQueue.shift();
+        cb?.(performance.now());
+      }
+
+      expect(scrollTopValue).toBe(900);
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+    }
+  });
+
+  it("FN-3884: snaps to bottom when switching sessions while open", async () => {
     mockFetchChatMessages
       .mockResolvedValueOnce({ messages: [{ id: "msg-1", sessionId: "session-model", role: "assistant", content: "A", createdAt: new Date().toISOString() }] })
       .mockResolvedValueOnce({ messages: [{ id: "msg-2", sessionId: "session-agent", role: "assistant", content: "B", createdAt: new Date().toISOString() }] });

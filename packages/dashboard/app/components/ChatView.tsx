@@ -785,7 +785,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
-  const lastScrolledSessionIdRef = useRef<string | null>(null);
+  const lastAnchoredSessionStateRef = useRef<{ sessionId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -895,31 +895,76 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     isUserScrollingRef.current = !atBottom;
   }, []);
 
+  const anchorToBottom = useCallback((container: HTMLElement) => {
+    if (!container.isConnected) return;
+
+    let frame = 0;
+    let stableFrames = 0;
+    let lastScrollHeight = -1;
+    const maxFrames = 6;
+
+    const writeBottom = () => {
+      if (!container.isConnected) return;
+
+      container.scrollTop = container.scrollHeight;
+      if (container.scrollHeight === lastScrollHeight) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+        lastScrollHeight = container.scrollHeight;
+      }
+
+      frame += 1;
+      if (frame >= maxFrames || stableFrames >= 2) {
+        setIsUserScrolling(false);
+        isUserScrollingRef.current = false;
+        return;
+      }
+
+      window.requestAnimationFrame(writeBottom);
+    };
+
+    writeBottom();
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    setIsUserScrolling(false);
-    isUserScrollingRef.current = false;
-  }, []);
+    anchorToBottom(messagesContainer);
+  }, [anchorToBottom]);
 
   useLayoutEffect(() => {
     const sessionId = activeSession?.id ?? null;
     if (!sessionId) {
-      lastScrolledSessionIdRef.current = null;
+      lastAnchoredSessionStateRef.current = null;
       return;
     }
-    if (messages.length === 0) return;
-    if (lastScrolledSessionIdRef.current === sessionId) return;
+
+    const nextState = {
+      sessionId,
+      loaded: !messagesLoading,
+      hasMessages: messages.length > 0,
+    };
+    const previousState = lastAnchoredSessionStateRef.current;
+    const isSessionChanged = previousState?.sessionId !== sessionId;
+    const finishedLoading =
+      previousState?.sessionId === sessionId && !previousState.loaded && nextState.loaded;
+    const firstMessagesArrived =
+      previousState?.sessionId === sessionId && !previousState.hasMessages && nextState.hasMessages;
+
+    const shouldAnchor = previousState === null || isSessionChanged || finishedLoading || firstMessagesArrived;
+    if (!shouldAnchor) {
+      return;
+    }
 
     const messagesContainer = messagesContainerRef.current;
-    if (!messagesContainer) return;
+    if (!messagesContainer) {
+      return;
+    }
 
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    setIsUserScrolling(false);
-    isUserScrollingRef.current = false;
-    lastScrolledSessionIdRef.current = sessionId;
-  }, [activeSession?.id, messages.length]);
+    anchorToBottom(messagesContainer);
+    lastAnchoredSessionStateRef.current = nextState;
+  }, [activeSession?.id, messages.length, messagesLoading, anchorToBottom]);
 
   // Scroll thread container to bottom on new messages or streaming when user is near live tail.
   // Avoid Element.scrollIntoView() here because on mobile Safari it can

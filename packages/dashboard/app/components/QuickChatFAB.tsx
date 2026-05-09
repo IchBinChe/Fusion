@@ -981,7 +981,7 @@ export function QuickChatFAB({
   // slides down on top of it.
   const suppressVvShrinkRef = useRef(false);
   const isUserScrollingRef = useRef(false);
-  const lastScrolledOpenSessionKeyRef = useRef<string | null>(null);
+  const previousOpenStateRef = useRef<{ isOpen: boolean; sessionId: string | null }>({ isOpen: false, sessionId: null });
 
   // Pin the document at the top while the panel is open on mobile.
   // Otherwise iOS can leave window.scrollY > 0 (e.g. after the keyboard
@@ -1417,33 +1417,64 @@ export function QuickChatFAB({
     isUserScrollingRef.current = !atBottom;
   }, []);
 
+  const anchorToBottom = useCallback((container: HTMLElement) => {
+    if (!container.isConnected) return;
+
+    let frame = 0;
+    let stableFrames = 0;
+    let lastScrollHeight = -1;
+    const maxFrames = 6;
+
+    const writeBottom = () => {
+      if (!container.isConnected) return;
+
+      container.scrollTop = container.scrollHeight;
+      if (container.scrollHeight === lastScrollHeight) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+        lastScrollHeight = container.scrollHeight;
+      }
+
+      frame += 1;
+      if (frame >= maxFrames || stableFrames >= 2) {
+        setIsUserScrolling(false);
+        isUserScrollingRef.current = false;
+        return;
+      }
+
+      window.requestAnimationFrame(writeBottom);
+    };
+
+    writeBottom();
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     const messagesEl = messagesRef.current;
     if (!messagesEl) return;
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    setIsUserScrolling(false);
-    isUserScrollingRef.current = false;
-  }, []);
+    anchorToBottom(messagesEl);
+  }, [anchorToBottom]);
 
   useLayoutEffect(() => {
     const sessionId = activeSession?.id ?? null;
+    const previousState = previousOpenStateRef.current;
+    previousOpenStateRef.current = { isOpen, sessionId };
+
     if (!isOpen || !sessionId) {
-      lastScrolledOpenSessionKeyRef.current = null;
       return;
     }
-    if (messages.length === 0) return;
 
-    const openSessionKey = `${isOpen}:${sessionId}`;
-    if (lastScrolledOpenSessionKeyRef.current === openSessionKey) return;
+    const openingNow = !previousState.isOpen && isOpen;
+    const sessionChangedWhileOpen = previousState.isOpen && previousState.sessionId !== sessionId;
+    if (!openingNow && !sessionChangedWhileOpen) {
+      return;
+    }
 
     const messagesEl = messagesRef.current;
     if (!messagesEl) return;
 
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    setIsUserScrolling(false);
-    isUserScrollingRef.current = false;
-    lastScrolledOpenSessionKeyRef.current = openSessionKey;
-  }, [isOpen, activeSession?.id, messages.length]);
+    anchorToBottom(messagesEl);
+  }, [isOpen, activeSession?.id, anchorToBottom]);
 
   // Auto-scroll messages when user is near the live tail.
   useEffect(() => {

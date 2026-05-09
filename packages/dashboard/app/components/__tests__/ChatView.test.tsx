@@ -3212,7 +3212,7 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
-  it("snaps to bottom when opening a session with loaded messages", async () => {
+  it("FN-3884: snaps to bottom when opening a session with loaded messages", async () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
       setupMockChat({ activeSession: activeSessionFixture, messages: [] });
@@ -3243,7 +3243,81 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
-  it("snaps to bottom when switching active session id", async () => {
+  it("FN-3884: re-anchors when messagesLoading transitions to loaded with messages", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    try {
+      setupMockChat({ activeSession: activeSessionFixture, messages: [], messagesLoading: true });
+      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => 980 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messagesLoading: false,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Loaded", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+      rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(980);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("FN-3884: retries bottom anchor while container height keeps growing", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    const originalRaf = window.requestAnimationFrame;
+    const rafQueue: FrameRequestCallback[] = [];
+    window.requestAnimationFrame = vi.fn((cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    });
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 600;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      scrollHeightValue = 900;
+      while (rafQueue.length > 0) {
+        const cb = rafQueue.shift();
+        cb?.(performance.now());
+      }
+
+      expect(scrollTopValue).toBe(900);
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("FN-3884: snaps to bottom when switching active session id", async () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
       setupMockChat({
@@ -3279,7 +3353,7 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
-  it("does not clobber scroll position on same-session history pagination", async () => {
+  it("FN-3884: does not yank when user scrolled up on same-session updates", async () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
       setupMockChat({

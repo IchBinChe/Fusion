@@ -26,10 +26,10 @@ import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentW
 import { AgentLogger } from "./agent-logger.js";
 import {
   resolveAgentInstructionsWithRatings,
-  buildSystemPromptWithInstructions,
   buildPluginPromptSection,
   resolveAgentHeartbeatProcedure,
 } from "./agent-instructions.js";
+import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { heartbeatLog, formatError } from "./logger.js";
 import { createRunAuditor, type EngineRunContext } from "./run-audit.js";
 import { promptWithFallback } from "./pi.js";
@@ -1838,23 +1838,22 @@ export class HeartbeatMonitor {
           }
         }
 
-        const systemPrompt = buildSystemPromptWithInstructions(
-          baseHeartbeatSystemPrompt,
-          [resolvedInstructionsForIdentity, memoryInstructions, selfImprovePrompt].filter((part) => part.trim()).join("\n\n"),
-        );
-        const heartbeatContributions = this.pluginRunner
-          ?.getPromptContributionsForSurface("heartbeat")
-          ?? [];
-        if (heartbeatContributions.length > 0) {
-          heartbeatLog.log(`applied ${heartbeatContributions.length} plugin prompt contributions for heartbeat surface`);
-        }
+        // Build structured layers for cross-session prompt caching.
         const heartbeatPluginContributions = buildPluginPromptSection(
           "heartbeat",
           this.pluginRunner,
         );
-        const systemPromptFinal = heartbeatPluginContributions
-          ? `${systemPrompt}\n\n${heartbeatPluginContributions}`
-          : systemPrompt;
+        if (heartbeatPluginContributions) {
+          heartbeatLog.log(`applied plugin prompt contributions for heartbeat surface`);
+        }
+
+        const heartbeatLayers = buildPromptLayers({
+          basePrompt: baseHeartbeatSystemPrompt,
+          agentInstructions: [resolvedInstructionsForIdentity, memoryInstructions, selfImprovePrompt].filter((part) => part.trim()).join("\n\n"),
+          pluginContributions: heartbeatPluginContributions,
+        });
+
+        const systemPromptFinal = collapsePromptLayers(heartbeatLayers);
 
         // fn_heartbeat_done must be the last tool in the array (stable terminal signal)
         heartbeatTools.push(heartbeatDoneTool);
@@ -1948,6 +1947,7 @@ export class HeartbeatMonitor {
           pluginRunner: this.pluginRunner,
           cwd: rootDir,
           systemPrompt: systemPromptFinal,
+          systemPromptLayers: heartbeatLayers,
           tools: "coding",
           customTools: heartbeatTools,
           defaultProvider: heartbeatSessionModels.defaultProvider,

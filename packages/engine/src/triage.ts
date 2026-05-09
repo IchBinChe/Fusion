@@ -30,9 +30,9 @@ import { AgentLogger } from "./agent-logger.js";
 import {
   resolveAgentInstructions,
   resolveAgentInstructionsWithRatings,
-  buildSystemPromptWithInstructions,
   buildPluginPromptSection,
 } from "./agent-instructions.js";
+import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { planLog, reviewerLog, formatError } from "./logger.js";
 import {
@@ -1014,30 +1014,29 @@ export class TriageProcessor {
         const triageIdentitySection = assignedAgent
           ? `## Identity\n\nYou are ${assignedAgent.name}${assignedAgent.title?.trim() ? `, ${assignedAgent.title.trim()}` : ""} (agent ID: ${assignedAgent.id}, role: ${assignedAgent.role}).`
           : "";
-        const triageSystemPrompt = buildSystemPromptWithInstructions(
-          resolveAgentPrompt("triage", settings.agentPrompts)
+        // Build structured layers for cross-session prompt caching.
+        const triagePluginContributions = buildPluginPromptSection(
+          "triage",
+          this.options.pluginRunner,
+        );
+        if (triagePluginContributions) {
+          planLog.log(`${task.id}: applied plugin prompt contributions for triage surface`);
+        }
+
+        const triageLayers = buildPromptLayers({
+          basePrompt: resolveAgentPrompt("triage", settings.agentPrompts)
             || (isFast ? FAST_TRIAGE_SYSTEM_PROMPT : TRIAGE_SYSTEM_PROMPT),
-          [
+          agentInstructions: [
             triageIdentitySection,
             triageInstructions,
             isResearchToolSurfaceEnabled(settings)
               ? getResearchGuidanceForSurface("triage")
               : "",
           ].filter((section) => section.trim()).join("\n\n"),
-        );
-        const triageContributions = this.options.pluginRunner
-          ?.getPromptContributionsForSurface("triage")
-          ?? [];
-        if (triageContributions.length > 0) {
-          planLog.log(`${task.id}: applied ${triageContributions.length} plugin prompt contributions for triage surface`);
-        }
-        const triagePluginContributions = buildPluginPromptSection(
-          "triage",
-          this.options.pluginRunner,
-        );
-        const triageSystemPromptFinal = triagePluginContributions
-          ? `${triageSystemPrompt}\n\n${triagePluginContributions}`
-          : triageSystemPrompt;
+          pluginContributions: triagePluginContributions,
+        });
+
+        const triageSystemPromptFinal = collapsePromptLayers(triageLayers);
 
         // Build skill selection context (assigned agent skills take precedence over role fallback)
         const skillContext = await buildSessionSkillContext({
@@ -1054,6 +1053,7 @@ export class TriageProcessor {
           pluginRunner: this.options.pluginRunner,
           cwd: this.rootDir,
           systemPrompt: triageSystemPromptFinal,
+          systemPromptLayers: triageLayers,
           tools: "coding",
           customTools,
           onText: agentLogger.onText,
@@ -1294,6 +1294,7 @@ export class TriageProcessor {
               pluginRunner: this.options.pluginRunner,
               cwd: this.rootDir,
               systemPrompt: triageSystemPromptFinal,
+              systemPromptLayers: triageLayers,
               tools: "coding",
               customTools,
               onText: agentLogger.onText,

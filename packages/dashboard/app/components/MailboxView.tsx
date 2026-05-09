@@ -28,6 +28,7 @@ import {
   type AgentMailboxResponse,
   type Agent,
 } from "../api";
+import { MailboxMessageContent } from "./MailboxMessageContent";
 import { MessageComposer } from "./MessageComposer";
 import { subscribeSse } from "../sse-bus";
 import { useViewportMode } from "../hooks/useViewportMode";
@@ -480,7 +481,10 @@ export function MailboxView({
                       ↪ Replying to {replyToMessage ? messagePreview(replyToMessage.content, 60) : `message ${replyToId}`}
                     </div>
                   )}
-                  <div className="mailbox-conversation-msg-body">{msg.content}</div>
+                  <MailboxMessageContent
+                    content={msg.content}
+                    className="mailbox-conversation-msg-body"
+                  />
                 </div>
               );
             })}
@@ -493,9 +497,11 @@ export function MailboxView({
                 ↪ Replying to message {selectedMessage.metadata.replyTo.messageId}
               </div>
             )}
-            <div className="mailbox-message-body" data-testid="mailbox-message-body">
-              {selectedMessage.content}
-            </div>
+            <MailboxMessageContent
+              content={selectedMessage.content}
+              className="mailbox-message-body"
+              testId="mailbox-message-body"
+            />
           </>
         )}
       </div>

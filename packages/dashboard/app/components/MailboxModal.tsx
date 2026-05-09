@@ -31,6 +31,7 @@ import {
   type AgentMailboxResponse,
 } from "../api";
 import { MessageComposer } from "./MessageComposer";
+import { MailboxMessageContent } from "./MailboxMessageContent";
 import type { Agent } from "../api";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
@@ -664,7 +665,10 @@ export function MailboxModal({
                             testId={`mailbox-reply-context-${msg.id}`}
                           />
                         )}
-                        <div className="mailbox-conversation-msg-body">{msg.content}</div>
+                        <MailboxMessageContent
+                          content={msg.content}
+                          className="mailbox-conversation-msg-body"
+                        />
                       </div>
                     );
                   })}
@@ -682,9 +686,11 @@ export function MailboxModal({
                       testId="mailbox-selected-reply-context"
                     />
                   )}
-                  <div className="mailbox-message-body" data-testid="mailbox-message-body">
-                    {selectedMessage.content}
-                  </div>
+                  <MailboxMessageContent
+                    content={selectedMessage.content}
+                    className="mailbox-message-body"
+                    testId="mailbox-message-body"
+                  />
                 </>
               )}
             </div>

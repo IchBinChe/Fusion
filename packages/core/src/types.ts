@@ -792,14 +792,30 @@ export interface TaskReviewStateItem {
   summary?: string;
 }
 
+export type ReviewAddressingStatus = "queued" | "in-progress" | "addressed" | "failed";
+
+export interface ReviewAddressingSnapshot {
+  itemId: string;
+  sourceMode: "pull-request" | "reviewer-agent";
+  source: "pr-review" | "reviewer-agent";
+  summary: string;
+  body: string;
+  authorLogin?: string;
+  filePath?: string;
+  lineNumber?: number;
+  threadId?: string;
+  url?: string;
+}
+
 export interface ReviewAddressingRecord {
   itemId: string;
-  status: "queued" | "in-progress" | "addressed" | "failed";
+  status: ReviewAddressingStatus;
   selectedAt: string;
   startedAt?: string;
   completedAt?: string;
   error?: string;
   stale?: boolean;
+  snapshot?: ReviewAddressingSnapshot;
 }
 
 export interface ReviewerTaskReviewSummary {

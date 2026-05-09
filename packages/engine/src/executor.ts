@@ -2266,8 +2266,11 @@ export class TaskExecutor {
     // true = requeue to todo, false = budget exhausted (already marked failed).
     let stuckRequeue: boolean | null = null;
     let taskDone = false;
+    let reviewAddressingActivated = false;
 
     try {
+      await this.transitionReviewAddressing(task.id, ["queued"], "in-progress");
+      reviewAddressingActivated = true;
       // Check dependencies
       const allTasks = await this.store.listTasks({ slim: true, includeArchived: false });
       const unmetDeps = task.dependencies.filter((depId) => {
@@ -3823,6 +3826,15 @@ export class TaskExecutor {
         this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
       }
     } finally {
+      if (reviewAddressingActivated) {
+        const latestTask = await this.store.getTask(task.id);
+        if (taskDone) {
+          await this.transitionReviewAddressing(task.id, ["in-progress", "queued"], "addressed");
+        } else if (latestTask.status === "failed") {
+          await this.transitionReviewAddressing(task.id, ["in-progress", "queued"], "failed");
+        }
+      }
+
       this.executing.delete(task.id);
       // Clear run context at end of execute() lifecycle
       this.currentRunContext = undefined;
@@ -4128,6 +4140,41 @@ export class TaskExecutor {
         };
       },
     };
+  }
+
+  private async transitionReviewAddressing(taskId: string, from: Array<"queued" | "in-progress" | "addressed" | "failed">, to: "queued" | "in-progress" | "addressed" | "failed"): Promise<void> {
+    const task = await this.store.getTask(taskId);
+    const reviewState = task.reviewState;
+    if (!reviewState || reviewState.addressing.length === 0) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    let changed = false;
+    const addressing = reviewState.addressing.map((record) => {
+      if (!from.includes(record.status)) {
+        return record;
+      }
+      changed = true;
+      return {
+        ...record,
+        status: to,
+        startedAt: to === "in-progress" ? now : record.startedAt,
+        completedAt: to === "addressed" || to === "failed" ? now : record.completedAt,
+        error: to === "addressed" ? undefined : record.error,
+      };
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    await this.store.updateTask(taskId, {
+      reviewState: {
+        ...reviewState,
+        addressing,
+      },
+    });
   }
 
   private createTaskDoneTool(taskId: string, onDone: () => void): ToolDefinition {

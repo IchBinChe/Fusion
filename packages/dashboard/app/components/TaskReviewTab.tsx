@@ -13,8 +13,22 @@ interface Props {
 }
 
 const REVIEW_LOAD_ERROR_MESSAGE = "Failed to load review data.";
-const DIRECT_MODE_EMPTY_MESSAGE =
-  "No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.";
+const DIRECT_MODE_EMPTY_MESSAGE = "No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.";
+
+type ReviewState = NonNullable<TaskDetail["reviewState"]>;
+type ReviewItem = ReviewState["items"][number];
+type AddressingRecord = ReviewState["addressing"][number];
+
+type DisplayReviewItem = {
+  id: string;
+  summary: string;
+  body: string;
+  path?: string;
+  createdAt?: string;
+  status: "queued" | "in-progress" | "addressed" | "failed";
+  addressing?: AddressingRecord;
+  item?: ReviewItem;
+};
 
 function formatTimestamp(value?: string): string {
   if (!value) return "Never";
@@ -27,10 +41,36 @@ function formatRefreshSource(source?: "manual" | "auto" | "initial-load"): strin
   return "Initial load";
 }
 
-type ReviewItem = NonNullable<TaskDetail["reviewState"]>["items"][number];
+function getDisplayReviewItems(review: ReviewState): DisplayReviewItem[] {
+  const addressingById = new Map(review.addressing.map((record) => [record.itemId, record] as const));
+  const items = review.items.map((item) => {
+    const addressing = addressingById.get(item.id);
+    return {
+      id: item.id,
+      summary: item.summary ?? item.body.slice(0, 120),
+      body: item.body,
+      path: item.path,
+      createdAt: item.createdAt,
+      status: addressing?.status ?? "queued",
+      addressing,
+      item,
+    } satisfies DisplayReviewItem;
+  });
 
-function getItemStatus(review: NonNullable<TaskDetail["reviewState"]>, item: ReviewItem): "queued" | "in-progress" | "addressed" | "failed" {
-  return review.addressing.find((record) => record.itemId === item.id)?.status ?? "queued";
+  const existingIds = new Set(items.map((item) => item.id));
+  const snapshots = review.addressing
+    .filter((record) => !existingIds.has(record.itemId) && record.snapshot)
+    .map((record) => ({
+      id: record.itemId,
+      summary: record.snapshot?.summary ?? record.itemId,
+      body: record.snapshot?.body ?? record.snapshot?.summary ?? record.itemId,
+      path: record.snapshot?.filePath,
+      createdAt: record.selectedAt,
+      status: record.status,
+      addressing: record,
+    } satisfies DisplayReviewItem));
+
+  return [...items, ...snapshots];
 }
 
 export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Props) {
@@ -44,6 +84,7 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
 
   const canRevise = selected.length > 0 && !revising;
   const isPrMode = review?.source === "pull-request";
+  const displayItems = useMemo(() => (review ? getDisplayReviewItems(review) : []), [review]);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,11 +112,11 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
     if (!review) return "No review feedback captured yet.";
     if (review.source === "pull-request") {
       const prSummary = review.summary as { reviewDecision?: string } | undefined;
-      return `${prSummary?.reviewDecision ?? "REVIEW_REQUIRED"} · ${review.items.length} review item(s)`;
+      return `${prSummary?.reviewDecision ?? "REVIEW_REQUIRED"} · ${displayItems.length} review item(s)`;
     }
     const reviewerSummary = review.summary as { summary?: string } | undefined;
-    return `${reviewerSummary?.summary ?? "reviewer-agent"} · ${review.items.length} review item(s)`;
-  }, [review]);
+    return `${reviewerSummary?.summary ?? "reviewer-agent"} · ${displayItems.length} review item(s)`;
+  }, [review, displayItems.length]);
 
   const decisionLabel = !review
     ? undefined
@@ -84,22 +125,13 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
       : (review.summary as { verdict?: string } | undefined)?.verdict;
 
   const refreshStatus = refreshing ? "refreshing" : (review?.refreshStatus ?? "ready");
-  const refreshToneClass =
-    refreshStatus === "error"
-      ? "status-dot status-dot--error"
-      : refreshStatus === "refreshing"
-        ? "status-dot status-dot--pending"
-        : "status-dot status-dot--online";
-  const refreshLabel =
-    refreshStatus === "error"
-      ? "Refresh failed"
-      : refreshStatus === "refreshing"
-        ? "Refreshing"
-        : "Up to date";
+  const refreshToneClass = refreshStatus === "error"
+    ? "status-dot status-dot--error"
+    : refreshStatus === "refreshing"
+      ? "status-dot status-dot--pending"
+      : "status-dot status-dot--online";
 
-  const toggleSelected = (id: string) => {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
-  };
+  const toggleSelected = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
 
   const onRefresh = async () => {
     try {
@@ -114,7 +146,6 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
         addToast(refreshMessage, "error");
         return;
       }
-      setError(null);
       addToast("Review refreshed", "success");
     } catch (refreshError) {
       const message = refreshError instanceof Error ? refreshError.message : REVIEW_LOAD_ERROR_MESSAGE;
@@ -130,22 +161,37 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
       if (!review) return;
       setError(null);
       setRevising(true);
-      const selectedItems: SelectedReviewItem[] = review.items
+      const selectedItems: SelectedReviewItem[] = displayItems
         .filter((item) => selected.includes(item.id))
         .map((item) => {
-          const itemRecord = item as unknown as Record<string, unknown>;
+          if (!item.item) {
+            return {
+              id: item.id,
+              source: review.source === "pull-request" ? "pr-review" : "reviewer-agent",
+              threadId: item.addressing?.snapshot?.threadId,
+              filePath: item.addressing?.snapshot?.filePath,
+              lineNumber: item.addressing?.snapshot?.lineNumber,
+              author: item.addressing?.snapshot?.authorLogin,
+              summary: item.summary,
+              body: item.body,
+              url: item.addressing?.snapshot?.url,
+            };
+          }
+
+          const itemRecord = item.item as unknown as Record<string, unknown>;
           return {
-            id: item.id,
+            id: item.item.id,
             source: review.source === "pull-request" ? "pr-review" : "reviewer-agent",
             threadId: typeof itemRecord.threadId === "string" ? itemRecord.threadId : undefined,
-            filePath: item.path,
+            filePath: item.item.path,
             lineNumber: typeof itemRecord.line === "number" ? itemRecord.line : undefined,
-            author: item.author?.login,
-            summary: item.summary ?? item.body.slice(0, 120),
-            body: item.body,
+            author: item.item.author?.login,
+            summary: item.item.summary ?? item.item.body.slice(0, 120),
+            body: item.item.body,
             url: typeof itemRecord.url === "string" ? itemRecord.url : undefined,
           };
         });
+
       const result = await reviseTaskReviewItems(task.id, selectedItems, projectId);
       setReview(result.reviewState);
       onTaskUpdated?.({ ...result.task, reviewState: result.reviewState } as Task);
@@ -165,9 +211,7 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
       <div className="task-review-tab__header">
         <div className="task-review-tab__summary-wrap">
           <p className="task-review-tab__summary">{summaryText}</p>
-          {decisionLabel ? (
-            <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span>
-          ) : null}
+          {decisionLabel ? <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span> : null}
         </div>
         <div className="task-review-tab__actions">
           <button className="btn btn-sm" onClick={onRefresh} disabled={refreshing || loading}>{refreshing ? "Refreshing…" : "Refresh"}</button>
@@ -176,77 +220,32 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
       </div>
       <div className="task-review-tab__meta task-review-tab__refresh-meta" aria-live="polite">
         <span className={refreshToneClass} aria-hidden="true" />
-        <span>{refreshLabel} · Last refreshed: {formatTimestamp(review?.lastRefreshedAt)} · {formatRefreshSource(review?.refreshSource)}</span>
+        <span>{refreshStatus === "error" ? "Refresh failed" : refreshStatus === "refreshing" ? "Refreshing" : "Up to date"} · Last refreshed: {formatTimestamp(review?.lastRefreshedAt)} · {formatRefreshSource(review?.refreshSource)}</span>
       </div>
       {loading ? <div className="task-review-tab__meta">Loading review data…</div> : null}
       {!loading && error ? <div className="task-review-tab__error">{error}</div> : null}
-      {!loading && !error && !isPrMode && review?.items?.length === 0 ? (
-        <div className="task-review-tab__empty">{emptyMessage ?? DIRECT_MODE_EMPTY_MESSAGE}</div>
-      ) : null}
-      {isPrMode && review?.summary && "reviewers" in review.summary && review.summary.reviewers?.length ? (
-        <ul className="task-review-tab__reviewers">
-          {review.summary.reviewers.map((reviewer) => (
-            <li key={`${reviewer.login}-${reviewer.state}`} className="task-review-tab__reviewer">@{reviewer.login} · {reviewer.state}</li>
+      {!loading && !error && !isPrMode && displayItems.length === 0 ? <div className="task-review-tab__empty">{emptyMessage ?? DIRECT_MODE_EMPTY_MESSAGE}</div> : null}
+      {!loading && !error && displayItems.length > 0 ? (
+        <ul className="task-review-tab__list">
+          {displayItems.map((item) => (
+            <li key={item.id} className="task-review-tab__item card">
+              <label className="task-review-tab__direct-item task-review-tab__direct-item--selectable">
+                <div className="task-review-tab__summary-wrap">
+                  <input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelected(item.id)} />
+                  <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.summary}</span>
+                  <span className={`task-review-tab__status task-review-tab__status--${item.status}`}>{item.status}</span>
+                </div>
+                <div className="task-review-tab__meta">{formatTimestamp(item.createdAt)}</div>
+                {item.addressing ? (
+                  <div className="task-review-tab__meta">Selected: {formatTimestamp(item.addressing.selectedAt)}{item.addressing.startedAt ? ` · Started: ${formatTimestamp(item.addressing.startedAt)}` : ""}{item.addressing.completedAt ? ` · Completed: ${formatTimestamp(item.addressing.completedAt)}` : ""}{item.addressing.error ? ` · Error: ${item.addressing.error}` : ""}</div>
+                ) : null}
+                <pre className="task-review-tab__body">{item.body}</pre>
+              </label>
+            </li>
           ))}
         </ul>
       ) : null}
-      {isPrMode && review?.summary && "blockingReasons" in review.summary && review.summary.blockingReasons?.length ? (
-        <ul className="task-review-tab__blockers">
-          {review.summary.blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}
-        </ul>
-      ) : null}
-      {isPrMode && review?.items?.length ? (
-        <ul className="task-review-tab__list">
-          {review.items.map((item) => {
-            const status = review?.addressing.find((record) => record.itemId === item.id)?.status ?? "queued";
-            return (
-              <li key={item.id} className="task-review-tab__item card">
-                <label className="task-review-tab__row">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(item.id)}
-                    onChange={() => toggleSelected(item.id)}
-                  />
-                  <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.body}</span>
-                  <span className={`task-review-tab__status task-review-tab__status--${status}`}>{status}</span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-      {!loading && !error && !isPrMode && review?.items?.length ? (
-        <ul className="task-review-tab__list">
-          {review.items
-            .slice()
-            .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-            .map((item) => {
-              const status = getItemStatus(review, item);
-              return (
-                <li key={item.id} className="task-review-tab__item card">
-                  <label className="task-review-tab__direct-item task-review-tab__direct-item--selectable">
-                    <div className="task-review-tab__summary-wrap">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(item.id)}
-                        onChange={() => toggleSelected(item.id)}
-                      />
-                      <span className="task-review-tab__decision">reviewer-agent</span>
-                      {item.reviewType ? <span className="task-review-tab__meta">{item.reviewType} review</span> : null}
-                      {typeof item.step === "number" ? <span className="task-review-tab__meta">Step {item.step}</span> : null}
-                      {item.verdict ? <span className="task-review-tab__decision">{item.verdict}</span> : null}
-                      <span className={`task-review-tab__status task-review-tab__status--${status}`}>{status}</span>
-                    </div>
-                    {item.summary ? <p className="task-review-tab__summary">{item.summary}</p> : null}
-                    <div className="task-review-tab__meta">{formatTimestamp(item.createdAt)}</div>
-                    <pre className="task-review-tab__body">{item.body}</pre>
-                  </label>
-                </li>
-              );
-            })}
-        </ul>
-      ) : null}
-      {isPrMode && !loading && !error && !review?.items?.length ? <div className="task-review-tab__empty">No review items yet.</div> : null}
+      {isPrMode && !loading && !error && displayItems.length === 0 ? <div className="task-review-tab__empty">No review items yet.</div> : null}
     </div>
   );
 }

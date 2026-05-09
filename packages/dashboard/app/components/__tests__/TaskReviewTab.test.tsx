@@ -50,7 +50,7 @@ describe("TaskReviewTab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
     expect(apiMocks.refreshTaskReview).toHaveBeenCalledWith(task.id, undefined);
     expect(await screen.findByText("APPROVED")).toBeInTheDocument();
-    expect(screen.getByText("Looks good")).toBeInTheDocument();
+    expect(screen.getAllByText("Looks good").length).toBeGreaterThan(0);
     expect(addToast).toHaveBeenCalledWith("Review refreshed", "success");
   });
 
@@ -187,7 +187,7 @@ describe("TaskReviewTab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
     expect((await screen.findAllByText("APPROVE")).length).toBeGreaterThan(0);
-    expect(screen.getByText("Step 3")).toBeInTheDocument();
+    expect(screen.getByText("code review Step 3: APPROVE")).toBeInTheDocument();
     expect(addToast).toHaveBeenCalledWith("Review refreshed", "success");
   });
 
@@ -216,9 +216,38 @@ describe("TaskReviewTab", () => {
     });
 
     render(<TaskReviewTab task={task} addToast={vi.fn()} />);
-    expect(await screen.findByText("reviewer-agent")).toBeInTheDocument();
-    expect(screen.getByText("Step 2")).toBeInTheDocument();
+    expect(await screen.findByText("code review Step 2: REVISE")).toBeInTheDocument();
     expect(screen.getAllByText("REVISE").length).toBeGreaterThan(0);
+  });
+
+  it("renders persisted addressing snapshot entries after reload", async () => {
+    const task = makeTask();
+    apiMocks.fetchTaskReview.mockResolvedValue({
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "CHANGES_REQUESTED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [],
+        addressing: [{
+          itemId: "ri-stale",
+          status: "failed",
+          selectedAt: new Date().toISOString(),
+          error: "Patch failed",
+          snapshot: {
+            itemId: "ri-stale",
+            sourceMode: "pull-request",
+            source: "pr-review",
+            summary: "Fix edge case",
+            body: "Fix edge case in parser",
+          },
+        }],
+      },
+      automationStatus: null,
+      emptyMessage: null,
+    });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    expect(await screen.findByText("Fix edge case")).toBeInTheDocument();
+    expect(screen.getByText(/Error: Patch failed/)).toBeInTheDocument();
   });
 
   it("submits reviewer-agent selections through same revision action", async () => {

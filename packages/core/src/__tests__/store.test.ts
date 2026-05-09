@@ -4183,17 +4183,62 @@ describe("TaskStore", () => {
 
     it("persists reviewState independently from legacy review", async () => {
       const created = await store.createTask({ description: "Task with review state" });
+      const selectedAt = new Date().toISOString();
       const reviewState: NonNullable<Task["reviewState"]> = {
         source: "pull-request",
         summary: { reviewDecision: "CHANGES_REQUESTED", reviewers: [], blockingReasons: [], checks: [] },
-        items: [{ id: "ri-1", body: "Fix this", author: { login: "octocat" }, createdAt: new Date().toISOString() }],
-        addressing: [{ itemId: "ri-1", status: "queued", selectedAt: new Date().toISOString() }],
+        items: [{ id: "ri-1", body: "Fix this", author: { login: "octocat" }, createdAt: selectedAt }],
+        addressing: [{
+          itemId: "ri-1",
+          status: "queued",
+          selectedAt,
+          snapshot: {
+            itemId: "ri-1",
+            sourceMode: "pull-request",
+            source: "pr-review",
+            summary: "Fix this",
+            body: "Fix this",
+            authorLogin: "octocat",
+          },
+        }],
       };
 
       await store.updateTask(created.id, { reviewState });
       const reloaded = await store.getTask(created.id);
       expect(reloaded.reviewState).toEqual(reviewState);
       expect(reloaded.review).toBeUndefined();
+    });
+
+    it("hydrates legacy addressing records with snapshots", async () => {
+      const created = await store.createTask({ description: "Legacy review state" });
+      const selectedAt = new Date().toISOString();
+      await store.updateTask(created.id, {
+        reviewState: {
+          source: "reviewer-agent",
+          items: [{
+            id: "review-1",
+            body: "Update tests for regression",
+            summary: "Update tests",
+            author: { login: "reviewer" },
+            createdAt: selectedAt,
+            source: "reviewer-agent",
+          }],
+          addressing: [{ itemId: "review-1", status: "queued", selectedAt }],
+        },
+      });
+
+      const reloaded = await store.getTask(created.id);
+      expect(reloaded.reviewState?.addressing[0].snapshot).toEqual({
+        itemId: "review-1",
+        sourceMode: "reviewer-agent",
+        source: "reviewer-agent",
+        summary: "Update tests",
+        body: "Update tests for regression",
+        authorLogin: "reviewer",
+        filePath: undefined,
+        threadId: undefined,
+        url: undefined,
+      });
     });
 
     it("preserves review metadata through archive and unarchive", async () => {

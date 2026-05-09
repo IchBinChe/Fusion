@@ -270,6 +270,10 @@ Steering comments can be injected mid-run into active executor sessions.
 
 When users select review items and trigger **Request revision** from the Review tab, Fusion starts an in-place same-task AI revision pass (no refinement child task):
 
+- Review addressing progress is persisted per selected item in task state, including a durable snapshot and lifecycle timestamps.
+- Each selected item transitions through `queued` → `in-progress` → `addressed`/`failed`, so Review progress survives refreshes and reloads even if upstream review data changes.
+- Persisted snapshots are rendered in the Review tab when the original source item is no longer present, while Comments remains dedicated to general discussion.
+
 - `in-progress` tasks receive compact steering guidance from the selected review items and continue on the same task/branch/worktree context.
 - `in-review` tasks are resumed back to `in-progress`, reopen the last completed step, and keep same-task branch/worktree context for the revision pass.
 - Assigned immediate-response agents are woken on-demand only when there is no active session; otherwise guidance is injected without forcing a new wake.

@@ -1832,9 +1832,34 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       });
       const steeringText = ["Selected review feedback to address", modeSummary, ...steeringItems].join("\n");
 
+      const priorAddressingById = new Map(task.reviewState.addressing.map((record) => [record.itemId, record] as const));
       const nextAddressing = [
         ...task.reviewState.addressing.filter((record) => !selectedSet.has(record.itemId)),
-        ...selectedItems.map((item: SelectedReviewItem) => ({ itemId: item.id, status: "queued" as const, selectedAt: now })),
+        ...selectedItems.map((item: SelectedReviewItem) => {
+          const existing = priorAddressingById.get(item.id);
+          return {
+            itemId: item.id,
+            status: "queued" as const,
+            selectedAt: now,
+            startedAt: undefined,
+            completedAt: undefined,
+            error: undefined,
+            stale: false,
+            snapshot: {
+              itemId: item.id,
+              sourceMode: task.reviewState?.source ?? "pull-request",
+              source: item.source,
+              summary: item.summary,
+              body: item.body,
+              authorLogin: item.author,
+              filePath: item.filePath,
+              lineNumber: item.lineNumber,
+              threadId: item.threadId,
+              url: item.url,
+            },
+            ...(existing ? { startedAt: existing.startedAt, completedAt: existing.completedAt } : {}),
+          };
+        }),
       ];
 
       const reviewState = {

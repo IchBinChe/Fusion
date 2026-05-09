@@ -179,6 +179,40 @@ interface ActivityLogRow {
   metadata: string | null;
 }
 
+function normalizeTaskReviewState(reviewState: Task["reviewState"] | undefined): Task["reviewState"] | undefined {
+  if (!reviewState) {
+    return undefined;
+  }
+
+  const itemsById = new Map(reviewState.items.map((item) => [item.id, item]));
+  const sourceMode = reviewState.source;
+  const normalizedAddressing = reviewState.addressing.map((record) => {
+    const item = itemsById.get(record.itemId);
+    const source = item?.source === "reviewer-agent" ? "reviewer-agent" : "pr-review";
+    const summary = item?.summary?.trim() || item?.body?.trim().slice(0, 160) || `Review item ${record.itemId}`;
+    const body = item?.body ?? summary;
+    return {
+      ...record,
+      snapshot: record.snapshot ?? {
+        itemId: record.itemId,
+        sourceMode,
+        source,
+        summary,
+        body,
+        authorLogin: item?.author?.login,
+        filePath: item?.path,
+        threadId: item?.threadId,
+        url: item?.htmlUrl,
+      },
+    };
+  });
+
+  return {
+    ...reviewState,
+    addressing: normalizedAddressing,
+  };
+}
+
 const TASK_ACTIVITY_LOG_ENTRY_LIMIT = 1_000;
 const TASK_ACTIVITY_LOG_OUTCOME_LIMIT = 4_000;
 const ARCHIVE_AGENT_LOG_SNAPSHOT_LIMIT = 25;
@@ -754,7 +788,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         return deduped.length > 0 ? deduped : undefined;
       })(),
       review: fromJson<import("./types.js").TaskReview>(row.review) ?? undefined,
-      reviewState: fromJson<import("./types.js").TaskReviewState>(row.reviewState) ?? undefined,
+      reviewState: normalizeTaskReviewState(fromJson<import("./types.js").TaskReviewState>(row.reviewState) ?? undefined),
       workflowStepResults: (() => { const w = fromJson<import("./types.js").WorkflowStepResult[]>(row.workflowStepResults); return w && w.length > 0 ? w : undefined; })(),
       prInfo: fromJson<import("./types.js").PrInfo>(row.prInfo),
       issueInfo: fromJson<import("./types.js").IssueInfo>(row.issueInfo),
@@ -3516,7 +3550,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (updates.reviewState === null) {
         task.reviewState = undefined;
       } else if (updates.reviewState !== undefined) {
-        task.reviewState = updates.reviewState;
+        task.reviewState = normalizeTaskReviewState(updates.reviewState);
       }
       if (updates.workflowStepResults === null) {
         task.workflowStepResults = undefined;

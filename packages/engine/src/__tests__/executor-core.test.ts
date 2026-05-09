@@ -151,6 +151,58 @@ describe("buildExecutionPrompt", () => {
   });
 });
 
+describe("TaskExecutor review addressing transitions", () => {
+  beforeEach(() => {
+    resetExecutorMocks();
+  });
+
+  it("moves queued addressing records to in-progress", async () => {
+    const store = createMockStore();
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      column: "in-progress",
+      status: null,
+      reviewState: {
+        source: "pull-request",
+        items: [],
+        addressing: [{ itemId: "ri-1", status: "queued", selectedAt: new Date().toISOString() }],
+      },
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await (executor as any).transitionReviewAddressing("FN-001", ["queued"], "in-progress");
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+      reviewState: expect.objectContaining({
+        addressing: [expect.objectContaining({ status: "in-progress", startedAt: expect.any(String) })],
+      }),
+    });
+  });
+
+  it("marks in-progress addressing records as failed", async () => {
+    const store = createMockStore();
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      column: "in-review",
+      status: "failed",
+      reviewState: {
+        source: "reviewer-agent",
+        items: [],
+        addressing: [{ itemId: "ri-1", status: "in-progress", selectedAt: new Date().toISOString() }],
+      },
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await (executor as any).transitionReviewAddressing("FN-001", ["in-progress"], "failed");
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+      reviewState: expect.objectContaining({
+        addressing: [expect.objectContaining({ status: "failed", completedAt: expect.any(String) })],
+      }),
+    });
+  });
+});
+
 describe("TaskExecutor action gate context", () => {
   it("pauses task and agent for approval and marks completion", async () => {
     const store = createMockStore();

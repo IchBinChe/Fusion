@@ -557,6 +557,46 @@ describe("wrapToolsWithPermanentAgentGating", () => {
     expect(createApprovalRequest).not.toHaveBeenCalled();
     expect(findPendingApprovalRequest).not.toHaveBeenCalled();
   });
+
+  it.each<[
+    "locked-down" | "approval-required",
+    Record<string, "block" | "require-approval">
+  ]>([
+    ["locked-down", {
+      git_write: "block",
+      file_write_delete: "block",
+      command_execution: "block",
+      network_api: "block",
+      task_agent_mutation: "block",
+    }],
+    ["approval-required", {
+      git_write: "require-approval",
+      file_write_delete: "require-approval",
+      command_execution: "require-approval",
+      network_api: "require-approval",
+      task_agent_mutation: "require-approval",
+    }],
+  ])("bypasses wrapping for fn_send_message under %s policy", async (presetId, rules) => {
+    const args = { message: "ping" };
+    const result = { ok: true, messageId: "msg-1" };
+    const execute = vi.fn().mockResolvedValue(result);
+    const tool = { name: "fn_send_message", label: "Send Message", description: "", parameters: {}, execute };
+    const createApprovalRequest = vi.fn();
+    const findPendingApprovalRequest = vi.fn();
+    const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
+    const wrapped = wrapToolsWithPermanentAgentGating([tool as any], {
+      permissionPolicy: { presetId, rules },
+      createApprovalRequest,
+      findPendingApprovalRequest,
+    });
+
+    expect(wrapped[0]).toBe(tool);
+    await expect((wrapped[0] as any).execute("t1", args)).resolves.toEqual(result);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith("t1", args);
+    expect(createApprovalRequest).not.toHaveBeenCalled();
+    expect(findPendingApprovalRequest).not.toHaveBeenCalled();
+  });
 });
 
 describe("wrapToolsWithActionGate", () => {
@@ -724,6 +764,39 @@ describe("wrapToolsWithActionGate", () => {
     expect(wrapped[0]).toBe(tool);
     await expect((wrapped[0] as any).execute("t1", {})).resolves.toEqual({ ok: true, terminal: true });
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(createApprovalRequest).not.toHaveBeenCalled();
+    expect(pauseForApproval).not.toHaveBeenCalled();
+  });
+
+  it.each<[
+    "locked-down" | "approval-required",
+    typeof lockedDownRules | typeof approvalRules
+  ]>([
+    ["locked-down", lockedDownRules],
+    ["approval-required", approvalRules],
+  ])("bypasses wrapping for fn_send_message under %s policy", async (presetId, rules) => {
+    const args = { message: "ping" };
+    const result = { ok: true, messageId: "msg-2" };
+    const execute = vi.fn().mockResolvedValue(result);
+    const tool = { name: "fn_send_message", label: "Send Message", description: "", parameters: {}, execute };
+    const createApprovalRequest = vi.fn();
+    const pauseForApproval = vi.fn();
+    const { wrapToolsWithActionGate } = await import("../pi.js");
+    const wrapped = wrapToolsWithActionGate([tool as any], {
+      agentId: "agent-1",
+      agentName: "Agent",
+      isEphemeral: false,
+      taskId: "FN-1",
+      permissionPolicy: { presetId, rules },
+      createApprovalRequest,
+      findApprovalByDedupeKey: vi.fn(),
+      pauseForApproval,
+    });
+
+    expect(wrapped[0]).toBe(tool);
+    await expect((wrapped[0] as any).execute("t1", args)).resolves.toEqual(result);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith("t1", args);
     expect(createApprovalRequest).not.toHaveBeenCalled();
     expect(pauseForApproval).not.toHaveBeenCalled();
   });

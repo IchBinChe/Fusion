@@ -1049,7 +1049,10 @@ function buildPermanentAgentApprovalDedupeKey(input: {
   ].join("|");
 }
 
-const HEARTBEAT_TERMINAL_TOOL_NAME = "fn_heartbeat_done";
+const GATE_BYPASS_TOOL_NAMES = new Set([
+  "fn_heartbeat_done",
+  "fn_send_message",
+]);
 
 export function wrapToolsWithBoundary(
   tools: ToolDefinition[],
@@ -1116,9 +1119,9 @@ export function wrapToolsWithPermanentAgentGating(
   }
 
   return tools.map((tool) => {
-    // FN-3852: heartbeat terminal completion must never be approval-gated,
-    // otherwise permanent-agent runs can deadlock in an open session.
-    if (tool.name === HEARTBEAT_TERMINAL_TOOL_NAME) {
+    // FN-3852/FN-3855: terminal completion and send-message coordination
+    // primitives must never be approval-gated, or open sessions can deadlock.
+    if (GATE_BYPASS_TOOL_NAMES.has(tool.name)) {
       return tool;
     }
 
@@ -1186,9 +1189,9 @@ export function wrapToolsWithActionGate(
   }
 
   return tools.map((tool) => {
-    // FN-3852: heartbeat terminal completion must never be approval-gated,
-    // otherwise permanent-agent runs can deadlock in an open session.
-    if (tool.name === HEARTBEAT_TERMINAL_TOOL_NAME) {
+    // FN-3852/FN-3855: terminal completion and send-message coordination
+    // primitives must never be approval-gated, or open sessions can deadlock.
+    if (GATE_BYPASS_TOOL_NAMES.has(tool.name)) {
       return tool;
     }
 

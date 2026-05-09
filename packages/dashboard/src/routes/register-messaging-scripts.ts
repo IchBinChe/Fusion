@@ -1,6 +1,6 @@
 import type { Request } from "express";
 import { resolve } from "node:path";
-import { DASHBOARD_USER_ID, MessageStore, type MessageType, type ParticipantType, validateMessageMetadata } from "@fusion/core";
+import { ApprovalRequestStore, DASHBOARD_USER_ID, MessageStore, type MessageType, type ParticipantType, validateMessageMetadata } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import { getTerminalService } from "../terminal-service.js";
 import type { ApiRoutesContext } from "./types.js";
@@ -262,8 +262,16 @@ export function registerMessagingScriptRoutes(ctx: ApiRoutesContext): void {
   router.get("/messages/unread-count", async (req, res) => {
     try {
       const msgStore = await getMessageStore(req);
+      const { store: scopedStore } = await getProjectContext(req);
       const mailbox = await msgStore.getMailbox(DASHBOARD_USER_ID, "user");
-      res.json({ unreadCount: mailbox.unreadCount });
+      let pendingApprovalCount = 0;
+      try {
+        const approvalStore = new ApprovalRequestStore(scopedStore.getDatabase());
+        pendingApprovalCount = approvalStore.list({ status: "pending", limit: Number.MAX_SAFE_INTEGER, offset: 0 }).length;
+      } catch {
+        pendingApprovalCount = 0;
+      }
+      res.json({ unreadCount: mailbox.unreadCount, pendingApprovalCount });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

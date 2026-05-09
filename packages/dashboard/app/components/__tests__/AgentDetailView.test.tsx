@@ -349,6 +349,22 @@ describe("AgentDetailView", () => {
     expect(screen.getByText(/Loading agent/i)).toBeInTheDocument();
   });
 
+  it("renders pending approval badge when agent has pending approvals", async () => {
+    mockFetchAgent.mockResolvedValueOnce(createMockAgent({ pendingApprovalCount: 3 }));
+
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("3 pending approvals")).toBeInTheDocument();
+    });
+  });
+
   it("renders inline mode as a region without overlay or close button", async () => {
     render(
       <AgentDetailView

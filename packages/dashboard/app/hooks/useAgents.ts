@@ -75,6 +75,9 @@ export function useAgents(projectId?: string, options?: UseAgentsOptions) {
         "agent:updated": refresh,
         "agent:deleted": refresh,
         "agent:stateChanged": refresh,
+        "approval:requested": refresh,
+        "approval:updated": refresh,
+        "approval:decided": refresh,
       },
     });
   }, [projectId, loadAgents, loadStats]);

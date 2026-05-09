@@ -168,6 +168,16 @@ describe("Header", () => {
       expect(screen.getByLabelText("Unread chat response")).toBeInTheDocument();
     });
 
+    it("shows mailbox pending-approval indicator when mailbox is not active", () => {
+      renderHeader({ onChangeView: noop, view: "board", mailboxPendingApprovalCount: 2 });
+      expect(screen.getByLabelText("Pending approvals")).toBeInTheDocument();
+    });
+
+    it("hides mailbox pending-approval indicator when mailbox view is active", () => {
+      renderHeader({ onChangeView: noop, view: "mailbox", mailboxPendingApprovalCount: 2 });
+      expect(screen.queryByLabelText("Pending approvals")).toBeNull();
+    });
+
     it("hides chat unread indicator when chat view is active", () => {
       renderHeader({ onChangeView: noop, view: "chat", chatHasUnreadResponse: true });
       expect(screen.queryByLabelText("Unread chat response")).toBeNull();

@@ -574,6 +574,13 @@
   justify-content: flex-end;
 }
 
+.agent-approval-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-warning);
+}
+
 .agent-badges .badge-skill {
   min-width: 0;
   max-width: min(100%, calc(var(--space-2xl) * 6));

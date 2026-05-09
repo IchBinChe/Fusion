@@ -122,6 +122,7 @@ Mailbox view shows inbox/outbox communication threads and unread state.
 - clicking a message in the Mail tab opens the task detail pane with full message content and conversation context
 - reply rows in the mailbox modal can expand inline to show the replied-to message context for easier thread reading
 - mailbox now includes an **Approvals** tab with pending and history filters (`approved` / `denied` / `completed`), approval detail context, and inline approve/deny actions for pending requests
+- mailbox entry points now show pending-approval indicators: Header mailbox toggle dot, Header overflow mailbox badge, Mobile mailbox tab dot, and Mobile More → Mailbox badge
 - approval lifecycle SSE events (`approval:requested`, `approval:updated`, `approval:decided`) trigger mailbox approvals refresh without manual reload
 - Visible message history/threading is driven by explicit `message.metadata.replyTo.messageId` links
 - Separate top-level messages from the same sender remain independent in the inbox and detail pane
@@ -232,6 +233,12 @@ Memory view provides a multi-file editor for project and daily memory files.
 ![Memory view](./screenshots/memory-view.png)
 
 ## Agents View
+
+Agent list and detail surfaces now surface pending approvals per agent:
+- Agents list/board cards show a warning-colored pending-approval badge when `pendingApprovalCount > 0`
+- Agent detail summary shows a matching pending-approval badge for the selected agent
+- Approval SSE events refresh these indicators live (no page reload required)
+
 
 Agents view is the control surface for runtime agents and team structure.
 

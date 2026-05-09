@@ -99,6 +99,8 @@ Approval pause/resume lifecycle (FN-3548):
 - HTTP decision endpoint resumes best-effort: `POST /api/approvals/:id/decision` with `{ decision: "approve" | "deny", comment? }` unpauses matching task/agent when they are paused for `awaiting-approval`.
 - Approval API surface: `GET /api/approvals` (supports status/limit/offset and returns `{ requests, total, pendingCount }`), `GET /api/approvals/:id` (includes request context + audit/history), `POST /api/approvals/:id/decision`.
 - Dashboard mailbox is the primary v1 resolution surface: approvals appear in the mailbox **Approvals** tab with pending/history views and inline approve/deny controls for pending requests.
+- Dashboard mailbox entry points (Header/Mobile nav) display pending-approval indicators so waiting approvals are visible before opening Mailbox.
+- Agents list/board cards and Agent Detail summary display per-agent `pendingApprovalCount` badges to show which agents are blocked by waiting approvals.
 
 Default and legacy fallback behavior:
 

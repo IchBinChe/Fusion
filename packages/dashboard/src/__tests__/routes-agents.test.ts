@@ -3473,6 +3473,7 @@ describe("Messaging Routes", () => {
 
     const unread = await GET(app, "/api/messages/unread-count");
     expect(unread.body.unreadCount).toBe(3);
+    expect(unread.body.pendingApprovalCount).toBe(0);
 
     const readAll = await REQUEST(app, "POST", "/api/messages/read-all");
     expect(readAll.status).toBe(200);
@@ -3526,6 +3527,42 @@ describe("Messaging Routes", () => {
     expect(unread).toBeDefined();
     expect(res.status).toBe(200);
     expect(res.body.unreadCount).toBe(1);
+    expect(res.body.pendingApprovalCount).toBe(0);
+  });
+
+  it("GET /api/messages/unread-count includes pendingApprovalCount and excludes resolved approvals", async () => {
+    const { ApprovalRequestStore } = await import("@fusion/core");
+    const approvalStore = new ApprovalRequestStore(store.getDatabase());
+
+    const pending = approvalStore.create({
+      requester: { actorId: "agent-1", actorType: "agent", actorName: "Agent One" },
+      targetAction: {
+        category: "command_execution",
+        action: "npm test",
+        summary: "Run tests",
+        resourceType: "command",
+        resourceId: "npm test",
+      },
+    });
+    const resolved = approvalStore.create({
+      requester: { actorId: "agent-2", actorType: "agent", actorName: "Agent Two" },
+      targetAction: {
+        category: "command_execution",
+        action: "npm run lint",
+        summary: "Run lint",
+        resourceType: "command",
+        resourceId: "npm run lint",
+      },
+    });
+    approvalStore.decide(resolved.id, "denied", {
+      actor: { actorId: "user", actorType: "user", actorName: "User" },
+    });
+
+    const res = await GET(app, "/api/messages/unread-count");
+
+    expect(pending).toBeDefined();
+    expect(res.status).toBe(200);
+    expect(res.body.pendingApprovalCount).toBe(1);
   });
 
   it("POST /api/messages validates required fields and creates messages", async () => {
@@ -3761,11 +3798,14 @@ describe("Agent stale task-link sanitization", () => {
   let tempDir: string;
   let fusionDir: string;
   let agentId: string;
+  let routeDb: Database;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-routes-agent-stale-"));
     fusionDir = join(tempDir, ".fusion");
     mkdirSync(fusionDir, { recursive: true });
+    routeDb = new Database(fusionDir, { inMemory: false });
+    routeDb.init();
 
     const { AgentStore } = await import("@fusion/core");
     const agentStore = new AgentStore({ rootDir: fusionDir });
@@ -3778,18 +3818,102 @@ describe("Agent stale task-link sanitization", () => {
   });
 
   afterEach(() => {
+    routeDb.close();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
   function buildAgentApp() {
     const store = createMockStore({
       getFusionDir: vi.fn().mockReturnValue(fusionDir),
+      getDatabase: vi.fn().mockReturnValue(routeDb),
     } as any);
     const app = express();
     app.use(express.json());
     app.use("/api", createApiRoutes(store));
     return app;
   }
+
+  async function createPendingApproval(requesterId: string) {
+    const { ApprovalRequestStore } = await import("@fusion/core");
+    const approvalStore = new ApprovalRequestStore(routeDb);
+    approvalStore.create({
+      requester: { actorId: requesterId, actorType: "agent", actorName: "Executor" },
+      targetAction: {
+        category: "command_execution",
+        action: "npm test",
+        summary: "Run tests",
+        resourceType: "command",
+        resourceId: "npm test",
+      },
+    });
+    }
+
+  it("GET /api/agents returns pendingApprovalCount=0 when no pending approvals exist", async () => {
+    const app = buildAgentApp();
+
+    const res = await GET(app, "/api/agents");
+
+    expect(res.status).toBe(200);
+    const agents = Array.isArray(res.body) ? res.body : [res.body];
+    const testAgent = agents.find((a: { id: string }) => a.id === agentId);
+    expect(testAgent).toBeDefined();
+    expect(testAgent.pendingApprovalCount).toBe(0);
+  });
+
+  it("GET /api/agents and /api/agents/:id include pendingApprovalCount for pending approvals", async () => {
+    const app = buildAgentApp();
+    await createPendingApproval(agentId);
+    await createPendingApproval(agentId);
+
+    const listRes = await GET(app, "/api/agents");
+    expect(listRes.status).toBe(200);
+    const agents = Array.isArray(listRes.body) ? listRes.body : [listRes.body];
+    const listed = agents.find((a: { id: string }) => a.id === agentId);
+    expect(listed).toBeDefined();
+    expect(listed.pendingApprovalCount).toBe(2);
+
+    const detailRes = await GET(app, `/api/agents/${agentId}`);
+    expect(detailRes.status).toBe(200);
+    expect(detailRes.body.pendingApprovalCount).toBe(2);
+  });
+
+  it("GET /api/agents pendingApprovalCount excludes approvals that are no longer pending", async () => {
+    const app = buildAgentApp();
+
+    const { ApprovalRequestStore } = await import("@fusion/core");
+    const approvalStore = new ApprovalRequestStore(routeDb);
+    const request = approvalStore.create({
+      requester: { actorId: agentId, actorType: "agent", actorName: "Executor" },
+      targetAction: {
+        category: "command_execution",
+        action: "npm test",
+        summary: "Run tests",
+        resourceType: "command",
+        resourceId: "npm test",
+      },
+    });
+    approvalStore.decide(request.id, "approved", {
+      actor: { actorId: "user", actorType: "user", actorName: "User" },
+    });
+    const res = await GET(app, "/api/agents");
+    expect(res.status).toBe(200);
+    const agents = Array.isArray(res.body) ? res.body : [res.body];
+    const listed = agents.find((a: { id: string }) => a.id === agentId);
+    expect(listed).toBeDefined();
+    expect(listed.pendingApprovalCount).toBe(0);
+  });
+
+  it("GET /api/agents pendingApprovalCount ignores approvals for missing agents", async () => {
+    const app = buildAgentApp();
+    await createPendingApproval("agent-missing");
+
+    const res = await GET(app, "/api/agents");
+    expect(res.status).toBe(200);
+    const agents = Array.isArray(res.body) ? res.body : [res.body];
+    const listed = agents.find((a: { id: string }) => a.id === agentId);
+    expect(listed).toBeDefined();
+    expect(listed.pendingApprovalCount).toBe(0);
+  });
 
   it("GET /api/agents omits taskId when linked task is done", async () => {
     const doneTaskId = "FN-DONE";

@@ -36,6 +36,7 @@ const createDefaultProps = () => ({
   onOpenMailbox: vi.fn(),
   onOpenNodes: vi.fn(),
   mailboxUnreadCount: 0,
+  mailboxPendingApprovalCount: 0,
   onOpenGitManager: vi.fn(),
   onOpenWorkflowSteps: vi.fn(),
   onOpenSchedules: vi.fn(),
@@ -118,6 +119,16 @@ describe("MobileNavBar", () => {
     fireEvent.click(screen.getByTestId("mobile-more-item-todos"));
 
     expect(onOpenTodos).toHaveBeenCalled();
+  });
+
+  it("shows mailbox pending-approval indicator when mailbox tab is inactive", () => {
+    render(<MobileNavBar {...createDefaultProps()} mailboxPendingApprovalCount={2} />);
+    expect(screen.getByLabelText("Pending approvals")).toBeInTheDocument();
+  });
+
+  it("hides mailbox pending-approval indicator when mailbox tab is active", () => {
+    render(<MobileNavBar {...createDefaultProps()} mailboxPendingApprovalCount={2} view="mailbox" />);
+    expect(screen.queryByLabelText("Pending approvals")).toBeNull();
   });
 
   it("keeps dependency graph in More and routes to canonical graph task view", () => {

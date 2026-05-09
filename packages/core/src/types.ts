@@ -4175,6 +4175,8 @@ export interface Agent {
   totalOutputTokens?: number;
   /** Last error message */
   lastError?: string;
+  /** Number of currently pending approvals requested by this agent. */
+  pendingApprovalCount?: number;
   /** Path to a markdown file containing custom instructions (resolved relative to project root).
    *  Must end in `.md`, no `..` traversal. Max 500 chars. */
   instructionsPath?: string;

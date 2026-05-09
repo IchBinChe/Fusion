@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Request, Response } from "express";
 import type { Agent, AgentCapability, AgentUpdateInput, TaskStore } from "@fusion/core";
 import {
+  ApprovalRequestStore,
   getDefaultHeartbeatProcedurePath,
   isAgentPermissionPolicyPresetId,
   normalizeAgentPermissionPolicyFromPreset,
@@ -40,6 +41,29 @@ function isCompatibleDefaultHeartbeatPath(path: string | undefined, agent: Agent
   return new RegExp(`^\\.fusion/agents/[^/]+-${safeId}/HEARTBEAT\\.md$`).test(trimmed);
 }
 
+function withPendingApprovalCounts<T extends Agent>(agents: T[], scopedStore: TaskStore): Array<T & { pendingApprovalCount: number }> {
+  try {
+    const approvalStore = new ApprovalRequestStore(scopedStore.getDatabase());
+    const pendingRequests = approvalStore.list({ status: "pending", limit: Number.MAX_SAFE_INTEGER, offset: 0 });
+    const counts = new Map<string, number>();
+
+    for (const request of pendingRequests) {
+      const agentId = request.requester.actorId;
+      counts.set(agentId, (counts.get(agentId) ?? 0) + 1);
+    }
+
+    return agents.map((agent) => ({
+      ...agent,
+      pendingApprovalCount: counts.get(agent.id) ?? 0,
+    }));
+  } catch {
+    return agents.map((agent) => ({
+      ...agent,
+      pendingApprovalCount: 0,
+    }));
+  }
+}
+
 export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: AgentCoreRouteDeps): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const { sanitizeAgentTaskLinks, validateAgentInstructionsPayload } = deps;
@@ -69,7 +93,7 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
 
       const agents = await agentStore.listAgents(filter as { state?: "idle" | "active" | "running" | "paused" | "error"; role?: AgentCapability; includeEphemeral?: boolean });
       const sanitizedAgents = await sanitizeAgentTaskLinks(agents, scopedStore);
-      res.json(sanitizedAgents);
+      res.json(withPendingApprovalCounts(sanitizedAgents, scopedStore));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -345,7 +369,8 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
       }
       // Sanitize taskId for single-agent responses (omit if linked task is terminal)
       const [sanitizedAgent] = await sanitizeAgentTaskLinks([agent], scopedStore);
-      res.json(sanitizedAgent);
+      const [agentWithPendingApprovals] = withPendingApprovalCounts([sanitizedAgent], scopedStore);
+      res.json(agentWithPendingApprovals);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

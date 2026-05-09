@@ -383,12 +383,14 @@ function AppInner() {
 
   // App-level mailbox/chat unread state (used for header/mobile nav badges)
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
+  const [mailboxPendingApprovalCount, setMailboxPendingApprovalCount] = useState(0);
   const [chatHasUnreadResponse, setChatHasUnreadResponse] = useState(false);
 
   const refreshMailboxUnreadCount = useCallback(() => {
     fetchUnreadCount(currentProject?.id)
-      .then((data: { unreadCount: number }) => {
+      .then((data: { unreadCount: number; pendingApprovalCount?: number }) => {
         setMailboxUnreadCount(data.unreadCount);
+        setMailboxPendingApprovalCount(data.pendingApprovalCount ?? 0);
       })
       .catch((err) => {
         console.warn("[App] Failed to fetch mailbox unread count:", err);
@@ -411,6 +413,9 @@ function AppInner() {
         "message:received": refreshMailboxUnreadCount,
         "message:read": refreshMailboxUnreadCount,
         "message:deleted": refreshMailboxUnreadCount,
+        "approval:requested": refreshMailboxUnreadCount,
+        "approval:updated": refreshMailboxUnreadCount,
+        "approval:decided": refreshMailboxUnreadCount,
       },
     });
   }, [currentProject?.id, refreshMailboxUnreadCount]);
@@ -1336,6 +1341,7 @@ function AppInner() {
         onOpenSystemStats={openSystemStatsWithNav}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
         mailboxUnreadCount={mailboxUnreadCount}
+        mailboxPendingApprovalCount={mailboxPendingApprovalCount}
         chatHasUnreadResponse={chatHasUnreadResponse}
         onOpenSchedules={openSchedulesWithNav}
         onOpenGitManager={openGitManagerWithNav}
@@ -1470,6 +1476,7 @@ function AppInner() {
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
         onOpenNodes={handleOpenNodesWithNav}
         mailboxUnreadCount={mailboxUnreadCount}
+        mailboxPendingApprovalCount={mailboxPendingApprovalCount}
         chatHasUnreadResponse={chatHasUnreadResponse}
         onOpenGitManager={openGitManagerWithNav}
         onOpenWorkflowSteps={openWorkflowStepsWithNav}

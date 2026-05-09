@@ -355,24 +355,37 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
     const contextVersionAtStart = contextVersionRef.current;
 
+    const refreshAgentForApprovalEvent = (event: MessageEvent) => {
+      if (contextVersionRef.current !== contextVersionAtStart) return;
+      try {
+        const payload: unknown = JSON.parse(event.data);
+        if (!payload || typeof payload !== "object") return;
+        const approvalAgentId = (payload as { agentId?: unknown }).agentId;
+        if (approvalAgentId !== agentId) return;
+        void loadAgent();
+      } catch {
+        // Ignore malformed events
+      }
+    };
+
     return subscribeSse(`/api/events${query}`, {
       events: {
         "agent:updated": (event) => {
           if (contextVersionRef.current !== contextVersionAtStart) return;
-
           try {
             const payload: unknown = JSON.parse(event.data);
             if (!payload || typeof payload !== "object") return;
-
             const updatedId = (payload as { id?: unknown }).id;
             if (updatedId !== agentId) return;
             if (hasConfigChangesRef.current) return;
-
             void loadAgent();
           } catch {
             // Ignore malformed events
           }
         },
+        "approval:requested": refreshAgentForApprovalEvent,
+        "approval:updated": refreshAgentForApprovalEvent,
+        "approval:decided": refreshAgentForApprovalEvent,
       },
     });
   }, [agentId, projectId, loadAgent]);
@@ -962,6 +975,12 @@ function DashboardTab({
         </div>
         <div className="dashboard-summary-hero__meta">
           <span className="dashboard-summary-hero__health" title={health.reason ?? health.label}>{health.icon} {health.label}</span>
+          {(agent.pendingApprovalCount ?? 0) > 0 ? (
+            <span className="badge agent-detail-approval-badge" title="Pending approvals">
+              <span className="status-dot status-dot--pending" />
+              {agent.pendingApprovalCount} pending approvals
+            </span>
+          ) : null}
           <span>Role: {agent.role}</span>
           <span>
             <span className="dashboard-summary-label">{runtimeHint ? "Runtime" : "Model"}</span>

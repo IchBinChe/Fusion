@@ -53,6 +53,7 @@ export interface MobileNavBarProps {
   onOpenSystemStats?: () => void;
   onOpenMailbox?: () => void;
   mailboxUnreadCount?: number;
+  mailboxPendingApprovalCount?: number;
   chatHasUnreadResponse?: boolean;
   onOpenGitManager?: () => void;
   onOpenWorkflowSteps?: () => void;
@@ -117,6 +118,7 @@ export function MobileNavBar({
   onOpenSystemStats,
   onOpenMailbox,
   mailboxUnreadCount = 0,
+  mailboxPendingApprovalCount = 0,
   chatHasUnreadResponse = false,
   onOpenGitManager,
   onOpenWorkflowSteps,
@@ -311,7 +313,12 @@ export function MobileNavBar({
           aria-selected={view === "mailbox"}
           onClick={() => onChangeView("mailbox")}
         >
-          <Mail />
+          <span className="mobile-nav-tab-icon-wrapper">
+            <Mail />
+            {mailboxPendingApprovalCount > 0 && view !== "mailbox" && (
+              <span className="status-dot status-dot--pending mobile-nav-chat-unread-dot" aria-label="Pending approvals" />
+            )}
+          </span>
           <span className="mobile-nav-tab-label">Mailbox</span>
           {mailboxUnreadCount > 0 && (
             <span className="mobile-nav-tab-badge">{formatCount(mailboxUnreadCount)}</span>
@@ -391,6 +398,9 @@ export function MobileNavBar({
               <span>Mailbox</span>
               {mailboxUnreadCount > 0 && (
                 <span className="mobile-more-item-badge mobile-more-item-badge--unread">{formatCount(mailboxUnreadCount)}</span>
+              )}
+              {mailboxPendingApprovalCount > 0 && (
+                <span className="mobile-more-item-badge">{formatCount(mailboxPendingApprovalCount)}</span>
               )}
             </button>
 

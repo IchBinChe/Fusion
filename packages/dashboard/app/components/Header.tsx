@@ -184,6 +184,8 @@ export interface HeaderProps {
   onOpenMailbox?: () => void;
   /** Unread message count for badge display */
   mailboxUnreadCount?: number;
+  /** Pending approval count for mailbox indicator */
+  mailboxPendingApprovalCount?: number;
   /** Whether chat has an unread assistant response */
   chatHasUnreadResponse?: boolean;
   onOpenSchedules?: () => void;
@@ -253,6 +255,7 @@ export function Header({
   onOpenSystemStats,
   onOpenMailbox,
   mailboxUnreadCount = 0,
+  mailboxPendingApprovalCount = 0,
   chatHasUnreadResponse = false,
   onOpenSchedules,
   onOpenGitManager,
@@ -1148,6 +1151,9 @@ export function Header({
               aria-pressed={view === "mailbox"}
             >
               <Mail size={16} />
+              {mailboxPendingApprovalCount > 0 && view !== "mailbox" && (
+                <span className="status-dot status-dot--pending header-chat-unread-dot" aria-label="Pending approvals" />
+              )}
             </button>
             {pluginDashboardViews
               .filter((entry) => entry.view.placement === "primary")
@@ -1834,6 +1840,9 @@ export function Header({
               >
                 <Mail size={16} />
                 <span>Mailbox{mailboxUnreadCount > 0 ? ` (${mailboxUnreadCount})` : ""}</span>
+                {mailboxPendingApprovalCount > 0 && (
+                  <span className="header-badge" data-testid="overflow-mailbox-approval-badge">{mailboxPendingApprovalCount}</span>
+                )}
               </button>
             )}
             {/* Usage - in overflow on mobile */}

@@ -304,6 +304,13 @@
   color: var(--text-muted);
 }
 
+.agent-detail-approval-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-warning);
+}
+
 .dashboard-summary-skills {
   display: inline-flex;
   align-items: center;

@@ -1099,6 +1099,12 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                         <span className="agent-board-icon"><AgentAvatar agent={agent} size={20} /></span>
                         <span className="agent-board-badge badge text-secondary">{getRoleLabel(agent.role)}</span>
                         <span className={`agent-board-badge badge ${stateBadgeClass}`}>{agent.state}</span>
+                        {(agent.pendingApprovalCount ?? 0) > 0 ? (
+                          <span className="agent-board-badge badge agent-approval-badge" title="Pending approvals">
+                            <span className="status-dot status-dot--pending" />
+                            {agent.pendingApprovalCount}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="agent-board-name">{agent.name}</div>
                       <div className="agent-board-id">{agent.id}</div>
@@ -1213,6 +1219,12 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                       <span className="badge text-secondary">
                         {getRoleLabel(agent.role)}
                       </span>
+                      {(agent.pendingApprovalCount ?? 0) > 0 ? (
+                        <span className="badge agent-approval-badge" title="Pending approvals">
+                          <span className="status-dot status-dot--pending" />
+                          {agent.pendingApprovalCount}
+                        </span>
+                      ) : null}
                       {/* List view: up to 2 skill badges */}
                       {(() => {
                         const skills = getSkillBadges(agent);

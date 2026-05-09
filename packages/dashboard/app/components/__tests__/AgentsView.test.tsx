@@ -219,6 +219,20 @@ describe("AgentsView", () => {
       });
     });
 
+    it("shows pending approval badge when agent has pending approvals", async () => {
+      mockFetchAgents.mockResolvedValueOnce([
+        { ...mockAgents[0], id: "agent-pending", name: "Pending Agent", pendingApprovalCount: 2 },
+      ]);
+      mockFetchAgentStats.mockResolvedValueOnce({ total: 1, byState: {}, byRole: {} });
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByTitle("Pending approvals")).toBeInTheDocument();
+        expect(screen.getByText("2")).toBeInTheDocument();
+      });
+    });
+
     it("formats skill badge labels from SKILL.md paths", async () => {
       mockFetchAgents.mockResolvedValueOnce([
         {

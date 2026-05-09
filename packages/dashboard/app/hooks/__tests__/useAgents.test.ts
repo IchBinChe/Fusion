@@ -184,15 +184,15 @@ describe("useAgents", () => {
     mockFetchAgents.mockClear();
     mockFetchAgentStats.mockClear();
 
-    for (const event of ["agent:created", "agent:updated", "agent:deleted", "agent:stateChanged"]) {
+    for (const event of ["agent:created", "agent:updated", "agent:deleted", "agent:stateChanged", "approval:requested", "approval:updated", "approval:decided"]) {
       act(() => {
         es._emit(event);
       });
     }
 
     await waitFor(() => {
-      expect(mockFetchAgents).toHaveBeenCalledTimes(4);
-      expect(mockFetchAgentStats).toHaveBeenCalledTimes(4);
+      expect(mockFetchAgents).toHaveBeenCalledTimes(7);
+      expect(mockFetchAgentStats).toHaveBeenCalledTimes(7);
     });
   });
 

@@ -7571,6 +7571,7 @@ export interface OutboxResponse {
 /** Response shape for GET /messages/unread-count */
 export interface UnreadCountResponse {
   unreadCount: number;
+  pendingApprovalCount?: number;
 }
 
 /** Response shape for POST /messages/read-all */

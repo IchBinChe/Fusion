@@ -2733,11 +2733,31 @@ export async function commitOrAmendMergeWithFixes(
         `  diffStat(preAttemptHeadSha..branch)\n${diffStatSummary || "  <empty>"}`;
       mergerLog.warn(diagnostics);
 
+      // FN-3842 ordering: trailer short-circuit first (this task already on
+      // HEAD), then ancestor short-circuit (branch already reachable from
+      // integration target via a different commit path), then squash-restore.
       if (trailerOnHead) {
         mergerLog.log(
           `${taskId}: HEAD already carries Fusion-Task-Id trailer — treating in-merge fix finalize as no-op success`,
         );
         return { ok: true, reason: "head-task-trailer" };
+      }
+
+      let branchAlreadyOnIntegrationTarget = false;
+      try {
+        await execAsync(`git merge-base --is-ancestor ${branchTip} ${preAttemptHeadSha}`, {
+          cwd: rootDir,
+          encoding: "utf-8",
+        });
+        branchAlreadyOnIntegrationTarget = true;
+      } catch {
+        branchAlreadyOnIntegrationTarget = false;
+      }
+      if (branchAlreadyOnIntegrationTarget) {
+        mergerLog.log(
+          `${taskId}: branch tip ${branchTip} is already ancestor of integration target ${preAttemptHeadSha} — treating finalize as already-merged success`,
+        );
+        return { ok: true, reason: "branch-already-merged" };
       }
 
       // No commit and no staged content can still be recoverable when the

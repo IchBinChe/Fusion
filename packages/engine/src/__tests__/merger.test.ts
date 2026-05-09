@@ -143,6 +143,7 @@ import {
   summarizeVerificationOutput,
   inferDefaultTestCommand,
   resolveTaskDiffBaseRef,
+  commitOrAmendMergeWithFixes,
   MergeAbortedError,
   type ConflictCategory,
 } from "../merger.js";
@@ -7625,5 +7626,47 @@ describe("aiMergeTask — in-merge verification fix", () => {
     expect(fixAttempts[0][1]).toContain("attempt 1/3");
     expect(fixAttempts[2][1]).toContain("attempt 2/3");
     expect(fixAttempts[4][1]).toContain("attempt 3/3");
+  });
+});
+
+describe("commitOrAmendMergeWithFixes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns already-merged success when branch tip is ancestor of integration target and finalize has no staged content", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git diff --cached --name-only")) return "" as any;
+      if (cmdStr === "git diff --name-only") return "" as any;
+      if (cmdStr.includes("git status -z --porcelain")) return "" as any;
+      if (cmdStr === "git rev-parse HEAD") return "abc123" as any;
+      if (cmdStr === "git rev-parse fusion/fn-9999") return "def456" as any;
+      if (cmdStr === "git merge-base def456 abc123") return "abc123" as any;
+      if (cmdStr === "git diff --stat abc123..fusion/fn-9999") return "" as any;
+      if (cmdStr === "git ls-files --others --exclude-standard") return "" as any;
+      if (cmdStr.includes("git log -1 --pretty=%B HEAD")) return "commit message without trailer" as any;
+      if (cmdStr === "git merge-base --is-ancestor def456 abc123") return "" as any;
+      return "" as any;
+    });
+
+    const result = await commitOrAmendMergeWithFixes(
+      "/tmp/root",
+      "FN-9999",
+      "fusion/fn-9999",
+      "",
+      true,
+      "abc123",
+      "",
+      undefined,
+      DEFAULT_SETTINGS,
+      undefined,
+      null,
+      null,
+      new Set(),
+    );
+
+    expect(result).toEqual({ ok: true, reason: "branch-already-merged" });
+    expect(mockedExecSync.mock.calls.some((call) => String(call[0]) === "git merge-base --is-ancestor def456 abc123")).toBe(true);
   });
 });

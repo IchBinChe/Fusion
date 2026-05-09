@@ -113,7 +113,7 @@ Separation of concerns:
 These fields are managed by the engine and cannot be directly edited:
 
 - `id` — Auto-generated unique identifier
-- `state` — Agent lifecycle state (managed by engine)
+- `state` — Agent lifecycle state (managed by engine). Non-ephemeral agents default to `active` on creation; ephemeral/task-worker agents default to `idle`.
 - `taskId` — Current working task (managed by scheduler)
 - `totalInputTokens` / `totalOutputTokens` — Token usage totals (managed by engine)
 - `createdAt` / `updatedAt` / `lastHeartbeatAt` — Timestamps (managed by system)

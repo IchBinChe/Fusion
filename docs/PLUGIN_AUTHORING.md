@@ -460,6 +460,10 @@ const plugin: FusionPlugin = {
 Routes are mounted at `/api/plugins/{pluginId}/{path}`.
 Route handlers receive the same loader-built `PluginContext` used by hooks/tools, including real `taskStore`, plugin `settings`, `logger`, `emitEvent`, and engine-injected `createAiSession` (when available):
 
+- Example roadmap plugin route: `path: "/roadmaps"` in plugin `roadmap-planner` resolves to `/api/plugins/roadmap-planner/roadmaps`
+- Roadmap suggestion endpoints follow the same namespace (for example `/api/plugins/roadmap-planner/roadmaps/:roadmapId/suggestions/milestones`)
+- Do not document or depend on legacy host-owned `/api/roadmaps` routes unless your current source still ships them
+
 - Plugin ID: `fusion-plugin-notification`
 - Route path: `/status`
 - Full URL: `/api/plugins/fusion-plugin-notification/status`
@@ -582,7 +586,8 @@ The API only returns normalized surface names.
 Top-level views are a **sibling contribution type** to `uiSlots`.
 
 - `uiSlots` are embedded surfaces (task detail tab, header action, etc.)
-- `dashboardViews` are full-screen destinations in dashboard navigation
+- `dashboardViews` is the shipped top-level plugin field for full-screen dashboard destinations
+- Earlier planning language may say `views`; the implemented API in `FusionPlugin` is `dashboardViews`
 
 Register `dashboardViews` on the plugin definition:
 
@@ -636,6 +641,12 @@ registerPluginView(
 ```
 
 The host then renders plugin views via `PluginDashboardViewHost` using the composite ID.
+
+Bundled workspace plugin pattern:
+- Keep plugin package under `plugins/` (for example `plugins/fusion-plugin-roadmap`)
+- Export backend/plugin entry from `src/index.ts` and keep dashboard view exports in the plugin package (for example `./dashboard-view`)
+- Register the lazy dashboard component in host code (currently `packages/dashboard/app/plugins/registerBundledPluginViews.ts`)
+- CLI bundling inlines backend plugin code from workspace packages; dashboard view modules are imported by the dashboard build via the host registry
 
 Runtime host context contract:
 - Registered views receive a `context` object from the dashboard host (`PluginDashboardViewContext`).
@@ -873,6 +884,8 @@ type CreateAiSessionFactory = (
 The factory is dependency-injected by the engine at runtime. In test-only or core-only environments where the engine module is not loaded, `ctx.createAiSession` is `undefined`, so guard before calling it.
 
 ### Example: Using `ctx.createAiSession()`
+
+Use this context factory for plugin AI features (for example roadmap milestone/feature suggestion generation). Avoid direct `@fusion/engine` imports from plugin code; engine wiring is injected by the host through `PluginContext`.
 
 ```typescript
 hooks: {
@@ -1128,6 +1141,15 @@ Polls CI status for branches and provides custom API endpoints.
 
 - Demonstrates: Custom routes, periodic background work, route handlers, UI slot registration
 - Features: `onLoad`/`onUnload` lifecycle, `setInterval` polling, REST API, UI slots for task cards and task detail tabs
+
+### [Roadmap Planner Plugin](../../plugins/fusion-plugin-roadmap/)
+
+Standalone roadmap planning plugin extracted from dashboard host code.
+
+- Demonstrates: `hooks.onSchemaInit` for plugin-owned schema DDL (`ensureRoadmapSchema`)
+- Demonstrates: plugin-scoped route namespace under `/api/plugins/roadmap-planner/*`
+- Demonstrates: top-level navigation registration through `dashboardViews` (`viewId: "roadmaps"`) and host static view registration
+- Demonstrates: AI suggestion flows that consume `ctx.createAiSession` through plugin route handlers
 
 ### [Droid Runtime Plugin](../../plugins/fusion-plugin-droid-runtime/)
 

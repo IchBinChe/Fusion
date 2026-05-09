@@ -1727,7 +1727,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
         {chatScope === "direct" ? (
           <>
             {/* Search section */}
-            <div className="chat-sidebar-search-section">
+            <div className="chat-sidebar-search-container">
               <div className="chat-sidebar-search-wrapper">
                 <Search size={14} className="chat-sidebar-search-icon" />
                 <input

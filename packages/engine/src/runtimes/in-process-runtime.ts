@@ -118,6 +118,7 @@ export class InProcessRuntime
    * before `start()` via `setMergeEnqueuer`.
    */
   private mergeEnqueuer?: (taskId: string) => void;
+  private activeMergeTaskIdProvider?: () => string | null;
   /** Tracks whether startup recovery was intentionally deferred due to pause state. */
   private startupRecoveryDeferred = false;
   /** Prevent duplicate unpause recovery dispatches from racing each other. */
@@ -621,6 +622,7 @@ export class InProcessRuntime
         getPlanningTaskIds: () => this.triageProcessor?.getProcessingTaskIds() ?? new Set<string>(),
         evictStaleTriageProcessing: () => this.triageProcessor?.evictStaleProcessing() ?? new Set<string>(),
         enqueueMerge: this.mergeEnqueuer ? (taskId: string) => this.mergeEnqueuer?.(taskId) : undefined,
+        getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
       });
       this.selfHealingManager.start();
       this.stuckTaskDetector.start();
@@ -855,6 +857,10 @@ export class InProcessRuntime
    */
   setMergeEnqueuer(enqueueMerge: (taskId: string) => void): void {
     this.mergeEnqueuer = enqueueMerge;
+  }
+
+  setActiveMergeTaskIdProvider(getActiveMergeTaskId: () => string | null): void {
+    this.activeMergeTaskIdProvider = getActiveMergeTaskId;
   }
 
   /**

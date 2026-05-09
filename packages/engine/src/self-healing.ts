@@ -77,6 +77,16 @@ export interface SelfHealingOptions {
    * the polling sweep's enqueue to silently no-op).
    */
   enqueueMerge?: (taskId: string) => void;
+  /**
+   * Minimum age before a transient merge status is considered stale when no
+   * active merge session is associated with that task.
+   */
+  staleMergingStatusMinAgeMs?: number;
+  /**
+   * Returns the task ID actively merging in this engine process, if any.
+   * Used to avoid clearing a transient merge status mid-merge.
+   */
+  getActiveMergeTaskId?: () => string | null;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -108,6 +118,7 @@ const ORPHANED_WITH_WORKTREE_GRACE_MS = 300_000;
  */
 const MAX_TASK_DONE_RETRIES = 3;
 const MAX_AUTO_MERGE_RETRIES = 3;
+const DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS = 5 * 60_000;
 
 interface LandedTaskCommit {
   sha: string;
@@ -649,6 +660,7 @@ export class SelfHealingManager {
           { name: "recover-failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps() },
           { name: "recover-interrupted-merging", fn: () => this.recoverInterruptedMergingTasks() },
           { name: "recover-done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata() },
+          { name: "recover-stale-merging-status", fn: () => this.recoverStaleMergingStatus() },
           { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
           { name: "recover-merged-review", fn: () => this.recoverMergedReviewTasks() },
           { name: "recover-misclassified-failures", fn: () => this.recoverMisclassifiedFailures() },
@@ -829,6 +841,59 @@ export class SelfHealingManager {
   }
 
   /**
+   * Clear stale transient merge statuses when no active merger owns the task.
+   *
+   * @returns Number of tasks unblocked by clearing stale status
+   */
+  async recoverStaleMergingStatus(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return 0;
+
+      const minAgeMs = this.options.staleMergingStatusMinAgeMs ?? DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS;
+      if (!Number.isFinite(minAgeMs) || minAgeMs <= 0) return 0;
+
+      const now = Date.now();
+      const activeMergeTaskId = this.options.getActiveMergeTaskId?.() ?? null;
+      const tasks = await this.store.listTasks({ column: "in-review", slim: true });
+      const stale = tasks.filter((task) => {
+        if (task.column !== "in-review" || task.paused) return false;
+        if (!task.status || (task.status !== "merging" && task.status !== "merging-pr")) return false;
+        if (activeMergeTaskId && activeMergeTaskId === task.id) return false;
+
+        const updatedAtMs = task.updatedAt ? Date.parse(task.updatedAt) : Number.NaN;
+        if (!Number.isFinite(updatedAtMs)) return false;
+        return now - updatedAtMs >= minAgeMs;
+      });
+
+      if (stale.length === 0) return 0;
+
+      let recovered = 0;
+      for (const task of stale) {
+        const previousStatus = task.status;
+        try {
+          log.warn(`Clearing stale merge status for ${task.id}: ${previousStatus}`);
+          await this.store.updateTask(task.id, { status: null });
+          await this.store.logEntry(
+            task.id,
+            `Auto-recovered: cleared stale '${previousStatus}' status (no active merger)`,
+          );
+          recovered++;
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to clear stale merge status for ${task.id}: ${errorMessage}`);
+        }
+      }
+
+      return recovered;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Stale merging status recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  /**
    * Recover `in-review` tasks that are fully mergeable but never had
    * `mergeTask()` invoked.
    *
@@ -852,6 +917,10 @@ export class SelfHealingManager {
       const mergeable = tasks.filter((t) =>
         t.column === "in-review" &&
         !t.paused &&
+        // Exclude transient merge statuses. Active merges should be left alone;
+        // stale ones are handled by recoverStaleMergingStatus().
+        t.status !== "merging" &&
+        t.status !== "merging-pr" &&
         Boolean(t.worktree) &&
         t.mergeDetails?.mergeConfirmed !== true &&
         // Mirror ProjectEngine.canMergeTask retry gate. If retries are already

@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "pnpm dlx vitest run --silent=passed-only --reporter=dot"
+    "test": "vitest run --silent=passed-only --reporter=dot"
   },
   "dependencies": {
     "@fusion/core": "workspace:*",

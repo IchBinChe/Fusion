@@ -1857,6 +1857,98 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
+    it("clears stale merging statuses with no active merger", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        globalPause: false,
+        enginePaused: false,
+      });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-3829-stale",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          updatedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+          steps: [{ name: "Ship it", status: "done" }],
+          workflowStepResults: [],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverStaleMergingStatus();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-3829-stale", { status: null });
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-3829-stale",
+        expect.stringContaining("cleared stale 'merging' status"),
+      );
+
+      managerWithRecovery.stop();
+    });
+
+    it("keeps transient merge status when task is actively merging", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getActiveMergeTaskId: () => "FN-3829-active",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        globalPause: false,
+        enginePaused: false,
+      });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-3829-active",
+          column: "in-review",
+          paused: false,
+          status: "merging-pr",
+          updatedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+          steps: [{ name: "Ship it", status: "done" }],
+          workflowStepResults: [],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverStaleMergingStatus();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-3829-active", { status: null });
+
+      managerWithRecovery.stop();
+    });
+
+    it("keeps fresh transient merge status within the default age window", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        globalPause: false,
+        enginePaused: false,
+      });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-3829-fresh",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          updatedAt: new Date(Date.now() - 60_000).toISOString(),
+          steps: [{ name: "Ship it", status: "done" }],
+          workflowStepResults: [],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverStaleMergingStatus();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-3829-fresh", { status: null });
+
+      managerWithRecovery.stop();
+    });
+
     it("merges eligible in-review tasks that still have an unmerged worktree", async () => {
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
@@ -2033,6 +2125,46 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(0);
       expect(store.mergeTask).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
+    it("does not re-enqueue tasks already marked as merging", async () => {
+      const enqueueMerge = vi.fn();
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        enqueueMerge,
+      });
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        autoMerge: true,
+        globalPause: false,
+        enginePaused: false,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-3829-merging",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          error: null,
+          mergeRetries: 0,
+          worktree: "/tmp/test-project/.worktrees/fn-3829-merging",
+          steps: [{ name: "Ship it", status: "done" }],
+          workflowStepResults: [{ id: "ws-1", status: "passed", phase: "pre-merge" }],
+          mergeDetails: undefined,
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMergeableReviewTasks();
+
+      expect(result).toBe(0);
+      expect(enqueueMerge).not.toHaveBeenCalled();
+      expect(store.logEntry).not.toHaveBeenCalledWith(
+        "FN-3829-merging",
+        expect.stringContaining("re-enqueued for merge"),
+      );
 
       managerWithRecovery.stop();
     });
@@ -3299,6 +3431,7 @@ describe("maintenance cycle concurrency", () => {
     (vi.spyOn(manager as any, "recoverCompletedTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverStaleIncompleteReviewTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverInterruptedMergingTasks").mockResolvedValue(0) as any);
+    (vi.spyOn(manager as any, "recoverStaleMergingStatus").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverMergeableReviewTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverMergedReviewTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverMisclassifiedFailures").mockResolvedValue(0) as any);
@@ -3323,6 +3456,7 @@ describe("maintenance cycle concurrency", () => {
     (vi.spyOn(manager as any, "recoverCompletedTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverStaleIncompleteReviewTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverInterruptedMergingTasks").mockResolvedValue(0) as any);
+    (vi.spyOn(manager as any, "recoverStaleMergingStatus").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverMergeableReviewTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverMergedReviewTasks").mockResolvedValue(0) as any);
     (vi.spyOn(manager as any, "recoverMisclassifiedFailures").mockResolvedValue(0) as any);
@@ -3391,6 +3525,7 @@ describe("maintenance cycle concurrency", () => {
     makeSlow("recoverCompletedTasks");
     makeSlow("recoverStaleIncompleteReviewTasks");
     makeSlow("recoverInterruptedMergingTasks");
+    makeSlow("recoverStaleMergingStatus");
     makeSlow("recoverMergeableReviewTasks");
     makeSlow("recoverMergedReviewTasks");
     makeSlow("recoverMisclassifiedFailures");
@@ -3416,6 +3551,7 @@ describe("maintenance cycle concurrency", () => {
       "recoverCompletedTasks",
       "recoverStaleIncompleteReviewTasks",
       "recoverInterruptedMergingTasks",
+      "recoverStaleMergingStatus",
       "recoverMergeableReviewTasks",
       "recoverMergedReviewTasks",
       "recoverMisclassifiedFailures",

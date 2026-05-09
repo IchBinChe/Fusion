@@ -159,6 +159,10 @@
   color: var(--text-muted);
 }
 
+.chat-sidebar-search-container {
+  padding: var(--space-sm);
+}
+
 .chat-sidebar-search-wrapper {
   position: relative;
   display: flex;

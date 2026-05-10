@@ -205,6 +205,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `defaultPresetBySize` | `{ S?: string; M?: string; L?: string }` | `{}` | Mapping for `S`/`M`/`L` → preset ID. |
 | `autoResolveConflicts` | `boolean` | `true` | Enable automatic merge conflict resolution. |
 | `smartConflictResolution` | `boolean` | `true` | Alias/preferred flag for smart conflict handling. |
+| `mergerAutostashMaxAgeHours` | `number` | `24` | Maximum autostash age in hours before startup/periodic stale-stash sweep drops `fusion-merger-autostash:*` leftovers (minimum `1`). |
 | `strictScopeEnforcement` | `boolean` | `false` | Block merges on out-of-scope file changes. |
 | `buildRetryCount` | `number` | `0` | Build retry attempts during merge. |
 | `verificationFixRetries` | `number` | `2` | Auto-fix retry attempts when verification fails during merge. |

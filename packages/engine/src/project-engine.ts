@@ -21,7 +21,7 @@ import { NotificationService } from "./notification/index.js";
 import { GridlockDetector } from "./gridlock-detector.js";
 import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import type { RoutineRunner } from "./routine-runner.js";
-import { aiMergeTask } from "./merger.js";
+import { aiMergeTask, sweepStaleAutostashes } from "./merger.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
@@ -170,6 +170,7 @@ export class ProjectEngine {
   private activeMergeTaskId: string | null = null;
   private mergeAbortController: AbortController | null = null;
   private mergeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private autostashSweepTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Pending manual merge resolvers — keyed by taskId.
@@ -444,6 +445,10 @@ export class ProjectEngine {
     // 8. Start periodic merge retry sweep
     this.scheduleMergeRetry(store);
 
+    // 9. Startup + periodic stale autostash sweeps (independent of autoMerge)
+    void this.runStaleAutostashSweep(store, "startup");
+    this.scheduleStaleAutostashSweep(store);
+
     this.started = true;
     runtimeLog.log(`ProjectEngine started for ${this.config.projectId}`);
   }
@@ -466,6 +471,10 @@ export class ProjectEngine {
     if (this.mergeRetryTimer) {
       clearTimeout(this.mergeRetryTimer);
       this.mergeRetryTimer = null;
+    }
+    if (this.autostashSweepTimer) {
+      clearTimeout(this.autostashSweepTimer);
+      this.autostashSweepTimer = null;
     }
 
     // Abort active/pending merge work before tearing down sessions.
@@ -1918,6 +1927,44 @@ export class ProjectEngine {
         `Auto-merge startup sweep failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  private resolveAutostashMaxAgeMs(settings: Settings): number {
+    const hours = Math.max(1, Math.trunc(settings.mergerAutostashMaxAgeHours ?? 24));
+    return hours * 60 * 60 * 1000;
+  }
+
+  private async runStaleAutostashSweep(store: TaskStore, reason: "startup" | "periodic"): Promise<void> {
+    try {
+      const settings = await store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return;
+      const maxAgeMs = this.resolveAutostashMaxAgeMs(settings);
+      const result = await sweepStaleAutostashes(this.config.workingDirectory, {
+        maxAgeMs,
+        taskStore: store,
+      });
+      if (result.dropped > 0) {
+        runtimeLog.log(`${reason === "startup" ? "Startup" : "Periodic"} stale autostash sweep dropped ${result.dropped} stash(es)`);
+      }
+    } catch (err: unknown) {
+      runtimeLog.warn(`Stale autostash ${reason} sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private scheduleStaleAutostashSweep(store: TaskStore): void {
+    if (this.shuttingDown) return;
+    const schedule = async () => {
+      if (this.shuttingDown) return;
+      try {
+        await this.runStaleAutostashSweep(store, "periodic");
+      } finally {
+        if (!this.shuttingDown) {
+          this.autostashSweepTimer = setTimeout(() => void schedule(), 60 * 60 * 1000);
+        }
+      }
+    };
+
+    this.autostashSweepTimer = setTimeout(() => void schedule(), 60 * 60 * 1000);
   }
 
   private scheduleMergeRetry(store: TaskStore): void {

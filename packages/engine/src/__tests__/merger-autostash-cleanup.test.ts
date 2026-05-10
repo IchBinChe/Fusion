@@ -6,7 +6,7 @@ import { execSync } from "node:child_process";
 import type { TaskStore } from "@fusion/core";
 import { __test__ } from "../merger.js";
 
-const { sweepAutostashOrphans, parseAutostashTaskId } = __test__;
+const { sweepAutostashOrphans, parseAutostashTaskId, sweepStaleAutostashes, dropAutostashHandle } = __test__;
 
 function git(cwd: string, cmd: string): string {
   return execSync(cmd, { cwd, stdio: "pipe" }).toString("utf-8").trim();
@@ -62,6 +62,82 @@ describe("parseAutostashTaskId", () => {
     expect(parseAutostashTaskId("fusion-merger-autostash:FN-3485")).toBeNull();
     expect(parseAutostashTaskId("fusion-merger-autostash::123")).toBeNull();
     expect(parseAutostashTaskId("WIP on main: abcdef")).toBeNull();
+  });
+});
+
+describe("sweepStaleAutostashes", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "fn-autostash-stale-"));
+    initRepo(dir);
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("drops stale autostashes older than maxAgeMs", async () => {
+    const oldTs = Date.now() - 26 * 60 * 60 * 1000;
+    const staleLabel = `fusion-merger-autostash:FN-5001:${oldTs}`;
+    writeFileSync(join(dir, "file.txt"), "stale\n");
+    git(dir, `git stash push -m ${JSON.stringify(staleLabel)} file.txt`);
+
+    const res = await sweepStaleAutostashes(dir, { maxAgeMs: 24 * 60 * 60 * 1000 });
+
+    expect(res.dropped).toBe(1);
+    expect(stashList(dir)).not.toContain("fusion-merger-autostash:FN-5001");
+  });
+
+  it("keeps recent autostashes within maxAgeMs", async () => {
+    const freshLabel = `fusion-merger-autostash:FN-5002:${Date.now()}`;
+    writeFileSync(join(dir, "file.txt"), "fresh\n");
+    git(dir, `git stash push -m ${JSON.stringify(freshLabel)} file.txt`);
+
+    const res = await sweepStaleAutostashes(dir, { maxAgeMs: 24 * 60 * 60 * 1000 });
+
+    expect(res.dropped).toBe(0);
+    expect(stashList(dir)).toContain("fusion-merger-autostash:FN-5002");
+  });
+
+  it("ignores non-fusion stash labels", async () => {
+    writeFileSync(join(dir, "file.txt"), "manual\n");
+    git(dir, "git stash push -m \"manual\" file.txt");
+
+    const res = await sweepStaleAutostashes(dir, { maxAgeMs: 1 });
+
+    expect(res.dropped).toBe(0);
+    expect(stashList(dir)).toContain("manual");
+  });
+
+  it("tolerates malformed autostash labels", async () => {
+    const malformed = "fusion-merger-autostash:FN-5003:not-a-timestamp";
+    writeFileSync(join(dir, "file.txt"), "bad\n");
+    git(dir, `git stash push -m ${JSON.stringify(malformed)} file.txt`);
+
+    await expect(sweepStaleAutostashes(dir, { maxAgeMs: 1 })).resolves.toEqual({ dropped: 0 });
+    expect(stashList(dir)).toContain("not-a-timestamp");
+  });
+
+  it("dropAutostashHandle drops primary and rescue shas", async () => {
+    const pLabel = `fusion-merger-autostash:FN-5004:${Date.now() - 1000}`;
+    writeFileSync(join(dir, "file.txt"), "primary\n");
+    git(dir, `git stash push -m ${JSON.stringify(pLabel)} file.txt`);
+    const primarySha = git(dir, 'git stash list --format="%H" -n 1');
+
+    const rLabel = `fusion-merger-autostash:FN-5004:race-rescue-0:${Date.now() - 500}`;
+    writeFileSync(join(dir, "file.txt"), "rescue\n");
+    git(dir, `git stash push -m ${JSON.stringify(rLabel)} file.txt`);
+    const rescueSha = git(dir, 'git stash list --format="%H" -n 1');
+
+    const result = await dropAutostashHandle(dir, "FN-5004", {
+      sha: primarySha,
+      label: pLabel,
+      rescueShas: [{ sha: rescueSha, label: rLabel }],
+    }, { keepIfLive: false });
+
+    expect(result.dropped).toBe(2);
+    expect(stashList(dir)).toBe("");
   });
 });
 

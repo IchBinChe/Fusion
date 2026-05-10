@@ -486,6 +486,61 @@ describe("aiMergeTask abort handling", () => {
   });
 });
 
+describe("aiMergeTask autostash cleanup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      },
+    } as any);
+  });
+
+  it("drops task autostash after successful merge restore", async () => {
+    const store = createMockStore({ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" });
+    const stashSha = "1111111111111111111111111111111111111111";
+    let dropped = false;
+
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes('git stash list --format="%H %gd %s"')) {
+        return dropped ? "" : `${stashSha} stash@{0} fusion-merger-autostash:FN-050:1`;
+      }
+      if (cmdStr.includes("git status -z --porcelain")) return " M file.txt\0" as any;
+      if (cmdStr.includes("git stash create")) return stashSha as any;
+      if (cmdStr.includes("git stash store")) return "" as any;
+      if (cmdStr.includes('git stash list --format="%H %gd"')) return dropped ? "" : `${stashSha} stash@{0}`;
+      if (cmdStr.includes("git rev-parse stash@{0}")) return stashSha as any;
+      if (cmdStr.includes("git stash drop stash@{0}")) {
+        dropped = true;
+        return "" as any;
+      }
+      if (cmdStr.includes("git stash apply")) return "" as any;
+      if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
+      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "mergedcommit123";
+      if (cmdStr.includes("git log")) return "- feat: something" as any;
+      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
+      if (cmdStr.includes("git diff") && cmdStr.includes("--stat")) return "1 file changed" as any;
+      if (cmdStr.includes("merge --squash")) return Buffer.from("");
+      if (cmdStr.includes("diff --cached --quiet")) return "1" as any;
+      if (cmdStr.includes("diff --cached")) return "0" as any;
+      if (cmdStr.includes("show --shortstat")) return "3 files changed, 10 insertions(+), 2 deletions(-)" as any;
+      if (cmdStr.includes("branch -d") || cmdStr.includes("branch -D")) return Buffer.from("");
+      if (cmdStr.includes("worktree remove")) return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(dropped).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("git stash drop stash@{0}")),
+    ).toBe(true);
+  });
+});
+
 describe("aiMergeTask — conditional worktree cleanup", () => {
   beforeEach(() => {
     vi.clearAllMocks();

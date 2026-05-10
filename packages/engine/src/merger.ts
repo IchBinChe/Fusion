@@ -1448,9 +1448,46 @@ async function sweepAutostashOrphans(
   }
 }
 
+const AUTOSTASH_TIMESTAMP_RE = /^fusion-merger-autostash:[A-Za-z]+-\d+:(?:race-rescue-\d+:)?(\d+)$/;
+
+export async function sweepStaleAutostashes(
+  rootDir: string,
+  options: { maxAgeMs: number; taskStore?: TaskStore },
+): Promise<{ dropped: number }> {
+  try {
+    void options.taskStore;
+    const now = Date.now();
+    const threshold = Math.max(0, Math.trunc(options.maxAgeMs));
+    const entries = await listOrphanedAutostashes(rootDir);
+    let dropped = 0;
+
+    for (const entry of entries) {
+      const match = AUTOSTASH_TIMESTAMP_RE.exec(entry.label.trim());
+      if (!match) continue;
+      const ts = Number.parseInt(match[1] ?? "", 10);
+      if (!Number.isFinite(ts)) continue;
+      if (now - ts <= threshold) continue;
+      const sourceTaskId = parseAutostashTaskId(entry.label) ?? "autostash-sweep";
+      const result = await dropAutostashBySha(rootDir, sourceTaskId, entry.sha);
+      if (result.dropped) dropped += 1;
+    }
+
+    const hours = Math.max(1, Math.round(threshold / 3_600_000));
+    mergerLog.log(`startup-sweep: dropped ${dropped} stale fusion-merger-autostash entries older than ${hours}h`);
+    return { dropped };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    mergerLog.warn(`startup-sweep: stale autostash sweep failed (${msg})`);
+    return { dropped: 0 };
+  }
+}
+
 export const __test__ = {
   sweepAutostashOrphans,
   parseAutostashTaskId,
+  dropAutostashHandle,
+  isAutostashLive,
+  sweepStaleAutostashes,
 };
 
 async function stashUnrelatedRootDirChanges(
@@ -1650,6 +1687,73 @@ async function dropAutostashBySha(
     }
   }
   return { dropped: false, reason: "exhausted retry attempts" };
+}
+
+async function isAutostashLive(rootDir: string, sha: string): Promise<boolean> {
+  try {
+    const stashFiles = await listStashChangedPaths(rootDir, sha);
+    if (stashFiles.size === 0) return false;
+    const pathsArg = [...stashFiles].map(quoteArg).join(" ");
+    const { stdout: pathDiffOut } = await execAsync(
+      `git diff --name-only HEAD ${quoteArg(sha)} -- ${pathsArg}`,
+      { cwd: rootDir, encoding: "utf-8" },
+    );
+    return pathDiffOut.trim().length > 0;
+  } catch {
+    return true;
+  }
+}
+
+async function dropAutostashHandle(
+  rootDir: string,
+  taskId: string,
+  handle: AutostashHandle,
+  options: {
+    keepIfLive: boolean;
+    store?: TaskStore;
+    context?: string;
+  },
+): Promise<{ dropped: number; keptLive: number; failed: number }> {
+  const entries = [
+    { sha: handle.sha, label: handle.label, kind: "primary" as const },
+    ...(handle.rescueShas ?? []).map((r) => ({ sha: r.sha, label: r.label, kind: "race-rescue" as const })),
+  ];
+
+  let dropped = 0;
+  let keptLive = 0;
+  let failed = 0;
+
+  for (const entry of entries) {
+    if (options.keepIfLive) {
+      const live = await isAutostashLive(rootDir, entry.sha);
+      if (live) {
+        keptLive += 1;
+        mergerLog.warn(`${taskId}: preserving live ${entry.kind} autostash ${entry.sha.slice(0, 7)} (${entry.label})`);
+        continue;
+      }
+    }
+
+    const dropResult = await dropAutostashBySha(rootDir, taskId, entry.sha);
+    if (dropResult.dropped) {
+      dropped += 1;
+      mergerLog.log(`${taskId}: dropped ${entry.kind} autostash ${entry.sha.slice(0, 7)} (${entry.label})`);
+    } else {
+      failed += 1;
+      mergerLog.warn(
+        `${taskId}: failed to drop ${entry.kind} autostash ${entry.sha.slice(0, 7)} (${entry.label}) — ${dropResult.reason ?? "unknown"}`,
+      );
+    }
+  }
+
+  if (options.store && options.context) {
+    await options.store.logEntry(
+      taskId,
+      `${options.context}: autostash cleanup dropped ${dropped}, preserved ${keptLive} live, failed ${failed}`,
+      entries.map((entry) => `${entry.kind} ${entry.sha.slice(0, 7)} (${entry.label})`).join("\n"),
+    ).catch(() => undefined);
+  }
+
+  return { dropped, keptLive, failed };
 }
 
 /**
@@ -2221,6 +2325,44 @@ ${fileList}
  *      `git apply --3way` from the patch, fall through to AI patch-recovery
  *      if needed. See `tryRecoverHardFailApply`.
  */
+async function restoreRescueAutostashes(
+  rootDir: string,
+  taskId: string,
+  handle: AutostashHandle,
+  ctx: {
+    store: TaskStore;
+  },
+): Promise<{ unresolvedCount: number }> {
+  const rescueShas = handle.rescueShas ?? [];
+  if (rescueShas.length === 0) return { unresolvedCount: 0 };
+
+  let unresolvedCount = 0;
+  for (const rescue of rescueShas) {
+    try {
+      await execAsync(`git stash apply ${rescue.sha}`, { cwd: rootDir });
+      const dropResult = await dropAutostashBySha(rootDir, taskId, rescue.sha);
+      if (dropResult.dropped) {
+        mergerLog.log(`${taskId}: restored and dropped race-rescue autostash ${rescue.sha.slice(0, 7)} (${rescue.label})`);
+      } else {
+        unresolvedCount += 1;
+        mergerLog.warn(`${taskId}: restored race-rescue autostash ${rescue.sha.slice(0, 7)} but drop failed (${dropResult.reason ?? "unknown"})`);
+      }
+    } catch (err: unknown) {
+      unresolvedCount += 1;
+      const msg = err instanceof Error ? err.message : String(err);
+      mergerLog.warn(`${taskId}: race-rescue autostash apply failed for ${rescue.sha.slice(0, 7)} (${msg}); preserving stash for manual recovery`);
+    }
+  }
+
+  await ctx.store.logEntry(
+    taskId,
+    `Race-rescue autostash restore attempted: ${rescueShas.length - unresolvedCount} restored, ${unresolvedCount} preserved`,
+    rescueShas.map((r) => `${r.sha.slice(0, 7)} (${r.label})`).join("\n"),
+  ).catch(() => undefined);
+
+  return { unresolvedCount };
+}
+
 async function restoreUnrelatedRootDirChanges(
   rootDir: string,
   taskId: string,
@@ -5727,11 +5869,28 @@ export async function aiMergeTask(
         if (resultForFinally) {
           resultForFinally.autostash = outcome;
         }
+
+        const rescueRestore = outcome.status === "restored" || outcome.status === "ai-resolved"
+          ? await restoreRescueAutostashes(rootDir, taskId, autostashHandle, { store })
+          : { unresolvedCount: 0 };
+        const keepIfLive = outcome.status === "failed"
+          || outcome.status === "conflict-needs-manual"
+          || rescueRestore.unresolvedCount > 0;
+        await dropAutostashHandle(rootDir, taskId, autostashHandle, {
+          keepIfLive,
+          store,
+          context: "Post-restore autostash cleanup",
+        });
       } catch (err: unknown) {
         // Any throw from restore should never propagate out of the merger
         // — the merge result has already been recorded. Log and swallow.
         const msg = err instanceof Error ? err.message : String(err);
-        mergerLog.warn(`${taskId}: autostash restore threw unexpectedly (${msg}) — stash may be left in place; check git stash list`);
+        mergerLog.warn(`${taskId}: autostash restore threw unexpectedly (${msg}) — running keep-if-live cleanup sweep`);
+        await dropAutostashHandle(rootDir, taskId, autostashHandle, {
+          keepIfLive: true,
+          store,
+          context: "Autostash restore exception cleanup",
+        });
         if (resultForFinally) {
           resultForFinally.autostash = {
             status: "failed",

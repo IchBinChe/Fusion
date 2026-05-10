@@ -201,6 +201,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   defaultPresetBySize: {},
   autoResolveConflicts: true,
   smartConflictResolution: true,
+  mergerAutostashMaxAgeHours: 24,
   worktreeRebaseBeforeMerge: true,
   worktreeRebaseRemote: "",
   worktreeRebaseLocalBase: true,

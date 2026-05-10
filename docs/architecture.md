@@ -1245,6 +1245,12 @@ Git dashboard routes are registered in `register-git-github.ts`.
 - `merger.ts` also exposes a test-only `__test__` helper object for internal merger unit/integration coverage (for example autostash orphan cleanup behavior)
 - Supports workflow-step execution after merge (post-merge phase)
 
+#### Autostash lifecycle
+- Before destructive merge prep, `stashUnrelatedRootDirChanges()` snapshots dirty root-dir edits into `fusion-merger-autostash:<taskId>:<ts>` (plus optional `race-rescue-*` stashes for late writes).
+- In `aiMergeTask` cleanup, `restoreUnrelatedRootDirChanges()` attempts restore; then `dropAutostashHandle()` runs on every terminal path and drops primary + race-rescue stashes when restoration succeeded or content is no longer live.
+- If restore fails with unresolved developer work (`failed`/`conflict-needs-manual`), cleanup uses a keep-if-live rule so still-live stashes are preserved for manual recovery.
+- `sweepAutostashOrphans()` keeps its subsumed/live classification for prior-run leftovers, and `sweepStaleAutostashes()` adds an age-based backstop that drops `fusion-merger-autostash:*` entries older than the configured threshold (default 24h).
+
 ### Conflict handling
 `merger.ts` includes conflict classification and auto-resolution helpers:
 - lock files (`LOCKFILE_PATTERNS`)

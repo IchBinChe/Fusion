@@ -2072,6 +2072,8 @@ export interface ProjectSettings {
    *  lock files (ours), generated files (theirs), and trivial whitespace conflicts
    *  without spawning an AI agent. Default: true. */
   smartConflictResolution?: boolean;
+  /** Drop stale merger autostashes older than this age in hours. Minimum 1. Default: 24. */
+  mergerAutostashMaxAgeHours?: number;
   /** When true, the merger fetches the remote and rebases the task branch
    *  onto the latest `<remote>/<defaultBranch>` before attempting to merge
    *  it back into the main branch. This catches upstream changes from

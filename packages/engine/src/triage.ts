@@ -1064,12 +1064,18 @@ export class TriageProcessor {
           // 1. Assigned durable agent runtime model pair when complete
           // 2. Task planning override pair
           // 3. Planning/project/global fallbacks
-          ...resolvePlanningSessionModel(
-            task.planningModelProvider,
-            task.planningModelId,
-            settings,
-            assignedAgent?.runtimeConfig,
-          ),
+          ...(() => {
+            const planningModel = resolvePlanningSessionModel(
+              task.planningModelProvider,
+              task.planningModelId,
+              settings,
+              assignedAgent?.runtimeConfig,
+            );
+            return {
+              defaultProvider: planningModel.provider,
+              defaultModelId: planningModel.modelId,
+            };
+          })(),
           fallbackProvider: settings.planningFallbackProvider && settings.planningFallbackModelId
             ? settings.planningFallbackProvider
             : settings.fallbackProvider,

@@ -2489,8 +2489,8 @@ describe("taskCreate tool model inheritance", () => {
       // Per-task override should take precedence over settings
       expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          provider: "google",
-          modelId: "gemini-2.5-pro",
+          defaultProvider: "google",
+          defaultModelId: "gemini-2.5-pro",
         }),
       );
     });
@@ -2554,8 +2554,8 @@ describe("taskCreate tool model inheritance", () => {
       // Should use settings planning model when no per-task override
       expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          provider: "openai",
-          modelId: "gpt-4o",
+          defaultProvider: "openai",
+          defaultModelId: "gpt-4o",
         }),
       );
     });
@@ -2619,8 +2619,8 @@ describe("taskCreate tool model inheritance", () => {
       // Should use project default override when planning lanes are absent
       expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          provider: "openai",
-          modelId: "gpt-4o",
+          defaultProvider: "openai",
+          defaultModelId: "gpt-4o",
         }),
       );
     });
@@ -2684,8 +2684,8 @@ describe("taskCreate tool model inheritance", () => {
       // Incomplete override should fall through to global defaults
       expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          provider: "anthropic",
-          modelId: "claude-sonnet-4-5",
+          defaultProvider: "anthropic",
+          defaultModelId: "claude-sonnet-4-5",
         }),
       );
     });
@@ -2747,8 +2747,8 @@ describe("taskCreate tool model inheritance", () => {
       // Should fall back to global defaults
       expect(mockCreateFnAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          provider: "anthropic",
-          modelId: "claude-sonnet-4-5",
+          defaultProvider: "anthropic",
+          defaultModelId: "claude-sonnet-4-5",
         }),
       );
     });
@@ -2867,8 +2867,8 @@ describe("taskCreate tool model inheritance", () => {
       const completeCall = capturedArgs.find((entry) => entry.taskId === "FN-AGENT-MODEL-1");
       const fallbackCall = capturedArgs.find((entry) => entry.taskId === "FN-AGENT-MODEL-2");
 
-      expect(completeCall).toMatchObject({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
-      expect(fallbackCall).toMatchObject({ provider: "openai", modelId: "gpt-4o" });
+      expect(completeCall).toMatchObject({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" });
+      expect(fallbackCall).toMatchObject({ defaultProvider: "openai", defaultModelId: "gpt-4o" });
     });
 
     it("passes assigned agent memory context into triage memory tools", async () => {

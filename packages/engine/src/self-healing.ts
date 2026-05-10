@@ -1108,6 +1108,11 @@ export class SelfHealingManager {
         const blocker = taskById.get(blockerId);
         let reason: string | null = null;
 
+        const unresolvedDeps = task.dependencies.filter((depId) => {
+          const dep = taskById.get(depId);
+          return dep && dep.column !== "done" && dep.column !== "in-review" && dep.column !== "archived";
+        });
+
         if (!blocker) {
           reason = `blocker ${blockerId} missing`;
         } else if (blocker.column === "done") {
@@ -1122,6 +1127,8 @@ export class SelfHealingManager {
           (blocker.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES
         ) {
           reason = `blocker ${blockerId} in-review + failed (mergeRetries ${blocker.mergeRetries ?? 0}/${MAX_AUTO_MERGE_RETRIES})`;
+        } else if (task.dependencies.length > 0 && !unresolvedDeps.includes(blockerId)) {
+          reason = `blocker ${blockerId} not among unresolved dependencies`;
         }
 
         if (!reason) continue;

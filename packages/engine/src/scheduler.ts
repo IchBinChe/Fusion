@@ -279,31 +279,53 @@ export class Scheduler {
         }
       }
 
-      // FN-3895: complement periodic stale-blockedBy self-healing with immediate
-      // unblock when a blocker reaches a terminal completion column.
+      // FN-3895/FN-3924: complement periodic stale-blockedBy self-healing with immediate
+      // blocker reconciliation when a potential blocker reaches a terminal completion column.
+      // Invariant: blockedBy must reference a *current* unresolved blocker, else be null.
       if (to === "done" || to === "archived") {
         try {
           const settings = await this.store.getSettings();
           if (!settings.globalPause && !settings.enginePaused) {
             const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
+            const allTasks = await this.store.listTasks({ slim: true, includeArchived: true });
+            const taskById = new Map(allTasks.map((candidate) => [candidate.id, candidate]));
             for (const dependent of todoTasks) {
-              if (dependent.blockedBy !== task.id) continue;
+              const mentionsCompletedTask = dependent.dependencies.includes(task.id);
+              const currentlyBlockedByCompletedTask = dependent.blockedBy === task.id;
+              if (!mentionsCompletedTask && !currentlyBlockedByCompletedTask) continue;
+
+              const unresolvedDeps = dependent.dependencies.filter((depId) => {
+                const dep = taskById.get(depId);
+                return dep && dep.column !== "done" && dep.column !== "in-review" && dep.column !== "archived";
+              });
+
               try {
-                await this.store.updateTask(dependent.id, { blockedBy: null, status: null });
-                await this.store.logEntry(
-                  dependent.id,
-                  `Auto-unblocked: blocker ${task.id} reached ${to}`,
-                );
+                if (unresolvedDeps.length > 0) {
+                  await this.store.updateTask(dependent.id, {
+                    status: "queued",
+                    blockedBy: unresolvedDeps[0],
+                  });
+                  await this.store.logEntry(
+                    dependent.id,
+                    `Auto-reblocked: unresolved dependency ${unresolvedDeps[0]} remains after ${task.id} reached ${to}`,
+                  );
+                } else {
+                  await this.store.updateTask(dependent.id, { blockedBy: null, status: null });
+                  await this.store.logEntry(
+                    dependent.id,
+                    `Auto-unblocked: blocker ${task.id} reached ${to}`,
+                  );
+                }
               } catch (error) {
                 schedulerLog.error(
-                  `Failed to auto-unblock dependent ${dependent.id} for blocker ${task.id}`,
+                  `Failed to reconcile dependent ${dependent.id} for blocker ${task.id}`,
                   error,
                 );
               }
             }
           }
         } catch (error) {
-          schedulerLog.error(`Failed event-driven unblock pass for blocker ${task.id}`, error);
+          schedulerLog.error(`Failed event-driven blocker reconciliation for ${task.id}`, error);
         }
       }
 
@@ -729,7 +751,10 @@ export class Scheduler {
         });
 
         if (unmetDeps.length > 0) {
-          await this.store.updateTask(task.id, { status: "queued" });
+          await this.store.updateTask(task.id, {
+            status: "queued",
+            blockedBy: unmetDeps[0],
+          });
           this.options.onBlocked?.(task, unmetDeps);
           continue;
         }
@@ -775,7 +800,16 @@ export class Scheduler {
               }
             }
             if (overlappingTaskId) {
-              await this.store.updateTask(task.id, { status: "queued", blockedBy: overlappingTaskId });
+              // Keep blockedBy tied to explicit unresolved dependencies when a task has
+              // dependency edges; avoid repointing dependency-unblocked tasks to unrelated
+              // overlap ids (FN-3924). For dependency-free tasks, blockedBy may reference
+              // the active overlap blocker.
+              await this.store.updateTask(
+                task.id,
+                task.dependencies.length > 0
+                  ? { status: "queued", blockedBy: null }
+                  : { status: "queued", blockedBy: overlappingTaskId },
+              );
               continue;
             }
           }

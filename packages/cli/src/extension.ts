@@ -532,7 +532,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
       if (params.agentId !== undefined) {
         const normalizedAgentId = normalizeNullableStringInput(params.agentId);
-        if (normalizedAgentId !== undefined && normalizedAgentId !== null) {
+        if (typeof normalizedAgentId === "string") {
           const error = await validateAssignableAgentId(ctx.cwd ?? process.cwd(), normalizedAgentId, task);
           if (error) {
             return {

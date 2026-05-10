@@ -461,8 +461,8 @@ describe("SelfHealingManager", () => {
         enginePaused: false,
       } as unknown as Settings);
       vi.mocked(store.listTasks).mockResolvedValue([
-        { id: "A", column: "todo", blockedBy: "B", paused: false, mergeRetries: 0 } as unknown as Task,
-        { id: "B", column: "done", blockedBy: null, paused: false, mergeRetries: 0 } as unknown as Task,
+        { id: "A", column: "todo", blockedBy: "B", paused: false, mergeRetries: 0, dependencies: [] } as unknown as Task,
+        { id: "B", column: "done", blockedBy: null, paused: false, mergeRetries: 0, dependencies: [] } as unknown as Task,
       ]);
 
       await manager.runStartupRecovery();
@@ -489,8 +489,8 @@ describe("SelfHealingManager", () => {
         enginePaused: false,
       } as unknown as Settings);
       vi.mocked(store.listTasks).mockResolvedValue([
-        { id: "A", column: "todo", blockedBy: "B", paused: false, mergeRetries: 0 } as unknown as Task,
-        { id: "B", column: "done", blockedBy: null, paused: false, mergeRetries: 0 } as unknown as Task,
+        { id: "A", column: "todo", blockedBy: "B", paused: false, mergeRetries: 0, dependencies: [] } as unknown as Task,
+        { id: "B", column: "done", blockedBy: null, paused: false, mergeRetries: 0, dependencies: [] } as unknown as Task,
       ]);
 
       await manager.runStartupRecovery();
@@ -3513,6 +3513,7 @@ describe("clearStaleBlockedBy", () => {
       paused: false,
       blockedBy: null,
       mergeRetries: 0,
+      dependencies: [],
       ...overrides,
     };
   }
@@ -3594,6 +3595,22 @@ describe("clearStaleBlockedBy", () => {
 
     expect(recovered).toBe(0);
     expect(store.updateTask).not.toHaveBeenCalled();
+    manager.stop();
+  });
+
+  it("clears blockedBy when dependency task has no unresolved deps but blockedBy points elsewhere", async () => {
+    const store = createRunningStore();
+    const taskA = createTask("A", { blockedBy: "FN-400", dependencies: ["FN-DEP"] });
+    const overlapBlocker = createTask("FN-400", { column: "in-progress" });
+    const dependency = createTask("FN-DEP", { column: "done" });
+    (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([taskA, overlapBlocker, dependency]);
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, status: null });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("not among unresolved dependencies"));
     manager.stop();
   });
 

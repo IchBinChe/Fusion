@@ -422,6 +422,68 @@ describe("Scheduler", () => {
       expect(store.updateTask).toHaveBeenCalledWith("FN-3811", { blockedBy: null, status: null });
     });
 
+    it("FN-3924: does not repoint cleared dependency blocker to unrelated overlap task", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const dep = createMockTask({ id: "FN-DEP", column: "done" });
+      const unrelated = createMockTask({
+        id: "FN-3170",
+        column: "in-review",
+        worktree: "/test/project/.worktrees/fn-3170",
+      });
+      const dependent = createMockTask({
+        id: "FN-3919",
+        column: "todo",
+        status: "queued",
+        blockedBy: "FN-DEP",
+        dependencies: ["FN-DEP"],
+      });
+      const tasks = [dep, unrelated, dependent];
+
+      const listTasks = vi.fn(async (options?: { column?: string; includeArchived?: boolean }) => {
+        if (options?.column === "todo") {
+          return tasks.filter((task) => task.column === "todo");
+        }
+        return tasks;
+      });
+
+      const updateTask = vi.fn(async (id: string, patch: Partial<Task>) => {
+        const task = tasks.find((candidate) => candidate.id === id);
+        if (task) Object.assign(task, patch);
+        return (task ?? createMockTask({ id })) as Task;
+      });
+
+      const store = createMockStore({
+        listTasks,
+        getTask: vi.fn(async (id: string) => (tasks.find((task) => task.id === id) ?? createMockTask({ id })) as any),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+          groupOverlappingFiles: true,
+        }),
+        parseFileScopeFromPrompt: vi.fn(async (taskId: string): Promise<string[]> => {
+          if (taskId === "FN-3170") return ["packages/dashboard/app/App.tsx"];
+          if (taskId === "FN-3919") return ["packages/dashboard/app/App.tsx"];
+          return ["packages/core/src/index.ts"];
+        }),
+        updateTask,
+        moveTask: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const scheduler = new Scheduler(store);
+      const movedHandler = (store.on as any).mock.calls.find((call: any) => call[0] === "task:moved")?.[1];
+      await movedHandler({ task: dep, from: "in-progress", to: "done" });
+
+      expect(updateTask).toHaveBeenCalledWith("FN-3919", { blockedBy: null, status: null });
+
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).not.toHaveBeenCalledWith("FN-3919", { status: "queued", blockedBy: "FN-3170" });
+      expect(tasks.find((task) => task.id === "FN-3919")?.blockedBy ?? null).toBeNull();
+    });
+
     it("does not trigger scheduling for non-done task:moved events", async () => {
       const store = createMockStore({
         listTasks: vi.fn().mockResolvedValue([
@@ -786,7 +848,7 @@ describe("Scheduler", () => {
       await scheduler.schedule();
 
       // Dependency-blocked urgent task should be queued, not started.
-      expect(updateTask).toHaveBeenCalledWith("FN-100", { status: "queued" });
+      expect(updateTask).toHaveBeenCalledWith("FN-100", { status: "queued", blockedBy: "FN-900" });
       // Overlap-blocked urgent task should be queued with blocker id.
       expect(updateTask).toHaveBeenCalledWith("FN-103", { status: "queued", blockedBy: "FN-001" });
       // Paused and recovery-gated urgent tasks never enter scheduling.
@@ -1406,7 +1468,7 @@ describe("Scheduler", () => {
 
       // Task with unmet deps should be queued, not validated
       // Since KB-006 is not done, KB-005 should not be validated
-      expect(updateTask).toHaveBeenCalledWith("FN-005", { status: "queued" });
+      expect(updateTask).toHaveBeenCalledWith("FN-005", { status: "queued", blockedBy: "FN-006" });
       // No filesystem validation should occur (no move to triage)
       expect(moveTask).not.toHaveBeenCalledWith("FN-005", "triage");
     });

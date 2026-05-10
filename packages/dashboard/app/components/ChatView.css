@@ -248,6 +248,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: calc(var(--space-md) * 3);
 }
 
 .chat-session-preview {
@@ -256,6 +257,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: calc(var(--space-md) * 3);
 }
 
 .chat-session-meta {
@@ -1346,6 +1348,11 @@
     height: calc(var(--space-lg) * 2.25);
     min-width: calc(var(--space-lg) * 2.25);
     min-height: calc(var(--space-lg) * 2.25);
+  }
+
+  .chat-session-title,
+  .chat-session-preview {
+    padding-right: calc((var(--space-lg) * 2.25) + var(--space-sm));
   }
 
   .chat-message--assistant .chat-message-render-toggle {

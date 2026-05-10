@@ -124,8 +124,8 @@ describe("GitHubTrackingCommentService", () => {
   it("ignores non-target columns", async () => {
     service.start();
 
-    for (const to of ["triage", "todo", "in-review", "archived"]) {
-      store.emit("task:moved", { task: createTask(), from: "todo", to });
+    for (const [from, to] of [["triage", "todo"], ["todo", "triage"], ["todo", "in-review"], ["in-review", "archived"]] as const) {
+      store.emit("task:moved", { task: createTask(), from, to });
     }
     await flushAsync();
 

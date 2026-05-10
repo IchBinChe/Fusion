@@ -2522,6 +2522,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       priority: normalizeTaskPriority(input.priority),
       tokenUsage: input.tokenUsage,
       sourceIssue: input.sourceIssue,
+      githubTracking: input.githubTracking,
       sourceType: input.source?.sourceType ?? "unknown",
       sourceAgentId: input.source?.sourceAgentId,
       sourceRunId: input.source?.sourceRunId,

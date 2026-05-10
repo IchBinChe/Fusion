@@ -151,7 +151,9 @@ describe("GitHubTrackingStateService", () => {
   it("does nothing for non-done transitions", async () => {
     service.start();
 
-    store.emit("task:moved", { task: createTask(), from: "todo", to: "in-progress" });
+    for (const [from, to] of [["triage", "todo"], ["todo", "in-progress"], ["in-review", "in-review"]] as const) {
+      store.emit("task:moved", { task: createTask(), from, to });
+    }
     await flushAsync();
 
     expect(mockSetIssueState).not.toHaveBeenCalled();

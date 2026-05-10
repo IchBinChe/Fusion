@@ -57,6 +57,19 @@ describe("formatTrackingIssueBody", () => {
       summary: "Summary paragraph",
     })).toBe("Fusion task: FN-X\n\nPrimary paragraph");
   });
+
+  it("does not include full prompt content or fusion hyperlinks", () => {
+    const body = formatTrackingIssueBody({
+      id: "FN-X",
+      description: "Short summary only",
+      prompt: "# PROMPT\nhttp://localhost:4040/tasks/FN-X\nFull private prompt",
+    });
+
+    expect(body).toContain("Fusion task: FN-X");
+    expect(body).toContain("Short summary only");
+    expect(body).not.toContain("localhost:4040/tasks/FN-X");
+    expect(body).not.toContain("Full private prompt");
+  });
 });
 
 describe("maybeCreateTrackingIssue", () => {
@@ -108,10 +121,43 @@ describe("maybeCreateTrackingIssue", () => {
 
     expect(result.created).toBe(true);
     expect(createIssueMock).toHaveBeenCalledTimes(1);
+    expect(createIssueMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.stringContaining("[FN-1]"),
+      body: expect.stringContaining("Fusion task: FN-1"),
+    }));
     expect(linkGithubIssue).toHaveBeenCalledWith("FN-1", expect.objectContaining({ owner: "o", repo: "r", number: 12 }));
     expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({
       metadata: expect.objectContaining({ type: "github-issue-created", repo: "o/r", number: 12 }),
     }));
+  });
+
+  it.each([
+    ["task override", { enabled: true, repoOverride: "task/repo" }, { githubTrackingDefaultRepo: "project/repo" }, { githubTrackingDefaultRepo: "global/repo" }, "task", "repo"],
+    ["project default", { enabled: true }, { githubTrackingDefaultRepo: "project/repo" }, { githubTrackingDefaultRepo: "global/repo" }, "project", "repo"],
+    ["global default", { enabled: true }, {}, { githubTrackingDefaultRepo: "global/repo" }, "global", "repo"],
+  ] as const)("resolves repo from %s", async (_label, tracking, projectSettings, globalSettings, owner, repo) => {
+    const linkGithubIssue = vi.fn();
+
+    await maybeCreateTrackingIssue(buildTask({ githubTracking: tracking }), {
+      taskStore: { linkGithubIssue, recordActivity: vi.fn() } as any,
+      projectSettings: projectSettings as any,
+      globalSettings: globalSettings as any,
+      logger: console,
+    });
+
+    expect(createIssueMock).toHaveBeenCalledWith(expect.objectContaining({ owner, repo }));
+  });
+
+  it("skips creation when tracking is on but no repo is configured", async () => {
+    const result = await maybeCreateTrackingIssue(buildTask({ githubTracking: { enabled: true } }), {
+      taskStore: { recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: {},
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(result).toEqual({ created: false, reason: "no_repo_configured" });
+    expect(createIssueMock).not.toHaveBeenCalled();
   });
 
   it("returns auth reason when resolver fails", async () => {

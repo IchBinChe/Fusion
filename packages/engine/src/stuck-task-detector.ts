@@ -11,7 +11,9 @@
  * - `recordProgress(taskId)` — step transitions (in-progress, done, skipped); resets counters
  *
  * The detector polls at a configurable interval and compares timestamps against
- * `taskStuckTimeoutMs` from settings.
+ * `taskStuckTimeoutMs` from settings. When that explicit override is unset, the
+ * detector falls back to `workflowStepTimeoutMs` so in-flight tool calls cannot
+ * leave an in-progress task unmonitored by default.
  */
 
 import type { TaskStore, Settings } from "@fusion/core";
@@ -470,8 +472,8 @@ export class StuckTaskDetector {
     // Defensive fallback for pause windows where lifecycle hooks haven't run yet.
     if (settings.globalPause || settings.enginePaused) return;
 
-    const timeoutMs = settings.taskStuckTimeoutMs;
-    if (!timeoutMs || timeoutMs <= 0) return; // Disabled
+    const timeoutMs = settings.taskStuckTimeoutMs ?? settings.workflowStepTimeoutMs;
+    if (!timeoutMs || timeoutMs <= 0) return; // Disabled only when both stuck and workflow timeouts are unset/disabled
 
     const stuckTasks: string[] = [];
 

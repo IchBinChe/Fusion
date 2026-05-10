@@ -775,14 +775,17 @@ describe("MissionManager", () => {
       expect(mobileSpan?.textContent).toBe("Build Auth System");
     });
 
-    it("sidebar header surfaces a centered Plan New Mission CTA", async () => {
+    it("renders the desktop Plan New Mission CTA in the sidebar footer action region", async () => {
       globalThis.fetch = createFetchMock();
       render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
       await waitFor(() => {
-        const cta = document.querySelector(".mission-manager__sidebar-cta");
+        const sidebar = screen.getByTestId("mission-sidebar");
+        const sidebarFooter = within(sidebar).getByTestId("mission-sidebar-footer");
+        const cta = within(sidebarFooter).getByRole("button", { name: "Plan New Mission" });
+
         expect(cta).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Plan New Mission" })).toBeInTheDocument();
+        expect(within(sidebar).queryByText("No missions yet")).toBeNull();
       });
     });
   });

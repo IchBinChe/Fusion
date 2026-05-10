@@ -3912,17 +3912,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             aria-label="Mission list"
             style={isMobile ? undefined : { width: `${sidebarWidth}px` }}
           >
-            <div className="mission-manager__sidebar-header">
-              <button
-                className="btn btn-sm btn-primary mission-manager__sidebar-cta"
-                onClick={() => setShowInterviewModal(true)}
-                title="Plan New Mission"
-                aria-label="Plan New Mission"
-              >
-                <Sparkles size={14} />
-                Plan New Mission
-              </button>
-            </div>
             <div className="mission-manager__sidebar-list">
               {loading ? (
                 <div className="mission-manager__loading">
@@ -3932,6 +3921,17 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               ) : (
                 renderMissionListContent({ hideBottomButtons: true })
               )}
+            </div>
+            <div className="mission-manager__sidebar-footer" data-testid="mission-sidebar-footer">
+              <button
+                className="btn btn-primary mission-manager__sidebar-cta"
+                onClick={() => setShowInterviewModal(true)}
+                title="Plan New Mission"
+                aria-label="Plan New Mission"
+              >
+                <Sparkles size={14} />
+                Plan New Mission
+              </button>
             </div>
           </aside>
 

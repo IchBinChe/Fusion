@@ -135,6 +135,18 @@ describe("desktop two-panel split CSS", () => {
     expect(css).toContain("overflow-y: auto;");
   });
 
+  it("anchors desktop Plan New Mission CTA in a sidebar footer with tokenized height", () => {
+    const css = loadAllAppCss();
+
+    const footerRule = css.match(/\.mission-manager__sidebar-footer\s*\{[^}]*\}/)?.[0];
+    expect(footerRule).toContain("border-top: var(--btn-border-width) solid var(--border);");
+
+    const ctaRule = css.match(/\.mission-manager__sidebar-cta\s*\{[^}]*\}/)?.[0];
+    expect(ctaRule).toContain("width: 100%;");
+    expect(ctaRule).toContain("min-height: calc(var(--space-lg) * 2 + var(--space-xs));");
+    expect(ctaRule).toContain("justify-content: center;");
+  });
+
   it("defines split container as flex row", () => {
     const css = loadAllAppCss();
     expect(css).toContain(".mission-manager__split {");

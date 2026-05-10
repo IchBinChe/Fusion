@@ -204,20 +204,22 @@
   box-shadow: var(--focus-ring-strong);
 }
 
-/* Desktop split-only sidebar header layout for mission quick actions. */
-.mission-manager__sidebar-header {
+/* Desktop split-only sidebar footer action bar for mission creation CTA. */
+.mission-manager__sidebar-footer {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
   padding: var(--space-md);
-  border-bottom: var(--btn-border-width) solid var(--border);
+  border-top: var(--btn-border-width) solid var(--border);
 }
 
 .mission-manager__sidebar-cta {
   width: 100%;
+  min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   justify-content: center;
   gap: var(--space-sm);
+  font-size: inherit;
 }
 
 /* Hide duplicate sidebar title; the shared header already labels this view. */

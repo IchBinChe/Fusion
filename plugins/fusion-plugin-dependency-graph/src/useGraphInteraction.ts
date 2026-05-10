@@ -186,7 +186,7 @@ export function useGraphInteraction() {
   const onPointerMove = useCallback((pointerId: number, point: PointerPoint, viewportWidth: number, viewportHeight: number) => {
     if (pointersRef.current.has(pointerId)) pointersRef.current.set(pointerId, point);
 
-    if (pointersRef.current.size >= 2 && pinchRef.current) {
+    if (pointersRef.current.size === 2 && pinchRef.current) {
       setAnimate(false);
       const [a, b] = Array.from(pointersRef.current.values());
       const distance = Math.hypot(a.x - b.x, a.y - b.y);
@@ -215,8 +215,19 @@ export function useGraphInteraction() {
 
   const onPointerUp = useCallback((pointerId: number) => {
     pointersRef.current.delete(pointerId);
-    if (pointersRef.current.size < 2) pinchRef.current = null;
-    if (pointersRef.current.size === 0) dragStateRef.current = null;
+    if (pointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
+
+    if (pointersRef.current.size === 1) {
+      const [remainingPoint] = Array.from(pointersRef.current.values());
+      dragStateRef.current = { start: remainingPoint, panStart: panRef.current };
+      return;
+    }
+
+    if (pointersRef.current.size === 0) {
+      dragStateRef.current = null;
+    }
   }, []);
 
   const onWheelZoom = useCallback((

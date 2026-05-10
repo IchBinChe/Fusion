@@ -33,6 +33,7 @@ export interface GraphTaskNodeProps extends TaskCardBridgeProps, Pick<HTMLAttrib
   style?: CSSProperties;
   position: GraphPosition;
   scale: number;
+  isSelected?: boolean;
   isHighlighted?: boolean;
   isDimmed?: boolean;
   onNodePositionChange: (taskId: string, position: GraphPosition) => void;
@@ -54,6 +55,7 @@ export function GraphTaskNode({
   style,
   position,
   scale,
+  isSelected = false,
   isHighlighted = false,
   isDimmed = false,
   onMouseEnter,
@@ -88,6 +90,7 @@ export function GraphTaskNode({
     taskId: task.id,
     position,
     scale,
+    canDrag: isSelected,
     onPositionChange: onNodePositionChange,
     onDragStateChange: onNodeDragStateChange,
     onDragEnd: onNodeDragEnd,
@@ -95,7 +98,7 @@ export function GraphTaskNode({
 
   return (
     <div
-      className={`graph-task-node graph-node--draggable${drag.isDragging ? " graph-node--dragging" : ""}${isHighlighted ? " graph-task-node--highlighted graph-node--highlighted" : ""}${isDimmed ? " graph-task-node--dimmed graph-node--dimmed" : ""}${isActive ? " graph-task-node--active" : ""}${isInReview ? " graph-task-node--in-review" : ""}`}
+      className={`graph-task-node${isSelected ? " graph-node--draggable graph-task-node--selected" : ""}${drag.isDragging ? " graph-node--dragging" : ""}${isHighlighted ? " graph-task-node--highlighted graph-node--highlighted" : ""}${isDimmed ? " graph-task-node--dimmed graph-node--dimmed" : ""}${isActive ? " graph-task-node--active" : ""}${isInReview ? " graph-task-node--in-review" : ""}`}
       style={style}
       draggable={false}
       data-testid={`graph-task-node-${task.id}`}

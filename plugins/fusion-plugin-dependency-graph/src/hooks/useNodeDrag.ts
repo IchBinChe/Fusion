@@ -8,6 +8,7 @@ interface UseNodeDragOptions {
   taskId: string;
   position: GraphPosition;
   scale: number;
+  canDrag: boolean;
   onPositionChange: (taskId: string, position: GraphPosition) => void;
   onDragStateChange?: (isDragging: boolean) => void;
   onDragEnd?: () => void;
@@ -19,7 +20,7 @@ interface PendingState {
   startPosition: GraphPosition;
 }
 
-export function useNodeDrag({ taskId, position, scale, onPositionChange, onDragStateChange, onDragEnd }: UseNodeDragOptions) {
+export function useNodeDrag({ taskId, position, scale, canDrag, onPositionChange, onDragStateChange, onDragEnd }: UseNodeDragOptions) {
   const [isDragging, setIsDragging] = useState(false);
   const pendingRef = useRef<PendingState | null>(null);
   const positionRef = useRef(position);
@@ -38,7 +39,7 @@ export function useNodeDrag({ taskId, position, scale, onPositionChange, onDragS
   }, [onDragEnd, onDragStateChange]);
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (!event.isPrimary) return;
+    if (!event.isPrimary || !canDrag) return;
     event.stopPropagation();
     const currentTarget = event.currentTarget;
     if (typeof currentTarget.setPointerCapture === "function") {
@@ -49,7 +50,7 @@ export function useNodeDrag({ taskId, position, scale, onPositionChange, onDragS
       startPointer: { x: event.clientX, y: event.clientY },
       startPosition: positionRef.current,
     };
-  }, []);
+  }, [canDrag]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pending = pendingRef.current;

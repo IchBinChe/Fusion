@@ -70,6 +70,7 @@ describe("DependencyGraph persistence", () => {
     const { unmount } = render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
 
     const node = screen.getByTestId("graph-task-node-A");
+    fireEvent.click(node);
     fireEvent.pointerDown(node, { pointerId: 1, isPrimary: true, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(node, { pointerId: 1, isPrimary: true, clientX: 30, clientY: 40 });
     fireEvent.pointerUp(node, { pointerId: 1, isPrimary: true, clientX: 30, clientY: 40 });

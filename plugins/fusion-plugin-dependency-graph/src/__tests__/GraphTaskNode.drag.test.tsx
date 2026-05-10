@@ -14,6 +14,7 @@ function props(overrides: Partial<React.ComponentProps<typeof GraphTaskNode>> = 
     projectId: "p1",
     position: { x: 0, y: 0 },
     scale: 1,
+    isSelected: false,
     isHighlighted: false,
     isDimmed: false,
     onNodePositionChange: vi.fn(),
@@ -42,7 +43,7 @@ afterEach(() => {
 describe("GraphTaskNode drag", () => {
   it("does not open detail after drag threshold is exceeded", () => {
     const onOpenDetail = vi.fn();
-    render(<GraphTaskNode {...props({ onOpenDetail })} />);
+    render(<GraphTaskNode {...props({ onOpenDetail, isSelected: true })} />);
     const node = screen.getByTestId("graph-task-node-FN-1");
 
     fireEvent.pointerDown(node, { pointerId: 1, clientX: 10, clientY: 10, isPrimary: true });
@@ -55,7 +56,7 @@ describe("GraphTaskNode drag", () => {
 
   it("applies dragging class only after threshold move", () => {
     const onNodePositionChange = vi.fn();
-    render(<GraphTaskNode {...props({ onNodePositionChange })} />);
+    render(<GraphTaskNode {...props({ onNodePositionChange, isSelected: true })} />);
     const node = screen.getByTestId("graph-task-node-FN-1");
 
     fireEvent.pointerDown(node, { pointerId: 1, clientX: 10, clientY: 10, isPrimary: true });
@@ -71,12 +72,25 @@ describe("GraphTaskNode drag", () => {
   });
 
   it("composes highlight and dragging classes", () => {
-    render(<GraphTaskNode {...props({ isHighlighted: true })} />);
+    render(<GraphTaskNode {...props({ isSelected: true, isHighlighted: true })} />);
     const node = screen.getByTestId("graph-task-node-FN-1");
     fireEvent.pointerDown(node, { pointerId: 1, clientX: 0, clientY: 0, isPrimary: true });
     fireEvent.pointerMove(node, { pointerId: 1, clientX: 10, clientY: 10, isPrimary: true });
 
     expect(node.className).toContain("graph-task-node--highlighted");
     expect(node.className).toContain("graph-node--dragging");
+  });
+
+  it("does not drag when node is not selected", () => {
+    const onNodePositionChange = vi.fn();
+    render(<GraphTaskNode {...props({ onNodePositionChange, isSelected: false })} />);
+    const node = screen.getByTestId("graph-task-node-FN-1");
+
+    fireEvent.pointerDown(node, { pointerId: 1, clientX: 10, clientY: 10, isPrimary: true });
+    fireEvent.pointerMove(node, { pointerId: 1, clientX: 25, clientY: 25, isPrimary: true });
+
+    expect(node.className).not.toContain("graph-node--dragging");
+    expect(node.className).not.toContain("graph-node--draggable");
+    expect(onNodePositionChange).not.toHaveBeenCalled();
   });
 });

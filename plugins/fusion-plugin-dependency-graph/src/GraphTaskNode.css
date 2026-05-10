@@ -17,6 +17,11 @@
   z-index: 2;
 }
 
+.graph-task-node--selected {
+  box-shadow: var(--focus-ring-strong), var(--shadow-md);
+  z-index: 2;
+}
+
 .graph-task-node--highlighted {
   box-shadow: 0 0 0 var(--btn-border-width) var(--todo), var(--shadow-md);
   z-index: 2;

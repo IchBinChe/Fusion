@@ -64,6 +64,21 @@ describe("useGraphInteraction", () => {
     expect(result.current.pan).toEqual({ x: -50, y: -50 });
   });
 
+  it("continues with pan after pinch when one pointer remains", () => {
+    const { result } = renderHook(() => useGraphInteraction());
+
+    act(() => {
+      result.current.onPointerDown(1, { x: 100, y: 100 });
+      result.current.onPointerDown(2, { x: 200, y: 100 });
+      result.current.onPointerMove(2, { x: 250, y: 100 }, 800, 600);
+      result.current.onPointerUp(2);
+      result.current.onPointerMove(1, { x: 120, y: 130 }, 800, 600);
+    });
+
+    expect(result.current.zoom).toBe(1.5);
+    expect(result.current.pan).toEqual({ x: 20, y: 30 });
+  });
+
   it("applies animation state for fit and reset", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useGraphInteraction());

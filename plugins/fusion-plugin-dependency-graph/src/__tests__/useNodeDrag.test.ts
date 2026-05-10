@@ -25,7 +25,7 @@ describe("useNodeDrag", () => {
     const onPositionChange = vi.fn();
     const onDragStateChange = vi.fn();
     const { result } = renderHook(() =>
-      useNodeDrag({ taskId: "A", position: { x: 10, y: 10 }, scale: 1, onPositionChange, onDragStateChange }),
+      useNodeDrag({ taskId: "A", position: { x: 10, y: 10 }, scale: 1, canDrag: true, onPositionChange, onDragStateChange }),
     );
 
     act(() => result.current.onPointerDown(pointerEvent({ clientX: 10, clientY: 20 })));
@@ -42,7 +42,7 @@ describe("useNodeDrag", () => {
   it("stays click-only below threshold", () => {
     const onPositionChange = vi.fn();
     const { result } = renderHook(() =>
-      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 1, onPositionChange }),
+      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 1, canDrag: true, onPositionChange }),
     );
 
     act(() => result.current.onPointerDown(pointerEvent()));
@@ -56,7 +56,7 @@ describe("useNodeDrag", () => {
   it("divides pointer delta by zoom scale", () => {
     const onPositionChange = vi.fn();
     const { result } = renderHook(() =>
-      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 2, onPositionChange }),
+      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 2, canDrag: true, onPositionChange }),
     );
 
     act(() => result.current.onPointerDown(pointerEvent()));
@@ -68,7 +68,7 @@ describe("useNodeDrag", () => {
   it("cancels drag cleanly on pointer cancel", () => {
     const onPositionChange = vi.fn();
     const { result } = renderHook(() =>
-      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 1, onPositionChange }),
+      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 1, canDrag: true, onPositionChange }),
     );
 
     act(() => result.current.onPointerDown(pointerEvent()));
@@ -77,5 +77,18 @@ describe("useNodeDrag", () => {
 
     act(() => result.current.onPointerCancel(pointerEvent({ clientX: 8, clientY: 0 })));
     expect(result.current.isDragging).toBe(false);
+  });
+
+  it("ignores pointer interactions when dragging is disabled", () => {
+    const onPositionChange = vi.fn();
+    const { result } = renderHook(() =>
+      useNodeDrag({ taskId: "A", position: { x: 0, y: 0 }, scale: 1, canDrag: false, onPositionChange }),
+    );
+
+    act(() => result.current.onPointerDown(pointerEvent()));
+    act(() => result.current.onPointerMove(pointerEvent({ clientX: 8, clientY: 0 })));
+
+    expect(result.current.isDragging).toBe(false);
+    expect(onPositionChange).not.toHaveBeenCalled();
   });
 });

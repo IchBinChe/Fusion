@@ -227,6 +227,7 @@ export function DependencyGraph({
                     key={node.task.id}
                     task={node.task}
                     projectId={projectId}
+                    isSelected={selectedTaskId === node.task.id}
                     style={{ minHeight: `${NODE_HEIGHT}px`, left: `${position.x}px`, top: `${position.y}px` }}
                     position={position}
                     scale={zoom}

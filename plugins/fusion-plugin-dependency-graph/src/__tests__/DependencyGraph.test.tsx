@@ -8,6 +8,9 @@ const zoomIn = vi.fn();
 const zoomOut = vi.fn();
 const resetView = vi.fn();
 const handleKeyDown = vi.fn();
+const onPointerDown = vi.fn();
+const onPointerMove = vi.fn();
+const onPointerUp = vi.fn();
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
   TaskCard: ({ task, onOpenDetail, disableDrag }: { task: Task; onOpenDetail: (task: Task) => void; disableDrag?: boolean }) => (
@@ -24,9 +27,9 @@ vi.mock("../useGraphInteraction", () => ({
     zoomOut,
     resetView,
     fitToGraph,
-    onPointerDown: vi.fn(),
-    onPointerMove: vi.fn(),
-    onPointerUp: vi.fn(),
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
     onWheelZoom: vi.fn(),
     handleKeyDown,
   }),
@@ -43,6 +46,9 @@ describe("DependencyGraph", () => {
     zoomOut.mockReset();
     resetView.mockReset();
     handleKeyDown.mockReset();
+    onPointerDown.mockReset();
+    onPointerMove.mockReset();
+    onPointerUp.mockReset();
   });
 
   afterEach(() => {
@@ -124,5 +130,27 @@ describe("DependencyGraph", () => {
     render(<DependencyGraph tasks={[createTask("A", "in-progress")]} onOpenTaskDetail={onOpenTaskDetail} />);
     fireEvent.click(screen.getByTestId("task-A"));
     expect(onOpenTaskDetail).toHaveBeenCalledWith("A");
+  });
+
+  it("requires selection before node drag class is enabled", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    const node = screen.getByTestId("graph-task-node-A");
+
+    expect(node.className).not.toContain("graph-node--draggable");
+    fireEvent.click(node);
+    expect(node.className).toContain("graph-node--draggable");
+  });
+
+  it("allows pane panning from an unselected node surface", () => {
+    render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
+    const node = screen.getByTestId("graph-task-node-A");
+
+    fireEvent.pointerDown(node, { pointerId: 1, clientX: 10, clientY: 10, isPrimary: true });
+    fireEvent.pointerMove(node, { pointerId: 1, clientX: 30, clientY: 20, isPrimary: true });
+    fireEvent.pointerUp(node, { pointerId: 1, clientX: 30, clientY: 20, isPrimary: true });
+
+    expect(onPointerDown).toHaveBeenCalled();
+    expect(onPointerMove).toHaveBeenCalled();
+    expect(onPointerUp).toHaveBeenCalled();
   });
 });

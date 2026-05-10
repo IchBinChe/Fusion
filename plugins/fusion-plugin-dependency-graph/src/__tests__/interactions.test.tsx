@@ -44,6 +44,18 @@ describe("dependency graph interactions", () => {
     expect(result.current.zoom).toBeGreaterThan(1);
   });
 
+  it("keeps single-pointer moves as pan-only without zoom changes", () => {
+    const { result } = renderHook(() => useGraphInteraction());
+
+    act(() => {
+      result.current.onPointerDown(1, { x: 10, y: 10 });
+      result.current.onPointerMove(1, { x: 40, y: 30 }, 800, 600);
+    });
+
+    expect(result.current.pan).toEqual({ x: 30, y: 20 });
+    expect(result.current.zoom).toBe(1);
+  });
+
   it("fit-to-graph computes bounds from actual node positions", () => {
     const { result } = renderHook(() => useGraphInteraction());
     const positions = new Map([
@@ -78,6 +90,7 @@ describe("dependency graph interactions", () => {
         task={createTask("A")}
         position={{ x: 0, y: 0 }}
         scale={1}
+        isSelected={true}
         isHighlighted={false}
         isDimmed={false}
         onNodePositionChange={onNodePositionChange}

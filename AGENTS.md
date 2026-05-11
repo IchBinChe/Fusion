@@ -311,9 +311,13 @@ Six tools enable inter-agent coordination — discovering agents, provisioning/d
 
 Create a non-ephemeral agent that reports to the caller (or, for CEO-level callers, any `reportsTo` target).
 
+Provisioning can be policy-gated (`projectSettings.agentProvisioning`). Tool responses include `details.outcome` of `created`, `pending_approval`, or `denied`. Pending requests are resolved via dashboard/API approval decision route (`POST /api/approvals/:id/decision`), which executes deferred creation on approve.
+
 ### `agent_delete` Tool
 
 Delete a non-ephemeral direct report. If the target holds a task checkout lease, deletion is blocked unless `force: true`. Assigned tasks can be reassigned via `reassign_to` or released/unassigned.
+
+Provisioning policy also applies to deletes (`details.outcome`: `deleted`, `pending_approval`, or `denied`). Approval decisions emit provisioning audit events (`agent:create:approved|denied`, `agent:delete:approved|denied`) tied to the original run/task metadata.
 
 ### `list_agents` Tool
 

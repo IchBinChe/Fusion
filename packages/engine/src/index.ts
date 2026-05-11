@@ -11,6 +11,7 @@ export {
   taskDocumentReadParams,
   taskDocumentWriteParams,
   taskLogParams,
+  executeApprovedAgentProvisioning,
 } from "./agent-tools.js";
 export { AgentSemaphore, PRIORITY_MERGE, PRIORITY_EXECUTE, PRIORITY_SPECIFY } from "./concurrency.js";
 export { TriageProcessor, type TriageProcessorOptions } from "./triage.js";

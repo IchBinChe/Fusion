@@ -102,6 +102,14 @@ Approval pause/resume lifecycle (FN-3548):
 - Dashboard mailbox entry points (Header/Mobile nav) display pending-approval indicators so waiting approvals are visible before opening Mailbox.
 - Agents list/board cards and Agent Detail summary display per-agent `pendingApprovalCount` badges to show which agents are blocked by waiting approvals.
 
+Agent provisioning approvals (`agent_provisioning` category):
+
+- `fn_agent_create` / `fn_agent_delete` can return `pending_approval` under `projectSettings.agentProvisioning` policy (`approvalMode`, trusted roles/IDs, `alwaysApproveDelete`).
+- Approval request is persisted with provisioning context (`tool` + `params`) and visible in mailbox/API approval queues.
+- Dashboard/API decision route `POST /api/approvals/:id/decision` executes deferred provisioning on `approve` via engine dispatcher (`executeApprovedAgentProvisioning`) and never executes on `deny`.
+- Decision handling emits run-audit mutations: `agent:create:approved`, `agent:create:denied`, `agent:delete:approved`, `agent:delete:denied` using original request task/run/requester linkage.
+- Malformed provisioning context or failed execution returns 500 from the decision route (no silent approval).
+
 Default and legacy fallback behavior:
 
 - New **non-ephemeral/permanent** agents persist a normalized `permissionPolicy` using preset `unrestricted` when not explicitly provided.

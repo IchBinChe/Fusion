@@ -1,4 +1,5 @@
-import { AgentStore, ApprovalRequestStore, type ApprovalRequestActorSnapshot, type ApprovalRequestStatus } from "@fusion/core";
+import { AgentStore, ApprovalRequestStore, type ApprovalRequest, type ApprovalRequestActorSnapshot, type ApprovalRequestStatus } from "@fusion/core";
+import { executeApprovedAgentProvisioning } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 import { emitApprovalSseEvent } from "../sse.js";
@@ -95,6 +96,34 @@ function toDetailDto(
     targetAction: request.targetAction,
     history,
   };
+}
+
+function emitProvisioningDecisionAudit(params: {
+  scopedStore: import("@fusion/core").TaskStore;
+  request: ApprovalRequest;
+  decision: "approved" | "denied";
+}): void {
+  const { scopedStore, request, decision } = params;
+  if (request.targetAction.category !== "agent_provisioning") return;
+
+  const action = request.targetAction.action === "delete" ? "delete" : "create";
+  const mutationType = `agent:${action}:${decision}` as const;
+  const event: Parameters<typeof scopedStore.recordRunAuditEvent>[0] = {
+    agentId: request.requester.actorId,
+    domain: "database",
+    mutationType,
+    target: request.targetAction.resourceId || request.requester.actorId,
+    metadata: {
+      approvalRequestId: request.id,
+      action,
+      resourceId: request.targetAction.resourceId,
+      requesterAgentId: request.requester.actorId,
+    },
+    runId: request.id,
+  };
+  if (request.taskId) event.taskId = request.taskId;
+  if (request.runId) event.runId = request.runId;
+  scopedStore.recordRunAuditEvent(event);
 }
 
 async function resumeAfterDecision(params: {
@@ -208,6 +237,17 @@ export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
           throw conflict(message);
         }
         throw error;
+      }
+
+      if (updated.targetAction.category === "agent_provisioning") {
+        if (body.decision === "approve") {
+          const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+          await agentStore.init();
+          await executeApprovedAgentProvisioning(updated, { agentStore });
+          emitProvisioningDecisionAudit({ scopedStore, request: updated, decision: "approved" });
+        } else {
+          emitProvisioningDecisionAudit({ scopedStore, request: updated, decision: "denied" });
+        }
       }
 
       await resumeAfterDecision({ scopedStore, request: updated, runtimeLogger });

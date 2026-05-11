@@ -126,6 +126,23 @@ describe("ApprovalRequestStore", () => {
     expect(fetched?.runId).toBe("run-abc");
   });
 
+  it("round-trips agent_provisioning category unchanged", () => {
+    const created = store.create({
+      requester: REQUESTER,
+      targetAction: {
+        category: "agent_provisioning",
+        action: "create",
+        summary: "Create helper",
+        resourceType: "agent",
+        resourceId: "",
+      },
+    });
+
+    const fetched = store.get(created.id);
+    expect(fetched?.targetAction.category).toBe("agent_provisioning");
+    expect(store.list({ status: "pending" }).some((row) => row.id === created.id && row.targetAction.category === "agent_provisioning")).toBe(true);
+  });
+
   it("normalizes legacy category aliases on create/read", () => {
     const created = store.create({
       requester: REQUESTER,

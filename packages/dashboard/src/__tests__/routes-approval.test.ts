@@ -7,6 +7,8 @@ const state = {
   audits: new Map<string, any[]>(),
   task: { id: "FN-1", paused: true, pausedByAgentId: "agent-1" },
   agent: { id: "agent-1", state: "paused", pauseReason: "awaiting-approval" },
+  runAuditEvents: [] as any[],
+  provisionedAgents: new Set<string>(),
 };
 
 class MockApprovalRequestStore {
@@ -59,9 +61,29 @@ class MockAgentStore {
   }
 }
 
+const executeApprovedAgentProvisioning = vi.fn(async (request: any) => {
+  const tool = request?.targetAction?.context?.tool;
+  if (!tool) throw new Error("Malformed agent provisioning request: missing tool");
+  if (tool === "fn_agent_create") {
+    const id = String(request?.targetAction?.context?.params?.name ?? "created-agent");
+    state.provisionedAgents.add(id);
+    return { id };
+  }
+  if (tool === "fn_agent_delete") {
+    const id = String(request?.targetAction?.resourceId ?? "");
+    state.provisionedAgents.delete(id);
+    return { deletedId: id };
+  }
+  throw new Error(`Unsupported provisioning tool: ${tool}`);
+});
+
 vi.mock("@fusion/core", () => ({
   ApprovalRequestStore: MockApprovalRequestStore,
   AgentStore: MockAgentStore,
+}));
+
+vi.mock("@fusion/engine", () => ({
+  executeApprovedAgentProvisioning,
 }));
 
 describe("approval routes", async () => {
@@ -80,6 +102,10 @@ describe("approval routes", async () => {
           getTask: async () => state.task,
           pauseTask: async (_id: string, paused: boolean) => {
             state.task = { ...state.task, paused, pausedByAgentId: paused ? state.task.pausedByAgentId : undefined };
+          },
+          recordRunAuditEvent: (event: any) => {
+            state.runAuditEvents.push(event);
+            return event;
           },
         },
         engine: undefined,
@@ -101,6 +127,9 @@ describe("approval routes", async () => {
   beforeEach(() => {
     updateAgent.mockClear();
     const now = new Date().toISOString();
+    executeApprovedAgentProvisioning.mockClear();
+    state.runAuditEvents = [];
+    state.provisionedAgents = new Set(["target-1"]);
     state.task = { id: "FN-1", paused: true, pausedByAgentId: "agent-1" };
     state.agent = { id: "agent-1", state: "paused", pauseReason: "awaiting-approval" };
     state.requests = new Map([
@@ -124,6 +153,60 @@ describe("approval routes", async () => {
         updatedAt: now,
         requestedAt: now,
       }],
+      ["apr-3", {
+        id: "apr-3",
+        status: "pending",
+        requester: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" },
+        targetAction: {
+          category: "agent_provisioning",
+          summary: "Create provisioned agent",
+          action: "create",
+          resourceType: "agent",
+          resourceId: "",
+          context: { tool: "fn_agent_create", params: { name: "created-agent", role: "executor" } },
+        },
+        taskId: "FN-1",
+        runId: "run-1",
+        createdAt: now,
+        updatedAt: now,
+        requestedAt: now,
+      }],
+      ["apr-4", {
+        id: "apr-4",
+        status: "pending",
+        requester: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" },
+        targetAction: {
+          category: "agent_provisioning",
+          summary: "Delete provisioned agent",
+          action: "delete",
+          resourceType: "agent",
+          resourceId: "target-1",
+          context: { tool: "fn_agent_delete", params: { agent_id: "target-1" } },
+        },
+        taskId: "FN-1",
+        runId: "run-2",
+        createdAt: now,
+        updatedAt: now,
+        requestedAt: now,
+      }],
+      ["apr-5", {
+        id: "apr-5",
+        status: "pending",
+        requester: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" },
+        targetAction: {
+          category: "agent_provisioning",
+          summary: "Malformed",
+          action: "create",
+          resourceType: "agent",
+          resourceId: "",
+          context: {},
+        },
+        taskId: "FN-1",
+        runId: "run-3",
+        createdAt: now,
+        updatedAt: now,
+        requestedAt: now,
+      }],
     ]);
     state.audits = new Map([
       ["apr-1", [{ id: "evt-created", eventType: "created", actor: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" }, createdAt: now }]],
@@ -135,9 +218,9 @@ describe("approval routes", async () => {
     const app = createApp();
     const res = await get(app, "/api/approvals?status=pending");
     expect(res.status).toBe(200);
-    expect(res.body.total).toBe(1);
-    expect(res.body.pendingCount).toBe(1);
-    expect(res.body.requests).toHaveLength(1);
+    expect(res.body.total).toBe(4);
+    expect(res.body.pendingCount).toBe(4);
+    expect(res.body.requests).toHaveLength(4);
     expect(res.body.requests[0]).toMatchObject({
       id: "apr-1",
       actionCategory: "command_execution",
@@ -191,8 +274,65 @@ describe("approval routes", async () => {
     expect(res.body.status).toBe("denied");
   });
 
-  it("returns 409 for invalid transition", async () => {
+  it("approves provisioning create and records audit", async () => {
     const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-3/decision",
+      JSON.stringify({ decision: "approve" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(200);
+    expect(executeApprovedAgentProvisioning).toHaveBeenCalledTimes(1);
+    expect(state.provisionedAgents.has("created-agent")).toBe(true);
+    expect(state.runAuditEvents.at(-1)).toMatchObject({ mutationType: "agent:create:approved", runId: "run-1" });
+    expect(state.task.paused).toBe(false);
+  });
+
+  it("denies provisioning create without execution and records denied audit", async () => {
+    const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-3/decision",
+      JSON.stringify({ decision: "deny" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(200);
+    expect(executeApprovedAgentProvisioning).not.toHaveBeenCalled();
+    expect(state.provisionedAgents.has("created-agent")).toBe(false);
+    expect(state.runAuditEvents.at(-1)).toMatchObject({ mutationType: "agent:create:denied", runId: "run-1" });
+  });
+
+  it("approves provisioning delete and records audit", async () => {
+    const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-4/decision",
+      JSON.stringify({ decision: "approve" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(200);
+    expect(state.provisionedAgents.has("target-1")).toBe(false);
+    expect(state.runAuditEvents.at(-1)).toMatchObject({ mutationType: "agent:delete:approved", runId: "run-2" });
+  });
+
+  it("returns 500 for malformed provisioning request context", async () => {
+    const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-5/decision",
+      JSON.stringify({ decision: "approve" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain("Malformed agent provisioning request");
+  });
+
+  it("returns 409 for invalid transition", async () => {    const app = createApp();
     const res = await request(
       app,
       "POST",

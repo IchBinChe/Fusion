@@ -188,6 +188,32 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("built fn pi extension integr
     expect(persisted?.description).toBe("Ship the packed CLI contract");
   });
 
+  it("runs provisioning tools through the built extension", async () => {
+    const createTool = api.tools.get("fn_agent_create")!;
+    const created = await createTool.execute(
+      "create-agent-1",
+      { name: "built-ext-agent", role: "executor" },
+      undefined,
+      undefined,
+      makeCtx(tmpDir),
+    );
+
+    expect(created.details.outcome).toBe("created");
+    expect(created.details.agentId).toMatch(/^agent-/);
+
+    const deleteTool = api.tools.get("fn_agent_delete")!;
+    const deleted = await deleteTool.execute(
+      "delete-agent-1",
+      { id: created.details.agentId },
+      undefined,
+      undefined,
+      makeCtx(tmpDir),
+    );
+
+    expect(deleted.details.outcome).toBe("deleted");
+    expect(deleted.details.agentId).toBe(created.details.agentId);
+  });
+
   it("delegates to real non-ephemeral agents and rejects runtime workers", async () => {
     const agent = await seedAgent(tmpDir, { name: "release-agent" });
     const runtimeWorker = await seedAgent(tmpDir, { name: "runtime-worker", ephemeral: true });

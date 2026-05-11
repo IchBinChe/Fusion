@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { __test__ } from "../merger.js";
@@ -38,11 +38,18 @@ function createAutostash(dir: string, label: string, content: string): string {
   return sha;
 }
 
+function assertIsolatedWorkspace(dir: string): void {
+  const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
+  if (!repoRoot) return;
+  expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
+}
+
 describe("autostash orphan surface", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-autostash-surface-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-autostash-surface-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 

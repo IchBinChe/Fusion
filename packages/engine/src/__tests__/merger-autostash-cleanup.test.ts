@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import type { TaskStore } from "@fusion/core";
@@ -44,6 +44,12 @@ function stashList(dir: string): string {
   return git(dir, 'git stash list --format="%H %gd %s"');
 }
 
+function assertIsolatedWorkspace(dir: string): void {
+  const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
+  if (!repoRoot) return;
+  expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
+}
+
 function makeStore(tasks: Record<string, string>, opts?: { throwOnGetTask?: boolean }): TaskStore {
   return {
     getTask: async (taskId: string) => {
@@ -69,7 +75,8 @@ describe("sweepStaleAutostashes", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-autostash-stale-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-autostash-stale-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 
@@ -145,7 +152,8 @@ describe("sweepAutostashOrphans", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-autostash-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-autostash-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 

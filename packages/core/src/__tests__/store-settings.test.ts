@@ -554,6 +554,33 @@ describe("TaskStore", () => {
   // ── Scope Separation Regression Tests (FN-1729) ───────────────────────────
 
   describe("scope separation regression", () => {
+    it("keeps dual-scope githubTrackingDefaultRepo in project scope while excluding global-only keys", async () => {
+      await harness.store().updateGlobalSettings({
+        githubTrackingDefaultRepo: "global/default",
+        themeMode: "light",
+      });
+
+      await harness.store().updateSettings({
+        githubTrackingDefaultRepo: "project/default",
+        themeMode: "dark",
+      });
+
+      const merged = await harness.store().getSettings();
+      const mergedFast = await harness.store().getSettingsFast();
+      const { global, project } = await harness.store().getSettingsByScope();
+      const scopedFast = await harness.store().getSettingsByScopeFast();
+
+      expect(merged.githubTrackingDefaultRepo).toBe("project/default");
+      expect(mergedFast.githubTrackingDefaultRepo).toBe("project/default");
+      expect(project.githubTrackingDefaultRepo).toBe("project/default");
+      expect(scopedFast.project.githubTrackingDefaultRepo).toBe("project/default");
+      expect(global.githubTrackingDefaultRepo).toBe("global/default");
+      expect(scopedFast.global.githubTrackingDefaultRepo).toBe("global/default");
+
+      expect((project as Record<string, unknown>).themeMode).toBeUndefined();
+      expect((scopedFast.project as Record<string, unknown>).themeMode).toBeUndefined();
+    });
+
     it("getSettingsByScope: global lane keys never appear in project scope", async () => {
       await harness.store().updateGlobalSettings({
         executionGlobalProvider: "anthropic",

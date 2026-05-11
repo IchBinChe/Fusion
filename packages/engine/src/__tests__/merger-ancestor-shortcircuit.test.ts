@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { commitOrAmendMergeWithFixes } from "../merger.js";
@@ -18,6 +18,12 @@ function initRepo(dir: string): void {
   writeFileSync(join(dir, "README.md"), "# repo\n");
   git(dir, "git add README.md");
   git(dir, 'git commit -m "chore: initial"');
+}
+
+function assertIsolatedWorkspace(dir: string): void {
+  const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
+  if (!repoRoot) return;
+  expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
 }
 
 function runFinalize(dir: string, taskId: string, branch: string, preAttemptHeadSha: string) {
@@ -45,7 +51,8 @@ describe("commitOrAmendMergeWithFixes ancestor/equivalent-content short-circuit"
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-ancestor-shortcircuit-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-ancestor-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 

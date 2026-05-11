@@ -1619,6 +1619,9 @@ export function SettingsModal({
 
       const globalPatch: Partial<GlobalSettings> = {};
       for (const [key, value] of Object.entries(payload)) {
+        if (key === "githubTrackingDefaultRepo" && activeSection !== "global-general") {
+          continue;
+        }
         if (isGlobalSettingsKey(key)) {
           // Implement null-as-delete semantics for global settings:
           // - undefined values are dropped during JSON serialization
@@ -1639,6 +1642,7 @@ export function SettingsModal({
       const projectPatch: Partial<Settings> = {};
       for (const [key, value] of Object.entries(payload)) {
         if (key === "githubTokenConfigured" || key === "prAuthAvailable") continue; // server-only fields
+        if (key === "githubTrackingDefaultRepo" && activeSection === "global-general") continue;
         if (!isProjectSettingsKey(key)) continue;
 
         // Get the initial project-scoped value (null if not set)
@@ -1689,7 +1693,7 @@ export function SettingsModal({
     } catch (err) {
       addToast(getErrorMessage(err), "error");
     }
-  }, [form, globalMaxConcurrent, prefixError, presetDraft, initialValues, initialScopedValues, onClose, addToast, projectId]);
+  }, [form, globalMaxConcurrent, prefixError, presetDraft, initialValues, initialScopedValues, onClose, addToast, projectId, activeSection]);
 
   const handleSaveMemory = useCallback(async () => {
     try {

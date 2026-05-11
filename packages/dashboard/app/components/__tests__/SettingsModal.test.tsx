@@ -540,6 +540,26 @@ describe("SettingsModal", () => {
       expect(input.value).toBe("");
       expect(screen.getByText(/Projects inherit this value when they do not set a project default tracking repo/i)).toBeInTheDocument();
     });
+
+    it("saves global default tracking repo via global settings payload only", async () => {
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      await userEvent.type(screen.getByLabelText("Global default tracking repo"), "octo/global-default");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalled();
+      });
+
+      const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(globalPayload.githubTrackingDefaultRepo).toBe("octo/global-default");
+
+      if (mockUpdateSettings.mock.calls.length > 0) {
+        const projectPayload = mockUpdateSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(projectPayload.githubTrackingDefaultRepo).toBeUndefined();
+      }
+    });
   });
 
   describe("Project General", () => {
@@ -1984,6 +2004,11 @@ describe("SettingsModal", () => {
       expect(payload.githubTrackingDefaultRepo).toBe("octo/repo");
       expect(payload.githubAuthMode).toBe("token");
       expect(payload.githubAuthToken).toBe("ghp_test_token");
+
+      if (mockUpdateGlobalSettings.mock.calls.length > 0) {
+        const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(globalPayload.githubTrackingDefaultRepo).toBeUndefined();
+      }
     });
   });
 

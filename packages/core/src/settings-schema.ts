@@ -346,3 +346,7 @@ export function isGlobalSettingsKey(key: string): key is keyof GlobalSettings {
 export function isProjectSettingsKey(key: string): key is keyof ProjectSettings {
   return (PROJECT_SETTINGS_KEYS as readonly string[]).includes(key);
 }
+
+export function isGlobalOnlySettingsKey(key: string): key is keyof GlobalSettings {
+  return isGlobalSettingsKey(key) && !isProjectSettingsKey(key);
+}

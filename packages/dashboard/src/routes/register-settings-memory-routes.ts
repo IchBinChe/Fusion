@@ -1,6 +1,7 @@
 import {
   DEFAULT_GLOBAL_SETTINGS,
   GLOBAL_SETTINGS_KEYS,
+  PROJECT_SETTINGS_KEYS,
   QMD_INSTALL_COMMAND,
   MemoryBackendError,
   buildInsightExtractionPrompt,
@@ -415,7 +416,8 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
 
       // Reject global-only fields with a helpful error pointing to the correct endpoint
       const globalKeySet = new Set<string>(GLOBAL_SETTINGS_KEYS);
-      const globalFieldsFound = Object.keys(clientSettings).filter((k) => globalKeySet.has(k));
+      const projectKeySet = new Set<string>(PROJECT_SETTINGS_KEYS);
+      const globalFieldsFound = Object.keys(clientSettings).filter((k) => globalKeySet.has(k) && !projectKeySet.has(k));
       if (globalFieldsFound.length > 0) {
         throw badRequest(`Cannot update global settings via this endpoint. Use PUT /settings/global instead. Global fields found: ${globalFieldsFound.join(", ")}`);
       }

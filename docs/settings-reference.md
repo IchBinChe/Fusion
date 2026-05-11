@@ -59,7 +59,7 @@ In **Settings → Notifications**, use **Test message notification** to exercise
 | `openrouterModelSync` | `boolean` | `true` | Sync OpenRouter model catalog into model pickers at startup. |
 | `opencodeGoModelSync` | `boolean` | `true` | Sync opencode-go model catalog at startup via `opencode models opencode --refresh`, normalizing discovered `opencode/...` IDs into the `opencode-go` provider surface used by `/api/models`. |
 | `updateCheckEnabled` | `boolean` | `true` | When enabled, Fusion performs a daily npm registry check for new `@runfusion/fusion` versions and shows update notices in CLI/dashboard. |
-| `githubTrackingDefaultRepo` | `string` | `undefined` | Global fallback issue-tracking repo (`owner/repo`) used when task-level tracking is enabled and no project/task override is set. |
+| `githubTrackingDefaultRepo` | `string` | `undefined` | Global fallback issue-tracking repo (`owner/repo`) used when task-level tracking is enabled and no project/task override is set. This key is dual-scope: global saves go through `PUT /api/settings/global` (Settings → Global General). |
 | `autoReloadOnVersionChange` | `boolean` | `true` | When enabled (default), the dashboard automatically reloads when a new build version is detected via `/version.json` polling or service worker activation. Set to `false` to suppress automatic reloads — the user must manually refresh to pick up updates. |
 | `modelOnboardingComplete` | `boolean` | `undefined` | Whether AI onboarding has been completed or dismissed. |
 | `executionGlobalProvider` | `string` | `undefined` | Global baseline provider for task execution. Project `executionProvider` overrides this. |
@@ -235,7 +235,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `githubCommentOnDone` | `boolean` | `false` | When enabled, tasks imported from GitHub issues post a completion comment to the source issue when the task moves to `done`. |
 | `githubCommentTemplate` | `string` | `undefined` | Optional issue comment template used by `githubCommentOnDone`. Supports `{taskId}` and `{taskTitle}` placeholders. If unset, Fusion uses a default completion message. |
 | `githubTrackingEnabledByDefault` | `boolean` | `false` | Project-level default for enabling issue tracking on new tasks. Even when this is false, issue creation can still occur per task if tracking is explicitly enabled. |
-| `githubTrackingDefaultRepo` | `string` | `undefined` | Project default issue-tracking repo (`owner/repo`) used before global fallback for tracked task creation. |
+| `githubTrackingDefaultRepo` | `string` | `undefined` | Project default issue-tracking repo (`owner/repo`) used before global fallback for tracked task creation (precedence: task override → project default → global default). This key is dual-scope: project saves go through `PUT /api/settings` (Settings → Merge). |
 | `githubAuthMode` | `"gh-cli" \| "token"` | `"gh-cli"` | Project GitHub auth strategy used by tracking lifecycle integration. `"gh-cli"` requires an installed/authenticated `gh` CLI. `"token"` requires a non-empty `githubAuthToken` (or `GITHUB_TOKEN` env fallback). Tracking lifecycle auth is strict per selected mode (no cross-fallback). |
 | `githubAuthToken` | `string` | `undefined` | Optional project PAT used when `githubAuthMode` is `"token"` (takes precedence over server startup token for tracking flows). |
 | `autoCreatePr` | `boolean` | `false` | Auto-create PRs for completed tasks. |

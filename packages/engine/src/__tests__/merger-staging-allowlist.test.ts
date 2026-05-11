@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { snapshotDirtyFiles, commitOrAmendMergeWithFixes } from "../merger.js";
@@ -74,6 +74,12 @@ function squashBranch(dir: string, branchName: string, fileName: string, content
 // Minimal stub settings / args used by commitOrAmendMergeWithFixes
 // ---------------------------------------------------------------------------
 
+function assertIsolatedWorkspace(dir: string): void {
+  const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
+  if (!repoRoot) return;
+  expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
+}
+
 const STUB_SETTINGS = {
   ...DEFAULT_SETTINGS,
   commitAuthorEnabled: false, // skip --author flag to avoid user config issues
@@ -87,7 +93,8 @@ describe("snapshotDirtyFiles", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-snapshot-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-snapshot-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 
@@ -135,7 +142,8 @@ describe("snapshotDirtyFiles", () => {
   });
 
   it("returns empty set when rootDir is not a git repo (error swallowed)", async () => {
-    const nonRepo = mkdtempSync(join(tmpdir(), "fn-non-repo-"));
+    const nonRepo = mkdtempSync(join(tmpdir(), "fusion-test-merger-non-repo-"));
+    assertIsolatedWorkspace(nonRepo);
     try {
       const snapshot = await snapshotDirtyFiles(nonRepo);
       expect(snapshot.size).toBe(0);
@@ -150,7 +158,8 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-allowlist-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-allowlist-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
     warnSpy = vi.spyOn(mergerLog, "warn");
   });
@@ -480,7 +489,8 @@ describe("snapshotDirtyFiles — paths with embedded spaces", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-snapshot-spaces-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-snapshot-spaces-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 
@@ -532,7 +542,8 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-allowlist-spaces-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-allowlist-spaces-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
     warnSpy = vi.spyOn(mergerLog, "warn");
   });

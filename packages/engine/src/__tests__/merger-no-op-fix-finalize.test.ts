@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { commitOrAmendMergeWithFixes } from "../merger.js";
@@ -33,6 +33,12 @@ function stageSquashThenClear(dir: string, branch: string, file: string, content
   return preAttemptSha;
 }
 
+function assertIsolatedWorkspace(dir: string): void {
+  const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
+  if (!repoRoot) return;
+  expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
+}
+
 const STUB_SETTINGS = {
   ...DEFAULT_SETTINGS,
   commitAuthorEnabled: false,
@@ -42,7 +48,8 @@ describe("commitOrAmendMergeWithFixes no-op finalize", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fn-noop-finalize-"));
+    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-noop-"));
+    assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_PROJECT_SETTINGS,
   GLOBAL_SETTINGS_KEYS,
   PROJECT_SETTINGS_KEYS,
+  isGlobalOnlySettingsKey,
   isGlobalSettingsKey,
   isProjectSettingsKey,
 } from "../types.js";
@@ -95,6 +96,8 @@ describe("settings key parity", () => {
     expect(isGlobalSettingsKey("githubAuthToken")).toBe(false);
     expect(isProjectSettingsKey("githubTrackingDefaultRepo")).toBe(true);
     expect(isGlobalSettingsKey("githubTrackingDefaultRepo")).toBe(true);
+    expect(isGlobalOnlySettingsKey("githubTrackingDefaultRepo")).toBe(false);
+    expect(isGlobalOnlySettingsKey("themeMode")).toBe(true);
   });
 
   it("keeps remoteAccess scoped to global settings only", () => {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
-import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalSettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
+import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { normalizeTaskPriority } from "./task-priority.js";
 import { canAgentTakeImplementationTask } from "./agent-role-policy.js";
 import { GlobalSettingsStore } from "./global-settings.js";
@@ -1783,7 +1783,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Strip global-only keys from project-level settings so stale project-scoped
     // values don't override the correct global value during the spread merge.
     const projectSettings = Object.fromEntries(
-      Object.entries(config.settings ?? {}).filter(([key]) => !isGlobalSettingsKey(key)),
+      Object.entries(config.settings ?? {}).filter(([key]) => !isGlobalOnlySettingsKey(key)),
     );
     return canonicalizeSettings({
       ...DEFAULT_SETTINGS,
@@ -1818,7 +1818,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // always done this; getSettingsFast() was missing the filter.
     const projectSettings: Partial<Settings> | undefined = raw
       ? (Object.fromEntries(
-          Object.entries(raw).filter(([key]) => !isGlobalSettingsKey(key)),
+          Object.entries(raw).filter(([key]) => !isGlobalOnlySettingsKey(key)),
         ) as Partial<Settings>)
       : undefined;
 
@@ -1846,7 +1846,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const projectSettings: Partial<ProjectSettings> = {};
     if (config.settings) {
       for (const key of Object.keys(config.settings)) {
-        if (!isGlobalSettingsKey(key)) {
+        if (!isGlobalOnlySettingsKey(key)) {
           (projectSettings as Record<string, unknown>)[key] = (config.settings as Record<string, unknown>)[key];
         }
       }
@@ -1881,7 +1881,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const projectScoped: Partial<ProjectSettings> = {};
     if (projectSettings) {
       for (const key of Object.keys(projectSettings)) {
-        if (!isGlobalSettingsKey(key)) {
+        if (!isGlobalOnlySettingsKey(key)) {
           (projectScoped as Record<string, unknown>)[key] = (projectSettings as Record<string, unknown>)[key];
         }
       }
@@ -1904,7 +1904,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Filter out global-only fields — they should go through updateGlobalSettings()
     const projectPatch: Partial<Settings> = {};
     for (const [key, value] of Object.entries(patch)) {
-      if (!isGlobalSettingsKey(key)) {
+      if (!isGlobalOnlySettingsKey(key)) {
         (projectPatch as Record<string, unknown>)[key] = value;
       }
     }

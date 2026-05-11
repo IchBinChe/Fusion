@@ -2469,6 +2469,7 @@ export {
   DEFAULT_SETTINGS,
   GLOBAL_SETTINGS_KEYS,
   PROJECT_SETTINGS_KEYS,
+  isGlobalOnlySettingsKey,
   isGlobalSettingsKey,
   isProjectSettingsKey,
 } from "./settings-schema.js";

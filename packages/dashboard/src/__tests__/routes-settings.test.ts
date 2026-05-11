@@ -687,6 +687,22 @@ describe("PUT /settings", () => {
     expect(res.body.error).toContain("must include both provider and modelId or neither");
   });
 
+  it("accepts dual-scope githubTrackingDefaultRepo on project settings endpoint", async () => {
+    const updatedSettings = { ...DEFAULT_SETTINGS, githubTrackingDefaultRepo: "octo/project-default" };
+    (store.updateSettings as ReturnType<typeof vi.fn>).mockResolvedValue(updatedSettings);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PUT",
+      "/api/settings",
+      JSON.stringify({ githubTrackingDefaultRepo: "octo/project-default" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateSettings).toHaveBeenCalledWith({ githubTrackingDefaultRepo: "octo/project-default" });
+  });
+
   it("rejects global-only fields with 400 error and helpful message", async () => {
     const res = await REQUEST(
       buildApp(),

@@ -1612,7 +1612,6 @@ function RunsTab({
     }
   }, [initialRunId, preferActiveRun, runs, isLoadingRuns, handleRunClick]);
 
-
   const handleStopRun = async () => {
     const shouldStop = await confirm({
       title: "Stop Active Run",
@@ -1632,7 +1631,6 @@ function RunsTab({
       addToast(`Failed to stop run: ${getErrorMessage(err)}`, "error");
     }
   };
-
 
   if (isLoadingRuns && runs.length === 0) {
     return (

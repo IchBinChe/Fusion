@@ -2164,6 +2164,17 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     value={messageInput}
                     onChange={handleInputChange}
                     onKeyDown={handleInputKeyDown}
+                    onKeyUp={handleInputKeyUp}
+                    onClick={handleInputSelectionChange}
+                    onBlur={handleInputBlur}
+                    onFocus={handleInputFocus}
+                    onTouchStart={(event) => {
+                      if (typeof window === "undefined") return;
+                      if (window.innerWidth > 768) return;
+                      if (document.activeElement === event.currentTarget) return;
+                      event.preventDefault();
+                      event.currentTarget.focus({ preventScroll: true });
+                    }}
                     rows={1}
                     data-testid="chat-input"
                   />

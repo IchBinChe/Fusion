@@ -3,13 +3,15 @@ import { resolve } from "node:path";
 import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
 const maxWorkers = computeMaxWorkers();
+const fusionAliases = {
+  "@fusion/core": resolve(__dirname, "../core/src/index.ts"),
+  "@fusion/dashboard": resolve(__dirname, "../dashboard/src/index.ts"),
+  "@fusion/engine": resolve(__dirname, "../engine/src/index.ts"),
+};
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@fusion/core": resolve(__dirname, "../core/src/index.ts"),
-      "@fusion/dashboard": resolve(__dirname, "../dashboard/src/index.ts"),
-    },
+    alias: fusionAliases,
   },
   test: {
     setupFiles: [resolve(__dirname, "../core/src/__test-utils__/vitest-setup.ts")],
@@ -23,6 +25,9 @@ export default defineConfig({
     passWithNoTests: true,
     projects: [
       {
+        resolve: {
+          alias: fusionAliases,
+        },
         test: {
           name: "desktop",
           include: ["src/__tests__/**/*.test.ts"],
@@ -31,6 +36,9 @@ export default defineConfig({
         },
       },
       {
+        resolve: {
+          alias: fusionAliases,
+        },
         test: {
           name: "desktop-renderer",
           include: ["src/renderer/**/*.test.ts", "src/renderer/**/*.test.tsx"],

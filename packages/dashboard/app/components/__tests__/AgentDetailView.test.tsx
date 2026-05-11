@@ -283,6 +283,7 @@ describe("AgentDetailView", () => {
       createdAt: "2024-01-01T00:00:00.000Z",
       updatedAt: "2024-01-01T00:00:00.000Z",
     } as any);
+    mockStartAgentRun.mockResolvedValue({ id: "run-003" } as any);
     // Default: no budget limit configured
     mockFetchAgentBudgetStatus.mockResolvedValue({
       agentId: "agent-001",

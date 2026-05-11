@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { ChatView } from "../ChatView";
 import * as useChatModule from "../../hooks/useChat";
@@ -228,6 +228,40 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
+    mediaSpy.mockRestore();
+  });
+
+  it("keeps room composer touch-focus behavior in parity with direct chat on mobile", async () => {
+    const mediaSpy = mockMobileViewport();
+    setup(
+      {
+        activeSession,
+        messages: [{ id: "msg-1", sessionId: activeSession.id, role: "assistant", content: "Direct hello", createdAt: "2026-04-08T00:00:00.000Z" }],
+      },
+      {
+        activeRoom: roomA,
+        messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "Room hello", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
+      },
+    );
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const roomInput = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    const roomFocusSpy = vi.spyOn(roomInput, "focus");
+    await act(async () => {
+      fireEvent.touchStart(roomInput);
+    });
+    expect(roomFocusSpy).toHaveBeenCalledWith({ preventScroll: true });
+
+    await userEvent.click(screen.getByTestId("chat-sidebar-scope-direct"));
+
+    const directInput = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    const directFocusSpy = vi.spyOn(directInput, "focus");
+    await act(async () => {
+      fireEvent.touchStart(directInput);
+    });
+    expect(directFocusSpy).toHaveBeenCalledWith({ preventScroll: true });
+
     mediaSpy.mockRestore();
   });
 

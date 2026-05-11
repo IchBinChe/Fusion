@@ -218,6 +218,26 @@ When the runtime model is present and differs from execution-lane settings, hear
 
 If a heartbeat cannot create/run a session due to unavailable provider credentials or missing provider registration, Fusion records `resultJson.reason = "heartbeat_model_unavailable"` with actionable diagnostics in `resultJson.detail`/`stderrExcerpt`.
 
+### Durable-agent transient error auto-recovery
+
+Self-healing may auto-recover **durable (non-ephemeral)** agents stuck in `state="error"` when all eligibility checks pass:
+
+- agent is non-ephemeral (`isEphemeralAgent(...) === false`)
+- heartbeat runtime is enabled (`runtimeConfig.enabled !== false`)
+- no active heartbeat execution is already running for the agent
+- `lastError` classifies as transient network/infrastructure failure
+- `lastError` is **not** operator-actionable (credentials/model/billing-style failures)
+
+When eligible, self-healing uses bounded retries with persisted metadata at `agent.metadata.durableErrorRecovery`:
+
+- exponential cooldown (`30s` base, capped at `15m`)
+- retry budget cap (`5` attempts)
+- persisted `attempts`, `lastAttemptAt`, `nextRetryAt`, `exhausted`, and `lastReason`
+
+On restart attempts, the runtime triggers the normal heartbeat pipeline with `source: "automation"` and a structured `contextSnapshot.selfHealing` payload so operators can audit recovery runs in heartbeat history.
+
+Self-healing intentionally leaves agents in `error` (no auto-restart) when blockers are operator-actionable or non-transient, when cooldown has not elapsed, when active execution is present, or when retry budget is exhausted.
+
 - **Timer trigger:** run completes and the durable agent returns to `state="active"` (recoverable soft-fail).
 - **Assignment / on-demand trigger:** run completes with `resultJson.actionRequired = true`, then the durable agent is paused with `pauseReason="heartbeat-model-unavailable"` and `lastError` set to actionable credential guidance (including the missing provider name when detectable).
 

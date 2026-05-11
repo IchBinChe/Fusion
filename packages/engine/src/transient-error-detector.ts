@@ -169,3 +169,25 @@ export function classifyError(errorMessage: string): "transient" | "usage-limit"
   // Default to permanent (mark as failed)
   return "permanent";
 }
+
+const OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS: RegExp[] = [
+  /invalid api key/i,
+  /authentication failed/i,
+  /unauthorized/i,
+  /forbidden/i,
+  /insufficient permissions?/i,
+  /model .* not found/i,
+  /unknown model/i,
+  /no such model/i,
+  /credential/i,
+  /missing .*key/i,
+  /billing/i,
+  /quota exceeded/i,
+];
+
+export function isOperatorActionableAgentError(errorMessage: string): boolean {
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return false;
+  }
+  return OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS.some((pattern) => pattern.test(errorMessage));
+}

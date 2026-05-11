@@ -22,6 +22,7 @@ import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
 import { getRegisteredWorktreePaths, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import { isRecoverableMissingWorktreeReviewFailure } from "./restart-recovery-coordinator.js";
+import { classifyError, isOperatorActionableAgentError } from "./transient-error-detector.js";
 
 const log = createLogger("self-healing");
 const execAsync = promisify(exec);
@@ -91,6 +92,8 @@ export interface SelfHealingOptions {
    * Used to avoid clearing a transient merge status mid-merge.
    */
   getActiveMergeTaskId?: () => string | null;
+  hasActiveAgentExecution?: (agentId: string) => boolean;
+  restartDurableAgentHeartbeat?: (agentId: string, context: { reason: string; attempt: number }) => Promise<boolean>;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -124,6 +127,9 @@ const MAX_TASK_DONE_RETRIES = 3;
 const MAX_AUTO_MERGE_RETRIES = 3;
 const DEADLOCK_RECOVERY_COOLDOWN_MS = 15 * 60_000;
 const DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS = 5 * 60_000;
+const DURABLE_ERROR_RECOVERY_MAX_RETRIES = 5;
+const DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS = 30_000;
+const DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS = 15 * 60_000;
 
 interface LandedTaskCommit {
   sha: string;
@@ -2182,6 +2188,33 @@ export class SelfHealingManager {
     }
   }
 
+  private getDurableAgentRecoveryState(agent: { metadata?: Record<string, unknown> | null }): {
+    attempts: number;
+    nextRetryAt?: string;
+    exhausted?: boolean;
+  } {
+    const metadata = agent.metadata ?? {};
+    const raw = metadata.durableErrorRecovery;
+    if (!raw || typeof raw !== "object") {
+      return { attempts: 0 };
+    }
+    const record = raw as Record<string, unknown>;
+    const attempts = typeof record.attempts === "number" && Number.isFinite(record.attempts)
+      ? Math.max(0, Math.floor(record.attempts))
+      : 0;
+    return {
+      attempts,
+      nextRetryAt: typeof record.nextRetryAt === "string" ? record.nextRetryAt : undefined,
+      exhausted: record.exhausted === true,
+    };
+  }
+
+  private computeDurableAgentRecoveryCooldownMs(attempts: number): number {
+    const clampedAttempts = Math.max(1, attempts);
+    const exponential = DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS * Math.pow(2, clampedAttempts - 1);
+    return Math.min(exponential, DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS);
+  }
+
   async recoverOrphanedAgents(): Promise<number> {
     const agentStore = this.options.agentStore;
     if (!agentStore) {
@@ -2212,10 +2245,39 @@ export class SelfHealingManager {
           return false;
         }
         const updatedAt = Date.parse(agent.updatedAt ?? "");
-        if (!Number.isFinite(updatedAt)) {
+        if (!Number.isFinite(updatedAt) || now - updatedAt < recoveryTimeoutMs) {
           return false;
         }
-        return now - updatedAt >= recoveryTimeoutMs;
+
+        if (agent.state === "error") {
+          const runtimeConfig = (agent.runtimeConfig ?? {}) as Record<string, unknown>;
+          if (runtimeConfig.enabled === false) {
+            return false;
+          }
+          if (this.options.hasActiveAgentExecution?.(agent.id) === true) {
+            return false;
+          }
+          if (classifyError(agent.lastError ?? "") !== "transient") {
+            return false;
+          }
+          if (isOperatorActionableAgentError(agent.lastError ?? "")) {
+            return false;
+          }
+
+          const recoveryState = this.getDurableAgentRecoveryState(agent);
+          if (recoveryState.exhausted) {
+            return false;
+          }
+          if (recoveryState.nextRetryAt) {
+            const nextRetryMs = Date.parse(recoveryState.nextRetryAt);
+            if (Number.isFinite(nextRetryMs) && nextRetryMs > now) {
+              log.log(`Durable agent ${agent.id} transient recovery delayed until ${recoveryState.nextRetryAt}`);
+              return false;
+            }
+          }
+        }
+
+        return true;
       });
 
       if (orphaned.length === 0) {
@@ -2227,10 +2289,44 @@ export class SelfHealingManager {
         const updatedAt = Date.parse(agent.updatedAt ?? "");
         const stuckForMs = Math.max(0, now - updatedAt);
         try {
+          if (agent.state === "error") {
+            const recoveryState = this.getDurableAgentRecoveryState(agent);
+            const nextAttempts = recoveryState.attempts + 1;
+            const exhausted = nextAttempts >= DURABLE_ERROR_RECOVERY_MAX_RETRIES;
+            const nextRetryAt = new Date(Date.now() + this.computeDurableAgentRecoveryCooldownMs(nextAttempts)).toISOString();
+            await agentStore.updateAgent(agent.id, {
+              metadata: {
+                ...(agent.metadata ?? {}),
+                durableErrorRecovery: {
+                  attempts: nextAttempts,
+                  lastAttemptAt: new Date().toISOString(),
+                  nextRetryAt,
+                  exhausted,
+                  lastReason: exhausted ? "retry-budget-exhausted" : "transient-error",
+                },
+              },
+            });
+            if (exhausted) {
+              log.warn(`Suppressed durable-agent auto-restart for ${agent.id}: retry budget exhausted`);
+              continue;
+            }
+          }
+
           await agentStore.updateAgentState(agent.id, "active");
           await agentStore.updateAgent(agent.id, {
             lastError: undefined,
           });
+
+          if (agent.state === "error" && this.options.restartDurableAgentHeartbeat) {
+            const restartOk = await this.options.restartDurableAgentHeartbeat(agent.id, {
+              reason: "transient-error",
+              attempt: this.getDurableAgentRecoveryState(agent).attempts + 1,
+            });
+            if (!restartOk) {
+              log.warn(`Durable-agent transient recovery heartbeat restart skipped for ${agent.id}`);
+            }
+          }
+
           log.log(
             `Auto-recovered: orphaned agent ${agent.id} stuck in ${agent.state} for ${Math.round(stuckForMs / 1000)}s — reset to active`,
           );

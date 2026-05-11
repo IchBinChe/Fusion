@@ -3,6 +3,7 @@ import {
   isTransientError,
   classifyError,
   isSilentTransientError,
+  isOperatorActionableAgentError,
   TRANSIENT_ERROR_PATTERNS,
 } from "../transient-error-detector.js";
 import { isUsageLimitError } from "../usage-limit-detector.js";
@@ -235,6 +236,21 @@ describe("Transient Error Detector", () => {
       TRANSIENT_ERROR_PATTERNS.forEach((pattern) => {
         expect(pattern.flags).toContain("i");
       });
+    });
+  });
+
+  describe("isOperatorActionableAgentError", () => {
+    it("returns true for credential/model/billing errors", () => {
+      expect(isOperatorActionableAgentError("invalid api key")).toBe(true);
+      expect(isOperatorActionableAgentError("Authentication failed for provider")).toBe(true);
+      expect(isOperatorActionableAgentError("model gpt-x not found")).toBe(true);
+      expect(isOperatorActionableAgentError("missing OPENAI_API_KEY")).toBe(true);
+      expect(isOperatorActionableAgentError("billing issue: quota exceeded")).toBe(true);
+    });
+
+    it("returns false for transient network errors", () => {
+      expect(isOperatorActionableAgentError("socket hang up")).toBe(false);
+      expect(isOperatorActionableAgentError("upstream connect error")).toBe(false);
     });
   });
 

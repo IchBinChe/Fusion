@@ -2465,6 +2465,39 @@ describe("executeHeartbeat", () => {
       });
     });
 
+    it("persists automation source recovery context on run records", async () => {
+      const store = createStoreWithAgentForExec();
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({
+        session: mockSession as any,
+      });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const result = await monitor.executeHeartbeat({
+        agentId: "agent-001",
+        source: "automation",
+        triggerDetail: "self-healing durable-agent transient recovery",
+        contextSnapshot: {
+          selfHealing: {
+            reason: "transient-error",
+            attempt: 1,
+            source: "durable-agent-transient-error-recovery",
+          },
+        },
+      });
+
+      expect(result.contextSnapshot).toEqual(
+        expect.objectContaining({
+          selfHealing: {
+            reason: "transient-error",
+            attempt: 1,
+            source: "durable-agent-transient-error-recovery",
+          },
+        }),
+      );
+    });
+
     it("records agent logs, context taskId, and stdoutExcerpt for successful runs", async () => {
       const store = createStoreWithAgentForExec();
       const appendAgentLog = vi.fn().mockResolvedValue(undefined);

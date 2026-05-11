@@ -635,6 +635,25 @@ export class InProcessRuntime
         enqueueMerge: this.mergeEnqueuer ? (taskId: string) => this.mergeEnqueuer?.(taskId) : undefined,
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
         leaseManager: this.leaseManager,
+        hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
+        restartDurableAgentHeartbeat: async (agentId: string, context: { reason: string; attempt: number }) => {
+          if (!this.heartbeatMonitor) {
+            return false;
+          }
+          const run = await this.heartbeatMonitor.executeHeartbeat({
+            agentId,
+            source: "automation",
+            triggerDetail: `self-healing durable-agent transient recovery (${context.reason}, attempt ${context.attempt})`,
+            contextSnapshot: {
+              selfHealing: {
+                reason: context.reason,
+                attempt: context.attempt,
+                source: "durable-agent-transient-error-recovery",
+              },
+            },
+          });
+          return !!run;
+        },
       });
       this.selfHealingManager.start();
       this.stuckTaskDetector.start();

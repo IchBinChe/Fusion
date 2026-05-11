@@ -529,19 +529,43 @@ describe("SelfHealingManager", () => {
       managerWithAgents.stop();
     });
 
-    it("recovers orphaned agent in error state", async () => {
+    it("recovers orphaned agent in transient error state", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
-        { id: "orphan-1", state: "error", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+        {
+          id: "orphan-1",
+          state: "error",
+          lastError: "socket hang up",
+          metadata: {},
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
       ]);
-      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
       expect(result).toBe(1);
       expect(agentStore.updateAgentState).toHaveBeenCalledWith("orphan-1", "active");
-      expect(agentStore.updateAgent).toHaveBeenCalledWith("orphan-1", { lastError: undefined });
+      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("orphan-1", { lastError: undefined });
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "orphan-1",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({
+              attempts: 1,
+              exhausted: false,
+              lastReason: "transient-error",
+            }),
+          }),
+        }),
+      );
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("orphan-1", { reason: "transient-error", attempt: 1 });
       managerWithAgents.stop();
     });
 
@@ -549,7 +573,7 @@ describe("SelfHealingManager", () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
-        { id: "orphan-1", state: "error", updatedAt: new Date(now - 10_000).toISOString() } as Agent,
+        { id: "orphan-1", state: "error", lastError: "socket hang up", updatedAt: new Date(now - 10_000).toISOString() } as Agent,
       ]);
       const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
 
@@ -557,6 +581,99 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(0);
       expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("skips non-transient/operator-actionable durable errors", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "agent-perm", state: "error", lastError: "invalid api key", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("suppresses transient recovery while cooldown is active", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-cooldown",
+          state: "error",
+          lastError: "socket hang up",
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: { durableErrorRecovery: { attempts: 2, nextRetryAt: new Date(now + 5 * 60_000).toISOString() } },
+        } as unknown as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("suppresses transient recovery when active agent execution is present", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "agent-active", state: "error", lastError: "socket hang up", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        hasActiveAgentExecution: (agentId) => agentId === "agent-active",
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("suppresses transient recovery when retry budget is exhausted", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-exhausted",
+          state: "error",
+          lastError: "socket hang up",
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: { durableErrorRecovery: { attempts: 4 } },
+        } as unknown as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-exhausted",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({
+              exhausted: true,
+              lastReason: "retry-budget-exhausted",
+            }),
+          }),
+        }),
+      );
       managerWithAgents.stop();
     });
 

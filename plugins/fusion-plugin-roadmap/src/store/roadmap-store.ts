@@ -157,22 +157,25 @@ export class RoadmapStore extends EventEmitter<RoadmapStoreEvents> {
 
   // ── ID Generators ───────────────────────────────────────────────────
 
-  private generateRoadmapId(): string {
-    const timestamp = Date.now();
+  private idSequence = 0;
+
+  private generateId(prefix: "RM" | "RMS" | "RF"): string {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const sequence = (this.idSequence++).toString(36).toUpperCase().padStart(4, "0");
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `RM-${timestamp.toString(36).toUpperCase()}-${random}`;
+    return `${prefix}-${timestamp}-${sequence}-${random}`;
+  }
+
+  private generateRoadmapId(): string {
+    return this.generateId("RM");
   }
 
   private generateMilestoneId(): string {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `RMS-${timestamp.toString(36).toUpperCase()}-${random}`;
+    return this.generateId("RMS");
   }
 
   private generateFeatureId(): string {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `RF-${timestamp.toString(36).toUpperCase()}-${random}`;
+    return this.generateId("RF");
   }
 
   // ── Row-to-Object Converters ───────────────────────────────────────

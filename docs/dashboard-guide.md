@@ -198,6 +198,24 @@ Features:
 
 ![Documents view](./screenshots/documents-view.png)
 
+## Reports View
+
+Reports View is available when the **Reports** plugin is installed and enabled.
+
+Navigation:
+- Desktop: **Header → More views → Reports**
+- Mobile: **More** sheet → **Reports**
+
+Features:
+
+- Reports history list with filters for cadence, status, date range, title text, and agent
+- Detail viewer with a sandboxed iframe preview backed by the report HTML preview endpoint
+- Section quick-jump sidebar based on stable report section markers
+- Compare drawer for side-by-side report comparisons with section-level diff groupings
+- Standalone HTML download/export action for sharing a self-contained report file
+
+For plugin internals (registration, API routes, rendering/export pipeline), see [Reports plugin docs](./plugins/reports.md).
+
 ### Markdown Rendering
 
 Documents view supports toggling between raw text and formatted markdown when viewing document content:

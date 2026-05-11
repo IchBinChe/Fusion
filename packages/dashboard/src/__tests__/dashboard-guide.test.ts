@@ -22,6 +22,7 @@ describe("dashboard guide coverage for lazy-loaded views", () => {
     "Agents View",
     "Roadmaps View",
     "Insights View",
+    "Reports View",
     "Plugin Manager",
     "Pi Extensions Manager",
   ] as const;

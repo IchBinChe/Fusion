@@ -1,12 +1,21 @@
 import { definePlugin } from "@fusion/plugin-sdk";
 import type { FusionPlugin, PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/plugin-sdk";
-import { FusionApiClient } from "./fusion-api-client.js";
 import { createNotifier } from "./notifier.js";
+import { requestReview, startWork } from "./agent-actions.js";
+import { runQuickCapture } from "./quick-capture.js";
 import { quickCaptureRoutes } from "./routes/quick-capture-routes.js";
 import { createNotificationRoutes } from "./routes/notification-routes.js";
 import { agentActionRoutes } from "./routes/agent-action-routes.js";
-import { getFusionBaseUrl, getFusionToken, getNotifyColumns, settingsSchema } from "./settings.js";
-import { StubGlassesTransport } from "./transport.js";
+import { boardRoutes } from "./routes/board-routes.js";
+import {
+  getCompanionWebhookUrl,
+  getFusionToken,
+  getNotifyColumns,
+  getQuickCaptureColumn,
+  settingsSchema,
+} from "./settings.js";
+import { WebhookGlassesTransport } from "./transport.js";
+import { createTransportRoutes } from "./routes/transport-routes.js";
 
 export type PluginDb = {
   exec(sql: string): void;
@@ -18,12 +27,9 @@ export type PluginDb = {
 };
 
 type PluginInstance = {
-  client: FusionApiClient;
-  transport: StubGlassesTransport;
+  transport: WebhookGlassesTransport;
   notifier: ReturnType<typeof createNotifier>;
-};
-
-const instances = new Map<string, PluginInstance>();
+};const instances = new Map<string, PluginInstance>();
 
 function getDbFromTaskStore(ctx: PluginContext): PluginDb {
   const pluginStore = ctx.taskStore.getPluginStore();
@@ -49,6 +55,7 @@ const coreRoutes: PluginRouteDefinition[] = [
         status: 200,
         body: {
           connected: instance.transport.connected,
+          transport: instance.transport.status,
           lastPollTime: instance.notifier.lastPolledAt() ?? null,
           notifyOnColumns: getNotifyColumns(ctx.settings),
         },
@@ -69,6 +76,7 @@ const coreRoutes: PluginRouteDefinition[] = [
 ];
 
 const notificationRoutes = createNotificationRoutes((ctx) => instances.get(ctx.pluginId)?.notifier);
+const transportRoutes = createTransportRoutes((ctx) => instances.get(ctx.pluginId)?.transport);
 
 const plugin: FusionPlugin = definePlugin({
   manifest: {
@@ -81,7 +89,7 @@ const plugin: FusionPlugin = definePlugin({
     settingsSchema,
   },
   state: "installed",
-  routes: [...coreRoutes, ...quickCaptureRoutes, ...agentActionRoutes, ...notificationRoutes],
+  routes: [...coreRoutes, ...boardRoutes, ...quickCaptureRoutes, ...agentActionRoutes, ...notificationRoutes, ...transportRoutes],
   hooks: {
     onSchemaInit: (db) => {
       (db as PluginDb).exec(`
@@ -99,9 +107,35 @@ const plugin: FusionPlugin = definePlugin({
         return;
       }
       const db = getDbFromTaskStore(ctx);
-      const client = new FusionApiClient(getFusionBaseUrl(ctx.settings), token);
-      const transport = new StubGlassesTransport();
+      const transport = new WebhookGlassesTransport({
+        companionWebhookUrl: getCompanionWebhookUrl(ctx.settings),
+      });
       await transport.connect();
+      transport.onAction(async (action) => {
+        if (action.type === "quick-capture") {
+          await runQuickCapture(
+            { text: action.text, column: undefined },
+            {
+              taskStore: ctx.taskStore,
+              pluginId: ctx.pluginId,
+              defaultColumn: getQuickCaptureColumn(ctx.settings),
+            },
+          );
+          return;
+        }
+
+        if (!action.taskId) return;
+
+        if (action.type === "start-work") {
+          await startWork({ taskId: action.taskId }, { taskStore: ctx.taskStore, pluginId: ctx.pluginId });
+          return;
+        }
+
+        if (action.type === "request-review") {
+          await requestReview({ taskId: action.taskId }, { taskStore: ctx.taskStore, pluginId: ctx.pluginId });
+        }
+      });
+
       const notifier = createNotifier({
         taskStore: ctx.taskStore,
         db,
@@ -111,7 +145,7 @@ const plugin: FusionPlugin = definePlugin({
         pluginId: ctx.pluginId,
       });
       notifier.start();
-      instances.set(ctx.pluginId, { client, transport, notifier });
+      instances.set(ctx.pluginId, { transport, notifier });
     },
     onUnload: async () => {
       for (const [pluginId, instance] of instances.entries()) {

@@ -1,0 +1,99 @@
+import type { Task } from "@fusion/core";
+import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/plugin-sdk";
+import {
+  boardToDeck,
+  DEFAULT_MAX_CARDS_PER_DECK,
+  DEFAULT_MAX_CHARS_PER_LINE,
+  DEFAULT_MAX_LINES_PER_CARD,
+  taskToCard,
+} from "../cards.js";
+import { requireApiKey } from "./quick-capture-routes.js";
+
+const ALLOWED_COLUMNS: Array<Task["column"]> = ["triage", "todo", "in-progress", "in-review", "done", "archived"];
+
+function parseColumns(raw: unknown): Set<Task["column"]> | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const parsed = raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is Task["column"] => ALLOWED_COLUMNS.includes(value as Task["column"]));
+  return parsed.length ? new Set(parsed) : null;
+}
+
+function parseMax(raw: unknown): number {
+  const value = typeof raw === "string" ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isFinite(value)) return DEFAULT_MAX_CARDS_PER_DECK;
+  return Math.max(1, Math.min(20, Math.floor(value)));
+}
+
+function requestData(req: unknown): {
+  headers: Record<string, string | string[] | undefined>;
+  query: Record<string, unknown>;
+  params: Record<string, unknown>;
+} {
+  const candidate = (req ?? {}) as {
+    headers?: Record<string, string | string[] | undefined>;
+    query?: Record<string, unknown>;
+    params?: Record<string, unknown>;
+  };
+  return { headers: candidate.headers ?? {}, query: candidate.query ?? {}, params: candidate.params ?? {} };
+}
+
+async function getBoardCards(req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> {
+  const request = requestData(req);
+  const auth = requireApiKey(ctx, { headers: request.headers });
+  if (!auth.ok) return auth.response;
+
+  const all = ((await ctx.taskStore.listTasks({ includeArchived: false })) as Task[]) ?? [];
+  const columns = parseColumns(request.query.columns);
+  const filtered = columns ? all.filter((task) => columns.has(task.column)) : all;
+  const maxCards = parseMax(request.query.max);
+  const deck = boardToDeck(filtered, {
+    maxCharsPerLine: DEFAULT_MAX_CHARS_PER_LINE,
+    maxLines: DEFAULT_MAX_LINES_PER_CARD,
+    maxCards,
+  });
+  return { status: 200, body: { deck, generatedAt: new Date().toISOString() } };
+}
+
+async function getBoardSummary(req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> {
+  const request = requestData(req);
+  const auth = requireApiKey(ctx, { headers: request.headers });
+  if (!auth.ok) return auth.response;
+
+  const all = ((await ctx.taskStore.listTasks({ includeArchived: false })) as Task[]) ?? [];
+  const columns = parseColumns(request.query.columns);
+  const filtered = columns ? all.filter((task) => columns.has(task.column)) : all;
+  const deck = boardToDeck(filtered, {
+    maxCharsPerLine: DEFAULT_MAX_CHARS_PER_LINE,
+    maxLines: DEFAULT_MAX_LINES_PER_CARD,
+    maxCards: 1,
+  });
+
+  return { status: 200, body: { summary: deck.summary, updatedAt: deck.summary.updatedAt } };
+}
+
+async function getTaskCards(req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> {
+  const request = requestData(req);
+  const auth = requireApiKey(ctx, { headers: request.headers });
+  if (!auth.ok) return auth.response;
+
+  const taskId = typeof request.params.id === "string" ? request.params.id.trim() : "";
+  if (!taskId) return { status: 400, body: { error: "task id is required" } };
+
+  const task = (await ctx.taskStore.getTask(taskId)) as Task | undefined;
+  if (!task) return { status: 404, body: { error: "task not found" } };
+
+  const deck = {
+    cards: [taskToCard(task, { maxCharsPerLine: DEFAULT_MAX_CHARS_PER_LINE, maxLines: DEFAULT_MAX_LINES_PER_CARD })],
+    summary: boardToDeck([task], { maxCards: 1 }).summary,
+  };
+
+  return { status: 200, body: { deck, generatedAt: new Date().toISOString() } };
+}
+
+export const boardRoutes: PluginRouteDefinition[] = [
+  { method: "GET", path: "/board/cards", handler: getBoardCards, description: "Read-only board card deck" },
+  { method: "GET", path: "/board", handler: getBoardSummary, description: "Read-only board summary" },
+  { method: "GET", path: "/tasks/:id/cards", handler: getTaskCards, description: "Read-only single task card deck" },
+];

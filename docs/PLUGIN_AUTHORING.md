@@ -1205,21 +1205,16 @@ Example plugin demonstrating settings schema and runtime configuration with all 
 - Features: Configurable greeting message, tag limit, logging toggle, log level selector
 - **Install from Settings**: Designed to be installed via the dashboard Settings → Plugins UI
 
-### [Even Cards Plugin](../../plugins/fusion-plugin-even-cards/)
-
-Read-only board/task card projection plugin for Even Realities companion flows.
-
-- Demonstrates: plugin routes protected with API-key auth, store reads via `ctx.taskStore`, and card-deck projection helpers
-- Features: `GET /board/cards`, `GET /board`, and `GET /tasks/:id/cards` endpoints with compact card payloads
-
 ### [Even Realities Glasses Plugin](../../plugins/fusion-plugin-even-realities-glasses/)
 
 Task-focused card bridge plugin for Even Realities glasses companion flows.
 
 - Features: quick capture text into new tasks via the plugin route
 - Features: polling-based task transition notifications on configured columns (default `in-review`)
+- Features: board/task card endpoints (`GET /board/cards`, `GET /board`, `GET /tasks/:id/cards`)
 - Features: agent actions for start work (`in-progress`) and request review (`in-review`), gated by `enableAgentActions`
-- Demonstrates: settings schema for `fusionApiBaseUrl`, `fusionApiToken`, `glassesDeviceId`, `pollingIntervalSeconds`, `notifyOnColumns`, `quickCaptureDefaultColumn`, and `enableAgentActions`
+- Features: webhook transport bridge with companion action ingestion (`POST /transport/actions`) and reconnect/status endpoints
+- Demonstrates: settings schema for `fusionApiBaseUrl`, `fusionApiToken`, `apiKey`, `glassesDeviceId`, `companionWebhookUrl`, `pollingIntervalSeconds`, `notifyOnColumns`, `quickCaptureDefaultColumn`, and `enableAgentActions`
 - Demonstrates FN-3737-aligned display limits: `EVEN_CARD_MAX_CHARS_PER_LINE = 28`, `EVEN_CARD_MAX_LINES_PER_CARD = 8`, `EVEN_CARD_MAX_DECK_SIZE = 12`
 
 ### Installing Example Plugins from Settings

@@ -28,6 +28,10 @@ export const settingsSchema: Record<string, PluginSettingSchema> = {
     type: "string",
     label: "Glasses Device ID",
   },
+  companionWebhookUrl: {
+    type: "string",
+    label: "Companion Webhook URL",
+  },
   pollingIntervalSeconds: {
     type: "number",
     label: "Polling Interval (seconds)",
@@ -63,6 +67,10 @@ export function getFusionBaseUrl(settings: Record<string, unknown>): string {
 
 export function getFusionToken(settings: Record<string, unknown>): string | undefined {
   return getSettingString(settings, "fusionApiToken");
+}
+
+export function getCompanionWebhookUrl(settings: Record<string, unknown>): string | undefined {
+  return getSettingString(settings, "companionWebhookUrl");
 }
 
 export function getPollingIntervalMs(settings: Record<string, unknown>): number {

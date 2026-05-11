@@ -18,6 +18,16 @@ export type GlassesCard = {
   actions?: GlassesCardAction[];
 };
 
+export type BoardSummary = {
+  counts: Record<string, number>;
+  updatedAt: string | null;
+};
+
+export type CardDeck = {
+  cards: GlassesCard[];
+  summary: BoardSummary;
+};
+
 const COLUMN_BADGES: Record<string, string> = {
   triage: "triage",
   todo: "todo",
@@ -27,18 +37,28 @@ const COLUMN_BADGES: Record<string, string> = {
   archived: "archived",
 };
 
+const COLUMN_ORDER: Array<Task["column"]> = ["triage", "todo", "in-progress", "in-review", "done", "archived"];
+
+export const DEFAULT_MAX_CHARS_PER_LINE = 24;
+export const DEFAULT_MAX_LINES_PER_CARD = 4;
+export const DEFAULT_MAX_CARDS_PER_DECK = 8;
 const DEFAULT_MAX_TITLE = 80;
 
 export function truncateLine(value: string, maxChars = DEFAULT_MAX_TITLE): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+  const trimmed = value.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  if (maxChars <= 1) return "…";
+  return `${trimmed.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-export function wrapLines(value: string, opts: { maxCharsPerLine?: number; maxLines?: number } = {}): string[] {
+export function wrapLines(
+  value: string,
+  opts: { maxCharsPerLine?: number; maxLines?: number } = {},
+): string[] {
   const maxCharsPerLine = Math.max(8, opts.maxCharsPerLine ?? 36);
   const maxLines = Math.max(1, opts.maxLines ?? 2);
   const words = value.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [""];
+  if (words.length === 0) return [];
   const lines: string[] = [];
   let current = "";
   for (const word of words) {
@@ -53,7 +73,7 @@ export function wrapLines(value: string, opts: { maxCharsPerLine?: number; maxLi
   }
   if (lines.length < maxLines && current) lines.push(current);
   if (lines.length > maxLines) return lines.slice(0, maxLines);
-  if (words.join(" ").length > lines.join(" ").length) {
+  if (words.join(" ").length > lines.join(" ").length && lines.length > 0) {
     lines[lines.length - 1] = truncateLine(lines[lines.length - 1], maxCharsPerLine);
   }
   return lines;
@@ -75,16 +95,43 @@ export function formatRelativeAge(updatedAt: string, opts: { now?: () => Date } 
   return `updated ${Math.floor(hours / 24)}d ago`;
 }
 
-export function taskToCard(task: Task): GlassesCard {
-  const title = typeof task.title === "string" && task.title.trim() ? task.title : task.description;
+function boardSummary(tasks: Task[]): BoardSummary {
+  const counts = Object.fromEntries(COLUMN_ORDER.map((column) => [column, 0]));
+  let updatedAt: string | null = null;
+  for (const task of tasks) {
+    counts[task.column] = (counts[task.column] ?? 0) + 1;
+    if (!updatedAt || task.updatedAt > updatedAt) updatedAt = task.updatedAt;
+  }
+  return { counts, updatedAt };
+}
+
+function boardSummaryCardFromCounts(summary: BoardSummary, now: string, maxCharsPerLine: number, maxLines: number): GlassesCard {
+  const summaryText = `Triage ${summary.counts.triage} Todo ${summary.counts.todo} Doing ${summary.counts["in-progress"]} Review ${summary.counts["in-review"]} Done ${summary.counts.done}`;
   return {
-    id: `task-${task.id}`,
+    id: "summary",
+    kind: "summary",
+    title: truncateLine("Fusion board", maxCharsPerLine),
+    lines: wrapLines(summaryText, { maxCharsPerLine, maxLines }),
+    badge: statusBadge("todo"),
+    updatedAt: summary.updatedAt ?? now,
+  };
+}
+
+export function taskToCard(
+  task: Task,
+  opts: { maxCharsPerLine?: number; maxLines?: number; now?: () => Date } = {},
+): GlassesCard {
+  const title = typeof task.title === "string" && task.title.trim() ? task.title : task.description;
+  const maxCharsPerLine = opts.maxCharsPerLine ?? DEFAULT_MAX_CHARS_PER_LINE;
+  const maxLines = opts.maxLines ?? DEFAULT_MAX_LINES_PER_CARD;
+  return {
+    id: task.id,
     kind: "task",
-    title: truncateLine(title, DEFAULT_MAX_TITLE),
-    lines: [
-      `assignee: ${task.assignedAgentId ?? task.assigneeUserId ?? "unassigned"}`,
-      formatRelativeAge(task.updatedAt),
-    ],
+    title: truncateLine(`${task.id.toUpperCase()} ${title}`, maxCharsPerLine),
+    lines: wrapLines(
+      `Priority ${task.priority ?? "normal"} Assignee ${task.assignedAgentId ?? task.assigneeUserId ?? "unassigned"} Age ${formatRelativeAge(task.createdAt ?? task.updatedAt, { now: opts.now })}`,
+      { maxCharsPerLine, maxLines },
+    ),
     badge: statusBadge(task.column),
     taskId: task.id,
     updatedAt: task.updatedAt,
@@ -92,6 +139,29 @@ export function taskToCard(task: Task): GlassesCard {
       { type: "start-work", taskId: task.id, label: "Start work" },
       { type: "request-review", taskId: task.id, label: "Request review" },
     ],
+  };
+}
+
+export function boardToDeck(
+  tasks: Task[],
+  opts: { maxCharsPerLine?: number; maxLines?: number; maxCards?: number; now?: string } = {},
+): CardDeck {
+  const maxCharsPerLine = opts.maxCharsPerLine ?? DEFAULT_MAX_CHARS_PER_LINE;
+  const maxLines = opts.maxLines ?? DEFAULT_MAX_LINES_PER_CARD;
+  const maxCards = opts.maxCards ?? DEFAULT_MAX_CARDS_PER_DECK;
+  const now = opts.now ?? new Date().toISOString();
+  const summary = boardSummary(tasks);
+  const active = tasks
+    .filter((task) => task.column !== "archived" && task.column !== "done")
+    .sort((a, b) => (b.updatedAt === a.updatedAt ? b.id.localeCompare(a.id) : b.updatedAt.localeCompare(a.updatedAt)))
+    .slice(0, Math.max(0, maxCards - 1));
+
+  return {
+    cards: [
+      boardSummaryCardFromCounts(summary, now, maxCharsPerLine, maxLines),
+      ...active.map((task) => taskToCard(task, { maxCharsPerLine, maxLines, now: () => new Date(now) })),
+    ],
+    summary,
   };
 }
 

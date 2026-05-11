@@ -1,22 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
-import { StubGlassesTransport } from "../transport.js";
+import { WebhookGlassesTransport } from "../transport.js";
 
-describe("StubGlassesTransport", () => {
-  it("records pushes in order", async () => {
-    const transport = new StubGlassesTransport();
+describe("WebhookGlassesTransport", () => {
+  it("posts cards to companion webhook", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200 })) as unknown as typeof fetch;
+    const transport = new WebhookGlassesTransport({
+      companionWebhookUrl: "https://companion.example",
+      fetchImpl,
+    });
+
+    await transport.connect();
     await transport.pushCard({ id: "1", kind: "task", title: "A", lines: [], badge: "todo" });
-    await transport.pushCard({ id: "2", kind: "task", title: "B", lines: [], badge: "done" });
-    expect(transport.pushedCards.map((card) => card.id)).toEqual(["1", "2"]);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://companion.example/cards",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(transport.connected).toBe(true);
+    expect(transport.status.lastPushAt).toEqual(expect.any(String));
   });
 
-  it("emits synthetic actions to handlers", async () => {
-    const transport = new StubGlassesTransport();
+  it("tracks configuration and dispatches actions", async () => {
+    const transport = new WebhookGlassesTransport();
     const handler = vi.fn();
     transport.onAction(handler);
 
-    await transport.emitAction({ type: "quick-capture", text: "new task", timestamp: new Date().toISOString() });
+    await transport.connect();
+    await transport.receiveAction?.({ type: "quick-capture", text: "new task", timestamp: new Date().toISOString() });
 
+    expect(transport.connected).toBe(false);
+    expect(transport.status.endpointConfigured).toBe(false);
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: "quick-capture" }));
   });
 });

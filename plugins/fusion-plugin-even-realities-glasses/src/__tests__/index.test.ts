@@ -6,6 +6,7 @@ describe("even realities plugin", () => {
     expect(plugin.manifest.id).toBe("fusion-plugin-even-realities-glasses");
     expect(Object.keys(plugin.manifest.settingsSchema ?? {}).sort()).toEqual([
       "apiKey",
+      "companionWebhookUrl",
       "enableAgentActions",
       "fusionApiBaseUrl",
       "fusionApiToken",
@@ -41,7 +42,11 @@ describe("even realities plugin", () => {
     };
     const ctx = {
       pluginId: "known",
-      settings: { fusionApiToken: "token", fusionApiBaseUrl: "http://localhost:4040" },
+      settings: {
+        fusionApiToken: "token",
+        fusionApiBaseUrl: "http://localhost:4040",
+        companionWebhookUrl: "https://companion.example",
+      },
       logger: console,
       taskStore: { getPluginStore: () => ({ db }) },
     } as never;

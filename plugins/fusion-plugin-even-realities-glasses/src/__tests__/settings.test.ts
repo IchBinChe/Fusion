@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentActionsEnabled,
+  getCompanionWebhookUrl,
   getFusionBaseUrl,
   getFusionToken,
   getNotifyColumns,
@@ -12,6 +13,7 @@ describe("settings accessors", () => {
   it("uses safe defaults", () => {
     expect(getFusionBaseUrl({})).toBe("http://localhost:4040");
     expect(getFusionToken({})).toBeUndefined();
+    expect(getCompanionWebhookUrl({})).toBeUndefined();
     expect(getPollingIntervalMs({})).toBe(30000);
     expect(getNotifyColumns({})).toEqual(["in-review"]);
     expect(getQuickCaptureColumn({})).toBe("triage");
@@ -21,6 +23,9 @@ describe("settings accessors", () => {
   it("trims string values", () => {
     expect(getFusionBaseUrl({ fusionApiBaseUrl: "  http://fusion.local:4040  " })).toBe("http://fusion.local:4040");
     expect(getFusionToken({ fusionApiToken: "  token  " })).toBe("token");
+    expect(getCompanionWebhookUrl({ companionWebhookUrl: "  https://companion.example/ingest  " })).toBe(
+      "https://companion.example/ingest",
+    );
   });
 
   it("enforces polling minimum and finite values", () => {

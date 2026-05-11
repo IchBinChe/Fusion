@@ -24,7 +24,9 @@ pnpm --filter @fusion-plugin-examples/even-realities-glasses test
 
 - `fusionApiBaseUrl` (default `http://localhost:4040`)
 - `fusionApiToken` (required Bearer token)
+- `apiKey` (required for plugin routes)
 - `glassesDeviceId` (optional identifier)
+- `companionWebhookUrl` (optional companion endpoint base URL for card push, e.g. `https://companion.example`)
 - `pollingIntervalSeconds` (default 30, min 5)
 - `notifyOnColumns` (default `["in-review"]`)
 - `quickCaptureDefaultColumn` (default `triage`)
@@ -154,8 +156,25 @@ curl -X GET "http://localhost:4040/api/plugins/fusion-plugin-even-realities-glas
 - Prefer local/self-hosted Fusion instances and avoid exposing dashboard APIs to public networks.
 - Treat `fusionApiToken` as secret material and rotate regularly.
 
-## Transport extension point
+## Board/task card endpoints (merged canonical surface)
 
-The plugin intentionally uses `GlassesTransport` + `StubGlassesTransport` for now. The real Even Realities BLE/SDK transport should be wired behind this interface.
+All companion-facing routes use `Authorization: Bearer <apiKey>` and are hosted under:
 
-Dependency research task FN-3737 was not available in this task runtime, so no concrete protocol implementation is included yet. Integrate the real SDK by replacing the stub transport in `src/index.ts` while keeping route + notifier behavior unchanged.
+`/api/plugins/fusion-plugin-even-realities-glasses`
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/board/cards` | Card deck projection for selected columns (`columns`, `max`) |
+| GET | `/board` | Board summary counts and status |
+| GET | `/tasks/:id/cards` | Single-task card deck |
+
+## Transport path (implemented)
+
+Production transport uses `WebhookGlassesTransport`.
+
+- `pushCard()` POSTs cards to `${companionWebhookUrl}/cards`
+- `/status` reports `connected`, transport mode, webhook config presence, `lastPushAt`, `lastActionAt`, and `lastError`
+- `POST /reconnect` forces disconnect/connect on the transport state machine
+- `POST /transport/actions` ingests companion actions (`start-work`, `request-review`, `quick-capture`) into plugin action handlers
+
+If `companionWebhookUrl` is unset, the plugin still serves authenticated routes and polling notifications, but card push remains degraded with `connected=false` and a status error until configured.

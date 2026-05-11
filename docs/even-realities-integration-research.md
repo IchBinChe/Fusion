@@ -3,6 +3,11 @@
 ## 1. Summary & Recommendation
 Recommend **Option A** for v1: a **Fusion plugin + Even companion app bridge**. The companion app (or Even Hub-hosted webview app) handles device/app bridge APIs and forwards minimal HTTP calls to Fusion (`fn serve`/dashboard API). This aligns with currently visible Even SDK positioning (WebView ↔ Even App bridge, not direct glasses→LAN HTTP) and lets Fusion reuse existing task/agent REST APIs and plugin route hosting.
 
+### Implementation status (FN-3970)
+- Implemented in Fusion plugin: canonical `fusion-plugin-even-realities-glasses` route surface now includes board/task card endpoints, quick capture, actions, notifications, and transport status/reconnect routes.
+- Production transport path now uses webhook-based `WebhookGlassesTransport` (`companionWebhookUrl`) instead of a stub transport.
+- Companion app delivery remains out of scope for this document/task chain; this doc still defines the recommended topology and open ecosystem questions.
+
 ## 2. Even Realities Platform Overview
 
 ### 2.1 Developer surface (SDKs, docs, supported hosts)

@@ -1,17 +1,66 @@
 # Even Realities Plugin API
 
-## Test Coverage
+Canonical plugin id: `fusion-plugin-even-realities-glasses`
 
-| Endpoint | Contract Row | Test Suite | Assertion Type |
-| --- | --- | --- | --- |
-| `GET /api/plugins/fusion-plugin-even-realities-glasses/board` | Auth required when daemon token enabled | `auth.test.ts` | `it.each` matrix for valid bearer / missing / wrong / `?fn_token=` fallback |
-| `GET /api/plugins/fusion-plugin-even-realities-glasses/board` | Board response includes expected columns/task summaries | `integration.test.ts` | Integration response contract assertion |
-| `GET /api/plugins/fusion-plugin-even-realities-glasses/tasks/:id` | Optional `summary` capped at 200 chars | `integration.test.ts` | Integration field-boundary assertion |
-| `GET /api/plugins/fusion-plugin-even-realities-glasses/changes` | Polling contract: strict `updatedAt > since`, ASC ordering, default/capped limits, `hasMore`, monotonic `serverTime` | `polling.test.ts` | Cursor + pagination contract assertions |
-| `GET /api/plugins/fusion-plugin-even-realities-glasses/changes` | Empty diff response shape `{ changes, hasMore, serverTime }` | `polling.test.ts` | Empty-state response assertion |
-| `POST /api/plugins/fusion-plugin-even-realities-glasses/quick-capture` | Input validation (required title, title cap) and default column behavior | `quick-capture.test.ts` | Validation + creation side-effect assertions |
-| `POST /api/plugins/fusion-plugin-even-realities-glasses/quick-capture` | Task-summary-only response (no description/prompt/log leakage), payload bounded | `response-shape.test.ts`, `quick-capture.test.ts` | Whitelist + payload-size assertions |
-| `POST /api/plugins/fusion-plugin-even-realities-glasses/actions/start-work` | Action enabled/disabled by `enableAgentActions` | `agent-actions.test.ts` | Feature-gate integration assertions |
-| `POST /api/plugins/fusion-plugin-even-realities-glasses/actions/request-review` | Action enabled/disabled by `enableAgentActions` | `agent-actions.test.ts` | Feature-gate integration assertions |
-| `POST /api/plugins/fusion-plugin-even-realities-glasses/actions/*` | Unknown task id rejected | `agent-actions.test.ts` | 404 contract assertion |
-| `/api/plugins/fusion-plugin-even-realities-glasses/<plugin-route>` and `/api/plugins/fusion-plugin-even-realities-glasses/enable` | Plugin route mount + management-route collision safety | `packages/dashboard/src/__tests__/plugin-routes-wiring.test.ts` | Routing/wiring integration assertions |
+All plugin routes are mounted under:
+
+`/api/plugins/fusion-plugin-even-realities-glasses`
+
+All companion-facing routes require:
+
+`Authorization: Bearer <apiKey>`
+
+## Endpoint Contract
+
+### Board / Task Cards
+
+- `GET /board/cards` → compact deck for selected columns (`columns`, `max`)
+- `GET /board` → board summary counts and updated timestamp
+- `GET /tasks/:id/cards` → single-task deck (`404` when missing)
+
+### Quick Capture
+
+- `POST /quick-capture`
+- Body: `{ "text": string, "column"?: TaskColumn }`
+- Creates a task using normalization + configured `quickCaptureDefaultColumn`
+
+### Agent Actions
+
+- `POST /actions/start-work`
+- `POST /actions/request-review`
+- `POST /actions/approve-plan`
+- `POST /actions/accept-review`
+- `POST /actions/return-to-agent`
+- `POST /actions/retry`
+
+Body: `{ "taskId": "FN-123" }`
+
+### Notifications
+
+- `GET /notifications` (`limit`, optional `drain=true`)
+- `POST /notifications/ack` with `{ "taskIds": string[] }`
+- `POST /notifications/poll-now`
+
+### Transport Status / Control
+
+- `GET /status` → `connected`, transport mode/config/error, last poll
+- `POST /reconnect` → reconnect transport lifecycle
+- `POST /transport/actions` → ingest companion actions (`start-work`, `request-review`, `quick-capture`)
+
+## Transport Contract
+
+Production transport is `WebhookGlassesTransport`:
+
+- pushes cards to `${companionWebhookUrl}/cards`
+- reports degraded status when webhook URL is missing/unreachable
+- records `lastPushAt`, `lastActionAt`, and `lastError` for `/status`
+
+## Test Coverage Map
+
+- `src/__tests__/board-routes.test.ts` — auth + board/task card route contracts
+- `src/__tests__/cards.test.ts` — card/deck projection budgets and formatting
+- `src/__tests__/quick-capture-routes.test.ts` — quick capture auth/input/error behavior
+- `src/__tests__/agent-action-routes.test.ts` + `agent-actions.test.ts` — action route contract and state transitions
+- `src/__tests__/notification-routes.test.ts` + `notifier.test.ts` — polling queue, ack, forced poll behavior
+- `src/__tests__/transport.test.ts` + `transport-routes.test.ts` — webhook push path, connection status, inbound action ingestion
+- `src/__tests__/index.test.ts` — manifest/settings keys and plugin lifecycle initialization behavior

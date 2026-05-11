@@ -872,10 +872,17 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.change(screen.getByRole("combobox", { name: "Task priority" }), {
+      const controls = screen.getByTestId("detail-meta-inline-controls");
+      const prioritySelect = screen.getByRole("combobox", { name: "Task priority" });
+      const executionModeToggle = screen.getByRole("button", { name: "Execution mode: standard" });
+
+      expect(prioritySelect.parentElement).toBe(controls.firstElementChild);
+      expect(executionModeToggle.parentElement).toBe(controls);
+
+      fireEvent.change(prioritySelect, {
         target: { value: "urgent" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Execution mode: standard" }));
+      fireEvent.click(executionModeToggle);
 
       await waitFor(() => {
         expect(mockUpdate).toHaveBeenNthCalledWith(1, "FN-001", { priority: "urgent" }, undefined);

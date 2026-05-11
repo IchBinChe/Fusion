@@ -170,8 +170,9 @@
 .detail-meta-inline-controls {
   --detail-priority-control-min-height: calc(var(--space-2xl) + var(--space-xs));
 
-  display: inline-flex;
+  display: flex;
   align-items: stretch;
+  flex-wrap: nowrap;
   gap: var(--space-xs);
 }
 
@@ -1535,13 +1536,6 @@
     align-items: stretch;
   }
 
-  .detail-meta-inline-controls {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-xs);
-  }
-
   .detail-priority-select {
     min-height: var(--detail-priority-control-min-height);
   }
@@ -1653,4 +1647,11 @@
     min-width: calc(var(--space-2xl) + var(--space-xs));
   }
 
+}
+
+@media (max-width: 640px) {
+  .detail-meta-inline-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

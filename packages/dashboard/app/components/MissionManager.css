@@ -2459,9 +2459,9 @@
     overflow-x: hidden;
   }
 
-  /* Detail view safe area bottom padding */
+  /* Detail view bottom padding stays content-only; shared project-content wrapper reserves nav/footer/safe-area space. */
   .mission-detail {
-    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: var(--space-lg);
   }
 
   .mission-detail__autopilot {

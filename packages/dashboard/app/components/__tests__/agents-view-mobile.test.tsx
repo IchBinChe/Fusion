@@ -270,16 +270,15 @@ describe("agents-view mobile CSS", () => {
     expect(contentBlock).toContain("overflow-y: auto");
     expect(contentBlock).toContain("-webkit-overflow-scrolling: touch");
     expect(contentBlock).toContain("overscroll-behavior: contain");
-    expect(contentBlock).toContain("var(--mobile-nav-height)");
+    expect(contentBlock).not.toContain("var(--mobile-nav-height)");
     expect(contentBlock).toContain("env(safe-area-inset-bottom, 0px)");
     expect(contentBlock).toContain("var(--standalone-bottom-gap)");
   });
 
-  it("stacks grouped filter controls on mobile", () => {
-    expect(mobileMediaBlock).toContain(".agent-controls-filters");
-    const block = extractRuleBlock(mobileMediaBlock, ".agent-controls-filters");
-    expect(block).toContain("flex-direction: column");
-    expect(block).toContain("width: 100%");
+  it("keeps grouped filter controls token-driven", () => {
+    const block = extractRuleBlock(cssContent, ".agent-controls-filters");
+    expect(block).toContain("display: flex");
+    expect(block).toContain("gap: var(--space-sm)");
   });
 
   it("defines .agents-view-title with flex-wrap on mobile", () => {

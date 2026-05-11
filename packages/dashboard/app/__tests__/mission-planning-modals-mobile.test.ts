@@ -72,9 +72,10 @@ describe("mission + planning modal mobile CSS", () => {
     expect(missionBlock).toMatch(/\.mission-feature__actions\s*\{[^}]*flex-wrap:\s*wrap;/s);
   });
 
-  it("MissionManager: detail view includes safe-area bottom padding", () => {
+  it("MissionManager: detail view keeps content-only bottom padding", () => {
     const missionBlock = findMobileBlockContaining(".mission-manager-overlay");
-    expect(missionBlock).toMatch(/\.mission-detail\s*\{[^}]*env\(safe-area-inset-bottom/s);
+    expect(missionBlock).toMatch(/\.mission-detail\s*\{[^}]*padding-bottom:\s*var\(--space-lg\);/s);
+    expect(missionBlock).not.toMatch(/\.mission-detail\s*\{[^}]*safe-area-inset-bottom/s);
   });
 
   it("SubtaskBreakdown: drag handle is touch-friendly (36px)", () => {

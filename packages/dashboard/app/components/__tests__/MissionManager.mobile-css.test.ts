@@ -42,6 +42,16 @@ describe("MissionManager mobile styles", () => {
     expect(section).toContain("word-break: break-word;");
   });
 
+  it("keeps mission detail mobile bottom padding content-only (no shared nav duplication)", () => {
+    const css = loadAllAppCss();
+    const section = getMissionMobileSection(css);
+    const detailRule = section.match(/\.mission-detail\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(detailRule).toContain("padding-bottom: var(--space-lg);");
+    expect(detailRule).not.toContain("safe-area-inset-bottom");
+    expect(detailRule).not.toContain("--mobile-nav-height");
+  });
+
   it("hides desktop split layout on mobile", () => {
     const css = loadAllAppCss();
     const section = getMissionMobileSection(css);

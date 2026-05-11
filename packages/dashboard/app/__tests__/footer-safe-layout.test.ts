@@ -101,6 +101,14 @@ describe("footer-safe project workspace layout", () => {
       // Should NOT have viewport-based calc
       expect(listBlock).not.toContain("100vh");
     });
+
+    it("agents mobile content does not re-add mobile nav height already reserved by wrapper", () => {
+      const mobileCss = extractMobileMediaBlocks(css);
+      const agentsContentBlock = mobileCss.match(/\.agents-view-content\s*\{[^}]*\}/)?.[0] ?? "";
+
+      expect(agentsContentBlock).toContain("padding: var(--space-md) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));");
+      expect(agentsContentBlock).not.toContain("var(--mobile-nav-height)");
+    });
   });
 
   // ── ExecutorStatusBar remains fixed ────────────────────────────────

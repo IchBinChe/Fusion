@@ -20,17 +20,26 @@ export function buildDevNodeArgs({
 const VALID_PREBUILD_MODES = new Set(["auto", "none", "client", "full"]);
 
 export function normalizePrebuildMode(value) {
-  const mode = String(value || "auto").toLowerCase();
-  if (!VALID_PREBUILD_MODES.has(mode)) {
+  const mode = value === undefined || value === null ? "auto" : String(value).toLowerCase();
+  if (mode === "" || !VALID_PREBUILD_MODES.has(mode)) {
     throw new Error(`Invalid prebuild mode "${value}". Expected one of: auto, none, client, full.`);
   }
   return mode;
 }
 
+export function hasHostOverride(args) {
+  return args.includes("--host") || args.some((arg) => arg.startsWith("--host="));
+}
+
+export function buildForwardedDevArgs(args) {
+  const needsDevHostInjection = args[0] === "dashboard" && !hasHostOverride(args);
+  return needsDevHostInjection ? [...args, "--host", "0.0.0.0"] : args;
+}
+
 export function parseDevWrapperArgs(rawArgs, env = process.env) {
   const inspectFlags = [];
   const args = [];
-  let requestedPrebuild = env.FUSION_DEV_PREBUILD || "auto";
+  let requestedPrebuild = env.FUSION_DEV_PREBUILD ?? "auto";
 
   for (let i = 0; i < rawArgs.length; i += 1) {
     const arg = rawArgs[i];

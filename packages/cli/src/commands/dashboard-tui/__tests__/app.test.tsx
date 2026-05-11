@@ -166,10 +166,15 @@ async function flushFrames() {
   await Promise.resolve();
 }
 
-async function focusSettingsDetailPane(stdin: { write: (chunk: string) => void }, lastFrame: () => string | undefined) {
-  stdin.write("\u001b[C");
+async function waitForFrameUpdateAfterInput() {
+  // Ink can schedule the frame triggered by stdin on the next timer tick.
   await new Promise((resolve) => setTimeout(resolve, 25));
   await flushFrames();
+}
+
+async function focusSettingsDetailPane(stdin: { write: (chunk: string) => void }, lastFrame: () => string | undefined) {
+  stdin.write("\u001b[C");
+  await waitForFrameUpdateAfterInput();
   await waitForFrameContains(lastFrame, "[C/V/X/P/L/U/K/R] remote actions");
 }
 

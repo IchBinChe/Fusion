@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildForwardedDevArgs,
   buildDevNodeArgs,
   getPrebuildCommand,
+  normalizePrebuildMode,
   parseDevWrapperArgs,
   resolvePrebuildMode,
 } from "../../../../scripts/dev-with-memory-lib.mjs";
@@ -43,6 +45,28 @@ describe("dev-with-memory prebuild options", () => {
       args: ["dashboard", "--port", "4050"],
       requestedPrebuild: "none",
     });
+  });
+
+  it("rejects explicit empty prebuild modes", () => {
+    expect(() => normalizePrebuildMode("")).toThrow(/Invalid prebuild mode/);
+    expect(() => parseDevWrapperArgs(["--prebuild=", "dashboard"], {})).toThrow(/Invalid prebuild mode/);
+  });
+
+  it("does not inject a dev host when --host=value is already present", () => {
+    expect(buildForwardedDevArgs(["dashboard", "--host=127.0.0.1"])).toEqual([
+      "dashboard",
+      "--host=127.0.0.1",
+    ]);
+  });
+
+  it("injects a LAN-reachable dev host for dashboard startup without a host override", () => {
+    expect(buildForwardedDevArgs(["dashboard", "--port", "4050"])).toEqual([
+      "dashboard",
+      "--port",
+      "4050",
+      "--host",
+      "0.0.0.0",
+    ]);
   });
 
   it("defaults dashboard startup to client-only prebuild instead of full workspace build", () => {

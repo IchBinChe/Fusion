@@ -9,6 +9,7 @@
  * Cross-platform: Works on Windows, macOS, and Linux.
  */
 import {
+  buildForwardedDevArgs,
   buildDevNodeArgs,
   getPrebuildCommand,
   parseDevWrapperArgs,
@@ -39,11 +40,7 @@ process.env.NODE_OPTIONS = nodeOptions;
 // mobile devices and other machines on the LAN for testing. Production
 // builds default to 127.0.0.1; this override only applies when starting
 // the dashboard via `pnpm dev dashboard` and only if no --host was passed.
-const needsDevHostInjection =
-  args[0] === "dashboard" && !args.includes("--host");
-const forwardedArgs = needsDevHostInjection
-  ? [...args, "--host", "0.0.0.0"]
-  : args;
+const forwardedArgs = buildForwardedDevArgs(args);
 const prebuildMode = resolvePrebuildMode(requestedPrebuild, forwardedArgs);
 const prebuildCommand = getPrebuildCommand(prebuildMode);
 

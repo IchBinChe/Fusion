@@ -43,7 +43,8 @@ pnpm build:all  # full recursive build including desktop/mobile
 ```bash
 pnpm local             # fast local dashboard/API startup on a safe localhost port
 pnpm local --engine    # fast local startup with the AI engine enabled
-pnpm dev               # source-mode CLI entrypoint; dashboard starts with a client-only prebuild
+pnpm local --prebuild <none|client|full>  # local dashboard/API startup with an explicit prebuild level
+pnpm dev               # source-mode CLI; dashboard gets a client-only prebuild, other commands skip it
 FUSION_DEV_PREBUILD=full pnpm dev dashboard  # production-like full workspace prebuild
 pnpm dev:ui            # dashboard dev server only
 pnpm dev:hmr           # dashboard API + Vite HMR UI, with no startup prebuild

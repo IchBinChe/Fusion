@@ -792,24 +792,32 @@ export class Scheduler {
             overlapIgnorePaths,
           );
           if (taskScope.length > 0) {
-            let overlappingTaskId: string | null = null;
-            for (const [ipId, ipScope] of activeScopes) {
-              if (this.pathsOverlap(taskScope, ipScope)) {
-                overlappingTaskId = ipId;
-                break;
-              }
-            }
+            const activeScopeEntries = Array.from(activeScopes.entries()).sort(([aId], [bId]) => aId.localeCompare(bId));
+            const currentBlockerScope = task.blockedBy ? activeScopes.get(task.blockedBy) : undefined;
+            const hasValidCurrentBlocker =
+              Boolean(task.blockedBy)
+              && Boolean(currentBlockerScope)
+              && this.pathsOverlap(taskScope, currentBlockerScope!);
+
+            /**
+             * blockedBy stamping invariants:
+             * - sticky when still valid: preserve an existing active overlapping blocker
+             * - deterministic when changing: pick the first overlapping active task by sorted taskId
+             * - idempotent writes only: update DB only when blockedBy/status must change
+             */
+            const overlappingTaskId = hasValidCurrentBlocker
+              ? task.blockedBy
+              : activeScopeEntries.find(([, ipScope]) => this.pathsOverlap(taskScope, ipScope))?.[0] ?? null;
+
             if (overlappingTaskId) {
               // Keep blockedBy tied to explicit unresolved dependencies when a task has
               // dependency edges; avoid repointing dependency-unblocked tasks to unrelated
               // overlap ids (FN-3924). For dependency-free tasks, blockedBy may reference
               // the active overlap blocker.
-              await this.store.updateTask(
-                task.id,
-                task.dependencies.length > 0
-                  ? { status: "queued", blockedBy: null }
-                  : { status: "queued", blockedBy: overlappingTaskId },
-              );
+              const targetBlockedBy = task.dependencies.length > 0 ? null : overlappingTaskId;
+              if (task.status !== "queued" || task.blockedBy !== targetBlockedBy) {
+                await this.store.updateTask(task.id, { status: "queued", blockedBy: targetBlockedBy });
+              }
               continue;
             }
           }

@@ -552,6 +552,13 @@ See [Memory Plugin Contract](./memory-plugin-contract.md) for the full plan.
 ### Scheduling and execution
 - `Scheduler` (`scheduler.ts`) — dependency-aware task scheduling that dispatches eligible todo tasks by priority first, then FIFO (`createdAt` ascending) within each priority tier.
   - `blockedBy` invariant (FN-3924): the field is only durable when it references a current unresolved explicit dependency (or, for dependency-free tasks, an active overlap blocker). If no current blocker remains, scheduler/event reconciliation clears `blockedBy` to `null` and re-evaluates from live task state.
+
+#### BlockedBy stamping invariants
+- Scheduler writes overlap-based `blockedBy` only when overlap gating is active and there is a live overlapping active scope; otherwise overlap logic does not stamp blockers.
+- Stamping is sticky when valid (FN-3899): if a todo task is already `queued` behind a blocker that is still active and still overlaps, the scheduler preserves that blocker and skips rewrites.
+- When the blocker must change, selection is deterministic: active overlap candidates are ordered by task ID and the first overlapping task is chosen, removing tick-order churn.
+- Writes are idempotent: scheduler updates `status/blockedBy` only when values change, reducing per-tick churn and audit noise.
+- Self-healing remains responsible for terminal/missing blocker cleanup (`clearStaleBlockedBy()`), while scheduler overlap stamping now focuses on stable active-overlap attribution.
 - `StepSessionExecutor` (`step-session-executor.ts`) — per-step sessions + parallel wave execution
 - `TaskCompletion` (`task-completion.ts`) — completion gate helpers
 - `SpecStaleness` (`spec-staleness.ts`) — stale spec detection utilities

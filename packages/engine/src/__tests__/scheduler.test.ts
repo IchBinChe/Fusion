@@ -1052,6 +1052,125 @@ describe("Scheduler", () => {
     });
   });
 
+  describe("blockedBy stability — FN-3899", () => {
+    it("preserves a still-valid queued blocker instead of repointing to another active task", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = [
+        createMockTask({ id: "FN-A", column: "in-progress" }),
+        createMockTask({ id: "FN-B", column: "in-progress" }),
+        createMockTask({ id: "FN-T", column: "todo", status: "queued", blockedBy: "FN-B" }),
+      ];
+
+      const parseScopeMock = vi.fn(async (taskId: string): Promise<string[]> => {
+        if (taskId === "FN-A") return ["packages/engine/src/merger.ts", "packages/dashboard/app/components/Header.tsx"];
+        if (taskId === "FN-B") return ["packages/dashboard/app/App.tsx"];
+        if (taskId === "FN-T") return ["packages/dashboard/app/App.tsx"];
+        return [];
+      });
+
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 10,
+          maxWorktrees: 10,
+          groupOverlappingFiles: true,
+        }),
+        parseFileScopeFromPrompt: parseScopeMock,
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).not.toHaveBeenCalledWith("FN-T", { status: "queued", blockedBy: "FN-A" });
+      expect(moveTask).not.toHaveBeenCalledWith("FN-T", "in-progress", expect.anything());
+    });
+
+    it("recomputes stale queued blockers when the recorded blocker is no longer overlapping", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = [
+        createMockTask({ id: "FN-A", column: "in-progress" }),
+        createMockTask({ id: "FN-B", column: "in-progress" }),
+        createMockTask({ id: "FN-T", column: "todo", status: "queued", blockedBy: "FN-A" }),
+      ];
+
+      const parseScopeMock = vi.fn(async (taskId: string): Promise<string[]> => {
+        if (taskId === "FN-A") return ["packages/engine/src/merger.ts"];
+        if (taskId === "FN-B") return ["packages/dashboard/app/App.tsx"];
+        if (taskId === "FN-T") return ["packages/dashboard/app/App.tsx"];
+        return [];
+      });
+
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 10,
+          maxWorktrees: 10,
+          groupOverlappingFiles: true,
+        }),
+        parseFileScopeFromPrompt: parseScopeMock,
+        updateTask,
+        moveTask: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).toHaveBeenCalledWith("FN-T", { status: "queued", blockedBy: "FN-B" });
+    });
+
+    it("does not stamp blockedBy for todos without overlap, including empty scopes", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = [
+        createMockTask({ id: "FN-A", column: "in-progress" }),
+        createMockTask({ id: "FN-T1", column: "todo" }),
+        createMockTask({ id: "FN-T2", column: "todo" }),
+      ];
+
+      const parseScopeMock = vi.fn(async (taskId: string): Promise<string[]> => {
+        if (taskId === "FN-A") return ["packages/engine/src/merger.ts"];
+        if (taskId === "FN-T1") return ["packages/dashboard/app/App.tsx"];
+        if (taskId === "FN-T2") return [];
+        return [];
+      });
+
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 10,
+          maxWorktrees: 10,
+          groupOverlappingFiles: true,
+        }),
+        parseFileScopeFromPrompt: parseScopeMock,
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).not.toHaveBeenCalledWith("FN-T1", { status: "queued", blockedBy: "FN-A" });
+      expect(updateTask).not.toHaveBeenCalledWith("FN-T2", { status: "queued", blockedBy: "FN-A" });
+      expect(moveTask).toHaveBeenCalledWith("FN-T1", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
+      expect(moveTask).toHaveBeenCalledWith("FN-T2", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
+    });
+  });
+
   describe("worktree reservation", () => {
     it("assigns a planned worktree path before moving a task to in-progress", async () => {
       vi.mocked(existsSync).mockReturnValue(true);

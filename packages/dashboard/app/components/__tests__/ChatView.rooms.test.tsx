@@ -214,6 +214,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
   beforeEach(() => {
     _resetInitialViewportHeight();
     vi.clearAllMocks();
+    localStorage.clear();
     if (!window.matchMedia) {
       Object.defineProperty(window, "matchMedia", { value: vi.fn(), configurable: true, writable: true });
     }
@@ -276,22 +277,55 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
 
   it("keeps room composer text and toasts once when room send fails", async () => {
     const addToast = vi.fn();
-    const sendRoomMessage = vi.fn().mockRejectedValue(new Error("Room backend failed"));
+    let rejectSend: (error?: unknown) => void;
+    const sendPromise = new Promise<undefined>((_, reject) => {
+      rejectSend = reject;
+    });
+    const sendRoomMessage = vi.fn().mockReturnValue(sendPromise);
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
     render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
 
-    const textarea = screen.getByTestId("chat-input");
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "Will retry{enter}");
 
     await waitFor(() => {
       expect(sendRoomMessage).toHaveBeenCalledWith("Will retry");
     });
+    expect(textarea.value).toBe("");
+
+    rejectSend!(new Error("Room backend failed"));
+
     await waitFor(() => {
-      expect((textarea as HTMLTextAreaElement).value).toBe("Will retry");
+      expect(textarea.value).toBe("Will retry");
     });
     expect(addToast).toHaveBeenCalledTimes(1);
     expect(addToast).toHaveBeenCalledWith("Room backend failed", "error");
+  });
+
+  it("clears room composer optimistically before send resolves", async () => {
+    let resolveSend: () => void;
+    const sendPromise = new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    });
+    const sendRoomMessage = vi.fn().mockReturnValue(sendPromise);
+    setup({}, { sendRoomMessage, activeRoom: roomA });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    await userEvent.type(textarea, "Optimistic clear{enter}");
+
+    await waitFor(() => {
+      expect(sendRoomMessage).toHaveBeenCalledWith("Optimistic clear");
+    });
+    expect(textarea.value).toBe("");
+
+    resolveSend!();
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("");
+    });
   });
 
   it("supports delete-room confirm/cancel and rerenders messages from hook state", async () => {

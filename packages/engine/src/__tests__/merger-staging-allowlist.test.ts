@@ -74,6 +74,10 @@ function squashBranch(dir: string, branchName: string, fileName: string, content
 // Minimal stub settings / args used by commitOrAmendMergeWithFixes
 // ---------------------------------------------------------------------------
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 function assertIsolatedWorkspace(dir: string): void {
   const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
   if (!repoRoot) return;
@@ -127,7 +131,7 @@ describe("snapshotDirtyFiles", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-snapshot-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-snapshot-"));
     createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
@@ -177,7 +181,7 @@ describe("snapshotDirtyFiles", () => {
   });
 
   it("returns empty set when rootDir is not a git repo (error swallowed)", async () => {
-    const nonRepo = mkdtempSync(join(tmpdir(), "fusion-test-merger-non-repo-"));
+    const nonRepo = mkdtempSync(join(testTempParent(), "fusion-test-merger-non-repo-"));
     assertIsolatedWorkspace(nonRepo);
     try {
       const snapshot = await snapshotDirtyFiles(nonRepo);
@@ -193,7 +197,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-allowlist-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-allowlist-"));
     createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
@@ -528,7 +532,7 @@ describe("snapshotDirtyFiles — paths with embedded spaces", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-snapshot-spaces-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-snapshot-spaces-"));
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
@@ -581,7 +585,7 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-allowlist-spaces-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-allowlist-spaces-"));
     createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);

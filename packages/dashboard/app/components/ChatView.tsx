@@ -1493,10 +1493,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         return;
       }
 
+      const previousInput = messageInput;
+      clearComposerState();
+
       try {
         await rooms.sendRoomMessage(trimmed);
-        clearComposerState();
       } catch (error) {
+        setMessageInput(previousInput);
         const message = error instanceof Error && error.message.trim()
           ? error.message
           : "Failed to send room message";

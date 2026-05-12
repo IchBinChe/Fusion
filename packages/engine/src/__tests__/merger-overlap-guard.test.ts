@@ -145,6 +145,10 @@ async function runOverlapMerge(dir: string, taskId: string, settingsOverrides: R
   return { store, result };
 }
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 function assertIsolatedWorkspace(dir: string): void {
   const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
   if (!repoRoot) return;
@@ -189,7 +193,7 @@ describe("merger overlap guard", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-overlap-guard-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-overlap-guard-"));
     createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
@@ -336,7 +340,7 @@ describe("aiMergeTask overlap-aware fallback integration", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-overlap-merge-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-overlap-merge-"));
     createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);

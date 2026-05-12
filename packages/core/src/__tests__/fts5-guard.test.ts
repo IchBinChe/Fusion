@@ -93,6 +93,31 @@ describe("FTS5 runtime guard", () => {
     });
   });
 
+  describe("ArchiveDatabase", () => {
+    let tmpDir: string;
+    let fusionDir: string;
+    let archive: ArchiveDatabase;
+
+    beforeEach(() => {
+      tmpDir = makeTmpDir();
+      fusionDir = join(tmpDir, ".fusion");
+      archive = new ArchiveDatabase(fusionDir);
+    });
+
+    afterEach(async () => {
+      try { archive.close(); } catch { /* already closed */ }
+      await rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it("enables WAL mode and busy_timeout for disk-backed archives", () => {
+      archive.init();
+      const journalMode = (archive as any).db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
+      const busyTimeout = (archive as any).db.prepare("PRAGMA busy_timeout").get() as Record<string, number>;
+      expect(journalMode.journal_mode).toBe("wal");
+      expect(Object.values(busyTimeout)[0]).toBe(5000);
+    });
+  });
+
   describe("TaskStore.searchTasks LIKE fallback", () => {
     let rootDir: string;
     let globalDir: string;

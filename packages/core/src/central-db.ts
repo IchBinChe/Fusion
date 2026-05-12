@@ -467,10 +467,11 @@ export class CentralDatabase {
       throw new Error(`Failed to open Fusion central database at ${this.dbPath}: ${message}`);
     }
 
+    // Wait up to the configured timeout for locks to clear before returning SQLITE_BUSY.
+    // Set this before other PRAGMAs so they also benefit.
+    this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
     // Enable WAL mode for concurrent reader/writer access
     this.db.exec("PRAGMA journal_mode = WAL");
-    // Wait up to the configured timeout for locks to clear before returning SQLITE_BUSY.
-    this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
     // Enable foreign key enforcement
     this.db.exec("PRAGMA foreign_keys = ON");
   }

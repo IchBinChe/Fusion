@@ -736,14 +736,34 @@ describe("Database", () => {
       expect(rowB).toBeUndefined();
     });
 
-    it("recovers outermost disk-backed transactions after a transient writer lock", async () => {
+    it("allows deferred read-only transactions to start while another connection holds the writer lock", async () => {
+      const dbPath = db.getPath();
+      db.exec("PRAGMA busy_timeout = 0");
+      const lock = await holdWriteLock(dbPath, { releaseMode: "manual" });
+      let callbackCalls = 0;
+
+      try {
+        const rowCount = db.transaction(() => {
+          callbackCalls += 1;
+          return (db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as { count: number }).count;
+        });
+
+        expect(rowCount).toBe(0);
+      } finally {
+        await lock.release();
+      }
+
+      expect(callbackCalls).toBe(1);
+    });
+
+    it("recovers outermost immediate transactions after a transient writer lock", async () => {
       const dbPath = db.getPath();
       db.exec("PRAGMA busy_timeout = 0");
       const lock = await holdWriteLock(dbPath, { releaseMode: "timer", holdMs: 150 });
       let callbackCalls = 0;
 
       try {
-        db.transaction(() => {
+        db.transactionImmediate(() => {
           callbackCalls += 1;
           db.prepare(
             "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
@@ -760,14 +780,14 @@ describe("Database", () => {
       expect(row).toEqual({ id: "FN-LOCK-RECOVER", description: "Recovered after lock" });
     });
 
-    it("preserves nested savepoint rollback semantics after recovering the outer writer lock", async () => {
+    it("preserves nested savepoint rollback semantics after recovering the outer immediate writer lock", async () => {
       const dbPath = db.getPath();
       db.exec("PRAGMA busy_timeout = 0");
       const lock = await holdWriteLock(dbPath, { releaseMode: "timer", holdMs: 150 });
       let callbackCalls = 0;
 
       try {
-        db.transaction(() => {
+        db.transactionImmediate(() => {
           callbackCalls += 1;
           db.prepare(
             "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"
@@ -798,7 +818,7 @@ describe("Database", () => {
       expect(db.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-LOCK-POST")).toBeDefined();
     });
 
-    it("fails without invoking the callback when the lock outlives the recovery window", async () => {
+    it("fails without invoking the callback when an immediate lock outlives the recovery window", async () => {
       const retryDb = new Database(fusionDir, {
         busyTimeoutMs: 0,
         lockRecoveryWindowMs: 100,
@@ -810,7 +830,7 @@ describe("Database", () => {
 
       try {
         expect(() => {
-          retryDb.transaction(() => {
+          retryDb.transactionImmediate(() => {
             callbackCalls += 1;
             retryDb.prepare(
               "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)"

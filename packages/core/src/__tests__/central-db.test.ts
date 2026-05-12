@@ -42,6 +42,16 @@ describe("CentralDatabase", () => {
       expect(db.getSchemaVersion()).toBe(10);
     });
 
+    it("should enable WAL mode and busy_timeout", () => {
+      db.init();
+
+      const journalMode = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
+      const busyTimeout = db.prepare("PRAGMA busy_timeout").get() as Record<string, number>;
+
+      expect(journalMode.journal_mode).toBe("wal");
+      expect(Object.values(busyTimeout)[0]).toBe(5000);
+    });
+
     it("should seed lastModified on init", () => {
       db.init();
       const lastModified = db.getLastModified();

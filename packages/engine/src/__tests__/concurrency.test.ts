@@ -199,6 +199,32 @@ describe("AgentSemaphore", () => {
     expect(sem.activeCount).toBe(0);
   });
 
+  it("keeps executor-style write sections within the configured execute concurrency", async () => {
+    const sem = new AgentSemaphore(2);
+    let concurrentWrites = 0;
+    let maxConcurrentWrites = 0;
+
+    const performWrite = (taskId: string) =>
+      sem.run(async () => {
+        concurrentWrites += 1;
+        maxConcurrentWrites = Math.max(maxConcurrentWrites, concurrentWrites);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        concurrentWrites -= 1;
+        return taskId;
+      }, PRIORITY_EXECUTE);
+
+    const completed = await Promise.all([
+      performWrite("FN-1"),
+      performWrite("FN-2"),
+      performWrite("FN-3"),
+      performWrite("FN-4"),
+    ]);
+
+    expect(completed).toEqual(["FN-1", "FN-2", "FN-3", "FN-4"]);
+    expect(maxConcurrentWrites).toBe(2);
+    expect(sem.activeCount).toBe(0);
+  });
+
   it("integration: shared semaphore limits triage + execution + merge together", async () => {
     const sem = new AgentSemaphore(2);
     let concurrent = 0;

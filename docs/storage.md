@@ -7,14 +7,21 @@
 - `config.nextId` is retained only as a legacy compatibility field and optional seed source; runtime task creation no longer mutates it as allocator truth.
 - Startup allocator reconciliation bumps each active prefix sequence to `max(current nextSequence, max(existing task suffix)+1)` across live + archived tasks to self-heal stale allocator drift.
 
-## SQLite write-path lock recovery (FN-4042)
+## SQLite write-path lock recovery (FN-4042 / FN-4083)
 
-- Project and central SQLite connections run in WAL mode with a configured `busy_timeout`, but executor-style writes now add a second bounded recovery layer around outermost write transactions.
-- `Database.transaction()` and `CentralDatabase.transaction()` acquire outermost transactions with `BEGIN IMMEDIATE`, so writer-lock contention is detected before the callback executes. This allows retrying lock acquisition without re-running user code.
+- Every disk-backed SQLite connection that Fusion opens for project storage (`fusion.db`), the central registry (`fusion-central.db`), archives (`archive.db`), and worktree hydration explicitly sets `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL` at connection open time before write work begins.
+- Project database transactions now distinguish read and write intent:
+  - `Database.transaction()` uses `BEGIN` (DEFERRED) for outermost transactions so read-only callers do not reserve the writer lock up front.
+  - `Database.transactionImmediate()` uses `BEGIN IMMEDIATE` for write-heavy paths that must detect writer contention before user code runs.
+- The shared task mutation path `atomicWriteTaskJsonWithAudit()` uses `transactionImmediate()`, so the task-row upsert and matching `runAuditEvents` insert still commit or roll back together, while lock contention is detected before the callback mutates in-memory state.
+- `CentralDatabase.transaction()` remains `BEGIN IMMEDIATE`-based because its current callers are write-oriented coordination updates; nested transactions still use SQLite `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` semantics in both databases.
 - Recovery is intentionally bounded: transient `SQLITE_BUSY` / `SQLITE_LOCKED` failures on outermost `BEGIN IMMEDIATE` and `COMMIT` are retried for a short additional window with small synchronous backoff sleeps. If the lock does not clear, the original write still fails loudly.
-- Nested transactions still use SQLite `SAVEPOINT` / `ROLLBACK TO` / `RELEASE`, so inner rollback semantics are unchanged: an inner failure can roll back independently and the outer transaction can continue.
-- Task writes that use `atomicWriteTaskJsonWithAudit()` still keep the task-row upsert and matching `runAuditEvents` insert in one SQLite transaction. They either commit together or roll back together; the compatibility `task.json` write still happens only after the SQLite transaction succeeds.
-- Direct `recordRunAuditEvent()` writes now also execute inside the shared transaction helper so they benefit from the same lock recovery and do not duplicate rows during transient contention.
+- Concurrent-write guarantees are layered:
+  - per-task mutations inside one engine process are serialized by `TaskStore.withTaskLock()`
+  - cross-task writes rely on WAL mode plus `busy_timeout`
+  - write-heavy transactional hot paths acquire `BEGIN IMMEDIATE` before mutating state
+  - compatibility `task.json` writes still happen only after the SQLite transaction succeeds
+- Direct `recordRunAuditEvent()` writes continue to execute inside the shared transaction helper so they benefit from the same lock recovery and do not duplicate rows during transient contention.
 
 ## 1) Summary
 

@@ -1740,7 +1740,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     task: Task,
     auditInput?: RunAuditEventInput,
   ): Promise<void> {
-    this.db.transaction(() => {
+    this.db.transactionImmediate(() => {
       // Upsert the task
       this.upsertTaskWithFtsRecovery(task);
 
@@ -4137,7 +4137,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       metadata: input.metadata,
     };
 
-    this.db.transaction(() => {
+    this.db.transactionImmediate(() => {
       this.db.prepare(`
         INSERT INTO runAuditEvents (
           id, timestamp, taskId, agentId, runId, domain, mutationType, target, metadata

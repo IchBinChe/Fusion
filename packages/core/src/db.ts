@@ -33,6 +33,8 @@ const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const DEFAULT_SQLITE_LOCK_RECOVERY_WINDOW_MS = 1_000;
 const DEFAULT_SQLITE_LOCK_RECOVERY_DELAY_MS = 50;
 
+type TransactionMode = "deferred" | "immediate";
+
 // ── JSON Helpers ─────────────────────────────────────────────────────
 
 /**
@@ -3279,20 +3281,26 @@ export class Database {
    * If the function throws, the transaction/savepoint is rolled back.
    * If the function returns normally, the transaction/savepoint is committed.
    *
-   * Outermost transactions acquire `BEGIN IMMEDIATE` so transient writer-lock
-   * contention is detected before user code runs, allowing bounded retry
-   * without re-executing the callback. Nested transactions remain savepoint-based.
+   * Outermost transactions default to `BEGIN` (DEFERRED) so read-only callers
+   * avoid taking a writer lock until they actually mutate state.
+   * Use `transactionImmediate()` for write-heavy paths that should acquire the
+   * RESERVED lock before user code runs and fail/retry before the callback executes.
    */
-  transaction<T>(fn: () => T): T {
+  transaction<T>(fn: () => T, options?: { mode?: TransactionMode }): T {
     const depth = this.transactionDepth++;
     const isOutermost = depth === 0;
     const savepointName = `sp_${depth}`;
+    const mode: TransactionMode = options?.mode ?? "deferred";
 
     try {
       if (isOutermost) {
-        this.runWithLockRecovery("BEGIN IMMEDIATE", () => {
-          this.db.exec("BEGIN IMMEDIATE");
-        });
+        if (mode === "immediate") {
+          this.runWithLockRecovery("BEGIN IMMEDIATE", () => {
+            this.db.exec("BEGIN IMMEDIATE");
+          });
+        } else {
+          this.db.exec("BEGIN");
+        }
       } else {
         this.db.exec(`SAVEPOINT ${savepointName}`);
       }
@@ -3322,6 +3330,10 @@ export class Database {
     } finally {
       this.transactionDepth--;
     }
+  }
+
+  transactionImmediate<T>(fn: () => T): T {
+    return this.transaction(fn, { mode: "immediate" });
   }
 
   /**

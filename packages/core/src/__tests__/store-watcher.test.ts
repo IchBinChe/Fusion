@@ -77,14 +77,18 @@ describe("TaskStore", () => {
       await harness.store().watch();
       const storeAny = harness.store() as any;
 
-      const firstCall = storeAny.checkForChanges();
-      const secondCall = storeAny.checkForChanges();
+      try {
+        const firstCall = storeAny.checkForChanges();
+        const secondCall = storeAny.checkForChanges();
 
-      expect(firstCall).toBeInstanceOf(Promise);
-      expect(secondCall).toBeInstanceOf(Promise);
+        expect(firstCall).toBeInstanceOf(Promise);
+        expect(secondCall).toBeInstanceOf(Promise);
 
-      await Promise.all([firstCall, secondCall]);
-      expect(storeAny.pollingInProgress).toBe(false);
+        await Promise.all([firstCall, secondCall]);
+        expect(storeAny.pollingInProgress).toBe(false);
+      } finally {
+        harness.store().stopWatching();
+      }
     });
 
     it("logs poll failures with context and keeps checkForChanges non-fatal", async () => {

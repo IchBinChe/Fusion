@@ -113,8 +113,10 @@ export async function hydrateWorktreeDb({
     }
 
     srcDb = new DatabaseSync(srcDbPath);
+    srcDb.exec("PRAGMA busy_timeout = 5000");
     dstDb = openWorktreeDbWithRecovery(dstDbPath, worktreePath);
 
+    dstDb.exec("PRAGMA busy_timeout = 5000");
     dstDb.exec("PRAGMA journal_mode = WAL");
 
     const srcTaskCols = getColumns(srcDb, "tasks");

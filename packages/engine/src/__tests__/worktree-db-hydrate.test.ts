@@ -65,9 +65,11 @@ describe("hydrateWorktreeDb", () => {
     const db = new DatabaseSync(join(worktree, ".fusion", "fusion.db"));
     const tasks = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE id IN ('FN-A','FN-B','FN-C')").get() as any).c;
     const docs = (db.prepare("SELECT COUNT(*) as c FROM task_documents WHERE taskId='FN-B'").get() as any).c;
+    const journalMode = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
     db.close();
     expect(tasks).toBe(3);
     expect(docs).toBe(1);
+    expect(journalMode.journal_mode).toBe("wal");
   });
 
   it("no-op when rootDir === worktreePath", async () => {

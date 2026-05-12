@@ -63,10 +63,10 @@ export class ArchiveDatabase {
       mkdirSync(fusionDir, { recursive: true });
     }
     this.db = new DatabaseSync(inMemory ? ":memory:" : join(fusionDir, "archive.db"));
+    this.db.exec("PRAGMA busy_timeout = 5000");
     if (!inMemory) {
       this.db.exec("PRAGMA journal_mode = WAL");
     }
-    this.db.exec("PRAGMA busy_timeout = 5000");
     this._fts5Available = probeFts5(this.db);
   }
 

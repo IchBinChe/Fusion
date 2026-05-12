@@ -1,5 +1,103 @@
 # @runfusion/fusion
 
+## 0.27.0
+
+### Minor Changes
+
+- 2fa4ba9: Add plugin signature verification and publisher trust policy controls across plugin install/load workflows. Plugin status now exposes publisher identity, key fingerprint, and verification state, with new trust-management and verification commands plus project-level `pluginTrustPolicy` enforcement modes (`off`, `warn`, `enforce`).
+- 7fd3ccc: Add bundled fusion-plugin-cli-printing-press plugin: a guided wizard for defining external services and generating CLIs from those definitions, plugin-owned dashboard views for managing and manually running generated CLIs, and availability of generated CLIs as pre-merge workflow steps and inside the executor runtime environment.
+- bd26b24: Add room-based chat to the dashboard. Users can switch between Direct and Rooms modes in ChatView, create Slack-style rooms (for example `#engineering`) with selected agent members, and chat with multiple agents in shared persisted history. `@mentions` route directly to the named agent, while other room members can respond when relevant.
+- 840cd1d: Add a global setting, `persistAgentThinkingLog` (default `false`), to control whether agent thinking/reasoning log rows are persisted. Tool output persistence remains separately controlled by `persistAgentToolOutput`.
+
+### Patch Changes
+
+- aa031ab: Add a bundled `fusion-plugin-cli-printing-press` plugin with a plugin-owned Create Service wizard view and draft-save API scaffold.
+- 0fb9bb5: Add a plugin-owned CLI Printing Press manage view with list/inspect/edit/regenerate/delete draft actions, plus draft update and regenerate API routes backed by the interim JSON draft store.
+- 36b6643: Add CLI Printing Press plugin run/test generation and execution actions, including regenerate/run/artifact endpoints, dashboard test-runner UI, and credential redaction for run output.
+- 1e76f24: Define and use a canonical SQLite-backed storage/config model for the bundled CLI Printing Press plugin, including service/spec/artifact/credential/settings tables and non-OAuth credential materialization helpers.
+- a04b320: Add a new `executorRuntimeEnv` plugin contribution surface so plugins can inject task-scoped runtime environment variables and PATH prepends for executor-spawned commands.
+
+  The bundled `fusion-plugin-cli-printing-press` now contributes generated CLI artifact directories to task PATH and exports `env_var` credentials into the task environment for executor command execution.
+
+- a39985c: Add approval-policy guards for `fn_agent_create` and `fn_agent_delete` with
+  `agentProvisioning` project settings, pending-approval outcomes, and approval-route
+  execution/audit handling for approved and denied provisioning requests.
+- 6b55b26: Update room chat mention UX so the mention popup prioritizes room members (with a member indicator) and rendered room-message mention chips visibly flag non-members, while preserving direct-chat behavior.
+- a4617be: Merger verification now runs `scripts/ensure-test-artifacts.mjs` as a preamble
+  and self-heals "Failed to resolve entry for package <pkg>" failures by
+  rebuilding the missing workspace package once before retrying. Unrecoverable
+  environment faults no longer increment `verificationFailureCount` or bounce
+  the task to `in-progress` — they remain in-review for the next sweep.
+- d6da4eb: Fixes a merger/self-healing recovery loop where in-review tasks with zero commits ahead of base were repeatedly re-enqueued forever. Fusion now detects deterministic no-op merge branches, marks them as no-op merge confirmed, and finalizes them to done instead of requeueing.
+- 1257155: Fix phantom-merge guard stranding tasks whose branch content is already on
+  main under a different SHA (sibling-task duplication, cherry-pick, prior
+  in-merge fix). The merger finalize path now recognizes ancestor and
+  equivalent-patch-id branches as a no-op success instead of refusing the
+  merge. The FN-1858 phantom-merge guard remains intact for the real-phantom
+  case (no recoverable content anywhere).
+- 6f2e8c4: Update the default heartbeat procedure to enforce bound-task scope discipline by classifying work as `executor-class`, `blocked`, or `coordination-class`, and steering executor/blocked ticks toward coordination actions instead of implementation advancement. Existing agents that already have seeded per-agent heartbeat files keep their current content until operators explicitly run the heartbeat-procedure upgrade endpoint, which re-seeds from the latest built-in default.
+- d1f4d5f: Expose verificationFixRetries (0-3) in Settings → Merge so users can tune in-merge auto-fix attempts without editing JSON.
+- 867c684: Fix scheduler overwriting `blockedBy` on queued todo tasks every tick, which caused unrelated work to converge on a single broad-scope in-progress task. Stamping is now sticky-when-still-valid with deterministic tiebreak.
+- 3c2f1bd: Post-merge prompt workflow-step agent sessions now honor the assigned agent runtime model (`runtimeConfig.model`) when the workflow step does not provide its own model override, matching the rest of the merger session model resolution path.
+- c41d49f: fix(FN-3906): auto-skip the built-in Frontend UX Design pre-merge workflow step when the task diff scope has no frontend/UI files, so non-frontend tasks no longer get stuck behind paused completion handoff deferrals for an irrelevant review gate.
+- 7d67dc3: Wire dashboard approval decisions for `agent_provisioning` requests to execute deferred agent create/delete actions.
+
+  Add focused test coverage for provisioning decision routing, policy/gating contracts, and approval request category round-trips.
+
+- 86df0a0: Executor task runtime environment now flows through `createResolvedAgentSession()` and `createFnAgent()` into task-scoped agent subprocesses (including executor-session bash commands). Plugin-provided `executorRuntimeEnv` PATH/env contributions are available inside agent-issued subprocesses while remaining isolated per task/session with no global `process.env` mutation.
+- 9b4cf90: Expose `verificationFixRetries` in Dashboard Settings → Merge so users can configure merge verification auto-fix retry attempts.
+- e6e596e: Move full SQLite integrity checks off the startup critical path by running `PRAGMA integrity_check(100)` asynchronously after boot. Expose database integrity state on `/api/health` via `database.corruptionDetected`, `database.integrityCheckPending`, and `database.integrityCheckLastRunAt` while preserving existing top-level health fields.
+- 0f5c086: Restore the CLI db vacuum command module wiring so tests and runtime command loading succeed.
+- e4ec922: Fix `fn db --vacuum` exit handling so successful exits are not caught as VACUUM failures, and await async vacuum errors correctly.
+- 6c0cf78: Skip PluginLoader loadability test when dist/index.js is absent (CI shard fix).
+- 81f143d: Fix fusion startup crash caused by the roadmap plugin's main entry re-exporting `RoadmapDashboardView`, which transitively imported a `.css` file under Node's tsx ESM loader. The dashboard view is still reachable through the dedicated `./dashboard-view` subpath used by the bundled-view registry.
+- 32e76c8: Expose `/api/mesh/state` as a real cluster snapshot API that aggregates peer-local mesh state and powers Nodes topology from actual `knownPeers` relationships instead of fabricated node-list links.
+- 3a67c1b: Align the bundled roadmap plugin to the canonical `fusion-plugin-roadmap` runtime id, expose roadmap APIs under `/api/plugins/fusion-plugin-roadmap/...`, and restore `/api/roadmaps` compatibility routing through plugin-owned handlers during migration.
+- d0a2d90: Add reports plugin HTML rendering templates, standalone offline export output, and HTML plugin route response support (`headers` + `contentType`) for attachment/preview endpoints.
+- 4535db5: Add Reports plugin dashboard view with list/history, filters, detail viewer, and period comparison.
+- 63fe25e: Reports plugin: add human approval/publish workflow and share-ready summary blocks (plain text, Markdown, Slack, email HTML) to the dashboard report detail viewer.
+- d6d3a29: Quiet benign Claude Code CLI stderr on clean shutdown by routing it to debug-only logs in `pi-claude-cli`.
+
+  This prevents MCP loading/initialization lines from surfacing as warning/error-level entries in the TUI Logs tab when Claude exits cleanly, while preserving warning/error surfacing for non-zero Claude CLI exits and authentication-related failures.
+
+- ef3281b: Preserve whitespace at SSE delta boundaries in dashboard chat streaming so streamed multi-sentence assistant responses render `. ` correctly between sentences in ChatView and QuickChatFAB.
+- 9b4cf90: Engine now auto-hydrates each task worktree's `.fusion/fusion.db` with the current task plus transitive dependency rows and their `task_documents` on worktree creation, pool acquire, and resume. Cross-task `sqlite3 .fusion/fusion.db` lookups in PROMPT.md no longer fail silently. Falls through with a warning on any failure; worktree creation is never blocked.
+- eb14812: Add automatic recovery for board-level merge deadlocks by promoting retry-exhausted already-landed review tasks to done, clearing stale `blockedBy` references on todo tasks when blockers are terminal or deadlocked, and excluding paused in-review worktrees from scheduler overlap `activeScopes` so paused blockers cannot repeatedly re-stamp downstream tasks.
+- 76c113c: Reports plugin: add interim cadence/aggregation/pipeline/runs-store seam exports so downstream tasks (FN-3780+) can plug in real implementations without scaffold churn.
+- ef4aeb2: Move agent Run Now control into the agent detail header next to lifecycle buttons.
+- d695201: Scheduler now auto-unblocks multi-dependency tasks when any blocker reaches done/archived; self-healing recovers stale queued status.
+- d6da4eb: Restore icon on the agent card "Details" button and only hide action labels in the split sidebar when buttons would not fit.
+- e4ec922: Allow durable `role: "engineer"` agents to receive explicitly routed implementation tasks via assignment and delegation flows without requiring `override=true`.
+- 17ef50f: Align `fn_task_retry` retry classification for `in-review` failures across dashboard and CLI surfaces. Execution-failed review tasks (incomplete steps) now retry back to `todo` with preserved progress, while merge-only failures (all steps done) stay in `in-review` with merge retry state reset. Also removes visible mission validation board-task creation in favor of internal validator runs.
+- d7980d5: Surface high fan-out blockers in the dashboard by escalating blocker badges and footer status summaries when a blocker has at least 5 active todo dependents.
+- 48aea50: Prevent auto-merge loops on terminal invalid done-transition failures during merge recovery.
+
+  When merge finalization encounters a non-recoverable state-machine error like
+  `Invalid transition: 'todo' → 'done'`, auto-recovery now keeps that task parked
+  in a stable failed review state instead of repeatedly re-enqueuing it for merge.
+
+  The merge-confirmed fast path also now re-checks task ownership and skips
+  finalization if the task has already left `in-review`.
+
+- f6a1862: Add agent provisioning policy plumbing for `fn_agent_create`/`fn_agent_delete`, including
+  `agent_provisioning` approval categorization and action-gate classification updates to avoid
+  double-approval collisions.
+- 4d2f029: Add age-based escalation for high fan-out blockers in the dashboard. High fan-out visibility still appears immediately, and blockers are now explicitly escalated only after they stay in blocking columns past the configurable stale threshold.
+- a0c7c33: Expose and honor `override` on `fn_delegate_task` so intentional non-executor delegations work end-to-end for durable agents while preserving default executor-role safeguards.
+- be404e5: Harden durable-agent heartbeat timer self-healing by adding scheduler-owned timer registration reconciliation and aligning dashboard dev-mode startup timer eligibility with runtime behavior.
+- 858bab2: Consolidate Even Realities plugin support into `fusion-plugin-even-realities-glasses` and remove `fusion-plugin-even-cards` from the active workspace package list to avoid duplicate user-facing integrations.
+- c02aade: Reclassify `fn_task_import_github` and `fn_task_import_github_issue` into action-gate task mutation tooling, while keeping permanent-agent classification aligned with task-creation coordination behavior.
+- 5640316: Add dashboard support for task lineage commit associations by introducing `GET /api/tasks/:id/commit-associations`, wiring a dedicated client helper, and surfacing confidence-labeled lineage rows in the Task Changes tab.
+- 5c3a1df: Memoize startup slim `listTasks` reads across dashboard/engine boot paths to reduce duplicate task-list SQL and JSON parsing work without introducing long-lived stale cache behavior.
+- c501e00: Deduplicate background SQLite integrity checks per database path so multi-project dashboard startup no longer stacks repeated `PRAGMA integrity_check(100)` runs against the same `fusion.db`. Health state fanout is preserved for all participating database instances (`integrityCheckPending`, `integrityCheckLastRunAt`, `corruptionDetected`).
+- a8b904c: Harden per-worktree DB hydration so missing `.fusion/` scratch state is bootstrapped and retried before degrading with `unable to open database file`.
+- 03b8bdb: Add CLI Printing Press to the built-in plugin catalog in Settings so users can discover and install the bundled plugin directly from Plugin Manager.
+- 12ae8f7: Improve local dashboard startup by replacing the default full workspace prebuild with a dashboard-client prebuild, adding explicit prebuild modes, and making update notices clearer for source checkouts.
+- c303187: Reconcile pull-request merge tasks when GitHub reports the PR merged after a merge command failure.
+- 2963923: Add one-click bundled plugin install support for Reports in Settings → Plugins.
+- 4205309: Keep stuck task detection active by default with an explicit task-stuck timeout default, without coupling it to workflow step timeout settings.
+- 4404c61: Unify local task creation on the distributed task-ID allocator lifecycle and remove runtime reliance on `config.nextId` as an allocation counter. Local allocator state now self-heals on startup by reconciling to existing task IDs for each prefix.
+
 ## 0.26.0
 
 ### Minor Changes

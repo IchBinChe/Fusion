@@ -50,6 +50,14 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 const noop = () => {};
 
+const highFanout = {
+  totalCount: 7,
+  activeTodoCount: 3,
+  dependentIds: ["FN-002", "FN-003"],
+  staleBlockedByDependentIds: [],
+  isHighFanout: true,
+} as const;
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -234,16 +242,32 @@ describe("TaskCard", () => {
     expect(badge.textContent).toContain("(1 stale)");
   });
 
+  it("renders high fan-out badge without visible todo suffix while keeping tooltip context", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-progress" })}
+        fanout={highFanout}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    const badge = screen.getByText("High fan-out").closest(".card-fanout-badge") as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toContain("High fan-out 7");
+    expect(badge.textContent).not.toContain("todo)");
+    expect(badge.getAttribute("data-tooltip")).toContain("3 waiting in todo");
+  });
+
   it("escalates only threshold-crossing fan-out badges", () => {
     const { rerender } = render(
       <TaskCard
         task={makeTask({ column: "in-progress" })}
         fanout={{
+          ...highFanout,
           totalCount: 8,
           activeTodoCount: 5,
           dependentIds: ["FN-003"],
-          staleBlockedByDependentIds: [],
-          isHighFanout: true,
           escalation: { blockerId: "FN-001", activeTodoCount: 5, totalActiveCount: 8, blockingAgeMs: 3_600_000 },
         }}
         onOpenDetail={noop}
@@ -251,11 +275,11 @@ describe("TaskCard", () => {
       />,
     );
 
-    let badge = document.querySelector(".card-fanout-badge--high-impact") as HTMLElement;
+    let badge = screen.getByText("Escalated").closest(".card-fanout-badge") as HTMLElement;
     expect(badge).not.toBeNull();
-    expect(badge).toHaveClass("card-fanout-badge--escalated");
     expect(badge.textContent).toContain("Escalated");
-    expect(badge.textContent).toContain("(5 todo)");
+    expect(badge.textContent).toContain("8");
+    expect(badge.textContent).not.toContain("todo)");
 
     rerender(
       <TaskCard
@@ -267,7 +291,7 @@ describe("TaskCard", () => {
     );
 
     badge = screen.getByText("Blocks").closest(".card-fanout-badge") as HTMLElement;
-    expect(badge).not.toHaveClass("card-fanout-badge--high-impact");
+    expect(badge).not.toBeNull();
   });
 
   it("shows plain paused label when pausedByAgentId is not set", () => {

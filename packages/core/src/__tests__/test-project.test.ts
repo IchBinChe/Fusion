@@ -1,9 +1,9 @@
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, readdirSync } from "node:fs";
 import { rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskStore } from "../store.js";
 import {
@@ -125,6 +125,25 @@ describe("test-project fixture", () => {
     expect(listed).toHaveLength(1);
     expect(listed[0].id).toBe(created.id);
     expect(fetched.description).toContain("Validate real TaskStore operations");
+  });
+
+  it("cleans up auto-created temp dirs when setup fails before returning a fixture", async () => {
+    const countTmpDirs = (prefix: string) =>
+      readdirSync(tmpdir()).filter((entry) => entry.startsWith(prefix)).length;
+
+    const projectCountBefore = countTmpDirs("fusion-test-project-");
+    const globalCountBefore = countTmpDirs("fusion-test-global-");
+    const error = new Error("boom");
+    const spy = vi.spyOn(TaskStore.prototype, "updateSettings").mockRejectedValueOnce(error);
+
+    try {
+      await expect(createTestProject()).rejects.toThrow(error);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(countTmpDirs("fusion-test-project-")).toBe(projectCountBefore);
+    expect(countTmpDirs("fusion-test-global-")).toBe(globalCountBefore);
   });
 
   it("createTestProject({ seedTasks }) pre-seeds tasks during setup", async () => {

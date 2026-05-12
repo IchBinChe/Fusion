@@ -71,37 +71,52 @@ export async function createTestProject(
   const globalDir = options.globalSettingsDir
     ? options.globalSettingsDir
     : mkdtempSync(join(tmpdir(), "fusion-test-global-"));
+  const ownsGlobalDir = !options.globalSettingsDir;
 
   assertAbsolutePath(rootDir, "rootDir");
   assertAbsolutePath(globalDir, "globalSettingsDir");
 
-  await mkdir(globalDir, { recursive: true });
+  let store: TaskStore | undefined;
 
-  const store = new TaskStore(rootDir, globalDir);
-  await store.init();
+  try {
+    await mkdir(globalDir, { recursive: true });
 
-  const { globalPatch, projectPatch } = splitSettings(options.settings);
-  await store.updateSettings(projectPatch);
+    store = new TaskStore(rootDir, globalDir);
+    await store.init();
 
-  if (Object.keys(globalPatch).length > 0) {
-    await store.updateGlobalSettings(globalPatch);
-  }
+    const { globalPatch, projectPatch } = splitSettings(options.settings);
+    await store.updateSettings(projectPatch);
 
-  const requestedSeedCount = Math.max(0, Math.floor(options.seedTasks ?? 0));
-  if (requestedSeedCount > 0) {
-    await seedTasks(store, requestedSeedCount);
-  }
+    if (Object.keys(globalPatch).length > 0) {
+      await store.updateGlobalSettings(globalPatch);
+    }
 
-  const cleanup = async () => {
-    store.close();
+    const requestedSeedCount = Math.max(0, Math.floor(options.seedTasks ?? 0));
+    if (requestedSeedCount > 0) {
+      await seedTasks(store, requestedSeedCount);
+    }
+
+    const initializedStore = store;
+    const cleanup = async () => {
+      initializedStore.close();
+      await destroyTestProject(rootDir);
+
+      if (ownsGlobalDir) {
+        await destroyTestProject(globalDir);
+      }
+    };
+
+    return { rootDir, store: initializedStore, globalDir, cleanup };
+  } catch (error) {
+    store?.close();
     await destroyTestProject(rootDir);
 
-    if (!options.globalSettingsDir) {
+    if (ownsGlobalDir) {
       await destroyTestProject(globalDir);
     }
-  };
 
-  return { rootDir, store, globalDir, cleanup };
+    throw error;
+  }
 }
 
 /**

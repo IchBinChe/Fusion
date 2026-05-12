@@ -1649,14 +1649,13 @@ function TaskCardComponent({
           )}
           {fanout && fanout.totalCount > 0 && (
             <span
-              className={`card-fanout-badge${fanout.staleBlockedByDependentIds.length > 0 ? " card-fanout-badge--stale" : ""}${fanout.isHighFanout ? " card-fanout-badge--high-impact" : ""}${fanout.escalation ? " card-fanout-badge--escalated" : ""}`}
+              className={`card-fanout-badge${fanout.staleBlockedByDependentIds.length > 0 ? " card-fanout-badge--stale" : ""}`}
               data-tooltip={`Blocking ${fanout.totalCount} active task(s); ${fanout.activeTodoCount} waiting in todo${fanout.isHighFanout ? ` (high fan-out threshold: ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD})` : ""}${fanout.escalation ? ` · escalated after ${Math.floor(fanout.escalation.blockingAgeMs / 60000)}m in blocking column` : ""}`}
             >
               <GitBranch size={12} style={{ verticalAlign: "middle" }} />
               <span>
                 {fanout.escalation ? "Escalated" : fanout.isHighFanout ? "High fan-out" : "Blocks"}{" "}
                 <span className="card-fanout-count">{fanout.totalCount}</span>
-                {fanout.isHighFanout ? ` (${fanout.activeTodoCount} todo)` : ""}
                 {fanout.staleBlockedByDependentIds.length > 0 ? ` (${fanout.staleBlockedByDependentIds.length} stale)` : ""}
               </span>
             </span>

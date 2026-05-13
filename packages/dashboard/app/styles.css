@@ -3408,12 +3408,6 @@ input[type="range"]:focus-visible {
     padding: 12px 14px;
   }
 
-  .backup-list ul {
-    max-height: 220px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
   /* Dropdown items touch target (shared: InlineCreateCard, NewTaskModal, TaskDetailModal, TaskForm) */
   .dep-dropdown-item {
     min-height: 36px;

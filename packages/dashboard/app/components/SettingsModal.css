@@ -244,6 +244,121 @@
   }
 }
 
+/* === Settings Backups: summary stats + backup list === */
+.backup-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-sm) var(--space-md);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+.backup-stat {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.backup-stat-value {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.backup-stat-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.backup-list {
+  margin-top: var(--space-sm);
+}
+
+.backup-list summary {
+  padding: var(--space-sm) 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.backup-list summary:hover {
+  color: var(--text);
+}
+
+.backup-list summary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring-strong);
+}
+
+.backup-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  margin-top: var(--space-sm);
+  padding: 0;
+  list-style: none;
+}
+
+.backup-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+  border-top: var(--btn-border-width) solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.backup-list li code {
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.backup-size {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .backup-stats {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .backup-stat {
+    align-items: flex-start;
+  }
+
+  .backup-list ul {
+    max-height: calc(var(--space-xl) * 9 + var(--space-md));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .backup-list li code {
+    white-space: normal;
+    word-break: break-all;
+  }
+}
+
 .settings-layout {
   display: flex;
   flex: 1;

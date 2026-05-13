@@ -30,11 +30,11 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_task_browse_github_issues` | List open GitHub issues from a repository to browse before importing. Returns issue numbers, titles, and URLs for selection. Use with fn_task_import_github_issue to import specific issues by number. |
 | `fn_task_plan` | Create a task via AI-guided planning mode — interactive conversation to refine your idea into a well-specified task. |
 | `fn_web_fetch` | Lightweight URL fetch (no JS rendering). Use agent-browser skill for JS-heavy pages. URL to fetch (http/https) Optional extraction hint for downstream summarization Timeout in milliseconds (default: 30000) Max bytes to return (default: 512000) |
-| `fn_research_run` | Start a bounded research run and optionally wait for findings. |
-| `fn_research_list` | List recent research runs. |
-| `fn_research_get` | Get one research run and structured findings. |
-| `fn_research_cancel` | Cancel an in-flight research run. Terminal runs return INVALID_TRANSITION. |
-| `fn_research_retry` | Retry a failed research run when lifecycle marks it retryable. |
+| `fn_research_run` | Cited-research pipeline: create a bounded search/fetch/synthesis run (not an autonomous experiment loop) and optionally wait for completion. |
+| `fn_research_list` | Cited-research pipeline: list recent search/fetch/synthesis runs (not experiment-loop sessions). |
+| `fn_research_get` | Cited-research pipeline: get one run with structured findings and citations (not experiment-loop state). |
+| `fn_research_cancel` | Cited-research pipeline: cancel an in-flight run; terminal runs return INVALID_TRANSITION (does not control experiment loops). |
+| `fn_research_retry` | Cited-research pipeline: retry a failed run when lifecycle marks it retryable (not an autonomous experiment loop retry). |
 | `fn_insight_list` | List persisted project insights with optional category/status filters. |
 | `fn_insight_show` | Show a single persisted insight by ID. |
 | `fn_insight_run_list` | List recent insight-generation runs with optional status/trigger filters. |

@@ -407,7 +407,7 @@ Lightweight URL fetch (no JS rendering). Use agent-browser skill for JS-heavy pa
 
 ### fn_research_run
 
-Start a bounded research run and optionally wait for findings.
+Cited-research pipeline: create a bounded search/fetch/synthesis run (not an autonomous experiment loop) and optionally wait for completion.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -417,7 +417,7 @@ Start a bounded research run and optionally wait for findings.
 
 ### fn_research_list
 
-List recent research runs.
+Cited-research pipeline: list recent search/fetch/synthesis runs (not experiment-loop sessions).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -426,7 +426,7 @@ List recent research runs.
 
 ### fn_research_get
 
-Get one research run and structured findings.
+Cited-research pipeline: get one run with structured findings and citations (not experiment-loop state).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -434,7 +434,7 @@ Get one research run and structured findings.
 
 ### fn_research_cancel
 
-Cancel an in-flight research run. Terminal runs return INVALID_TRANSITION.
+Cited-research pipeline: cancel an in-flight run; terminal runs return INVALID_TRANSITION (does not control experiment loops).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -442,7 +442,7 @@ Cancel an in-flight research run. Terminal runs return INVALID_TRANSITION.
 
 ### fn_research_retry
 
-Retry a failed research run when lifecycle marks it retryable.
+Cited-research pipeline: retry a failed run when lifecycle marks it retryable (not an autonomous experiment loop retry).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

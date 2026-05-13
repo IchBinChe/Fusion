@@ -4595,7 +4595,14 @@ export class TaskExecutor {
         }
         const settings = await store.getSettings();
         const hardPauseActive = Boolean(settings.globalPause);
-        await store.updateTask(taskId, { paused: false, pausedByAgentId: null, status: null });
+        // Task-level pause prevents new work from starting, not completion of
+        // in-flight work. Always clear it on explicit agent completion so the
+        // board cannot strand a completed task in a paused state.
+        await store.updateTask(taskId, {
+          paused: undefined,
+          pausedByAgentId: undefined,
+          status: null,
+        });
         await store.logEntry(taskId, "Task marked done by agent");
 
         const latestTask = await store.getTask(taskId);

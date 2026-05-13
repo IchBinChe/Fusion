@@ -2063,6 +2063,7 @@ describe("TaskExecutor global pause behavior", () => {
   it("parks todo tasks in in-progress when fn_task_done is called during global pause", async () => {
     const store = createMockStore();
     let capturedCustomTools: any[] = [];
+    let taskDoneResult: any;
 
     const todoTask = {
       id: "FN-001",
@@ -2097,7 +2098,7 @@ describe("TaskExecutor global pause behavior", () => {
           prompt: vi.fn().mockImplementation(async () => {
             const taskDoneTool = capturedCustomTools.find((tool: any) => tool.name === "fn_task_done");
             if (taskDoneTool) {
-              await taskDoneTool.execute("call-1", { summary: "done" });
+              taskDoneResult = await taskDoneTool.execute("call-1", { summary: "done" });
             }
           }),
           dispose: vi.fn(),
@@ -2106,15 +2107,17 @@ describe("TaskExecutor global pause behavior", () => {
     }) as any);
 
     const executor = new TaskExecutor(store, "/tmp/test");
+    const watchdogSpy = vi.spyOn(executor as any, "scheduleCompletedTaskWatchdog");
     await executor.execute(todoTask as any);
 
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
-      paused: false,
-      pausedByAgentId: null,
+      paused: undefined,
+      pausedByAgentId: undefined,
       status: null,
     });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "in-review");
+    expect(watchdogSpy).not.toHaveBeenCalledWith("FN-001", "fn_task_done");
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-001",
       expect.stringContaining("fn_task_done called while task was in todo during pause"),
@@ -2125,12 +2128,16 @@ describe("TaskExecutor global pause behavior", () => {
           id === "FN-001" && action.includes("Completion handoff deferred — global pause active"),
       ),
     ).toBe(true);
+    expect(taskDoneResult.content[0].text).toBe(
+      "Task marked complete. Completion handoff deferred until pause is cleared.",
+    );
   });
 
   describe("fn_task_done with paused state (FN-3964 / FN-4167 regression)", () => {
     it("advances todo + paused tasks through normal completion handoff", async () => {
       const store = createMockStore();
       let capturedCustomTools: any[] = [];
+      let taskDoneResult: any;
       const todoTask = {
         id: "FN-001",
         title: "Paused todo task",
@@ -2165,7 +2172,7 @@ describe("TaskExecutor global pause behavior", () => {
             prompt: vi.fn().mockImplementation(async () => {
               const taskDoneTool = capturedCustomTools.find((tool: any) => tool.name === "fn_task_done");
               if (taskDoneTool) {
-                await taskDoneTool.execute("call-1", { summary: "done" });
+                taskDoneResult = await taskDoneTool.execute("call-1", { summary: "done" });
               }
             }),
             dispose: vi.fn(),
@@ -2178,9 +2185,10 @@ describe("TaskExecutor global pause behavior", () => {
 
       await executor.execute(todoTask as any);
 
+      // FN-4145: explicit agent completion always clears task-level pause state.
       expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
-        paused: false,
-        pausedByAgentId: null,
+        paused: undefined,
+        pausedByAgentId: undefined,
         status: null,
       });
       expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
@@ -2192,12 +2200,16 @@ describe("TaskExecutor global pause behavior", () => {
             id === "FN-001" && action.includes("Completion handoff deferred — global pause active"),
         ),
       ).toBe(false);
+      expect(taskDoneResult.content[0].text).toBe(
+        "Task marked complete with summary. All steps done. Moving to in-review.",
+      );
       // globalPause:true deferred behavior is intentionally covered by the test above.
     });
 
     it("completes in-progress + paused tasks after clearing task-level pause state", async () => {
       const store = createMockStore();
       let capturedCustomTools: any[] = [];
+      let taskDoneResult: any;
       const inProgressTask = {
         id: "FN-001",
         title: "Paused in-progress task",
@@ -2231,7 +2243,7 @@ describe("TaskExecutor global pause behavior", () => {
             prompt: vi.fn().mockImplementation(async () => {
               const taskDoneTool = capturedCustomTools.find((tool: any) => tool.name === "fn_task_done");
               if (taskDoneTool) {
-                await taskDoneTool.execute("call-1", { summary: "done" });
+                taskDoneResult = await taskDoneTool.execute("call-1", { summary: "done" });
               }
             }),
             dispose: vi.fn(),
@@ -2245,8 +2257,8 @@ describe("TaskExecutor global pause behavior", () => {
       await executor.execute(inProgressTask as any);
 
       expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
-        paused: false,
-        pausedByAgentId: null,
+        paused: undefined,
+        pausedByAgentId: undefined,
         status: null,
       });
       expect(watchdogSpy).toHaveBeenCalledWith("FN-001", "fn_task_done");
@@ -2259,6 +2271,9 @@ describe("TaskExecutor global pause behavior", () => {
             id === "FN-001" && action.includes("Completion handoff deferred — global pause active"),
         ),
       ).toBe(false);
+      expect(taskDoneResult.content[0].text).toBe(
+        "Task marked complete with summary. All steps done. Moving to in-review.",
+      );
       // globalPause:true deferred behavior is intentionally covered by
       // "parks todo tasks in in-progress when fn_task_done is called during global pause".
     });

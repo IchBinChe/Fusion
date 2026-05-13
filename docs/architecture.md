@@ -553,8 +553,19 @@ See [Memory Plugin Contract](./memory-plugin-contract.md) for the full plan.
 ### Agent roles
 - **Planning**: the planning processor generates task plans (`PROMPT.md`) and selects eligible planning tasks by priority first, then FIFO (`createdAt` ascending) within each priority tier.
 - **Executor**: `TaskExecutor` (`executor.ts`) implements tasks in worktrees
-- **Reviewer**: `reviewStep()` (`reviewer.ts`) performs plan/code reviews
+- **Reviewer**: `reviewStep()` (`reviewer.ts`) performs plan/code/spec reviews
 - **Merger**: `aiMergeTask()` (`merger.ts`) merges approved work
+
+#### Reviewer verdict recovery contract (FN-4092)
+- Reviewer verdicts are `APPROVE`, `REVISE`, `RETHINK`, or `UNAVAILABLE`.
+- For non-pause `UNAVAILABLE` or non-context reviewer prompt errors, `reviewStep()` retries once:
+  - Prefer configured validator fallback model (`validatorFallbackProvider` + `validatorFallbackModelId`, including project overrides), or
+  - Retry once on the same model with stricter `Verdict:` output instructions when no fallback model is configured.
+- Pause/engine-pause short-circuits still return `UNAVAILABLE` immediately and do not spawn/retry reviewer sessions.
+- Executor handling in `createReviewStepTool()` is now explicit:
+  - `plan`/`spec` `UNAVAILABLE` is advisory after retry exhaustion (`UNAVAILABLE (advisory)`), and execution proceeds.
+  - `code` `UNAVAILABLE` remains blocking; step completion must wait for a usable review verdict.
+  - Advisory and blocking paths are both logged to task logs for operator visibility.
 
 ### Scheduling and execution
 - `Scheduler` (`scheduler.ts`) — dependency-aware task scheduling that dispatches eligible todo tasks by priority first, then FIFO (`createdAt` ascending) within each priority tier.

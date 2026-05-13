@@ -229,8 +229,8 @@ Override precedence for direct merges is:
 | `executionModelId` | `string` | `undefined` | Model ID for task execution agents. |
 | `validatorProvider` | `string` | `undefined` | Provider for plan/code reviewers. |
 | `validatorModelId` | `string` | `undefined` | Model ID for plan/code reviewers. |
-| `validatorFallbackProvider` | `string` | `undefined` | Fallback provider for reviewers. |
-| `validatorFallbackModelId` | `string` | `undefined` | Fallback model ID for reviewers. |
+| `validatorFallbackProvider` | `string` | `undefined` | Fallback provider for reviewers; also used by reviewer UNAVAILABLE/error recovery retry before returning terminal UNAVAILABLE. |
+| `validatorFallbackModelId` | `string` | `undefined` | Fallback model ID for reviewers; paired with `validatorFallbackProvider` for reviewer recovery retry. |
 | `modelPresets` | `ModelPreset[]` | `[]` | Reusable executor/reviewer model presets. |
 | `autoSelectModelPreset` | `boolean` | `false` | Auto-select presets by task size. |
 | `defaultPresetBySize` | `{ S?: string; M?: string; L?: string }` | `{}` | Mapping for `S`/`M`/`L` → preset ID. |

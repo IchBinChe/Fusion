@@ -1624,7 +1624,7 @@ function AppInner() {
           onDismiss={dismissUpdateBanner}
         />
       )}
-      {viewMode === "project" && currentProject && dashboardHealth?.taskIdIntegrity.status === "anomaly" && dashboardHealth.taskIdIntegrity.recommendedAction && (
+      {viewMode === "project" && currentProject && dashboardHealth?.taskIdIntegrity?.status === "anomaly" && dashboardHealth.taskIdIntegrity.recommendedAction && (
         <TaskIdIntegrityBanner
           report={dashboardHealth.taskIdIntegrity}
           recommendedAction={dashboardHealth.taskIdIntegrity.recommendedAction}

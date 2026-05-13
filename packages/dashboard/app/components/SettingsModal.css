@@ -402,6 +402,15 @@
   background: var(--text-muted);
 }
 
+.settings-research-source-locked {
+  cursor: default;
+  color: var(--text-muted) !important;
+}
+
+.settings-research-source-locked input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
 .settings-research-source-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -4528,7 +4528,10 @@ export function SettingsModal({
             </div>
             <div className="form-group">
               <label>Enabled Sources</label>
-              <label htmlFor="research-project-source-webSearch" className="checkbox-label">
+              <label
+                htmlFor="research-project-source-webSearch"
+                className="checkbox-label settings-research-source-locked"
+              >
                 <input id="research-project-source-webSearch" type="checkbox" checked disabled readOnly />
                 Web Search <span className="settings-muted">Always on</span>
               </label>

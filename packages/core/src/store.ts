@@ -3081,6 +3081,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const activeTasks = await Promise.all((rows as unknown as TaskRow[]).map(async (row) => {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
+      task.stalledReview = detectStalledReview(task, { now });
 
       // Slim path: aggregate the timed-execution total server-side, then
       // strip the heavy log payload from the wire response. Without this

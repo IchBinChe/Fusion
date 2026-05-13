@@ -118,6 +118,12 @@ pnpm --filter @fusion/dashboard test:build          # built client output contra
 
 Run the default dashboard gate for ordinary dashboard work. Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, route registration, or anything that could invalidate the curated selection. Run `test:browser-smoke` for layout, responsive, navigation, modal, or CSS changes. Run `test:build` for Vite/build output, lazy-loading, chunking, static asset, or client-dist changes.
 
+### Engine test helper convention
+
+`packages/engine/src/__tests__/executor-test-helpers.ts` now defaults `isUsableTaskWorktree` to `true` via a helper-level `worktree-pool` mock so fabricated worktree paths continue to pass FN-4114 liveness gating without real `git worktree add` setup.
+To test failure paths, override per test with `vi.spyOn(worktreePool, "isUsableTaskWorktree").mockResolvedValueOnce(false)` (or `.mockResolvedValue(false)` in a scoped `beforeEach`).
+This is test-only scaffolding; production liveness assertions in `packages/engine/src/executor.ts` remain unchanged.
+
 ### Package-Specific Test Commands
 
 Common targeted lanes:

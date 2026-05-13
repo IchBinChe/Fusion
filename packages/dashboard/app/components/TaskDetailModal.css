@@ -402,11 +402,22 @@
   gap: var(--space-xs);
 }
 
+.detail-source-section .detail-source-header {
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+}
+
 .detail-source-summary {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-xs);
+}
+
+.detail-source-section .detail-source-summary {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .detail-source-label {
@@ -461,6 +472,10 @@
   color: var(--text-muted);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.detail-source-section .detail-source-toggle {
+  flex: 0 0 auto;
 }
 
 .detail-source-header .detail-source-toggle {
@@ -1625,7 +1640,8 @@
   }
 
   .detail-source-section .detail-source-summary {
-    flex: 1 1 100%;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .detail-github-tracking-section .detail-source-header {

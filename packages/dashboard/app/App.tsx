@@ -1,5 +1,11 @@
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
-import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
+import {
+  computeCapacityRisk,
+  DEFAULT_CAPACITY_RISK_TODO_THRESHOLD,
+  type Task,
+  type TaskDetail,
+  type WorkflowStep,
+} from "@fusion/core";
 import { Header, useViewportMode } from "./components/Header";
 import { Board } from "./components/Board";
 import { TaskCard } from "./components/TaskCard";
@@ -15,6 +21,7 @@ import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
 import { SessionNotificationBanner } from "./components/SessionNotificationBanner";
 import { CliBinaryInstallBanner } from "./components/CliBinaryInstallBanner";
 import { SetupWarningBanner } from "./components/SetupWarningBanner";
+import { CapacityRiskBanner } from "./components/CapacityRiskBanner";
 import { TaskIdIntegrityBanner } from "./components/TaskIdIntegrityBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
@@ -33,6 +40,7 @@ import { useBackgroundSessions } from "./hooks/useBackgroundSessions";
 import { useSessionBannersHidden } from "./hooks/useSessionBannerPref";
 import { useTasks } from "./hooks/useTasks";
 import { useProjects } from "./hooks/useProjects";
+import { useAgents } from "./hooks/useAgents";
 import { useNodes } from "./hooks/useNodes";
 import { useCurrentProject } from "./hooks/useCurrentProject";
 import { ToastProvider, useToast } from "./hooks/useToast";
@@ -708,6 +716,7 @@ function AppInner() {
     enginePaused,
     taskStuckTimeoutMs,
     staleHighFanoutBlockerAgeThresholdMs,
+    capacityRiskTodoThreshold,
     showQuickChatFAB,
     prAuthAvailable,
     settingsLoaded,
@@ -721,6 +730,28 @@ function AppInner() {
     toggleEnginePause,
     refresh: refreshAppSettings,
   } = useAppSettings(currentProject?.id);
+
+  const { stats: agentStats } = useAgents(currentProject?.id);
+
+  const inProgressCount = useMemo(
+    () => boardSourceTasks.filter((task) => task.column === "in-progress").length,
+    [boardSourceTasks],
+  );
+  const inReviewCount = useMemo(
+    () => boardSourceTasks.filter((task) => task.column === "in-review").length,
+    [boardSourceTasks],
+  );
+  const capacityRiskSignal = useMemo(
+    () =>
+      computeCapacityRisk({
+        todoCount: agentStats?.todoTaskCount ?? 0,
+        inProgressCount,
+        inReviewCount,
+        idleNonEphemeralAgentCount: agentStats?.idleNonEphemeralCount ?? 0,
+        threshold: capacityRiskTodoThreshold ?? DEFAULT_CAPACITY_RISK_TODO_THRESHOLD,
+      }),
+    [agentStats?.todoTaskCount, agentStats?.idleNonEphemeralCount, inProgressCount, inReviewCount, capacityRiskTodoThreshold],
+  );
 
   const skillsEnabled = experimentalFeatures.skillsView === true;
   const nodesEnabled = experimentalFeatures.nodesView === true;
@@ -1432,6 +1463,7 @@ function AppInner() {
     if (taskView === "board") {
       return (
         <PageErrorBoundary>
+          <CapacityRiskBanner signal={capacityRiskSignal} />
           <Board
             tasks={filteredBoardTasks}
             projectId={currentProject?.id}

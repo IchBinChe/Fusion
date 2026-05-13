@@ -13,6 +13,7 @@ export interface UseAppSettingsResult {
   enginePaused: boolean;
   taskStuckTimeoutMs: number | undefined;
   staleHighFanoutBlockerAgeThresholdMs: number;
+  capacityRiskTodoThreshold: number;
   showQuickChatFAB: boolean;
   prAuthAvailable: boolean;
   settingsLoaded: boolean;
@@ -42,6 +43,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [enginePaused, setEnginePaused] = useState(false);
   const [taskStuckTimeoutMs, setTaskStuckTimeoutMs] = useState<number | undefined>(undefined);
   const [staleHighFanoutBlockerAgeThresholdMs, setStaleHighFanoutBlockerAgeThresholdMs] = useState(2 * 60 * 60 * 1000);
+  const [capacityRiskTodoThreshold, setCapacityRiskTodoThreshold] = useState(20);
   const [showQuickChatFAB, setShowQuickChatFAB] = useState(false);
   const [prAuthAvailable, setPrAuthAvailable] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -78,6 +80,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
         settings.staleHighFanoutBlockerAgeThresholdMs ?? 2 * 60 * 60 * 1000,
       );
       setShowQuickChatFAB(settings.showQuickChatFAB === true);
+      setCapacityRiskTodoThreshold(settings.capacityRiskTodoThreshold ?? 20);
       setExperimentalFeatures(settings.experimentalFeatures ?? {});
       const features = settings.experimentalFeatures ?? {};
       setInsightsEnabled(features.insights === true);
@@ -174,6 +177,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     enginePaused,
     taskStuckTimeoutMs,
     staleHighFanoutBlockerAgeThresholdMs,
+    capacityRiskTodoThreshold,
     showQuickChatFAB,
     prAuthAvailable,
     settingsLoaded,

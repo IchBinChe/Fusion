@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadStylesCss } from "../test/cssFixture";
 
 const APP_ROOT = path.resolve(__dirname, "..");
 const ALLOWLIST = new Set([
@@ -38,7 +39,7 @@ describe("text token canonicalization", () => {
   });
 
   it("defines canonical text tokens and does not define --text-secondary at :root", () => {
-    const stylesCss = readFileSync(path.join(APP_ROOT, "styles.css"), "utf8");
+    const stylesCss = loadStylesCss();
     const rootBlocks = [...stylesCss.matchAll(/:root\s*\{([\s\S]*?)\}/g)].map((match) => match[1]);
     expect(rootBlocks.length).toBeGreaterThan(0);
     const allRootContent = rootBlocks.join("\n");

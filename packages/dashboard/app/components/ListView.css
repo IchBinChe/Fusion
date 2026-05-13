@@ -600,16 +600,6 @@
 }
 
 
-.list-status-badge.stuck {
-  background: color-mix(in srgb, var(--triage) 20%, transparent);
-  color: var(--triage);
-  animation: stuck-pulse 2s ease-in-out infinite;
-}
-
-.list-status-badge.pulsing {
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
 .list-status-badge--triage {
   background: var(--status-triage-bg);
   color: var(--triage);
@@ -638,6 +628,16 @@
 .list-status-badge.failed {
   background: var(--status-error-bg);
   color: var(--color-error-dark);
+}
+
+.list-status-badge.stuck {
+  background: color-mix(in srgb, var(--triage) 20%, transparent);
+  color: var(--triage);
+  animation: stuck-pulse 2s ease-in-out infinite;
+}
+
+.list-status-badge.pulsing {
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 .list-column-badge {

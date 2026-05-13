@@ -4,7 +4,6 @@ import { sortTasksForDisplayColumn } from "./taskSorting";
 import { Column } from "./Column";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useBatchBadgeFetch } from "../hooks/useBatchBadgeFetch";
 import { fetchWorkflowSteps, type ModelInfo } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
 
@@ -76,8 +75,6 @@ function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next
 export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const archivedLoadedRef = useRef(false);
-  const { fetchBatch } = useBatchBadgeFetch(projectId);
-  const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
   const blockerFanoutMap = useBlockerFanout(tasks, {
     staleHighFanoutAgeThresholdMs: staleHighFanoutBlockerAgeThresholdMs,
@@ -160,41 +157,9 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     };
   }, [projectId]);
 
-  // Collect task IDs with GitHub badge info for batch fetching
-  const taskIdsWithBadges = useMemo(() => {
-    return tasks
-      .filter((t) => t.prInfo || t.issueInfo)
-      .map((t) => t.id);
-  }, [tasks]);
-
-  // Batch fetch badge statuses on mount and when visible tasks change
-  useEffect(() => {
-    if (taskIdsWithBadges.length === 0) return;
-
-    // Debounce the batch fetch to handle rapid changes
-    if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
-    }
-
-    debounceTimeoutRef.current = setTimeout(() => {
-      // Fetch in chunks of 50 to respect the API limit
-      const chunks: string[][] = [];
-      for (let i = 0; i < taskIdsWithBadges.length; i += 50) {
-        chunks.push(taskIdsWithBadges.slice(i, i + 50));
-      }
-
-      // Fire all chunks concurrently - the hook handles deduplication
-      chunks.forEach((chunk) => {
-        void fetchBatch(chunk);
-      });
-    }, 500);
-
-    return () => {
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
-    };
-  }, [taskIdsWithBadges, fetchBatch]);
+  // FN-4380: GitHub badge state comes from persisted task fields (`task.prInfo`,
+  // `task.issueInfo`, `task.githubTracking.issue`) and live WebSocket `badge:updated`
+  // messages. We do NOT eagerly call `/api/github/batch-status` on board load.
 
   return (
     <>

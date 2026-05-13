@@ -217,7 +217,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   mergeDiffVolumeThreshold: undefined,
   mergeDiffVolumeAllowlist: undefined,
   mergeStrategyOverlapBehavior: "flip-to-prefer-branch",
-  postMergeAuditMode: "block",
+  postMergeAuditMode: "warn",
   workflowStepTimeoutMs: 360_000,
   workflowRevisionForkOnScopeMismatch: true,
   strictScopeEnforcement: false,

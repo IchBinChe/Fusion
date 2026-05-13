@@ -1137,18 +1137,6 @@
 
 /* === Mobile Responsive Overrides === */
 @media (max-width: 768px) {
-  .card-header {
-    flex-wrap: wrap;
-    row-gap: var(--space-xs);
-  }
-
-  .card-header-actions {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-  }
-
   /* Card edit button: always visible on mobile (no hover) */
   .card-edit-btn {
     opacity: 1;
@@ -1177,7 +1165,7 @@
     height: 16px;
   }
 
-  /* Card: always show action buttons on mobile (no hover state) */
+  /* FN-4365/FN-4351: keep secondary actions compact and inline with the header title row on mobile. */
   .card-header-actions {
     gap: 4px;
     flex-shrink: 0;

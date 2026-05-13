@@ -118,8 +118,8 @@ describe("NotificationService deferred failure notifications", () => {
     store.setTask(task({ id: "FN-1", status: "failed", column: "in-review" }));
     store.emit("task:updated", task({ id: "FN-1", status: "failed", column: "in-review" }));
 
-    store.setTask(task({ id: "FN-1", status: null, column: "done" }));
-    store.emit("task:moved", { task: task({ id: "FN-1", status: null, column: "done" }), from: "in-review", to: "done" });
+    store.setTask(task({ id: "FN-1", status: undefined, column: "done" }));
+    store.emit("task:moved", { task: task({ id: "FN-1", status: undefined, column: "done" }), from: "in-review", to: "done" });
     await vi.advanceTimersByTimeAsync(100);
 
     expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());

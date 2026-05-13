@@ -80,8 +80,11 @@ function HistoryHarness({ children }: { children: ReactNode }) {
   return <NavigationHistoryProvider value={history}>{children}</NavigationHistoryProvider>;
 }
 
+const countNavIndexPushes = (pushStateSpy: ReturnType<typeof vi.spyOn>) =>
+  pushStateSpy.mock.calls.filter(([state]) => typeof (state as { navIndex?: unknown })?.navIndex === "number").length;
+
 describe("PlanningModeModal mobile swipe-back", () => {
-  const originalPushState = window.history.pushState;
+  let pushStateSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,23 +92,13 @@ describe("PlanningModeModal mobile swipe-back", () => {
     mockFetchAiSessions.mockResolvedValue([planningSessionSummary]);
     mockFetchAiSession.mockResolvedValue(planningSessionDetail);
     mockFetchModels.mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] });
-    window.history.pushState = vi.fn();
+    pushStateSpy = vi.spyOn(window.history, "pushState");
   });
 
-  afterEach(() => {
-    window.history.pushState = originalPushState;
-  });
-
-  it("pushes a mobile nav entry when opening a planning session and popstate returns to the list", async () => {
-    render(
+  it("pushes one mobile nav entry when opening a planning session and popstate returns to list view", async () => {
+    const { rerender } = render(
       <HistoryHarness>
-        <PlanningModeModal
-          isOpen={true}
-          onClose={vi.fn()}
-          onTaskCreated={vi.fn()}
-          onTasksCreated={vi.fn()}
-          tasks={[]}
-        />
+        <PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
       </HistoryHarness>,
     );
 
@@ -117,30 +110,34 @@ describe("PlanningModeModal mobile swipe-back", () => {
 
     await waitFor(() => {
       expect(mockFetchAiSession).toHaveBeenCalledWith("plan-1");
-      expect(window.history.pushState).toHaveBeenCalledWith(expect.objectContaining({ navIndex: 1 }), "");
+      expect(countNavIndexPushes(pushStateSpy)).toBe(1);
     });
 
-    expect(screen.getByLabelText("Back to sessions")).toBeInTheDocument();
+    rerender(
+      <HistoryHarness>
+        <PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
+      </HistoryHarness>,
+    );
+
+    await waitFor(() => {
+      expect(countNavIndexPushes(pushStateSpy)).toBe(1);
+    });
 
     act(() => {
       window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
     });
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Back to sessions")).not.toBeInTheDocument();
+      const body = document.querySelector(".planning-modal-body");
+      expect(body).toHaveClass("planning-modal-body--show-list");
+      expect(body).not.toHaveClass("planning-modal-body--show-detail");
     });
   });
 
-  it("pushes a mobile nav entry when opening the new-session detail and popstate returns to the list", async () => {
+  it("pushes a mobile nav entry when opening New Session and popstate returns to the list", async () => {
     render(
       <HistoryHarness>
-        <PlanningModeModal
-          isOpen={true}
-          onClose={vi.fn()}
-          onTaskCreated={vi.fn()}
-          onTasksCreated={vi.fn()}
-          tasks={[]}
-        />
+        <PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
       </HistoryHarness>,
     );
 
@@ -151,32 +148,26 @@ describe("PlanningModeModal mobile swipe-back", () => {
     fireEvent.click(screen.getByRole("button", { name: /new session/i }));
 
     await waitFor(() => {
-      expect(window.history.pushState).toHaveBeenCalledWith(expect.objectContaining({ navIndex: 1 }), "");
+      expect(pushStateSpy).toHaveBeenCalledWith(expect.objectContaining({ navIndex: expect.any(Number) }), "");
     });
-
-    expect(screen.getByLabelText("Back to sessions")).toBeInTheDocument();
 
     act(() => {
       window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
     });
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Back to sessions")).not.toBeInTheDocument();
+      const body = document.querySelector(".planning-modal-body");
+      expect(body).toHaveClass("planning-modal-body--show-list");
+      expect(body).not.toHaveClass("planning-modal-body--show-detail");
     });
   });
 
-  it("does not push a nav entry on desktop session selection", async () => {
+  it("does not push nav entries on desktop for either selecting a session or opening New Session", async () => {
     mockViewportMode.mockReturnValue("desktop");
 
     render(
       <HistoryHarness>
-        <PlanningModeModal
-          isOpen={true}
-          onClose={vi.fn()}
-          onTaskCreated={vi.fn()}
-          onTasksCreated={vi.fn()}
-          tasks={[]}
-        />
+        <PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
       </HistoryHarness>,
     );
 
@@ -185,10 +176,61 @@ describe("PlanningModeModal mobile swipe-back", () => {
     });
 
     fireEvent.click(screen.getByText("Roadmap draft"));
+    fireEvent.click(screen.getByRole("button", { name: /new session/i }));
 
     await waitFor(() => {
       expect(mockFetchAiSession).toHaveBeenCalledWith("plan-1");
     });
-    expect(window.history.pushState).not.toHaveBeenCalled();
+
+    expect(countNavIndexPushes(pushStateSpy)).toBe(0);
+  });
+
+  it("re-arms mobile push after closing and reopening the modal", async () => {
+    const { rerender } = render(
+      <HistoryHarness>
+        <PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
+      </HistoryHarness>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Roadmap draft")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new session/i }));
+    await waitFor(() => {
+      expect(countNavIndexPushes(pushStateSpy)).toBe(1);
+    });
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+    });
+
+    await waitFor(() => {
+      const body = document.querySelector(".planning-modal-body");
+      expect(body).toHaveClass("planning-modal-body--show-list");
+      expect(body).not.toHaveClass("planning-modal-body--show-detail");
+    });
+
+    rerender(
+      <HistoryHarness>
+        <PlanningModeModal isOpen={false} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
+      </HistoryHarness>,
+    );
+
+    rerender(
+      <HistoryHarness>
+        <PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={[]} />
+      </HistoryHarness>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Roadmap draft")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new session/i }));
+
+    await waitFor(() => {
+      expect(countNavIndexPushes(pushStateSpy)).toBe(2);
+    });
   });
 });

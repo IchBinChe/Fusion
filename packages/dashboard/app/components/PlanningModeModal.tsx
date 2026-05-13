@@ -239,6 +239,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
   const viewportMode = useViewportMode();
+  const isMobile = viewportMode === "mobile";
   const { pushNav } = useNavigationHistoryContext();
 
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } =
@@ -976,41 +977,37 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setMobileShowDetail(false);
   }, []);
 
-  const handleClearSelectedSession = useCallback(() => {
-    setSelectedSessionId(null);
-    setMobileShowDetail(false);
-  }, []);
-
-  const previousSelectedSessionIdRef = useRef<string | null>(selectedSessionId);
-  const previousMobileShowDetailRef = useRef(mobileShowDetail);
+  const previousMobileShowDetailRef = useRef<boolean>(false);
 
   useEffect(() => {
-    const previousSelectedSessionId = previousSelectedSessionIdRef.current;
-    previousSelectedSessionIdRef.current = selectedSessionId;
-
-    if (viewportMode !== "mobile" || !selectedSessionId || previousSelectedSessionId !== null) {
-      return;
+    if (!isOpen) {
+      previousMobileShowDetailRef.current = false;
     }
-
-    pushNav({
-      type: "view",
-      revert: handleClearSelectedSession,
-    });
-  }, [handleClearSelectedSession, pushNav, selectedSessionId, viewportMode]);
+  }, [isOpen]);
 
   useEffect(() => {
     const previousMobileShowDetail = previousMobileShowDetailRef.current;
-    previousMobileShowDetailRef.current = mobileShowDetail;
 
-    if (viewportMode !== "mobile" || !mobileShowDetail || previousMobileShowDetail || selectedSessionId !== null) {
+    if (!isMobile) {
+      // Keep the previous mobile detail state untouched on desktop so viewport flips don't trigger stale pushes.
       return;
     }
 
-    pushNav({
-      type: "view",
-      revert: handleBackToList,
-    });
-  }, [handleBackToList, mobileShowDetail, pushNav, selectedSessionId, viewportMode]);
+    if (!mobileShowDetail) {
+      previousMobileShowDetailRef.current = false;
+      return;
+    }
+
+    // FN-4187: Push on mobileShowDetail transitions (not selectedSessionId) so New Session also gets a back-stack entry.
+    if (!previousMobileShowDetail) {
+      pushNav({
+        type: "view",
+        revert: handleBackToList,
+      });
+    }
+
+    previousMobileShowDetailRef.current = true;
+  }, [handleBackToList, isMobile, mobileShowDetail, pushNav]);
 
   const syncPlanningDraft = useCallback(
     async (sessionId: string, planText: string) => {

@@ -240,9 +240,9 @@ describe("TaskCard mobile", () => {
     for (const selector of selectors) {
       let found = false;
       for (const match of mobileSection.matchAll(pattern)) {
-        const blockSelector = match[1].trim();
+        const blockSelector = match[1];
         const block = match[2];
-        if (blockSelector !== selector) continue;
+        if (!blockSelector.includes(selector)) continue;
         found = true;
         expect(block).toContain("opacity: 1;");
         expect(block).not.toContain("min-height:");
@@ -265,9 +265,9 @@ describe("TaskCard mobile", () => {
     for (const selector of selectors) {
       let found = false;
       for (const match of mobileSection.matchAll(pattern)) {
-        const blockSelector = match[1].trim();
+        const blockSelector = match[1];
         const block = match[2];
-        if (blockSelector !== selector) continue;
+        if (!blockSelector.includes(selector)) continue;
         found = true;
         expect(block).not.toContain("min-height:");
       }
@@ -317,6 +317,33 @@ describe("TaskCard mobile", () => {
     const css = loadAllAppCss();
     expectRuleToContain(css, ".card-time-indicator", "margin-left: auto;");
     expectRuleToContain(css, ".card-header-actions", "margin-left: auto;");
+  });
+
+  it("FN-4365: keeps .card-header-actions on the same row as the title in the mobile media block", () => {
+    const css = loadAllAppCss();
+    const mobileSection = getMainMobileSection(css);
+    const pattern = /([^{}]+)\{([\s\S]*?)\}/g;
+
+    let foundHeaderActions = false;
+
+    for (const match of mobileSection.matchAll(pattern)) {
+      const selector = match[1];
+      const block = match[2];
+
+      if (selector.includes(".card-header-actions")) {
+        foundHeaderActions = true;
+        expect(block).not.toContain("width: 100%");
+        expect(block).not.toContain("margin-left: 0");
+        expect(block).not.toContain("flex-wrap");
+        expect(block).not.toContain("justify-content: flex-end");
+      }
+
+      if (selector.trim() === ".card-header") {
+        expect(block).not.toContain("flex-wrap: wrap");
+      }
+    }
+
+    expect(foundHeaderActions).toBe(true);
   });
 
   it("truncates TaskCard files-changed text instead of wrapping", () => {

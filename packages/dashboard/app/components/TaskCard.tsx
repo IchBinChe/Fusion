@@ -1748,7 +1748,7 @@ function TaskCardComponent({
       {showTrackingIndicator && githubTrackedIssue && (
         <div className="card-bottom-right-row">
           <a
-            className="card-source-provenance card-github-tracking-link"
+            className="card-github-tracking-chip card-github-tracking-link"
             href={githubTrackedIssue.url}
             target="_blank"
             rel="noopener noreferrer"

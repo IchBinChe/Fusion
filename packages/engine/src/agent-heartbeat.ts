@@ -161,10 +161,12 @@ interface TrackedAgent {
 }
 
 /**
- * Grace multiplier applied to each direct report's configured heartbeat
- * interval before flagging it stale in reports-health summaries.
+ * A direct report is flagged stale only when its last heartbeat is older than
+ * 1.5 × its configured `heartbeatIntervalMs`. This matches the human CEO's
+ * manual rule (see FN-4295) and avoids false positives for long-cadence
+ * reports (e.g. 180-minute PM/CTO agents).
  */
-const HEARTBEAT_GRACE_MULTIPLIER = 4;
+const REPORTS_STALE_INTERVAL_MULTIPLIER = 1.5;
 
 /**
  * Minimum staleness threshold floor for very short heartbeat intervals.
@@ -2648,7 +2650,7 @@ export class HeartbeatMonitor {
     const rows = reports.map((report) => {
       const { pollIntervalMs, heartbeatTimeoutMs } = this.resolveAgentConfig(report.id);
       const staleThresholdMs = Math.max(
-        pollIntervalMs * HEARTBEAT_GRACE_MULTIPLIER,
+        pollIntervalMs * REPORTS_STALE_INTERVAL_MULTIPLIER,
         MIN_HEARTBEAT_STALENESS_MS,
       );
       const lastHeartbeatTs = report.lastHeartbeatAt ? Date.parse(report.lastHeartbeatAt) : NaN;

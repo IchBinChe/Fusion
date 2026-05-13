@@ -927,6 +927,12 @@ The client treats mapping persistence as part of onboarding success. If mapping 
 | POST | `/api/update-check/refresh` | Clear cached update data and force a fresh npm update check. |
 | GET | `/api/updates/check` | Perform an on-demand npm registry check for the latest `@runfusion/fusion` version (no cache). |
 
+### Agent stats endpoint
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/agents/stats` | Aggregate agent/task stats used by operator summaries and capacity-risk signaling. Returns `activeCount`, `assignedTaskCount`, `completedRuns`, `failedRuns`, `successRate`, plus `idleNonEphemeralCount` (idle agents excluding ephemeral/runtime workers via `isEphemeralAgent`) and `todoTaskCount` (tasks currently in Todo). |
+
 ### Docker provisioning endpoints
 
 Initial container provisioning and lifecycle routes are registered by `register-docker-provisioning-routes.ts`.

@@ -328,24 +328,34 @@ describe("SelfHealingManager", () => {
       expect(store.updateTask).toHaveBeenCalledWith("FN-001", { stuckKillCount: 3 });
     });
 
-    it("moves task to in-review with deterministic STUCK_LOOP_EXHAUSTED contract when budget is exhausted", async () => {
-      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+    it("walks stuck kills from 0 to max+1 and terminalizes deterministically", async () => {
+      let killCount = 0;
+      (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async () => ({
         id: "FN-001",
-        stuckKillCount: 6,
-      } as unknown as Task);
+        stuckKillCount: killCount,
+      } as unknown as Task));
+      (store.updateTask as ReturnType<typeof vi.fn>).mockImplementation(async (_taskId: string, patch: Partial<Task>) => {
+        if (typeof patch.stuckKillCount === "number") killCount = patch.stuckKillCount;
+      });
 
       manager.start();
 
-      const result = await manager.checkStuckBudget("FN-001", "loop");
+      for (let i = 1; i <= 6; i++) {
+        const result = await manager.checkStuckBudget("FN-001", "inactivity");
+        expect(result).toBe(true);
+        expect(killCount).toBe(i);
+      }
 
-      expect(result).toBe(false);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+      const terminal = await manager.checkStuckBudget("FN-001", "loop");
+      expect(terminal).toBe(false);
+      expect(killCount).toBe(7);
+      expect(store.updateTask).toHaveBeenLastCalledWith("FN-001", {
         stuckKillCount: 7,
         status: "failed",
         error: "STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6) after last reason=loop.",
       });
-      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
-      expect(store.logEntry).toHaveBeenCalledWith(
+      expect(store.moveTask).toHaveBeenLastCalledWith("FN-001", "in-review");
+      expect(store.logEntry).toHaveBeenLastCalledWith(
         "FN-001",
         "STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6), last reason=loop. No further automatic retries will run. Manually retry, pause, or move the task to triage to resume work.",
       );
@@ -376,6 +386,32 @@ describe("SelfHealingManager", () => {
       const result = await manager.checkStuckBudget("FN-001");
 
       expect(result).toBe(true);
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ error: expect.stringContaining("STUCK_LOOP_EXHAUSTED:") }),
+      );
+    });
+
+    it("keeps task failed and logs warning when moveTask(in-review) fails at exhaustion", async () => {
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "FN-001",
+        stuckKillCount: 6,
+      } as unknown as Task);
+      (store.moveTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("concurrent move"));
+
+      manager.start();
+
+      const result = await manager.checkStuckBudget("FN-001", "loop");
+
+      expect(result).toBe(false);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+        stuckKillCount: 7,
+        status: "failed",
+        error: "STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6) after last reason=loop.",
+      });
+      expect(getSelfHealingLogger().warn).toHaveBeenCalledWith(
+        expect.stringContaining("moveTask(\"in-review\") failed (concurrent move)"),
+      );
     });
 
     it("handles undefined stuckKillCount as 0", async () => {

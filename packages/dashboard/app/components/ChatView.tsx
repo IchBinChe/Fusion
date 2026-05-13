@@ -960,6 +960,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const isUserScrollingRef = useRef(false);
   const lastAnchoredThreadStateRef = useRef<{ threadId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const previousChatScopeRef = useRef<"direct" | "rooms" | null>(null);
+  const visibilityReanchorTimeoutRef = useRef<number | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1334,6 +1335,23 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       anchorToBottom(messagesContainer);
       isUserScrollingRef.current = false;
       setIsUserScrolling(false);
+
+      if (visibilityReanchorTimeoutRef.current !== null) {
+        window.clearTimeout(visibilityReanchorTimeoutRef.current);
+        visibilityReanchorTimeoutRef.current = null;
+      }
+
+      visibilityReanchorTimeoutRef.current = window.setTimeout(() => {
+        visibilityReanchorTimeoutRef.current = null;
+        if (isUserScrollingRef.current) {
+          return;
+        }
+        const connectedContainer = messagesContainerRef.current;
+        if (!connectedContainer) {
+          return;
+        }
+        anchorToBottom(connectedContainer);
+      }, 250);
     };
 
     const onVisibilityChange = () => {
@@ -1349,6 +1367,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pageshow", reAnchorToLatest);
+      if (visibilityReanchorTimeoutRef.current !== null) {
+        window.clearTimeout(visibilityReanchorTimeoutRef.current);
+        visibilityReanchorTimeoutRef.current = null;
+      }
     };
   }, [isMobile, activeSession, roomThreadActive, anchorToBottom]);
 

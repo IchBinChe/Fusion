@@ -148,6 +148,23 @@ fn task unarchive FN-001
 
 **Global pause vs task pause:** `settings.globalPause` gates new scheduler dispatches and is checked by the `fn_task_done` handoff logic. Task-level `task.paused` is a per-task gate that blocks execution start. They are independent — a task can be paused individually even when `globalPause` is `false`, and clearing `task.paused` does not affect `globalPause`.
 
+### Stranded-worktree recovery
+
+When Fusion detects uncommitted task-attributable changes in a task worktree during a requeue/release path, it will **not** silently move the task back to `todo`/`triage`. Instead, it parks the task in `status: "failed"` so operators can recover the stranded workspace state.
+
+Diagnostics are written to both places:
+
+- `task.error` (task detail summary)
+- task activity log entry (timeline)
+
+Each diagnostic includes task ID, absolute worktree path, dirty-file count, and sample dirty paths.
+
+Recovery flow:
+
+1. Inspect the worktree: `cd <worktreePath> && git status`
+2. Rescue changes as needed: `git diff` and/or `git stash push -u`
+3. Clear/retry the failed task from the dashboard/CLI so it can re-enter scheduling after the workspace is safe.
+
 ### Branch metadata semantics
 
 Task cards on the board only surface branch metadata when it is non-default/user-meaningful: they hide the conventional auto-generated working branch (`fusion/<task-id>` and suffixed variants) and hide the default merge target (`main`), while still showing custom working branches and non-default merge targets.

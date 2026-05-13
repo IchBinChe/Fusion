@@ -226,19 +226,25 @@ describe("TaskCard mobile", () => {
     expectRuleToContain(mobileSection, ".card-archive-btn", "opacity: 1;");
   });
 
-  it("does not force .card-archive-btn min-height in the mobile media block", () => {
+  it("uses tokenized 36px min-height for archive/unarchive/send-back buttons in the mobile media block", () => {
     const css = loadAllAppCss();
     const mobileSection = getMainMobileSection(css);
 
-    // Archive buttons use natural height from padding — no forced min-height
-    const pattern = /([^{}]+)\{([\s\S]*?)\}/g;
-    for (const match of mobileSection.matchAll(pattern)) {
-      const selector = match[1].trim();
-      const block = match[2];
-      if (!selector.includes(".card-archive-btn") && !selector.includes(".card-unarchive-btn")) continue;
-      // Archive/unarchive buttons should not have min-height in mobile block
-      expect(block).not.toContain("min-height");
-    }
+    expectRuleToContain(
+      mobileSection,
+      ".card-archive-btn",
+      "min-height: calc(var(--space-xl) + var(--space-md));",
+    );
+    expectRuleToContain(
+      mobileSection,
+      ".card-unarchive-btn",
+      "min-height: calc(var(--space-xl) + var(--space-md));",
+    );
+    expectRuleToContain(
+      mobileSection,
+      ".card-send-back-btn",
+      "min-height: calc(var(--space-xl) + var(--space-md));",
+    );
   });
 
   it("does not force .card-steps-toggle min-height in the mobile media block", () => {
@@ -276,8 +282,11 @@ describe("TaskCard mobile", () => {
 
   it("keeps TaskCard timer chip in-flow and right-aligned in footer metadata row", () => {
     const css = loadAllAppCss();
+    const mobileSection = getMainMobileSection(css);
     expectRuleToContain(css, ".card-time-indicator", "margin-left: auto;");
     expectRuleToContain(css, ".card-header-actions", "margin-left: auto;");
+    expectRuleToContain(mobileSection, ".card-header-actions", "width: 100%;");
+    expectRuleToContain(mobileSection, ".card-header-actions", "margin-left: 0;");
   });
 
   it("truncates TaskCard files-changed text instead of wrapping", () => {

@@ -1059,7 +1059,7 @@ Repair outcomes:
 
 Stale threshold:
 - Repair staleness defaults to **`2 × heartbeatIntervalMs`**
-- This is intentionally separate from dashboard display staleness (`4×` grace multiplier)
+- This is intentionally separate from dashboard display staleness (`1.5× heartbeatIntervalMs` with a 5-minute floor)
 
 Dashboard surfacing path:
 - The stale-repair metadata write uses the existing `AgentStore.updateAgent(...)` path

@@ -1133,6 +1133,18 @@
 
 /* === Mobile Responsive Overrides === */
 @media (max-width: 768px) {
+  .card-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .card-header-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
   /* Card edit button: always visible on mobile (no hover) */
   .card-edit-btn {
     opacity: 1;
@@ -1174,12 +1186,14 @@
   .card-archive-btn,
   .card-unarchive-btn {
     opacity: 1;
-    padding: calc(var(--space-xs) - (var(--space-xs) / 4)) var(--space-sm);
+    min-height: calc(var(--space-xl) + var(--space-md));
+    padding: var(--space-xs) var(--space-md);
   }
 
   .card-send-back-btn {
     opacity: 1;
-    padding: calc(var(--space-xs) - (var(--space-xs) / 4)) var(--space-sm);
+    min-height: calc(var(--space-xl) + var(--space-md));
+    padding: var(--space-xs) var(--space-md);
   }
 
   /* Card: compact progress bar on narrow cards */

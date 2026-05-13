@@ -2117,7 +2117,29 @@ export function TaskDetailContent({
                           </button>
                         </>
                       )}
-                      {provenanceDisplay.contextInfo ? ` (${provenanceDisplay.contextInfo})` : ""}
+                      {provenanceDisplay.contextInfo ? (
+                        <>
+                          {" ("}
+                          {provenanceDisplay.contextHref ? (
+                            <a
+                              className="detail-provenance-link detail-provenance-context"
+                              href={provenanceDisplay.contextHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={provenanceDisplay.contextInfoFull}
+                            >
+                              {provenanceDisplay.contextInfo}
+                            </a>
+                          ) : (
+                            <span className="detail-provenance-context" title={provenanceDisplay.contextInfoFull}>
+                              {provenanceDisplay.contextInfo}
+                            </span>
+                          )}
+                          {")"}
+                        </>
+                      ) : (
+                        ""
+                      )}
                     </span>
                   </div>
                 )}

@@ -1,5 +1,92 @@
 # @runfusion/fusion
 
+## 0.28.0
+
+### Minor Changes
+
+- af39d47: Surface in-flight mission interview drafts in the dashboard Missions view, `fn mission list`, and the `fn_mission_list` pi tool. Adds Resume and Discard actions for drafts, plus `GET /api/missions/interview/drafts` and `POST /api/missions/interview/drafts/:sessionId/discard` endpoints.
+- db919df: Close the linked GitHub tracking issue (with state_reason "not_planned") when a tracked Fusion task is deleted.
+- be5e1fb: Route multi-substantive direct-merge task branches through a history-preserving merge path by default, with new project and per-task controls for forcing squash vs rebase-style commit preservation.
+- 044b1cb: Add a new `message:room` notification event for agent assistant replies posted in chat rooms. The event is enabled by default for ntfy notifications and can be tested or toggled from Settings → Notifications alongside the existing direct-message events.
+- 7e057a6: Export `DiffVolumeRegressionError`, `MergeAbortedError`, and `SquashAuditError` from `@fusion/engine` so consumers can use `instanceof` checks without deep-importing.
+
+### Patch Changes
+
+- ad45a23: Merger now refuses to land a squash whose staged diff has zero overlap with the
+  task's declared `## File Scope`. Tasks can opt out by setting
+  `task.scopeOverride = true` (with optional `task.scopeOverrideReason`).
+  Violating squashes leave the task in `in-review` with a structured agent-log
+  entry instead of silently shipping out-of-scope changes.
+- 37063a0: fn_task_done now appends to the existing task summary when a workflow step
+  forces a rerun, instead of overwriting the original completion summary.
+- 239f7bf: Chat composer text is now persisted per conversation and recovered across page refreshes.
+- a9e2b07: Heartbeat scheduling now auto-reaps stale active heartbeat runs so durable agents recover regular timer ticks without requiring a manual stop/start.
+- 4a60568: Restore Quick Chat so reopening the dashboard resumes the most recently updated session instead of always defaulting to the first agent or default model.
+- 7a982a2: Fix ntfy notifications so unicode mailbox titles deliver correctly and oversized titles/messages are truncated before publish.
+- 917ffa5: Dependency graph: support trackpad/two-finger scroll and mouse wheel to pan when zoomed in. Hold Ctrl/Cmd (or use a trackpad pinch) to zoom.
+- 2822781: Task detail Review tab now renders review item bodies as markdown by default, with a Markdown/Plain toggle that persists per user.
+- 84ccc47: GitHub tracking 'done' comments now include the merge commit SHA, subject, branch, PR link, file-change stats, and merge timestamp when available.
+- f7b12b5: Dashboard now warns before starting OAuth login for providers whose redirect can't reach the dashboard host (Anthropic / OpenAI Codex), reminding users to copy the browser address bar URL before the redirect tab navigates away.
+- 056b1a9: Chat room composer now clears immediately when a message is sent and restores the typed text only if the send fails, matching standard chat UX.
+- 8653a36: Fix chat room send button on mobile: first touch now sends the message instead of dismissing the keyboard.
+- 4a6b561: Auto-open newly created chat rooms in the dashboard so successful room creation immediately reveals the new thread, including collapsing the mobile sidebar.
+- bbd92a1: File paths in dashboard chat messages, logs, and task detail markdown are now clickable and open in the integrated file browser.
+- 75fe39d: Fix `fn_task_done` failing to clear `paused`/`pausedByAgentId` when called on a paused task (FN-3964). Before this fix, a task with `task.paused=true` in `in-progress` or `todo` would land in a contradictory `todo + paused` state after completion, blocking future scheduler picks. Now the executor always clears task-level pause flags on explicit agent completion.
+- acc2db9: Fix GitHub tracking issue creation under gh-cli auth mode (`gh issue create` does not support `--json`); surface tracking creation failures in the task activity log.
+- 2881d86: Fix dashboard crash `undefined is not an object (evaluating 'taskIdIntegrity.status')` when the health response lacks `taskIdIntegrity` (e.g. older dashboard server). The banner gate in `App.tsx` now optional-chains `taskIdIntegrity` so the page renders cleanly when the field is missing.
+- 6124535: Fix `ENOENT: ... rename 'task.json.tmp' -> 'task.json'` failures when two TaskStore instances (e.g. engine + dashboard server) write to the same task concurrently. The shared `task.json.tmp` filename caused one writer's `rename` to consume the tmp file and the other's to ENOENT. Each write now uses a unique tmp filename (`task.json.<pid>.<uuid>.tmp`) and cleans up its own tmp on rename failure.
+- a79dbfc: Fix mobile Safari layout glitch where switching to the Kanban board view could render the dashboard compressed in a corner.
+- 75fe39d: Make executor branch-name collisions fail loudly by default, add a legacy opt-in escape hatch, and introduce CLI branch recovery commands for reclaiming or discarding stranded task branches.
+- 429bdc2: Merger now detects when the Attempt 3 `-X ours` fallback under
+  `mergeConflictStrategy="smart-prefer-main"` would resolve files that main has
+  recently modified, and by default prefers the branch side on those overlapping
+  files to avoid silently discarding branch work (FN-3936). Configurable via the
+  new `mergeStrategyOverlapBehavior` setting (`flip-to-prefer-branch` default,
+  `warn-only`, or `ignore`).
+- 8b037e4: Add a pre-commit diff-volume gate for auto-resolved squash merges. Fusion now compares each file's staged squash delta against the branch's net delta and blocks the merge in `in-review` when a non-allowlisted file silently loses too much branch content.
+
+  Add three new project settings for tuning the gate: `mergeDiffVolumeMinLines` (default `20`), `mergeDiffVolumeThreshold` (default `0.2`), and `mergeDiffVolumeAllowlist` (default `[]`).
+
+- a136dd3: Stale `blockedBy` markers no longer prevent `fn_task_done`, and self-healing now repairs stale blockers on active `in-progress` and `in-review` tasks as well as `todo` rows.
+- 162f4da: Documented the `fn task branch-recovery` CLI flow and the `executorAllowSiblingBranchRename` project setting.
+- 759f8f5: Mobile chat composer now renders the agent mention popup above the input.
+- 24b839b: Keep chat room threads anchored to the latest message when returning to a room, switching rooms, or resuming the mobile view.
+- 8737779: Show the chat sidebar search input on mobile instead of leaving an orphan search icon.
+- 203cb16: Simplify the task-card fan-out badge label by dropping the trailing "(N todo)" parenthetical from the visible text while keeping the hover tooltip context intact. The badge count now inherits the same fan-out meta text color as the surrounding label.
+- bc5fdd2: Fix the bundled dependency-graph plugin so it no longer lands in a phantom error state in Settings when the Graph view still works, and show the underlying plugin error message in Plugin Manager whenever a plugin is in the error state.
+- b387df8: Fix zero-step in-review retry classification to route execution-side failures correctly, closing the remaining gap from PR #59 and crediting HarryCordewener's original workstream.
+- 7e089e1: Recover agent/task reassignment sync from upstream PR #58 (author: HarryCordewener). TaskStore.updateTask now keeps agents.taskId aligned with task.assignedAgentId, clears stale checkout leases held by the outgoing agent, and protects against races where the outgoing agent has already moved on.
+- 0f5a5b5: Lazy-load `dockerode` for Docker support, with actionable missing-package errors instead of import-time failures. Based on HarryCordewener's work in PR #58 and PR #59.
+- 75fe39d: Fix the dashboard Research view layout so the sidebar, reader pane, actions, findings, and stats render cleanly without overlap on desktop and mobile.
+- 2d250e6: Keep web search always enabled in the Research view and remove the `none` web-search provider option plus the per-project Web Search source toggle from settings.
+- 062b5a9: Mobile swipe-back from chat conversation, mission detail, and planning session detail now returns to the corresponding list instead of escaping the view.
+- f8066c4: Default the Settings modal to the General section instead of Authentication when no initial section is specified.
+- 0a03ad8: Board task cards now show a GitHub icon when linked to a tracked GitHub issue.
+- d899443: Fix: clear task-level pause on `fn_task_done` so explicit agent completions cannot strand tasks in a `paused` state. Hard-pause gating for deferred completion handoff now keys off `globalPause` only.
+- c55494e: Add a one-click inline "Enable GitHub tracking" button to the task detail GitHub tracking header when tracking is disabled.
+- 08b4af3: GitHub tracking now derives an issue title and transition-comment title from the task description (and, when configured, the AI title summarizer) instead of emitting "Untitled task" when the Fusion task has no title.
+- dfb613e: Fix mobile layout of the GitHub tracking enable button on the task detail modal so it stays before the disclosure toggle and no longer overflows narrow screens.
+- fd2744a: Shorten the GitHub tracking enable button text to "Enable" and reduce its size in the task detail header.
+- e75274e: Fix GitHub tracking state appearing stale/inaccurate on tasks after engine restart.
+- 1802fde: Make the GitHub tracking "Enable" button render as a compact header action on desktop while preserving the mobile touch target.
+- cec9bcb: Align the Research view provider checklist with the always-on web search behavior from FN-4135 by keeping **Web Search** visible as a locked checked option with an **Always on** affordance.
+- 12a08cb: Surface GitHub tracking project options (default on/off for new tasks, default repo) in the project General settings section.
+- fbd441e: Surface pending chat-room messages during agent heartbeats and let permanent agents reply with a new `fn_post_room_message` tool.
+- 8d48359: Chat rooms now intelligently compact older messages into a summary header
+  when transcripts exceed the verbatim window, preserving long-running
+  context for agent replies instead of silently dropping earlier turns.
+- 8775267: Fix GitHub tracking disclosure icon alignment in task detail — chevron now stays on the first row when summary wraps.
+- f397e71: GitHub tracking now waits until a task has a usable title before creating a tracking issue instead of publishing `[FN-XXX] Untitled task` placeholder issues.
+- d084ff4: Fix mobile swipe-back from the Planning modal's "New Session" path: opening a new planning session on mobile now registers a back-stack entry so swipe-back returns to the planning sessions list instead of closing the modal.
+- bbfd6a9: Raise the dashboard chat composer autosize cap so longer drafts stay readable before scrolling.
+- a347871: Detect task-ID allocator integrity anomalies at startup and on demand, log them as structured errors, surface them through /api/health, and render an operator-visible dashboard banner with the affected IDs and recommended next action.
+- 72453bb: Permanently-failed `in-review` tasks no longer block overlapping superseding tasks from being dispatched by the scheduler's file-scope overlap guard.
+- d301f0b: Keep the GitHub tracking header actions on the same row as the label in the task detail modal.
+- 4a6b561: Tighten the Task Detail modal GitHub tracking header into a compact single-row summary with the inline Enable action and disclosure toggle staying aligned across desktop and mobile layouts.
+- 55eeb81: Dependency graph: double-tap a task node on mobile to open task detail.
+- ac59d5c: Override task-scoped heartbeat procedure files during no-task heartbeats so ambient runs only receive tool-safe prompt guidance.
+- 1d87d77: Anchor the GitHub linked/imported indicator icon to the bottom-right corner of dashboard task cards while preserving existing link behavior and accessibility metadata.
+
 ## 0.27.1
 
 ### Patch Changes

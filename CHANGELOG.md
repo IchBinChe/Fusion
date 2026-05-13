@@ -2,6 +2,60 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.28.1
+
+### @fusion/core
+
+#### Patch Changes
+
+- 681770f: Remove false-positive `committed_reservation_for_existing_id` task-ID-integrity check. The rule flagged every committed reservation that pointed at an existing task, but that's the happy-path steady state — a reservation transitions to `committed` immediately after the task row is inserted, so it's always expected to map to an existing ID. The banner was firing on every healthy node with task history.
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- 681770f: Remove false-positive `committed_reservation_for_existing_id` task-ID-integrity check. The rule flagged every committed reservation that pointed at an existing task, but that's the happy-path steady state — a reservation transitions to `committed` immediately after the task row is inserted, so it's always expected to map to an existing ID. The banner was firing on every healthy node with task history.
+- Updated dependencies [681770f]
+  - @fusion/core@0.28.1
+  - @fusion/engine@0.28.1
+  - @fusion-plugin-examples/cli-printing-press@0.1.5
+  - @fusion-plugin-examples/dependency-graph@0.1.19
+  - @fusion-plugin-examples/roadmap@0.1.7
+  - @fusion-plugin-examples/cursor-runtime@0.1.7
+  - @fusion-plugin-examples/droid-runtime@0.1.14
+  - @fusion-plugin-examples/hermes-runtime@0.2.38
+  - @fusion-plugin-examples/openclaw-runtime@0.2.38
+  - @fusion-plugin-examples/paperclip-runtime@0.2.38
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- Updated dependencies [681770f]
+  - @fusion/core@0.28.1
+  - @fusion/dashboard@0.28.1
+
+### @fusion/engine
+
+#### Patch Changes
+
+- Updated dependencies [681770f]
+  - @fusion/core@0.28.1
+  - @fusion/pi-claude-cli@0.28.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- Updated dependencies [681770f]
+  - @fusion/core@0.28.1
+
+### runfusion.ai
+
+#### Patch Changes
+
+- @runfusion/fusion@0.28.1
+
 ## 0.28.0
 
 ### @fusion/dashboard
@@ -4691,6 +4745,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.14
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.14
 
 ## 0.11.13
 

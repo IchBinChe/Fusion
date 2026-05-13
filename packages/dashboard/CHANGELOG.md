@@ -1,5 +1,22 @@
 # @fusion/dashboard
 
+## 0.28.1
+
+### Patch Changes
+
+- 681770f: Remove false-positive `committed_reservation_for_existing_id` task-ID-integrity check. The rule flagged every committed reservation that pointed at an existing task, but that's the happy-path steady state — a reservation transitions to `committed` immediately after the task row is inserted, so it's always expected to map to an existing ID. The banner was firing on every healthy node with task history.
+- Updated dependencies [681770f]
+  - @fusion/core@0.28.1
+  - @fusion/engine@0.28.1
+  - @fusion-plugin-examples/cli-printing-press@0.1.5
+  - @fusion-plugin-examples/dependency-graph@0.1.19
+  - @fusion-plugin-examples/roadmap@0.1.7
+  - @fusion-plugin-examples/cursor-runtime@0.1.7
+  - @fusion-plugin-examples/droid-runtime@0.1.14
+  - @fusion-plugin-examples/hermes-runtime@0.2.38
+  - @fusion-plugin-examples/openclaw-runtime@0.2.38
+  - @fusion-plugin-examples/paperclip-runtime@0.2.38
+
 ## 0.28.0
 
 ### Patch Changes

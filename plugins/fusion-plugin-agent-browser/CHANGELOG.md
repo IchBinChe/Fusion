@@ -1,5 +1,11 @@
 # @fusion-plugin-examples/agent-browser
 
+## 0.1.8
+
+### Patch Changes
+
+- @fusion/plugin-sdk@0.28.1
+
 ## 0.1.7
 
 ### Patch Changes

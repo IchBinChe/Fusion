@@ -1503,15 +1503,6 @@ function AppInner() {
     );
   };
 
-  if (!initialLoadComplete) {
-    return (
-      <>
-        <DashboardLoader stage={loadingStage} />
-        <ToastContainer toasts={toasts} onRemove={removeToast} />
-      </>
-    );
-  }
-
   const showOnboardingResumeCard = !modalManager.modelOnboardingOpen && isOnboardingResumable();
   const showPostOnboardingRecommendations =
     !modalManager.modelOnboardingOpen &&
@@ -1522,7 +1513,14 @@ function AppInner() {
   return (
     <NavigationHistoryProvider value={{ pushNav, replaceCurrent }}>
       <FileBrowserProvider openFile={openFileInBrowser}>
-      <Header
+        {!initialLoadComplete ? (
+          <>
+            <DashboardLoader stage={loadingStage} />
+            <ToastContainer toasts={toasts} onRemove={removeToast} />
+          </>
+        ) : (
+          <>
+            <Header
         shellHost={shellHost.host}
         onOpenSettings={openSettingsWithNav}
         onOpenGitHubImport={openGitHubImportWithNav}
@@ -1783,22 +1781,24 @@ function AppInner() {
         onReopenOnboarding={reopenOnboardingWithNav}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
-      {shellApi && (
-        <>
-          <NativeShellOnboardingModal
-            open={requiresShellOnboarding}
-            shellApi={shellApi}
-            shellState={shellState}
-            onComplete={() => setShellOnboardingComplete(true)}
-          />
-          <NativeShellConnectionManager
-            open={shellConnectionManagerOpen}
-            shellApi={shellApi}
-            shellState={shellState}
-            onClose={() => setShellConnectionManagerOpen(false)}
-          />
-        </>
-      )}
+            {shellApi && (
+              <>
+                <NativeShellOnboardingModal
+                  open={requiresShellOnboarding}
+                  shellApi={shellApi}
+                  shellState={shellState}
+                  onComplete={() => setShellOnboardingComplete(true)}
+                />
+                <NativeShellConnectionManager
+                  open={shellConnectionManagerOpen}
+                  shellApi={shellApi}
+                  shellState={shellState}
+                  onClose={() => setShellConnectionManagerOpen(false)}
+                />
+              </>
+            )}
+          </>
+        )}
       </FileBrowserProvider>
     </NavigationHistoryProvider>
   );

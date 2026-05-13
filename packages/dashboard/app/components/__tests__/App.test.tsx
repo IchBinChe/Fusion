@@ -3,8 +3,15 @@ import { render, screen, fireEvent, waitFor, act, within } from "@testing-librar
 import type { NodeConfig, Settings } from "@fusion/core";
 import type { ProjectInfo } from "../../api";
 import { scopedKey } from "../../utils/projectStorage";
+import { useFileBrowser } from "../../context/FileBrowserContext";
 
 // No mock needed - tests use localStorage directly
+
+function FileBrowserProbe({ testId }: { testId: string }) {
+  const ctx = useFileBrowser();
+  const status = ctx && typeof ctx.openFile === "function" ? "ok" : "missing";
+  return <div data-testid={testId}>{status}</div>;
+}
 
 const defaultSettings: Settings = {
   maxConcurrent: 2,
@@ -346,6 +353,14 @@ vi.mock("../../components/TodoView", () => ({
   ),
 }));
 
+vi.mock("../../components/ChatView", () => ({
+  ChatView: () => <FileBrowserProbe testId="fb-probe-chat" />,
+}));
+
+vi.mock("../../components/DashboardLoader", () => ({
+  DashboardLoader: () => <FileBrowserProbe testId="fb-probe-loader" />,
+}));
+
 vi.mock("../../components/QuickChatFAB", () => ({
   QuickChatFAB: () => null,
 }));
@@ -585,6 +600,7 @@ beforeEach(() => {
   mockRefreshProjects.mockReset();
   mockRefreshProjects.mockImplementation(async () => {});
   mockCurrentProjectState.currentProject = { id: DEFAULT_PROJECT_ID, name: "Test Project", path: "/test", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" };
+  mockCurrentProjectState.loading = false;
   mockCurrentProjectState.setCurrentProject.mockClear();
   mockCurrentProjectState.clearCurrentProject.mockClear();
   // Reset node context mocks
@@ -644,6 +660,29 @@ beforeEach(() => {
   });
   mockUseViewportMode.mockReset();
   mockUseViewportMode.mockReturnValue("desktop");
+});
+
+describe("FN-4250 FileBrowserProvider coverage", () => {
+  it("FN-4250: ChatView branch is inside FileBrowserProvider", async () => {
+    localStorage.setItem(taskViewStorageKey(), "chat");
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("fb-probe-chat")).toHaveTextContent("ok");
+    });
+  });
+
+  it("FN-4250: loader branch is inside FileBrowserProvider", async () => {
+    mockProjectsState.loading = true;
+    mockCurrentProjectState.loading = true;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("fb-probe-loader")).toHaveTextContent("ok");
+    });
+  });
 });
 
 describe("App backend-unreachable first-run flow", () => {

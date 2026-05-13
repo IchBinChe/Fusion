@@ -813,8 +813,8 @@ describe("useQuickChat", () => {
     });
 
     await waitFor(() => {
-      expect(mockFetchChatMessages).toHaveBeenCalledTimes(2);
-      expect(mockFetchChatMessages).toHaveBeenLastCalledWith("session-existing", { limit: 50 }, "proj-123");
+      expect(mockFetchChatMessages.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(mockFetchChatMessages).toHaveBeenCalledWith("session-existing", { limit: 50 }, "proj-123");
     });
   });
 
@@ -923,12 +923,13 @@ describe("useQuickChat", () => {
     });
   });
 
-  it("shows Load failed toast when tab remains visible", async () => {
+  it("suppresses Load failed when tab remains visible", async () => {
     const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
     const addToast = vi.fn();
     let onErrorHandler: ((data: string) => void) | undefined;
 
     mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatSession.mockResolvedValueOnce({ session: existingSession });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
 
     mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
@@ -943,14 +944,15 @@ describe("useQuickChat", () => {
       await result.current.switchSession("agent-001");
     });
 
-    await expect(act(async () => {
+    await act(async () => {
       const sendPromise = result.current.sendMessage("Hello");
       onErrorHandler?.("Load failed");
       await sendPromise;
-    })).rejects.toThrow("Load failed");
+    });
 
     await waitFor(() => {
-      expect(addToast).toHaveBeenCalledWith("Load failed", "error");
+      expect(addToast).not.toHaveBeenCalledWith("Load failed", "error");
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-existing", "proj-123");
     });
   });
 
@@ -984,6 +986,81 @@ describe("useQuickChat", () => {
     await waitFor(() => {
       expect(addToast).not.toHaveBeenCalledWith("Failed to fetch", "error");
     });
+  });
+
+  it("reattaches with replayFromEventId when tab becomes visible and server is generating", async () => {
+    const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
+    const generatingSession = {
+      ...existingSession,
+      isGenerating: true,
+      inFlightGeneration: {
+        status: "generating" as const,
+        streamingText: "partial",
+        streamingThinking: "thinking",
+        toolCalls: [],
+        replayFromEventId: 17,
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+    };
+    const addToast = vi.fn();
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatSession.mockResolvedValueOnce({ session: generatingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    act(() => {
+      setDocumentVisibilityState("hidden");
+      setDocumentVisibilityState("visible");
+    });
+
+    await waitFor(() => {
+      expect(mockAttachChatStream).toHaveBeenCalledWith(
+        "session-existing",
+        expect.any(Object),
+        "proj-123",
+        { lastEventId: 17 },
+      );
+      expect(addToast).not.toHaveBeenCalled();
+    });
+  });
+
+  it("visibility reconnect failure is silent and only runs without a live stream", async () => {
+    const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
+    const addToast = vi.fn();
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockFetchChatSession.mockRejectedValueOnce(new Error("network"));
+
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    act(() => {
+      setDocumentVisibilityState("hidden");
+      setDocumentVisibilityState("visible");
+    });
+
+    await waitFor(() => {
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-existing", "proj-123");
+      expect(addToast).not.toHaveBeenCalled();
+    });
+
+    mockFetchChatSession.mockClear();
+    act(() => {
+      result.current.sendMessage("Hello");
+      setDocumentVisibilityState("hidden");
+      setDocumentVisibilityState("visible");
+    });
+    expect(mockFetchChatSession).not.toHaveBeenCalled();
   });
 
   it("still shows toast for non-suspension errors regardless of visibility", async () => {

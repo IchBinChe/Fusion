@@ -269,7 +269,11 @@ export function useQuickChat(
     [projectId],
   );
 
-  const attachIfGenerating = useCallback((sessionId: string, inFlightGeneration?: ChatInFlightGenerationState | null) => {
+  const attachIfGenerating = useCallback((
+    sessionId: string,
+    inFlightGeneration?: ChatInFlightGenerationState | null,
+    options?: { silent?: boolean },
+  ) => {
     if (streamRef.current || !sessionId) {
       return true;
     }
@@ -289,7 +293,7 @@ export function useQuickChat(
       setStreamingThinking,
       setStreamingToolCalls,
       cancelStreamingFlushesRef,
-      addToast,
+      addToast: options?.silent ? undefined : addToast,
       onFallbackSession: (data, fallbackSessionId) => {
         const nextModel = parseModelDescriptor(data.fallbackModel);
         setSessions((prev) => prev.map((session) =>
@@ -316,7 +320,9 @@ export function useQuickChat(
         isStreamingRef.current = false;
         streamRef.current = null;
         const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
-        addToast?.(errorMessage, "error");
+        if (!options?.silent) {
+          addToast?.(errorMessage, "error");
+        }
         void fetchChatMessages(sessionId, { limit: 50 }, projectId).then((resp) => {
           setMessages(resp.messages.map(mapChatMessageToInfo));
         }).catch(() => {});
@@ -613,6 +619,43 @@ export function useQuickChat(
   const sendMessageRef = useRef<(content: string, attachments?: File[]) => Promise<void>>(() => Promise.resolve());
   const visibilitySuspension = useTabVisibilitySuspension();
 
+  const reconnectSessionSilently = useCallback(async (sessionId: string) => {
+    try {
+      await refreshSessions();
+      const refreshed = await fetchChatSession(sessionId, projectId);
+      const refreshedSession = refreshed.session;
+      if (activeSessionRef.current?.id === sessionId) {
+        setActiveSession((prev) => {
+          if (!prev || prev.id !== sessionId) {
+            return prev;
+          }
+          return {
+            ...prev,
+            ...refreshedSession,
+          };
+        });
+      }
+
+      if (refreshedSession.isGenerating) {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(true);
+        isStreamingRef.current = true;
+        attachIfGenerating(sessionId, refreshedSession.inFlightGeneration, { silent: true });
+      } else {
+        setStreamingText("");
+        setStreamingThinking("");
+        setStreamingToolCalls([]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        await reloadMessages();
+      }
+    } catch {
+      // Intentionally silent reconnect path.
+    }
+  }, [attachIfGenerating, projectId, refreshSessions, reloadMessages]);
+
   /**
    * Send a message using SSE streaming.
    * @param content message text content
@@ -721,12 +764,18 @@ export function useQuickChat(
             console.error("[useQuickChat] Stream error:", data);
 
             const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
-            const shouldSuppressSuspensionError = typeof data === "string"
-              && isLikelyTabSuspensionError(data)
-              && (visibilitySuspension.isHiddenNow() || visibilitySuspension.wasRecentlyHidden(5000));
+            const shouldSuppressSuspensionError = isLikelyTabSuspensionError(errorMessage);
 
             if (shouldSuppressSuspensionError) {
               console.info("[useQuickChat] Suppressed tab-suspension stream error:", data);
+              if (activeSession?.id) {
+                setStreamingText("");
+                setStreamingThinking("");
+                setStreamingToolCalls([]);
+                setIsStreaming(true);
+                isStreamingRef.current = true;
+                void reconnectSessionSilently(activeSession.id);
+              }
               sendCompletionRef.current?.resolve();
             } else {
               addToast?.(errorMessage, "error");
@@ -743,7 +792,9 @@ export function useQuickChat(
               }
             }
 
-            void reloadMessages();
+            if (!shouldSuppressSuspensionError) {
+              void reloadMessages();
+            }
           },
         });
 
@@ -755,10 +806,53 @@ export function useQuickChat(
       void completionPromise.catch(() => {});
       return completionPromise;
     },
-    [activeSession, projectId, addToast, reloadMessages, visibilitySuspension],
+    [activeSession, projectId, addToast, reloadMessages, reconnectSessionSilently],
   );
 
   sendMessageRef.current = sendMessage;
+
+  useEffect(() => {
+    const unsubscribe = visibilitySuspension.onBecameVisible(() => {
+      if (skipNextSessionInitRef.current) {
+        return;
+      }
+      const currentSession = activeSessionRef.current;
+      if (!currentSession || streamRef.current) {
+        return;
+      }
+
+      void fetchChatSession(currentSession.id, projectId)
+        .then((data) => {
+          if (streamRef.current || activeSessionRef.current?.id !== currentSession.id) {
+            return;
+          }
+
+          if (data.session.isGenerating) {
+            setStreamingText("");
+            setStreamingThinking("");
+            setStreamingToolCalls([]);
+            setIsStreaming(true);
+            isStreamingRef.current = true;
+            attachIfGenerating(currentSession.id, data.session.inFlightGeneration, { silent: true });
+            return;
+          }
+
+          if (isStreamingRef.current) {
+            setStreamingText("");
+            setStreamingThinking("");
+            setStreamingToolCalls([]);
+            setIsStreaming(false);
+            isStreamingRef.current = false;
+            void reloadMessages();
+          }
+        })
+        .catch(() => {
+          // Intentionally silent for visibility reconnect path.
+        });
+    });
+
+    return unsubscribe;
+  }, [attachIfGenerating, projectId, reloadMessages, visibilitySuspension]);
 
   // Cleanup on unmount
   useEffect(() => {

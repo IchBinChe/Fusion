@@ -3598,7 +3598,21 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       <div
         key={session.id}
         className="mission-list__item mission-list__item--interview"
+        role="button"
+        tabIndex={0}
+        aria-label={`Resume interview ${session.title || "Mission interview"}`}
         onClick={() => handleResumeInterviewSession(session.id)}
+        onKeyDown={(event) => {
+          if (event.currentTarget !== event.target) return;
+          if (event.key === "Enter") {
+            handleResumeInterviewSession(session.id);
+            return;
+          }
+          if (event.key === " ") {
+            event.preventDefault();
+            handleResumeInterviewSession(session.id);
+          }
+        }}
       >
         <div className="mission-list__item-content">
           <div className="mission-list__item-header">
@@ -3662,7 +3676,22 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       <div
         key={m.id}
         className={`mission-list__item ${isSelected ? "mission-list__item--selected" : ""} ${isInterviewStyle ? "mission-list__item--interview" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-label={`Open mission ${m.title}`}
+        aria-pressed={isSelected}
         onClick={() => handleSelectMission(mission)}
+        onKeyDown={(event) => {
+          if (event.currentTarget !== event.target) return;
+          if (event.key === "Enter") {
+            handleSelectMission(mission);
+            return;
+          }
+          if (event.key === " ") {
+            event.preventDefault();
+            handleSelectMission(mission);
+          }
+        }}
       >
         <div className="mission-list__item-content">
           <div className="mission-list__item-header">

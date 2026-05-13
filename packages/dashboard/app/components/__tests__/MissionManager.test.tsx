@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { MissionManager } from "../MissionManager";
+import { loadAllAppCssBaseOnly } from "../../test/cssFixture";
 
 /**
  * MissionManager layout reference (post FN-3136):
@@ -4064,6 +4065,92 @@ describe("MissionManager", () => {
       expect(within(sidebar).getByText("API Redesign")).toBeInTheDocument();
       const sidebarList = document.querySelector(".mission-manager__sidebar-list") as HTMLElement;
       expect(getComputedStyle(sidebarList).overflowY).toBe("auto");
+    });
+  });
+
+  describe("mission list row interactions", () => {
+    it("renders mission and interview rows as keyboard-reachable buttons with labels", async () => {
+      mockFetchMissionInterviewDrafts.mockResolvedValue([
+        {
+          id: "S-001",
+          title: "Auth interview",
+          status: "awaiting_input",
+          projectId: null,
+          hasConversation: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      const missionRow = await screen.findByRole("button", { name: "Open mission Build Auth System" });
+      const interviewRow = await screen.findByRole("button", { name: "Resume interview Auth interview" });
+
+      expect(missionRow).toHaveAttribute("tabindex", "0");
+      expect(missionRow).toHaveAttribute("aria-pressed", "false");
+      expect(interviewRow).toHaveAttribute("tabindex", "0");
+    });
+
+    it("activates rows from keyboard and prevents bubbling from interview row actions", async () => {
+      mockFetchMissionInterviewDrafts.mockResolvedValue([
+        {
+          id: "S-002",
+          title: "Retry interview",
+          status: "error",
+          projectId: null,
+          hasConversation: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+      const fetchMock = createFetchMock();
+      globalThis.fetch = fetchMock;
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      const interviewRow = await screen.findByRole("button", { name: "Resume interview Retry interview" });
+      fireEvent.keyDown(interviewRow, { key: "Enter" });
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("S-002");
+      });
+
+      mockFetchAiSession.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+      expect(mockFetchAiSession).not.toHaveBeenCalled();
+
+      const missionRow = await screen.findByRole("button", { name: "Open mission Build Auth System" });
+      const missionDetailFetchesBefore = fetchMock.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0].includes("/api/missions/M-001"),
+      ).length;
+
+      const spaceEvent = fireEvent.keyDown(missionRow, { key: " " });
+      expect(spaceEvent).toBe(false);
+
+      await waitFor(() => {
+        const missionDetailFetchesAfter = fetchMock.mock.calls.filter(
+          (call) => typeof call[0] === "string" && call[0].includes("/api/missions/M-001"),
+        ).length;
+        expect(missionDetailFetchesAfter).toBe(missionDetailFetchesBefore + 1);
+      });
+    });
+  });
+
+  describe("MissionManager tokenized sizing regression", () => {
+    it("does not retain targeted hardcoded px literals in MissionManager selectors", async () => {
+      const css = await loadAllAppCssBaseOnly();
+
+      expect(css).not.toMatch(/\.mission-manager__title\s*\{[^}]*font-size:\s*16px/i);
+      expect(css).not.toMatch(/\.mission-manager__sidebar\s*\{[^}]*width:\s*300px/i);
+      expect(css).not.toMatch(/\.mission-status-badge\s*\{[^}]*font-size:\s*11px/i);
+      expect(css).not.toMatch(/\.mission-status-badge\s*\{[^}]*padding:\s*2px\s+8px/i);
+      expect(css).not.toMatch(/\.mission-status-badge--sm\s*\{[^}]*font-size:\s*10px/i);
+      expect(css).not.toMatch(/\.mission-status-badge--sm\s*\{[^}]*padding:\s*1px\s+6px/i);
+      expect(css).not.toMatch(/\.mission-detail__title\s*\{[^}]*font-size:\s*18px/i);
+      expect(css).not.toMatch(/\.mission-event__type\s*\{[^}]*font-size:\s*11px/i);
+      expect(css).not.toMatch(/\.mission-event__type\s*\{[^}]*padding:\s*2px\s+8px/i);
+      expect(css).not.toMatch(/\.mission-plan-state-indicator\s*\{[^}]*width:\s*16px/i);
+      expect(css).not.toMatch(/\.mission-plan-state-indicator\s*\{[^}]*height:\s*16px/i);
+      expect(css).not.toMatch(/\.mission-plan-state-indicator\s*\{[^}]*border-radius:\s*4px/i);
     });
   });
 

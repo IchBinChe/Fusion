@@ -141,21 +141,6 @@
   border-radius: var(--radius-pill);
 }
 
-.card-status-badge.pulsing {
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-.card-status-badge.failed {
-  background: var(--status-error-bg);
-  color: var(--color-error-dark);
-}
-
-.card-status-badge.stuck {
-  background: var(--status-triage-bg-deep);
-  color: var(--triage);
-  animation: stuck-pulse 2s ease-in-out infinite;
-}
-
 .card-status-badge.stalled-review {
   background: color-mix(in srgb, var(--color-warning) 18%, transparent);
   color: var(--color-warning);
@@ -174,16 +159,6 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
-}
-
-.card-status-badge.paused {
-  background: var(--status-done-bg-deep);
-  color: var(--text-muted);
-}
-
-.card-status-badge.awaiting-approval {
-  background: var(--status-triage-bg-deep);
-  color: var(--triage);
 }
 
 .card-status-badge--triage {
@@ -209,6 +184,31 @@
 .card-status-badge--archived {
   background: var(--status-archived-bg);
   color: var(--text-muted);
+}
+
+.card-status-badge.pulsing {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.card-status-badge.failed {
+  background: var(--status-error-bg);
+  color: var(--color-error-dark);
+}
+
+.card-status-badge.stuck {
+  background: var(--status-triage-bg-deep);
+  color: var(--triage);
+  animation: stuck-pulse 2s ease-in-out infinite;
+}
+
+.card-status-badge.paused {
+  background: var(--status-done-bg-deep);
+  color: var(--text-muted);
+}
+
+.card-status-badge.awaiting-approval {
+  background: var(--status-triage-bg-deep);
+  color: var(--triage);
 }
 
 .card.stuck {

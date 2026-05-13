@@ -227,7 +227,7 @@ describe("executeHeartbeat", () => {
       vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
         id,
         runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 },
-      }) as Agent);
+      }) as unknown as Agent);
       vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
         { id: "agent-frontend", name: "Frontend Engineer", state: "active", taskId: "FN-201", lastHeartbeatAt: new Date(now - 53 * 60_000).toISOString(), updatedAt: new Date(now - 53 * 60_000).toISOString() } as Agent,
         { id: "agent-writer", name: "Technical Writer", state: "active", taskId: "FN-202", lastHeartbeatAt: new Date(now - 51 * 60_000).toISOString(), updatedAt: new Date(now - 51 * 60_000).toISOString() } as Agent,
@@ -250,7 +250,7 @@ describe("executeHeartbeat", () => {
       vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
         id,
         runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 },
-      }) as Agent);
+      }) as unknown as Agent);
       vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
         {
           id: "agent-overdue-a",
@@ -282,13 +282,13 @@ describe("executeHeartbeat", () => {
       const store = createStoreWithAgentForExec();
       vi.mocked(store.getCachedAgent).mockImplementation((id: string) => {
         if (id === "agent-short") {
-          return { id, runtimeConfig: { heartbeatIntervalMs: 5 * 60_000 } } as Agent;
+          return { id, runtimeConfig: { heartbeatIntervalMs: 5 * 60_000 } } as unknown as Agent;
         }
         if (id === "agent-medium") {
-          return { id, runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 } } as Agent;
+          return { id, runtimeConfig: { heartbeatIntervalMs: 60 * 60_000 } } as unknown as Agent;
         }
         if (id === "agent-long") {
-          return { id, runtimeConfig: { heartbeatIntervalMs: 4 * 60 * 60_000 } } as Agent;
+          return { id, runtimeConfig: { heartbeatIntervalMs: 4 * 60 * 60_000 } } as unknown as Agent;
         }
         return null;
       });
@@ -311,7 +311,7 @@ describe("executeHeartbeat", () => {
       vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
         id,
         runtimeConfig: { heartbeatIntervalMs: 1_000 },
-      }) as Agent);
+      }) as unknown as Agent);
       vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
         { id: "agent-fast", name: "Fast Poller", state: "active", taskId: "FN-210", lastHeartbeatAt: new Date(now - 2 * 60_000).toISOString(), updatedAt: new Date(now - 2 * 60_000).toISOString() } as Agent,
       ]);

@@ -326,6 +326,8 @@ interface ProvenanceDisplay {
   label: string;
   parentTaskId?: string;
   contextInfo?: string;
+  contextHref?: string;
+  contextInfoFull?: string;
   sourceAgentId?: string;
 }
 
@@ -336,6 +338,19 @@ interface ProvenanceLabelOptions {
 function getIssueUrlFromMetadata(metadata: Task["sourceMetadata"]): string | undefined {
   const issueUrl = metadata?.issueUrl;
   return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
+}
+
+function parseGithubIssueLabel(url: string): { label: string; href: string } | null {
+  const match = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)(?:$|[/?#])/);
+  if (!match) {
+    return null;
+  }
+
+  const [, owner, repo, , number] = match;
+  return {
+    label: `${owner}/${repo}#${number}`,
+    href: url,
+  };
 }
 
 function getResearchContextInfo(metadata: Task["sourceMetadata"]): string | undefined {
@@ -373,9 +388,12 @@ function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOpt
       return { label: "Workflow Step" };
     case "github_import": {
       const issueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
+      const parsedIssue = issueUrl ? parseGithubIssueLabel(issueUrl) : null;
       return {
         label: "GitHub Import",
-        contextInfo: issueUrl,
+        contextInfo: issueUrl ? (parsedIssue?.label ?? "Open issue") : undefined,
+        contextHref: issueUrl,
+        contextInfoFull: issueUrl,
       };
     }
     case "research": {
@@ -383,6 +401,7 @@ function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOpt
       return {
         label: "Research",
         contextInfo,
+        contextInfoFull: contextInfo,
       };
     }
     case "task_refine":

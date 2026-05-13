@@ -568,6 +568,4 @@
     width: 100%;
     justify-content: space-between;
   }
-
-  /* FN-4352: reverted mobile expand-toggle inflation from FN-4236; falls back to compact base sizing. */
 }

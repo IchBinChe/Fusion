@@ -1657,9 +1657,10 @@
     opacity: 1;
   }
 
+  /* FN-4352: keep row text clearance aligned to compact secondary delete control (FN-3628 had larger clearance for inflated control). */
   .chat-session-title,
   .chat-session-preview {
-    padding-right: calc((var(--space-lg) * 2.25) + var(--space-sm));
+    padding-right: calc((var(--space-md) * 2) + var(--space-sm));
   }
 
   .chat-message--assistant .chat-message-render-toggle {

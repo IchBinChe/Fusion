@@ -226,25 +226,29 @@ describe("TaskCard mobile", () => {
     expectRuleToContain(mobileSection, ".card-archive-btn", "opacity: 1;");
   });
 
-  it("uses tokenized 36px min-height for archive/unarchive/send-back buttons in the mobile media block", () => {
+  it("keeps archive/unarchive/send-back visible without min-height overrides in the mobile media block", () => {
     const css = loadAllAppCss();
     const mobileSection = getMainMobileSection(css);
 
-    expectRuleToContain(
-      mobileSection,
+    const selectors = [
       ".card-archive-btn",
-      "min-height: calc(var(--space-xl) + var(--space-md));",
-    );
-    expectRuleToContain(
-      mobileSection,
       ".card-unarchive-btn",
-      "min-height: calc(var(--space-xl) + var(--space-md));",
-    );
-    expectRuleToContain(
-      mobileSection,
       ".card-send-back-btn",
-      "min-height: calc(var(--space-xl) + var(--space-md));",
-    );
+    ];
+    const pattern = /([^{}]+)\{([\s\S]*?)\}/g;
+
+    for (const selector of selectors) {
+      let found = false;
+      for (const match of mobileSection.matchAll(pattern)) {
+        const blockSelector = match[1].trim();
+        const block = match[2];
+        if (blockSelector !== selector) continue;
+        found = true;
+        expect(block).toContain("opacity: 1;");
+        expect(block).not.toContain("min-height:");
+      }
+      expect(found).toBe(true);
+    }
   });
 
   it("does not force .card-steps-toggle min-height in the mobile media block", () => {
@@ -295,30 +299,14 @@ describe("TaskCard mobile", () => {
     expectRuleToContain(css, ".card-session-files span", "white-space: nowrap;");
   });
 
-  it("uses tokenized 36px touch targets for TaskCard action buttons in the mobile media block", () => {
+  it("uses compact 28px touch targets for TaskCard action buttons in the mobile media block", () => {
     const css = loadAllAppCss();
     const mobileSection = getMainMobileSection(css);
 
-    expectRuleToContain(
-      mobileSection,
-      ".card-edit-btn",
-      "width: calc(var(--space-xl) + var(--space-md));",
-    );
-    expectRuleToContain(
-      mobileSection,
-      ".card-edit-btn",
-      "height: calc(var(--space-xl) + var(--space-md));",
-    );
-    expectRuleToContain(
-      mobileSection,
-      ".card-delete-btn",
-      "width: calc(var(--space-xl) + var(--space-md));",
-    );
-    expectRuleToContain(
-      mobileSection,
-      ".card-delete-btn",
-      "height: calc(var(--space-xl) + var(--space-md));",
-    );
+    expectRuleToContain(mobileSection, ".card-edit-btn", "width: 28px;");
+    expectRuleToContain(mobileSection, ".card-edit-btn", "height: 28px;");
+    expectRuleToContain(mobileSection, ".card-delete-btn", "width: 28px;");
+    expectRuleToContain(mobileSection, ".card-delete-btn", "height: 28px;");
   });
 
   it("opens task detail on quick tap", async () => {

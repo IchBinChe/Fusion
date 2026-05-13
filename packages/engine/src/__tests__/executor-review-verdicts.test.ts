@@ -253,6 +253,14 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
  * Returns a map of tool name → tool execute function for direct testing.
  */
 async function captureTools(settingsOverride?: Record<string, unknown>): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
+  const { tools } = await captureToolsWithStore(settingsOverride);
+  return tools;
+}
+
+async function captureToolsWithStore(settingsOverride?: Record<string, unknown>): Promise<{
+  tools: Record<string, (id: string, params: any) => Promise<any>>;
+  store: ReturnType<typeof createMockStore>;
+}> {
   const store = createMockStore();
   if (settingsOverride) {
     store.getSettings.mockResolvedValue({ ...(await store.getSettings()), ...settingsOverride });
@@ -310,7 +318,7 @@ async function captureTools(settingsOverride?: Record<string, unknown>): Promise
   for (const t of capturedTools) {
     tools[t.name] = t.execute;
   }
-  return tools;
+  return { tools, store };
 }
 
 describe("Code review verdict tracking", () => {
@@ -440,6 +448,58 @@ describe("Code review verdict tracking", () => {
     });
 
     expect(result.content[0].text).toContain("Code review remains blocking");
+  });
+
+  it("repeated plan UNAVAILABLE logs escalation while remaining advisory", async () => {
+    mockedReviewStep.mockResolvedValue({
+      verdict: "UNAVAILABLE",
+      review: "Reviewer unavailable",
+      summary: "No verdict",
+    });
+
+    const { tools, store } = await captureToolsWithStore();
+    const first = await tools.fn_review_step("call1", {
+      step: 0,
+      type: "plan",
+      step_name: "Implement",
+    });
+    const second = await tools.fn_review_step("call2", {
+      step: 0,
+      type: "plan",
+      step_name: "Implement",
+    });
+
+    expect(first.content[0].text).toContain("UNAVAILABLE (advisory)");
+    expect(second.content[0].text).toContain("UNAVAILABLE (advisory)");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-TEST",
+      expect.stringContaining("UNAVAILABLE — proceeding advisory after fallback retry exhausted"),
+    );
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-TEST",
+      expect.stringContaining("repeated UNAVAILABLE (2)"),
+    );
+    const updateResult = await tools.fn_task_update("call3", { step: 1, status: "done" });
+    expect(updateResult.content[0].text).toContain("→ done");
+  });
+
+  it("spec review UNAVAILABLE is advisory", async () => {
+    mockedReviewStep.mockResolvedValue({
+      verdict: "UNAVAILABLE",
+      review: "Reviewer unavailable",
+      summary: "No verdict",
+    });
+
+    const tools = await captureTools();
+    const result = await tools.fn_review_step("call1", {
+      step: 0,
+      type: "spec",
+      step_name: "Spec Review",
+    });
+
+    expect(result.content[0].text).toContain("UNAVAILABLE (advisory)");
+    const updateResult = await tools.fn_task_update("call2", { step: 1, status: "done" });
+    expect(updateResult.content[0].text).toContain("→ done");
   });
 });
 

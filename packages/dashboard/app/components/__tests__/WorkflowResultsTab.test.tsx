@@ -1159,4 +1159,109 @@ describe("WorkflowResultsTab", () => {
       expect(screen.getByTestId("workflow-output-modal")).toBeInTheDocument();
     });
   });
+
+  describe("verdict and notes rendering", () => {
+    it("renders PASS verdict badge when verdict is present", () => {
+      const results: WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-001",
+          workflowStepName: "QA Check",
+          status: "passed",
+          verdict: "PASS",
+          output: "All tests passed.",
+        },
+      ];
+
+      render(<WorkflowResultsTab taskId="FN-001" results={results} />);
+
+      const badge = screen.getByTestId("workflow-verdict-badge-WS-001");
+      expect(badge).toHaveTextContent("PASS");
+      expect(badge.className).toContain("workflow-verdict-badge--PASS");
+    });
+
+    it("renders FAIL verdict badge when verdict is present", () => {
+      const results: WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-002",
+          workflowStepName: "Security Audit",
+          status: "failed",
+          verdict: "FAIL",
+          output: "Found issues in auth.ts.",
+        },
+      ];
+
+      render(<WorkflowResultsTab taskId="FN-001" results={results} />);
+
+      const badge = screen.getByTestId("workflow-verdict-badge-WS-002");
+      expect(badge).toHaveTextContent("FAIL");
+      expect(badge.className).toContain("workflow-verdict-badge--FAIL");
+    });
+
+    it("does not render verdict badge when verdict is undefined", () => {
+      const results: WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-001",
+          workflowStepName: "QA Check",
+          status: "passed",
+          output: "All tests passed.",
+        },
+      ];
+
+      render(<WorkflowResultsTab taskId="FN-001" results={results} />);
+
+      expect(screen.queryByTestId("workflow-verdict-badge-WS-001")).not.toBeInTheDocument();
+    });
+
+    it("renders notes when present on completed step", () => {
+      const results: WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-001",
+          workflowStepName: "QA Check",
+          status: "passed",
+          verdict: "PASS",
+          notes: "No relevant changes in scope — approved.",
+          output: "Reviewed files.",
+        },
+      ];
+
+      render(<WorkflowResultsTab taskId="FN-001" results={results} />);
+
+      const notesEl = screen.getByTestId("workflow-result-notes-WS-001");
+      expect(notesEl).toHaveTextContent("No relevant changes in scope — approved.");
+    });
+
+    it("hides notes when status is pending", () => {
+      const results: WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-001",
+          workflowStepName: "QA Check",
+          status: "pending",
+          notes: "Should not show.",
+          startedAt: "2026-03-31T10:00:00Z",
+        },
+      ];
+
+      render(<WorkflowResultsTab taskId="FN-001" results={results} />);
+
+      expect(screen.queryByTestId("workflow-result-notes-WS-001")).not.toBeInTheDocument();
+    });
+
+    it("renders both verdict badge and notes together", () => {
+      const results: WorkflowStepResult[] = [
+        {
+          workflowStepId: "WS-003",
+          workflowStepName: "UX Review",
+          status: "advisory_failure",
+          verdict: "FAIL",
+          notes: "Spacing needs adjustment.",
+          output: "Detailed findings here.",
+        },
+      ];
+
+      render(<WorkflowResultsTab taskId="FN-001" results={results} />);
+
+      expect(screen.getByTestId("workflow-verdict-badge-WS-003")).toHaveTextContent("FAIL");
+      expect(screen.getByTestId("workflow-result-notes-WS-003")).toHaveTextContent("Spacing needs adjustment.");
+    });
+  });
 });

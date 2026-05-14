@@ -431,6 +431,10 @@ export interface WorkflowStepOutcome {
   revisionRequested?: boolean;
   output?: string;
   error?: string;
+  /** Machine-readable verdict extracted from structured JSON output. */
+  verdict?: "PASS" | "FAIL";
+  /** Notes extracted from structured JSON output (distinct from raw output). */
+  notes?: string;
   /** Set when the call exceeded `settings.workflowStepTimeoutMs`. Signals the
    *  caller to escalate to the fallback model rather than treat the failure
    *  as a generic revision request. */
@@ -6303,6 +6307,8 @@ ${failureFeedback}
               ...results[existingIdx],
               status: "passed",
               output: result.output,
+              verdict: result.verdict,
+              notes: result.notes ?? result.output,
               completedAt,
             };
           }
@@ -6323,7 +6329,8 @@ ${failureFeedback}
               ...results[existingIdx],
               status: gateMode === "advisory" ? "advisory_failure" : "failed",
               output: result.output || "Revision requested",
-              notes: result.output || "Revision requested",
+              verdict: result.verdict,
+              notes: result.notes || result.output || "Revision requested",
               completedAt,
             };
           }
@@ -6494,6 +6501,50 @@ ${failureFeedback}
   }
 
   /**
+   * Parse structured JSON verdict from workflow step output.
+   *
+   * Looks for a trailing JSON block of the form:
+   *   ```json-workflow-verdict
+   *   {"verdict":"PASS"|"FAIL","notes":"..."}
+   *   ```
+   *
+   * If found, extracts verdict/notes and returns the prose before the block
+   * as `output`.
+   *
+   * Falls back to prose-only parsing (REQUEST REVISION) for backward compat.
+   */
+  private parseWorkflowStepOutput(rawOutput: string): {
+    output: string;
+    verdict?: "PASS" | "FAIL";
+    notes?: string;
+  } {
+    const trimmed = rawOutput.trim();
+
+    // Try structured JSON block first
+    const jsonBlockMatch = trimmed.match(
+      /```json-workflow-verdict\s*\n([\s\S]*?)\n\s*```/,
+    );
+    if (jsonBlockMatch) {
+      try {
+        const parsed = JSON.parse(jsonBlockMatch[1].trim());
+        if (parsed.verdict === "PASS" || parsed.verdict === "FAIL") {
+          const proseBefore = trimmed.slice(0, trimmed.indexOf(jsonBlockMatch[0])).trim();
+          return {
+            output: proseBefore || parsed.notes || "",
+            verdict: parsed.verdict,
+            notes: parsed.notes,
+          };
+        }
+      } catch {
+        // Malformed JSON — fall through to prose parsing
+      }
+    }
+
+    // Fallback: no structured block found, return raw output
+    return { output: trimmed };
+  }
+
+  /**
    * Execute a single workflow step by spawning an agent with the step's prompt.
    * Returns structured outcome with support for revision requests.
    */
@@ -6562,29 +6613,33 @@ You have access to the file system to review changes.
 
 ## Feedback Format
 
-When your review is complete, you MUST use one of these exact formats:
+When your review is complete, your response MUST end with a structured verdict block.
 
-**For PASS (no issues found):**
-Simply state your findings and approval. No special formatting required.
+**Structure:**
+1. Your prose findings (any length — explain what you reviewed, what passed, what didn't).
+2. A fenced JSON block at the very end:
 
-**For REVISION REQUESTED (issues found that require code changes):**
-Your response MUST start with the exact phrase:
-\`REQUEST REVISION\`
+\`\`\`json-workflow-verdict
+{"verdict":"PASS","notes":"<optional short summary>"}
+\`\`\`
 
-Followed by a clear, actionable description of what needs to be fixed.
-Be specific: reference exact files, line numbers, or functions that need changes.
+or for failures:
 
-Example:
-\`REQUEST REVISION
+\`\`\`json-workflow-verdict
+{"verdict":"FAIL","notes":"<what needs to change>"}
+\`\`\`
 
-The login function in src/auth.ts does not handle the case where the user
-account is locked. Add proper error handling for the LOCKED_ACCOUNT error code
-and show an appropriate message to the user.\`
+**Rules:**
+- The JSON block MUST be the last thing in your response.
+- \`verdict\` must be exactly \`"PASS"\` or \`"FAIL"\`.
+- \`notes\` is optional but recommended — a concise human-readable summary.
+- For FAIL, describe what needs to change in both the prose and \`notes\`.
+- If this step is out of scope (no relevant files), fast-bail:
+  \`\`\`json-workflow-verdict
+  {"verdict":"PASS","notes":"No relevant changes in scope — approved."}
+  \`\`\`
 
-**Important:**
-- Only use "REQUEST REVISION" when the implementation needs code changes.
-- If the code is correct and no changes are needed, just state your findings.
-- Be constructive and actionable — vague feedback wastes the executor's time.`;
+**Backward compat:** If you cannot produce JSON, you may still use \`REQUEST REVISION\` at the start of your response to signal failure. The prose format is deprecated — prefer JSON.`;
 
     const agentLogger = new AgentLogger({
       store: this.store,
@@ -6739,14 +6794,36 @@ and show an appropriate message to the user.\`
         session.dispose();
         await agentLogger.flush();
 
+        const parsed = this.parseWorkflowStepOutput(output);
         const trimmedOutput = output.trim();
+
+        // Structured verdict takes priority
+        if (parsed.verdict) {
+          if (parsed.verdict === "FAIL") {
+            return {
+              success: false,
+              revisionRequested: true,
+              output: parsed.output,
+              verdict: "FAIL",
+              notes: parsed.notes,
+            };
+          }
+          return {
+            success: true,
+            output: parsed.output,
+            verdict: "PASS",
+            notes: parsed.notes,
+          };
+        }
+
+        // Fallback: prose-based REQUEST REVISION detection
         const revisionMatch = trimmedOutput.match(/^REQUEST REVISION\s*\n*/i);
         if (revisionMatch) {
           const feedbackStart = revisionMatch[0].length;
           const feedback = trimmedOutput.slice(feedbackStart).trim();
           return { success: false, revisionRequested: true, output: feedback };
         }
-        return { success: true, output };
+        return { success: true, output: trimmedOutput };
       } catch (err: unknown) {
         await agentLogger.flush();
         try { session.dispose(); } catch { /* best-effort */ }

@@ -237,6 +237,51 @@
   color: var(--text);
 }
 
+/* Workflow verdict badge */
+.workflow-result-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.workflow-verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(var(--space-xs) * 0.5) var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.5);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  font-family: var(--font-mono);
+}
+
+.workflow-verdict-badge--PASS {
+  background-color: color-mix(in srgb, var(--color-success) 15%, transparent);
+  color: var(--color-success);
+}
+
+.workflow-verdict-badge--FAIL {
+  background-color: color-mix(in srgb, var(--color-error) 15%, transparent);
+  color: var(--color-error);
+}
+
+/* Workflow result notes */
+.workflow-result-notes {
+  margin-top: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-info) 6%, var(--surface));
+  font-size: calc(var(--space-sm) + var(--space-xs));
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.workflow-result-notes-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
 /* Phase badge base and modifier classes */
 .phase-badge {
   margin-inline-start: var(--space-xs);

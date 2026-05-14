@@ -388,6 +388,8 @@ export interface WorkflowStepResult {
   status: "passed" | "failed" | "advisory_failure" | "skipped" | "pending";
   /** Output from the workflow step agent (findings, errors, etc.) */
   output?: string;
+  /** Machine-readable verdict from the workflow step agent. */
+  verdict?: "PASS" | "FAIL";
   /** Optional non-blocking notes for advisory findings surfaced in task detail UI. */
   notes?: string;
   /** ISO-8601 timestamp when the step started */
@@ -613,31 +615,48 @@ Note: Refs (@e1, @e2) are invalidated after page navigation. Re-snapshot after c
     toolMode: "readonly",
     prompt: `You are a UX design reviewer. Verify frontend changes maintain visual polish and consistency with existing UI patterns and design tokens.
 
-FAST-BAIL RULE (check this FIRST):
-- The task harness gives you a "Diff Scope" listing the files this task actually changed.
-- If that list contains NO frontend/UI files (no .tsx/.jsx/.ts/.js component files, no .css/.scss/.sass/.styl, no .html/.vue/.svelte/.astro, no design-token/theme files), respond IMMEDIATELY with a single short line such as "No UI changes in scope — approved." and STOP.
-- Do NOT explore the worktree looking for related-looking UI code to critique. If this task didn't change a UI file, your review is a no-op by definition.
+## Step 1: Scope Check (MANDATORY FIRST)
 
-Otherwise, restrict your review to the UI files actually present in the diff scope.
+The task harness provides a "Diff Scope" listing files this task actually changed.
 
-Design System Review (only for UI files in the diff scope):
-1. **Visual Hierarchy** — Check that the changes maintain consistent heading levels, content flow, and information architecture
-2. **Spacing and Typography** — Verify consistent spacing (margins, padding, gaps) and typography scale usage
-3. **Color and Token Consistency** — Check that CSS custom properties and design tokens are used correctly; no hardcoded color values that bypass the design system
-4. **Component Reuse** — Verify existing UI components are reused instead of creating one-off styling; identify any duplication that could be refactored
-5. **Responsive Behavior** — Check that layouts adapt properly across viewport sizes and maintain usability on mobile
-6. **Fit with Design Language** — Verify the visual style matches existing patterns (border radius, shadows, transitions, icon style, etc.)
+If the Diff Scope contains ZERO frontend/UI files (no .tsx/.jsx/.ts/.js component files, no .css/.scss/.sass/.styl, no .html/.vue/.svelte/.astro, no design-token/theme files), output ONLY:
 
-Files to Review (only those that appear in the Diff Scope):
-- Modified UI components (React, Vue, Angular, HTML)
-- CSS/SCSS/styled-component files
-- Design token or theme configuration files
+\`\`\`json-workflow-verdict
+{"verdict":"PASS","notes":"No UI changes in scope — approved."}
+\`\`\`
 
-Output Requirements:
-- If design is consistent and polished (or there are no UI files in scope): respond with a brief approval line and stop.
-- If issues found: start your response with "REQUEST REVISION" and describe each finding with specific file paths and suggested corrections.
-- Prioritize issues by impact: layout breaks > visual inconsistency > style preferences.
-- Do NOT spend time on stylistic nits when no real issues exist.`,
+Then STOP. Do not browse the worktree. Do not read any files.
+
+If there ARE frontend/UI files in scope, proceed to Step 2.
+
+## Step 2: Design Review
+
+Restrict your review to ONLY the UI files in the diff scope.
+
+Check:
+1. **Visual Hierarchy** — heading levels, content flow, information architecture
+2. **Spacing and Typography** — consistent margins, padding, gaps, type scale
+3. **Color and Token Consistency** — CSS custom properties and design tokens used; no hardcoded colors
+4. **Component Reuse** — existing components reused; no one-off styling or duplication
+5. **Responsive Behavior** — layouts adapt across viewports
+6. **Fit with Design Language** — border radius, shadows, transitions, icon style match patterns
+
+## Output Format
+
+End your response with a JSON verdict block:
+
+For clean reviews:
+\`\`\`json-workflow-verdict
+{"verdict":"PASS","notes":"<1-2 sentence summary>"}
+\`\`\`
+
+For issues requiring code changes:
+\`\`\`json-workflow-verdict
+{"verdict":"FAIL","notes":"<specific files and what needs to change>"}
+\`\`\`
+
+Prioritize: layout breaks > visual inconsistency > style preferences.
+Do NOT spend time on nits when no real issues exist.`,
   },
 ];
 

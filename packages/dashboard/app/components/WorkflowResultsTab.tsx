@@ -494,13 +494,29 @@ export function WorkflowResultsTab({
                   {result.workflowStepName}
                   {phaseBadge(phase, result.workflowStepId, "workflow-result-phase")}
                 </div>
-                <span
-                  className={`workflow-result-badge workflow-result-badge--${result.status}`}
-                  data-testid={`workflow-result-badge-${result.workflowStepId}`}
-                >
-                  {getStatusLabel(result.status)}
-                </span>
+                <div className="workflow-result-badges">
+                  {result.verdict && (
+                    <span
+                      className={`workflow-verdict-badge workflow-verdict-badge--${result.verdict}`}
+                      data-testid={`workflow-verdict-badge-${result.workflowStepId}`}
+                    >
+                      {result.verdict}
+                    </span>
+                  )}
+                  <span
+                    className={`workflow-result-badge workflow-result-badge--${result.status}`}
+                    data-testid={`workflow-result-badge-${result.workflowStepId}`}
+                  >
+                    {getStatusLabel(result.status)}
+                  </span>
+                </div>
               </div>
+
+              {result.notes && result.status !== "pending" && (
+                <div className="workflow-result-notes" data-testid={`workflow-result-notes-${result.workflowStepId}`}>
+                  <span className="workflow-result-notes-label">Notes:</span> {linkifyFilePaths(result.notes)}
+                </div>
+              )}
 
               <div className="workflow-result-meta">
                 {result.startedAt && (

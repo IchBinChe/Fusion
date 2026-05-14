@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo, useRef, type UIEvent } from "react";
+import { useState, useCallback, useMemo, useRef, useId, type UIEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FileEdit, Eye, ListOrdered, WrapText } from "lucide-react";
+import { FileEdit, Eye, ListOrdered, WrapText, ChevronDown, ChevronUp } from "lucide-react";
 
 interface FileEditorProps {
   content: string;
@@ -30,13 +30,16 @@ export function FileEditor({
 }: FileEditorProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [wordWrap, setWordWrap] = useState(true);
+  const [toolbarActionsExpanded, setToolbarActionsExpanded] = useState(false);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const isMarkdown = isMarkdownFile(filePath);
+  const toolbarActionsId = useId();
 
   // For markdown files in readOnly mode, default to preview
   const effectiveShowPreview = isMarkdown && (readOnly ? true : showPreview);
   const shouldRenderLineNumbers = showLineNumbers && !readOnly && !effectiveShowPreview;
   const shouldShowLineNumbersToggle = Boolean(onToggleLineNumbers) && canToggleLineNumbers && !readOnly && !effectiveShowPreview;
+  const hasSecondaryActions = shouldShowLineNumbersToggle || !readOnly;
   const lineCount = useMemo(() => {
     if (!shouldRenderLineNumbers) {
       return 0;
@@ -55,6 +58,10 @@ export function FileEditor({
 
   const handleWordWrapToggle = useCallback(() => {
     setWordWrap((prev) => !prev);
+  }, []);
+
+  const handleToolbarActionsToggle = useCallback(() => {
+    setToolbarActionsExpanded((prev) => !prev);
   }, []);
 
   const handleTextareaScroll = useCallback((event: UIEvent<HTMLTextAreaElement>) => {
@@ -93,26 +100,42 @@ export function FileEditor({
           </div>
           {!readOnly && (
             <div className="file-editor-toolbar-actions">
-              {shouldShowLineNumbersToggle && (
-                <button
-                  className={`btn btn-sm file-editor-line-numbers-button ${showLineNumbers ? "btn-primary" : ""}`}
-                  onClick={onToggleLineNumbers}
-                  aria-label="Toggle line numbers"
-                  aria-pressed={showLineNumbers}
-                  title="Toggle line numbers"
-                >
-                  <ListOrdered size={14} />
-                  <span>Line #</span>
-                </button>
+              {hasSecondaryActions && (
+                <>
+                  <button
+                    className="btn btn-sm btn-icon"
+                    onClick={handleToolbarActionsToggle}
+                    aria-label="Toggle editor options"
+                    title="Toggle editor options"
+                    aria-expanded={toolbarActionsExpanded}
+                    aria-controls={toolbarActionsId}
+                  >
+                    {toolbarActionsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <div className="file-editor-toolbar-collapsible" id={toolbarActionsId} hidden={!toolbarActionsExpanded}>
+                    {shouldShowLineNumbersToggle && (
+                      <button
+                        className={`btn btn-sm file-editor-line-numbers-button ${showLineNumbers ? "btn-primary" : ""}`}
+                        onClick={onToggleLineNumbers}
+                        aria-label="Toggle line numbers"
+                        aria-pressed={showLineNumbers}
+                        title="Toggle line numbers"
+                      >
+                        <ListOrdered size={14} />
+                        <span>Line #</span>
+                      </button>
+                    )}
+                    <button
+                      className={`btn btn-sm ${wordWrap ? "btn-primary" : ""}`}
+                      onClick={handleWordWrapToggle}
+                      aria-label="Toggle word wrap"
+                      title="Toggle word wrap"
+                    >
+                      <WrapText size={14} />
+                    </button>
+                  </div>
+                </>
               )}
-              <button
-                className={`btn btn-sm ${wordWrap ? "btn-primary" : ""}`}
-                onClick={handleWordWrapToggle}
-                aria-label="Toggle word wrap"
-                title="Toggle word wrap"
-              >
-                <WrapText size={14} />
-              </button>
             </div>
           )}
         </div>
@@ -121,26 +144,42 @@ export function FileEditor({
           <div className="file-editor-toolbar">
             <div className="file-editor-mode-toggle" />
             <div className="file-editor-toolbar-actions">
-              {shouldShowLineNumbersToggle && (
-                <button
-                  className={`btn btn-sm file-editor-line-numbers-button ${showLineNumbers ? "btn-primary" : ""}`}
-                  onClick={onToggleLineNumbers}
-                  aria-label="Toggle line numbers"
-                  aria-pressed={showLineNumbers}
-                  title="Toggle line numbers"
-                >
-                  <ListOrdered size={14} />
-                  <span>Line #</span>
-                </button>
+              {hasSecondaryActions && (
+                <>
+                  <button
+                    className="btn btn-sm btn-icon"
+                    onClick={handleToolbarActionsToggle}
+                    aria-label="Toggle editor options"
+                    title="Toggle editor options"
+                    aria-expanded={toolbarActionsExpanded}
+                    aria-controls={toolbarActionsId}
+                  >
+                    {toolbarActionsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <div className="file-editor-toolbar-collapsible" id={toolbarActionsId} hidden={!toolbarActionsExpanded}>
+                    {shouldShowLineNumbersToggle && (
+                      <button
+                        className={`btn btn-sm file-editor-line-numbers-button ${showLineNumbers ? "btn-primary" : ""}`}
+                        onClick={onToggleLineNumbers}
+                        aria-label="Toggle line numbers"
+                        aria-pressed={showLineNumbers}
+                        title="Toggle line numbers"
+                      >
+                        <ListOrdered size={14} />
+                        <span>Line #</span>
+                      </button>
+                    )}
+                    <button
+                      className={`btn btn-sm ${wordWrap ? "btn-primary" : ""}`}
+                      onClick={handleWordWrapToggle}
+                      aria-label="Toggle word wrap"
+                      title="Toggle word wrap"
+                    >
+                      <WrapText size={14} />
+                    </button>
+                  </div>
+                </>
               )}
-              <button
-                className={`btn btn-sm ${wordWrap ? "btn-primary" : ""}`}
-                onClick={handleWordWrapToggle}
-                aria-label="Toggle word wrap"
-                title="Toggle word wrap"
-              >
-                <WrapText size={14} />
-              </button>
             </div>
           </div>
         )
@@ -148,9 +187,7 @@ export function FileEditor({
 
       {effectiveShowPreview ? (
         <div className="file-editor-preview markdown-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {content}
-          </ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
       ) : (
         <div className={`file-editor-textarea-shell ${shouldRenderLineNumbers ? "file-editor-textarea-shell--line-numbers" : ""}`}>

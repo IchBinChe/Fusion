@@ -4,6 +4,10 @@ import { loadAllAppCss } from "../../test/cssFixture";
 import { FileEditor } from "../FileEditor";
 
 describe("FileEditor", () => {
+  const expandEditorOptions = () => {
+    fireEvent.click(screen.getByRole("button", { name: /toggle editor options/i }));
+  };
+
   it("renders textarea with correct class names", () => {
     render(<FileEditor content="" onChange={vi.fn()} />);
     const textarea = screen.getByRole("textbox");
@@ -62,35 +66,35 @@ describe("FileEditor", () => {
     it("shows edit/preview toggle for .md files", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" />);
       
-      expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /edit mode/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /preview/i })).toBeInTheDocument();
     });
 
     it("shows edit/preview toggle for .markdown files", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.markdown" />);
       
-      expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /edit mode/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /preview/i })).toBeInTheDocument();
     });
 
     it("shows edit/preview toggle for .mdx files", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="page.mdx" />);
       
-      expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /edit mode/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /preview/i })).toBeInTheDocument();
     });
 
     it("does not show edit/preview toggle for non-markdown files", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
       
-      expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /edit mode/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /preview/i })).not.toBeInTheDocument();
     });
 
     it("does not show edit/preview toggle when filePath is not provided", () => {
       render(<FileEditor content="some content" onChange={vi.fn()} />);
       
-      expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /edit mode/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /preview/i })).not.toBeInTheDocument();
     });
 
@@ -123,7 +127,7 @@ describe("FileEditor", () => {
       fireEvent.click(previewButton);
       
       // Then switch back to edit
-      const editButton = screen.getByRole("button", { name: /edit/i });
+      const editButton = screen.getByRole("button", { name: /edit mode/i });
       fireEvent.click(editButton);
       
       // Textarea should be visible again
@@ -146,7 +150,7 @@ describe("FileEditor", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" readOnly />);
       
       // Edit button should not be visible
-      expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /edit mode/i })).not.toBeInTheDocument();
       // Preview button should still be visible
       expect(screen.getByRole("button", { name: /preview/i })).toBeInTheDocument();
     });
@@ -173,7 +177,7 @@ describe("FileEditor", () => {
     it("edit button is disabled when already in edit mode", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" />);
       
-      const editButton = screen.getByRole("button", { name: /edit/i });
+      const editButton = screen.getByRole("button", { name: /edit mode/i });
       // Edit button should be disabled in edit mode
       expect(editButton).toBeDisabled();
     });
@@ -182,63 +186,69 @@ describe("FileEditor", () => {
   describe("word wrap toggle", () => {
     it("shows word wrap toggle button for markdown files in edit mode", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" />);
-      
+
+      expandEditorOptions();
       expect(screen.getByRole("button", { name: /toggle word wrap/i })).toBeInTheDocument();
     });
 
     it("shows word wrap toggle button for non-markdown files", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
-      
+
+      expandEditorOptions();
       expect(screen.getByRole("button", { name: /toggle word wrap/i })).toBeInTheDocument();
     });
 
     it("does not show word wrap toggle button in readOnly mode", () => {
       render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" readOnly />);
-      
+
       expect(screen.queryByRole("button", { name: /toggle word wrap/i })).not.toBeInTheDocument();
     });
 
     it("word wrap is enabled by default", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
-      
+
       const textarea = screen.getByRole("textbox");
       expect(textarea.classList.contains("file-editor-textarea--wrap")).toBe(true);
     });
 
     it("toggle button shows active state when word wrap is enabled", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
-      
+
+      expandEditorOptions();
       const wrapButton = screen.getByRole("button", { name: /toggle word wrap/i });
       expect(wrapButton.classList.contains("btn-primary")).toBe(true);
     });
 
     it("clicking toggle button disables word wrap", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
-      
+
+      expandEditorOptions();
       const wrapButton = screen.getByRole("button", { name: /toggle word wrap/i });
       fireEvent.click(wrapButton);
-      
+
       const textarea = screen.getByRole("textbox");
       expect(textarea.classList.contains("file-editor-textarea--wrap")).toBe(false);
     });
 
     it("clicking toggle button again re-enables word wrap", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
-      
+
+      expandEditorOptions();
       const wrapButton = screen.getByRole("button", { name: /toggle word wrap/i });
-      fireEvent.click(wrapButton); // turn off
-      fireEvent.click(wrapButton); // turn on
-      
+      fireEvent.click(wrapButton);
+      fireEvent.click(wrapButton);
+
       const textarea = screen.getByRole("textbox");
       expect(textarea.classList.contains("file-editor-textarea--wrap")).toBe(true);
     });
 
     it("toggle button loses active state when word wrap is disabled", () => {
       render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" />);
-      
+
+      expandEditorOptions();
       const wrapButton = screen.getByRole("button", { name: /toggle word wrap/i });
       fireEvent.click(wrapButton);
-      
+
       expect(wrapButton.classList.contains("btn-primary")).toBe(false);
     });
   });
@@ -255,6 +265,7 @@ describe("FileEditor", () => {
         />,
       );
 
+      expandEditorOptions();
       expect(screen.getByRole("button", { name: /toggle line numbers/i })).toHaveAttribute("aria-pressed", "false");
       expect(screen.getByRole("button", { name: /toggle line numbers/i })).toHaveAttribute("title", "Toggle line numbers");
     });
@@ -276,6 +287,7 @@ describe("FileEditor", () => {
         />,
       );
 
+      expandEditorOptions();
       fireEvent.click(screen.getByRole("button", { name: /toggle line numbers/i }));
       expect(onToggleLineNumbers).toHaveBeenCalledTimes(1);
     });
@@ -324,6 +336,7 @@ describe("FileEditor", () => {
         />,
       );
 
+      expandEditorOptions();
       fireEvent.click(screen.getByRole("button", { name: /preview mode/i }));
       expect(document.querySelector(".file-editor-line-numbers")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /toggle line numbers/i })).not.toBeInTheDocument();
@@ -342,6 +355,46 @@ describe("FileEditor", () => {
       );
 
       expect(document.querySelector(".file-editor-line-numbers")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("editor toolbar options collapse", () => {
+    it("secondary actions are collapsed by default for markdown and non-markdown files", () => {
+      const { rerender } = render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" onToggleLineNumbers={vi.fn()} />);
+
+      expect(screen.queryByRole("button", { name: /toggle line numbers/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /toggle word wrap/i })).not.toBeInTheDocument();
+
+      rerender(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" onToggleLineNumbers={vi.fn()} />);
+      expect(screen.queryByRole("button", { name: /toggle line numbers/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /toggle word wrap/i })).not.toBeInTheDocument();
+    });
+
+    it("expanding shows line-number and wrap toggles", () => {
+      render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" onToggleLineNumbers={vi.fn()} />);
+
+      expandEditorOptions();
+      expect(screen.getByRole("button", { name: /toggle line numbers/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /toggle word wrap/i })).toBeInTheDocument();
+    });
+
+    it("collapsing hides the toggles again", () => {
+      render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" onToggleLineNumbers={vi.fn()} />);
+
+      expandEditorOptions();
+      expandEditorOptions();
+      expect(screen.queryByRole("button", { name: /toggle line numbers/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /toggle word wrap/i })).not.toBeInTheDocument();
+    });
+
+    it("aria-expanded reflects state", () => {
+      render(<FileEditor content="const x = 1;" onChange={vi.fn()} filePath="script.ts" onToggleLineNumbers={vi.fn()} />);
+
+      const optionsButton = screen.getByRole("button", { name: /toggle editor options/i });
+      expect(optionsButton).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(optionsButton);
+      expect(optionsButton).toHaveAttribute("aria-expanded", "true");
     });
   });
 

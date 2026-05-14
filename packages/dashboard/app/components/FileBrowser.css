@@ -694,6 +694,13 @@
   flex-wrap: wrap;
 }
 
+.file-editor-toolbar-collapsible {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
 .file-editor-line-numbers-button {
   display: inline-flex;
   align-items: center;

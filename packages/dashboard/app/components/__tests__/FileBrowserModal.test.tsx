@@ -763,6 +763,7 @@ describe("FileBrowserModal", () => {
 
       await clickFileEntry("file1.ts");
 
+      fireEvent.click(screen.getByRole("button", { name: /toggle editor options/i }));
       const toggle = screen.getByRole("button", { name: /toggle line numbers/i });
       expect(toggle).toHaveAttribute("aria-pressed", "false");
 
@@ -786,6 +787,7 @@ describe("FileBrowserModal", () => {
 
       await clickFileEntry("file1.ts");
 
+      fireEvent.click(screen.getByRole("button", { name: /toggle editor options/i }));
       expect(screen.getByRole("button", { name: /toggle line numbers/i })).toHaveAttribute("aria-pressed", "true");
 
       rerender(
@@ -799,6 +801,9 @@ describe("FileBrowserModal", () => {
 
       await clickFileEntry("file1.ts");
 
+      if (!screen.queryByRole("button", { name: /toggle line numbers/i })) {
+        fireEvent.click(screen.getByRole("button", { name: /toggle editor options/i }));
+      }
       expect(screen.getByRole("button", { name: /toggle line numbers/i })).toHaveAttribute("aria-pressed", "false");
     });
 
@@ -823,6 +828,7 @@ describe("FileBrowserModal", () => {
         fireEvent.click(screen.getByText("editable.ts"));
       });
 
+      fireEvent.click(screen.getByRole("button", { name: /toggle editor options/i }));
       fireEvent.click(screen.getByRole("button", { name: /toggle line numbers/i }));
       expect(document.querySelector(".file-editor-line-numbers")).toBeInTheDocument();
 

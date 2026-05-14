@@ -159,7 +159,7 @@ describeIfGit("FN-4424 empty cherry-pick handling (real git)", () => {
     expect((store.moveTask as ReturnType<typeof vi.fn>).mock.calls.some(([, column]) => column === "done")).toBe(true);
     const newShas = git(repo, `git rev-list --reverse ${xSha}..HEAD`).split("\n").filter(Boolean);
     expect(newShas).toHaveLength(1);
-    expect(git(repo, "cat-file -e HEAD:unique.txt && echo present")).toBe("present");
+    expect(git(repo, "git cat-file -e HEAD:unique.txt && echo present")).toBe("present");
     expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.some(([id, msg]) => id === task.id
       && String(msg).includes("Auto-merge skipped 1 empty cherry-pick(s); proceeded with 1 non-empty commit(s)"))).toBe(true);
   }, 20_000);

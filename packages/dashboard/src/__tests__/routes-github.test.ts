@@ -1979,6 +1979,108 @@ describe("GET /tasks/:id/diff", () => {
     });
   });
 
+  it("resolves missing done-task commitSha from run-audit commit events", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kb-dashboard-done-audit-"));
+    try {
+      execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "config", "user.email", "kb-tests@example.com"], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "config", "user.name", "KB Tests"], { stdio: "pipe" });
+      writeFileSync(join(root, "tracked.ts"), "export const value = 1;\n");
+      execFileSync("git", ["-C", root, "add", "tracked.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "commit", "-m", "initial"], { stdio: "pipe" });
+      writeFileSync(join(root, "tracked.ts"), "export const value = 2;\n");
+      execFileSync("git", ["-C", root, "commit", "-am", "update"], { stdio: "pipe" });
+      const mergeSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf-8", stdio: "pipe" }).trim();
+
+      const localStore = createMockStore({
+        getRootDir: vi.fn().mockReturnValue(root),
+        getRunAuditEvents: vi.fn().mockReturnValue([{ mutationType: "commit:create", target: mergeSha }]),
+        getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
+      });
+      (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...FAKE_TASK_DETAIL,
+        id: "FN-001",
+        column: "done",
+        mergeDetails: { filesChanged: 1, insertions: 1, deletions: 1 },
+      });
+
+      const app = express();
+      app.use(express.json());
+      app.use("/api", createApiRoutes(localStore));
+
+      const res = await GET(app, "/api/tasks/FN-001/diff");
+      expect(res.status).toBe(200);
+      expect(res.body.stats.filesChanged).toBe(1);
+      expect(res.body.stats.additions).toBeGreaterThan(0);
+      expect(res.body.stats.deletions).toBeGreaterThan(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves missing done-task commitSha from lineage associations when audit has no sha", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kb-dashboard-done-lineage-"));
+    try {
+      execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "config", "user.email", "kb-tests@example.com"], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "config", "user.name", "KB Tests"], { stdio: "pipe" });
+      writeFileSync(join(root, "tracked.ts"), "export const value = 1;\n");
+      execFileSync("git", ["-C", root, "add", "tracked.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", root, "commit", "-m", "initial"], { stdio: "pipe" });
+      writeFileSync(join(root, "tracked.ts"), "export const value = 3;\n");
+      execFileSync("git", ["-C", root, "commit", "-am", "lineage change"], { stdio: "pipe" });
+      const lineageSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf-8", stdio: "pipe" }).trim();
+
+      const localStore = createMockStore({
+        getRootDir: vi.fn().mockReturnValue(root),
+        getRunAuditEvents: vi.fn().mockReturnValue([]),
+        getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([{ commitSha: lineageSha, authoredAt: new Date().toISOString() }]),
+      });
+      (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...FAKE_TASK_DETAIL,
+        id: "FN-001",
+        lineageId: "lineage-1",
+        column: "done",
+        mergeDetails: { filesChanged: 1, insertions: 1, deletions: 1 },
+      });
+
+      const app = express();
+      app.use(express.json());
+      app.use("/api", createApiRoutes(localStore));
+
+      const res = await GET(app, "/api/tasks/FN-001/diff");
+      expect(res.status).toBe(200);
+      expect(res.body.stats.filesChanged).toBe(1);
+      expect(res.body.stats.additions).toBeGreaterThan(0);
+      expect(res.body.stats.deletions).toBeGreaterThan(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps mergeDetails summary fallback when no done-task commit sha can be resolved", async () => {
+    const localStore = createMockStore({
+      getRunAuditEvents: vi.fn().mockReturnValue([{ mutationType: "commit:create", target: "HEAD" }]),
+      getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
+    });
+    (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      lineageId: "lineage-1",
+      column: "done",
+      mergeDetails: { filesChanged: 3, insertions: 10, deletions: 2 },
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(localStore));
+
+    const res = await GET(app, "/api/tasks/FN-001/diff");
+    expect(res.status).toBe(200);
+    expect(res.body.files).toEqual([]);
+    expect(res.body.stats).toEqual({ filesChanged: 3, additions: 10, deletions: 2 });
+  });
+
   it("uses destination path for rename entries in active-task name-status parsing", async () => {
     const root = mkdtempSync(join(tmpdir(), "kb-dashboard-rename-"));
     try {

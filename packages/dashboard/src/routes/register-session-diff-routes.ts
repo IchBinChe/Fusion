@@ -228,13 +228,20 @@ async function isReachableFromHead(sha: string, rootDir: string): Promise<boolea
 }
 
 type DoneTaskAggregationTask = {
+  id: string;
   lineageId?: string | null;
-  mergeDetails?: { commitSha?: string } | null;
+  mergeDetails?: { commitSha?: string; filesChanged?: number; insertions?: number; deletions?: number } | null;
 };
 
 type DoneTaskAggregationStore = {
   getRootDir: () => string;
   getTaskCommitAssociationsByLineageId: (lineageId: string) => Promise<Array<{ commitSha: string; authoredAt?: string | null }>>;
+  getRunAuditEvents?: (filter: {
+    taskId?: string;
+    domain?: string;
+    mutationType?: string;
+    limit?: number;
+  }) => Array<{ target?: unknown; metadata?: unknown; payload?: unknown; newValue?: unknown }> | Promise<Array<{ target?: unknown; metadata?: unknown; payload?: unknown; newValue?: unknown }>>;
 };
 
 async function resolveCommitDiffSpec(sha: string, rootDir: string): Promise<
@@ -303,6 +310,64 @@ async function collectDoneRangeFiles(range: string, rootDir: string): Promise<Ag
   }
 
   return files;
+}
+
+function extractCommitShaCandidate(event: { target?: unknown; metadata?: unknown; payload?: unknown; newValue?: unknown }): string | undefined {
+  if (typeof event.target === "string" && event.target.trim()) {
+    return event.target.trim();
+  }
+
+  const candidateObjects = [event.metadata, event.payload, event.newValue].filter((value): value is Record<string, unknown> => !!value && typeof value === "object");
+  for (const candidate of candidateObjects) {
+    const commitSha = candidate.commitSha;
+    if (typeof commitSha === "string" && commitSha.trim()) {
+      return commitSha.trim();
+    }
+  }
+
+  return undefined;
+}
+
+async function resolveAuditCommitSha(taskId: string, scopedStore: DoneTaskAggregationStore): Promise<string | undefined> {
+  if (!scopedStore.getRunAuditEvents) return undefined;
+
+  const rootDir = scopedStore.getRootDir();
+  const mutationTypes = ["git:commit", "commit:create", "commit:amend"];
+  for (const mutationType of mutationTypes) {
+    const events = await Promise.resolve(scopedStore.getRunAuditEvents({ taskId, domain: "git", mutationType, limit: 5 }));
+    for (const event of events) {
+      const candidate = extractCommitShaCandidate(event);
+      if (!candidate) continue;
+      try {
+        const resolved = (await runGitCommand(["rev-parse", "--verify", "--quiet", candidate], rootDir, 5000)).trim();
+        if (resolved && (await isReachableFromHead(resolved, rootDir))) {
+          return resolved;
+        }
+      } catch {
+        // ignore invalid or unreachable candidates
+      }
+    }
+  }
+
+  return undefined;
+}
+
+async function resolveDoneTaskMergeSha(task: DoneTaskAggregationTask, scopedStore: DoneTaskAggregationStore): Promise<string | undefined> {
+  const existing = task.mergeDetails?.commitSha?.trim();
+  if (existing) return existing;
+
+  const auditSha = await resolveAuditCommitSha(task.id, scopedStore);
+  if (auditSha) return auditSha;
+
+  if (!task.lineageId) return undefined;
+  const associations = await scopedStore.getTaskCommitAssociationsByLineageId(task.lineageId);
+  for (const association of associations) {
+    if (association.commitSha && (await isReachableFromHead(association.commitSha, scopedStore.getRootDir()))) {
+      return association.commitSha;
+    }
+  }
+
+  return undefined;
 }
 
 async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: DoneTaskAggregationStore): Promise<{
@@ -530,10 +595,21 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
-      if (task.column === "done" && task.mergeDetails?.commitSha) {
-        const aggregated = await collectDoneTaskFiles(task, scopedStore);
+      if (task.column === "done") {
+        const resolvedMergeSha = await resolveDoneTaskMergeSha(task, scopedStore);
+        const doneTaskForDiff = resolvedMergeSha
+          ? {
+              ...task,
+              mergeDetails: {
+                ...task.mergeDetails,
+                commitSha: resolvedMergeSha,
+              },
+            }
+          : task;
+
+        const aggregated = await collectDoneTaskFiles(doneTaskForDiff, scopedStore);
         const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
-        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.files.length >= expectedFilesChanged;
+        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged === expectedFilesChanged;
 
         if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json({
@@ -546,8 +622,32 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
           return;
         }
 
+        if (aggregated.usedAggregation && aggregated.files.length > 0) {
+          res.json({
+            files: aggregated.files.map((file) => ({
+              ...file,
+              status: file.status === "renamed" ? "modified" : file.status,
+            })),
+            stats: aggregated.stats,
+          });
+          return;
+        }
+
+        if (!resolvedMergeSha) {
+          const md = task.mergeDetails;
+          res.json({
+            files: [],
+            stats: {
+              filesChanged: md?.filesChanged ?? 0,
+              additions: md?.insertions ?? 0,
+              deletions: md?.deletions ?? 0,
+            },
+          });
+          return;
+        }
+
         const rootDir = scopedStore.getRootDir();
-        const sha = task.mergeDetails.commitSha;
+        const sha = resolvedMergeSha;
 
         let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>>;
         try {
@@ -590,18 +690,6 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
-      if (task.column === "done") {
-        const md = task.mergeDetails;
-        res.json({
-          files: [],
-          stats: {
-            filesChanged: md?.filesChanged ?? 0,
-            additions: md?.insertions ?? 0,
-            deletions: md?.deletions ?? 0,
-          },
-        });
-        return;
-      }
 
       const worktree = typeof req.query.worktree === "string" ? req.query.worktree : undefined;
       const resolvedWorktree = worktree || task.worktree;
@@ -728,18 +816,39 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
-      if (task.column === "done" && task.mergeDetails?.commitSha) {
-        const aggregated = await collectDoneTaskFiles(task, scopedStore);
+      if (task.column === "done") {
+        const resolvedMergeSha = await resolveDoneTaskMergeSha(task, scopedStore);
+        const doneTaskForDiff = resolvedMergeSha
+          ? {
+              ...task,
+              mergeDetails: {
+                ...task.mergeDetails,
+                commitSha: resolvedMergeSha,
+              },
+            }
+          : task;
+
+        const aggregated = await collectDoneTaskFiles(doneTaskForDiff, scopedStore);
         const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
-        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.files.length >= expectedFilesChanged;
+        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.stats.filesChanged === expectedFilesChanged;
 
         if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
           return;
         }
 
+        if (aggregated.usedAggregation && aggregated.files.length > 0) {
+          res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
+          return;
+        }
+
+        if (!resolvedMergeSha) {
+          res.json([]);
+          return;
+        }
+
         const rootDir = scopedStore.getRootDir();
-        const sha = task.mergeDetails.commitSha;
+        const sha = resolvedMergeSha;
 
         let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>>;
 
@@ -759,10 +868,6 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
-      if (task.column === "done") {
-        res.json([]);
-        return;
-      }
 
       if (!task.worktree) {
         const fallbackFiles = await tryBranchRefFallbackFileDiffs(task, scopedStore.getRootDir());
@@ -820,13 +925,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         try {
           const committedOutput = (await runGitCommand(["diff", "--name-status", `${diffBase}..HEAD`], cwd, 5000)).trim();
           for (const line of committedOutput.split("\n").filter(Boolean)) {
-            const parts = line.split("\t");
-            const statusCode = parts[0] ?? "M";
-            if (statusCode.startsWith("R")) {
-              fileMap.set(parts[2] ?? parts[1] ?? "", { statusCode, oldPath: parts[1] });
-            } else {
-              fileMap.set(parts[1] ?? "", { statusCode });
-            }
+            const parsed = parseNameStatusLine(line);
+            if (!parsed) continue;
+            fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
           }
         } catch {
           // continue with working-tree-only changes
@@ -836,16 +937,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       try {
         const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status"], cwd, 5000)).trim();
         for (const line of stagedOutput.split("\n").filter(Boolean)) {
-          const parts = line.split("\t");
-          const statusCode = parts[0] ?? "M";
-          const filePath = parts[1] ?? "";
-          if (filePath && !fileMap.has(filePath)) {
-            if (statusCode.startsWith("R")) {
-              fileMap.set(filePath, { statusCode, oldPath: parts[2] });
-            } else {
-              fileMap.set(filePath, { statusCode });
-            }
-          }
+          const parsed = parseNameStatusLine(line);
+          if (!parsed || fileMap.has(parsed.path)) continue;
+          fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
         }
       } catch {
         // ignore staged diff failures
@@ -854,16 +948,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       try {
         const workingTreeOutput = (await runGitCommand(["diff", "--name-status"], cwd, 5000)).trim();
         for (const line of workingTreeOutput.split("\n").filter(Boolean)) {
-          const parts = line.split("\t");
-          const statusCode = parts[0] ?? "M";
-          const filePath = parts[1] ?? "";
-          if (filePath && !fileMap.has(filePath)) {
-            if (statusCode.startsWith("R")) {
-              fileMap.set(filePath, { statusCode, oldPath: parts[2] });
-            } else {
-              fileMap.set(filePath, { statusCode });
-            }
-          }
+          const parsed = parseNameStatusLine(line);
+          if (!parsed || fileMap.has(parsed.path)) continue;
+          fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
         }
       } catch {
         // ignore unstaged diff failures

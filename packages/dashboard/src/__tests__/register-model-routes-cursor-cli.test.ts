@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    access: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue('{"anthropic":{},"openai":{},"cursor-cli":{}}'),
+  };
+});
 import type { Router } from "express";
 import { registerModelRoutes } from "../routes/register-model-routes.js";
 

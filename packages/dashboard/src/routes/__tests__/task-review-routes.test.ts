@@ -17,6 +17,7 @@ function createMockStore(): TaskStore {
       dependencies: [],
       steps: [],
       currentStep: 0,
+      reviewState: { source: "reviewer-agent", items: [], addressing: [] },
       log: [],
       createdAt: now,
       updatedAt: now,
@@ -51,16 +52,17 @@ describe("task review routes", () => {
 
     const res = await REQUEST(buildApp(store), "GET", "/api/tasks/FN-001/review");
     expect(res.status).toBe(200);
-    expect(res.body.reviewState.source).toBe("reviewer-agent");
-    expect(res.body.reviewState.items[0].reviewType).toBe("code");
+    expect(res.body.mode).toBe("reviewer-agent");
+    expect(res.body.items[0].reviewState).toBe("REVISE");
   });
 
   it("returns exact empty payload/message when no feedback exists", async () => {
     const store = createMockStore();
     const res = await REQUEST(buildApp(store), "GET", "/api/tasks/FN-001/review");
     expect(res.status).toBe(200);
-    expect(res.body.reviewState.items).toEqual([]);
-    expect(res.body.emptyMessage).toBe("No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.");
+    expect(res.body.mode).toBe("reviewer-agent");
+    expect(res.body.summary).toBeNull();
+    expect(res.body.items).toEqual([]);
   });
 
   it("falls back to task-log summary when reviewer output is incomplete", async () => {
@@ -75,7 +77,7 @@ describe("task review routes", () => {
 
     const res = await REQUEST(buildApp(store), "GET", "/api/tasks/FN-001/review");
     expect(res.status).toBe(200);
-    expect(res.body.reviewState.items[0].summary).toBe("plan review Step 1: APPROVE");
-    expect(res.body.reviewState.items[0].step).toBe(1);
+    expect(res.body.items[0].title).toContain("plan review APPROVE");
+    expect(res.body.items[0].itemId).toContain("step-1");
   });
 });

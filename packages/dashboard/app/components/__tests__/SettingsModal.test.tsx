@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ComponentProps } from "react";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { EditorView } from "@codemirror/view";
 import { SettingsModal } from "../SettingsModal";
 import { __test_clearCache as clearPluginUiSlotsCache } from "../../hooks/usePluginUiSlots";
 import type { PluginUiContributionEntry, SettingsExportData, UpdateCheckResponse } from "../../api";
@@ -2176,6 +2177,15 @@ describe("SettingsModal", () => {
       expect(addToast).toHaveBeenCalledWith("qmd installed successfully", "success");
     });
 
+    const getMemoryEditorView = (path: string) => {
+      const host = screen.getByLabelText(`Editor for ${path}`);
+      const root = host.querySelector(".cm-editor") as HTMLElement | null;
+      if (!root) throw new Error(`Expected CodeMirror root for ${path}`);
+      const view = EditorView.findFromDOM(root);
+      if (!view) throw new Error(`Expected EditorView for ${path}`);
+      return view;
+    };
+
     it("loads and shows memory editor content when navigating to Memory", async () => {
       renderModal();
 
@@ -2192,8 +2202,8 @@ describe("SettingsModal", () => {
         expect(mockFetchMemoryFile).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
       });
 
-      const editor = await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md") as HTMLTextAreaElement;
-      expect(editor.value).toContain("Existing dreams");
+      await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md");
+      expect(getMemoryEditorView(".fusion/memory/DREAMS.md").state.doc.toString()).toContain("Existing dreams");
     });
 
     it("shows loading state while memory is being fetched", async () => {
@@ -2238,8 +2248,9 @@ describe("SettingsModal", () => {
       const select = await screen.findByLabelText("Memory File");
       await userEvent.selectOptions(select, ".fusion/memory/MEMORY.md");
 
-      const editor = await screen.findByLabelText("Editor for .fusion/memory/MEMORY.md");
-      fireEvent.change(editor, { target: { value: "# Updated memory\n- Reusable learning" } });
+      await screen.findByLabelText("Editor for .fusion/memory/MEMORY.md");
+      const view = getMemoryEditorView(".fusion/memory/MEMORY.md");
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "# Updated memory\n- Reusable learning" } });
 
       const saveButton = await screen.findByRole("button", { name: "Save Memory" });
       await userEvent.click(saveButton);
@@ -2271,8 +2282,8 @@ describe("SettingsModal", () => {
         expect(mockCompactMemory).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
       });
 
-      const editor = await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md") as HTMLTextAreaElement;
-      expect(editor.value).toContain("Compacted Memory");
+      await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md");
+      expect(getMemoryEditorView(".fusion/memory/DREAMS.md").state.doc.toString()).toContain("Compacted Memory");
       expect(addToast).toHaveBeenCalledWith("Memory file compacted", "success");
     });
 
@@ -2286,8 +2297,8 @@ describe("SettingsModal", () => {
 
       await userEvent.click(await screen.findByText("Memory"));
 
-      const editor = await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md") as HTMLTextAreaElement;
-      expect(editor.value).toBe("");
+      await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md");
+      expect(getMemoryEditorView(".fusion/memory/DREAMS.md").state.doc.toString()).toBe("");
     });
 
     it("switches between memory files in the editor", async () => {
@@ -2313,8 +2324,8 @@ describe("SettingsModal", () => {
         expect(mockFetchMemoryFile).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
       });
 
-      const editor = await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md") as HTMLTextAreaElement;
-      expect(editor.value).toContain("Dreams");
+      await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md");
+      expect(getMemoryEditorView(".fusion/memory/DREAMS.md").state.doc.toString()).toContain("Dreams");
     });
   });
 

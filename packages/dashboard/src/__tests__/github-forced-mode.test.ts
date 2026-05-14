@@ -7,17 +7,19 @@ vi.mock("@fusion/core", async () => {
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
     runGh: vi.fn(),
+    runGhAsync: vi.fn(),
     runGhJsonAsync: vi.fn(),
     getGhErrorMessage: vi.fn((error) => error instanceof Error ? error.message : String(error)),
   };
 });
 
-import { getGhErrorMessage, isGhAuthenticated, isGhAvailable, runGh, runGhJsonAsync } from "@fusion/core";
+import { getGhErrorMessage, isGhAuthenticated, isGhAvailable, runGh, runGhAsync, runGhJsonAsync } from "@fusion/core";
 import { GitHubClient } from "../github.js";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
 const mockRunGh = vi.mocked(runGh);
+const mockRunGhAsync = vi.mocked(runGhAsync);
 const mockRunGhJsonAsync = vi.mocked(runGhJsonAsync);
 const mockGetGhErrorMessage = vi.mocked(getGhErrorMessage);
 
@@ -56,6 +58,7 @@ describe("GitHubClient forced mode", () => {
   });
 
   it("forced gh-cli mode uses only gh path", async () => {
+    mockRunGhAsync.mockResolvedValue("https://github.com/o/r/issues/2");
     mockRunGhJsonAsync.mockResolvedValue({ url: "https://github.com/o/r/issues/2", number: 2, createdAt: "2026-01-02T00:00:00.000Z" } as never);
     const fetchSpy = vi.spyOn(global, "fetch" as never).mockImplementation(() => {
       throw new Error("fetch should not run");

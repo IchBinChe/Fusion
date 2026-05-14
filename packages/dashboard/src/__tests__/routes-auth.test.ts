@@ -53,6 +53,24 @@ const { mockPerformUpdateCheck, mockClearUpdateCheckCache, mockExecSync, mockExe
   mockExecFile: vi.fn(),
 }));
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    access: vi.fn(async (path: actual.PathLike) => {
+      const value = String(path);
+      if (value.endsWith("auth.json") || value.endsWith("models.json")) return;
+      return actual.access(path);
+    }),
+    readFile: vi.fn(async (path: actual.PathLike, options?: Parameters<typeof actual.readFile>[1]) => {
+      const value = String(path);
+      if (value.endsWith("auth.json")) return '{"anthropic":{},"openai":{},"cursor-cli":{}}';
+      if (value.endsWith("models.json")) return '{"providers":{"anthropic":{"apiKey":"x"},"openai":{"apiKey":"x"},"cursor-cli":{"apiKey":"x"}}}';
+      return actual.readFile(path, options as never);
+    }),
+  };
+});
+
 vi.mock("../update-check.js", async () => {
   const actual = await vi.importActual<typeof import("../update-check.js")>("../update-check.js");
   return {

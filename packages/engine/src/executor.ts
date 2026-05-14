@@ -2813,6 +2813,13 @@ export class TaskExecutor {
             return;
           }
           if (this.pausedAborted.has(task.id)) {
+            if (this.userCanceledTaskIds.has(task.id)) {
+              this.pausedAborted.delete(task.id);
+              this.stuckAborted.delete(task.id);
+              this.userCanceledTaskIds.delete(task.id);
+              await this.store.logEntry(task.id, "Execution canceled by user — leaving task in todo");
+              return;
+            }
             this.pausedAborted.delete(task.id);
             await this.store.logEntry(task.id, "Execution paused — step sessions terminated, moved to todo", undefined, this.currentRunContext);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
@@ -3021,6 +3028,13 @@ export class TaskExecutor {
             this.depAborted.delete(task.id);
             await this.handleDepAbortCleanup(task.id, worktreePath);
           } else if (this.pausedAborted.has(task.id)) {
+            if (this.userCanceledTaskIds.has(task.id)) {
+              this.pausedAborted.delete(task.id);
+              this.stuckAborted.delete(task.id);
+              this.userCanceledTaskIds.delete(task.id);
+              await this.store.logEntry(task.id, "Execution canceled by user — leaving task in todo");
+              return;
+            }
             this.pausedAborted.delete(task.id);
             await this.store.logEntry(task.id, "Execution paused during step-session", undefined, this.currentRunContext);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });

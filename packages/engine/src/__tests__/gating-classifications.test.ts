@@ -74,6 +74,7 @@ describe("gating-classifications parity", () => {
         "fn_memory_append",
         "fn_memory_get",
         "fn_memory_search",
+        "fn_post_room_message",
         "fn_read_evaluations",
         "fn_read_messages",
         "fn_reflect_on_performance",

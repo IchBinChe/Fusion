@@ -380,7 +380,6 @@ export function updateTask(
     executionMode?: "standard" | "fast" | null;
     noCommitsExpected?: boolean;
     priority?: TaskPriority | null;
-    noCommitsExpected?: boolean;
     sourceIssue?: TaskSourceIssue | null;
     nodeId?: string | null;
     branch?: string | null;

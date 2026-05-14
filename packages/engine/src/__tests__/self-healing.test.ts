@@ -3719,6 +3719,115 @@ describe("SelfHealingManager", () => {
     });
   });
 
+  describe("recoverAlreadyMergedReviewTasks — run-audit emission", () => {
+    it("emits task:auto-recover-already-merged when recovery succeeds", async () => {
+      const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+      const storeWithAudit = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false }),
+        listTasks: vi.fn().mockResolvedValue([
+          {
+            id: "FN-audit",
+            column: "in-review",
+            paused: false,
+            status: "failed",
+            mergeRetries: 4,
+            mergeDetails: undefined,
+            baseBranch: "main",
+            branch: "fusion/fn-audit",
+            steps: [],
+            log: [],
+          },
+        ]),
+        recordRunAuditEvent,
+      });
+      const managerWithRecovery = new SelfHealingManager(storeWithAudit, { rootDir: "/tmp/test-project" });
+      vi.spyOn(managerWithRecovery as any, "findAlreadyMergedTaskCommit").mockResolvedValue({ sha: "abc1234def5678", strategy: "trailer" });
+
+      const recovered = await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+
+      expect(recovered).toBe(1);
+      expect(recordRunAuditEvent).toHaveBeenCalledTimes(1);
+      expect(recordRunAuditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          domain: "database",
+          mutationType: "task:auto-recover-already-merged",
+          target: "FN-audit",
+          metadata: expect.objectContaining({
+            mergeSha: "abc1234def5678",
+            mergeStrategy: "trailer",
+            baseBranch: "main",
+            mergeRetries: 4,
+          }),
+        }),
+      );
+
+      managerWithRecovery.stop();
+    });
+
+    it("does not emit when no landed commit is detected", async () => {
+      const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+      const storeWithAudit = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false }),
+        listTasks: vi.fn().mockResolvedValue([
+          {
+            id: "FN-no-hit",
+            column: "in-review",
+            paused: false,
+            status: "failed",
+            mergeRetries: 3,
+            mergeDetails: undefined,
+            baseBranch: "main",
+            branch: "fusion/fn-no-hit",
+            steps: [],
+            log: [],
+          },
+        ]),
+        recordRunAuditEvent,
+      });
+      const managerWithRecovery = new SelfHealingManager(storeWithAudit, { rootDir: "/tmp/test-project" });
+      vi.spyOn(managerWithRecovery as any, "findAlreadyMergedTaskCommit").mockResolvedValue(null);
+
+      const recovered = await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+
+      expect(recovered).toBe(0);
+      expect(recordRunAuditEvent).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
+    it("continues recovery when run-audit persistence throws", async () => {
+      const recordRunAuditEvent = vi.fn().mockRejectedValueOnce(new Error("audit write failed"));
+      const storeWithAudit = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false }),
+        listTasks: vi.fn().mockResolvedValue([
+          {
+            id: "FN-audit-throw",
+            column: "in-review",
+            paused: false,
+            status: "failed",
+            mergeRetries: 5,
+            mergeDetails: undefined,
+            baseBranch: "main",
+            branch: "fusion/fn-audit-throw",
+            steps: [],
+            log: [],
+          },
+        ]),
+        recordRunAuditEvent,
+      });
+      const managerWithRecovery = new SelfHealingManager(storeWithAudit, { rootDir: "/tmp/test-project" });
+      vi.spyOn(managerWithRecovery as any, "findAlreadyMergedTaskCommit").mockResolvedValue({ sha: "def5678abc1234", strategy: "trailer" });
+
+      const recovered = await managerWithRecovery.recoverAlreadyMergedReviewTasks();
+
+      expect(recovered).toBe(1);
+      expect(storeWithAudit.moveTask).toHaveBeenCalledWith("FN-audit-throw", "done");
+      expect(recordRunAuditEvent).toHaveBeenCalledTimes(1);
+
+      managerWithRecovery.stop();
+    });
+  });
+
   describe("recoverReviewTasksWithFailedPreMergeSteps", () => {
     const baseTask = {
       id: "FN-1572",

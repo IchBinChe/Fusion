@@ -75,6 +75,7 @@ function createStore(tasks: TaskMap, settings: Partial<Settings> = {}): TaskStor
     updateSettings: vi.fn(async () => mergedSettings),
     mergeTask: vi.fn(async () => undefined),
     getRootDir: vi.fn(() => ""),
+    recordRunAuditEvent: vi.fn(async () => undefined),
   }) as unknown as TaskStore & EventEmitter;
 
   return store;
@@ -126,6 +127,14 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect(task.mergeDetails?.mergeConfirmed).toBe(true);
     expect(existsSync(worktreePath)).toBe(false);
     expect(git(repo, "git worktree list")).not.toContain(worktreePath);
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledTimes(1);
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: "database",
+        mutationType: "task:auto-recover-already-merged",
+        target: "FN-TEST-1",
+      }),
+    );
   });
 
   it(

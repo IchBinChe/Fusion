@@ -7294,11 +7294,41 @@ export async function aiMergeTask(
             const existingTask = await store.getTask(taskId).catch(() => null);
             const existingDetails = existingTask?.mergeDetails;
             if (existingDetails?.commitSha && existingDetails.commitSha !== postPushSha) {
+              let updatedStats = {
+                filesChanged: existingDetails.filesChanged,
+                insertions: existingDetails.insertions,
+                deletions: existingDetails.deletions,
+              };
+              try {
+                const { stdout: postPushStatsOutput } = await execAsync(
+                  `git show --shortstat --format= ${quoteArg(postPushSha)}`,
+                  { cwd: rootDir, encoding: "utf-8" },
+                );
+                const normalized = postPushStatsOutput.trim().replace(/\n/g, " ");
+                const filesMatch = normalized.match(/(\d+) files? changed/);
+                const insertionsMatch = normalized.match(/(\d+) insertions?\(\+\)/);
+                const deletionsMatch = normalized.match(/(\d+) deletions?\(-\)/);
+                updatedStats = {
+                  filesChanged: filesMatch ? Number.parseInt(filesMatch[1], 10) : 0,
+                  insertions: insertionsMatch ? Number.parseInt(insertionsMatch[1], 10) : 0,
+                  deletions: deletionsMatch ? Number.parseInt(deletionsMatch[1], 10) : 0,
+                };
+              } catch (statsErr: unknown) {
+                const statsErrMessage = statsErr instanceof Error ? statsErr.message : String(statsErr);
+                mergerLog.warn(`${taskId}: post-push SHA refreshed but stat recompute failed: ${statsErrMessage}`);
+              }
+
               await store.updateTask(taskId, {
-                mergeDetails: { ...existingDetails, commitSha: postPushSha },
+                mergeDetails: {
+                  ...existingDetails,
+                  commitSha: postPushSha,
+                  filesChanged: updatedStats.filesChanged,
+                  insertions: updatedStats.insertions,
+                  deletions: updatedStats.deletions,
+                },
               });
               mergerLog.log(
-                `${taskId}: post-push HEAD changed from ${existingDetails.commitSha.slice(0, 8)} to ${postPushSha.slice(0, 8)} — refreshed mergeDetails.commitSha`,
+                `${taskId}: post-push HEAD changed from ${existingDetails.commitSha.slice(0, 8)} to ${postPushSha.slice(0, 8)} — refreshed mergeDetails.commitSha (stats: ${updatedStats.filesChanged ?? 0}f/${updatedStats.insertions ?? 0}i/${updatedStats.deletions ?? 0}d, was ${existingDetails.filesChanged ?? 0}f/${existingDetails.insertions ?? 0}i/${existingDetails.deletions ?? 0}d)`,
               );
             }
           }

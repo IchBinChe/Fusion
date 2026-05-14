@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { TaskDetail } from "@fusion/core";
+import type { Task } from "@fusion/core";
 import { AutoClaimSnapshotManager, extractDescriptionFirstLine } from "../auto-claim-snapshot.js";
 
-function makeTask(overrides: Partial<TaskDetail> & Pick<TaskDetail, "id">): TaskDetail {
+function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
   return {
     id: overrides.id,
     title: overrides.title ?? null,
@@ -20,7 +20,7 @@ function makeTask(overrides: Partial<TaskDetail> & Pick<TaskDetail, "id">): Task
     checkedOutBy: overrides.checkedOutBy,
     paused: overrides.paused,
     columnMovedAt: overrides.columnMovedAt,
-  } as TaskDetail;
+  } as Task;
 }
 
 describe("AutoClaimSnapshotManager", () => {
@@ -85,6 +85,22 @@ describe("AutoClaimSnapshotManager", () => {
     const snapshot = await manager.getSnapshot();
 
     expect(snapshot.tasks.map((t) => t.id)).toEqual(["FN-1", "FN-2", "FN-3"]);
+  });
+
+  it("caps candidate set to 50 and computes capped baseScore", async () => {
+    const tasks = Array.from({ length: 55 }, (_, idx) => makeTask({
+      id: `FN-${idx + 1}`,
+      createdAt: "2025-12-01T00:00:00.000Z",
+    }));
+    const manager = new AutoClaimSnapshotManager({
+      taskStore: { listTasks: vi.fn(async () => tasks) },
+      now: () => Date.parse("2026-01-03T00:00:00.000Z"),
+    });
+
+    const snapshot = await manager.getSnapshot();
+
+    expect(snapshot.tasks).toHaveLength(50);
+    expect(snapshot.tasks[0]?.baseScore).toBe(5);
   });
 
   it("extracts first non-empty description line and caps length", () => {

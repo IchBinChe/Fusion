@@ -1,4 +1,4 @@
-import type { TaskDetail, TaskStore } from "@fusion/core";
+import type { Task, TaskStore } from "@fusion/core";
 import { createLogger, type Logger } from "./logger.js";
 
 /**
@@ -13,7 +13,7 @@ export interface AutoClaimCandidate {
   createdAt: string;
   columnMovedAt?: string;
   baseScore: number;
-  column: TaskDetail["column"];
+  column: Task["column"];
 }
 
 export interface AutoClaimSnapshot {
@@ -37,6 +37,7 @@ export class AutoClaimSnapshotManager {
   private readonly now: () => number;
   private cache: AutoClaimSnapshot | null = null;
   private staleReason: "ttl" | "invalidate" = "ttl";
+  private invalidatedAt = 0;
   private inFlight: Promise<AutoClaimSnapshot> | null = null;
 
   constructor({ taskStore, ttlMs = 30_000, logger = autoClaimSnapshotLog, now = Date.now }: AutoClaimSnapshotManagerOptions) {
@@ -49,6 +50,7 @@ export class AutoClaimSnapshotManager {
   invalidate(reason: string): void {
     this.cache = null;
     this.staleReason = "invalidate";
+    this.invalidatedAt = this.now();
     this.logger.log(`invalidate reason=${reason}`);
   }
 
@@ -61,10 +63,12 @@ export class AutoClaimSnapshotManager {
       return this.inFlight;
     }
 
+    const startedAt = this.now();
     this.inFlight = this.rebuild();
     try {
       const next = await this.inFlight;
-      this.cache = next;
+      const invalidatedDuringRebuild = this.invalidatedAt > startedAt;
+      this.cache = invalidatedDuringRebuild ? null : next;
       return next;
     } finally {
       this.inFlight = null;
@@ -105,7 +109,7 @@ export class AutoClaimSnapshotManager {
     return snapshot;
   }
 
-  private toCandidate(task: TaskDetail, now: number): AutoClaimCandidate {
+  private toCandidate(task: Task, now: number): AutoClaimCandidate {
     const reference = task.columnMovedAt ?? task.createdAt;
     const ageMs = Math.max(0, now - Date.parse(reference));
     const ageHours = ageMs / (1000 * 60 * 60);

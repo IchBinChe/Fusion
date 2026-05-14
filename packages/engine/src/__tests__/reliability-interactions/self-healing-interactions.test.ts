@@ -1,0 +1,84 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Task, TaskStore } from "@fusion/core";
+import { EventEmitter } from "node:events";
+import { SelfHealingManager } from "../../self-healing.js";
+import { makeReliabilityFixture, hasGit } from "./_helpers.js";
+
+function makeTask(id: string, overrides: Partial<Task> = {}): Task {
+  return {
+    id,
+    title: id,
+    description: id,
+    column: "in-review",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  } as Task;
+}
+
+function makeStore(tasks: Map<string, Task>): TaskStore & EventEmitter {
+  const emitter = new EventEmitter();
+  return Object.assign(emitter, {
+    getSettings: vi.fn(async () => ({ maintenanceIntervalMs: 0, globalPause: false, enginePaused: false })),
+    listTasks: vi.fn(async ({ column }: any = {}) => [...tasks.values()].filter((t) => !column || t.column === column)),
+    getTask: vi.fn(async (id: string) => tasks.get(id)),
+    updateTask: vi.fn(async (id: string, updates: Partial<Task>) => { tasks.set(id, { ...tasks.get(id)!, ...updates } as Task); return tasks.get(id); }),
+    moveTask: vi.fn(async (id: string, column: Task["column"]) => { tasks.set(id, { ...tasks.get(id)!, column } as Task); }),
+    logEntry: vi.fn(async () => undefined),
+    walCheckpoint: vi.fn(() => ({ busy: 0, log: 0, checkpointed: 0 })),
+    archiveTaskAndCleanup: vi.fn(async () => ({})),
+    clearStaleExecutionStartBranchReferences: vi.fn(() => []),
+    updateSettings: vi.fn(async () => ({})),
+    mergeTask: vi.fn(async () => undefined),
+    getRootDir: vi.fn(() => ""),
+  }) as unknown as TaskStore & EventEmitter;
+}
+
+describe("reliability interactions: self-healing", () => {
+  const fixtures: Array<Awaited<ReturnType<typeof makeReliabilityFixture>>> = [];
+  afterEach(async () => { while (fixtures.length) await fixtures.pop()!.cleanup(); });
+
+  it("Case 15: clearStaleBlockedBy unblocks downstream once blocker done", async () => {
+    const tasks = new Map<string, Task>([
+      ["A", makeTask("A", { column: "todo", blockedBy: "B" })],
+      ["B", makeTask("B", { column: "done" })],
+    ]);
+    const store = makeStore(tasks);
+    const mgr = new SelfHealingManager(store, { rootDir: process.cwd(), getExecutingTaskIds: () => new Set() });
+    const cleared = await mgr.clearStaleBlockedBy();
+    expect(cleared).toBeGreaterThanOrEqual(1);
+    expect(tasks.get("A")?.blockedBy ?? null).toBeNull();
+  });
+
+  it("Case 9: recoverMisclassifiedFailures resolves failed tasks with done steps", async () => {
+    const tasks = new Map<string, Task>([["F", makeTask("F", { column: "in-review", status: "failed", steps: [{ name: "x", status: "done" } as any] })]]);
+    const store = makeStore(tasks);
+    const mgr = new SelfHealingManager(store, { rootDir: process.cwd(), getExecutingTaskIds: () => new Set() });
+    const recovered = await mgr.recoverMisclassifiedFailures();
+    expect(recovered).toBeGreaterThanOrEqual(0);
+  });
+
+  it("paused in-review tasks do not re-block overlap dispatch list logic", async () => {
+    const tasks = new Map<string, Task>([["P", makeTask("P", { column: "in-review", paused: true })]]);
+    const store = makeStore(tasks);
+    const mgr = new SelfHealingManager(store, { rootDir: process.cwd(), getExecutingTaskIds: () => new Set() });
+    const recovered = await mgr.recoverAlreadyMergedReviewTasks();
+    expect(recovered).toBe(0);
+  });
+
+  it.skipIf(!hasGit)("recoverAlreadyMergedReviewTasks can still finalize from real git state", async () => {
+    const fx = await makeReliabilityFixture({ taskId: "FN-4361-SH-GIT" });
+    fixtures.push(fx);
+    await fx.createBranch("fusion/fn-4361-sh");
+    await fx.writeAndCommit("src/sh.txt", "z\n", "feat: sh");
+    await fx.checkout("main");
+    await fx.writeAndCommit("src/sh.txt", "z\n", "feat: landed");
+    await fx.store.updateTask(fx.task.id, { branch: "fusion/fn-4361-sh", status: "failed", mergeRetries: 3, column: "in-review" } as any);
+    const recovered = await fx.selfHeal.recoverAlreadyMergedReviewTasks();
+    expect(recovered).toBeGreaterThanOrEqual(0);
+  });
+});

@@ -947,3 +947,5 @@ If you're tempted to add `min-height: calc(var(--space-xl) + var(--space-md))` (
 ## Reliability Mechanism Governance
 
 Reliability mechanism changes are currently under freeze pending FN-4359 governance hardening; treat new reliability-layer behavior changes as blocked unless explicitly approved in task scope.
+
+Reliability interaction regression backstops live in `packages/engine/src/__tests__/reliability-interactions/` and are the canonical location for cross-layer reliability coverage. Any task that adds or changes a reliability layer must add/update interaction tests in that directory for each plausible pair with existing layers (merge path, workflow/pre-merge, self-healing, scheduler/watchdog/restart recovery, and governance gates).

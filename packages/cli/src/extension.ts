@@ -21,6 +21,7 @@ import {
   formatRoleMismatchReason,
   resolveAgentProvisioningPolicy,
   TASK_PRIORITIES,
+  type ExperimentSessionStore,
 } from "@fusion/core";
 import {
   getGhErrorMessage,
@@ -28,7 +29,18 @@ import {
   isGhAvailable,
   runGhJsonAsync,
 } from "@fusion/core/gh-cli";
-import { fetchWebContent } from "@fusion/engine";
+import {
+  defaultGitOps,
+  ExperimentFinalizeBranchExistsError,
+  ExperimentFinalizeCherryPickConflictError,
+  ExperimentFinalizeMergeBaseError,
+  ExperimentFinalizeNoKeptRunsError,
+  ExperimentFinalizePlanError,
+  ExperimentFinalizeService,
+  ExperimentFinalizeStateError,
+  type FinalizePlanOverride,
+  fetchWebContent,
+} from "@fusion/engine";
 import { resolve, basename, extname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -1722,6 +1734,83 @@ export default function kbExtension(pi: ExtensionAPI) {
         content: [{ type: "text", text: `Created retry run ${retryRun.id} from ${params.id}.` }],
         details: toResearchRunDetails(retryRun),
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "fn_experiment_finalize",
+    label: "fn: Finalize Experiment Session",
+    description: "Group kept experiment runs into reviewable branches and finalize the session. Use dryRun=true to preview the plan without touching git.",
+    parameters: Type.Object({
+      sessionId: Type.String({ description: "Experiment session ID" }),
+      integrationBranch: Type.Optional(Type.String({ description: "Integration branch to compute merge-base against (default: main)" })),
+      dryRun: Type.Optional(Type.Boolean({ description: "Preview plan only; do not create branches" })),
+      planOverride: Type.Optional(Type.Any({ description: "Optional plan override payload" })),
+      summary: Type.Optional(Type.String({ description: "Optional finalize summary" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      try {
+        const store = await getStore(ctx.cwd);
+        const sessionStore = (store as { getExperimentSessionStore?: () => ExperimentSessionStore }).getExperimentSessionStore?.();
+        if (!sessionStore) {
+          return {
+            content: [{ type: "text", text: "Experiment session store is unavailable in this project." }],
+            isError: true,
+            details: { code: "STORE_UNAVAILABLE" },
+          };
+        }
+        const service = new ExperimentFinalizeService({
+          store: sessionStore,
+          git: defaultGitOps(resolveProjectRoot(ctx.cwd)),
+        });
+
+        if (params.dryRun) {
+          const plan = await service.previewPlan({
+            sessionId: params.sessionId,
+            integrationBranch: params.integrationBranch,
+          });
+          return {
+            content: [{ type: "text", text: `Finalize plan for ${plan.sessionId}: ${plan.groups.length} group(s), merge-base ${plan.mergeBaseCommit}.` }],
+            details: { plan },
+          };
+        }
+
+        const result = await service.finalize({
+          sessionId: params.sessionId,
+          integrationBranch: params.integrationBranch,
+          planOverride: params.planOverride as FinalizePlanOverride | undefined,
+          summary: params.summary,
+        });
+        return {
+          content: [{ type: "text", text: `Finalized ${result.sessionId}. Created ${result.branches.length} branch(es).` }],
+          details: { result },
+        };
+      } catch (error) {
+        if (
+          error instanceof ExperimentFinalizeStateError
+          || error instanceof ExperimentFinalizeNoKeptRunsError
+          || error instanceof ExperimentFinalizePlanError
+          || error instanceof ExperimentFinalizeMergeBaseError
+          || error instanceof ExperimentFinalizeBranchExistsError
+          || error instanceof ExperimentFinalizeCherryPickConflictError
+        ) {
+          return {
+            content: [{ type: "text", text: error.message }],
+            isError: true,
+            details: {
+              code: error.code,
+              ...(error instanceof ExperimentFinalizeCherryPickConflictError
+                ? { groupId: error.groupId, commit: error.commit, stderr: error.stderr }
+                : {}),
+            },
+          };
+        }
+        return {
+          content: [{ type: "text", text: error instanceof Error ? error.message : "Unknown experiment finalize error" }],
+          isError: true,
+          details: { code: "INTERNAL_ERROR" },
+        };
+      }
     },
   });
 

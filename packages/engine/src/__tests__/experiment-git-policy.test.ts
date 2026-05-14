@@ -53,6 +53,13 @@ function createGitMock(): GitOps {
     stashPush: vi.fn(),
     stashPop: vi.fn(),
     statusPorcelain: vi.fn(),
+    mergeBase: vi.fn(),
+    branchExists: vi.fn(),
+    createBranch: vi.fn(),
+    cherryPick: vi.fn(),
+    checkout: vi.fn(),
+    currentBranch: vi.fn(),
+    deleteBranch: vi.fn(),
   };
 }
 

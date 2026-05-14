@@ -35,6 +35,7 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_research_get` | Cited-research pipeline: get one run with structured findings and citations (not experiment-loop state). |
 | `fn_research_cancel` | Cited-research pipeline: cancel an in-flight run; terminal runs return INVALID_TRANSITION (does not control experiment loops). |
 | `fn_research_retry` | Cited-research pipeline: retry a failed run when lifecycle marks it retryable (not an autonomous experiment loop retry). |
+| `fn_experiment_finalize` | Group kept experiment runs into reviewable branches and finalize the session. Use dryRun=true to preview the plan without touching git. |
 | `fn_insight_list` | List persisted project insights with optional category/status filters. |
 | `fn_insight_show` | Show a single persisted insight by ID. |
 | `fn_insight_run_list` | List recent insight-generation runs with optional status/trigger filters. |

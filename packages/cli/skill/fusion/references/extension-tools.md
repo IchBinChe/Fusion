@@ -448,6 +448,18 @@ Cited-research pipeline: retry a failed run when lifecycle marks it retryable (n
 |-----------|------|----------|-------------|
 | `id` | string | ✓ | Research run ID |
 
+### fn_experiment_finalize
+
+Group kept experiment runs into reviewable branches and finalize the session. Use dryRun=true to preview the plan without touching git.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | string | ✓ | Experiment session ID |
+| `integrationBranch` | string | — | Integration branch to compute merge-base against (default: main) |
+| `dryRun` | boolean | — | Preview plan only; do not create branches |
+| `planOverride` | unknown | — | Optional plan override payload |
+| `summary` | string | — | Optional finalize summary |
+
 <!-- END: extension-tools -->
 ## Dashboard Command
 

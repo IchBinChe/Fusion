@@ -139,6 +139,7 @@ async function loadCommandHandlers() {
   const { runPluginCreate } = await import("./commands/plugin-scaffold.js");
   const { runSkillsSearch, runSkillsInstall } = await import("./commands/skills.js");
   const { runResearchCreate, runResearchList, runResearchShow, runResearchExport, runResearchCancel, runResearchRetry } = await import("./commands/research.js");
+  const { runExperimentFinalize } = await import("./commands/experiment-finalize.js");
   const { runUpdate } = await import("./commands/update.js");
 
   return {
@@ -235,6 +236,7 @@ async function loadCommandHandlers() {
     runResearchExport,
     runResearchCancel,
     runResearchRetry,
+    runExperimentFinalize,
     runUpdate,
     runChatInteractive,
   };
@@ -605,6 +607,7 @@ async function main() {
     runResearchExport,
     runResearchCancel,
     runResearchRetry,
+    runExperimentFinalize,
     runUpdate,
     runChatInteractive,
   } = await loadCommandHandlers();
@@ -911,6 +914,34 @@ async function main() {
           default:
             console.error(`Unknown subcommand: research ${subcommand || ""}`);
             console.log("Try: fn research create | list | show | export | cancel | retry");
+            process.exit(1);
+        }
+        break;
+      }
+
+      case "experiment": {
+        const subcommand = args[1];
+        switch (subcommand) {
+          case "finalize": {
+            const sessionId = args[2];
+            if (!sessionId) {
+              console.error("Usage: fn experiment finalize <sessionId> [--integration-branch <name>] [--dry-run] [--json] [--summary <text>] [--plan-file <path>]");
+              process.exit(1);
+            }
+            await runExperimentFinalize({
+              sessionId,
+              integrationBranch: getFlagValue(args, "--integration-branch") ?? "main",
+              dryRun: args.includes("--dry-run"),
+              json: args.includes("--json"),
+              summary: getFlagValue(args, "--summary"),
+              planFile: getFlagValue(args, "--plan-file"),
+              projectName,
+            });
+            break;
+          }
+          default:
+            console.error(`Unknown subcommand: experiment ${subcommand || ""}`);
+            console.log("Try: fn experiment finalize <session-id>");
             process.exit(1);
         }
         break;

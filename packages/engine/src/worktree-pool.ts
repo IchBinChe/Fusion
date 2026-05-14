@@ -264,6 +264,7 @@ export class WorktreePool {
         branchName,
         conflictingWorktreePath: conflictingPath,
         requestingTaskId: options?.requestingTaskId ?? taskId,
+        ownerTaskId: taskId,
         startPoint: base,
       });
       if (inspection.kind === "stale" || inspection.kind === "stale-resolved") {

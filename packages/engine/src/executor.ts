@@ -7048,6 +7048,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       branchName: error.branchName,
       conflictingWorktreePath: error.conflictingWorktreePath,
       requestingTaskId: task.id,
+      ownerTaskId: task.id,
       startPoint: error.startPoint,
     });
 
@@ -7737,6 +7738,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         branchName: branch,
         conflictingWorktreePath: conflictPath,
         requestingTaskId: taskId,
+        ownerTaskId: taskId,
         startPoint,
       });
 

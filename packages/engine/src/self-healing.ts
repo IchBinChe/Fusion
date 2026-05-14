@@ -1435,6 +1435,7 @@ export class SelfHealingManager {
             branchName: task.branch,
             conflictingWorktreePath: task.worktree,
             requestingTaskId: task.id,
+            ownerTaskId: task.id,
             startPoint: task.baseCommitSha ?? task.mergeDetails?.mergeTargetBranch ?? "main",
           });
 

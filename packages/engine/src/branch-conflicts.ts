@@ -95,6 +95,7 @@ export interface InspectBranchConflictInput {
   branchName: string;
   conflictingWorktreePath: string;
   requestingTaskId: string;
+  ownerTaskId?: string;
   startPoint?: string;
 }
 
@@ -270,28 +271,45 @@ export async function listBranchRecoveryCandidates(
   return candidates;
 }
 
-async function countTaskAttributedCommits(repoDir: string, range: string, taskId: string): Promise<number> {
+interface TaskAttributionSummary {
+  ownCount: number;
+  foreignCount: number;
+}
+
+async function summarizeTaskAttributedCommits(repoDir: string, range: string, taskId: string): Promise<TaskAttributionSummary> {
   const escapedTaskId = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const subjectPattern = new RegExp(`^(feat|fix|test|chore|docs|refactor|perf|build)\\(${escapedTaskId}\\):`);
-  const trailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}: ${escapedTaskId}(?:\\n|$)`);
+  const ownSubjectPattern = new RegExp(`^(feat|fix|test|chore|docs|refactor|perf|build)\\(${escapedTaskId}\\):`);
+  const ownTrailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}: ${escapedTaskId}(?:\\n|$)`);
+  const genericSubjectPattern = /^(feat|fix|test|chore|docs|refactor|perf|build)\((FN-\d+)\):/i;
+  const genericTrailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}:\\s*(FN-\\d+)(?:\\n|$)`, "i");
   let output = "";
   try {
     output = await runGit(repoDir, `git log --format=%H%x00%s%x00%b ${quoteShellArg(range)}`);
   } catch {
-    return 0;
+    return { ownCount: 0, foreignCount: 0 };
   }
-  if (!output) return 0;
+  if (!output) return { ownCount: 0, foreignCount: 0 };
 
+  const normalizedTaskId = taskId.toUpperCase();
   const tokens = output.split("\u0000");
-  let count = 0;
+  let ownCount = 0;
+  let foreignCount = 0;
   for (let i = 0; i + 2 < tokens.length; i += 3) {
     const subject = tokens[i + 1] ?? "";
     const body = tokens[i + 2] ?? "";
-    if (subjectPattern.test(subject) || trailerPattern.test(body)) {
-      count += 1;
+    if (ownSubjectPattern.test(subject) || ownTrailerPattern.test(body)) {
+      ownCount += 1;
+      continue;
+    }
+    const subjectMatch = subject.match(genericSubjectPattern);
+    const trailerMatch = body.match(genericTrailerPattern);
+    const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
+    if (attributedTaskId && attributedTaskId !== normalizedTaskId) {
+      foreignCount += 1;
     }
   }
-  return count;
+
+  return { ownCount, foreignCount };
 }
 
 export async function assertCleanBranchAtBase(
@@ -489,6 +507,12 @@ export async function autoRecoverCrossContamination(
   };
 }
 
+function deriveTaskIdFromFusionBranch(branchName: string): string | null {
+  const match = /^fusion\/(fn-\d+)$/i.exec(branchName.trim());
+  if (!match) return null;
+  return match[1].toUpperCase();
+}
+
 export async function inspectBranchConflict(
   input: InspectBranchConflictInput,
 ): Promise<BranchConflictInspectionResult> {
@@ -518,11 +542,12 @@ export async function inspectBranchConflict(
 
   const existingTipSha = await revParse(input.repoDir, input.branchName);
   const uniqueCommitResult = await listUniqueBranchCommits(input.repoDir, startPoint, input.branchName);
-  const taskAttributedCommitCount = await countTaskAttributedCommits(
+  const attribution = await summarizeTaskAttributedCommits(
     input.repoDir,
     `${startPoint}..${input.branchName}`,
     input.requestingTaskId,
   );
+  const taskAttributedCommitCount = attribution.ownCount;
 
   if (!uniqueCommitResult.degraded && uniqueCommitResult.commits.length === 0) {
     return {
@@ -532,7 +557,13 @@ export async function inspectBranchConflict(
     };
   }
 
-  if (taskAttributedCommitCount > 0) {
+  const normalizedOwnerTaskId = (input.ownerTaskId ?? input.requestingTaskId).trim().toUpperCase();
+  const branchOwnerTaskId = deriveTaskIdFromFusionBranch(input.branchName);
+  const isSelfOwnedWorktree =
+    livePath === input.conflictingWorktreePath ||
+    (branchOwnerTaskId !== null && branchOwnerTaskId === normalizedOwnerTaskId);
+
+  if (taskAttributedCommitCount > 0 || (isSelfOwnedWorktree && attribution.foreignCount === 0)) {
     return {
       kind: "reclaimable",
       livePath,

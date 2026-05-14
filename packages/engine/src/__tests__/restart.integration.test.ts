@@ -721,7 +721,7 @@ describe("In-progress task resume after restart", () => {
       expect(store.moveTask).toHaveBeenCalledWith("FN-963", "in-review");
       expect(store.logEntry).toHaveBeenCalledWith(
         "FN-963",
-        "Auto-recovered: task work was complete but stuck in in-progress — moved to in-review",
+        "Auto-recovered: task work was complete but stranded in in-progress — moved to in-review",
       );
     });
   });

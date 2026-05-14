@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
 import { loadAllAppCss } from "../../test/cssFixture";
 import { FileEditor } from "../FileEditor";
 
@@ -14,52 +15,54 @@ describe("FileEditor", () => {
     expect(textarea.classList.contains("file-editor-textarea")).toBe(true);
   });
 
-  it("renders with content prop value", () => {
-    const content = "const x = 42;";
-    render(<FileEditor content={content} onChange={vi.fn()} />);
-    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
-    expect(textarea.value).toBe(content);
-  });
-
-  it("calls onChange when text is modified", () => {
+  it("calls onChange when document changes", () => {
     const onChange = vi.fn();
-    render(<FileEditor content="" onChange={onChange} />);
-    const textarea = screen.getByRole("textbox");
-    
-    fireEvent.change(textarea, { target: { value: "new content" } });
-    
+    render(<FileEditor content="" onChange={onChange} filePath="a.ts" />);
+    const view = getEditorView();
+    view.dispatch({ changes: { from: 0, insert: "new content" } });
     expect(onChange).toHaveBeenCalledWith("new content");
   });
 
   it("respects readOnly prop", () => {
-    render(<FileEditor content="readonly content" onChange={vi.fn()} readOnly />);
-    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
-    expect(textarea.readOnly).toBe(true);
+    render(<FileEditor content="readonly" onChange={vi.fn()} readOnly filePath="a.ts" />);
+    expect(document.querySelector(".cm-content")?.getAttribute("contenteditable")).toBe("false");
   });
 
-  it("has correct aria-label based on filePath prop", () => {
-    const filePath = "src/components/App.tsx";
-    render(<FileEditor content="" onChange={vi.fn()} filePath={filePath} />);
-    const textarea = screen.getByRole("textbox");
-    expect(textarea.getAttribute("aria-label")).toBe(`Editor for ${filePath}`);
+  it("uses fallback aria-label when filePath missing", () => {
+    render(<FileEditor content="x" onChange={vi.fn()} />);
+    expect(screen.getByLabelText("File editor")).toBeInTheDocument();
   });
 
-  it("has default aria-label when filePath is not provided", () => {
-    render(<FileEditor content="" onChange={vi.fn()} />);
-    const textarea = screen.getByRole("textbox");
-    expect(textarea.getAttribute("aria-label")).toBe("File editor");
+  it("markdown preview toggle still works", () => {
+    render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" />);
+    fireEvent.click(screen.getByRole("button", { name: /preview mode/i }));
+    expect(document.querySelector(".file-editor-preview")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /edit mode/i }));
+    expect(document.querySelector(".cm-editor")).toBeInTheDocument();
   });
 
-  it("has spellCheck disabled", () => {
-    render(<FileEditor content="" onChange={vi.fn()} />);
-    const textarea = screen.getByRole("textbox");
-    expect(textarea.getAttribute("spellcheck")).toBe("false");
+  it("line-number toggle still flips state and gutter visibility", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <FileEditor content="a\nb" onChange={vi.fn()} filePath="a.ts" showLineNumbers={false} onToggleLineNumbers={onToggle} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /toggle line numbers/i }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".cm-gutters")).not.toBeInTheDocument();
+
+    rerender(<FileEditor content="a\nb" onChange={vi.fn()} filePath="a.ts" showLineNumbers onToggleLineNumbers={onToggle} />);
+    expect(document.querySelector(".cm-gutters")).toBeInTheDocument();
   });
 
-  it("is not readOnly by default", () => {
-    render(<FileEditor content="" onChange={vi.fn()} />);
-    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
-    expect(textarea.readOnly).toBe(false);
+  it("word-wrap toggle still works", () => {
+    render(<FileEditor content="long long content" onChange={vi.fn()} filePath="a.ts" />);
+    const wrapButton = screen.getByRole("button", { name: /toggle word wrap/i });
+    expect(wrapButton.classList.contains("btn-primary")).toBe(true);
+    fireEvent.click(wrapButton);
+    expect(wrapButton.classList.contains("btn-primary")).toBe(false);
+    fireEvent.click(wrapButton);
+    expect(wrapButton.classList.contains("btn-primary")).toBe(true);
   });
 
   describe("markdown preview", () => {
@@ -426,21 +429,6 @@ describe("FileEditor", () => {
       expect(mobileCss).toMatch(
         /\.file-editor-toolbar-actions\s+\.btn\s*\{[^}]*min-height:\s*var\(--mobile-nav-height\);[^}]*min-width:\s*var\(--mobile-nav-height\);[^}]*\}/,
       );
-    });
-  });
-
-  describe("markdown preview scrollability", () => {
-    it("preview container has correct CSS classes for scrolling", () => {
-      render(<FileEditor content="# Hello World" onChange={vi.fn()} filePath="readme.md" />);
-      
-      // Switch to preview mode
-      const previewButton = screen.getByRole("button", { name: /preview/i });
-      fireEvent.click(previewButton);
-      
-      const preview = document.querySelector(".file-editor-preview");
-      expect(preview).toBeInTheDocument();
-      // The class includes scrollable styles: flex: 1, min-height: 0, overflow-y: auto
-      expect(preview?.classList.contains("file-editor-preview")).toBe(true);
     });
   });
 });

@@ -830,14 +830,14 @@ describe("FileBrowserModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /toggle editor options/i }));
       fireEvent.click(screen.getByRole("button", { name: /toggle line numbers/i }));
-      expect(document.querySelector(".file-editor-line-numbers")).toBeInTheDocument();
+      expect(document.querySelector(".cm-gutters")).toBeInTheDocument();
 
       await act(async () => {
         fireEvent.click(screen.getByText("readme.pdf"));
       });
 
       expect(screen.queryByRole("button", { name: /toggle line numbers/i })).not.toBeInTheDocument();
-      expect(document.querySelector(".file-editor-line-numbers")).not.toBeInTheDocument();
+      expect(document.querySelector(".cm-gutters")).not.toBeInTheDocument();
     });
   });
 

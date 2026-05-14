@@ -1,0 +1,190 @@
+#!/usr/bin/env node
+
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+function runGit(projectRoot, args, { allowFailure = false } = {}) {
+  try {
+    return execFileSync("git", args, { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch (error) {
+    if (allowFailure) return null;
+    throw error;
+  }
+}
+
+function parseArgs(argv) {
+  const options = {
+    projectRoot: process.cwd(),
+    outPath: null,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--project-root") {
+      options.projectRoot = path.resolve(argv[i + 1] ?? process.cwd());
+      i += 1;
+    } else if (arg.startsWith("--out=")) {
+      options.outPath = path.resolve(arg.slice("--out=".length));
+    } else if (arg === "--out") {
+      options.outPath = path.resolve(argv[i + 1] ?? "audit-branch-cross-contamination.json");
+      i += 1;
+    }
+  }
+  return options;
+}
+
+function sqliteJson(dbPath, sql) {
+  const output = execFileSync("sqlite3", ["-json", dbPath, sql], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  return output ? JSON.parse(output) : [];
+}
+
+function parseTaskIdFromSubject(subject) {
+  const match = String(subject).match(/^[a-z]+\((FN-\d+)\):/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+function parseTaskIdFromBody(body) {
+  const match = String(body).match(/(?:^|\n)Fusion-Task-Id:\s*(FN-\d+)\s*(?:\n|$)/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+function expectedBranch(taskId, branch) {
+  if (branch && String(branch).trim()) return String(branch).trim();
+  return `fusion/${String(taskId).toLowerCase()}`;
+}
+
+function branchExists(projectRoot, branchName) {
+  return runGit(projectRoot, ["rev-parse", "--verify", `refs/heads/${branchName}`], { allowFailure: true }) !== null;
+}
+
+function parseCommits(raw) {
+  if (!raw) return [];
+  const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.map((line) => {
+    const [sha, subject, body] = line.split("\u001f");
+    const trailerTaskId = parseTaskIdFromBody(body ?? "");
+    const subjectTaskId = parseTaskIdFromSubject(subject ?? "");
+    return {
+      sha,
+      subject,
+      trailerTaskId,
+      subjectTaskId,
+      attributedTaskId: trailerTaskId ?? subjectTaskId,
+    };
+  });
+}
+
+export function auditBranchCrossContamination({ projectRoot = process.cwd() } = {}) {
+  const dbPath = path.join(projectRoot, ".fusion", "fusion.db");
+  const taskRows = sqliteJson(
+    dbPath,
+    `SELECT id, title, branch, baseCommitSha, "column" AS columnName FROM tasks WHERE "column" IN ('triage','todo','in-progress','in-review') ORDER BY id`,
+  );
+
+  const report = {
+    generatedAt: new Date().toISOString(),
+    projectRoot,
+    scannedTaskCount: taskRows.length,
+    scannedColumns: ["triage", "todo", "in-progress", "in-review"],
+    taintedTaskCount: 0,
+    missingBranchCount: 0,
+    tasks: [],
+  };
+
+  for (const task of taskRows) {
+    const taskId = String(task.id).toUpperCase();
+    const branchName = expectedBranch(taskId, task.branch);
+    const baseCommitSha = task.baseCommitSha ? String(task.baseCommitSha).trim() : null;
+
+    if (!baseCommitSha) {
+      report.tasks.push({
+        taskId,
+        title: task.title,
+        branchName,
+        baseCommitSha: null,
+        column: task.columnName,
+        skipped: true,
+        reason: "missing-baseCommitSha",
+      });
+      continue;
+    }
+
+    if (!branchExists(projectRoot, branchName)) {
+      report.missingBranchCount += 1;
+      process.stderr.write(`[skip] ${taskId}: branch not found locally (${branchName})\n`);
+      report.tasks.push({
+        taskId,
+        title: task.title,
+        branchName,
+        baseCommitSha,
+        column: task.columnName,
+        skipped: true,
+        reason: "branch-missing-local",
+      });
+      continue;
+    }
+
+    const rawLog = runGit(projectRoot, ["log", `${baseCommitSha}..${branchName}`, "--format=%H%x1f%s%x1f%b"]);
+    const commits = parseCommits(rawLog);
+    const taintedCommits = commits.filter((commit) => commit.attributedTaskId && commit.attributedTaskId !== taskId);
+    const ownCommits = commits.filter((commit) => commit.attributedTaskId === taskId);
+    const isTainted = taintedCommits.length > 0;
+
+    if (isTainted) report.taintedTaskCount += 1;
+
+    report.tasks.push({
+      taskId,
+      title: task.title,
+      branchName,
+      baseCommitSha,
+      column: task.columnName,
+      totalCommits: commits.length,
+      taskAttributedCommitCount: ownCommits.length,
+      tainted: isTainted,
+      taintedCommits: taintedCommits.map((commit) => ({
+        sha: commit.sha,
+        subject: commit.subject,
+        foreignTaskId: commit.attributedTaskId,
+      })),
+      recommendation: !isTainted ? "clean" : ownCommits.length > 0 ? "refile" : "force-reset",
+      commits,
+    });
+  }
+
+  return report;
+}
+
+function renderSummary(report) {
+  const lines = [
+    `Branch cross-contamination audit`,
+    `Scanned tasks: ${report.scannedTaskCount}`,
+    `Tainted branches: ${report.taintedTaskCount}`,
+    `Missing local branches: ${report.missingBranchCount}`,
+    "",
+  ];
+  for (const task of report.tasks) {
+    if (task.skipped) continue;
+    if (!task.tainted) continue;
+    lines.push(`${task.taskId} | branch=${task.branchName} | base=${task.baseCommitSha} | commits=${task.totalCommits} | recommendation=${task.recommendation}`);
+    for (const commit of task.taintedCommits) {
+      lines.push(`  - ${commit.sha.slice(0, 12)} ${commit.subject} [foreign=${commit.foreignTaskId ?? "unknown"}]`);
+    }
+  }
+  return lines.join("\n");
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const options = parseArgs(process.argv.slice(2));
+  const report = auditBranchCrossContamination({ projectRoot: options.projectRoot });
+  const json = JSON.stringify(report, null, 2);
+  process.stdout.write(`${json}\n`);
+  process.stderr.write(`${renderSummary(report)}\n`);
+  if (options.outPath) {
+    fs.mkdirSync(path.dirname(options.outPath), { recursive: true });
+    fs.writeFileSync(options.outPath, json);
+    process.stderr.write(`\nWrote report: ${options.outPath}\n`);
+  }
+}

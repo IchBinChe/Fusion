@@ -1595,9 +1595,18 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     composer.style.height = `${clampChatInputHeight(composer.scrollHeight)}px`;
   }, []);
 
+  const handleComposerRef = useCallback((textarea: HTMLTextAreaElement | null) => {
+    inputRef.current = textarea;
+    if (!textarea) {
+      return;
+    }
+
+    resizeComposer(textarea);
+  }, [resizeComposer]);
+
   useLayoutEffect(() => {
     resizeComposer();
-  }, [messageInput, resizeComposer]);
+  }, [chatScope, messageInput, activeSession?.id, rooms.activeRoom?.id, resizeComposer]);
 
   const clearComposerState = useCallback(() => {
     setMessageInput("");
@@ -2723,7 +2732,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               <div className="chat-input-row">
                 <div className="chat-input-wrapper">
                   <textarea
-                    ref={inputRef}
+                    ref={handleComposerRef}
                     className="chat-input-textarea"
                     placeholder="Type a message..."
                     value={messageInput}
@@ -3045,7 +3054,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 }}
               >
                 <textarea
-                  ref={inputRef}
+                  ref={handleComposerRef}
                   className="chat-input-textarea"
                   placeholder="Type a message..."
                   value={messageInput}

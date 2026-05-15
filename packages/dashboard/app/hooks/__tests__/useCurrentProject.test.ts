@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { useCurrentProject } from "../useCurrentProject";
+import {
+  CONSECUTIVE_ABSENCE_THRESHOLD,
+  useCurrentProject,
+} from "../useCurrentProject";
 import type { ProjectInfo } from "../../api";
 
 // Mock the API functions
@@ -263,5 +266,163 @@ describe("useCurrentProject", () => {
         dashboardCurrentProjectIdByNode: { local: "proj_1" },
       }),
     );
+  });
+
+  describe("transient omission tolerance", () => {
+    const activeProjectTwo: ProjectInfo = { ...mockProjects[1], status: "active" };
+    const projectsWithoutCurrent = (): ProjectInfo[] => [activeProjectTwo];
+
+    async function waitForProjectOneSelection(result: { current: ReturnType<typeof useCurrentProject> }) {
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      await waitFor(() => {
+        expect(result.current.currentProject?.id).toBe("proj_1");
+      });
+    }
+
+    it("does not switch on a single transient omission", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+      rerender({ projects: projectsWithoutCurrent() });
+
+      expect(result.current.currentProject?.id).toBe("proj_1");
+    });
+
+    it("does not switch on two consecutive omissions", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+
+      for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD - 1; i += 1) {
+        rerender({ projects: projectsWithoutCurrent() });
+      }
+
+      expect(result.current.currentProject?.id).toBe("proj_1");
+    });
+
+    it("switches after sustained absence reaches threshold", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+
+      for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD; i += 1) {
+        rerender({ projects: projectsWithoutCurrent() });
+      }
+
+      await waitFor(() => {
+        expect(result.current.currentProject?.id).toBe("proj_2");
+      });
+    });
+
+    it("resets absence counter when project reappears", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+
+      rerender({ projects: projectsWithoutCurrent() });
+      rerender({ projects: projectsWithoutCurrent() });
+      rerender({ projects: [...mockProjects] });
+      rerender({ projects: projectsWithoutCurrent() });
+
+      expect(result.current.currentProject?.id).toBe("proj_1");
+    });
+
+    it("does not switch when available projects is empty", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+      rerender({ projects: [] });
+
+      expect(result.current.currentProject?.id).toBe("proj_1");
+    });
+
+    it("persists switched project after sustained absence", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+      vi.mocked(updateGlobalSettings).mockClear();
+
+      for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD; i += 1) {
+        rerender({ projects: projectsWithoutCurrent() });
+      }
+
+      await waitFor(() => {
+        expect(result.current.currentProject?.id).toBe("proj_2");
+      });
+
+      expect(updateGlobalSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dashboardCurrentProjectIdByNode: { local: "proj_2" },
+        }),
+      );
+    });
+
+    it("resets absence tracking after manual project selection", async () => {
+      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+        dashboardCurrentProjectIdByNode: { local: "proj_1" },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ projects }) => useCurrentProject(projects),
+        { initialProps: { projects: mockProjects } },
+      );
+
+      await waitForProjectOneSelection(result);
+
+      rerender({ projects: projectsWithoutCurrent() });
+      rerender({ projects: projectsWithoutCurrent() });
+
+      act(() => {
+        result.current.setCurrentProject(activeProjectTwo);
+      });
+
+      rerender({ projects: [mockProjects[0]] });
+
+      expect(result.current.currentProject?.id).toBe("proj_2");
+    });
   });
 });

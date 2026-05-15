@@ -58,6 +58,51 @@ test("ensureTestArtifacts rebuilds @fusion/dashboard when its dist is missing", 
   assert.deepEqual(calls[0].args, ["--filter", "@fusion/dashboard", "build"]);
 });
 
+test("detectMissingArtifacts flags @fusion/engine when dist/index.js is missing", () => {
+  const missing = detectMissingArtifacts("/repo", (fullPath) => !fullPath.endsWith("packages/engine/dist/index.js"));
+  const names = missing.map((pkg) => pkg.name);
+
+  assert.ok(names.includes("@fusion/engine"));
+});
+
+test("ensureTestArtifacts rebuilds @fusion/engine when dist is missing", () => {
+  const calls = [];
+  const built = ensureTestArtifacts(
+    "/repo",
+    (cmd, args, cwd) => calls.push({ cmd, args, cwd }),
+    (fullPath) => !fullPath.endsWith("packages/engine/dist/index.js"),
+  );
+
+  assert.deepEqual(built, ["@fusion/engine"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cmd, "pnpm");
+  assert.deepEqual(calls[0].args, ["--filter", "@fusion/engine", "build"]);
+});
+
+test("detectMissingArtifacts flags dependency-graph when dist/dashboard-view.js is missing", () => {
+  const missing = detectMissingArtifacts(
+    "/repo",
+    (fullPath) => !fullPath.endsWith("plugins/fusion-plugin-dependency-graph/dist/dashboard-view.js"),
+  );
+  const names = missing.map((pkg) => pkg.name);
+
+  assert.ok(names.includes("@fusion-plugin-examples/dependency-graph"));
+});
+
+test("ensureTestArtifacts rebuilds dependency-graph for incomplete dist artifacts", () => {
+  const calls = [];
+  const built = ensureTestArtifacts(
+    "/repo",
+    (cmd, args, cwd) => calls.push({ cmd, args, cwd }),
+    (fullPath) => !fullPath.endsWith("plugins/fusion-plugin-dependency-graph/dist/dashboard-view.js"),
+  );
+
+  assert.deepEqual(built, ["@fusion-plugin-examples/dependency-graph"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cmd, "pnpm");
+  assert.deepEqual(calls[0].args, ["--filter", "@fusion-plugin-examples/dependency-graph", "build"]);
+});
+
 test("detectMissingArtifacts flags hermes when dist/index.js exists but dist/cli-spawn.js is missing", () => {
   const missing = detectMissingArtifacts("/repo", (fullPath) => !fullPath.endsWith("dist/cli-spawn.js"));
   const names = missing.map((pkg) => pkg.name);
@@ -103,12 +148,11 @@ test("ensureTestArtifacts rebuilds openclaw for incomplete dist artifacts", () =
   assert.deepEqual(calls[0].args, ["--filter", "@fusion-plugin-examples/openclaw-runtime", "build"]);
 });
 
-function createStaleFs(pluginName, { artifactMtime = 1000, sourceMtime = 2000 } = {}) {
-  const sourceDir = `/repo/plugins/${pluginName}/src`;
+function createStaleFsForPackage({ sourceDir, artifactPathFragment }, { artifactMtime = 1000, sourceMtime = 2000 } = {}) {
   const sourceFile = `${sourceDir}/index.ts`;
 
   const statFn = (fullPath) => {
-    if (fullPath.includes("/dist/")) return { mtimeMs: artifactMtime };
+    if (fullPath.includes(artifactPathFragment)) return { mtimeMs: artifactMtime };
     if (fullPath === sourceFile) return { mtimeMs: sourceMtime };
     return { mtimeMs: 0 };
   };
@@ -121,6 +165,12 @@ function createStaleFs(pluginName, { artifactMtime = 1000, sourceMtime = 2000 } 
   };
 
   return { statFn, readdirFn };
+}
+
+function createStaleFs(pluginName, { artifactMtime = 1000, sourceMtime = 2000 } = {}) {
+  const sourceDir = `/repo/plugins/${pluginName}/src`;
+
+  return createStaleFsForPackage({ sourceDir, artifactPathFragment: "/dist/" }, { artifactMtime, sourceMtime });
 }
 
 test("detectMissingOrStaleArtifacts returns hermes when dist artifact is older than src", () => {
@@ -157,6 +207,29 @@ test("detectMissingOrStaleArtifacts covers all example plugins for staleness", a
       assert.ok(result.some((pkg) => pkg.name === pkgName));
     });
   }
+});
+
+test("detectMissingOrStaleArtifacts flags @fusion/engine when dist artifact is older than src", () => {
+  const { statFn, readdirFn } = createStaleFsForPackage(
+    { sourceDir: "/repo/packages/engine/src", artifactPathFragment: "packages/engine/dist/" },
+    { artifactMtime: 1000, sourceMtime: 3000 },
+  );
+
+  const result = detectMissingOrStaleArtifacts("/repo", () => true, statFn, readdirFn);
+  assert.ok(result.some((pkg) => pkg.name === "@fusion/engine"));
+});
+
+test("detectMissingOrStaleArtifacts flags dependency-graph when dist artifact is older than src", () => {
+  const { statFn, readdirFn } = createStaleFsForPackage(
+    {
+      sourceDir: "/repo/plugins/fusion-plugin-dependency-graph/src",
+      artifactPathFragment: "plugins/fusion-plugin-dependency-graph/dist/",
+    },
+    { artifactMtime: 1000, sourceMtime: 3000 },
+  );
+
+  const result = detectMissingOrStaleArtifacts("/repo", () => true, statFn, readdirFn);
+  assert.ok(result.some((pkg) => pkg.name === "@fusion-plugin-examples/dependency-graph"));
 });
 
 test("detectMissingOrStaleArtifacts merges missing and stale results without duplicates", () => {
@@ -210,7 +283,7 @@ test("ensureTestArtifacts invokes rebuild command for stale package", () => {
   assert.deepEqual(calls[0].args, ["--filter", "@fusion-plugin-examples/hermes-runtime", "build"]);
 });
 
-test("ensureTestArtifacts writes FN-4232 remediation block to stderr on rebuild failure", () => {
+test("ensureTestArtifacts writes detailed FN-4232/FN-4605 remediation block to stderr on rebuild failure", () => {
   const { statFn, readdirFn } = createStaleFs("fusion-plugin-hermes-runtime", {
     artifactMtime: 1000,
     sourceMtime: 3000,
@@ -240,6 +313,35 @@ test("ensureTestArtifacts writes FN-4232 remediation block to stderr on rebuild 
   assert.ok(built.includes("@fusion-plugin-examples/hermes-runtime"));
   assert.equal(exitCode, 2);
   assert.match(stderr, /@fusion-plugin-examples\/hermes-runtime/);
+  assert.match(stderr, /\[test-bootstrap\] stale \(src newer than dist\): plugins\/fusion-plugin-hermes-runtime\/dist\/index.js/);
+  assert.match(stderr, /\[test-bootstrap\] stale \(src newer than dist\): plugins\/fusion-plugin-hermes-runtime\/dist\/cli-spawn.js/);
   assert.match(stderr, /pnpm install --frozen-lockfile/);
-  assert.match(stderr, /FN-4232/);
+  assert.match(stderr, /FN-4232, FN-4605/);
+});
+
+test("ensureTestArtifacts remediation labels missing artifact paths", () => {
+  let stderr = "";
+  let exitCode = null;
+
+  const built = ensureTestArtifacts(
+    "/repo",
+    undefined,
+    (fullPath) => !fullPath.endsWith("plugins/fusion-plugin-dependency-graph/dist/dashboard-view.js"),
+    () => ({ mtimeMs: 1_000 }),
+    () => [],
+    {
+      spawnFn: () => ({ status: 3 }),
+      exitFn: (code) => {
+        exitCode = code;
+      },
+      stderrWrite: (chunk) => {
+        stderr += String(chunk);
+        return true;
+      },
+    },
+  );
+
+  assert.ok(built.includes("@fusion-plugin-examples/dependency-graph"));
+  assert.equal(exitCode, 3);
+  assert.match(stderr, /\[test-bootstrap\] missing: plugins\/fusion-plugin-dependency-graph\/dist\/dashboard-view.js/);
 });

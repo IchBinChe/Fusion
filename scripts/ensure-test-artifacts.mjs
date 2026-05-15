@@ -7,7 +7,20 @@ import { spawnSync } from "node:child_process";
 export const REQUIRED_BUILD_PACKAGES = [
   { name: "@fusion/core", requiredArtifacts: ["packages/core/dist/index.js"] },
   { name: "@fusion/dashboard", requiredArtifacts: ["packages/dashboard/dist/index.js"] },
+  {
+    name: "@fusion/engine",
+    requiredArtifacts: ["packages/engine/dist/index.js"],
+    staleAgainstGlobs: [{ sourcePath: "packages/engine/src" }],
+  },
   { name: "@fusion/plugin-sdk", requiredArtifacts: ["packages/plugin-sdk/dist/index.js"] },
+  {
+    name: "@fusion-plugin-examples/dependency-graph",
+    requiredArtifacts: [
+      "plugins/fusion-plugin-dependency-graph/dist/index.js",
+      "plugins/fusion-plugin-dependency-graph/dist/dashboard-view.js",
+    ],
+    staleAgainstGlobs: [{ sourcePath: "plugins/fusion-plugin-dependency-graph/src" }],
+  },
   {
     name: "@fusion-plugin-examples/hermes-runtime",
     requiredArtifacts: [
@@ -118,15 +131,35 @@ export function detectMissingArtifacts(rootDir = process.cwd(), existsFn = exist
   return detectMissingOrStaleArtifacts(rootDir, existsFn, statFn, readdirFn);
 }
 
-function writeRemediation(stderrWrite, pkgNames, filterCommand) {
+function classifyArtifactIssues(pkgEntry, rootDir, existsFn, statFn, readdirFn) {
+  const missingPaths = pkgEntry.requiredArtifacts.filter((artifactPath) => !existsFn(path.join(rootDir, artifactPath)));
+  if (missingPaths.length > 0) {
+    return { missingPaths, stalePaths: [] };
+  }
+  if (isStale(pkgEntry, rootDir, statFn, readdirFn, existsFn)) {
+    return { missingPaths: [], stalePaths: [...pkgEntry.requiredArtifacts] };
+  }
+  return { missingPaths: [], stalePaths: [] };
+}
+
+function writeRemediation(stderrWrite, pkgEntries, filterCommand, rootDir, existsFn = existsSync, statFn = statSync, readdirFn = readdirSync) {
   stderrWrite("\n[test-bootstrap] FAILED: workspace dist artifact rebuild did not complete.\n");
   stderrWrite(`[test-bootstrap] command: ${filterCommand}\n`);
-  stderrWrite(`[test-bootstrap] affected packages: ${pkgNames.join(", ")}\n`);
+  stderrWrite(`[test-bootstrap] affected packages: ${pkgEntries.map((pkg) => pkg.name).join(", ")}\n`);
+  for (const pkgEntry of pkgEntries) {
+    const { missingPaths, stalePaths } = classifyArtifactIssues(pkgEntry, rootDir, existsFn, statFn, readdirFn);
+    for (const missingPath of missingPaths) {
+      stderrWrite(`[test-bootstrap] missing: ${missingPath}\n`);
+    }
+    for (const stalePath of stalePaths) {
+      stderrWrite(`[test-bootstrap] stale (src newer than dist): ${stalePath}\n`);
+    }
+  }
   stderrWrite("[test-bootstrap] next steps:\n");
   stderrWrite("  1) pnpm install --frozen-lockfile\n");
   stderrWrite("  2) pnpm --filter <pkg> build\n");
   stderrWrite("  3) delete <plugin>/dist and re-run pnpm test\n");
-  stderrWrite("[test-bootstrap] reference: FN-4232\n\n");
+  stderrWrite("[test-bootstrap] reference: FN-4232, FN-4605\n\n");
 }
 
 function run(
@@ -137,13 +170,20 @@ function run(
     exitFn = process.exit,
     stderrWrite = process.stderr.write.bind(process.stderr),
     spawnFn = spawnSync,
+    pkgEntries = [],
+    existsFn = existsSync,
+    statFn = statSync,
+    readdirFn = readdirSync,
   } = {},
 ) {
   const result = spawnFn(command, args, { cwd, stdio: "inherit" });
   if (result.status !== 0) {
     const filterCommand = `${command} ${args.join(" ")}`;
     const packageNames = args.filter((entry, index) => args[index - 1] === "--filter");
-    writeRemediation(stderrWrite, packageNames, filterCommand);
+    const packagesToReport = pkgEntries.length > 0
+      ? pkgEntries
+      : REQUIRED_BUILD_PACKAGES.filter((pkg) => packageNames.includes(pkg.name));
+    writeRemediation(stderrWrite, packagesToReport, filterCommand, cwd, existsFn, statFn, readdirFn);
     exitFn(result.status ?? 1);
   }
 }
@@ -162,7 +202,13 @@ export function ensureTestArtifacts(
   const names = missingOrStale.map((pkg) => pkg.name);
   console.log(`[test-bootstrap] rebuilding workspace dist artifacts (missing or stale): ${names.join(", ")}`);
   if (runFn === run) {
-    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir, runOptions);
+    runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir, {
+      ...runOptions,
+      pkgEntries: missingOrStale,
+      existsFn,
+      statFn,
+      readdirFn,
+    });
   } else {
     runFn("pnpm", [...names.flatMap((name) => ["--filter", name]), "build"], rootDir);
   }

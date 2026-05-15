@@ -143,6 +143,37 @@ describe("aiMergeTask rebaseBaseSha persistence", () => {
     expect(mergeDetailsCall?.[1].mergeDetails.rebaseBaseSha).toBe("rebasebase123");
   });
 
+  it("stores rebaseBaseSha for rebase-routed merges even when post-merge audit is off", async () => {
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        directMergeCommitStrategy: "always-rebase",
+        postMergeAuditMode: "off",
+      }),
+    });
+
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
+      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "rebasemergedsha";
+      if (cmdStr.includes("git log")) return "- feat: something";
+      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
+      if (cmdStr.includes("rev-parse \"abc123\"")) return "rebasebase123";
+      if (cmdStr.includes("rev-list --reverse \"rebasebase123..fusion/FN-050\"")) return "";
+      if (cmdStr.includes("status --porcelain")) return "";
+      if (cmdStr.includes("rev-parse --git-path CHERRY_PICK_HEAD")) return ".git/CHERRY_PICK_HEAD";
+      if (cmdStr.includes("rev-parse --git-path sequencer")) return ".git/sequencer";
+      if (cmdStr.includes("diff --shortstat \"rebasebase123..HEAD\"")) return "2 files changed, 5 insertions(+), 1 deletions(-)";
+      if (cmdStr.includes("branch -d") || cmdStr.includes("branch -D")) return Buffer.from("");
+      if (cmdStr.includes("worktree remove")) return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+    const mergeDetailsCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls.find((call: any[]) => call[1]?.mergeDetails);
+    expect(mergeDetailsCall?.[1].mergeDetails.rebaseBaseSha).toBe("rebasebase123");
+  });
+
   it("leaves rebaseBaseSha undefined for squash merges", async () => {
     const store = createMockStore();
 

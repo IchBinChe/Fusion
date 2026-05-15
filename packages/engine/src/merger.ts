@@ -7291,7 +7291,7 @@ export async function aiMergeTask(
     let landedFiles: string[] | undefined;
 
     try {
-      const statsCommand = selectedPostMergeAuditStrategy === "rebase" && rebaseMergeBaseSha
+      const statsCommand = rebaseMergeBaseSha
         ? `git diff --shortstat ${quoteArg(`${rebaseMergeBaseSha}..HEAD`)}`
         : "git show --shortstat --format= HEAD";
       const { stdout: statsOutput } = await execAsync(statsCommand, {
@@ -7410,7 +7410,7 @@ export async function aiMergeTask(
 
     if (!isEmptyCommit && !mergeWasEmpty && recordedSha) {
       try {
-        const landedFilesCommand = selectedPostMergeAuditStrategy === "rebase" && rebaseMergeBaseSha
+        const landedFilesCommand = rebaseMergeBaseSha
           ? `git diff --name-only ${quoteArg(`${rebaseMergeBaseSha}..${recordedSha}`)}`
           : `git show --name-only --format= ${quoteArg(recordedSha)}`;
         const { stdout: landedFilesOutput } = await execAsync(landedFilesCommand, {
@@ -7432,7 +7432,7 @@ export async function aiMergeTask(
 
     const mergeDetails: MergeDetails = {
       commitSha: recordedSha,
-      rebaseBaseSha: selectedPostMergeAuditStrategy === "rebase" && !mergeWasEmpty ? rebaseMergeBaseSha : undefined,
+      rebaseBaseSha: !mergeWasEmpty && rebaseMergeBaseSha ? rebaseMergeBaseSha : undefined,
       landedFiles,
       filesChanged: recordedFilesChanged,
       insertions: recordedInsertions,

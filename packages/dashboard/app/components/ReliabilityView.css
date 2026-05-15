@@ -32,6 +32,13 @@
   gap: var(--space-lg);
 }
 
+.reliability-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
 .reliability-table {
   width: 100%;
   border-collapse: collapse;
@@ -53,6 +60,23 @@
 }
 
 .reliability-muted {
+  color: var(--text-muted);
+}
+
+.reliability-details {
+  margin-top: var(--space-sm);
+}
+
+.reliability-details summary {
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.reliability-details-content {
+  margin-top: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
   color: var(--text-muted);
 }
 
@@ -91,5 +115,10 @@
 
   .reliability-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reliability-section-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

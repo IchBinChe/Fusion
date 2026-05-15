@@ -994,9 +994,7 @@ describe("App approval notification banner", () => {
 });
 
 describe("App chat unread response indicator", () => {
-  it("shows unread indicator when assistant message arrives for active session after leaving chat", async () => {
-    localStorage.setItem(scopedKey("kb-chat-active-session", "proj_123"), "sess-active");
-
+  const getChatEvents = async () => {
     render(<App />);
 
     await waitFor(() => {
@@ -1006,14 +1004,19 @@ describe("App chat unread response indicator", () => {
     const chatSubscriptionCall = mockSubscribeSse.mock.calls.find(
       ([url, sub]) => String(url).startsWith("/api/events") && typeof (sub as { events?: Record<string, unknown> })?.events?.["chat:message:added"] === "function",
     );
-    const subscriptionConfig = chatSubscriptionCall?.[1] as {
+
+    return (chatSubscriptionCall?.[1] as {
       events: Record<string, (event: MessageEvent) => void>;
-    };
+    }).events;
+  };
+
+  it("shows unread indicator when assistant message arrives for any individual session", async () => {
+    const events = await getChatEvents();
 
     await act(async () => {
-      subscriptionConfig.events["chat:message:added"](
+      events["chat:message:added"](
         new MessageEvent("chat:message:added", {
-          data: JSON.stringify({ role: "assistant", sessionId: "sess-active" }),
+          data: JSON.stringify({ role: "assistant", sessionId: "sess-other" }),
         }),
       );
     });
@@ -1023,31 +1026,43 @@ describe("App chat unread response indicator", () => {
     });
   });
 
-  it("does not show unread indicator for non-qualifying chat events", async () => {
-    localStorage.setItem(scopedKey("kb-chat-active-session", "proj_123"), "sess-active");
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(mockSubscribeSse).toHaveBeenCalled();
-    });
-
-    const chatSubscriptionCall = mockSubscribeSse.mock.calls.find(
-      ([url, sub]) => String(url).startsWith("/api/events") && typeof (sub as { events?: Record<string, unknown> })?.events?.["chat:message:added"] === "function",
-    );
-    const subscriptionConfig = chatSubscriptionCall?.[1] as {
-      events: Record<string, (event: MessageEvent) => void>;
-    };
+  it("does not show unread indicator for individual user messages", async () => {
+    const events = await getChatEvents();
 
     await act(async () => {
-      subscriptionConfig.events["chat:message:added"](
+      events["chat:message:added"](
         new MessageEvent("chat:message:added", {
           data: JSON.stringify({ role: "user", sessionId: "sess-active" }),
         }),
       );
-      subscriptionConfig.events["chat:message:added"](
-        new MessageEvent("chat:message:added", {
-          data: JSON.stringify({ role: "assistant", sessionId: "sess-other" }),
+    });
+
+    expect(screen.queryByLabelText("Unread chat response")).toBeNull();
+  });
+
+  it("shows unread indicator for room assistant replies", async () => {
+    const events = await getChatEvents();
+
+    await act(async () => {
+      events["chat:room:message:added"](
+        new MessageEvent("chat:room:message:added", {
+          data: JSON.stringify({ role: "assistant", roomId: "room-1", id: "msg-1", content: "hi", createdAt: new Date().toISOString() }),
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Unread chat response")).toBeInTheDocument();
+    });
+  });
+
+  it("does not show unread indicator for room user messages", async () => {
+    const events = await getChatEvents();
+
+    await act(async () => {
+      events["chat:room:message:added"](
+        new MessageEvent("chat:room:message:added", {
+          data: JSON.stringify({ role: "user", roomId: "room-1", id: "msg-2", content: "mine", createdAt: new Date().toISOString() }),
         }),
       );
     });
@@ -1056,25 +1071,12 @@ describe("App chat unread response indicator", () => {
   });
 
   it("clears unread indicator when returning to chat and does not mark while in chat", async () => {
-    localStorage.setItem(scopedKey("kb-chat-active-session", "proj_123"), "sess-active");
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(mockSubscribeSse).toHaveBeenCalled();
-    });
-
-    const chatSubscriptionCall = mockSubscribeSse.mock.calls.find(
-      ([url, sub]) => String(url).startsWith("/api/events") && typeof (sub as { events?: Record<string, unknown> })?.events?.["chat:message:added"] === "function",
-    );
-    const subscriptionConfig = chatSubscriptionCall?.[1] as {
-      events: Record<string, (event: MessageEvent) => void>;
-    };
+    const events = await getChatEvents();
 
     await act(async () => {
-      subscriptionConfig.events["chat:message:added"](
-        new MessageEvent("chat:message:added", {
-          data: JSON.stringify({ role: "assistant", sessionId: "sess-active" }),
+      events["chat:room:message:added"](
+        new MessageEvent("chat:room:message:added", {
+          data: JSON.stringify({ role: "assistant", roomId: "room-1", id: "msg-3", content: "reply", createdAt: new Date().toISOString() }),
         }),
       );
     });
@@ -1090,9 +1092,9 @@ describe("App chat unread response indicator", () => {
     });
 
     await act(async () => {
-      subscriptionConfig.events["chat:message:added"](
-        new MessageEvent("chat:message:added", {
-          data: JSON.stringify({ role: "assistant", sessionId: "sess-active" }),
+      events["chat:room:message:added"](
+        new MessageEvent("chat:room:message:added", {
+          data: JSON.stringify({ role: "assistant", roomId: "room-1", id: "msg-4", content: "while-open", createdAt: new Date().toISOString() }),
         }),
       );
     });

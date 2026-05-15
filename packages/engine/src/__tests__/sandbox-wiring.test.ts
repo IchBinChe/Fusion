@@ -112,7 +112,8 @@ describe("sandbox wiring", () => {
       rootDir: "/tmp/root",
     });
 
-    const result = await (runner as any).executeCommand("echo routine", 5000, new Date().toISOString());
+    const routine = { id: "routine-1", agentId: "agent-1" } as any;
+    const result = await (runner as any).executeCommand(routine, "echo routine", 5000, new Date().toISOString());
     expect(result.success).toBe(true);
     expect(run).toHaveBeenCalledWith("echo routine", {
       cwd: "/tmp/root",

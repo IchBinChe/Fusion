@@ -16,6 +16,8 @@ interface FileEditorProps {
   showLineNumbers?: boolean;
   onToggleLineNumbers?: () => void;
   canToggleLineNumbers?: boolean;
+  toolbarExpanded?: boolean;
+  toolbarActionsId?: string;
 }
 
 function isMarkdownFile(filePath?: string): boolean {
@@ -40,10 +42,15 @@ export function FileEditor({
   showLineNumbers = false,
   onToggleLineNumbers,
   canToggleLineNumbers = true,
+  toolbarExpanded,
+  toolbarActionsId: externalToolbarActionsId,
 }: FileEditorProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [wordWrap, setWordWrap] = useState(true);
-  const [toolbarActionsExpanded, setToolbarActionsExpanded] = useState(false);
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const isControlled = toolbarExpanded !== undefined;
+  const expanded = isControlled ? toolbarExpanded : internalExpanded;
+
   const editorHostRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const syncingFromPropsRef = useRef(false);
@@ -57,7 +64,8 @@ export function FileEditor({
   const themeCompartmentRef = useRef(new Compartment());
 
   const isMarkdown = isMarkdownFile(filePath);
-  const toolbarActionsId = useId();
+  const generatedToolbarActionsId = useId();
+  const toolbarActionsId = externalToolbarActionsId ?? generatedToolbarActionsId;
   const [darkThemeActive, setDarkThemeActive] = useState(() => isDarkTheme());
 
   const effectiveShowPreview = isMarkdown && (readOnly ? true : showPreview);
@@ -69,7 +77,11 @@ export function FileEditor({
   const handleEditClick = useCallback(() => setShowPreview(false), []);
   const handlePreviewClick = useCallback(() => setShowPreview(true), []);
   const handleWordWrapToggle = useCallback(() => setWordWrap((prev) => !prev), []);
-  const handleToolbarActionsToggle = useCallback(() => setToolbarActionsExpanded((prev) => !prev), []);
+  const handleToolbarActionsToggle = useCallback(() => {
+    if (!isControlled) {
+      setInternalExpanded((prev) => !prev);
+    }
+  }, [isControlled]);
 
   useEffect(() => {
     if (!editorHostRef.current || effectiveShowPreview) {
@@ -139,12 +151,14 @@ export function FileEditor({
 
   return (
     <div className="file-editor-container">
-      {hasToolbarActions ? (
-        <div className={`file-editor-toolbar ${toolbarActionsExpanded ? "file-editor-toolbar--expanded" : ""}`}>
-          <button className="btn btn-sm btn-icon file-editor-toolbar-button" onClick={handleToolbarActionsToggle} aria-label="Toggle editor options" title="Toggle editor options" aria-expanded={toolbarActionsExpanded} aria-controls={toolbarActionsId}>
-            {toolbarActionsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-          <div className="file-editor-toolbar-actions" id={toolbarActionsId} hidden={!toolbarActionsExpanded}>
+      {hasToolbarActions && (expanded || !isControlled) ? (
+        <div className={`file-editor-toolbar ${expanded ? "file-editor-toolbar--expanded" : ""}`}>
+          {!isControlled && (
+            <button className="btn btn-sm btn-icon file-editor-toolbar-button" onClick={handleToolbarActionsToggle} aria-label="Toggle editor options" title="Toggle editor options" aria-expanded={expanded} aria-controls={toolbarActionsId}>
+              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          )}
+          <div className="file-editor-toolbar-actions" id={toolbarActionsId} hidden={!expanded}>
             {isMarkdown ? (
               <>
                 {!readOnly && (

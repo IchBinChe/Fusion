@@ -1,6 +1,6 @@
 import "./FileBrowser.css";
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { X, Save, RotateCcw, Folder, FileType, ArrowLeft } from "lucide-react";
+import { useState, useCallback, useEffect, useMemo, useRef, useId } from "react";
+import { X, Save, RotateCcw, Folder, FileType, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { useWorkspaceFileBrowser } from "../hooks/useWorkspaceFileBrowser";
 import { useWorkspaceFileEditor } from "../hooks/useWorkspaceFileEditor";
 import { useWorkspaces } from "../hooks/useWorkspaces";
@@ -85,6 +85,8 @@ export function FileBrowserModal({
   const [mobileView, setMobileView] = useState<"list" | "editor">("list");
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [showLineNumbers, setShowLineNumbers] = useState(false);
+  const [toolbarActionsExpanded, setToolbarActionsExpanded] = useState(false);
+  const toolbarActionsId = useId();
 
   const {
     entries,
@@ -125,6 +127,7 @@ export function FileBrowserModal({
     if (!selectedFile) {
       setMobileView("list");
     }
+    setToolbarActionsExpanded(false);
   }, [selectedFile]);
 
   useEffect(() => {
@@ -370,6 +373,18 @@ export function FileBrowserModal({
                         <span>Back</span>
                       </button>
                     )}
+                    {!isBinaryFile(selectedFile) && (
+                      <button
+                        className="btn btn-sm btn-icon file-editor-toolbar-button"
+                        onClick={() => setToolbarActionsExpanded((prev) => !prev)}
+                        aria-label="Toggle editor options"
+                        title="Toggle editor options"
+                        aria-expanded={toolbarActionsExpanded}
+                        aria-controls={toolbarActionsId}
+                      >
+                        {toolbarActionsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                    )}
                     {selectedFile}
                     {isBinaryFile(selectedFile) && (
                       <span className="file-browser-binary-indicator">
@@ -432,6 +447,8 @@ export function FileBrowserModal({
                       showLineNumbers={showLineNumbers && !isBinaryFile(selectedFile)}
                       onToggleLineNumbers={handleToggleLineNumbers}
                       canToggleLineNumbers={!isBinaryFile(selectedFile)}
+                      toolbarExpanded={toolbarActionsExpanded}
+                      toolbarActionsId={toolbarActionsId}
                     />
                   </div>
                 )}

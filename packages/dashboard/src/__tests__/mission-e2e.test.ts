@@ -315,6 +315,33 @@ function createMockMissionStore() {
       Array.from(features.values()).filter((feature) => feature.sliceId === sliceId)
     ),
 
+    applyDerivedMilestoneAcceptanceCriteria: vi.fn((milestoneId: string) => {
+      const milestone = milestones.get(milestoneId);
+      if (!milestone) throw new Error("Milestone " + milestoneId + " not found");
+      if (milestone.acceptanceCriteria?.trim()) return milestone;
+
+      const milestoneSlices = Array.from(slices.values()).filter((slice) => slice.milestoneId === milestoneId);
+      const lines = milestoneSlices
+        .flatMap((slice) => Array.from(features.values()).filter((feature) => feature.sliceId === slice.id))
+        .map((feature) => {
+          const acceptance = feature.acceptanceCriteria?.trim();
+          const description = feature.description?.trim();
+          const text = acceptance || description;
+          return text ? `- ${feature.title}: ${text}` : undefined;
+        })
+        .filter((line): line is string => Boolean(line));
+
+      if (lines.length === 0) return milestone;
+
+      const updated = {
+        ...milestone,
+        acceptanceCriteria: lines.join("\n"),
+        updatedAt: new Date().toISOString(),
+      };
+      milestones.set(milestoneId, updated);
+      return updated;
+    }),
+
     activateSlice: vi.fn((id: string) => {
       const slice = slices.get(id);
       if (!slice) throw new Error("Slice " + id + " not found");
@@ -2539,6 +2566,159 @@ describe("Mission API", () => {
       );
       expect(fallbackCall).toBeDefined();
       expect(fallbackCall![1].assertion).toBe("Verify implementation of: Minimal Feature");
+    });
+
+    it("derives milestone acceptance criteria from feature acceptance criteria when omitted", async () => {
+      const { app } = buildApp();
+      const mockSessionId = "test-derived-milestone-acceptance";
+
+      const store = new MockAiSessionStore();
+      store.rows.set(mockSessionId, {
+        id: mockSessionId,
+        type: "mission_interview",
+        status: "complete",
+        title: "Derived Acceptance Mission",
+        inputPayload: JSON.stringify({ ip: "127.0.0.1", missionTitle: "Derived Acceptance Mission" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify({
+          missionTitle: "Derived Acceptance Mission",
+          milestones: [{
+            title: "Milestone",
+            slices: [{
+              title: "Slice",
+              features: [{ title: "Feature A", acceptanceCriteria: "A done" }],
+            }],
+          }],
+        }),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lockedByTab: null,
+        lockedAt: null,
+      });
+      setAiSessionStore(store as any);
+
+      const res = await request(app, "POST", "/api/missions/interview/create-mission", JSON.stringify({ sessionId: mockSessionId }), { "content-type": "application/json" });
+      expect(res.status).toBe(201);
+      expect(res.body.milestones[0].acceptanceCriteria).toBe("- Feature A: A done");
+    });
+
+    it("derives milestone acceptance criteria from feature descriptions when acceptance criteria are blank", async () => {
+      const { app } = buildApp();
+      const mockSessionId = "test-derived-milestone-description";
+
+      const store = new MockAiSessionStore();
+      store.rows.set(mockSessionId, {
+        id: mockSessionId,
+        type: "mission_interview",
+        status: "complete",
+        title: "Derived Description Mission",
+        inputPayload: JSON.stringify({ ip: "127.0.0.1", missionTitle: "Derived Description Mission" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify({
+          missionTitle: "Derived Description Mission",
+          milestones: [{
+            title: "Milestone",
+            slices: [{
+              title: "Slice",
+              features: [{ title: "Feature B", description: "B done", acceptanceCriteria: " " }],
+            }],
+          }],
+        }),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lockedByTab: null,
+        lockedAt: null,
+      });
+      setAiSessionStore(store as any);
+
+      const res = await request(app, "POST", "/api/missions/interview/create-mission", JSON.stringify({ sessionId: mockSessionId }), { "content-type": "application/json" });
+      expect(res.status).toBe(201);
+      expect(res.body.milestones[0].acceptanceCriteria).toBe("- Feature B: B done");
+    });
+
+    it("preserves explicit milestone acceptance criteria from interview summary", async () => {
+      const { app } = buildApp();
+      const mockSessionId = "test-explicit-milestone-acceptance";
+
+      const store = new MockAiSessionStore();
+      store.rows.set(mockSessionId, {
+        id: mockSessionId,
+        type: "mission_interview",
+        status: "complete",
+        title: "Explicit Acceptance Mission",
+        inputPayload: JSON.stringify({ ip: "127.0.0.1", missionTitle: "Explicit Acceptance Mission" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify({
+          missionTitle: "Explicit Acceptance Mission",
+          milestones: [{
+            title: "Milestone",
+            acceptanceCriteria: "Manual milestone criteria",
+            slices: [{
+              title: "Slice",
+              features: [{ title: "Feature C", acceptanceCriteria: "Feature-level criteria" }],
+            }],
+          }],
+        }),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lockedByTab: null,
+        lockedAt: null,
+      });
+      setAiSessionStore(store as any);
+
+      const res = await request(app, "POST", "/api/missions/interview/create-mission", JSON.stringify({ sessionId: mockSessionId }), { "content-type": "application/json" });
+      expect(res.status).toBe(201);
+      expect(res.body.milestones[0].acceptanceCriteria).toBe("Manual milestone criteria");
+    });
+
+    it("leaves milestone acceptance criteria empty when no feature contributes text", async () => {
+      const { app } = buildApp();
+      const mockSessionId = "test-empty-derived-milestone-acceptance";
+
+      const store = new MockAiSessionStore();
+      store.rows.set(mockSessionId, {
+        id: mockSessionId,
+        type: "mission_interview",
+        status: "complete",
+        title: "Empty Acceptance Mission",
+        inputPayload: JSON.stringify({ ip: "127.0.0.1", missionTitle: "Empty Acceptance Mission" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify({
+          missionTitle: "Empty Acceptance Mission",
+          milestones: [{
+            title: "Milestone",
+            slices: [{
+              title: "Slice",
+              features: [{ title: "Feature D", description: "  ", acceptanceCriteria: "" }],
+            }],
+          }],
+        }),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lockedByTab: null,
+        lockedAt: null,
+      });
+      setAiSessionStore(store as any);
+
+      const res = await request(app, "POST", "/api/missions/interview/create-mission", JSON.stringify({ sessionId: mockSessionId }), { "content-type": "application/json" });
+      expect(res.status).toBe(201);
+      expect(res.body.milestones[0].acceptanceCriteria ?? undefined).toBeUndefined();
     });
 
     it("handles partial plans gracefully without throwing on undefined arrays", async () => {

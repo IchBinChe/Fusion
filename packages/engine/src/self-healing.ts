@@ -2809,9 +2809,13 @@ export class SelfHealingManager {
 
   private async readShortstatForSha(
     sha: string,
+    rebaseBaseSha?: string,
   ): Promise<{ filesChanged: number; insertions: number; deletions: number } | null> {
     try {
-      const stats = await execAsync(`git show --shortstat --format= ${shellQuote(sha)}`, {
+      const command = rebaseBaseSha
+        ? `git diff --shortstat ${shellQuote(`${rebaseBaseSha}..${sha}`)}`
+        : `git show --shortstat --format= ${shellQuote(sha)}`;
+      const stats = await execAsync(command, {
         cwd: this.options.rootDir,
         maxBuffer: 1024 * 1024,
       });
@@ -2866,7 +2870,7 @@ export class SelfHealingManager {
               continue;
             }
 
-            const liveShortstat = await this.readShortstatForSha(storedSha);
+            const liveShortstat = await this.readShortstatForSha(storedSha, task.mergeDetails?.rebaseBaseSha);
             const liveLandedFiles = await this.readLandedFilesForSha(storedSha, task.mergeDetails?.rebaseBaseSha);
             const currentLandedFiles = task.mergeDetails?.landedFiles;
             const landedFilesMismatch = Boolean(

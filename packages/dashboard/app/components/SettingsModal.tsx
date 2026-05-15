@@ -1026,7 +1026,7 @@ export function SettingsModal({
 
     try {
       const { url, instructions, manualCode, deviceCode } = await loginProvider(providerId);
-      if (instructions?.trim()) {
+      if (instructions?.trim() && !(providerId === "github-copilot" && deviceCode)) {
         setLoginInstructions((prev) => ({ ...prev, [providerId]: instructions }));
       }
       if (manualCode) {

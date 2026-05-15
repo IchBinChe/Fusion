@@ -1643,6 +1643,7 @@ describe("SettingsModal", () => {
         });
       mockLoginProvider.mockResolvedValueOnce({
         url: "https://auth.example.com/login",
+        instructions: "Enter code: ABCD-1234",
         deviceCode: {
           userCode: "ABCD-1234",
           verificationUri: "https://github.com/login/device",
@@ -1656,6 +1657,7 @@ describe("SettingsModal", () => {
       await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
 
       expect(await within(copilotCard).findByText("ABCD-1234")).toBeInTheDocument();
+      expect(within(copilotCard).queryByTestId("auth-login-instructions-github-copilot")).not.toBeInTheDocument();
       await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
       expect(writeText).toHaveBeenCalledWith("ABCD-1234");
 

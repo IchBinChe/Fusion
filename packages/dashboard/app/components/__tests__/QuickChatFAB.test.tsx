@@ -178,6 +178,53 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.getByTestId("quick-chat-session-option-session-agent")).toBeInTheDocument();
   });
 
+  it("renders unread dots for unread sessions and hides active session dot", async () => {
+    localStorage.setItem(
+      "kb:proj-1:fusion:chat-unread:direct",
+      JSON.stringify({ "session-model": "2026-05-15T00:00:00.000Z" }),
+    );
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
+
+    expect(screen.queryByTestId("quick-chat-unread-dot-session-model")).toBeNull();
+    expect(screen.getByTestId("quick-chat-unread-dot-session-agent")).toBeInTheDocument();
+  });
+
+  it("renders unread dots for unread rooms", async () => {
+    const selectRoom = vi.fn();
+    mockUseAppSettings.mockReturnValue({ experimentalFeatures: { chatRooms: true } } as ReturnType<typeof useAppSettings>);
+    mockUseChatRooms.mockReturnValue({
+      rooms: [
+        { id: "room-1", name: "engineering", slug: "engineering", memberCount: 2, createdAt: new Date().toISOString(), updatedAt: "2026-05-15T00:00:00.000Z" },
+        { id: "room-2", name: "support", slug: "support", memberCount: 2, createdAt: new Date().toISOString(), updatedAt: "2026-05-15T01:00:00.000Z" },
+      ],
+      roomsLoading: false,
+      roomsError: null,
+      activeRoom: { id: "room-1", name: "engineering", slug: "engineering", memberCount: 2, createdAt: new Date().toISOString(), updatedAt: "2026-05-15T00:00:00.000Z" },
+      activeRoomMembers: [],
+      messages: [],
+      messagesLoading: false,
+      selectRoom,
+      createRoom: vi.fn(),
+      deleteRoom: vi.fn(),
+      sendRoomMessage: vi.fn(),
+      refreshRooms: vi.fn(),
+    });
+    localStorage.setItem(
+      "kb:proj-1:fusion:chat-unread:rooms",
+      JSON.stringify({ "room-1": "2026-05-15T00:00:00.000Z" }),
+    );
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
+
+    expect(screen.queryByTestId("quick-chat-unread-dot-room-1")).toBeNull();
+    expect(screen.getByTestId("quick-chat-unread-dot-room-2")).toBeInTheDocument();
+  });
+
   it("does not render room options or group labels when chat rooms are disabled", async () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));

@@ -755,6 +755,63 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     });
   });
 
+  it("renders unread dots for unread direct sessions and hides dot for active session", async () => {
+    const selectSession = vi.fn();
+    const sessionA: ChatSessionInfo = {
+      ...activeSession,
+      id: "session-a",
+      title: "Session A",
+      updatedAt: "2026-04-08T00:00:00.000Z",
+      lastMessageAt: "2026-04-08T00:00:00.000Z",
+    };
+    const sessionB: ChatSessionInfo = {
+      ...activeSession,
+      id: "session-b",
+      title: "Session B",
+      updatedAt: "2026-04-08T01:00:00.000Z",
+      lastMessageAt: "2026-04-08T01:00:00.000Z",
+    };
+
+    localStorage.setItem("fusion:chat-scope", "direct");
+    localStorage.setItem("kb:proj-123:fusion:chat-unread:direct", JSON.stringify({ "session-a": "2026-04-08T00:00:00.000Z" }));
+
+    setup({
+      sessions: [sessionA, sessionB],
+      filteredSessions: [sessionA, sessionB],
+      activeSession: sessionA,
+      selectSession,
+    });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    expect(screen.queryByTestId("chat-unread-dot-session-a")).toBeNull();
+    expect(screen.getByTestId("chat-unread-dot-session-b")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("chat-session-session-b"));
+    expect(selectSession).toHaveBeenCalledWith("session-b");
+    expect(localStorage.getItem("kb:proj-123:fusion:chat-unread:direct")).toContain("session-b");
+  });
+
+  it("renders unread dots for unread rooms", () => {
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    localStorage.setItem("kb:proj-123:fusion:chat-unread:rooms", JSON.stringify({ "room-a": "2026-04-08T00:00:00.000Z" }));
+
+    const roomB = {
+      ...roomA,
+      id: "room-b",
+      name: "Room B",
+      slug: "room-b",
+      updatedAt: "2026-04-08T01:00:00.000Z",
+    };
+
+    setup({}, { rooms: [roomA, roomB], activeRoom: roomA });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    expect(screen.queryByTestId("chat-unread-dot-room-a")).toBeNull();
+    expect(screen.getByTestId("chat-unread-dot-room-b")).toBeInTheDocument();
+  });
+
   it("keeps direct mode behavior unchanged when rooms are enabled", async () => {
     localStorage.setItem("fusion:chat-scope", "direct");
     const addToast = vi.fn();

@@ -3760,8 +3760,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task = this.archiveEntryToTask(archived, false);
       }
 
-      if (task.column === "done" && toColumn === "done") {
-        if (this.clearDoneTransientFields(task)) {
+      if (task.column === toColumn) {
+        if (toColumn === "done" && this.clearDoneTransientFields(task)) {
           task.updatedAt = new Date().toISOString();
           await this.atomicWriteTaskJson(dir, task);
           if (this.isWatching) this.taskCache.set(id, { ...task });

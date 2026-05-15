@@ -362,6 +362,12 @@ describe("TaskStore", () => {
 
       await expect(store.moveTask(task.id, "todo")).resolves.toMatchObject({ id: task.id, column: "todo" });
     });
+
+    it("treats same-column moves as a no-op", async () => {
+      const task = await store.createTask({ description: "same column no-op", column: "todo" });
+
+      await expect(store.moveTask(task.id, "todo")).resolves.toMatchObject({ id: task.id, column: "todo" });
+    });
   });
 
 

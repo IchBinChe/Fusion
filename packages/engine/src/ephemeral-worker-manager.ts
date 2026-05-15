@@ -277,10 +277,12 @@ export class EphemeralWorkerManager {
       this.pendingDeletions.add(agentId);
     }
 
+    const effectiveTerminalState = reason === "error" && !ephemeral ? "active" : terminalState;
+
     try {
-      await this.agentStore.updateAgentState(agentId, terminalState);
+      await this.agentStore.updateAgentState(agentId, effectiveTerminalState);
     } catch (err) {
-      this.log.warn(`Failed to update agent ${agentId} to ${terminalState} (${reason}): ${this.formatError(err)}`);
+      this.log.warn(`Failed to update agent ${agentId} to ${effectiveTerminalState} (${reason}): ${this.formatError(err)}`);
     }
     try {
       await this.agentStore.syncExecutionTaskLink(agentId, undefined);

@@ -921,7 +921,7 @@ describe("InProcessRuntime", () => {
         await vi.advanceTimersByTimeAsync(5000);
 
         const updated = await store.getAgent(durable.id);
-        expect(updated?.state).toBe("error");
+        expect(updated?.state).toBe("active");
         expect(updated?.taskId).toBeUndefined();
         expect(deleteAgentSpy).not.toHaveBeenCalledWith(durable.id);
       } finally {

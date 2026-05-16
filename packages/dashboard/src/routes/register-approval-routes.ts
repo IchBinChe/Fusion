@@ -6,7 +6,7 @@ import {
   type ApprovalRequestActorSnapshot,
   type ApprovalRequestStatus,
 } from "@fusion/core";
-import { executeApprovedAgentProvisioning } from "@fusion/engine";
+import { executeApprovedAgentProvisioning, executeApprovedWorktrunkInstall } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 import { emitApprovalSseEvent } from "../sse.js";
@@ -297,6 +297,36 @@ export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
           emitProvisioningDecisionAudit({ scopedStore, request: updated, decision: "approved" });
         } else {
           emitProvisioningDecisionAudit({ scopedStore, request: updated, decision: "denied" });
+        }
+      }
+
+      if (updated.targetAction.category === "network_api" && updated.targetAction.action === "worktrunk_install") {
+        if (body.decision === "approve") {
+          try {
+            const settings = await scopedStore.getSettings();
+            await executeApprovedWorktrunkInstall({
+              approvalStore,
+              settings: settings.worktrunk ?? {},
+              request: updated,
+            });
+          } catch (error) {
+            runtimeLogger.warn("Worktrunk install approval execution failed", {
+              requestId: updated.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            scopedStore.recordRunAuditEvent({
+              domain: "filesystem",
+              mutationType: "binary:install-failed",
+              target: updated.targetAction.resourceId,
+              agentId: updated.requester.actorId,
+              runId: updated.runId ?? updated.id,
+              ...(updated.taskId ? { taskId: updated.taskId } : {}),
+              metadata: {
+                approvalRequestId: updated.id,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            });
+          }
         }
       }
 

@@ -82,8 +82,11 @@ vi.mock("@fusion/core", () => ({
   AgentStore: MockAgentStore,
 }));
 
+const executeApprovedWorktrunkInstall = vi.fn(async () => ({ binaryPath: "~/.fusion/bin/worktrunk", source: "installed-release" }));
+
 vi.mock("@fusion/engine", () => ({
   executeApprovedAgentProvisioning,
+  executeApprovedWorktrunkInstall,
 }));
 
 describe("approval routes", async () => {
@@ -128,6 +131,7 @@ describe("approval routes", async () => {
     updateAgent.mockClear();
     const now = new Date().toISOString();
     executeApprovedAgentProvisioning.mockClear();
+    executeApprovedWorktrunkInstall.mockClear();
     state.runAuditEvents = [];
     state.provisionedAgents = new Set(["target-1"]);
     state.task = { id: "FN-1", paused: true, pausedByAgentId: "agent-1" };
@@ -207,10 +211,47 @@ describe("approval routes", async () => {
         updatedAt: now,
         requestedAt: now,
       }],
+      ["apr-6", {
+        id: "apr-6",
+        status: "pending",
+        requester: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" },
+        targetAction: {
+          category: "network_api",
+          summary: "Install worktrunk",
+          action: "worktrunk_install",
+          resourceType: "binary",
+          resourceId: "~/.fusion/bin/worktrunk",
+        },
+        taskId: "FN-1",
+        runId: "run-4",
+        createdAt: now,
+        updatedAt: now,
+        requestedAt: now,
+      }],
+    ]);
+    state.audits = new Map([
+        id: "apr-5",
+        status: "pending",
+        requester: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" },
+        targetAction: {
+          category: "agent_provisioning",
+          summary: "Malformed",
+          action: "create",
+          resourceType: "agent",
+          resourceId: "",
+          context: {},
+        },
+        taskId: "FN-1",
+        runId: "run-3",
+        createdAt: now,
+        updatedAt: now,
+        requestedAt: now,
+      }],
     ]);
     state.audits = new Map([
       ["apr-1", [{ id: "evt-created", eventType: "created", actor: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" }, createdAt: now }]],
       ["apr-2", [{ id: "evt-denied", eventType: "denied", actor: { actorId: "dashboard", actorType: "user", actorName: "User" }, createdAt: now }]],
+      ["apr-6", [{ id: "evt-created-6", eventType: "created", actor: { actorId: "agent-1", actorType: "agent", actorName: "Agent 1" }, createdAt: now }]],
     ]);
   });
 
@@ -345,6 +386,32 @@ describe("approval routes", async () => {
     );
     expect(res.status).toBe(500);
     expect(res.body.error).toContain("Malformed agent provisioning request");
+  });
+
+  it("invokes worktrunk installer on approve for worktrunk_install approvals", async () => {
+    const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-6/decision",
+      JSON.stringify({ decision: "approve" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(200);
+    expect(executeApprovedWorktrunkInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invoke worktrunk installer on deny for worktrunk_install approvals", async () => {
+    const app = createApp();
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-6/decision",
+      JSON.stringify({ decision: "deny" }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(200);
+    expect(executeApprovedWorktrunkInstall).not.toHaveBeenCalled();
   });
 
   it("returns 409 for invalid transition", async () => {

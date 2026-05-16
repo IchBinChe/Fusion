@@ -23,6 +23,7 @@ import { GitHubClient, parseBadgeUrl } from "../github.js";
 import { GitHubIssueCommentService } from "../github-issue-comment.js";
 import { GitHubTrackingCommentService } from "../github-tracking-comments.js";
 import { GitHubTrackingStateService } from "../github-tracking-state.js";
+import { GitHubTrackingReconciler } from "../github-tracking-reconciler.js";
 import { githubRateLimiter } from "../github-poll.js";
 import { listRegisteredProjectStores, onProjectStoreRegistered } from "../project-store-resolver.js";
 import {
@@ -1126,6 +1127,8 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
     ctx.registerDispose(() => githubTrackingCommentService.stop());
 
     const githubTrackingStateService = new GitHubTrackingStateService(store);
+    const githubTrackingReconciler = new GitHubTrackingReconciler();
+    const reconcileScheduledStores = new WeakSet<TaskStore>();
     githubTrackingStateService.start();
 
     const attachedStateStores = new Set<TaskStore>();
@@ -1135,6 +1138,13 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       }
       attachedStateStores.add(projectStore);
       githubTrackingStateService.attach(projectStore);
+
+      if (!reconcileScheduledStores.has(projectStore)) {
+        reconcileScheduledStores.add(projectStore);
+        setImmediate(() => {
+          void githubTrackingReconciler.reconcile(projectStore);
+        });
+      }
     };
 
     attachStateStore(store);

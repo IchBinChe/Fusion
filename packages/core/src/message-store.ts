@@ -337,6 +337,41 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
   }
 
   /**
+   * Delete messages older than a max inactivity threshold (by updatedAt).
+   * @param maxAgeMs - Inactivity threshold in milliseconds
+   * @returns Number of deleted messages
+   */
+  cleanupOldMessages(maxAgeMs: number): { messagesDeleted: number } {
+    if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) {
+      return { messagesDeleted: 0 };
+    }
+
+    const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+
+    const deletedIds = this.db.transaction(() => {
+      const rows = this.db.prepare(`
+        DELETE FROM messages
+        WHERE updatedAt < ?
+        RETURNING id
+      `).all(cutoff) as Array<{ id: string }>;
+      return rows.map((row) => row.id);
+    });
+
+    if (deletedIds.length === 0) {
+      messageStoreLog.log(`cleanupOldMessages deleted=0 cutoff=${cutoff}`);
+      return { messagesDeleted: 0 };
+    }
+
+    for (const id of deletedIds) {
+      this.emit("message:deleted", id);
+    }
+
+    this.db.bumpLastModified();
+    messageStoreLog.log(`cleanupOldMessages deleted=${deletedIds.length} cutoff=${cutoff}`);
+    return { messagesDeleted: deletedIds.length };
+  }
+
+  /**
    * Get all messages between two participants (conversation view).
    * @param participantA - First participant
    * @param participantB - Second participant

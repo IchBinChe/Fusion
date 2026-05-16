@@ -556,6 +556,82 @@ describe("MessageStore", () => {
     });
   });
 
+  describe("cleanupOldMessages()", () => {
+    it("deletes only messages with updatedAt older than cutoff", () => {
+      const oldA = store.sendMessage({ fromId: "user-1", fromType: "user", toId: "agent-1", toType: "agent", content: "old-a", type: "user-to-agent" });
+      const oldB = store.sendMessage({ fromId: "agent-2", fromType: "agent", toId: "user-1", toType: "user", content: "old-b", type: "agent-to-user" });
+      const recent = store.sendMessage({ fromId: "agent-3", fromType: "agent", toId: "user-2", toType: "user", content: "recent", type: "system" });
+
+      const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString();
+      const oneDayAgo = new Date(Date.now() - 1 * 86_400_000).toISOString();
+      db.prepare("UPDATE messages SET updatedAt = ? WHERE id = ?").run(tenDaysAgo, oldA.id);
+      db.prepare("UPDATE messages SET updatedAt = ? WHERE id = ?").run(tenDaysAgo, oldB.id);
+      db.prepare("UPDATE messages SET updatedAt = ? WHERE id = ?").run(oneDayAgo, recent.id);
+
+      const result = store.cleanupOldMessages(7 * 86_400_000);
+      expect(result).toEqual({ messagesDeleted: 2 });
+      expect(store.getMessage(oldA.id)).toBeNull();
+      expect(store.getMessage(oldB.id)).toBeNull();
+      expect(store.getMessage(recent.id)).not.toBeNull();
+    });
+
+    it("no-ops for non-positive and non-finite maxAgeMs", () => {
+      const message = store.sendMessage({ fromId: "user-1", fromType: "user", toId: "agent-1", toType: "agent", content: "keep", type: "user-to-agent" });
+      const events: string[] = [];
+      store.on("message:deleted", (id) => events.push(id));
+      const bumpSpy = vi.spyOn(db, "bumpLastModified");
+
+      expect(store.cleanupOldMessages(0)).toEqual({ messagesDeleted: 0 });
+      expect(store.cleanupOldMessages(-1)).toEqual({ messagesDeleted: 0 });
+      expect(store.cleanupOldMessages(Number.NaN)).toEqual({ messagesDeleted: 0 });
+      expect(store.cleanupOldMessages(Number.POSITIVE_INFINITY)).toEqual({ messagesDeleted: 0 });
+
+      expect(store.getMessage(message.id)).not.toBeNull();
+      expect(events).toEqual([]);
+      expect(bumpSpy).not.toHaveBeenCalled();
+    });
+
+    it("emits message:deleted for each deleted message id", () => {
+      const oldA = store.sendMessage({ fromId: "user-1", fromType: "user", toId: "agent-1", toType: "agent", content: "old-a", type: "user-to-agent" });
+      const oldB = store.sendMessage({ fromId: "agent-1", fromType: "agent", toId: "user-1", toType: "user", content: "old-b", type: "agent-to-user" });
+      const cutoffAge = new Date(Date.now() - 20 * 86_400_000).toISOString();
+      db.prepare("UPDATE messages SET updatedAt = ? WHERE id IN (?, ?)").run(cutoffAge, oldA.id, oldB.id);
+
+      const events: string[] = [];
+      store.on("message:deleted", (id) => events.push(id));
+
+      const result = store.cleanupOldMessages(7 * 86_400_000);
+      expect(result.messagesDeleted).toBe(2);
+      expect(new Set(events)).toEqual(new Set([oldA.id, oldB.id]));
+    });
+
+    it("handles bulk deletion and bumps lastModified once", () => {
+      const bumpSpy = vi.spyOn(db, "bumpLastModified");
+      const oldIds: string[] = [];
+
+      for (let i = 0; i < 55; i += 1) {
+        const message = store.sendMessage({
+          fromId: `agent-${i}`,
+          fromType: "agent",
+          toId: `user-${i}`,
+          toType: "user",
+          content: `bulk-${i}`,
+          type: i % 2 === 0 ? "agent-to-user" : "system",
+        });
+        oldIds.push(message.id);
+      }
+
+      const oldTimestamp = new Date(Date.now() - 40 * 86_400_000).toISOString();
+      const placeholders = oldIds.map(() => "?").join(", ");
+      db.prepare(`UPDATE messages SET updatedAt = ? WHERE id IN (${placeholders})`).run(oldTimestamp, ...oldIds);
+      bumpSpy.mockClear();
+
+      const result = store.cleanupOldMessages(7 * 86_400_000);
+      expect(result.messagesDeleted).toBe(55);
+      expect(bumpSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("getConversation()", () => {
     it("returns all messages between two participants", () => {
       // user-1 sends to agent-1

@@ -7,8 +7,9 @@ import { SelfHealingManager } from "../../self-healing.js";
 import { TriageProcessor } from "../../triage.js";
 
 function triageTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
+  const { id, ...rest } = overrides;
   return {
-    id: overrides.id,
+    id,
     title: overrides.id,
     description: overrides.id,
     priority: "low",
@@ -20,7 +21,7 @@ function triageTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
     createdAt: "2026-05-15T10:00:00.000Z",
     updatedAt: "2026-05-15T10:00:00.000Z",
     columnMovedAt: "2026-05-15T10:00:00.000Z",
-    ...overrides,
+    ...rest,
   } as Task;
 }
 

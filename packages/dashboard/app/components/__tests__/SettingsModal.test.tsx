@@ -2127,7 +2127,45 @@ describe("SettingsModal", () => {
       expect(screen.getByLabelText("Worktrunk failure behavior")).toBeInTheDocument();
     });
 
+    it("renders install affordance between enable toggle and binary path controls", async () => {
+      mockUseWorktrunkInstallStatus.mockReturnValue({
+        status: "missing",
+        requestInstall: vi.fn(),
+        requesting: false,
+        version: undefined,
+        installPath: undefined,
+        pendingApprovalId: undefined,
+        error: undefined,
+      });
+
+      renderModal({ initialSection: "worktrees" });
+      await waitForSettingsModalReady();
+
+      const enabledToggle = screen.getByLabelText("Enable worktrunk integration");
+      const installAffordance = screen.getByTestId("worktrunk-install-affordance");
+      const binaryPathInput = screen.getByLabelText("Worktrunk binary path");
+
+      const enableGroup = enabledToggle.closest(".form-group");
+      const binaryPathGroup = binaryPathInput.closest(".form-group");
+
+      expect(enableGroup).not.toBeNull();
+      expect(binaryPathGroup).not.toBeNull();
+
+      expect(enableGroup!.compareDocumentPosition(installAffordance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(installAffordance.compareDocumentPosition(binaryPathGroup!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("toggles disabled states and shows the worktreesDir precedence hint", async () => {
+      mockUseWorktrunkInstallStatus.mockReturnValue({
+        status: "installed",
+        requestInstall: vi.fn(),
+        requesting: false,
+        version: "v1.2.3",
+        installPath: "~/.fusion/bin/worktrunk",
+        pendingApprovalId: undefined,
+        error: undefined,
+      });
+
       renderModal();
       await waitForSettingsModalReady();
       await userEvent.click(screen.getByText("Worktrees"));

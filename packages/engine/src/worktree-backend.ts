@@ -1,18 +1,17 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import type { Settings } from "@fusion/core";
 import { inspectBranchConflict } from "./branch-conflicts.js";
 import { formatError, worktreePoolLog } from "./logger.js";
 
 const execAsync = promisify(exec);
-const GIT_TIMEOUT_MS = 120_000;
-const GIT_MAX_BUFFER = 10 * 1024 * 1024;
+const NATIVE_TIMEOUT_MS = 120_000;
+const WORKTRUNK_TIMEOUT_MS = 120_000;
+const REMOVE_TIMEOUT_MS = 60_000;
+const MAX_BUFFER = 10 * 1024 * 1024;
 
 export type WorktreeBackendKind = "native" | "worktrunk";
-
-export interface WorktreeBackend {
-  kind: WorktreeBackendKind;
-  create(input: WorktreeCreateInput): Promise<WorktreeCreateResult>;
-}
+export type WorktreeOperation = "create" | "remove" | "sync" | "prune";
 
 export interface WorktreeCreateInput {
   rootDir: string;
@@ -28,15 +27,54 @@ export interface WorktreeCreateResult {
   branch: string;
 }
 
+export interface WorktreeRemoveInput {
+  rootDir: string;
+  worktreePath: string;
+  taskId?: string;
+}
+
+export interface WorktreeSyncInput {
+  rootDir: string;
+  worktreePath: string;
+  branch: string;
+  taskId?: string;
+}
+
+export interface WorktreePruneInput {
+  rootDir: string;
+}
+
+export interface WorktreeBackend {
+  readonly kind: WorktreeBackendKind;
+  create(input: WorktreeCreateInput): Promise<WorktreeCreateResult>;
+  remove(input: WorktreeRemoveInput): Promise<void>;
+  sync(input: WorktreeSyncInput): Promise<{ skipped: true }>;
+  prune(input: WorktreePruneInput): Promise<void>;
+}
+
+export type WorktrunkOperationCode =
+  | "worktrunk_operation_failed"
+  | "worktrunk_binary_missing"
+  | "worktrunk_unsupported_operation";
+
 export class WorktrunkOperationError extends Error {
-  constructor(
-    public readonly operation: string,
-    public readonly code: "worktrunk_operation_failed" | "worktrunk_binary_missing",
-    public readonly stderr: string,
-    public readonly exitCode: number | null,
-  ) {
-    super(`worktrunk ${operation} failed: ${stderr}`);
+  readonly code: WorktrunkOperationCode;
+  readonly operation: WorktreeOperation;
+  readonly stderr?: string;
+  readonly exitCode?: number | null;
+
+  constructor(input: {
+    operation: WorktreeOperation;
+    code: WorktrunkOperationCode;
+    stderr?: string;
+    exitCode?: number | null;
+  }) {
+    super(`worktrunk ${input.operation} failed`);
     this.name = "WorktrunkOperationError";
+    this.operation = input.operation;
+    this.code = input.code;
+    this.stderr = input.stderr;
+    this.exitCode = input.exitCode;
   }
 }
 
@@ -44,8 +82,24 @@ function quoteShellArg(value: string): string {
   return JSON.stringify(value);
 }
 
+function getErrorStderr(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("stderr" in error)) return undefined;
+  const stderr = (error as { stderr?: unknown }).stderr;
+  return stderr == null ? undefined : String(stderr);
+}
+
+function getErrorExitCode(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const value = error as Record<string, unknown>;
+  if (typeof value.status === "number") return value.status;
+  if (typeof value.code === "number") return value.code;
+  return null;
+}
+
 export class NativeWorktreeBackend implements WorktreeBackend {
-  kind: WorktreeBackendKind = "native";
+  readonly kind: WorktreeBackendKind = "native";
+
+  constructor(private readonly deps: { logger?: { log: (m: string) => void; warn: (m: string) => void } } = {}) {}
 
   async create(input: WorktreeCreateInput): Promise<WorktreeCreateResult> {
     const startArg = input.startPoint ? ` ${quoteShellArg(input.startPoint)}` : "";
@@ -55,8 +109,8 @@ export class NativeWorktreeBackend implements WorktreeBackend {
         {
           cwd: input.rootDir,
           encoding: "utf-8",
-          timeout: GIT_TIMEOUT_MS,
-          maxBuffer: GIT_MAX_BUFFER,
+          timeout: NATIVE_TIMEOUT_MS,
+          maxBuffer: MAX_BUFFER,
         },
       );
       return { path: input.worktreePath, branch: branchName };
@@ -74,7 +128,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
         try {
           return await createWithBranch(candidateBranch);
         } catch {
-          // keep probing suffixes
+          // continue probing suffixes
         }
       }
 
@@ -88,7 +142,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
           startPoint: input.startPoint,
         });
       } catch (inspectError) {
-        worktreePoolLog.warn(
+        this.deps.logger?.warn?.(
           `[worktree-backend] ${input.taskId}: failed to inspect branch conflict: ${formatError(inspectError).detail}`,
         );
       }
@@ -100,68 +154,111 @@ export class NativeWorktreeBackend implements WorktreeBackend {
       throw error;
     }
   }
-}
 
-export class WorktrunkWorktreeBackend implements WorktreeBackend {
-  kind: WorktreeBackendKind = "worktrunk";
+  async remove(input: WorktreeRemoveInput): Promise<void> {
+    // FN-4678: migrate remove call sites to backend.remove().
+    await execAsync(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, {
+      cwd: input.rootDir,
+      encoding: "utf-8",
+      timeout: REMOVE_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+    });
+  }
 
-  constructor(private readonly deps: { binaryPath: string | null; logger?: { warn: (m: string) => void } }) {}
+  async sync(_input: WorktreeSyncInput): Promise<{ skipped: true }> {
+    // Sync-with-trunk semantics are specific to the worktrunk backend.
+    return { skipped: true as const };
+  }
 
-  async create(input: WorktreeCreateInput): Promise<WorktreeCreateResult> {
-    if (!this.deps.binaryPath || !this.deps.binaryPath.trim()) {
-      throw new WorktrunkOperationError(
-        "create",
-        "worktrunk_binary_missing",
-        "worktrunk binary not configured",
-        null,
-      );
-    }
-
-    // Placeholder command wiring for FN-4622; FN-4623 will map this to the finalized worktrunk README contract.
-    const command = `${quoteShellArg(this.deps.binaryPath)} switch --create ${quoteShellArg(input.branch)}`;
-
-    try {
-      await execAsync(command, {
-        cwd: input.rootDir,
-        encoding: "utf-8",
-        timeout: GIT_TIMEOUT_MS,
-        maxBuffer: GIT_MAX_BUFFER,
-      });
-      return { path: input.worktreePath, branch: input.branch };
-    } catch (error) {
-      const stderr =
-        error && typeof error === "object" && "stderr" in error
-          ? String((error as { stderr?: unknown }).stderr ?? "")
-          : "";
-      const execError = error && typeof error === "object" ? (error as Record<string, unknown>) : null;
-      const exitCode = execError
-        ? typeof execError.status === "number"
-          ? execError.status
-          : typeof execError.code === "number"
-            ? execError.code
-            : null
-        : null;
-      this.deps.logger?.warn?.(
-        `[worktree-backend] worktrunk create failed: ${stderr || String(error)}`,
-      );
-      throw new WorktrunkOperationError(
-        "create",
-        "worktrunk_operation_failed",
-        stderr,
-        exitCode,
-      );
-    }
+  async prune(input: WorktreePruneInput): Promise<void> {
+    await execAsync("git worktree prune", {
+      cwd: input.rootDir,
+      encoding: "utf-8",
+      timeout: NATIVE_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+    });
   }
 }
 
-export interface ResolveWorktreeBackendDeps {
-  logger?: { warn: (m: string) => void };
+export class WorktrunkWorktreeBackend implements WorktreeBackend {
+  readonly kind: WorktreeBackendKind = "worktrunk";
+
+  constructor(
+    private readonly deps: {
+      binaryPath: string | null;
+      logger?: { log: (m: string) => void; warn: (m: string) => void };
+    },
+  ) {}
+
+  private get binaryPath(): string {
+    const binaryPath = this.deps.binaryPath?.trim() ?? "";
+    if (!binaryPath) {
+      throw new WorktrunkOperationError({
+        operation: "create",
+        code: "worktrunk_binary_missing",
+        stderr: "worktrunk binary not configured",
+        exitCode: null,
+      });
+    }
+    return binaryPath;
+  }
+
+  private async runPlaceholder(operation: WorktreeOperation, rootDir: string): Promise<void> {
+    let binaryPath: string;
+    try {
+      binaryPath = this.binaryPath;
+    } catch (error) {
+      if (error instanceof WorktrunkOperationError) {
+        throw new WorktrunkOperationError({ ...error, operation });
+      }
+      throw error;
+    }
+
+    // FN-4623: replace placeholder with real worktrunk subcommand mapping.
+    const command = `${quoteShellArg(binaryPath)} --help`;
+
+    try {
+      await execAsync(command, {
+        cwd: rootDir,
+        encoding: "utf-8",
+        timeout: WORKTRUNK_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+      });
+    } catch (error) {
+      const stderr = getErrorStderr(error) ?? String(error);
+      const exitCode = getErrorExitCode(error);
+      this.deps.logger?.warn?.(`[worktree-backend] worktrunk ${operation} failed: ${stderr}`);
+      throw new WorktrunkOperationError({
+        operation,
+        code: "worktrunk_operation_failed",
+        stderr,
+        exitCode,
+      });
+    }
+  }
+
+  async create(input: WorktreeCreateInput): Promise<WorktreeCreateResult> {
+    await this.runPlaceholder("create", input.rootDir);
+    return { path: input.worktreePath, branch: input.branch };
+  }
+
+  async remove(input: WorktreeRemoveInput): Promise<void> {
+    await this.runPlaceholder("remove", input.rootDir);
+  }
+
+  async sync(input: WorktreeSyncInput): Promise<{ skipped: true }> {
+    await this.runPlaceholder("sync", input.rootDir);
+    return { skipped: true as const };
+  }
+
+  async prune(input: WorktreePruneInput): Promise<void> {
+    await this.runPlaceholder("prune", input.rootDir);
+  }
 }
 
 export function resolveWorktreeBackend(
-  // Intentionally structural so this file can land before FN-4621 adds the typed worktrunk settings schema.
-  settings: Partial<{ worktrunk?: { enabled?: boolean; binaryPath?: string } }>,
-  deps: ResolveWorktreeBackendDeps = {},
+  settings: Partial<Settings>,
+  deps: { logger?: { log: (m: string) => void; warn: (m: string) => void } } = {},
 ): WorktreeBackend {
   if (settings.worktrunk?.enabled === true) {
     return new WorktrunkWorktreeBackend({
@@ -170,5 +267,5 @@ export function resolveWorktreeBackend(
     });
   }
 
-  return new NativeWorktreeBackend();
+  return new NativeWorktreeBackend({ logger: deps.logger });
 }

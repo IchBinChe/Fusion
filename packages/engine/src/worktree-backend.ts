@@ -294,14 +294,17 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
     // backend currently assumes that template aligns with Fusion's configured
     // worktree path resolution so callers can keep using `input.worktreePath`.
     const args = ["switch", "--create", input.branch];
-    if (input.startPoint) args.push(input.startPoint);
+    if (input.startPoint) args.push("--base", input.startPoint);
     await this.runWorktrunk(args, { cwd: input.rootDir, operation: "create" });
     return { path: input.worktreePath, branch: input.branch };
   }
 
   async remove(input: WorktreeRemoveInput): Promise<void> {
     // worktrunk mapping: `wt remove <branch>` from repo root.
-    await this.runWorktrunk(["remove", input.branch ?? input.worktreePath], { cwd: input.rootDir, operation: "remove" });
+    await this.runWorktrunk(["remove", "--foreground", input.branch ?? input.worktreePath], {
+      cwd: input.rootDir,
+      operation: "remove",
+    });
   }
 
   async sync(_input: WorktreeSyncInput): Promise<{ skipped: boolean }> {

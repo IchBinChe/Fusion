@@ -162,7 +162,7 @@ describe("WorktrunkWorktreeBackend", () => {
 
     expect(execFileMock).toHaveBeenCalledWith(
       "worktrunk",
-      ["switch", "--create", "fusion/fn-1", "main"],
+      ["switch", "--create", "fusion/fn-1", "--base", "main"],
       expect.objectContaining({ cwd: "/repo", timeout: 120000, maxBuffer: 10485760 }),
     );
   });
@@ -179,7 +179,7 @@ describe("WorktrunkWorktreeBackend", () => {
 
     expect(execFileMock).toHaveBeenCalledWith(
       "worktrunk",
-      ["remove", "fusion/fn-1"],
+      ["remove", "--foreground", "fusion/fn-1"],
       expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
     );
   });

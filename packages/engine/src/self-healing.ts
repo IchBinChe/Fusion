@@ -1046,9 +1046,10 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       const doneAutoArchiveDaysRaw = settings.doneAutoArchiveDays;
+      const doneAutoArchiveDaysNumber = Number(doneAutoArchiveDaysRaw);
       const doneAutoArchiveDays =
-        Number.isFinite(doneAutoArchiveDaysRaw) && Number.isInteger(doneAutoArchiveDaysRaw) && doneAutoArchiveDaysRaw > 0
-          ? doneAutoArchiveDaysRaw
+        Number.isFinite(doneAutoArchiveDaysNumber) && Number.isInteger(doneAutoArchiveDaysNumber) && doneAutoArchiveDaysNumber > 0
+          ? doneAutoArchiveDaysNumber
           : 0;
       if (settings.autoArchiveDoneTasksEnabled === false && doneAutoArchiveDays === 0) {
         return 0;

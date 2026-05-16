@@ -165,6 +165,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   worktrunk: {
     enabled: false,
     binaryPath: undefined,
+    installedBinaryPath: undefined,
     onFailure: "fail",
   },
   experimentalFeatures: {},
@@ -203,6 +204,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   worktrunk: {
     enabled: false,
     binaryPath: undefined,
+    installedBinaryPath: undefined,
     onFailure: "fail",
   },
   worktreesDir: undefined,

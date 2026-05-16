@@ -6,9 +6,10 @@ const WORKTRUNK_ON_FAILURE_VALUES: readonly WorktrunkOnFailure[] = [
 ] as const;
 
 export const DEFAULT_WORKTRUNK_SETTINGS: Required<Pick<WorktrunkSettings, "enabled" | "onFailure">> &
-  Pick<WorktrunkSettings, "binaryPath"> = {
+  Pick<WorktrunkSettings, "binaryPath" | "installedBinaryPath"> = {
   enabled: false,
   binaryPath: undefined,
+  installedBinaryPath: undefined,
   onFailure: "fail",
 };
 
@@ -22,12 +23,17 @@ export function resolveWorktrunkSettings(
   const enabled = projectValue?.enabled ?? globalValue?.enabled ?? DEFAULT_WORKTRUNK_SETTINGS.enabled;
   const binaryPath =
     projectValue?.binaryPath ?? globalValue?.binaryPath ?? DEFAULT_WORKTRUNK_SETTINGS.binaryPath;
+  const installedBinaryPath =
+    projectValue?.installedBinaryPath ??
+    globalValue?.installedBinaryPath ??
+    DEFAULT_WORKTRUNK_SETTINGS.installedBinaryPath;
   const onFailure =
     projectValue?.onFailure ?? globalValue?.onFailure ?? DEFAULT_WORKTRUNK_SETTINGS.onFailure;
 
   return {
     enabled,
     ...(binaryPath !== undefined ? { binaryPath } : {}),
+    ...(installedBinaryPath !== undefined ? { installedBinaryPath } : {}),
     onFailure,
   };
 }
@@ -68,6 +74,17 @@ export function validateWorktrunkSettings(value: unknown): WorktrunkSettings {
       throw new Error('worktrunk.onFailure must be one of: "fail", "fallback-native"');
     }
     validated.onFailure = input.onFailure as WorktrunkOnFailure;
+  }
+
+  if (input.installedBinaryPath !== undefined) {
+    if (typeof input.installedBinaryPath !== "string") {
+      throw new Error("worktrunk.installedBinaryPath must be a string when set");
+    }
+    const trimmed = input.installedBinaryPath.trim();
+    if (trimmed.length === 0) {
+      throw new Error("worktrunk.installedBinaryPath cannot be empty");
+    }
+    validated.installedBinaryPath = trimmed;
   }
 
   return validated;

@@ -1944,6 +1944,9 @@ export interface WorktrunkSettings {
    *  - "fallback-native": fall back to Fusion's built-in worktree-pool and
    *    emit a one-shot dashboard alert. */
   onFailure?: WorktrunkOnFailure;
+  /** Cached install path discovered by the auto-install flow.
+   *  Set by Fusion engine; not intended for manual edits. */
+  installedBinaryPath?: string;
 }
 
 export interface GlobalSettings {
@@ -4749,7 +4752,7 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
   git_write: ["git commit", "git push", "git merge", "git branch -d", "git worktree add", "write", "edit"],
   file_write_delete: ["write", "edit", "fn_task_attach"],
   command_execution: ["bash (non-git)", "read", "find", "grep", "ls"],
-  network_api: ["fn_research_run (web/research)", "fn_web_fetch"],
+  network_api: ["fn_research_run (web/research)", "fn_web_fetch", "worktrunk_install"],
   task_agent_mutation: [
     "fn_task_create",
     "fn_delegate_task",

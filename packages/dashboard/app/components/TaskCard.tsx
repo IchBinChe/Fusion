@@ -1427,7 +1427,7 @@ function TaskCardComponent({
     return null;
   })();
 
-  const chipFarRight = task.column === "in-progress"
+  const chipFarRight = (task.column === "in-progress" || task.column === "in-review")
     && filesChangedButton == null
     && showTrackingIndicator
     && Boolean(githubTrackedIssue);

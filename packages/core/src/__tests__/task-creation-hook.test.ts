@@ -104,4 +104,103 @@ describe("task creation hook", () => {
     await store.createTask({ description: "a" });
     expect(hook).not.toHaveBeenCalled();
   });
+
+  describe("createTask hook ordering with summarization", () => {
+    it("defers hook until summarizer succeeds and keeps task:created synchronous", async () => {
+      const store = harness.store();
+      const observations: string[] = [];
+      const hook = vi.fn((task) => observations.push(`hook:${task.title ?? "<none>"}`));
+      const eventSpy = vi.fn(() => observations.push("event:task-created"));
+      const onSummarize = vi.fn().mockResolvedValue("Generated Title");
+      setTaskCreatedHook(hook);
+      store.on("task:created", eventSpy);
+
+      await store.createTask(
+        { description: "a".repeat(201) },
+        { onSummarize, settings: { autoSummarizeTitles: true } },
+      );
+
+      expect(eventSpy).toHaveBeenCalledTimes(1);
+      expect(hook).not.toHaveBeenCalled();
+
+      await vi.waitFor(() => {
+        expect(hook).toHaveBeenCalledTimes(1);
+      });
+      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ title: "Generated Title" }), store);
+      expect(observations).toEqual(["event:task-created", "hook:Generated Title"]);
+    });
+
+    it("defers hook until summarizer settles when summarizer returns null", async () => {
+      const store = harness.store();
+      const hook = vi.fn();
+      const onSummarize = vi.fn().mockResolvedValue(null);
+      setTaskCreatedHook(hook);
+
+      await store.createTask(
+        { description: "b".repeat(201) },
+        { onSummarize, settings: { autoSummarizeTitles: true } },
+      );
+
+      expect(hook).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(hook).toHaveBeenCalledTimes(1);
+      });
+      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ title: undefined }), store);
+    });
+
+    it("defers hook until summarizer settles when summarizer rejects", async () => {
+      const store = harness.store();
+      const hook = vi.fn();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const onSummarize = vi.fn().mockRejectedValue(new Error("summarizer failed"));
+      setTaskCreatedHook(hook);
+
+      try {
+        await store.createTask(
+          { description: "c".repeat(201) },
+          { onSummarize, settings: { autoSummarizeTitles: true } },
+        );
+
+        expect(hook).not.toHaveBeenCalled();
+        await vi.waitFor(() => {
+          expect(hook).toHaveBeenCalledTimes(1);
+        });
+        expect(hook).toHaveBeenCalledWith(expect.objectContaining({ title: undefined }), store);
+        const warnCall = warnSpy.mock.calls.find(([message]) =>
+          typeof message === "string" && message.includes("Title summarization failed for task")
+        );
+        expect(warnCall).toBeDefined();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("fires hook synchronously when summarization is not configured", async () => {
+      const store = harness.store();
+      const hook = vi.fn();
+      setTaskCreatedHook(hook);
+
+      await store.createTask(
+        { description: "plain task without summarization" },
+        { settings: { autoSummarizeTitles: false } },
+      );
+
+      expect(hook).toHaveBeenCalledTimes(1);
+    });
+
+    it("fires hook synchronously for short descriptions and does not invoke summarizer", async () => {
+      const store = harness.store();
+      const hook = vi.fn();
+      const onSummarize = vi.fn().mockResolvedValue("Should never be used");
+      setTaskCreatedHook(hook);
+
+      await store.createTask(
+        { description: "short description" },
+        { onSummarize, settings: { autoSummarizeTitles: true } },
+      );
+
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(onSummarize).not.toHaveBeenCalled();
+    });
+  });
 });

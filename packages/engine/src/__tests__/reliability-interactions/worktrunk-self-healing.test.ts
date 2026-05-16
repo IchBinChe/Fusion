@@ -1,0 +1,175 @@
+import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import type { RunAuditEventInput, Settings, TaskStore } from "@fusion/core";
+import { SelfHealingManager } from "../../self-healing.js";
+
+const { execSpy, resolveBackendSpy, scanIdleSpy, readdirSpy, inspectBranchConflictSpy } = vi.hoisted(() => ({
+  execSpy: vi.fn(),
+  resolveBackendSpy: vi.fn(),
+  scanIdleSpy: vi.fn(),
+  readdirSpy: vi.fn(),
+  inspectBranchConflictSpy: vi.fn(),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    exec: execSpy,
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    readdirSync: readdirSpy,
+  };
+});
+
+vi.mock("../../worktree-pool.js", async () => {
+  const actual = await vi.importActual<any>("../../worktree-pool.js");
+  return {
+    ...actual,
+    resolveWorktreeBackend: resolveBackendSpy,
+    scanIdleWorktrees: scanIdleSpy,
+    isUsableTaskWorktree: vi.fn().mockResolvedValue(true),
+  };
+});
+
+vi.mock("../../branch-conflicts.js", async () => {
+  const actual = await vi.importActual<any>("../../branch-conflicts.js");
+  return {
+    ...actual,
+    inspectBranchConflict: inspectBranchConflictSpy,
+  };
+});
+
+function makeStore(settings: Settings, events: RunAuditEventInput[] = []): TaskStore & EventEmitter {
+  const emitter = new EventEmitter();
+  return Object.assign(emitter, {
+    getSettings: vi.fn(async () => settings),
+    listTasks: vi.fn(async ({ column }: any = {}) => {
+      if (column === "todo") {
+        return [{
+          id: "FN-4628",
+          title: "FN-4628",
+          column: "todo",
+          status: "branch-conflict-unrecoverable",
+          paused: false,
+          branch: "fusion/fn-4628",
+          worktree: "/tmp/fn-4628",
+          baseCommitSha: "base",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }];
+      }
+      return [];
+    }),
+    updateTask: vi.fn(async () => undefined),
+    logEntry: vi.fn(async () => undefined),
+    recordRunAuditEvent: vi.fn(async (event: RunAuditEventInput) => {
+      events.push(event);
+    }),
+  }) as unknown as TaskStore & EventEmitter;
+}
+
+function wireExecSuccess() {
+  execSpy.mockImplementation((command: string, opts: unknown, callback: (...args: any[]) => void) => {
+    const cb = typeof opts === "function" ? opts : callback;
+    cb(null, "", "");
+  });
+}
+
+describe("reliability interactions: worktrunk x self-healing", () => {
+  it("periodic maintenance delegates prune to worktrunk and skips native git prune", async () => {
+    wireExecSuccess();
+    const prune = vi.fn().mockResolvedValue(undefined);
+    resolveBackendSpy.mockReturnValue({ kind: "worktrunk", prune });
+
+    const store = makeStore({ maintenanceIntervalMs: 0, worktrunk: { enabled: true, onFailure: "fail" } } as Settings);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/project" });
+
+    await (manager as any).runMaintenance();
+
+    expect(prune).toHaveBeenCalledWith({ rootDir: "/tmp/project" });
+    expect(execSpy).not.toHaveBeenCalledWith(expect.stringContaining("git worktree prune"), expect.anything(), expect.anything());
+  });
+
+  it.each([
+    { onFailure: "fail", shouldFallback: false },
+    { onFailure: "fallback-native", shouldFallback: true },
+  ] as const)("records audit on worktrunk prune failure (%s)", async ({ onFailure, shouldFallback }) => {
+    wireExecSuccess();
+    const events: RunAuditEventInput[] = [];
+    const prune = vi.fn().mockRejectedValue(new Error("boom"));
+    resolveBackendSpy.mockReturnValue({ kind: "worktrunk", prune });
+
+    const store = makeStore({ maintenanceIntervalMs: 0, worktrunk: { enabled: true, onFailure } } as Settings, events);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/project" });
+
+    await (manager as any).pruneWorktrees();
+
+    const failureEvent = events.find((event) => event.mutationType === "worktree:worktrunk-prune");
+    expect(failureEvent).toBeDefined();
+    expect((failureEvent?.metadata as Record<string, unknown>)?.success).toBe(false);
+
+    const nativePruneCalled = execSpy.mock.calls.some((call) => String(call[0]).includes("git worktree prune"));
+    expect(nativePruneCalled).toBe(shouldFallback);
+  });
+
+  it("enforceWorktreeCap short-circuits to backend prune with worktrunk enabled", async () => {
+    wireExecSuccess();
+    const prune = vi.fn().mockResolvedValue(undefined);
+    resolveBackendSpy.mockReturnValue({ kind: "worktrunk", prune });
+    scanIdleSpy.mockResolvedValue(["/tmp/project/.worktrees/idle"]);
+
+    const store = makeStore({ maintenanceIntervalMs: 0, worktrunk: { enabled: true, onFailure: "fail" } } as Settings);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/project" });
+
+    await (manager as any).enforceWorktreeCap();
+
+    expect(prune).toHaveBeenCalledWith({ rootDir: "/tmp/project" });
+    expect(scanIdleSpy).not.toHaveBeenCalled();
+    expect(readdirSpy).not.toHaveBeenCalled();
+    expect(execSpy).not.toHaveBeenCalledWith(expect.stringContaining("git worktree remove"), expect.anything(), expect.anything());
+  });
+
+  it("branch-conflict reclaim remains active and keeps git worktree prune plumbing", async () => {
+    wireExecSuccess();
+    resolveBackendSpy.mockReturnValue({ kind: "worktrunk", prune: vi.fn() });
+    inspectBranchConflictSpy.mockResolvedValue({
+      status: "tip-already-merged",
+      branch: "fusion/fn-4628",
+      tip: "abc",
+      mergeTarget: "main",
+      uniqueCommitCount: 0,
+      uniqueCommits: [],
+      branchExists: true,
+      strategyUsed: "tip-reachability",
+    });
+
+    const store = makeStore({ maintenanceIntervalMs: 0, worktrunk: { enabled: true, onFailure: "fail" } } as Settings);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/project" });
+
+    await manager.reclaimSelfOwnedBranchConflicts();
+
+    expect(inspectBranchConflictSpy).toHaveBeenCalled();
+    const nativePruneCalled = execSpy.mock.calls.some((call) => String(call[0]).includes("git worktree prune"));
+    expect(nativePruneCalled).toBe(true);
+  });
+
+  it("uses merged store settings where worktrunk is enabled", async () => {
+    wireExecSuccess();
+    const prune = vi.fn().mockResolvedValue(undefined);
+    resolveBackendSpy.mockReturnValue({ kind: "worktrunk", prune });
+
+    const store = makeStore({ maintenanceIntervalMs: 0, worktrunk: { enabled: true, onFailure: "fail" } } as Settings);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/project" });
+
+    await (manager as any).pruneWorktrees();
+
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(store.getSettings).toHaveBeenCalled();
+  });
+});

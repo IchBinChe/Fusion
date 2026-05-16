@@ -58,14 +58,23 @@ describe("useCurrentProject", () => {
     expect(result.current.currentProject).toBeNull();
   });
 
-  it("defaults to first active project when projects available but no selection", async () => {
-    const { result } = renderHook(() => useCurrentProject(mockProjects));
+  it("auto-default on null requires threshold number of confirming polls", async () => {
+    const { result, rerender } = renderHook(
+      ({ projects }) => useCurrentProject(projects),
+      { initialProps: { projects: [] as ProjectInfo[] } },
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
+    expect(result.current.currentProject).toBeNull();
 
-    // Should default to first active project
+    for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD - 1; i += 1) {
+      rerender({ projects: [...mockProjects] });
+      expect(result.current.currentProject).toBeNull();
+    }
+
+    rerender({ projects: [...mockProjects] });
     await waitFor(() => {
       expect(result.current.currentProject?.id).toBe("proj_1");
     });
@@ -105,29 +114,24 @@ describe("useCurrentProject", () => {
     });
   });
 
-  it("defaults to first active project when no selection", async () => {
-    const { result } = renderHook(() => useCurrentProject(mockProjects));
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    // Should default to first active project
-    await waitFor(() => {
-      expect(result.current.currentProject?.id).toBe("proj_1");
-    });
-  });
 
   it("clears selection when project no longer exists and defaults to first active", async () => {
     (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       dashboardCurrentProjectIdByNode: { local: "proj_old" },
     });
 
-    const { result } = renderHook(() => useCurrentProject(mockProjects));
+    const { result, rerender } = renderHook(
+      ({ projects }) => useCurrentProject(projects),
+      { initialProps: { projects: mockProjects } },
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
+
+    for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD; i += 1) {
+      rerender({ projects: [...mockProjects] });
+    }
 
     // Should clear and default to first active
     await waitFor(() => {
@@ -215,11 +219,18 @@ describe("useCurrentProject", () => {
   it("handles global settings fetch failure gracefully", async () => {
     (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Network error"));
 
-    const { result } = renderHook(() => useCurrentProject(mockProjects));
+    const { result, rerender } = renderHook(
+      ({ projects }) => useCurrentProject(projects),
+      { initialProps: { projects: mockProjects } },
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
+
+    for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD; i += 1) {
+      rerender({ projects: [...mockProjects] });
+    }
 
     // Should fall back to default behavior (first active project)
     await waitFor(() => {
@@ -281,7 +292,7 @@ describe("useCurrentProject", () => {
       });
     }
 
-    it("does not switch on a single transient omission", async () => {
+    it("transient 1-poll drop of current project does NOT switch selection", async () => {
       (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
         dashboardCurrentProjectIdByNode: { local: "proj_1" },
       });
@@ -293,11 +304,13 @@ describe("useCurrentProject", () => {
 
       await waitForProjectOneSelection(result);
       rerender({ projects: projectsWithoutCurrent() });
+      expect(result.current.currentProject?.id).toBe("proj_1");
 
+      rerender({ projects: mockProjects });
       expect(result.current.currentProject?.id).toBe("proj_1");
     });
 
-    it("does not switch on two consecutive omissions", async () => {
+    it("transient 2-poll drop of current project does NOT switch selection", async () => {
       (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
         dashboardCurrentProjectIdByNode: { local: "proj_1" },
       });
@@ -312,11 +325,13 @@ describe("useCurrentProject", () => {
       for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD - 1; i += 1) {
         rerender({ projects: projectsWithoutCurrent() });
       }
+      expect(result.current.currentProject?.id).toBe("proj_1");
 
+      rerender({ projects: mockProjects });
       expect(result.current.currentProject?.id).toBe("proj_1");
     });
 
-    it("switches after sustained absence reaches threshold", async () => {
+    it("sustained 3+ poll absence of current project DOES switch to fallback", async () => {
       (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
         dashboardCurrentProjectIdByNode: { local: "proj_1" },
       });
@@ -337,71 +352,21 @@ describe("useCurrentProject", () => {
       });
     });
 
-    it("resets absence counter when project reappears", async () => {
+    it("saved-project hydration is immediate (not debounced)", async () => {
       (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
         dashboardCurrentProjectIdByNode: { local: "proj_1" },
       });
 
-      const { result, rerender } = renderHook(
-        ({ projects }) => useCurrentProject(projects),
-        { initialProps: { projects: mockProjects } },
-      );
-
-      await waitForProjectOneSelection(result);
-
-      rerender({ projects: projectsWithoutCurrent() });
-      rerender({ projects: projectsWithoutCurrent() });
-      rerender({ projects: [...mockProjects] });
-      rerender({ projects: projectsWithoutCurrent() });
-
-      expect(result.current.currentProject?.id).toBe("proj_1");
-    });
-
-    it("does not switch when available projects is empty", async () => {
-      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
-        dashboardCurrentProjectIdByNode: { local: "proj_1" },
-      });
-
-      const { result, rerender } = renderHook(
-        ({ projects }) => useCurrentProject(projects),
-        { initialProps: { projects: mockProjects } },
-      );
-
-      await waitForProjectOneSelection(result);
-      rerender({ projects: [] });
-
-      expect(result.current.currentProject?.id).toBe("proj_1");
-    });
-
-    it("persists switched project after sustained absence", async () => {
-      (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
-        dashboardCurrentProjectIdByNode: { local: "proj_1" },
-      });
-
-      const { result, rerender } = renderHook(
-        ({ projects }) => useCurrentProject(projects),
-        { initialProps: { projects: mockProjects } },
-      );
-
-      await waitForProjectOneSelection(result);
-      vi.mocked(updateGlobalSettings).mockClear();
-
-      for (let i = 0; i < CONSECUTIVE_ABSENCE_THRESHOLD; i += 1) {
-        rerender({ projects: projectsWithoutCurrent() });
-      }
+      const { result } = renderHook(() => useCurrentProject(mockProjects));
 
       await waitFor(() => {
-        expect(result.current.currentProject?.id).toBe("proj_2");
+        expect(result.current.loading).toBe(false);
       });
 
-      expect(updateGlobalSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dashboardCurrentProjectIdByNode: { local: "proj_2" },
-        }),
-      );
+      expect(result.current.currentProject?.id).toBe("proj_1");
     });
 
-    it("resets absence tracking after manual project selection", async () => {
+    it("explicit clearCurrentProject() still suppresses auto-select after polls confirm", async () => {
       (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
         dashboardCurrentProjectIdByNode: { local: "proj_1" },
       });
@@ -412,17 +377,17 @@ describe("useCurrentProject", () => {
       );
 
       await waitForProjectOneSelection(result);
-
-      rerender({ projects: projectsWithoutCurrent() });
-      rerender({ projects: projectsWithoutCurrent() });
 
       act(() => {
-        result.current.setCurrentProject(activeProjectTwo);
+        result.current.clearCurrentProject();
       });
+      expect(result.current.currentProject).toBeNull();
 
-      rerender({ projects: [mockProjects[0]] });
+      for (let i = 0; i <= CONSECUTIVE_ABSENCE_THRESHOLD; i += 1) {
+        rerender({ projects: mockProjects });
+      }
 
-      expect(result.current.currentProject?.id).toBe("proj_2");
+      expect(result.current.currentProject).toBeNull();
     });
   });
 });

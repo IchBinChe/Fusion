@@ -334,6 +334,7 @@ Default notes:
 | `maintenanceIntervalMs` | `number` | `300000` | Periodic maintenance interval in ms (5 min). |
 | `autoArchiveDoneTasksEnabled` | `boolean` | `true` | Enable periodic auto-archiving of done tasks. |
 | `autoArchiveDoneAfterMs` | `number` | `172800000` | Age in ms after entering done before auto-archive (48h). |
+| `doneAutoArchiveDays` | `number` | `0` | Integer day-based done-task retention. `0` disables day override; values `> 0` take precedence over `autoArchiveDoneAfterMs`. |
 | `archiveAgentLogMode` | `"none" \| "compact" \| "full"` | `"compact"` | Agent log retention strategy for cold archive snapshots. |
 | `autoUpdatePrStatus` | `boolean` | `false` | Auto-refresh PR status badges. |
 | `githubCommentOnDone` | `boolean` | `false` | When enabled, tasks imported from GitHub issues post a completion comment to the source issue when the task moves to `done`. |

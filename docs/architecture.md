@@ -985,7 +985,7 @@ Mesh configuration and post-provision managed-node operations are registered sep
 ### Run Audit API
 The run-audit system records every mutation performed by the engine across four domains:
 - **Database** — task:create, task:update, task:move, etc.
-- **Git** — worktree:create, commit:create, merge:resolve, merge:audit-failure, and worktrunk lifecycle events (`worktree:worktrunk-install|create|sync|prune|remove`, plus `worktree:worktrunk-failure` and `worktree:worktrunk-fallback-native`). Worktrunk events share metadata `{ op, binaryPath?, worktreePath?, durationMs?, exitCode?, stderrPreview?, installSource?, prunedCount? }` with `installSource` limited to successful install events and `prunedCount` limited to successful prune events when known. Dirty post-merge audit outcomes emit `merge:audit-failure` with metadata `{ mode, strategy, action, reason, issueCount, duplicateSubjectCount, touchedFileOverlapCount, verificationPassed, auditTargetLabel }`.
+- **Git** — worktree:create, commit:create, merge:resolve, merge:audit-failure, and worktrunk lifecycle events (`worktree:worktrunk-install|create|sync|prune|remove`, plus `worktree:worktrunk-fallback`, `worktree:worktrunk-failure`, and `worktree:worktrunk-fallback-native`). Worktrunk events share metadata `{ op, binaryPath?, worktreePath?, durationMs?, exitCode?, stderrPreview?, installSource?, prunedCount? }` with `installSource` limited to successful install events and `prunedCount` limited to successful prune events when known. Dirty post-merge audit outcomes emit `merge:audit-failure` with metadata `{ mode, strategy, action, reason, issueCount, duplicateSubjectCount, touchedFileOverlapCount, verificationPassed, auditTargetLabel }`.
 - **Git / `merge:file-scope-violation`** — emitted by the merger when `FileScopeViolationError` aborts a squash. `target` is the task ID; metadata includes `stagedFiles`, `declaredScope`, `resetLabel`, `stagedFileCount`, and `declaredScopeCount`. Consumed by `fileScopeInvariantFailuresPerDay` in `GET /api/health/reliability` (FN-4360).
 - **Filesystem** — file:write, prompt:write, attachment:create, etc.
 - **Sandbox** — backend lifecycle events from `SandboxBackend` wiring in executor/merger/routine-runner (`sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`) introduced after FN-4636.
@@ -1456,6 +1456,15 @@ When a tracked task transitions into `done`, Fusion closes the linked GitHub iss
 - Each active task runs in isolated worktree under `.worktrees/*`
 - Executor creates branches like `fusion/{task-id}` (`executor.ts`)
 - `WorktreePool` can recycle idle worktrees when enabled
+
+#### WorktreeBackend abstraction
+- Backend contract: `WorktreeBackend` (`packages/engine/src/worktree-backend.ts`, re-exported via `packages/engine/src/worktree-pool.ts`).
+- Implementations: `NativeWorktreeBackend` (Fusion-managed `git worktree` flow) and `WorktrunkWorktreeBackend` (delegates to external `worktrunk` CLI).
+- Backend selection is driven by `worktrunk.enabled`; when enabled, worktrunk-managed layout overrides `worktreesDir` for delegated operations.
+- Delegated operation surface in the interface: `create`, `sync`, `prune`, `remove` (plus backend path resolution via `resolveWorktreePath`).
+- Executor acquisition paths (`worktree-acquisition.ts`) resolve backend selection centrally, so create flow stays backend-agnostic above the pool/acquisition layer.
+- Self-healing is worktrunk-aware for failure recovery: tasks paused with `pausedReason: "worktrunk_operation_failed"` are explicitly skipped in reclaim sweeps (`self-healing.ts`) until operator intervention.
+- Failure contract: delegated worktrunk errors preserve stderr context (`WorktrunkOperationError`) and are handled by `worktrunk.onFailure` — `"fail"` pauses the task, while `"fallback-native"` retries on the native backend and emits one-shot fallback telemetry.
 
 #### Branch-conflict inspection and auto-reclaim
 - `inspectBranchConflict` classifies branch collisions as `stale`, `stale-resolved`, `reclaimable`, or `live-foreign`.

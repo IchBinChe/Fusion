@@ -287,7 +287,10 @@ If resolution fails, `worktrunk.onFailure` governs disposition (`fail` → pause
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `worktreesDir` | `string` | `undefined` | Optional container directory for task worktrees. Supports absolute paths, project-relative paths, `~` expansion, and `{repo}` token substitution (project root basename). Defaults to `<projectRoot>/.worktrees` when unset and applies to newly-created worktrees/pool scans. |
+| `worktreesDir` | `string` | `undefined` | Optional container directory for task worktrees. Supports absolute paths, project-relative paths, `~` expansion, and `{repo}` token substitution (project root basename). Defaults to `<projectRoot>/.worktrees` when unset and applies to newly-created worktrees/pool scans. When `worktrunk.enabled` is `true`, worktrunk's managed layout takes precedence and the custom directory is ignored until worktrunk is disabled. |
+| `worktrunk.enabled` | `boolean` | `false` | Enables worktrunk-backed worktree operations (create/sync/prune/remove) via the WorktreeBackend abstraction. |
+| `worktrunk.binaryPath` | `string` | `undefined` | Optional absolute path override for the `worktrunk` binary. Leave unset to auto-resolve from `~/.fusion/bin/worktrunk` and `$PATH`. |
+| `worktrunk.onFailure` | `"fail" \| "fallback-native"` | `"fail"` | Behavior when a worktrunk operation fails: `fail` pauses the task with a surfaced error, `fallback-native` switches to Fusion's native worktree backend and emits a one-shot alert. |
 | `taskPrefix` | `string` | `"FN"` | Prefix used for newly generated task IDs. |
 | `includeTaskIdInCommit` | `boolean` | `true` | Include task ID as commit scope in generated commits. |
 | `commitAuthorEnabled` | `boolean` | `true` | Apply explicit `--author` attribution on Fusion commits. |

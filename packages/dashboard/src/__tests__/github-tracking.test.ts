@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "@fusion/core";
 
 const createIssueMock = vi.fn();
+const searchIssuesMock = vi.fn();
 const resolveAuthMock = vi.fn();
 const summarizeTitleMock = vi.fn();
 
@@ -16,6 +17,7 @@ vi.mock("@fusion/core", async () => {
 vi.mock("../github.js", () => ({
   GitHubClient: vi.fn().mockImplementation(() => ({
     createIssue: createIssueMock,
+    searchIssues: searchIssuesMock,
   })),
 }));
 
@@ -157,6 +159,7 @@ describe("maybeCreateTrackingIssue", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     summarizeTitleMock.mockResolvedValue(null);
+    searchIssuesMock.mockResolvedValue([]);
   });
 
   it("returns tracking_disabled when not enabled", async () => {
@@ -245,6 +248,131 @@ describe("maybeCreateTrackingIssue", () => {
     expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({
       metadata: expect.objectContaining({ type: "github-issue-created", repo: "o/r", number: 12 }),
     }));
+  });
+
+  it("links existing issue when dedup match is found", async () => {
+    const linkGithubIssue = vi.fn();
+    const recordActivity = vi.fn();
+
+    searchIssuesMock.mockResolvedValue([
+      {
+        number: 400,
+        title: "Diff route truncation in packages/dashboard/src/routes/register-session-diff-routes.ts",
+        body: "rebase-merge path drops output",
+        html_url: "https://github.com/o/r/issues/400",
+        state: "closed",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await maybeCreateTrackingIssue(buildTask({
+      title: "Fix rebase-merge truncation in registerSessionDiffRoutes",
+      description: "## File Scope\n- packages/dashboard/src/routes/register-session-diff-routes.ts",
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue, recordActivity } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(result).toEqual({ created: false, reason: "existing_issue_found" });
+    expect(createIssueMock).not.toHaveBeenCalled();
+    expect(linkGithubIssue).toHaveBeenCalledWith("FN-1", expect.objectContaining({
+      owner: "o",
+      repo: "r",
+      number: 400,
+      url: "https://github.com/o/r/issues/400",
+    }));
+    expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ type: "github-issue-dedup-matched", number: 400 }),
+    }));
+  });
+
+  it("falls through to create issue when dedup search has no qualifying match", async () => {
+    searchIssuesMock.mockResolvedValue([
+      {
+        number: 401,
+        title: "Unrelated docs cleanup",
+        body: "touches readme only",
+        html_url: "https://github.com/o/r/issues/401",
+        state: "closed",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await maybeCreateTrackingIssue(buildTask({
+      title: "Fix rebase-merge truncation in registerSessionDiffRoutes",
+      description: "## File Scope\n- packages/dashboard/src/routes/register-session-diff-routes.ts",
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(searchIssuesMock).toHaveBeenCalled();
+    expect(createIssueMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ created: true });
+  });
+
+  it("skips dedup search when disabled in project settings", async () => {
+    await maybeCreateTrackingIssue(buildTask({
+      title: "Fix rebase-merge truncation in registerSessionDiffRoutes",
+      description: "## File Scope\n- packages/dashboard/src/routes/register-session-diff-routes.ts",
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: { githubTrackingDedupEnabled: false } as any,
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(searchIssuesMock).not.toHaveBeenCalled();
+    expect(createIssueMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues issue creation when dedup search errors", async () => {
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    searchIssuesMock.mockRejectedValue(new Error("search failed"));
+
+    const result = await maybeCreateTrackingIssue(buildTask({
+      title: "Fix rebase-merge truncation in registerSessionDiffRoutes",
+      description: "## File Scope\n- packages/dashboard/src/routes/register-session-diff-routes.ts",
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger,
+    });
+
+    expect(result).toMatchObject({ created: true });
+    expect(createIssueMock).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("duplicate-search failed"));
+  });
+
+  it("skips dedup search when there is no file-scope or keyword signal", async () => {
+    await maybeCreateTrackingIssue(buildTask({
+      title: "Fix bug",
+      description: "tiny",
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(searchIssuesMock).not.toHaveBeenCalled();
+    expect(createIssueMock).toHaveBeenCalledTimes(1);
   });
 
   it("creates issue for github_import tasks when tracking is explicitly enabled", async () => {

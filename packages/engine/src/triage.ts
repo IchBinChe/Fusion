@@ -201,7 +201,8 @@ tests. Manual verification is NOT a test.
   as part of this task (not just skipping tests)
 
 ## Duplicate check
-Before writing a spec, call \`fn_task_list\` to see existing tasks.
+Before writing a spec, first call \`fn_task_list\` to see active tasks, then call \`fn_task_search\` with 2-4 distinct keyword phrases from the task title and description (for example file paths, error symptoms, and symbol names).
+For any likely match in \`done\` or \`archived\`, call \`fn_task_get\` to inspect details before deciding.
 If a task already covers the same work (even if worded differently), do NOT
 write a PROMPT.md. Instead, write a single line to the output file:
 \`DUPLICATE: {existing-task-id}\`
@@ -239,6 +240,7 @@ For tasks you assess as Size M or L, consider whether splitting into 2-5 child t
 ## Triage tools
 You have these extra tools during triage:
 - \`fn_task_list\` — list existing active tasks
+- \`fn_task_search\` — keyword search across tasks, including done and archived tasks
 - \`fn_task_get\` — inspect a task and its PROMPT.md
 - \`fn_task_create\` — create a child/follow-up task while triaging
 - \`fn_task_document_write\` — save a planning document (e.g., key="plan")
@@ -460,7 +462,8 @@ If this task REMOVES existing functionality (deleting modules, settings, API end
 - Include targeted tests in implementation steps and full quality-gate runs in final verification
 
 ## Duplicate check
-Before writing a spec, call \`fn_task_list\` to find existing active tasks.
+Before writing a spec, call \`fn_task_list\` to find existing active tasks, then call \`fn_task_search\` with 2-4 distinct keyword phrases from the task title and description (for example file paths, error symptoms, and symbol names).
+For any likely match in \`done\` or \`archived\`, call \`fn_task_get\` to inspect details before deciding.
 If an existing task already covers the same work, do NOT write a PROMPT.md. Instead write exactly:
 \`DUPLICATE: {existing-task-id}\`
 
@@ -1647,6 +1650,12 @@ export class TriageProcessor {
       id: Type.String({ description: "Task ID (e.g. KB-001)" }),
     });
     const taskCreatePriorityValues = ["low", "normal", "high", "urgent"] as const;
+    const taskSearchParams = Type.Object({
+      query: Type.String({ minLength: 1, description: "Search query" }),
+      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50, description: "Max results (default 20, max 50)" })),
+      includeDone: Type.Optional(Type.Boolean({ description: "Include done tasks (default true)" })),
+      includeArchived: Type.Optional(Type.Boolean({ description: "Include archived tasks (default true)" })),
+    });
     const taskCreateParams = Type.Object({
       title: Type.Optional(Type.String({ description: "Short child task title" })),
       description: Type.String({ description: "Child task description/mission" }),
@@ -1685,6 +1694,53 @@ export class TriageProcessor {
         });
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
+          details: {},
+        };
+      },
+    };
+
+    const taskSearch: ToolDefinition = {
+      name: "fn_task_search",
+      label: "Search Tasks",
+      description:
+        "Keyword search across tasks, including done and archived tasks by default. " +
+        "Use for duplicate detection before filing a new task.",
+      parameters: taskSearchParams,
+      execute: async (
+        _callId: string,
+        params: Static<typeof taskSearchParams>,
+      ) => {
+        const query = params.query.trim();
+        if (query.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No tasks matched." }],
+            details: {},
+          };
+        }
+        const results = await store.searchTasks(query, {
+          slim: true,
+          includeArchived: params.includeArchived ?? true,
+          limit: params.limit ?? 20,
+        });
+        const includeDone = params.includeDone ?? true;
+        const filtered = includeDone
+          ? results
+          : results.filter((t) => t.column !== "done");
+        if (filtered.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No tasks matched." }],
+            details: {},
+          };
+        }
+        const lines = filtered.map((t) => {
+          const desc = t.title || t.description.slice(0, 80);
+          const deps = t.dependencies.length
+            ? ` [deps: ${t.dependencies.join(", ")}]`
+            : "";
+          return `${t.id} (${t.column}): ${desc}${deps}`;
+        });
+        return {
+          content: [{ type: "text" as const, text: `Search results for "${query}" (${filtered.length}):\n${lines.join("\n")}` }],
           details: {},
         };
       },
@@ -1856,7 +1912,7 @@ export class TriageProcessor {
       },
     };
 
-    return [taskList, taskGet, taskCreate];
+    return [taskList, taskSearch, taskGet, taskCreate];
   }
 
   /**

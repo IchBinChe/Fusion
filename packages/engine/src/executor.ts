@@ -4538,8 +4538,16 @@ export class TaskExecutor {
 
             const alreadyAttemptedRecovery = (task.recoveryRetryCount ?? 0) > 0;
             if (classified.unique.length === 0 && !alreadyAttemptedRecovery) {
+              // Run the recovery inside the worktree (when one exists) so the final
+              // `git checkout <branch>` step doesn't collide with the worktree's own
+              // checkout. If we operate from this.rootDir while the branch is checked
+              // out in a worktree, git refuses the recheckout with
+              // "branch already used by worktree" and the in-line happy path silently
+              // fails — every contaminated task would then fall through to the
+              // dispatcher pause path even when it could have auto-recovered.
+              const recoveryRepoDir = task.worktree ?? this.rootDir;
               const recovery = await autoRecoverCrossContamination({
-                repoDir: this.rootDir,
+                repoDir: recoveryRepoDir,
                 branchName: err.branchName,
                 baseSha: err.baseSha,
                 taskId: task.id,
@@ -4560,7 +4568,17 @@ export class TaskExecutor {
                 pausedReason: null,
                 error: null,
               });
-              await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
+              // FN-4939: preserve the worktree across requeue. The recovery operated
+              // inside the worktree (re-anchored the branch and re-checked it out), so
+              // the worktree directory remains internally consistent and usable. Nulling
+              // task.worktree here was the root cause of transient
+              // `no-worktree-no-merge-confirmed` stall signals — a live mapped worktree
+              // would still exist on disk while task.worktree was null, and downstream
+              // classifiers (in-review-stall.ts, TaskChangesTab) cannot distinguish
+              // "worktree gone" from "pointer not yet repopulated". Matches sibling
+              // recovery paths in auto-recovery-handlers/contamination.ts,
+              // tryBootstrapMisbindingRecovery, and self-healing reclaim.
+              await this.store.moveTask(task.id, "todo", { preserveResumeState: true, preserveWorktree: true });
               return;
             }
 

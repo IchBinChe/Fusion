@@ -659,14 +659,14 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
       const rows = scopedStore.getDatabase().prepare(`
         SELECT
           id AS runId,
-          createdAt,
+          startedAt AS createdAt,
           COALESCE(length(json_extract(data, '$.systemPrompt')), 0) AS systemChars,
           COALESCE(length(json_extract(data, '$.executionPrompt')), 0) AS execChars,
           COALESCE(length(json_extract(data, '$.systemPrompt')), 0)
             + COALESCE(length(json_extract(data, '$.executionPrompt')), 0) AS totalChars
         FROM agentRuns
         WHERE json_extract(data, '$.agentId') = ?
-        ORDER BY createdAt DESC
+        ORDER BY startedAt DESC
         LIMIT ?
       `).all(req.params.id, limit) as Array<{
         runId: string;

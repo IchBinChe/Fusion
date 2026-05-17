@@ -87,4 +87,42 @@ describe("FN-4815 triage duplicate-search regression", () => {
     expect(output).toContain(`${scenario.doneTask.id} (done):`);
     expect(output).toContain("(done)");
   });
+
+  it("FN-4726/FN-4734: recently-merged done task touching register-session-diff-routes.ts surfaces via fn_task_search", async () => {
+    const scenario = createTriageDuplicateScenario();
+    const store = scenario.buildMockStore();
+    const doneTask = {
+      ...scenario.doneTask,
+      id: "FN-4726",
+      title: "Fix done-task diff rebase/cherry-pick truncation in register-session-diff-routes",
+      description:
+        "Prevents done-task diff truncation during rebase/cherry-pick paths in packages/dashboard/src/routes/register-session-diff-routes.ts with assertions in packages/dashboard/src/__tests__/routes-diff.test.ts.",
+      column: "done" as const,
+    };
+    store.searchTasks = vi.fn().mockResolvedValue([doneTask]);
+
+    const processor = new TriageProcessor(store, "/tmp/root");
+    const tools = (processor as any).createTriageTools({
+      parentTaskId: "FN-TRIAGE",
+      allowTaskCreate: true,
+      createdSubtasksRef: { current: [] },
+    });
+    const taskSearchTool = tools.find((tool: any) => tool.name === "fn_task_search");
+
+    const query = "done-task diff rebase cherry-pick register-session-diff-routes";
+    const result = await taskSearchTool.execute("call-4734", {
+      query,
+      includeDone: true,
+      includeArchived: true,
+    });
+    const output = result.content[0].text;
+
+    expect(store.searchTasks).toHaveBeenCalledWith(query, {
+      slim: true,
+      includeArchived: true,
+      limit: 20,
+    });
+    expect(output).toContain("FN-4726 (done):");
+    expect(output).toContain("(done)");
+  });
 });

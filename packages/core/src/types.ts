@@ -4926,7 +4926,8 @@ export type AgentPermissionPolicyActionCategory = PermanentAgentSensitiveActionC
 export type ApprovalRequestActionCategory =
   | AgentPermissionPolicyActionCategory
   | "agent_provisioning"
-  | "sandbox_provisioning";
+  | "sandbox_provisioning"
+  | "secrets_access";
 
 /** How a runtime action category is handled by permission policy. */
 export type AgentPermissionPolicyDisposition = "allow" | "block" | "require-approval";
@@ -5028,6 +5029,8 @@ export function normalizeApprovalRequestActionCategory(
       return "agent_provisioning";
     case "sandbox_provisioning":
       return "sandbox_provisioning";
+    case "secrets_access":
+      return "secrets_access";
     default:
       return category;
   }

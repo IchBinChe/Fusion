@@ -43,6 +43,7 @@ describe("approval request domain contract", () => {
     expect(normalizeApprovalRequestActionCategory("network_access")).toBe("network_api");
     expect(normalizeApprovalRequestActionCategory("task_mutation")).toBe("task_agent_mutation");
     expect(normalizeApprovalRequestActionCategory("agent_mutation")).toBe("task_agent_mutation");
+    expect(normalizeApprovalRequestActionCategory("secrets_access")).toBe("secrets_access");
   });
 
   it("enforces the lifecycle transition matrix", () => {

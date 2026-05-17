@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { FileMentionPopup } from "../FileMentionPopup";
 import type { FileSearchItem } from "../../hooks/useFileMention";
+import { loadAllAppCss } from "../../test/cssFixture";
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
@@ -141,5 +142,14 @@ describe("FileMentionPopup", () => {
 
     const items = screen.getAllByRole("option");
     expect(items).toHaveLength(3);
+  });
+});
+describe("FN-4812 mobile anchoring", () => {
+  it("anchors file mention popup above the input inside mobile media query", async () => {
+    const css = await loadAllAppCss();
+
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*768px\)\s*\{[^{}]*\.file-mention-popup\s*\{[^}]*top:\s*auto\s*!important;[^}]*bottom:\s*calc\(100%\s*\+\s*var\(--space-xs\)\);[^}]*left:\s*var\(--space-md\)\s*!important;[^}]*right:\s*var\(--space-md\);/m,
+    );
   });
 });

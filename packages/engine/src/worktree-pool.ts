@@ -121,6 +121,31 @@ export async function getRegisteredWorktreePaths(rootDir: string): Promise<Set<s
   return new Set(canonicalized);
 }
 
+export async function getRegisteredWorktreeBranchMap(rootDir: string): Promise<Map<string, string>> {
+  const { rawOutput } = await describeRegisteredWorktrees(rootDir);
+  const branchMap = new Map<string, string>();
+  let currentWorktree: string | null = null;
+
+  for (const line of rawOutput.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentWorktree = canonicalizePath(line.slice("worktree ".length));
+      continue;
+    }
+
+    if (line.startsWith("branch ") && currentWorktree) {
+      const branchRef = line.slice("branch ".length).trim();
+      const branchName = branchRef.startsWith("refs/heads/")
+        ? branchRef.slice("refs/heads/".length)
+        : branchRef;
+      if (branchName) {
+        branchMap.set(branchName, currentWorktree);
+      }
+    }
+  }
+
+  return branchMap;
+}
+
 export async function isRegisteredGitWorktree(rootDir: string, worktreePath: string): Promise<boolean> {
   return (await getRegisteredWorktreePaths(rootDir)).has(canonicalizePath(worktreePath));
 }

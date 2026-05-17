@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStallReason, getStalePausedReviewSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
-import { RemovalReason, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
+import { RemovalReason, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
   extractMissingWorktreePathFromSessionStartFailure,
   isMissingWorktreeSessionStartFailure,
@@ -46,6 +46,7 @@ import { resolveWorktreesDir } from "./worktree-paths.js";
 import type { OwnedLandedClassification } from "./merger.js";
 
 const log = createLogger("self-healing");
+const worktreeMetadataReconcileLog = createLogger("worktree-metadata-reconcile");
 const execAsync = promisify(exec);
 const DONE_TASK_INTEGRITY_SWEEP_LIMIT = 50;
 
@@ -556,6 +557,8 @@ export class SelfHealingManager {
       { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies().then(() => undefined) },
       { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts().then(() => undefined) },
       { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts().then(() => undefined) },
+      // FN-4962 ordering invariant: metadata reconcile must run before stale-active reclaim.
+      { name: "reconcile-task-worktree-metadata", fn: () => this.reconcileTaskWorktreeMetadata().then(() => undefined) },
       { name: "reclaim-stale-active-branches", fn: () => this.reclaimStaleActiveBranches().then(() => undefined) },
       { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls().then(() => undefined) },
       { name: "surface-stale-paused-reviews", fn: () => this.surfaceStalePausedReviews().then(() => undefined) },
@@ -1131,6 +1134,8 @@ export class SelfHealingManager {
           { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies() },
           { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts() },
           { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts() },
+          // FN-4962 ordering invariant: metadata reconcile must run before stale-active reclaim.
+          { name: "reconcile-task-worktree-metadata", fn: () => this.reconcileTaskWorktreeMetadata() },
           { name: "reclaim-stale-active-branches", fn: () => this.reclaimStaleActiveBranches() },
           { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls() },
           { name: "surface-stale-paused-reviews", fn: () => this.surfaceStalePausedReviews() },
@@ -2165,6 +2170,7 @@ export class SelfHealingManager {
       if (settings.globalPause || settings.enginePaused) return result;
 
       const task = await this.store.getTask(taskId);
+      await this.reconcileTaskWorktreeMetadata({ includeTaskIds: new Set([taskId]) });
       const allTasks = await this.store.listTasks({ slim: true, includeArchived: true });
       const taskById = new Map(allTasks.map((t) => [t.id, t]));
       const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
@@ -2296,6 +2302,109 @@ export class SelfHealingManager {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.warn(`${prefix} failed: ${errorMessage}`);
       return result;
+    }
+  }
+
+  private async emitWorktreeMetadataAuditEvent(input: {
+    taskId: string;
+    mutationType: "task:auto-recover-worktree-metadata-rebound" | "task:auto-recover-worktree-metadata-cleared";
+    previousWorktree: string | null;
+    newWorktree: string | null;
+    previousBranch: string | null;
+    newBranch: string | null;
+  }): Promise<void> {
+    try {
+      const auditor = createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("self-heal", input.taskId),
+        agentId: "self-healing",
+        taskId: input.taskId,
+        phase: "worktree-metadata-reconcile",
+      });
+      await auditor.database({
+        type: input.mutationType as never,
+        target: input.taskId,
+        metadata: {
+          taskId: input.taskId,
+          previousWorktree: input.previousWorktree,
+          newWorktree: input.newWorktree,
+          previousBranch: input.previousBranch,
+          newBranch: input.newBranch,
+        },
+      });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      worktreeMetadataReconcileLog.warn(
+        `Failed to record ${input.mutationType} for ${input.taskId}: ${errorMessage}`,
+      );
+    }
+  }
+
+  async reconcileTaskWorktreeMetadata(options?: { includeTaskIds?: Set<string> }): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return 0;
+
+      const allTasks = await this.store.listTasks({ slim: true, includeArchived: false });
+      const branchMap = await getRegisteredWorktreeBranchMap(this.options.rootDir);
+      const registeredPaths = new Set(branchMap.values());
+      let repaired = 0;
+
+      for (const task of allTasks) {
+        if (!task.worktree) continue;
+        if (!options?.includeTaskIds?.has(task.id) && (task.column === "done" || task.column === "archived")) {
+          continue;
+        }
+
+        const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+        if (executingIds.has(task.id)) continue;
+        if (activeSessionRegistry.isPathActive(task.worktree)) continue;
+
+        const normalizedBranch = `fusion/${task.id.toLowerCase()}`;
+        const canonicalTaskWorktree = resolve(task.worktree);
+        const stale = !existsSync(task.worktree) || !registeredPaths.has(canonicalTaskWorktree);
+        if (!stale) continue;
+
+        const previousWorktree = task.worktree;
+        const previousBranch = task.branch ?? null;
+        const liveWorktree = branchMap.get(normalizedBranch);
+
+        if (liveWorktree) {
+          await this.store.updateTask(task.id, { worktree: liveWorktree, branch: normalizedBranch });
+          await this.emitWorktreeMetadataAuditEvent({
+            taskId: task.id,
+            mutationType: "task:auto-recover-worktree-metadata-rebound",
+            previousWorktree,
+            newWorktree: liveWorktree,
+            previousBranch,
+            newBranch: normalizedBranch,
+          });
+          worktreeMetadataReconcileLog.log(
+            `[worktree-metadata-reconcile] rebound ${task.id}: ${previousWorktree} -> ${liveWorktree} (${previousBranch ?? "<none>"} -> ${normalizedBranch})`,
+          );
+          repaired++;
+          continue;
+        }
+
+        await this.store.updateTask(task.id, { worktree: null, branch: null });
+        await this.emitWorktreeMetadataAuditEvent({
+          taskId: task.id,
+          mutationType: "task:auto-recover-worktree-metadata-cleared",
+          previousWorktree,
+          newWorktree: null,
+          previousBranch,
+          newBranch: null,
+        });
+        worktreeMetadataReconcileLog.log(
+          `[worktree-metadata-reconcile] cleared ${task.id}: ${previousWorktree} (${previousBranch ?? "<none>"})`,
+        );
+        repaired++;
+      }
+
+      return repaired;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      worktreeMetadataReconcileLog.error(`reconcileTaskWorktreeMetadata failed: ${errorMessage}`);
+      return 0;
     }
   }
 

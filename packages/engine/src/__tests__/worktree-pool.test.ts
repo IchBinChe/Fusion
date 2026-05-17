@@ -47,6 +47,7 @@ vi.mock("node:fs", () => ({
 
 import {
   WorktreePool,
+  getRegisteredWorktreeBranchMap,
   getRegisteredWorktreePaths,
   isGitRepository,
   scanIdleWorktrees,
@@ -610,6 +611,39 @@ describe("getRegisteredWorktreePaths", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("[worktree-pool] Failed to list registered worktrees: git unavailable"),
     );
+  });
+});
+
+describe("getRegisteredWorktreeBranchMap", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns a branch→worktree map from porcelain output", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      if (String(cmd) === "git worktree list --porcelain") {
+        return [
+          "worktree /root",
+          "HEAD abc",
+          "branch refs/heads/main",
+          "",
+          "worktree /root/.worktrees/sleek-stone",
+          "HEAD def",
+          "branch refs/heads/fusion/fn-4913",
+          "",
+          "worktree /root/.worktrees/detached",
+          "HEAD 123",
+          "detached",
+          "",
+        ].join("\n") as any;
+      }
+      return Buffer.from("");
+    });
+
+    const map = await getRegisteredWorktreeBranchMap("/root");
+    expect(map.get("main")).toBe("/root");
+    expect(map.get("fusion/fn-4913")).toBe("/root/.worktrees/sleek-stone");
+    expect(map.has("detached")).toBe(false);
   });
 });
 

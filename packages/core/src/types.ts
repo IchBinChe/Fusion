@@ -750,6 +750,7 @@ export interface PrInfo {
   checkRollup?: "success" | "failure" | "pending" | "none";
   lastCommentAt?: string;
   lastCheckedAt?: string;
+  lastReviewDecision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
 }
 
 export type IssueState = "open" | "closed";
@@ -916,6 +917,9 @@ export interface TaskComment {
   author: string;
   createdAt: string;
   updatedAt?: string;
+  source?: "user" | "agent" | "github-review" | "github-review-comment";
+  externalId?: string;
+  reviewState?: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
 }
 
 export interface TaskCommentInput {

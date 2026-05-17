@@ -6807,7 +6807,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     id: string,
     text: string,
     author: string = "user",
-    options?: { skipRefinement?: boolean },
+    options?: {
+      skipRefinement?: boolean;
+      source?: "user" | "agent" | "github-review" | "github-review-comment";
+      externalId?: string;
+      reviewState?: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+    },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     // Phase 1: Add comment under lock
@@ -6820,22 +6825,36 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.log = [];
       }
 
+      if (!task.comments) {
+        task.comments = [];
+      }
+
+      const externalSource = options?.source;
+      const externalId = options?.externalId;
+      if (externalSource && externalId) {
+        const existing = task.comments.find((entry) => entry.source === externalSource && entry.externalId === externalId);
+        if (existing) {
+          return task;
+        }
+      }
+
       // Generate unique ID: timestamp + random suffix for collision resistance
       const commentId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const now = new Date().toISOString();
 
       const comment: import("./types.js").TaskComment = {
         id: commentId,
         text,
         author,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
+        source: options?.source,
+        externalId: options?.externalId,
+        reviewState: options?.reviewState,
       };
 
-      if (!task.comments) {
-        task.comments = [];
-      }
       task.comments.push(comment);
-      task.updatedAt = new Date().toISOString();
+      task.updatedAt = now;
       const logEntry: TaskLogEntry = {
         timestamp: task.updatedAt,
         action: `Comment added by ${author}`,
@@ -6854,7 +6873,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           domain: "database",
           mutationType: "task:comment",
           target: task.id,
-          metadata: { author, commentId },
+          metadata: { author, commentId, source: options?.source ?? null, externalId: options?.externalId ?? null },
         });
       } else {
         await this.atomicWriteTaskJson(dir, task);

@@ -43,7 +43,7 @@ import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
-import { RemovalReason, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
 import {
   StaleWorktreeIndexLockError,
@@ -2943,22 +2943,57 @@ export class TaskExecutor {
         livenessFailure = "outside_worktrees_dir";
       }
 
-      if (!livenessFailure && (acquisition.isResume || (hadAssignedWorktree && !task.sessionFile))) {
-        const isUsable = await isUsableTaskWorktree(this.rootDir, worktreePath);
-        if (!isUsable) {
-          livenessFailure = "not_usable_task_worktree";
+      let livenessFailureReason: string | null = null;
+      let livenessClassification: string | null = null;
+      const shouldGate = acquisition.isResume || (hadAssignedWorktree && !task.sessionFile && acquisition.source !== "fresh");
+      if (!livenessFailure && shouldGate) {
+        const classification = await classifyTaskWorktree(this.rootDir, worktreePath);
+        if (!classification.ok) {
+          livenessClassification = classification.classification;
+          livenessFailureReason = classification.reason;
+          livenessFailure = `not_usable_task_worktree:${classification.classification}`;
         }
       }
 
       if (livenessFailure) {
         const expected = `${resolveWorktreesDir(this.rootDir, settings)}/* (usable, registered)`;
         const observed = `${worktreePath} (${observedWorktreeRealpath})`;
-        const failureMessage = `worktree liveness assertion failed: ${livenessFailure} — observed=${observed}, expected=${expected}`;
+        let registeredPaths: string[] = [];
+        try {
+          const registeredSnapshot = await describeRegisteredWorktrees(this.rootDir);
+          registeredPaths = registeredSnapshot.canonicalized;
+        } catch {
+          registeredPaths = [];
+        }
+        const visibleRegistered = registeredPaths.slice(0, 10);
+        const registeredSuffix = registeredPaths.length > 10
+          ? `, … +${registeredPaths.length - 10} more`
+          : "";
+        const registeredSection = ` — registered=[${visibleRegistered.join(", ")}${registeredSuffix}]`;
+        const reasonSection = livenessFailureReason ? ` (${livenessFailureReason})` : "";
+        const failureMessage = `worktree liveness assertion failed: ${livenessFailure}${reasonSection} — observed=${observed}, expected=${expected}${registeredSection}`;
         executorLog.error(`${task.id}: ${failureMessage}`);
         await this.store.logEntry(task.id, failureMessage, undefined, this.currentRunContext);
 
         const priorRequeues = task.taskDoneRetryCount ?? 0;
         const nextRequeueCount = priorRequeues + 1;
+        const terminalAction = priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES ? "requeue-todo" : "park-in-review";
+        if (livenessClassification) {
+          await audit.git({
+            type: "worktree:incomplete-detected",
+            target: worktreePath,
+            metadata: {
+              classification: livenessClassification,
+              reason: livenessFailureReason ?? undefined,
+              source: "executor-liveness-gate",
+              taskId: task.id,
+              retryCount: nextRequeueCount,
+              maxRetries: MAX_TASK_DONE_REQUEUE_RETRIES,
+              terminalAction,
+            },
+          });
+        }
+
         if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
           await this.store.updateTask(task.id, {
             status: "failed",

@@ -68,10 +68,13 @@ export interface EngineRunContext {
  * ```ts
  * // worktree:incomplete-detected
  * metadata: {
- *   classification: "missing" | "incomplete" | "unregistered";
+ *   classification: "missing" | "incomplete" | "unregistered" | "outside-work-tree";
  *   reason?: string;
- *   source: "pool-acquire" | "resume" | "session-start";
+ *   source: "pool-acquire" | "resume" | "session-start" | "executor-liveness-gate";
  *   taskId?: string;
+ *   retryCount?: number;
+ *   maxRetries?: number;
+ *   terminalAction?: "requeue-todo" | "park-in-review";
  * }
  *
  * // worktree:auto-recovered

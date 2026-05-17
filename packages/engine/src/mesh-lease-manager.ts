@@ -319,6 +319,15 @@ export class MeshLeaseManager {
 
     const isUnreachableOwnerReason = stale.reason === "owner_node_offline" || stale.reason === "owner_node_error";
     const ownerNodeId = task.checkoutNodeId;
+    const localNodeId = this.options.localNodeId ?? "local";
+    const preRecoveryOwnerHealth =
+      task.checkoutNodeId && this.options.nodeHealthMonitor
+        ? this.options.nodeHealthMonitor.getNodeHealth(task.checkoutNodeId)
+        : undefined;
+    const normalizedOwnerNodeHealth =
+      preRecoveryOwnerHealth === "offline" || preRecoveryOwnerHealth === "error" || preRecoveryOwnerHealth === "online"
+        ? preRecoveryOwnerHealth
+        : "unknown";
     const ownerNodeHealth = stale.reason === "owner_node_error" ? "error" : "offline";
     const previousOwnerAgentId = task.checkedOutBy;
     const previousColumn = task.column;
@@ -379,7 +388,7 @@ export class MeshLeaseManager {
         task,
         ownerNodeId: task.checkoutNodeId,
         ownerNodeHealth: currentOwnerNodeHealth,
-        localNodeId: this.options.localNodeId ?? "local",
+        localNodeId,
         handoffPolicy,
       });
       handoffAction = handoffDecision.action;
@@ -396,6 +405,26 @@ export class MeshLeaseManager {
           handoffReason: handoffDecision.reason,
         });
         meshLeaseManagerLog.log(`mesh-lease: handoff parked taskId=${task.id} reason=${handoffDecision.reason}`);
+        await (this.options.taskStore as any).recordRunAuditEvent?.({
+          domain: "database",
+          mutationType: "node:handoff:parked",
+          target: task.id,
+          metadata: {
+            taskId: task.id,
+            ownerNodeId,
+            ownerNodeHealth:
+              currentOwnerNodeHealth === "offline" ||
+              currentOwnerNodeHealth === "error" ||
+              currentOwnerNodeHealth === "online"
+                ? currentOwnerNodeHealth
+                : "unknown",
+            localNodeId,
+            handoffPolicy,
+            decisionReason: handoffDecision.reason,
+            source: "mesh-lease.recover",
+            recoveryReason: reason,
+          },
+        });
         return false;
       }
     }
@@ -439,6 +468,23 @@ export class MeshLeaseManager {
         handoffReason,
       });
     }
+
+    await (this.options.taskStore as any).recordRunAuditEvent?.({
+      domain: "database",
+      mutationType: "node:lease:recovered",
+      target: task.id,
+      metadata: {
+        taskId: task.id,
+        ownerNodeId,
+        ownerNodeHealth: normalizedOwnerNodeHealth,
+        localNodeId,
+        handoffPolicy,
+        decisionReason: handoffReason,
+        source: "mesh-lease.recover",
+        epoch: nextEpoch,
+        recoveryReason: `${reason} (${stale.reason ?? "stale"})`,
+      },
+    });
 
     if (isUnreachableOwnerReason) {
       await emitNodeUnreachableRecovery({

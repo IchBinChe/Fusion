@@ -174,6 +174,7 @@ Detailed mechanism logs live in `docs/architecture.md` and `docs/design/`. The c
 - **In-review stall deadlock**: identical stalls (same code + reason) repeated past `inReviewStallDeadlockThreshold` (default 3) auto-pause with `pausedReason: "in-review-stall-deadlock"` and `status: "failed"`.
 - **Restart recovery**: `RestartRecoveryCoordinator` classifies interrupted `in-progress` runs. Unusable-worktree session-start failures (`missing`, `incomplete`, `unregistered git worktree`) are recoverable; retries are capped at `MAX_WORKTREE_SESSION_RETRIES=3` before escalating.
 - **Task title/ID drift (FN-4898)**: active and archived title writes normalize foreign embedded `FN-NNN` tokens via `packages/core/src/task-title-id-drift.ts`. Lineage is preserved in `sourceParentTaskId` / description markers, not title embeds.
+- **PR-conflict reclaim wiring (FN-4763)**: GitHub PR refresh now persists normalized `prInfo.mergeable` conflict state and, when conflicting, funnels tasks into self-healing’s existing reclaim machinery (`reclaimPrConflictForTask` / `reclaim-pr-conflicts` stage) so branch-conflict handling stays centralized with existing `inspectBranchConflict` outcomes and unrecoverable pause semantics.
 - **Worktrunk-managed lifecycles**: when `worktrunk.enabled`, self-healing defers prune/idle/worktree-cap sweeps to the worktrunk backend; branch-level reclaim and orphan rescue stay native.
 
 ## Engine Process Rules

@@ -50,7 +50,9 @@ function makeStore(
       if (column === "in-progress") return [task];
       return [];
     }),
-    updateTask: vi.fn(async (_id: string, updates: Partial<Task>) => (task ? Object.assign(task, updates) : null)),    moveTask: vi.fn(async (_id: string, column: Task["column"]) => {
+    updateTask: vi.fn(async (_id: string, updates: Partial<Task>) => (task ? Object.assign(task, updates) : null)),
+    moveTask: vi.fn(async (_id: string, column: Task["column"]) => {
+      if (!task) return null;
       task.column = column;
       return task;
     }),
@@ -161,7 +163,7 @@ describe("SelfHealingManager.reclaimPrConflictForTask", () => {
   });
 
   it("skips when branch or worktree is missing", async () => {
-    const task = makeTask({ branch: null });
+    const task = makeTask({ branch: undefined });
     const store = makeStore(task);
     const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
     const result = await manager.reclaimPrConflictForTask(task.id);

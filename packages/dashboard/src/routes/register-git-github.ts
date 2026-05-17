@@ -3333,12 +3333,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
 
       // Trigger background refresh if stale (don't await, let it run)
       if (isStale) {
-        const selfHealingManager = engine?.getSelfHealingManager?.();
-        refreshPrInBackground(scopedStore, task.id, task.prInfo, githubToken, {
-          onConflictDetected: async (taskId) => {
-            await selfHealingManager?.reclaimPrConflictForTask(taskId);
-          },
-        });
+        refreshPrInBackground(scopedStore, task.id, task.prInfo, githubToken);
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -3427,7 +3422,11 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
 
       let conflictReclaimQueued = false;
       if (prInfo.mergeable === "conflicting" && task.branch && task.worktree) {
-        const selfHealingManager = engine?.getSelfHealingManager?.();
+        const selfHealingManager =
+          (engine as { getSelfHealingManager?: () => { reclaimPrConflictForTask: (taskId: string) => Promise<unknown> } } | undefined)?.getSelfHealingManager?.() ??
+          (engine as { getRuntime?: () => { getSelfHealingManager?: () => { reclaimPrConflictForTask: (taskId: string) => Promise<unknown> } } } | undefined)
+            ?.getRuntime?.()
+            ?.getSelfHealingManager?.();
         if (selfHealingManager) {
           await selfHealingManager.reclaimPrConflictForTask(task.id);
           conflictReclaimQueued = true;
@@ -3483,7 +3482,11 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         throw conflict("Task has no branch/worktree to reclaim");
       }
 
-      const selfHealingManager = engine?.getSelfHealingManager?.();
+      const selfHealingManager =
+        (engine as { getSelfHealingManager?: () => { reclaimPrConflictForTask: (taskId: string) => Promise<unknown> } } | undefined)?.getSelfHealingManager?.() ??
+        (engine as { getRuntime?: () => { getSelfHealingManager?: () => { reclaimPrConflictForTask: (taskId: string) => Promise<unknown> } } } | undefined)
+          ?.getRuntime?.()
+          ?.getSelfHealingManager?.();
       if (!selfHealingManager) {
         return res.json({ queued: false, reason: "engine-unavailable" });
       }

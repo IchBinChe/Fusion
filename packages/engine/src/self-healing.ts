@@ -1356,7 +1356,7 @@ export class SelfHealingManager {
   }
 
   async reclaimPrConflictForTask(taskId: string): Promise<{ outcome: "reclaimed" | "stale-resolved" | "tip-already-merged" | "paused-unrecoverable" | "skipped"; reason?: string }> {
-    const task = this.store.getTask(taskId);
+    const task = await this.store.getTask(taskId);
     if (!task) return { outcome: "skipped", reason: "task-not-found" };
 
     const settings = await this.store.getSettings();

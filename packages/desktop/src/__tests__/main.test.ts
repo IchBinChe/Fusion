@@ -17,14 +17,21 @@ const rendererMocks = vi.hoisted(() => {
 vi.mock("../renderer.ts", () => rendererMocks);
 
 const mocks = vi.hoisted(() => {
+  const browserWindowHandlers = new Map<string, (...args: unknown[]) => void>();
   const browserWindowInstance = {
     loadURL: vi.fn(),
     loadFile: vi.fn(),
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      browserWindowHandlers.set(event, handler);
+    }),
+    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      browserWindowHandlers.set(event, handler);
+    }),
     isVisible: vi.fn(() => true),
     show: vi.fn(),
     focus: vi.fn(),
     hide: vi.fn(),
+    maximize: vi.fn(),
   };
 
   const BrowserWindow = vi.fn(() => browserWindowInstance) as unknown as {
@@ -73,6 +80,10 @@ const mocks = vi.hoisted(() => {
   const getRendererFilePath = vi.fn(() => "/path/to/dist/client/index.html");
   const isUrlRenderer = vi.fn(() => false);
 
+  const screen = {
+    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
+  };
+
   return {
     app,
     BrowserWindow,
@@ -82,7 +93,9 @@ const mocks = vi.hoisted(() => {
     Menu,
     nativeImage,
     shell,
+    screen,
     browserWindowInstance,
+    browserWindowHandlers,
     isDevelopmentMode,
     getRendererUrl,
     getRendererFilePath,
@@ -98,6 +111,7 @@ vi.mock("electron", () => ({
   Menu: mocks.Menu,
   nativeImage: mocks.nativeImage,
   shell: mocks.shell,
+  screen: mocks.screen,
 }));
 
 const mainDeps = vi.hoisted(() => {
@@ -137,6 +151,25 @@ vi.mock("../native.js", () => ({
   saveDesktopLaunchMode: mainDeps.saveDesktopLaunchMode,
   saveWindowState: mainDeps.saveWindowState,
   setupAutoUpdater: mainDeps.setupAutoUpdater,
+  clampWindowStateToVisibleDisplay: vi.fn((state, displays) => {
+    if (state.x === undefined || state.y === undefined) {
+      return state;
+    }
+    const minVisible = 64;
+    const windowRight = state.x + state.width;
+    const windowBottom = state.y + state.height;
+    const visible = displays.some((display: { workArea: { x: number; y: number; width: number; height: number } }) => {
+      const right = display.workArea.x + display.workArea.width;
+      const bottom = display.workArea.y + display.workArea.height;
+      const overlapWidth = Math.max(0, Math.min(windowRight, right) - Math.max(state.x, display.workArea.x));
+      const overlapHeight = Math.max(0, Math.min(windowBottom, bottom) - Math.max(state.y, display.workArea.y));
+      return overlapWidth >= minVisible && overlapHeight >= minVisible;
+    });
+    if (visible) {
+      return state;
+    }
+    return { width: state.width, height: state.height, isMaximized: state.isMaximized };
+  }),
   normalizeDesktopRemoteLaunch: vi.fn((settings) => {
     const active = settings.profiles.find((profile: { id: string }) => profile.id === settings.activeProfileId);
     return active ? { mode: "remote", profileId: active.id, serverBaseUrl: active.serverUrl.replace(/\/$/, ""), serverLabel: active.name, authToken: active.authToken ?? undefined } : null;
@@ -182,6 +215,7 @@ describe("main process", () => {
     rendererMocks.getRendererUrl.mockReturnValue("file:///path/to/dist/client/index.html");
     rendererMocks.getRendererFilePath.mockReturnValue("/path/to/dist/client/index.html");
     rendererMocks.isUrlRenderer.mockReturnValue(false);
+    mocks.screen.getAllDisplays.mockReturnValue([{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]);
   });
 
   it("DASHBOARD_URL defaults to local file URL in production mode", async () => {
@@ -331,6 +365,62 @@ describe("main process", () => {
 
     expect(mocks.browserWindowInstance.on).toHaveBeenCalledWith("close", expect.any(Function));
     expect(mocks.browserWindowInstance.on).toHaveBeenCalledWith("closed", expect.any(Function));
+  });
+
+  it("createMainWindow shows and focuses on ready-to-show", async () => {
+    const { createMainWindow } = await importMainModule();
+
+    createMainWindow();
+    mocks.browserWindowHandlers.get("ready-to-show")?.();
+
+    expect(mocks.browserWindowInstance.show).toHaveBeenCalledTimes(1);
+    expect(mocks.browserWindowInstance.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("createMainWindow fallback timer shows and focuses when ready-to-show never fires", async () => {
+    vi.useFakeTimers();
+    const { createMainWindow } = await importMainModule();
+
+    createMainWindow();
+    vi.advanceTimersByTime(2000);
+
+    expect(mocks.browserWindowInstance.show).toHaveBeenCalledTimes(1);
+    expect(mocks.browserWindowInstance.focus).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("initializeApp drops off-screen x/y before BrowserWindow construction", async () => {
+    mainDeps.loadWindowState.mockResolvedValueOnce({
+      x: -9999,
+      y: -9999,
+      width: 1280,
+      height: 900,
+      isMaximized: false,
+    });
+    const { initializeApp } = await importMainModule();
+
+    await initializeApp();
+
+    const [options] = mocks.BrowserWindow.mock.calls[0] as Array<Record<string, unknown>>;
+    expect(options).not.toHaveProperty("x");
+    expect(options).not.toHaveProperty("y");
+  });
+
+  it("initializeApp preserves x/y when state overlaps a visible display", async () => {
+    mainDeps.loadWindowState.mockResolvedValueOnce({
+      x: 100,
+      y: 100,
+      width: 1280,
+      height: 900,
+      isMaximized: false,
+    });
+    const { initializeApp } = await importMainModule();
+
+    await initializeApp();
+
+    const [options] = mocks.BrowserWindow.mock.calls[0] as Array<Record<string, unknown>>;
+    expect(options).toMatchObject({ x: 100, y: 100 });
   });
 
   it("importing main does not auto-start", async () => {

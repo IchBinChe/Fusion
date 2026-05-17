@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, nativeImage, screen, Tray } from "electron";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setupDeepLinkHandler, registerDeepLinkProtocol } from "./deep-link.js";
@@ -13,6 +13,7 @@ import {
   setupAutoUpdater,
   normalizeDesktopRemoteLaunch,
   buildRemoteShellHandoffUrl,
+  clampWindowStateToVisibleDisplay,
   type DesktopLaunchMode,
   type NormalizedDesktopRemoteLaunch,
   type WindowState,
@@ -92,6 +93,17 @@ export function createMainWindow(state?: WindowState, launchTargetUrl?: string):
     void window.loadFile(getRendererFilePath());
   }
 
+  const showFallbackTimer = setTimeout(() => {
+    window.show();
+    window.focus();
+  }, 2000);
+
+  window.once("ready-to-show", () => {
+    clearTimeout(showFallbackTimer);
+    window.show();
+    window.focus();
+  });
+
   window.on("close", (event) => {
     saveWindowState(window);
 
@@ -148,8 +160,17 @@ export async function initializeApp(): Promise<void> {
     currentDesktopLaunchMode = "local";
   }
 
+  const windowState = state
+    ? clampWindowStateToVisibleDisplay(
+        state,
+        typeof screen?.getAllDisplays === "function"
+          ? screen.getAllDisplays().map((display) => ({ workArea: display.workArea }))
+          : [],
+      )
+    : undefined;
+
   const createdWindow = createMainWindow(
-    state ?? undefined,
+    windowState,
     currentDesktopLaunchMode === "remote" && currentRemoteLaunch
       ? buildRemoteShellHandoffUrl(currentRemoteLaunch)
       : undefined,
@@ -208,7 +229,7 @@ export async function initializeApp(): Promise<void> {
   setupDeepLinkHandler(createdWindow);
   setupAutoUpdater(createdWindow);
 
-  if (state?.isMaximized === true) {
+  if (windowState?.isMaximized === true) {
     createdWindow.maximize();
   }
 }

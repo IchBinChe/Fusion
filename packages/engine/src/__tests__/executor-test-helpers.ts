@@ -113,6 +113,15 @@ vi.mock("../worktree-pool.js", async (importOriginal) => {
     isUsableTaskWorktree: vi.fn().mockResolvedValue(true),
   };
 });
+vi.mock("../worktree-stale-lock.js", async () => {
+  const actual = await vi.importActual<typeof import("../worktree-stale-lock.js")>("../worktree-stale-lock.js");
+  return {
+    ...actual,
+    parseIndexLockPath: vi.fn(actual.parseIndexLockPath),
+    classifyStaleLock: vi.fn(),
+    tryRemoveStaleLock: vi.fn(),
+  };
+});
 
 vi.mock("node:child_process", async () => {
   const { promisify } = await import("node:util");
@@ -238,6 +247,7 @@ import { exec, execSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { hydrateWorktreeDb } from "../worktree-db-hydrate.js";
 import { isUsableTaskWorktree } from "../worktree-pool.js";
+import { classifyStaleLock, tryRemoveStaleLock } from "../worktree-stale-lock.js";
 
 export const mockedCreateFnAgent = vi.mocked(createFnAgent);
 export const mockedSessionManager = vi.mocked(SessionManager);
@@ -251,6 +261,8 @@ export const mockedExistsSync = vi.mocked(existsSync);
 export const mockedRealpathSync = vi.mocked(realpathSync);
 export const mockedHydrateWorktreeDb = vi.mocked(hydrateWorktreeDb);
 export const mockedIsUsableTaskWorktree = vi.mocked(isUsableTaskWorktree);
+export const mockedClassifyStaleLock = vi.mocked(classifyStaleLock);
+export const mockedTryRemoveStaleLock = vi.mocked(tryRemoveStaleLock);
 
 export type EventListener = (...args: unknown[]) => void;
 
@@ -324,6 +336,10 @@ export function resetExecutorMocks() {
   mockedExec.mockReset();
   mockedExecSync.mockReset();
   mockedIsUsableTaskWorktree.mockResolvedValue(true);
+  mockedClassifyStaleLock.mockReset();
+  mockedTryRemoveStaleLock.mockReset();
+  mockedClassifyStaleLock.mockResolvedValue({ kind: "fresh", reason: "fresh" } as any);
+  mockedTryRemoveStaleLock.mockResolvedValue({ removed: true });
   mockExecuteAll.mockResolvedValue([]);
   mockTerminateAllSessions.mockResolvedValue(undefined);
   mockCleanup.mockResolvedValue(undefined);

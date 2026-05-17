@@ -46,6 +46,12 @@ import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
 import { RemovalReason, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, isUsableTaskWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import {
+  StaleWorktreeIndexLockError,
+  classifyStaleLock,
+  parseIndexLockPath,
+  tryRemoveStaleLock,
+} from "./worktree-stale-lock.js";
+import {
   BranchConflictError,
   BranchCrossContaminationError,
   assertCleanBranchAtBase,
@@ -7637,7 +7643,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         const errorMessage = error instanceof Error ? error.message : String(error);
         const isLastAttempt = attempt === this.MAX_WORKTREE_RETRIES - 1;
         const isBranchConflict = isBranchConflictError(error);
-        const isTerminalWorktreeError = error instanceof NonRetryableWorktreeError || isBranchConflict;
+        const isTerminalWorktreeError = error instanceof NonRetryableWorktreeError || error instanceof StaleWorktreeIndexLockError || isBranchConflict;
 
         if (isLastAttempt || isTerminalWorktreeError) {
           await this.store.logEntry(
@@ -7967,6 +7973,72 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     }
   }
 
+  private async emitStaleLockAudit(taskId: string, event: string, targetPath: string, metadata: Record<string, unknown>): Promise<void> {
+    if (!this.currentRunContext?.runId || !this.currentRunContext.agentId) return;
+    const auditor = createRunAuditor(this.store, {
+      runId: this.currentRunContext.runId,
+      agentId: this.currentRunContext.agentId,
+      taskId,
+      phase: this.currentRunContext.phase,
+      source: this.currentRunContext.source,
+    });
+    await auditor.git({ type: event as any, target: targetPath, metadata });
+  }
+
+  private async recoverIndexLockIfStale(taskId: string, path: string, conflictInfo: { lockPath?: string; message?: string }): Promise<boolean> {
+    const lockPath = conflictInfo.lockPath;
+    if (!lockPath) return false;
+
+    const classification = await classifyStaleLock({
+      rootDir: this.rootDir,
+      lockPath,
+      activeSessionRegistry,
+    });
+    await this.emitStaleLockAudit(taskId, "worktree:stale-lock-detected", path, {
+      lockPath,
+      classification: classification.kind,
+      reason: classification.reason,
+      ageMs: classification.ageMs ?? null,
+      owningWorktreePath: classification.owningWorktreePath ?? null,
+    });
+
+    if (classification.kind !== "stale") {
+      await this.emitStaleLockAudit(taskId, "worktree:stale-lock-refused", path, {
+        lockPath,
+        classification: classification.kind,
+        reason: classification.reason,
+        ageMs: classification.ageMs ?? null,
+        owningWorktreePath: classification.owningWorktreePath ?? null,
+      });
+      throw new StaleWorktreeIndexLockError({
+        message: `Worktree creation blocked: index.lock at ${resolvePath(this.rootDir, lockPath)} is held by another git process (reason: ${classification.reason}, owning worktree ${classification.owningWorktreePath ?? "unknown"}). Resolve manually before retrying.`,
+        lockPath: resolvePath(this.rootDir, lockPath),
+        classification: classification.kind,
+        reason: classification.reason,
+      });
+    }
+
+    try {
+      const removed = await tryRemoveStaleLock({ lockPath: resolvePath(this.rootDir, lockPath) });
+      if (removed.removed) {
+        await this.emitStaleLockAudit(taskId, "worktree:stale-lock-recovered", path, { lockPath });
+        await this.store.logEntry(taskId, `Recovered stale worktree index.lock and retrying`, resolvePath(this.rootDir, lockPath), this.currentRunContext);
+        return true;
+      }
+      await this.emitStaleLockAudit(taskId, "worktree:stale-lock-recovery-failed", path, {
+        lockPath,
+        reason: removed.reason ?? "not-removed",
+      });
+      return false;
+    } catch (error) {
+      await this.emitStaleLockAudit(taskId, "worktree:stale-lock-recovery-failed", path, {
+        lockPath,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
   /**
    * Single attempt to create a worktree with conflict detection and recovery.
    * Returns the actual worktree path used (may differ from input if recovery generated new name).
@@ -8043,6 +8115,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       }
     };
 
+    let staleLockRecoveryAttempted = false;
     try {
       await createWithBranch(branch);
       executorLog.log(`Worktree created: ${path}${startPoint ? ` (from ${startPoint})` : ""}`);
@@ -8052,6 +8125,16 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       return { path, branch };
     } catch (initialError: unknown) {
       const conflictInfo = this.extractWorktreeConflictInfo(initialError);
+
+      if (conflictInfo.type === "index-lock-contention" && !staleLockRecoveryAttempted) {
+        staleLockRecoveryAttempted = true;
+        const recovered = await this.recoverIndexLockIfStale(taskId, path, conflictInfo);
+        if (recovered) {
+          await createWithBranch(branch);
+          executorLog.log(`Worktree created after stale lock recovery: ${path}`);
+          return { path, branch };
+        }
+      }
 
       if (conflictInfo.type === "not-git-repo") {
         throw new NonRetryableWorktreeError(
@@ -8113,6 +8196,16 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
         // Check if the fallback also hit an "already used" conflict
         const fallbackConflictInfo = this.extractWorktreeConflictInfo(fallbackError);
+        if (fallbackConflictInfo.type === "index-lock-contention" && !staleLockRecoveryAttempted) {
+          staleLockRecoveryAttempted = true;
+          const recovered = await this.recoverIndexLockIfStale(taskId, path, fallbackConflictInfo);
+          if (recovered) {
+            await createFromExistingBranch();
+            executorLog.log(`Worktree created from existing branch after stale lock recovery: ${path}`);
+            return { path, branch };
+          }
+        }
+
         if (fallbackConflictInfo.type === "not-git-repo") {
           throw new NonRetryableWorktreeError(
             "Project directory is not a Git repository. Fusion requires a Git repository for worktree creation. Initialize with 'git init' or run from a Git project directory.",
@@ -8552,8 +8645,9 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
    * - "working tree already exists"
    */
   private extractWorktreeConflictInfo(error: unknown): {
-    type: "already-used" | "invalid-reference" | "leading-directories" | "already-exists" | "not-git-repo" | "unknown";
+    type: "already-used" | "invalid-reference" | "leading-directories" | "already-exists" | "not-git-repo" | "index-lock-contention" | "unknown";
     path?: string;
+    lockPath?: string;
     message?: string;
   } {
     const execError = error instanceof Error ? error : new Error(String(error));
@@ -8575,6 +8669,11 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     const alreadyCheckedOutMatch = output.match(/is already checked out at '([^']+)'/);
     if (alreadyCheckedOutMatch) {
       return { type: "already-used", path: alreadyCheckedOutMatch[1], message: output };
+    }
+
+    const lockPath = parseIndexLockPath(output);
+    if (lockPath) {
+      return { type: "index-lock-contention", lockPath, message: output };
     }
 
     // Pattern: invalid reference: 'branch-name'

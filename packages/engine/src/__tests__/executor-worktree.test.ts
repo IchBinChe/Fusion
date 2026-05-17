@@ -33,6 +33,8 @@ import {
   mockedExistsSync,
   mockedHydrateWorktreeDb,
   mockedIsUsableTaskWorktree,
+  mockedClassifyStaleLock,
+  mockedTryRemoveStaleLock,
   mockExecuteAll,
   mockTerminateAllSessions,
   mockCleanup,
@@ -1233,6 +1235,61 @@ describe("TaskExecutor worktree recovery", () => {
       ),
     ).toBe(true);
     expect(worktreeAddCalls.length).toBeGreaterThan(0);
+  });
+
+  describe("index.lock stale recovery", () => {
+    it("recovers stale lock and succeeds", async () => {
+      const store = createMockStore();
+      let addCalls = 0;
+      mockedClassifyStaleLock.mockResolvedValue({ kind: "stale", reason: "old-lock", ageMs: 60000 } as any);
+      mockedTryRemoveStaleLock.mockResolvedValue({ removed: true });
+
+      mockedExecSync.mockImplementation((cmd: string | string[]) => {
+        const command = typeof cmd === "string" ? cmd : cmd[0];
+        if (command.includes("git worktree add") && addCalls++ === 0) {
+          const error: any = new Error("fatal: unable to create '/tmp/test/.git/worktrees/swift-falcon/index.lock': File exists");
+          error.stderr = Buffer.from("fatal: unable to create '/tmp/test/.git/worktrees/swift-falcon/index.lock': File exists");
+          throw error;
+        }
+        return Buffer.from("");
+      });
+
+      const executor = new TaskExecutor(store, "/tmp/test");
+      await executor.execute(makeTask());
+
+      expect(mockedClassifyStaleLock).toHaveBeenCalled();
+      expect(mockedTryRemoveStaleLock).toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-050",
+        expect.stringContaining("Recovered stale worktree index.lock and retrying"),
+        expect.any(String),
+        expect.anything(),
+      );
+    });
+
+    it("refuses fresh lock and fails with actionable error", async () => {
+      const store = createMockStore();
+      mockedClassifyStaleLock.mockResolvedValue({ kind: "active-session", reason: "active-session-owns-worktree", owningWorktreePath: "/tmp/test/.worktrees/swift-falcon" } as any);
+
+      mockedExecSync.mockImplementation((cmd: string | string[]) => {
+        const command = typeof cmd === "string" ? cmd : cmd[0];
+        if (command.includes("git worktree add")) {
+          const error: any = new Error("fatal: unable to create '/tmp/test/.git/worktrees/swift-falcon/index.lock': File exists");
+          error.stderr = Buffer.from("fatal: unable to create '/tmp/test/.git/worktrees/swift-falcon/index.lock': File exists");
+          throw error;
+        }
+        return Buffer.from("");
+      });
+
+      const executor = new TaskExecutor(store, "/tmp/test");
+      await executor.execute(makeTask());
+
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-050",
+        expect.objectContaining({ status: "failed", error: expect.stringContaining("index.lock") }),
+      );
+      expect(mockedTryRemoveStaleLock).not.toHaveBeenCalled();
+    });
   });
 
   it("removes stale branch and retries when branch exists without worktree", async () => {

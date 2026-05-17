@@ -18,8 +18,12 @@ const mocks = vi.hoisted(() => {
       on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
         listeners.set(event, handler);
       }),
+      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        listeners.set(event, handler);
+      }),
       hide: vi.fn(),
       show: vi.fn(),
+      focus: vi.fn(),
       maximize: vi.fn(),
       isDestroyed: vi.fn(() => false),
       getBounds: vi.fn(() => ({ x: 50, y: 80, width: 1280, height: 900 })),
@@ -62,6 +66,10 @@ const mocks = vi.hoisted(() => {
 
   const nativeImage = {
     createEmpty: vi.fn(() => ({ id: "empty" })),
+  };
+
+  const screen = {
+    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
   };
 
   const buildAppMenu = vi.fn(() => {
@@ -120,6 +128,7 @@ const mocks = vi.hoisted(() => {
     BrowserWindow,
     Tray,
     nativeImage,
+    screen,
     buildAppMenu,
     setupTray,
     registerIpcHandlers,
@@ -142,6 +151,7 @@ vi.mock("electron", () => ({
   BrowserWindow: mocks.BrowserWindow,
   Tray: mocks.Tray,
   nativeImage: mocks.nativeImage,
+  screen: mocks.screen,
 }));
 
 vi.mock("../menu.js", () => ({
@@ -173,6 +183,7 @@ vi.mock("../native.js", () => ({
     return active ? { mode: "remote", profileId: active.id, serverBaseUrl: active.serverUrl.replace(/\/$/, ""), serverLabel: active.name, authToken: active.authToken ?? undefined } : null;
   }),
   buildRemoteShellHandoffUrl: vi.fn((launch) => `https://remote.example.com?shellMode=remote&profileId=${launch.profileId}`),
+  clampWindowStateToVisibleDisplay: vi.fn((state) => state),
 }));
 
 vi.mock("../local-runtime.js", () => ({

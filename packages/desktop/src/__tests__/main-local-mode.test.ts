@@ -13,12 +13,15 @@ const mocks = vi.hoisted(() => {
 
   const browserWindow = {
     on: vi.fn(),
+    once: vi.fn(),
     loadURL: vi.fn(),
     loadFile: vi.fn(),
     isDestroyed: vi.fn(() => false),
     getBounds: vi.fn(() => ({ x: 0, y: 0, width: 800, height: 600 })),
     isMaximized: vi.fn(() => false),
     hide: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
     maximize: vi.fn(),
     webContents: { send: vi.fn() },
   };
@@ -33,7 +36,11 @@ const mocks = vi.hoisted(() => {
     getServerPort: vi.fn(() => undefined),
   };
 
-  return { app, appHandlers, BrowserWindow, Tray, browserWindow, localRuntimeManager };
+  const screen = {
+    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
+  };
+
+  return { app, appHandlers, BrowserWindow, Tray, browserWindow, localRuntimeManager, screen };
 });
 
 vi.mock("electron", () => ({
@@ -41,6 +48,7 @@ vi.mock("electron", () => ({
   BrowserWindow: mocks.BrowserWindow,
   Tray: mocks.Tray,
   nativeImage: { createEmpty: vi.fn(() => ({})) },
+  screen: mocks.screen,
 }));
 
 vi.mock("../renderer.js", () => ({ isUrlRenderer: vi.fn(() => true), getRendererUrl: vi.fn(() => "http://localhost"), getRendererFilePath: vi.fn(() => "index.html") }));
@@ -54,6 +62,7 @@ vi.mock("../native.js", () => ({
   saveDesktopLaunchMode: vi.fn(async () => undefined),
   saveWindowState: vi.fn(),
   setupAutoUpdater: vi.fn(),
+  clampWindowStateToVisibleDisplay: vi.fn((state) => state),
 }));
 vi.mock("../deep-link.js", () => ({ registerDeepLinkProtocol: vi.fn(), setupDeepLinkHandler: vi.fn() }));
 vi.mock("../local-runtime.js", () => ({ LocalRuntimeManager: vi.fn(() => mocks.localRuntimeManager) }));

@@ -2,7 +2,6 @@ import { SecretsStoreError, type SecretScope } from "@fusion/core";
 import { ApiError, badRequest } from "../api-error.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
-const VALID_SCOPES: SecretScope[] = ["project", "global"];
 const VALID_POLICIES = ["auto", "prompt", "deny"] as const;
 
 function parseScope(scope: unknown): SecretScope {
@@ -52,27 +51,29 @@ export const registerSecretsRoutes: ApiRouteRegistrar = (ctx) => {
     try {
       assertObject(req.body);
       const { scope, key, value, description, accessPolicy, envExportable, envExportKey } = req.body;
-      if (!VALID_SCOPES.includes(scope as SecretScope)) {
-        throw badRequest("scope must be 'project' or 'global'");
-      }
+      const parsedScope = parseScope(scope);
       if (typeof key !== "string" || key.trim().length === 0) {
         throw badRequest("key must be a non-empty string");
       }
       if (typeof value !== "string") {
         throw badRequest("value must be a string");
       }
-      if (accessPolicy !== undefined && !VALID_POLICIES.includes(accessPolicy as (typeof VALID_POLICIES)[number])) {
-        throw badRequest("accessPolicy must be one of: auto, prompt, deny");
+      let parsedAccessPolicy: (typeof VALID_POLICIES)[number] | undefined;
+      if (accessPolicy !== undefined) {
+        if (!VALID_POLICIES.includes(accessPolicy as (typeof VALID_POLICIES)[number])) {
+          throw badRequest("accessPolicy must be one of: auto, prompt, deny");
+        }
+        parsedAccessPolicy = accessPolicy as (typeof VALID_POLICIES)[number];
       }
 
       const { store: scopedStore } = await getProjectContext(req);
       const secretsStore = await scopedStore.getSecretsStore();
       const secret = await secretsStore.createSecret({
-        scope,
-        key,
-        plaintextValue: value,
+        scope: parsedScope,
+        key: key as string,
+        plaintextValue: value as string,
         description: typeof description === "string" ? description : null,
-        accessPolicy,
+        accessPolicy: parsedAccessPolicy,
         envExportable: envExportable === undefined ? undefined : Boolean(envExportable),
         envExportKey: typeof envExportKey === "string" ? envExportKey : null,
       });

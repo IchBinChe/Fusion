@@ -11,8 +11,10 @@ const mocks = vi.hoisted(() => {
     loadURL: vi.fn(),
     loadFile: vi.fn(),
     on: vi.fn(),
+    once: vi.fn(),
     hide: vi.fn(),
     show: vi.fn(),
+    focus: vi.fn(),
     maximize: vi.fn(),
   };
 
@@ -28,6 +30,9 @@ const mocks = vi.hoisted(() => {
     })),
     nativeImage: {
       createEmpty: vi.fn(() => ({ id: "empty-image" })),
+    },
+    screen: {
+      getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
     },
     browserWindow,
     buildAppMenu: vi.fn(),
@@ -48,6 +53,7 @@ vi.mock("electron", () => ({
   BrowserWindow: mocks.BrowserWindow,
   Tray: mocks.Tray,
   nativeImage: mocks.nativeImage,
+  screen: mocks.screen,
 }));
 
 vi.mock("../menu.js", () => ({
@@ -78,6 +84,7 @@ vi.mock("../native.js", () => ({
   saveDesktopLaunchMode: mocks.saveDesktopLaunchMode,
   saveWindowState: mocks.saveWindowState,
   setupAutoUpdater: mocks.setupAutoUpdater,
+  clampWindowStateToVisibleDisplay: vi.fn((state) => state),
 }));
 
 // Mock renderer module

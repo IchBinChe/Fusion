@@ -129,16 +129,29 @@ Audit payloads exclude plaintext values, passphrases, and envelope crypto materi
 
 ## Audit Events
 
-Current run-audit docs already list filesystem secret env lifecycle event names:
+Filesystem-domain secret audit taxonomy:
 
+- `secret:read`
+- `secret:create`
+- `secret:update`
+- `secret:delete`
+- `secret:approval-requested`
+- `secret:approval-granted`
+- `secret:approval-denied`
+- `secret:sync-push`
+- `secret:sync-pull`
 - `secret:env-write`
 - `secret:env-write-skipped`
 - `secret:env-cleanup`
 - `secret:env-cleanup-skipped`
 
-⚠️ The broader secret event taxonomy (`secret:create`, `secret:update`, `secret:delete`, `secret:read`, approvals, sync push/pull) is not wired in this branch. Follow-up: **FN-4867**.
+Wired in this branch/task lineage: `secret:read`, `secret:create`, `secret:update`, `secret:delete`, and approval events (`secret:approval-requested`, `secret:approval-granted`, `secret:approval-denied`).
 
-Rule that will continue to apply when read events land: secret-read audit records must never include plaintext values.
+Pending follow-ups:
+- Sync endpoint/event integration details continue under **FN-4913** (`secret:sync-push`, `secret:sync-pull`).
+- Env materialization lifecycle wiring continues under **FN-4912** (`secret:env-*`).
+
+**Plaintext prohibition:** audit payload metadata must never include plaintext, decrypted values, ciphertext, or nonce fields. Use `assertNoSecretPlaintext(...)` as the canonical enforcement helper before emitting secret audit events.
 
 ## Operational Notes
 

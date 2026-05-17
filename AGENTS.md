@@ -331,7 +331,7 @@ Reusable quality gates at configurable lifecycle phases. **Pre-merge** can block
 Every engine mutation is recorded across four domains:
 - **Database** — task:create, task:update, task:move, `room:ambiguity:branch` (deictic message routing telemetry), etc.
 - **Git** — worktree:create, commit:create, merge:resolve, etc.
-- **Filesystem** — file:write, prompt:write, attachment:create, `secret:env-*`, etc.
+- **Filesystem** — file:write, prompt:write, attachment:create, `secret:read|create|update|delete|approval-requested|approval-granted|approval-denied|sync-push|sync-pull`, `secret:env-*`, etc.
 - **Sandbox** — `sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`.
 
 Events are tied to run IDs end-to-end. See [docs/architecture.md](./docs/architecture.md) for the audit API.

@@ -64,7 +64,7 @@ function createMockStore(task: Task, settings: Record<string, unknown> = {}): Ta
 function createMockHealthMonitor(statusMap: Record<string, NodeStatus | undefined>) {
   return {
     getNodeHealth: vi.fn((id: string) => statusMap[id]),
-  } as unknown as import("../node-health-monitor.js").NodeHealthMonitor;
+  } as unknown as import("../../node-health-monitor.js").NodeHealthMonitor;
 }
 
 describe("reliability interactions: owning-node unavailable handoff", () => {

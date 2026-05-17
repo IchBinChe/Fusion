@@ -179,56 +179,65 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   // If onCreate is not provided, the component is disabled
   const isDisabled = !onCreate;
 
-  // Fetch models and settings if not provided by parent
+  // Fetch models if not provided by parent
   useEffect(() => {
     if (availableModels) {
       setLoadedModels(availableModels);
       setModelsLoading(false);
       setModelsError(null);
-    } else {
-      let cancelled = false;
-      setModelsLoading(true);
-      setModelsError(null);
-      fetchModels()
-        .then((response) => {
-          if (!cancelled) {
-            setLoadedModels(response.models);
-            // Only set internal favorites when parent doesn't manage them
-            if (!parentFavoriteProviders) {
-              setFavoriteProviders(response.favoriteProviders);
-            }
-            if (!parentFavoriteModels) {
-              setFavoriteModels(response.favoriteModels);
-            }
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setModelsError(getErrorMessage(err) || "Failed to load models");
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setModelsLoading(false);
-          }
-        });
-
-      // Also fetch settings for presets
-      fetchSettings(projectId)
-        .then((nextSettings) => {
-          if (!cancelled) {
-            setSettings(nextSettings);
-          }
-        })
-        .catch(() => {
-          // Silently ignore settings fetch failure
-        });
-
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
-  }, [availableModels, parentFavoriteProviders, parentFavoriteModels, projectId]);
+
+    let cancelled = false;
+    setModelsLoading(true);
+    setModelsError(null);
+    fetchModels()
+      .then((response) => {
+        if (!cancelled) {
+          setLoadedModels(response.models);
+          // Only set internal favorites when parent doesn't manage them
+          if (!parentFavoriteProviders) {
+            setFavoriteProviders(response.favoriteProviders);
+          }
+          if (!parentFavoriteModels) {
+            setFavoriteModels(response.favoriteModels);
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setModelsError(getErrorMessage(err) || "Failed to load models");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setModelsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [availableModels, parentFavoriteProviders, parentFavoriteModels]);
+
+  // Settings always drive toggle/preset behavior, regardless of model source.
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchSettings(projectId)
+      .then((nextSettings) => {
+        if (!cancelled) {
+          setSettings(nextSettings);
+        }
+      })
+      .catch(() => {
+        // Silently ignore settings fetch failure
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const executorSelectionValue = getModelSelectionValue(executorProvider, executorModelId);
   const validatorSelectionValue = getModelSelectionValue(validatorProvider, validatorModelId);
@@ -1898,8 +1907,13 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
             <button
               type="button"
-              className={`btn btn-sm ${effectiveGithubTracking ? "btn-primary" : ""}`}
-              onClick={() => setGithubTrackingOverride(!effectiveGithubTracking)}
+              className={`btn btn-sm ${githubTrackingProjectEnabled && effectiveGithubTracking ? "btn-primary" : ""}`}
+              onClick={() => {
+                if (!githubTrackingProjectEnabled) {
+                  return;
+                }
+                setGithubTrackingOverride((prev) => (prev ?? true) ? false : true);
+              }}
               onMouseDown={(e) => e.preventDefault()}
               disabled={!githubTrackingProjectEnabled}
               aria-pressed={effectiveGithubTracking}

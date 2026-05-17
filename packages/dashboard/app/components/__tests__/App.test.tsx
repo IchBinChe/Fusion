@@ -1659,7 +1659,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     await waitFor(() => expect(fetchAuthStatus).toHaveBeenCalled());
 
     // Settings modal should NOT be open
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
     expect(screen.queryByText("Settings")).toBeNull();
 
     // Onboarding modal should NOT be open
@@ -1681,7 +1681,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     render(<App />);
 
     await waitFor(() => expect(fetchAuthStatus).toHaveBeenCalled());
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     expect(screen.queryByText("Settings")).toBeNull();
     expect(screen.queryByText("Set Up AI")).toBeNull();
@@ -1715,7 +1715,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     render(<App />);
 
     await waitFor(() => expect(fetchAuthStatus).toHaveBeenCalled());
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     // Settings modal should NOT be open
     expect(screen.queryByText("Settings")).toBeNull();
@@ -1746,7 +1746,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     fireEvent.click(settingsButton);
 
     // Settings should open with Authentication section (first/default)
-    await waitFor(() => expect(fetchSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchSettings.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(fetchAuthStatus).toHaveBeenCalled());
 
     // Authentication section content should be visible (providers listed)
@@ -1955,7 +1955,7 @@ describe("App engine pause (soft pause)", () => {
 describe("App view switching", () => {
   it("opens research view from overflow and persists view selection", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
-    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
       experimentalFeatures: {
         ...defaultSettings.experimentalFeatures,
@@ -2003,7 +2003,7 @@ describe("App view switching", () => {
 
   it("does not expose research navigation when research feature is disabled", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
-    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
       experimentalFeatures: {
         ...defaultSettings.experimentalFeatures,
@@ -2026,7 +2026,7 @@ describe("App view switching", () => {
   it("initializes research view from persisted task-view when feature-enabled", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     localStorage.setItem(taskViewStorageKey(), "research");
-    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
       experimentalFeatures: {
         ...defaultSettings.experimentalFeatures,
@@ -2047,7 +2047,7 @@ describe("App view switching", () => {
   it("falls back to board when research view is feature-disabled", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     localStorage.setItem(taskViewStorageKey(), "research");
-    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
       experimentalFeatures: {
         ...defaultSettings.experimentalFeatures,
@@ -2069,7 +2069,7 @@ describe("App view switching", () => {
   it("falls back to board when evals view is feature-disabled", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     localStorage.setItem(taskViewStorageKey(), "evals");
-    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
       experimentalFeatures: {
         ...defaultSettings.experimentalFeatures,
@@ -2308,7 +2308,7 @@ describe("App view switching", () => {
 
   it("opens planning mode when TodoView triggers planning from todo item", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
-    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
       experimentalFeatures: {
         ...defaultSettings.experimentalFeatures,

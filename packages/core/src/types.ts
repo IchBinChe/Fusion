@@ -2100,6 +2100,11 @@ export interface GlobalSettings {
   ntfyDashboardHost?: string;
   /** Optional global fallback per-task token budget defaults. */
   taskTokenBudget?: TaskTokenBudget;
+  /** Default access policy applied to a secret when its row-level `access_policy`
+   *  is null/unset. One of "auto" (return value to caller and audit),
+   *  "prompt" (route through approvals), or "deny" (reject without prompt).
+   *  Default when unset: "prompt". */
+  secretsAccessPolicy?: SecretAccessPolicy;
   /** Policy for recovering tasks whose existing owning node becomes unavailable. */
   owningNodeHandoffPolicy?: OwningNodeHandoffPolicy;
   /** How long a task must remain in `status='failed'` before a push notification fires.
@@ -2807,11 +2812,6 @@ export interface ProjectSettings {
    *    to permanent executor agents using the reporting chain heuristic.
    *  Tasks without an eligible permanent executor remain queued. */
   ephemeralAgentsEnabled?: boolean;
-  /** Default access policy applied to a secret when its row-level `access_policy`
-   *  is null/unset. One of "auto" (return value to caller and audit),
-   *  "prompt" (route through approvals), or "deny" (reject without prompt).
-   *  Default when unset: "prompt". */
-  secretsAccessPolicy?: SecretAccessPolicy;
   /** Approval policy for agent provisioning tools (fn_agent_create/fn_agent_delete). */
   agentProvisioning?: {
     approvalMode?: AgentProvisioningApprovalMode;

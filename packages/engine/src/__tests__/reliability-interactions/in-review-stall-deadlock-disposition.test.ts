@@ -74,7 +74,7 @@ describe("reliability interactions: in-review stall deadlock disposition", () =>
     expect(task.pausedReason).toBe("in-review-stall-deadlock");
     expect(task.status).toBe("failed");
 
-    const disposedEntries = task.log.filter((entry) =>
+    const disposedEntries = task.log.filter((entry: { action: string }) =>
       entry.action.startsWith("In-review stall auto-disposed [merge-blocker]:"),
     );
     expect(disposedEntries).toHaveLength(1);
@@ -143,7 +143,7 @@ describe("reliability interactions: in-review stall deadlock disposition", () =>
 
     expect(task.pausedReason).not.toBe("in-review-stall-deadlock");
     expect((store.updateTask as any).mock.calls.length).toBe(0);
-    expect(task.log.some((entry) => entry.action.startsWith("In-review stall auto-disposed ["))).toBe(false);
+    expect(task.log.some((entry: { action: string }) => entry.action.startsWith("In-review stall auto-disposed ["))).toBe(false);
     expect(((store as any).__auditEvents as any[]).some((event) => event.mutationType === "task:in-review-stall-deadlock-disposed")).toBe(false);
 
     manager.stop();

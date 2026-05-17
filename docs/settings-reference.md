@@ -318,6 +318,7 @@ Default notes:
 | `specStalenessEnabled` | `boolean` | `false` | Enforce automatic re-planning for stale plans. |
 | `specStalenessMaxAgeMs` | `number` | `21600000` | Spec staleness threshold in ms (6 hours). |
 | `taskStuckTimeoutMs` | `number` | `undefined` | Inactivity timeout for stuck-task recovery. |
+| `inReviewStallDeadlockThreshold` | `number` | `3` | Minimum number of identical consecutive in-review stall log entries (same stall code + reason) before self-healing auto-disposes the task by pausing it with `pausedReason="in-review-stall-deadlock"` and marking status `failed`. Set to `0` to disable. |
 | `stalePausedReviewThresholdMs` | `number` | `86400000` | Threshold in ms for surfacing paused `in-review` tasks as stale paused review diagnostics (24 hours). `0` or `undefined` disables stale paused review surfacing/logging. |
 | `staleInProgressWarningMs` | `number` | `14400000` | Task-age staleness warning threshold in ms for `in-progress` tasks (4 hours). `0` or `undefined` disables warning-level surfacing. |
 | `staleInProgressCriticalMs` | `number` | `86400000` | Task-age staleness critical threshold in ms for `in-progress` tasks (24 hours). `0` or `undefined` disables critical-level surfacing. |
@@ -946,6 +947,7 @@ To clear all overrides, set `promptOverrides` to `null`:
     "mergeStrategy": "direct",
     "autoResolveConflicts": true,
     "taskStuckTimeoutMs": 600000,
+    "inReviewStallDeadlockThreshold": 3,
     "runStepsInNewSessions": true,
     "maxParallelSteps": 2
   }

@@ -1,4 +1,4 @@
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, type InReviewStallCode, type InReviewStallSignal, type Task } from "@fusion/core";
+import type { InReviewStallCode, InReviewStallSignal, Task } from "@fusion/core";
 
 import { MAX_AUTO_MERGE_RETRIES } from "../hooks/useBlockerFanout";
 
@@ -90,6 +90,8 @@ export function getInReviewStallCopy(
 }
 
 const ACTIVE_MERGE_STATUSES: ReadonlySet<Task["status"]> = new Set(["merging", "merging-pr", "merging-fix"]);
+
+const IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX = "In-review stall auto-disposed [";
 
 const IN_REVIEW_STALL_DEADLOCK_COPY: InReviewStallDeadlockCopy = {
   headline: "In-review deadlock auto-disposed",

@@ -165,6 +165,7 @@ export type DatabaseMutationType =
   | "task:auto-recover-completion-fanout"
   | "task:auto-recover-worktree-session-exhausted"
   | "task:auto-recover-starved-refinement"
+  | "task:in-review-stall-deadlock-disposed"
   | "task:finalize-unproven-blocked"
   | "task:integrity-reconcile-modified-files"
   | "task:integrity-warning"

@@ -135,29 +135,32 @@ export async function isInsideGitWorkTree(worktreePath: string): Promise<boolean
   }
 }
 
+export type TaskWorktreeClassificationResult =
+  | { ok: true }
+  | { ok: false; classification: "missing" | "incomplete" | "unregistered"; reason: string };
+
 /**
- * Language-agnostic liveness gate for task worktrees.
- *
- * Usable requires: directory exists, `.git` entry exists (file or directory),
- * worktree is registered in `git worktree list --porcelain`, and git confirms
- * the path is inside a work tree (`git rev-parse --is-inside-work-tree`).
- *
- * Classification intent:
- * - missing: worktree directory does not exist
- * - incomplete: directory exists but required git metadata is not complete
- * - unregistered: directory/.git exists but not registered as a git worktree
+ * Language-agnostic liveness/classification gate for task worktrees.
  */
-export async function isUsableTaskWorktree(rootDir: string, worktreePath: string): Promise<boolean> {
+export async function classifyTaskWorktree(rootDir: string, worktreePath: string): Promise<TaskWorktreeClassificationResult> {
   if (!existsSync(worktreePath)) {
-    return false;
+    return { ok: false, classification: "missing", reason: "worktree directory does not exist" };
   }
-  if (!hasRequiredWorktreeFiles(worktreePath)) {
-    return false;
+  if (!hasRequiredWorktreeFiles(worktreePath) || !await isInsideGitWorkTree(worktreePath)) {
+    return { ok: false, classification: "incomplete", reason: "missing or invalid .git metadata" };
   }
   if (!await isRegisteredGitWorktree(rootDir, worktreePath)) {
-    return false;
+    return { ok: false, classification: "unregistered", reason: "not registered in git worktree list" };
   }
-  return await isInsideGitWorkTree(worktreePath);
+  return { ok: true };
+}
+
+/**
+ * Language-agnostic liveness gate for task worktrees.
+ */
+export async function isUsableTaskWorktree(rootDir: string, worktreePath: string): Promise<boolean> {
+  const result = await classifyTaskWorktree(rootDir, worktreePath);
+  return result.ok;
 }
 
 export function isInsideWorktreesDir(

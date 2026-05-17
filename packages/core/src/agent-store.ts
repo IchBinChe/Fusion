@@ -1429,7 +1429,7 @@ export class AgentStore extends EventEmitter {
         const isSameNodeHolder = existingNodeId !== null && requestNodeId === existingNodeId;
         const expectedEpoch = isSameAgentHolder && isSameNodeHolder ? existingEpoch : undefined;
 
-        const centralResult = this.claimStore.tryClaimTask({
+        const centralResult = await Promise.resolve(this.claimStore.tryClaimTask({
           projectId: this.claimProjectId,
           taskId,
           nodeId: requestNodeId,
@@ -1437,7 +1437,7 @@ export class AgentStore extends EventEmitter {
           runId: leaseContext?.runId ?? task.checkoutRunId ?? null,
           renewedAt: nextRenewedAt,
           expectedEpoch,
-        });
+        }));
 
         if (!centralResult.ok) {
           throw new CheckoutConflictError(taskId, centralResult.current.ownerAgentId, agentId);

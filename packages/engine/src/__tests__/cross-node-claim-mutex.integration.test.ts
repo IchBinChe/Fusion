@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { AgentStore, CheckoutConflictError, TaskStore, createCentralDatabase } from "@fusion/core";
+import { AgentStore, CheckoutConflictError, TaskStore, createCentralDatabase, type CentralDatabase } from "@fusion/core";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "fn-cross-node-claim-test-"));
@@ -47,6 +47,24 @@ describe("cross-node claim mutex integration", () => {
   });
 
   it("allows one winner per race and bumps epoch once per successful ownership acquisition", async () => {
+    const originalTryClaim = centralDb.tryClaimTask.bind(centralDb);
+    const installBarrier = () => {
+      let waiters = 0;
+      let releaseBarrier: (() => void) | undefined;
+      const barrier = new Promise<void>((resolve) => {
+        releaseBarrier = resolve;
+      });
+
+      centralDb.tryClaimTask = ((input) => {
+        waiters += 1;
+        if (waiters === 2) {
+          releaseBarrier?.();
+        }
+        return barrier.then(() => originalTryClaim(input));
+      }) as CentralDatabase["tryClaimTask"];
+    };
+
+    installBarrier();
     const [first, second] = await Promise.allSettled([
       storeA.checkoutTask(agentA, taskId, { runId: "run-a" }),
       storeB.checkoutTask(agentB, taskId, { runId: "run-b" }),
@@ -67,6 +85,7 @@ describe("cross-node claim mutex integration", () => {
 
     await (winner.checkedOutBy === agentA ? storeA : storeB).releaseTask(winner.checkedOutBy ?? "", taskId);
 
+    installBarrier();
     const [third, fourth] = await Promise.allSettled([
       storeA.checkoutTask(agentA, taskId, { runId: "run-c" }),
       storeB.checkoutTask(agentB, taskId, { runId: "run-d" }),

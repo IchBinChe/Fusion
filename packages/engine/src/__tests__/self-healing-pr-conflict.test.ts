@@ -89,6 +89,25 @@ describe("SelfHealingManager.reclaimPrConflictForTask", () => {
     expect(sweepSpy).toHaveBeenCalled();
   });
 
+  it("returns reclaimed for reclaimable conflicts", async () => {
+    const task = makeTask({ column: "in-review", paused: true, pausedReason: "branch-conflict-unrecoverable" as any });
+    const store = makeStore(task);
+    vi.spyOn(branchConflicts, "inspectBranchConflict").mockResolvedValue({ kind: "reclaimable", livePath: task.worktree, tipSha: "abc123", taskAttributedCommitCount: 1, strandedCommits: [{ sha: "abc123" }] } as any);
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(task.id);
+    expect(result.outcome).toBe("reclaimed");
+    expect((store.moveTask as any).mock.calls.some((c: any[]) => c[1] === "todo")).toBe(true);
+  });
+
+  it("returns reclaimed for fully-subsumed conflicts", async () => {
+    const task = makeTask({ branch: "feature/non-fusion-branch" });
+    const store = makeStore(task);
+    vi.spyOn(branchConflicts, "inspectBranchConflict").mockResolvedValue({ kind: "fully-subsumed", livePath: task.worktree, tipSha: "abc123", taskAttributedCommitCount: 0, strandedCommits: [] } as any);
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(task.id);
+    expect(result.outcome).toBe("reclaimed");
+  });
+
   it("returns paused-unrecoverable when conflict is unrecoverable and dispatcher pauses", async () => {
     const task = makeTask();
     const store = makeStore(task);

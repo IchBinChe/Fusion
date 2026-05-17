@@ -4,6 +4,7 @@ import type { Settings, Task, TaskStore } from "@fusion/core";
 import { SelfHealingManager } from "../../self-healing.js";
 import * as branchConflicts from "../../branch-conflicts.js";
 import * as worktreePool from "../../worktree-pool.js";
+import { activeSessionRegistry } from "../../active-session-registry.js";
 
 function task(overrides: Partial<Task> = {}): Task {
   return {
@@ -51,6 +52,7 @@ function store(t: Task): TaskStore & EventEmitter {
 describe("reliability interaction: pr conflict reclaim", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    activeSessionRegistry.clear();
     vi.spyOn(worktreePool, "isUsableTaskWorktree").mockResolvedValue(true);
   });
 
@@ -64,11 +66,22 @@ describe("reliability interaction: pr conflict reclaim", () => {
     expect(branchConflicts.inspectBranchConflict).toHaveBeenCalled();
   });
 
-  it("skips checked-out task during pr conflict reclaim", async () => {
-    const t = task({ checkedOutBy: "agent-1" });
+  it("skips active heartbeat-style session during pr conflict reclaim", async () => {
+    const t = task();
     const s = store(t);
+    activeSessionRegistry.registerPath(t.worktree!, { taskId: t.id, kind: "executor", ownerKey: t.id });
     const manager = new SelfHealingManager(s as any, { rootDir: "/tmp/test" } as any);
     const result = await manager.reclaimPrConflictForTask(t.id);
-    expect(result).toEqual({ outcome: "skipped", reason: "checked-out" });
+    expect(result).toEqual({ outcome: "skipped", reason: "active-session" });
+  });
+
+  it("keeps paused-review reclaim path resumable", async () => {
+    const t = task();
+    const s = store(t);
+    vi.spyOn(branchConflicts, "inspectBranchConflict").mockResolvedValue({ kind: "reclaimable", livePath: t.worktree, tipSha: "abc123", taskAttributedCommitCount: 2, strandedCommits: [{ sha: "abc123" }] } as any);
+    const manager = new SelfHealingManager(s as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(t.id);
+    expect(result.outcome).toBe("reclaimed");
+    expect(t.column).toBe("todo");
   });
 });

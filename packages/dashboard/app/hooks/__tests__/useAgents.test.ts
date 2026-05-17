@@ -45,6 +45,7 @@ describe("useAgents", () => {
   beforeEach(() => {
     MockEventSource.instances = [];
     window.sessionStorage.clear();
+    window.localStorage.clear();
     mockFetchAgents.mockReset().mockResolvedValue([]);
     mockFetchAgentStats.mockReset().mockResolvedValue(defaultStats);
     vi.spyOn(console, "error").mockImplementation(() => {});

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Agent, AgentState, AgentCapability, AgentStats } from "../api";
 import { fetchAgents, fetchAgentStats } from "../api";
 import { isEphemeralAgent } from "@fusion/core";
 import { subscribeSse } from "../sse-bus";
+import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
 
 interface UseAgentsOptions {
   filterState?: AgentState | "all";
@@ -16,12 +17,21 @@ interface AgentFilter {
 }
 
 export function useAgents(projectId?: string, options?: UseAgentsOptions) {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [stats, setStats] = useState<AgentStats | null>(null);
+  const [agents, setAgents] = useState<Agent[]>(() => {
+    const cached = readCache<Agent[]>(SWR_CACHE_KEYS.AGENTS);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [stats, setStats] = useState<AgentStats | null>(() => {
+    const cached = readCache<AgentStats>(SWR_CACHE_KEYS.AGENT_STATS);
+    return cached ?? null;
+  });
   const [isLoading, setIsLoading] = useState(false);
+  const hasCachedHydrationRef = useRef(agents.length > 0 || stats !== null);
 
   const loadAgents = useCallback(async (filter?: AgentFilter) => {
-    setIsLoading(true);
+    if (!hasCachedHydrationRef.current) {
+      setIsLoading(true);
+    }
     try {
       const filterState = options?.filterState;
       const baseFilter = filterState && filterState !== "all" ? { state: filterState } : undefined;
@@ -40,6 +50,8 @@ export function useAgents(projectId?: string, options?: UseAgentsOptions) {
       // with duplicate-key warnings until the dashboard runs out of heap.
       const unique = Array.from(new Map(data.map((a) => [a.id, a])).values());
       setAgents(unique);
+      writeCache(SWR_CACHE_KEYS.AGENTS, unique, { maxBytes: 500_000 });
+      hasCachedHydrationRef.current = hasCachedHydrationRef.current || unique.length > 0;
     } catch (err) {
       console.error("Failed to load agents:", err);
     } finally {
@@ -51,6 +63,8 @@ export function useAgents(projectId?: string, options?: UseAgentsOptions) {
     try {
       const data = await fetchAgentStats(projectId);
       setStats(data);
+      writeCache(SWR_CACHE_KEYS.AGENT_STATS, data, { maxBytes: 500_000 });
+      hasCachedHydrationRef.current = true;
     } catch (err) {
       console.error("Failed to load agent stats:", err);
     }

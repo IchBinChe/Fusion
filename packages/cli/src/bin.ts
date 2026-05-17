@@ -289,8 +289,12 @@ Usage:
   fn task branch-recovery <id> [--reclaim <branch>] [--discard <branch> --yes]
                                       Inspect, reclaim, or discard stranded task branches
   fn task pr-create <id> [--title <title>] [--base <branch>] [--body <body>]
-                         Create a GitHub PR for an in-review task
+                         Alias of: fn pr create
   fn task import <owner/repo> [opts]  Import GitHub issues as tasks
+
+PR:
+  fn pr create <task-id> [--title <title>] [--base <branch>] [--body <body>] [--draft] [--no-ai]
+                                      Create a GitHub PR for a task (default: AI-generated title/body)
   fn research create --query <text> [--wait] [--max-wait-ms <ms>] [--json]
                                       Create and optionally wait for a cited-research run (search/fetch/synthesis)
   fn research list | ls [--status <status>] [--limit <n>] [--json]

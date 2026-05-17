@@ -571,10 +571,9 @@ describe("promptWithFallback auto-compaction", () => {
     expect(mockPrompt.mock.calls[1]).toEqual(["test prompt", options]);
   });
 
-  it("delegates to session.promptWithFallback when available", async () => {
-    // Mock session with promptWithFallback method
+  it("uses standalone prompt path even when session.promptWithFallback exists", async () => {
     const mockSessionPromptWithFallback = vi.fn().mockResolvedValue(undefined);
-    const mockPrompt = vi.fn();
+    const mockPrompt = vi.fn().mockResolvedValue(undefined);
     const mockCompact = vi.fn();
     const session = {
       prompt: mockPrompt,
@@ -584,10 +583,8 @@ describe("promptWithFallback auto-compaction", () => {
 
     await promptWithFallback(session, "test prompt");
 
-    // Verify session.promptWithFallback was called (auto-compaction handled by session)
-    expect(mockSessionPromptWithFallback).toHaveBeenCalledTimes(1);
-    // Verify direct prompt was NOT called
-    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(mockPrompt).toHaveBeenCalledTimes(1);
+    expect(mockSessionPromptWithFallback).not.toHaveBeenCalled();
   });
 
   it("handles context error patterns from various providers", async () => {

@@ -721,13 +721,11 @@
 }
 
 .card-footer-row.card-footer-row--chip-far-right > .card-source-provenance:first-of-type,
-.card-footer-row.card-footer-row--chip-far-right > .card-github-tracking-chip:first-of-type,
 .card-footer-row.card-footer-row--chip-far-right > .card-source-provenance + .card-github-tracking-chip:first-of-type {
   margin-left: 0;
 }
 
 .card-footer-row.card-footer-row--chip-far-right > .card-github-tracking-chip {
-  order: 2;
   margin-left: auto;
 }
 
@@ -1314,7 +1312,6 @@
   }
 
   .card-footer-row.card-footer-row--chip-far-right > .card-github-tracking-chip {
-    order: 2;
     margin-left: auto;
   }
 

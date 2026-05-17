@@ -2001,7 +2001,7 @@ describe("TaskCard", () => {
         },
         expectedLeftChipSelector: ".card-time-indicator",
       },
-    ])("keeps tracking chip visually last on in-progress when files changed is absent: $name", ({ taskPatch, expectedLeftChipSelector }) => {
+    ])("keeps right-side chips after tracking on in-progress when files changed is absent: $name", ({ taskPatch, expectedLeftChipSelector }) => {
       const { container } = render(
         <TaskCard
           task={makeTask({
@@ -2017,15 +2017,45 @@ describe("TaskCard", () => {
         />,
       );
 
-      const footerRow = container.querySelector(".card-footer-row");
+      const footerRow = container.querySelector(".card-footer-row") as HTMLElement | null;
       const trackingChip = container.querySelector(".card-github-tracking-chip") as HTMLElement | null;
-      const leftChip = container.querySelector(expectedLeftChipSelector) as HTMLElement | null;
+      const rightSideChip = container.querySelector(expectedLeftChipSelector) as HTMLElement | null;
       expect(footerRow).not.toBeNull();
       expect(footerRow).toHaveClass("card-footer-row--chip-far-right");
       expect(trackingChip).not.toBeNull();
-      expect(leftChip).not.toBeNull();
-      expect(getComputedStyle(trackingChip as HTMLElement).order).toBe("2");
-      expect(getComputedStyle(leftChip as HTMLElement).order).not.toBe("2");
+      expect(rightSideChip).not.toBeNull();
+      const children = Array.from((footerRow as HTMLElement).children);
+      expect(children.at(-1)).toBe(rightSideChip);
+      expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
+      expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
+    });
+
+    it.each(["in-progress", "in-review"] as const)("renders time indicator to the right of tracking chip in %s", (column) => {
+      const { container } = render(
+        <TaskCard
+          task={makeTask({
+            column,
+            sourceType: "dashboard_ui",
+            modifiedFiles: [],
+            githubTracking: { issue: trackedIssue },
+            executionStartedAt: "2026-04-25T12:00:00.000Z",
+            updatedAt: "2026-04-25T12:12:00.000Z",
+          })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onOpenDetailWithTab={vi.fn()}
+        />,
+      );
+
+      const footerRow = container.querySelector(".card-footer-row") as HTMLElement | null;
+      const trackingChip = container.querySelector(".card-github-tracking-chip") as HTMLElement | null;
+      const timeChip = container.querySelector(".card-time-indicator") as HTMLElement | null;
+      expect(footerRow).not.toBeNull();
+      expect(trackingChip).not.toBeNull();
+      expect(timeChip).not.toBeNull();
+      const children = Array.from((footerRow as HTMLElement).children);
+      expect(children.indexOf(timeChip as HTMLElement)).toBeGreaterThan(children.indexOf(trackingChip as HTMLElement));
+      expect(children.at(-1)).toBe(timeChip);
     });
 
     it("does not force far-right modifier when in-progress card has files changed", () => {
@@ -2063,7 +2093,7 @@ describe("TaskCard", () => {
         },
         expectedLeftChipSelector: ".card-time-indicator",
       },
-    ])("keeps tracking chip visually last on in-review when files changed is absent: $name", ({ taskPatch, expectedLeftChipSelector }) => {
+    ])("keeps right-side chips after tracking on in-review when files changed is absent: $name", ({ taskPatch, expectedLeftChipSelector }) => {
       const { container } = render(
         <TaskCard
           task={makeTask({
@@ -2079,15 +2109,17 @@ describe("TaskCard", () => {
         />,
       );
 
-      const footerRow = container.querySelector(".card-footer-row");
+      const footerRow = container.querySelector(".card-footer-row") as HTMLElement | null;
       const trackingChip = container.querySelector(".card-github-tracking-chip") as HTMLElement | null;
-      const leftChip = container.querySelector(expectedLeftChipSelector) as HTMLElement | null;
+      const rightSideChip = container.querySelector(expectedLeftChipSelector) as HTMLElement | null;
       expect(footerRow).not.toBeNull();
       expect(footerRow).toHaveClass("card-footer-row--chip-far-right");
       expect(trackingChip).not.toBeNull();
-      expect(leftChip).not.toBeNull();
-      expect(getComputedStyle(trackingChip as HTMLElement).order).toBe("2");
-      expect(getComputedStyle(leftChip as HTMLElement).order).not.toBe("2");
+      expect(rightSideChip).not.toBeNull();
+      const children = Array.from((footerRow as HTMLElement).children);
+      expect(children.at(-1)).toBe(rightSideChip);
+      expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
+      expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
     });
 
     it("does not force far-right modifier when in-review card has files changed", () => {

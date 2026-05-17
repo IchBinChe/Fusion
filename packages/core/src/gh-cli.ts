@@ -263,9 +263,12 @@ function parseRetryAfterMs(content: string): number | undefined {
 
 function normalizeGhErrorParts(error: unknown): { message: string; stderr: string; stdout: string; exitCode: string | number | null } {
   if (error && typeof error === "object") {
-    const withDetails = error as Partial<GhError> & { message?: unknown; code?: unknown; stderr?: unknown; stdout?: unknown };
+    const withDetails = error as { message?: unknown; code?: unknown; stderr?: unknown; stdout?: unknown };
+    const rawMessage = withDetails.message;
     return {
-      message: withDetails.message instanceof Error ? withDetails.message.message : String(withDetails.message ?? error),
+      message: rawMessage && typeof rawMessage === "object" && rawMessage instanceof Error
+        ? rawMessage.message
+        : String(rawMessage ?? error),
       stderr: String(withDetails.stderr ?? ""),
       stdout: String(withDetails.stdout ?? ""),
       exitCode: (withDetails.code as string | number | null | undefined) ?? null,

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import type { Task, TaskStore } from "@fusion/core";
 import { SelfHealingManager } from "../../self-healing.js";
@@ -69,6 +71,19 @@ describe("reliability interactions: worktree metadata reconcile", () => {
     executing = false;
     expect(await manager.reconcileTaskWorktreeMetadata()).toBe(1);
     expect((store as any).updateTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs reconcile before reclaim-stale-active-branches in maintenance ordering", () => {
+    const selfHealingPath = fileURLToPath(new URL("../../self-healing.ts", import.meta.url));
+    const source = readFileSync(selfHealingPath, "utf8");
+    const maintenanceSlice = source.slice(
+      source.indexOf("const batch2Fns:"),
+      source.indexOf("for (const fn of batch2Fns)"),
+    );
+
+    expect(maintenanceSlice.indexOf('"reconcile-task-worktree-metadata"')).toBeLessThan(
+      maintenanceSlice.indexOf('"reclaim-stale-active-branches"'),
+    );
   });
 
   it("skips done tasks during periodic reconcile (completion fan-out owns done lifecycle)", async () => {

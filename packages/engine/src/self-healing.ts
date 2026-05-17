@@ -2379,7 +2379,7 @@ export class SelfHealingManager {
             newBranch: normalizedBranch,
           });
           worktreeMetadataReconcileLog.log(
-            `[worktree-metadata-reconcile] rebound ${task.id}: ${previousWorktree} -> ${liveWorktree} (${previousBranch ?? "<none>"} -> ${normalizedBranch})`,
+            `rebound ${task.id}: ${previousWorktree} -> ${liveWorktree} (${previousBranch ?? "<none>"} -> ${normalizedBranch})`,
           );
           repaired++;
           continue;
@@ -2395,7 +2395,7 @@ export class SelfHealingManager {
           newBranch: null,
         });
         worktreeMetadataReconcileLog.log(
-          `[worktree-metadata-reconcile] cleared ${task.id}: ${previousWorktree} (${previousBranch ?? "<none>"})`,
+          `cleared ${task.id}: ${previousWorktree} (${previousBranch ?? "<none>"})`,
         );
         repaired++;
       }

@@ -1745,6 +1745,211 @@ describe("Node settings sync routes", () => {
     });
   });
 
+  describe("FN-4847 auth/ownership edge cases", () => {
+    it("treats apiKey: null identically to apiKey: '' on outbound push", async () => {
+      mockGetNode.mockResolvedValue({ ...createMockRemoteNode(), apiKey: null as unknown as string });
+
+      const res = await request(app, "POST", "/api/nodes/node-remote-001/settings/push", JSON.stringify({}), { "content-type": "application/json" });
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Null apiKey must follow the same falsy guard as empty-string/missing keys and short-circuit before fetch.
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe(MISSING_REMOTE_NODE_API_KEY_MESSAGE);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no Authorization header", undefined],
+      ["empty Authorization header", ""],
+      ["wrong scheme: Basic", "Basic test-api-key-123"],
+      ["wrong scheme: lowercase bearer", "bearer test-api-key-123"],
+      ["Bearer with empty token", "Bearer "],
+      ["Bearer with leading whitespace token", "Bearer  test-api-key-123"],
+      ["Bearer with trailing whitespace token", "Bearer test-api-key-123 "],
+      ["mismatched token", "Bearer not-the-local-key"],
+    ])("rejects %s on POST /api/settings/sync-receive with 401", async (_name, authorization) => {
+      mockListNodes.mockResolvedValue([createMockLocalNode()]);
+
+      const headers = authorization === undefined
+        ? { "content-type": "application/json" }
+        : { "content-type": "application/json", Authorization: authorization };
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/sync-receive",
+        JSON.stringify({ sourceNodeId: "node-remote-001", exportedAt: "2026-05-17T00:00:00.000Z", global: {}, projects: {} }),
+        headers,
+      );
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Bearer parsing must reject malformed and mismatched variants before any settings mutation executes.
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/Missing or invalid Authorization header|Invalid apiKey/);
+      expect(mockApplyRemoteSettings).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no Authorization header", undefined],
+      ["empty Authorization header", ""],
+      ["wrong scheme: Basic", "Basic test-api-key-123"],
+      ["wrong scheme: lowercase bearer", "bearer test-api-key-123"],
+      ["Bearer with empty token", "Bearer "],
+      ["Bearer with leading whitespace token", "Bearer  test-api-key-123"],
+      ["Bearer with trailing whitespace token", "Bearer test-api-key-123 "],
+      ["mismatched token", "Bearer not-the-local-key"],
+    ])("rejects %s on POST /api/settings/auth-receive with 401", async (_name, authorization) => {
+      mockListNodes.mockResolvedValue([createMockLocalNode()]);
+
+      const headers = authorization === undefined
+        ? { "content-type": "application/json" }
+        : { "content-type": "application/json", Authorization: authorization };
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/auth-receive",
+        JSON.stringify({
+          authMaterial: { version: 1, exportedAt: "2026-05-17T00:00:00.000Z", checksum: "auth-checksum", payload: { providerAuth: {} } },
+          sourceNodeId: "node-remote-001",
+          timestamp: "2026-05-17T00:00:00.000Z",
+        }),
+        headers,
+      );
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Auth material import must enforce identical bearer checks and avoid storage writes on denied auth.
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/Missing or invalid Authorization header|Invalid apiKey/);
+      expect(mockAuthStorageSet).not.toHaveBeenCalled();
+    });
+
+    it("rejects auth-receive with sourceNodeId=<local node id> when bearer is wrong", async () => {
+      mockListNodes.mockResolvedValue([createMockLocalNode()]);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/auth-receive",
+        JSON.stringify({
+          authMaterial: { version: 1, exportedAt: "2026-05-16T00:00:00.000Z", checksum: "auth-checksum", payload: { providerAuth: {} } },
+          sourceNodeId: "node-local-001",
+          timestamp: "2026-05-16T00:00:00.000Z",
+        }),
+        { "content-type": "application/json", Authorization: "Bearer wrong" },
+      );
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // A body claiming local-node source identity must never bypass bearer equality checks.
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain("Invalid apiKey");
+      expect(mockAuthStorageSet).not.toHaveBeenCalled();
+    });
+
+    it("sync-status reports actionableDenialReason='missing-remote-api-key' when remote node has no apiKey", async () => {
+      mockGetNode.mockResolvedValue({ ...createMockRemoteNode(), apiKey: "" });
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Sync-status must expose a stable denial enum when outbound auth cannot even be attempted.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.actionableDenialReason).toBe("missing-remote-api-key");
+      expect(res.body.diff).toEqual({ global: [], project: [] });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("sync-status reports actionableDenialReason='auth-failed' when remote returns HTTP 401", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockResolvedValue({ ok: false, status: 401, text: () => Promise.resolve("unauthorized") } as Response);
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Remote auth failures must be surfaced as an actionable enum rather than silent degraded reachability.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.actionableDenialReason).toBe("auth-failed");
+    });
+
+    it("sync-status also maps remote HTTP 403 to actionableDenialReason='auth-failed'", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockResolvedValue({ ok: false, status: 403, text: () => Promise.resolve("forbidden") } as Response);
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // fetchFromRemoteNode intentionally collapses remote 401/403 into one wrapped auth-failed contract.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.actionableDenialReason).toBe("auth-failed");
+    });
+
+    it("sync-status reports actionableDenialReason='unreachable' on network failure", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockRejectedValue(Object.assign(new Error("fetch failed"), { cause: { code: "ECONNREFUSED" } }));
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Connection failures must be classified as unreachable so operators get actionable diagnostics.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.actionableDenialReason).toBe("unreachable");
+    });
+
+    it("sync-status maps AbortError to actionableDenialReason='unreachable'", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" }));
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Timeout/abort failures should map to the same unreachable denial reason as other network errors.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.actionableDenialReason).toBe("unreachable");
+    });
+
+    it("sync-status reports actionableDenialReason='unknown' on remote HTTP 500", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve("oops") } as Response);
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Non-auth upstream failures should classify as unknown rather than leaking transport details.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.actionableDenialReason).toBe("unknown");
+    });
+
+    it("sync-status returns actionableDenialReason: null when the remote probe succeeds", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ global: {}, project: {} }) } as Response);
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Successful probes should include an explicit null denial reason to keep the response shape stable.
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(true);
+      expect(res.body.actionableDenialReason).toBeNull();
+    });
+
+    it("sync-status actionableDenialReason never includes underlying error text or URLs", async () => {
+      mockGetNode.mockResolvedValue(createMockRemoteNode());
+      mockFetch.mockRejectedValue(new Error("http://remote.invalid/api/settings/scopes — secret-fragment"));
+
+      const res = await request(app, "GET", "/api/nodes/node-remote-001/settings/sync-status");
+
+      // FN-4847 edge-case backstop for Node Settings Sync auth/ownership.
+      // Denial diagnostics must stay enum-only and never reflect sensitive message or URL fragments.
+      expect(res.status).toBe(200);
+      expect(JSON.stringify(res.body)).not.toContain("secret-fragment");
+      expect(JSON.stringify(res.body)).not.toContain("remote.invalid");
+    });
+  });
+
   describe("FN-4862 node-settings sync auth/ownership backstop", () => {
     it("blocks POST /api/nodes/:id/settings/push when remote node apiKey is empty string and never calls fetch", async () => {
       mockGetNode.mockResolvedValue({ ...createMockRemoteNode(), apiKey: "" });

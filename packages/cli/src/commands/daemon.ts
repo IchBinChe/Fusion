@@ -439,19 +439,35 @@ export async function runDaemon(opts: DaemonOptions = {}) {
 
   const store = primaryEngine.getTaskStore();
 
+  const getGlobalSettingsStore = () => {
+    const candidate = store as { getGlobalSettingsStore?: () => { getSettings: () => Promise<unknown> } };
+    return typeof candidate.getGlobalSettingsStore === "function"
+      ? candidate.getGlobalSettingsStore()
+      : null;
+  };
+
   if (peerExchangeService) {
-    void store.getGlobalSettingsStore().getSettings().then((globalSettings) => {
-      peerExchangeService?.updateGlobalSettings(globalSettings);
-    }).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[daemon] Failed to load initial peer exchange settings: ${message}`);
-    });
+    const globalSettingsStore = getGlobalSettingsStore();
+    if (globalSettingsStore) {
+      void globalSettingsStore.getSettings().then((globalSettings) => {
+        peerExchangeService?.updateGlobalSettings(
+          globalSettings as Parameters<PeerExchangeService["updateGlobalSettings"]>[0],
+        );
+      }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[daemon] Failed to load initial peer exchange settings: ${message}`);
+      });
+    }
   }
 
   store.on("settings:updated", () => {
     if (!peerExchangeService) return;
-    void store.getGlobalSettingsStore().getSettings().then((globalSettings) => {
-      peerExchangeService?.updateGlobalSettings(globalSettings);
+    const globalSettingsStore = getGlobalSettingsStore();
+    if (!globalSettingsStore) return;
+    void globalSettingsStore.getSettings().then((globalSettings) => {
+      peerExchangeService?.updateGlobalSettings(
+        globalSettings as Parameters<PeerExchangeService["updateGlobalSettings"]>[0],
+      );
     }).catch(() => undefined);
   });
 

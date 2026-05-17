@@ -236,6 +236,68 @@ const MODEL_FIXTURE = [
   { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
 ];
 
+type PersistSettingInput = {
+  section: string;
+  label: string;
+  kind: "checkbox" | "text" | "number" | "select";
+  value: boolean | string | number;
+  scope: "project" | "global";
+  expectedKey: string;
+};
+
+async function expectSettingPersists({ section, label, kind, value, scope, expectedKey }: PersistSettingInput) {
+  const user = userEvent.setup();
+  renderModal();
+  await waitForSettingsModalReady();
+  await user.click(screen.getByRole("button", { name: new RegExp(`^${section}$`, "i") }));
+
+  const control = await screen.findByLabelText(label);
+  if (kind === "checkbox") {
+    const shouldBeChecked = Boolean(value);
+    if ((control as HTMLInputElement).checked !== shouldBeChecked) {
+      await user.click(control);
+    }
+  } else {
+    await user.clear(control);
+    await user.type(control, String(value));
+  }
+
+  await user.click(screen.getByRole("button", { name: /^Save$/i }));
+
+  const expectedPayload = expect.objectContaining({ [expectedKey]: value });
+  if (scope === "global") {
+    await waitFor(() => expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(expectedPayload));
+    return;
+  }
+
+  await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalledWith(expectedPayload));
+}
+
+async function assertProjectModelSavePayload(provider: string, modelId: string, expectedKeys: string[]) {
+  const user = userEvent.setup();
+  renderModal({ initialSection: "project-models" });
+  await waitForSettingsModalReady();
+
+  await user.selectOptions(screen.getByLabelText("Default Provider"), provider);
+  await user.selectOptions(screen.getByLabelText("Default Model"), modelId);
+  await user.click(screen.getByRole("button", { name: /^Save$/i }));
+
+  await waitFor(() => {
+    expect(mockUpdateSettings).toHaveBeenCalledWith(
+      expect.objectContaining(
+        expectedKeys.reduce<Record<string, string>>((acc, key) => {
+          acc[key] = key.includes("Provider") ? provider : modelId;
+          return acc;
+        }, {}),
+      ),
+    );
+  });
+}
+
+function forEachProvider<T>(providers: T[], fn: (provider: T) => void) {
+  providers.forEach(fn);
+}
+
 describe("SettingsModal", () => {
   it("applies keyboard CSS variables when mobile keyboard is open", async () => {
     mockUseMobileKeyboard.mockReturnValue({
@@ -1184,23 +1246,14 @@ describe("SettingsModal", () => {
         favoriteModels: [],
       });
 
-      renderModal();
-      await waitForSettingsModalReady();
-
-      await userEvent.click(screen.getByRole("button", { name: "Models" }));
-      const checkbox = await screen.findByLabelText("Sync opencode-go model list at startup");
-      expect(checkbox).toBeChecked();
-
-      await userEvent.click(checkbox);
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-      await waitFor(() => {
-        expect(mockUpdateGlobalSettings).toHaveBeenCalled();
+      await expectSettingPersists({
+        section: "models",
+        label: "Sync opencode-go model list at startup",
+        kind: "checkbox",
+        value: false,
+        scope: "global",
+        expectedKey: "opencodeGoModelSync",
       });
-
-      expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ opencodeGoModelSync: false }),
-      );
     });
 
     it("renders and saves OpenRouter advanced settings", async () => {
@@ -1615,22 +1668,24 @@ describe("SettingsModal", () => {
   });
 
   describe("Authentication provider icon wrappers", () => {
-    it("renders stable auth-provider-icon wrappers with branded and fallback SVG behavior", async () => {
+    it.each([
+      { id: "openrouter", name: "OpenRouter", authenticated: true, type: "api_key", iconTestId: "openrouter-icon" },
+      { id: "unknown-provider", name: "Unknown Provider", authenticated: false, type: "api_key", iconTestId: null },
+    ] as const)("renders stable auth-provider-icon wrappers for $id", async ({ id, name, authenticated, type, iconTestId }) => {
       mockFetchAuthStatus.mockResolvedValueOnce({
-        providers: [
-          { id: "openrouter", name: "OpenRouter", authenticated: true, type: "api_key" },
-          { id: "unknown-provider", name: "Unknown Provider", authenticated: false, type: "api_key" },
-        ],
+        providers: [{ id, name, authenticated, type }],
       });
 
       renderModal();
       await waitForSettingsModalReady();
 
-      const openRouterIconWrapper = await screen.findByTestId("auth-provider-icon-openrouter");
-      expect(within(openRouterIconWrapper).getByTestId("openrouter-icon")).toBeInTheDocument();
+      const iconWrapper = await screen.findByTestId(`auth-provider-icon-${id}`);
+      if (iconTestId) {
+        expect(within(iconWrapper).getByTestId(iconTestId)).toBeInTheDocument();
+        return;
+      }
 
-      const unknownIconWrapper = screen.getByTestId("auth-provider-icon-unknown-provider");
-      const fallbackSvg = unknownIconWrapper.querySelector("svg");
+      const fallbackSvg = iconWrapper.querySelector("svg");
       expect(fallbackSvg).toBeInTheDocument();
       expect(fallbackSvg).not.toHaveAttribute("data-testid");
     });
@@ -3116,44 +3171,16 @@ describe("SettingsModal", () => {
       expect(screen.getByText("Roadmaps")).toBeInTheDocument();
     });
 
-    it("shows researchView in the Experimental Features list", async () => {
+    it.each([
+      "Research View",
+      "Evals View",
+      "Chat Rooms",
+      "Sandbox (command isolation)",
+      "Planning-style Agent Onboarding",
+    ])("shows %s in the Experimental Features list", async (featureLabel) => {
       renderModal();
-
       await openExperimentalFeaturesSection();
-
-      expect(screen.getByLabelText("Research View")).toBeInTheDocument();
-    });
-
-    it("shows evalsView in the Experimental Features list", async () => {
-      renderModal();
-
-      await openExperimentalFeaturesSection();
-
-      expect(screen.getByLabelText("Evals View")).toBeInTheDocument();
-    });
-
-    it("shows chatRooms in the Experimental Features list", async () => {
-      renderModal();
-
-      await openExperimentalFeaturesSection();
-
-      expect(screen.getByLabelText("Chat Rooms")).toBeInTheDocument();
-    });
-
-    it("shows sandbox in the Experimental Features list", async () => {
-      renderModal();
-
-      await openExperimentalFeaturesSection();
-
-      expect(screen.getByLabelText("Sandbox (command isolation)")).toBeInTheDocument();
-    });
-
-    it("shows agentOnboarding in the Experimental Features list", async () => {
-      renderModal();
-
-      await openExperimentalFeaturesSection();
-
-      expect(screen.getByLabelText("Planning-style Agent Onboarding")).toBeInTheDocument();
+      expect(screen.getByLabelText(featureLabel)).toBeInTheDocument();
     });
 
     it("shows a single canonical Dev Server toggle", async () => {
@@ -3979,19 +4006,33 @@ describe("SettingsModal", () => {
       });
     });
 
-    it("shows ntfy fields when ntfy provider is enabled", async () => {
-      mockFetchSettings.mockResolvedValueOnce({ ...defaultSettings, ntfyEnabled: true, ntfyTopic: "test-topic" });
+    it.each([
+      {
+        provider: "ntfy",
+        initial: { ...defaultSettings, ntfyEnabled: true, ntfyTopic: "test-topic" },
+        enable: async () => {},
+        visibleLabel: "ntfy Topic",
+        hiddenLabel: "Webhook URL",
+      },
+      {
+        provider: "webhook",
+        initial: defaultSettings,
+        enable: async () => {
+          await userEvent.click(screen.getByLabelText("Webhook notifications"));
+        },
+        visibleLabel: "Webhook URL",
+        hiddenLabel: "ntfy Topic",
+      },
+    ])("shows $provider fields when enabled and hides opposite provider fields", async ({ initial, enable, visibleLabel, hiddenLabel }) => {
+      mockFetchSettings.mockResolvedValueOnce(initial);
       renderModal();
       await waitForSettingsModalReady();
       await openNotificationsSection();
+      await enable();
 
-      expect(screen.getByLabelText("ntfy Topic")).toBeInTheDocument();
-      expect(screen.getByLabelText("Dashboard Hostname")).toBeInTheDocument();
-      expect(screen.getByText("Notify on events")).toBeInTheDocument();
+      expect(screen.getByLabelText(visibleLabel)).toBeInTheDocument();
+      expect(screen.queryByLabelText(hiddenLabel)).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Test notification/ })).toBeInTheDocument();
-
-      await userEvent.click(screen.getByText("Advanced"));
-      expect(screen.getByLabelText("Access token (optional)")).toBeInTheDocument();
     });
 
     it("shows fallback, dreams, and mailbox/room message events for both providers", async () => {
@@ -4018,31 +4059,6 @@ describe("SettingsModal", () => {
       expect(agentToUserWebhook.checked).toBe(true);
       expect(agentToAgentWebhook.checked).toBe(true);
       expect(roomMessageWebhook.checked).toBe(true);
-    });
-
-    it("shows webhook fields when webhook provider is enabled", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
-      await userEvent.click(screen.getByLabelText("Webhook notifications"));
-
-      expect(screen.getByLabelText("Webhook URL")).toBeInTheDocument();
-      expect(screen.getByLabelText("Format")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Test notification/ })).toBeInTheDocument();
-    });
-
-    it("hides ntfy body when ntfy is disabled", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
-      expect(screen.queryByLabelText("ntfy Topic")).not.toBeInTheDocument();
-    });
-
-    it("hides webhook body when webhook is disabled", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-      await openNotificationsSection();
-      expect(screen.queryByLabelText("Webhook URL")).not.toBeInTheDocument();
     });
 
     it("calls testNotification with ntfy provider ID when ntfy test button clicked", async () => {

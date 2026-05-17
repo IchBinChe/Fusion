@@ -1098,6 +1098,81 @@ async function applyChangesRequestedTransition(
   }
 }
 
+export function resolvePrMergeMethod(
+  settings: Pick<import("@fusion/core").Settings, "directMergeCommitStrategy"> | null | undefined,
+  prInfo: Pick<PrInfo, "autoMergeStrategy"> | null | undefined,
+  explicit?: "merge" | "squash" | "rebase",
+): "merge" | "squash" | "rebase" {
+  if (explicit) return explicit;
+  if (prInfo?.autoMergeStrategy) return prInfo.autoMergeStrategy;
+  switch (settings?.directMergeCommitStrategy) {
+    case "always-rebase":
+      return "rebase";
+    case "always-squash":
+      return "squash";
+    case "auto":
+    default:
+      return "squash";
+  }
+}
+
+async function mergeTaskPr(
+  scopedStore: TaskStore,
+  task: Task,
+  token: string | undefined,
+  explicitMethod?: "merge" | "squash" | "rebase",
+  runIdPrefix = "pr-merge",
+): Promise<PrInfo> {
+  if (!task.prInfo?.number) {
+    throw badRequest("Task has no associated PR number");
+  }
+  if (task.prInfo.status !== "open") {
+    throw badRequest(`PR is ${task.prInfo.status}`);
+  }
+
+  const badgeParsed = parseBadgeUrl(task.prInfo.url);
+  const repo = badgeParsed ?? getCurrentRepo(scopedStore.getRootDir());
+  if (!repo) {
+    throw badRequest("Could not determine GitHub repository");
+  }
+
+  const settings = await scopedStore.getSettings();
+  const method = resolvePrMergeMethod(settings, task.prInfo, explicitMethod);
+  const client = new GitHubClient(token);
+
+  try {
+    const mergedPrInfo = await client.mergePr({ owner: repo.owner, repo: repo.repo, number: task.prInfo.number, method });
+    const updated = {
+      ...task.prInfo,
+      ...mergedPrInfo,
+      autoMergeOnGreen: task.prInfo.autoMergeOnGreen,
+      autoMergeStrategy: task.prInfo.autoMergeStrategy,
+      lastMergeError: undefined,
+      lastMergeErrorAt: undefined,
+      draft: mergedPrInfo.draft ?? mergedPrInfo.isDraft,
+    } satisfies PrInfo;
+    await scopedStore.updatePrInfo(task.id, updated);
+    await scopedStore.applyPrMergedTransition(task.id, {
+      agentId: "dashboard",
+      runId: `${runIdPrefix}-${task.id}-${Date.now()}`,
+    });
+    return updated;
+  } catch (error) {
+    const message = getCommandErrorMessage(error) || "Failed to merge pull request";
+    await scopedStore.updatePrInfo(task.id, {
+      ...task.prInfo,
+      lastMergeError: message,
+      lastMergeErrorAt: new Date().toISOString(),
+    });
+    const err = new ApiError(502, "Failed to merge pull request", {
+      code: "pr_merge_failed",
+      retryable: true,
+      error: message,
+    });
+    throw err;
+  }
+}
+
 export async function refreshPrInBackground(store: TaskStore, taskId: string, currentPrInfo: PrInfo, token?: string): Promise<void> {
   try {
     let owner: string;
@@ -1130,15 +1205,37 @@ export async function refreshPrInBackground(store: TaskStore, taskId: string, cu
     const task = await store.getTask(taskId);
 
     const reviewSnapshot = await client.getPrReviewSnapshot(owner, repo, currentPrInfo.number);
+    const mergeStatus = await client.getPrMergeStatus(owner, repo, currentPrInfo.number);
+    const prior = task.prInfo;
     const prInfo = {
-      ...reviewSnapshot.prInfo,
+      ...prior,
+      ...mergeStatus.prInfo,
+      autoMergeOnGreen: prior?.autoMergeOnGreen,
+      autoMergeStrategy: prior?.autoMergeStrategy,
+      lastMergeError: prior?.lastMergeError,
+      lastMergeErrorAt: prior?.lastMergeErrorAt,
+      draft: mergeStatus.prInfo.draft ?? mergeStatus.prInfo.isDraft,
       lastCheckedAt: new Date().toISOString(),
       lastReviewDecision: reviewSnapshot.decision,
-    };
+    } satisfies PrInfo;
 
     await store.updatePrInfo(taskId, prInfo);
     await syncPrReviewsToTask(store, task, reviewSnapshot);
     await applyChangesRequestedTransition(store, task, reviewSnapshot, prInfo);
+
+    if (prInfo.status === "merged") {
+      await store.applyPrMergedTransition(taskId, {
+        agentId: "dashboard",
+        runId: `pr-refresh-${taskId}-${Date.now()}`,
+      });
+      return;
+    }
+
+    const lastMergeErrorAt = prior?.lastMergeErrorAt ? Date.parse(prior.lastMergeErrorAt) : Number.NaN;
+    const recentlyFailed = Number.isFinite(lastMergeErrorAt) && Date.now() - lastMergeErrorAt < 5 * 60 * 1000;
+    if (prior?.autoMergeOnGreen && mergeStatus.mergeReady && !recentlyFailed) {
+      await mergeTaskPr(store, task, token, undefined, "pr-refresh");
+    }
   } catch {
     // best-effort
   }
@@ -3295,8 +3392,14 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       const reviewSnapshot = await client.getPrReviewSnapshot(owner, repo, task.prInfo.number);
       const mergeStatus = await client.getPrMergeStatus(owner, repo, task.prInfo.number);
 
-      const prInfo = {
-        ...reviewSnapshot.prInfo,
+      const prInfo: PrInfo = {
+        ...task.prInfo,
+        ...mergeStatus.prInfo,
+        autoMergeOnGreen: task.prInfo.autoMergeOnGreen,
+        autoMergeStrategy: task.prInfo.autoMergeStrategy,
+        lastMergeError: task.prInfo.lastMergeError,
+        lastMergeErrorAt: task.prInfo.lastMergeErrorAt,
+        draft: mergeStatus.prInfo.draft ?? mergeStatus.prInfo.isDraft,
         lastCheckedAt: new Date().toISOString(),
         lastReviewDecision: reviewSnapshot.decision,
       };
@@ -3305,13 +3408,27 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       await syncPrReviewsToTask(scopedStore, task, reviewSnapshot);
       await applyChangesRequestedTransition(scopedStore, task, reviewSnapshot, prInfo);
 
+      if (prInfo.status === "merged") {
+        await scopedStore.applyPrMergedTransition(task.id, {
+          agentId: "dashboard",
+          runId: `pr-refresh-${task.id}-${Date.now()}`,
+        });
+      } else {
+        const lastMergeErrorAt = prInfo.lastMergeErrorAt ? Date.parse(prInfo.lastMergeErrorAt) : Number.NaN;
+        const recentlyFailed = Number.isFinite(lastMergeErrorAt) && Date.now() - lastMergeErrorAt < 5 * 60 * 1000;
+        if (prInfo.autoMergeOnGreen && mergeStatus.mergeReady && !recentlyFailed) {
+          await mergeTaskPr(scopedStore, task, githubToken, undefined, "pr-refresh");
+        }
+      }
+
+      const refreshedTask = await scopedStore.getTask(task.id);
       res.json({
-        prInfo,
+        prInfo: refreshedTask.prInfo ?? prInfo,
         mergeReady: mergeStatus.mergeReady,
         blockingReasons: mergeStatus.blockingReasons,
         reviewDecision: reviewSnapshot.decision,
         checks: mergeStatus.checks,
-        automationStatus: task.status ?? null,
+        automationStatus: refreshedTask.status ?? task.status ?? null,
       });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -3324,6 +3441,63 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       } else {
         rethrowAsApiError(err);
       }
+    }
+  });
+
+  router.post("/tasks/:id/pr/merge", async (req, res) => {
+    try {
+      const method = req.body?.method;
+      if (method && !["merge", "squash", "rebase"].includes(method)) {
+        throw badRequest("Invalid merge method");
+      }
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.getTask(req.params.id);
+      if (!task.prInfo?.number) {
+        throw notFound("Task has no associated PR");
+      }
+      if (task.prInfo.status === "merged") {
+        await scopedStore.applyPrMergedTransition(task.id, {
+          agentId: "dashboard",
+          runId: `pr-merge-${task.id}-${Date.now()}`,
+        });
+        return res.json({ prInfo: task.prInfo, alreadyMerged: true });
+      }
+      const prInfo = await mergeTaskPr(scopedStore, task, githubToken, method);
+      res.json({ prInfo });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err, "Failed to merge PR");
+    }
+  });
+
+  router.post("/tasks/:id/pr/auto-merge", async (req, res) => {
+    try {
+      const { enabled, strategy } = req.body ?? {};
+      if (typeof enabled !== "boolean") {
+        throw badRequest("enabled must be a boolean");
+      }
+      if (strategy && !["merge", "squash", "rebase"].includes(strategy)) {
+        throw badRequest("Invalid auto-merge strategy");
+      }
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.getTask(req.params.id);
+      if (!task.prInfo) {
+        throw notFound("Task has no associated PR");
+      }
+      const prInfo: PrInfo = {
+        ...task.prInfo,
+        autoMergeOnGreen: enabled,
+        autoMergeStrategy: strategy ?? task.prInfo.autoMergeStrategy,
+        lastMergeError: undefined,
+        lastMergeErrorAt: undefined,
+      };
+      await scopedStore.updatePrInfo(task.id, prInfo);
+      res.json({ prInfo });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to set PR auto-merge");
     }
   });
 

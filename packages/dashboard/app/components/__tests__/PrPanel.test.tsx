@@ -6,9 +6,11 @@ vi.mock("../../api", () => ({
   refreshPrStatus: vi.fn(),
   fetchPrChecks: vi.fn(),
   fetchPrReviews: vi.fn(),
+  mergePr: vi.fn(),
+  setAutoMergeOnGreen: vi.fn(),
 }));
 
-import { refreshPrStatus, fetchPrChecks, fetchPrReviews } from "../../api";
+import { refreshPrStatus, fetchPrChecks, fetchPrReviews, mergePr, setAutoMergeOnGreen } from "../../api";
 
 const mockAddToast = vi.fn();
 const mockOnPrUpdated = vi.fn();
@@ -34,6 +36,8 @@ describe("PrPanel", () => {
       lastCheckedAt: new Date().toISOString(),
     });
     (fetchPrReviews as ReturnType<typeof vi.fn>).mockResolvedValue({ snapshot: { decision: null, items: [] }, comments: [] });
+    (mergePr as ReturnType<typeof vi.fn>).mockResolvedValue({ prInfo: { ...mockPrInfo, status: "merged" } });
+    (setAutoMergeOnGreen as ReturnType<typeof vi.fn>).mockResolvedValue({ prInfo: { ...mockPrInfo, autoMergeOnGreen: true } });
   });
 
   it("renders create button and calls onRequestCreatePr", () => {

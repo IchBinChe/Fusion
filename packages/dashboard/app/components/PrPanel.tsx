@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GitPullRequest, ExternalLink, RefreshCw, Plus, MessageSquare, CircleDot, XCircle, GitMerge } from "lucide-react";
 import { getErrorMessage } from "@fusion/core";
-import { fetchPrReviews, refreshPrStatus, type PrCheckStatus, type PrInfo, type PrRefreshResponse, type PrReviewsResponse } from "../api";
+import { fetchPrReviews, mergePr, refreshPrStatus, setAutoMergeOnGreen, type DirectMergeCommitStrategy, type PrCheckStatus, type PrInfo, type PrRefreshResponse, type PrReviewsResponse } from "../api";
 import { usePrChecksStream } from "../hooks/usePrChecksStream";
 import { PrChecksList } from "./PrChecksList";
 import type { ToastType } from "../hooks/useToast";
@@ -19,6 +19,7 @@ interface PrPanelProps {
   prAuthAvailable: boolean;
   onPrUpdated: (prInfo: PrInfo) => void;
   onRequestCreatePr?: () => void;
+  directMergeCommitStrategy?: DirectMergeCommitStrategy;
   addToast: (message: string, type?: ToastType) => void;
 }
 
@@ -52,11 +53,20 @@ export function PrPanel({
   prAuthAvailable,
   onPrUpdated,
   onRequestCreatePr,
+  directMergeCommitStrategy = "auto",
   addToast,
 }: PrPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshState, setRefreshState] = useState<PrRefreshResponse | null>(null);
   const [reviewsState, setReviewsState] = useState<PrReviewsResponse | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeStrategy, setMergeStrategy] = useState<"merge" | "squash" | "rebase">(
+    directMergeCommitStrategy === "always-rebase"
+      ? "rebase"
+      : directMergeCommitStrategy === "always-squash"
+        ? "squash"
+        : "squash",
+  );
 
   useEffect(() => {
     if (!prInfo) {
@@ -85,6 +95,31 @@ export function PrPanel({
       setIsRefreshing(false);
     }
   }, [taskId, projectId, prInfo, onPrUpdated, addToast]);
+
+  const handleMerge = useCallback(async () => {
+    if (!prInfo) return;
+    setIsMerging(true);
+    try {
+      const result = await mergePr(taskId, mergeStrategy, projectId);
+      onPrUpdated(result.prInfo);
+      addToast("Pull request merged", "success");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to merge pull request", "error");
+    } finally {
+      setIsMerging(false);
+    }
+  }, [addToast, mergeStrategy, onPrUpdated, prInfo, projectId, taskId]);
+
+  const handleAutoMergeToggle = useCallback(async (enabled: boolean) => {
+    if (!prInfo) return;
+    try {
+      const result = await setAutoMergeOnGreen(taskId, enabled, mergeStrategy, projectId);
+      onPrUpdated(result.prInfo);
+      addToast(enabled ? "Auto-merge enabled" : "Auto-merge disabled", "success");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to update auto-merge", "error");
+    }
+  }, [addToast, mergeStrategy, onPrUpdated, prInfo, projectId, taskId]);
 
   if (!prInfo) {
     if (automationStatus === "creating-pr") {
@@ -170,6 +205,9 @@ export function PrPanel({
     initialRollup: checkSummary,
     initialLastCheckedAt: prInfo.lastCheckedAt,
   });
+  const mergeReady = (refreshState?.mergeReady ?? false) && prInfo.status === "open";
+  const blockingReasonsTitle = (refreshState?.blockingReasons ?? []).join("; ");
+  const showMergeControls = prInfo.status === "open" && (prInfo.draft ?? prInfo.isDraft) !== true;
 
   return (
     <div className="pr-section">
@@ -236,6 +274,47 @@ export function PrPanel({
           ))}
         </div>
 
+        {showMergeControls ? (
+          <div className="pr-panel-section">
+            <div className="pr-panel-row-label">Merge</div>
+            <div className="pr-merge-controls">
+              <select className="select" value={mergeStrategy} onChange={(event) => setMergeStrategy(event.target.value as "merge" | "squash" | "rebase")}>
+                <option value="merge">merge</option>
+                <option value="squash">squash</option>
+                <option value="rebase">rebase</option>
+              </select>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleMerge}
+                disabled={!mergeReady || isMerging}
+                title={mergeReady ? "Merge pull request" : blockingReasonsTitle || "Refresh PR status to check merge readiness"}
+              >
+                Merge pull request
+              </button>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={Boolean(prInfo.autoMergeOnGreen)}
+                  onChange={(event) => {
+                    void handleAutoMergeToggle(event.currentTarget.checked);
+                  }}
+                />
+                Auto-merge when green
+              </label>
+            </div>
+            {prInfo.lastMergeError ? (
+              <div className="pr-merge-error">
+                <span>{prInfo.lastMergeError}</span>
+                <button className="btn btn-sm" onClick={handleMerge} disabled={isMerging}>Retry</button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {(prInfo.draft ?? prInfo.isDraft) === true && prInfo.status === "open" ? (
+          <div className="pr-hint pr-hint--warning">Ready for review required before merging.</div>
+        ) : null}
+
         {reviewDecision === "CHANGES_REQUESTED" && taskColumn === "todo" && (
           <div className="pr-hint pr-hint--warning">Auto-moved to Todo — reviewer feedback ready</div>
         )}
@@ -249,7 +328,7 @@ export function PrPanel({
           </div>
         )}
         {prInfo.status === "merged" && (
-          <div className="pr-hint pr-hint--info">This PR is merged. fn will finish local cleanup and move the task to Done.</div>
+          <div className="pr-hint pr-hint--success">Merged — task moved to Done</div>
         )}
 
         <div className="pr-footer">

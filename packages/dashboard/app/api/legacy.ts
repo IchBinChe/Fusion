@@ -2219,6 +2219,11 @@ export interface PrRefreshResponse {
   automationStatus?: string | null;
 }
 
+export interface PrMergeResponse {
+  prInfo: PrInfo;
+  alreadyMerged?: boolean;
+}
+
 export interface PrChecksResponse {
   checks: PrCheckStatus[];
   rollup: "success" | "pending" | "failure" | "unknown";
@@ -2346,6 +2351,25 @@ export function fetchPrStatus(id: string, projectId?: string): Promise<PrStatusR
 export function refreshPrStatus(id: string, projectId?: string): Promise<PrRefreshResponse> {
   return api<PrRefreshResponse>(withProjectId(`/tasks/${id}/pr/refresh`, projectId), {
     method: "POST",
+  });
+}
+
+export function mergePr(id: string, method?: "merge" | "squash" | "rebase", projectId?: string): Promise<PrMergeResponse> {
+  return api<PrMergeResponse>(withProjectId(`/tasks/${id}/pr/merge`, projectId), {
+    method: "POST",
+    body: JSON.stringify(method ? { method } : {}),
+  });
+}
+
+export function setAutoMergeOnGreen(
+  id: string,
+  enabled: boolean,
+  strategy?: "merge" | "squash" | "rebase",
+  projectId?: string,
+): Promise<{ prInfo: PrInfo }> {
+  return api<{ prInfo: PrInfo }>(withProjectId(`/tasks/${id}/pr/auto-merge`, projectId), {
+    method: "POST",
+    body: JSON.stringify({ enabled, strategy }),
   });
 }
 

@@ -3292,6 +3292,7 @@ export function TaskDetailContent({
                 taskColumn={task.column}
                 autoMerge={settings?.autoMerge ?? false}
                 isManualPrFlow={isManualPrFlow}
+                directMergeCommitStrategy={settings?.directMergeCommitStrategy}
                 prAuthAvailable={prAuthAvailable ?? false}
                 // TODO(FN-4758): wire create-PR modal trigger
                 onRequestCreatePr={undefined}

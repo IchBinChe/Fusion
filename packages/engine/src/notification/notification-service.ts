@@ -139,10 +139,21 @@ export class NotificationService {
   }
 
   private handleTaskMoved = (data: { task: Task; from: Column; to: Column }): void => {
-    void this.maybeSuppressTransientFailedNotification(data.task, `moved to ${data.to}`);
+    void this.handleTaskMovedAsync(data);
+  };
 
-    if (!this.notificationsEnabled || data.to !== "in-review") {
+  private async handleTaskMovedAsync(data: { task: Task; from: Column; to: Column }): Promise<void> {
+    await this.maybeSuppressTransientFailedNotification(data.task, `moved to ${data.to}`);
+
+    if (data.to !== "in-review") {
       return;
+    }
+
+    if (!this.notificationsEnabled) {
+      await this.refreshNotificationState("task:moved");
+      if (!this.notificationsEnabled) {
+        return;
+      }
     }
 
     const payload = this.createTaskPayload(data.task, "in-review");
@@ -182,8 +193,19 @@ export class NotificationService {
   };
 
   private handleTaskMerged = (result: MergeResult): void => {
-    if (!this.notificationsEnabled || !result.merged) {
+    void this.handleTaskMergedAsync(result);
+  };
+
+  private async handleTaskMergedAsync(result: MergeResult): Promise<void> {
+    if (!result.merged) {
       return;
+    }
+
+    if (!this.notificationsEnabled) {
+      await this.refreshNotificationState("task:merged");
+      if (!this.notificationsEnabled) {
+        return;
+      }
     }
 
     this.maybeNotify(

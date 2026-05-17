@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
 import {
   Database,
   createDatabase,
@@ -19,6 +19,7 @@ import { rm } from "node:fs/promises";
 import { once } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { ensureRoadmapSchema } from "../../../../plugins/fusion-plugin-roadmap/src/roadmap-schema.js";
+import { createSharedTaskStoreTestHarness } from "./store-test-helpers.js";
 
 const createdTmpDirs = new Set<string>();
 
@@ -2570,22 +2571,20 @@ describe("createDatabase factory", () => {
 // ── TaskStore — verification cache methods ────────────────────────────────
 
 describe("TaskStore — verification cache", () => {
-  let rootDir: string;
-  let globalDir: string;
+  const harness = createSharedTaskStoreTestHarness();
   let store: TaskStore;
 
+  beforeAll(harness.beforeAll);
   beforeEach(async () => {
-    rootDir = mkdtempSync(join(tmpdir(), "kb-vc-test-"));
-    globalDir = mkdtempSync(join(tmpdir(), "kb-vc-global-"));
-    store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
-    await store.init();
+    await harness.beforeEach();
+    store = harness.store();
   });
 
   afterEach(async () => {
-    store.close();
-    await rm(rootDir, { recursive: true, force: true });
-    await rm(globalDir, { recursive: true, force: true });
+    await harness.afterEach();
   });
+
+  afterAll(harness.afterAll);
 
   it("returns null when no cache entry exists", () => {
     const hit = store.getVerificationCacheHit("abc1234", "pnpm test", "pnpm build");

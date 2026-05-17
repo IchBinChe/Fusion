@@ -4,6 +4,7 @@ import { useAgents } from "../useAgents";
 import * as api from "../../api";
 import type { Agent, AgentCapability, AgentState, AgentStats } from "../../api";
 import { MockEventSource } from "../../../vitest.setup";
+import { SWR_CACHE_KEYS } from "../../utils/swrCache";
 
 vi.mock("../../api", () => ({
   fetchAgents: vi.fn(),
@@ -73,8 +74,33 @@ describe("useAgents", () => {
     expect(mockFetchAgentStats).toHaveBeenCalled();
   });
 
-  it("fetches agents and stats on mount and populates state", async () => {
-    const agents = [
+  it("hydrates cached agents and stats synchronously before revalidation", async () => {
+    const cachedAgents = [createAgent({ id: "cached-agent", name: "Cached", state: "active" })];
+    const cachedStats = { ...defaultStats, activeCount: 9 };
+    window.localStorage.setItem(SWR_CACHE_KEYS.AGENTS, JSON.stringify(cachedAgents));
+    window.localStorage.setItem(SWR_CACHE_KEYS.AGENT_STATS, JSON.stringify(cachedStats));
+
+    let resolveAgents: ((agents: Agent[]) => void) | undefined;
+    mockFetchAgents.mockImplementationOnce(
+      () =>
+        new Promise<Agent[]>((resolve) => {
+          resolveAgents = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useAgents());
+
+    expect(result.current.agents).toEqual(cachedAgents);
+    expect(result.current.stats).toEqual(cachedStats);
+    expect(result.current.isLoading).toBe(false);
+
+    await act(async () => {
+      resolveAgents?.([createAgent({ id: "live-agent", state: "active" })]);
+      await Promise.resolve();
+    });
+  });
+
+  it("fetches agents and stats on mount and populates state", async () => {    const agents = [
       createAgent({ id: "a-1", name: "Alpha", state: "active" }),
       createAgent({ id: "a-2", name: "Beta", state: "idle" }),
     ];
@@ -174,8 +200,21 @@ describe("useAgents", () => {
     });
   });
 
-  it("refreshes agents and stats on supported SSE events", async () => {
+  it("writes through agents and stats cache after successful fetch", async () => {
+    const agents = [createAgent({ id: "live-agent", state: "active" })];
+    const stats = { ...defaultStats, activeCount: 4 };
+    mockFetchAgents.mockResolvedValueOnce(agents);
+    mockFetchAgentStats.mockResolvedValueOnce(stats);
+
     renderHook(() => useAgents());
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(SWR_CACHE_KEYS.AGENTS) ?? "[]")).toEqual(agents);
+      expect(JSON.parse(window.localStorage.getItem(SWR_CACHE_KEYS.AGENT_STATS) ?? "null")).toEqual(stats);
+    });
+  });
+
+  it("refreshes agents and stats on supported SSE events", async () => {    renderHook(() => useAgents());
 
     await waitFor(() => {
       expect(MockEventSource.instances.length).toBeGreaterThan(0);
@@ -197,8 +236,34 @@ describe("useAgents", () => {
     });
   });
 
-  it("closes SSE subscription on unmount", async () => {
-    const { unmount } = renderHook(() => useAgents());
+  it("reconciles SSE updates on top of cached hydration", async () => {
+    const cachedAgents = [createAgent({ id: "cached-agent", state: "active" })];
+    window.localStorage.setItem(SWR_CACHE_KEYS.AGENTS, JSON.stringify(cachedAgents));
+
+    mockFetchAgents.mockResolvedValueOnce(cachedAgents);
+
+    const { result } = renderHook(() => useAgents());
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.length).toBeGreaterThan(0);
+    });
+
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    mockFetchAgents.mockResolvedValueOnce([
+      ...cachedAgents,
+      createAgent({ id: "from-sse", state: "running" }),
+    ]);
+
+    act(() => {
+      es._emit("agent:updated");
+    });
+
+    await waitFor(() => {
+      expect(result.current.agents.some((agent) => agent.id === "from-sse")).toBe(true);
+    });
+  });
+
+  it("closes SSE subscription on unmount", async () => {    const { unmount } = renderHook(() => useAgents());
 
     await waitFor(() => {
       expect(MockEventSource.instances.length).toBeGreaterThan(0);

@@ -38,8 +38,6 @@
           document.documentElement.setAttribute('data-theme', effectiveMode);
           document.documentElement.setAttribute('data-color-theme', colorTheme);
           document.documentElement.style.fontSize = fontScale + '%';
-          // Load theme-data.css for non-default themes to prevent flash
-          // This logic mirrors app/hooks/useTheme.ts#getThemeDataUrl()
           if (colorTheme !== 'default') {
             var base = document.baseURI || (document.location && document.location.href) || '';
             var themeDataUrl;
@@ -48,33 +46,20 @@
             } else if (base.indexOf('http://') === 0 || base.indexOf('https://') === 0) {
               themeDataUrl = new URL('/theme-data.css', base).toString();
             } else if (base.indexOf('file://') === 0) {
-              themeDataUrl = base.endsWith('/')
-                ? base.slice(0, -1) + '/theme-data.css'
-                : base.replace(/\/[^\/]+$/, '/theme-data.css');
+              if (base.endsWith('/')) {
+                themeDataUrl = base.slice(0, -1) + '/theme-data.css';
+              } else {
+                var lastSlashIndex = base.lastIndexOf('/');
+                themeDataUrl = lastSlashIndex >= 0
+                  ? base.slice(0, lastSlashIndex) + '/theme-data.css'
+                  : '/theme-data.css';
+              }
             } else {
               themeDataUrl = '/theme-data.css';
             }
-
-            // Check for existing link and update href if stale
             var existingLink = document.getElementById('theme-data');
-            if (existingLink && existingLink.tagName === 'LINK') {
-              // Update href if it differs (handles baseURI changes between loads)
-              if (existingLink.href !== themeDataUrl) {
-                existingLink.href = themeDataUrl;
-              }
-              // Move existing link to end of <head> for CSS cascade correctness.
-              // This ensures color-theme rules take precedence over base token
-              // redefinitions in subsequent stylesheets.
-              if (existingLink.parentNode === document.head && document.head.lastChild !== existingLink) {
-                document.head.appendChild(existingLink);
-              }
-            } else {
-              // No existing link - create one
-              var link = document.createElement('link');
-              link.rel = 'stylesheet';
-              link.href = themeDataUrl;
-              link.id = 'theme-data';
-              document.head.appendChild(link);
+            if (existingLink && existingLink.tagName === 'LINK' && existingLink.href !== themeDataUrl) {
+              existingLink.href = themeDataUrl;
             }
           }
         } catch (e) {
@@ -85,6 +70,7 @@
       })();
     </script>
     <!-- fusion:view-preload -->
+    <link rel="stylesheet" href="/theme-data.css" id="theme-data" />
   </head>
   <body>
     <div id="root"></div>

@@ -158,16 +158,10 @@ function applyThemeAttributes(
 }
 
 /**
- * Load theme-data.css for non-default themes.
- * Safely handles existing links by checking href and updating if stale.
- * After href reconciliation, existing links are moved to the end of <head>
- * to ensure color-theme CSS rules take precedence over base token
- * redefinitions in subsequent stylesheets (CSS cascade correctness).
+ * Reconcile the statically declared #theme-data stylesheet href for the current base URI.
  *
- * This is critical for dark mode: if #theme-data is injected early by
- * pre-hydration scripts but styles.css loads later and redefines base
- * tokens, those redefinitions win the cascade unless theme-data is
- * repositioned to come after them.
+ * The link is authored in app/index.html so browsers can discover and fetch theme-data.css
+ * during HTML parsing. Runtime only updates href when needed (notably file:// Electron paths).
  */
 function loadThemeDataStylesheet(): void {
   if (!isBrowser) return;
@@ -176,22 +170,13 @@ function loadThemeDataStylesheet(): void {
   const existingLink = document.getElementById(THEME_DATA_ID) as HTMLLinkElement | null;
 
   if (existingLink) {
-    // Link exists - update href if it differs from expected (handles baseURI changes)
     if (existingLink.href !== expectedHref) {
       existingLink.href = expectedHref;
-    }
-    // Move existing link to end of <head> for CSS cascade correctness.
-    // This ensures color-theme rules (which use [data-color-theme="..."] selectors)
-    // are evaluated AFTER any subsequent stylesheets that might redefine base tokens.
-    // Without this, dark color themes can appear broken because base token
-    // redefinitions win the cascade over color-theme rules.
-    if (existingLink.parentNode === document.head && document.head.lastChild !== existingLink) {
-      document.head.appendChild(existingLink);
     }
     return;
   }
 
-  // No existing link - create one
+  // Defensive fallback: index.html should always provide this link.
   const link = document.createElement("link");
   link.rel = "stylesheet";
   link.href = expectedHref;
@@ -200,15 +185,10 @@ function loadThemeDataStylesheet(): void {
 }
 
 /**
- * Unload theme-data.css when returning to default theme.
+ * No-op: #theme-data stays mounted permanently via static index.html markup.
+ * Theme rules only apply when [data-color-theme="..."] selectors match.
  */
-function unloadThemeDataStylesheet(): void {
-  if (!isBrowser) return;
-  const existing = document.getElementById(THEME_DATA_ID);
-  if (existing) {
-    existing.remove();
-  }
-}
+function unloadThemeDataStylesheet(): void {}
 
 /**
  * Custom hook for theme management.
@@ -444,19 +424,8 @@ export function getThemeInitScript(): string {
           }
 
           var existingLink = document.getElementById('theme-data');
-          if (existingLink && existingLink.tagName === 'LINK') {
-            if (existingLink.href !== themeDataUrl) {
-              existingLink.href = themeDataUrl;
-            }
-            if (existingLink.parentNode === document.head && document.head.lastChild !== existingLink) {
-              document.head.appendChild(existingLink);
-            }
-          } else {
-            var link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = themeDataUrl;
-            link.id = 'theme-data';
-            document.head.appendChild(link);
+          if (existingLink && existingLink.tagName === 'LINK' && existingLink.href !== themeDataUrl) {
+            existingLink.href = themeDataUrl;
           }
         }
       } catch (e) {

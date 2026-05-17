@@ -11,7 +11,7 @@ import type {
   MessageStore,
   RoutineStore,
 } from "@fusion/core";
-import { ChatStore, isEphemeralAgent } from "@fusion/core";
+import { ChatStore, createCentralDatabase, isEphemeralAgent } from "@fusion/core";
 import { Scheduler } from "../scheduler.js";
 import type { PrMonitor, PrComment } from "../pr-monitor.js";
 import type { PrInfo } from "@fusion/core";
@@ -96,6 +96,7 @@ export class InProcessRuntime
   private usageLimitPauser?: UsageLimitPauser;
   private selfHealingManager?: SelfHealingManager;
   private leaseManager?: MeshLeaseManager;
+  private leaseCentralClaimStore?: ReturnType<typeof createCentralDatabase>;
   private agentStore?: AgentStore;
   private heartbeatMonitor?: HeartbeatMonitor;
   private triggerScheduler?: HeartbeatTriggerScheduler;
@@ -308,11 +309,22 @@ export class InProcessRuntime
           })
         : undefined;
 
+      // FN-4823/FN-4819 §2.5: central-claim-aware recovery when central DB is reachable;
+      // fallback to local-only recovery remains in MeshLeaseManager for single-node contexts.
+      try {
+        this.leaseCentralClaimStore = createCentralDatabase(this.centralCore.getGlobalDir());
+        this.leaseCentralClaimStore.init();
+      } catch (error) {
+        runtimeLog.warn(`Failed to initialize central claim store for mesh lease recovery: ${error instanceof Error ? error.message : String(error)}`);
+        this.leaseCentralClaimStore = undefined;
+      }
+
       this.leaseManager = new MeshLeaseManager({
         taskStore: this.taskStore,
         agentStore: this.agentStore,
         getHandoffPolicy: () => this.taskStore.getSettings().then((settings) => settings.owningNodeHandoffPolicy),
         getExecutingTaskIds: () => this.executor?.getExecutingTaskIds() ?? new Set<string>(),
+        centralClaimStore: this.leaseCentralClaimStore,
         projectId: this.config.projectId,
       });
 
@@ -895,6 +907,11 @@ export class InProcessRuntime
         if (worktrees.length > 0) {
           runtimeLog.log(`Drained ${worktrees.length} worktrees from pool`);
         }
+      }
+
+      if (this.leaseCentralClaimStore) {
+        this.leaseCentralClaimStore.close();
+        this.leaseCentralClaimStore = undefined;
       }
 
       this.setStatus("stopped");

@@ -5,6 +5,7 @@ import { SelfHealingManager } from "../self-healing.js";
 import { AutoRecoveryDispatcher } from "../auto-recovery.js";
 import * as branchConflicts from "../branch-conflicts.js";
 import * as worktreePool from "../worktree-pool.js";
+import { activeSessionRegistry } from "../active-session-registry.js";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -27,19 +28,19 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   } as Task;
 }
 
-function makeStore(task: Task, paused = false): TaskStore & EventEmitter {
+function makeStore(task: Task | null, paused = false, enginePaused = false): TaskStore & EventEmitter {
   const emitter = new EventEmitter();
-  const settings = { globalPause: paused, enginePaused: false, autoRecovery: { mode: "deterministic-only", maxRetries: 3 } } as Settings;
+  const settings = { globalPause: paused, enginePaused, autoRecovery: { mode: "deterministic-only", maxRetries: 3 } } as Settings;
   return Object.assign(emitter, {
     getSettings: vi.fn(async () => settings),
-    getTask: vi.fn((id: string) => (id === task.id ? task : null)),
+    getTask: vi.fn((id: string) => (task && id === task.id ? task : null)),
     listTasks: vi.fn(async ({ column }: { column?: string } = {}) => {
+      if (!task) return [];
       if (!column) return [task];
       if (column === "in-progress") return [task];
       return [];
     }),
-    updateTask: vi.fn(async (_id: string, updates: Partial<Task>) => Object.assign(task, updates)),
-    moveTask: vi.fn(async (_id: string, column: Task["column"]) => {
+    updateTask: vi.fn(async (_id: string, updates: Partial<Task>) => (task ? Object.assign(task, updates) : null)),    moveTask: vi.fn(async (_id: string, column: Task["column"]) => {
       task.column = column;
       return task;
     }),
@@ -55,6 +56,7 @@ function makeStore(task: Task, paused = false): TaskStore & EventEmitter {
 describe("SelfHealingManager.reclaimPrConflictForTask", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    activeSessionRegistry.clear();
     vi.spyOn(worktreePool, "isUsableTaskWorktree").mockResolvedValue(true);
   });
 
@@ -106,11 +108,53 @@ describe("SelfHealingManager.reclaimPrConflictForTask", () => {
     expect(result).toEqual({ outcome: "skipped", reason: "worktrunk-paused" });
   });
 
+  it("skips when engine pause is active", async () => {
+    const task = makeTask();
+    const store = makeStore(task, false, true);
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(task.id);
+    expect(result).toEqual({ outcome: "skipped", reason: "engine-paused" });
+  });
+
   it("skips when global pause is active", async () => {
     const task = makeTask();
     const store = makeStore(task, true);
     const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
     const result = await manager.reclaimPrConflictForTask(task.id);
     expect(result).toEqual({ outcome: "skipped", reason: "engine-paused" });
+  });
+
+  it("returns task-not-found for missing task", async () => {
+    const store = makeStore(null);
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask("FN-404");
+    expect(result).toEqual({ outcome: "skipped", reason: "task-not-found" });
+  });
+
+  it("skips when branch or worktree is missing", async () => {
+    const task = makeTask({ branch: null });
+    const store = makeStore(task);
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(task.id);
+    expect(result).toEqual({ outcome: "skipped", reason: "missing-branch-or-worktree" });
+  });
+
+  it("skips when worktree has an active session", async () => {
+    const task = makeTask();
+    const store = makeStore(task);
+    activeSessionRegistry.registerPath(task.worktree!, { taskId: task.id, kind: "executor", ownerKey: task.id });
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(task.id);
+    expect(result).toEqual({ outcome: "skipped", reason: "active-session" });
+    activeSessionRegistry.clear();
+  });
+
+  it("skips unusable worktree", async () => {
+    const task = makeTask();
+    const store = makeStore(task);
+    vi.spyOn(worktreePool, "isUsableTaskWorktree").mockResolvedValueOnce(false);
+    const manager = new SelfHealingManager(store as any, { rootDir: "/tmp/test" } as any);
+    const result = await manager.reclaimPrConflictForTask(task.id);
+    expect(result).toEqual({ outcome: "skipped", reason: "unusable-worktree" });
   });
 });

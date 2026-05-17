@@ -3,7 +3,7 @@ import type { Task, Column, TaskCreateInput, MergeResult, GithubIssueAction } fr
 import { normalizeColumn } from "@fusion/core";
 import * as api from "../api";
 import { subscribeSse } from "../sse-bus";
-import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, writeCache } from "../utils/swrCache";
+import { clearCache, readCache, SWR_CACHE_KEYS, SWR_TASKS_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 const loggedTaskCacheHitProjects = new Set<string>();
 
@@ -99,7 +99,7 @@ export function useTasks(options?: UseTasksOptions) {
     if (!projectId) {
       return [];
     }
-    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`, { maxAgeMs: SWR_TASKS_MAX_AGE_MS });
     if (Array.isArray(cachedTasks) && cachedTasks.length > 0 && !loggedTaskCacheHitProjects.has(projectId)) {
       loggedTaskCacheHitProjects.add(projectId);
       console.info("[swr-cache] hit tasks=", cachedTasks.length, "projectId=", projectId);
@@ -170,6 +170,9 @@ export function useTasks(options?: UseTasksOptions) {
         return;
       }
       setLastRefreshErrorAt(Date.now());
+      if (requestProjectId) {
+        clearCache(`${SWR_CACHE_KEYS.TASKS_PREFIX}${requestProjectId}`);
+      }
       if (options?.clearOnError) {
         setTasks([]);
         return;
@@ -205,7 +208,7 @@ export function useTasks(options?: UseTasksOptions) {
       return;
     }
 
-    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`, { maxAgeMs: SWR_TASKS_MAX_AGE_MS });
     if (Array.isArray(cachedTasks)) {
       if (cachedTasks.length > 0 && !loggedTaskCacheHitProjects.has(projectId)) {
         loggedTaskCacheHitProjects.add(projectId);

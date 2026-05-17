@@ -52,6 +52,7 @@ const mockUpdateTask = vi.mocked(api.updateTask);
 const mockArchiveAllDone = vi.mocked(api.archiveAllDone);
 const mockReadCache = vi.spyOn(swrCache, "readCache");
 const mockWriteCache = vi.spyOn(swrCache, "writeCache");
+const mockClearCache = vi.spyOn(swrCache, "clearCache");
 
 // Mock EventSource
 class MockEventSource {
@@ -96,6 +97,7 @@ beforeEach(() => {
   mockFetchTasks.mockReset().mockResolvedValue([]);
   mockReadCache.mockReset();
   mockWriteCache.mockReset();
+  mockClearCache.mockReset();
   mockReadCache.mockReturnValue(null);
   
   // Ensure we start with real timers for every test
@@ -169,9 +171,15 @@ describe("useTasks", () => {
   it("passes maxAge to task cache hydration reads", () => {
     renderHook(() => useTasks({ projectId: "proj-1" }));
 
-    expect(mockReadCache).toHaveBeenCalledWith(
+    expect(mockReadCache).toHaveBeenNthCalledWith(
+      1,
       `${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`,
-      { maxAgeMs: swrCache.SWR_DEFAULT_MAX_AGE_MS },
+      { maxAgeMs: swrCache.SWR_TASKS_MAX_AGE_MS },
+    );
+    expect(mockReadCache).toHaveBeenNthCalledWith(
+      2,
+      `${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`,
+      { maxAgeMs: swrCache.SWR_TASKS_MAX_AGE_MS },
     );
   });
 
@@ -206,6 +214,37 @@ describe("useTasks", () => {
       expect(result.current.tasks).toEqual([]);
     });
     expect(result.current.isStale).toBe(true);
+  });
+
+  it("clears per-project task cache when initial clearOnError refresh fails", async () => {
+    mockFetchTasks.mockRejectedValueOnce(new Error("offline"));
+
+    renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    await waitFor(() => {
+      expect(mockClearCache).toHaveBeenCalledWith(`${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`);
+    });
+  });
+
+  it("clears stale envelope between failed and successful refreshes across remount", async () => {
+    mockFetchTasks.mockRejectedValueOnce(new Error("offline"));
+
+    const firstMount = renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    await waitFor(() => {
+      expect(mockClearCache).toHaveBeenCalledWith(`${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`);
+    });
+
+    firstMount.unmount();
+
+    mockFetchTasks.mockResolvedValueOnce([createMockTask({ id: "FN-FRESH" })]);
+    renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    await waitFor(() => {
+      expect(mockFetchTasks).toHaveBeenLastCalledWith(undefined, undefined, "proj-1", undefined, false);
+    });
+
+    expect(mockClearCache).toHaveBeenCalledTimes(1);
   });
 
   it("writes through task cache on successful fetch", async () => {

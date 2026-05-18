@@ -82,6 +82,22 @@ describe("reliability interactions: ghost-bug preflight", () => {
     expect(updated.column).toBe("todo");
   });
 
+  it("keeps task when title is non-bug-shape and no constructs are cited", async () => {
+    const fx = await createFixture();
+    fixtures.push(fx);
+    const task = await fx.store.createTask({ title: "chore: dependency refresh", description: "typecheck error still reported", prompt: "draft" });
+
+    await (fx.triage as any).finalizeApprovedTask(
+      task,
+      `${basePrompt}\nNo code construct citation here.\n`,
+      await fx.store.getSettings(),
+      {},
+    );
+
+    const updated = await fx.store.getTask(task.id);
+    expect(updated.column).toBe("todo");
+  });
+
   it("fails open when probe throws", async () => {
     const fx = await createFixture();
     fixtures.push(fx);

@@ -20,6 +20,7 @@ async function createStore() {
 describe("reliability interactions: same-agent duplicate intake", () => {
   const fixtures: Array<Awaited<ReturnType<typeof createStore>>> = [];
   afterEach(async () => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     while (fixtures.length) await fixtures.pop()!.cleanup();
   });
@@ -47,6 +48,25 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     expect((entry?.metadata as { siblingTaskIds?: string[] } | null)?.siblingTaskIds).toEqual([a.id]);
   });
 
+  it("does not archive similar tasks from different agents", async () => {
+    const fx = await createStore();
+    fixtures.push(fx);
+
+    const a = await fx.store.createTask({
+      title: "fix: secrets sync typecheck",
+      description: "typecheck error in secrets-sync",
+      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+    });
+    const b = await fx.store.createTask({
+      title: "fix: secrets sync typecheck regression",
+      description: "typecheck error in secrets-sync",
+      source: { sourceType: "agent", sourceAgentId: "agent-y" },
+    });
+
+    expect((await fx.store.getTask(a.id)).column).toBe("triage");
+    expect((await fx.store.getTask(b.id)).column).toBe("triage");
+  });
+
   it("does not archive unrelated tasks", async () => {
     const fx = await createStore();
     fixtures.push(fx);
@@ -59,6 +79,29 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     const b = await fx.store.createTask({
       title: "feat: add mission detail panel",
       description: "new dashboard ui",
+      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+    });
+
+    expect((await fx.store.getTask(a.id)).column).toBe("triage");
+    expect((await fx.store.getTask(b.id)).column).toBe("triage");
+  });
+
+  it("does not archive similar tasks outside the 24h window", async () => {
+    const fx = await createStore();
+    fixtures.push(fx);
+
+    vi.useFakeTimers();
+    const start = new Date("2026-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const a = await fx.store.createTask({
+      title: "fix: secrets sync typecheck",
+      description: "typecheck error in secrets-sync",
+      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+    });
+    vi.setSystemTime(new Date(start.getTime() + 25 * 60 * 60 * 1000));
+    const b = await fx.store.createTask({
+      title: "fix: secrets sync typecheck regression",
+      description: "typecheck error in secrets-sync",
       source: { sourceType: "agent", sourceAgentId: "agent-x" },
     });
 

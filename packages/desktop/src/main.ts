@@ -262,7 +262,15 @@ export function run(): void {
     if (mainWindow === null) {
       const window = createMainWindow();
       window.show();
+      return;
     }
+    // The close handler hides the window instead of destroying it, so a
+    // subsequent dock/Finder activate must explicitly show + focus it —
+    // otherwise the app appears to do nothing when relaunched.
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
   });
 }
 

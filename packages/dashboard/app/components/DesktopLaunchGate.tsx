@@ -12,7 +12,11 @@ type Phase =
 
 function getFusionShell() {
   if (typeof window === "undefined") return null;
-  return window.fusionShell ?? null;
+  const shell = window.fusionShell ?? null;
+  if (!shell) {
+    console.log("[DesktopLaunchGate] window.fusionShell unavailable; bypassing");
+  }
+  return shell;
 }
 
 function isDesktopShell(state: ShellConnectionState | null): boolean {
@@ -73,15 +77,19 @@ export function DesktopLaunchGate({ children }: PropsWithChildren) {
     let cancelled = false;
     void (async () => {
       try {
+        console.log("[DesktopLaunchGate] fetching shell state…");
         const state = await shell.getState();
         if (cancelled) return;
+        console.log("[DesktopLaunchGate] shell state:", state);
 
         if (!isDesktopShell(state)) {
+          console.log("[DesktopLaunchGate] not desktop-shell host; bypassing");
           setPhase({ kind: "bypass" });
           return;
         }
 
         if (needsChooser(state)) {
+          console.log("[DesktopLaunchGate] first run / no mode chosen — showing chooser");
           setPhase({ kind: "chooser", state });
           return;
         }

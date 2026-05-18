@@ -349,7 +349,7 @@ Archived tasks can be cleaned up while preserving metadata. Restored tasks keep 
 
 ## Secrets
 
-AES-256-GCM-encrypted storage in project (`secrets`) and global (`secrets_global`) scopes. Per-secret access policy (`auto`/`prompt`/`deny`) resolved as `row → global default → "prompt"`. Master key via the core `MasterKeyProvider` abstraction. See [docs/secrets.md](./docs/secrets.md) for current capabilities and the pending agent-tool wiring (FN-4867).
+AES-256-GCM-encrypted storage in project (`secrets`) and global (`secrets_global`) scopes. Per-secret access policy (`auto`/`prompt`/`deny`) resolved as `row → global default → "prompt"`. Master key via the core `MasterKeyProvider` abstraction. `fn_secret_get` is shipped in `packages/cli/src/extension.ts` (`key`, optional `scope`; `auto`/`prompt`/`deny` policy branches with `secret:read`/approval audit events and no plaintext in audit payloads). See [docs/secrets.md](./docs/secrets.md) for current capabilities; remaining open gap is master-key rotation UX.
 
 ## Node Dashboard
 

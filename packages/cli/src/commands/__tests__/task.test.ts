@@ -2924,6 +2924,50 @@ describe("runTaskPrCreate", () => {
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Using AI-generated title/body"));
     });
 
+    it("uses user title + AI body when only title is provided", async () => {
+      const task = makeInReviewTask();
+      mockGetTask.mockResolvedValueOnce(task);
+      vi.mocked(generatePrMetadata).mockResolvedValueOnce({ title: "AI Title", body: "AI Body", templateUsed: false });
+      mockCreatePr.mockResolvedValueOnce(makePrInfo());
+
+      await runTaskPrCreate("FN-001", { title: "User Title" });
+
+      expect(mockCreatePr).toHaveBeenCalledWith(expect.objectContaining({ title: "User Title", body: "AI Body" }));
+    });
+
+    it("uses AI title + user body when only body is provided", async () => {
+      const task = makeInReviewTask();
+      mockGetTask.mockResolvedValueOnce(task);
+      vi.mocked(generatePrMetadata).mockResolvedValueOnce({ title: "AI Title", body: "AI Body", templateUsed: false });
+      mockCreatePr.mockResolvedValueOnce(makePrInfo());
+
+      await runTaskPrCreate("FN-001", { body: "User Body" });
+
+      expect(mockCreatePr).toHaveBeenCalledWith(expect.objectContaining({ title: "AI Title", body: "User Body" }));
+    });
+
+    it("does not call AI when both title and body are provided", async () => {
+      const task = makeInReviewTask();
+      mockGetTask.mockResolvedValueOnce(task);
+      mockCreatePr.mockResolvedValueOnce(makePrInfo());
+
+      await runTaskPrCreate("FN-001", { title: "User Title", body: "User Body" });
+
+      expect(generatePrMetadata).not.toHaveBeenCalled();
+    });
+
+    it("falls back when AI metadata generation fails", async () => {
+      const task = makeInReviewTask({ title: undefined, description: "fallback description value for title" });
+      mockGetTask.mockResolvedValueOnce(task);
+      vi.mocked(generatePrMetadata).mockRejectedValueOnce(new Error("ai failed"));
+      mockCreatePr.mockResolvedValueOnce(makePrInfo());
+
+      await runTaskPrCreate("FN-001", {});
+
+      expect(mockCreatePr).toHaveBeenCalledWith(expect.objectContaining({ title: "Fallback description value for title".slice(0, 50) }));
+      expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining("AI metadata generation failed"));
+    });
+
     it("skips AI metadata when --no-ai is set", async () => {
       const task = makeInReviewTask();
       mockGetTask.mockResolvedValueOnce(task);

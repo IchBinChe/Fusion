@@ -228,6 +228,10 @@ export class MasterKeyManager {
       return this.injectedKeytar;
     }
 
+    if (process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN === "1") {
+      return null;
+    }
+
     try {
       const require = createRequire(import.meta.url);
       const modName = `key${"tar"}`;

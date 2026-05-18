@@ -114,6 +114,13 @@ function findRepoRoot(start: string): string {
 const repoRoot = findRepoRoot(realProjectRoot);
 process.env.FUSION_TEST_REAL_ROOT = repoRoot;
 
+// Prevent MasterKeyManager from hitting the real macOS/Linux keychain during
+// tests — keytar can block for 15s+ on CI-like environments. Tests that need
+// to exercise the keychain branch inject a fake KeytarLike via the constructor.
+if (!process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN) {
+  process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN = "1";
+}
+
 // Shared parent directory for all worker temp dirs in this run.
 // globalTeardown wipes this at the end of the suite.
 const WORKER_ROOT = join(tmpdir(), "fusion-test-workers");

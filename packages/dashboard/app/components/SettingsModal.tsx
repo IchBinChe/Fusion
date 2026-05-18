@@ -43,6 +43,7 @@ import { CustomProvidersSection } from "./CustomProvidersSection";
 import { AgentPermissionPolicyEditor } from "./AgentPermissionPolicyEditor";
 import { AgentProvisioningPolicyEditor } from "./AgentProvisioningPolicyEditor";
 import { applyPresetToSelection, generateUniquePresetId } from "../utils/modelPresets";
+import { copyTextToClipboard } from "../utils/copyToClipboard";
 import { appendTokenQuery } from "../auth";
 import { useConfirm } from "../hooks/useConfirm";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
@@ -1180,7 +1181,7 @@ export function SettingsModal({
     }
 
     lastAutoCopiedDeviceCodesRef.current["github-copilot"] = copilotDeviceCode.userCode;
-    void navigator.clipboard?.writeText(copilotDeviceCode.userCode);
+    void copyTextToClipboard(copilotDeviceCode.userCode);
   }, [deviceCodes]);
 
   const handleLogin = useCallback(async (providerId: string) => {
@@ -6982,7 +6983,14 @@ export function SettingsModal({
                                   <button
                                     className="btn btn-sm"
                                     onClick={() => {
-                                      void navigator.clipboard?.writeText(deviceCodes[provider.id].userCode);
+                                      void (async () => {
+                                        const copied = await copyTextToClipboard(deviceCodes[provider.id].userCode);
+                                        if (copied) {
+                                          addToast("Copied code to clipboard", "success");
+                                          return;
+                                        }
+                                        addToast("Failed to copy code — copy it manually from the box above", "error");
+                                      })();
                                     }}
                                   >
                                     Copy code

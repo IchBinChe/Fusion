@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PrCreateModal } from "../PrCreateModal";
 import type { PrInfo } from "@fusion/core";
+import { loadAllAppCss } from "../../test/cssFixture";
 
 const mocks = vi.hoisted(() => ({
   generatePrMetadata: vi.fn(),
@@ -54,7 +55,20 @@ function renderModal(overrides?: Partial<ComponentProps<typeof PrCreateModal>>) 
 }
 
 describe("PrCreateModal", () => {
+  let styleEl: HTMLStyleElement;
+
+  beforeAll(() => {
+    styleEl = document.createElement("style");
+    styleEl.textContent = loadAllAppCss();
+    document.head.appendChild(styleEl);
+  });
+
+  afterAll(() => {
+    styleEl.remove();
+  });
+
   beforeEach(() => {
+    localStorage.clear();
     vi.clearAllMocks();
     mocks.generatePrMetadata.mockResolvedValue(metadata);
     mocks.fetchPrPreflight.mockResolvedValue(preflight);
@@ -65,6 +79,17 @@ describe("PrCreateModal", () => {
   it("renders nothing when closed", () => {
     render(<PrCreateModal open={false} taskId="FN-4756" onClose={vi.fn()} onCreated={vi.fn()} addToast={vi.fn()} />);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("applies resizable modal CSS and restores persisted inline size", async () => {
+    localStorage.setItem("fusion:pr-create-modal-size", JSON.stringify({ width: 820, height: 640 }));
+    renderModal();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveClass("pr-create-modal");
+    expect(getComputedStyle(dialog).resize).toBe("both");
+    expect(dialog.style.width).toBe("820px");
+    expect(dialog.style.height).toBe("640px");
   });
 
   it("loads metadata/preflight/options on open and renders key sections", async () => {

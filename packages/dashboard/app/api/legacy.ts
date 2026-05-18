@@ -65,6 +65,7 @@ import type {
   ResearchRunStatus,
   TaskPriority,
   TaskSourceIssue,
+  PrConflictDiagnostics,
   PrInfo,
   ManagedDockerNodeInput,
   DockerNodeConfig,
@@ -2199,6 +2200,7 @@ export interface PrStatusResponse {
 
 export interface PrRefreshResponse {
   prInfo: PrInfo;
+  conflictDiagnostics?: PrConflictDiagnostics;
   mergeReady: boolean;
   mergeable?: PrInfo["mergeable"];
   blockingReasons: string[];

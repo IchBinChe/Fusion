@@ -5,6 +5,7 @@ import type {
   BatchStatusEntry,
   BatchStatusResponse,
   BatchStatusResult,
+  DirectMergeCommitStrategy,
   IssueInfo,
   PrInfo,
   RunAuditEventInput,
@@ -1205,7 +1206,11 @@ export async function refreshPrInBackground(
   taskId: string,
   currentPrInfo: PrInfo,
   token?: string,
-  options?: { onConflictDetected?: (taskId: string) => Promise<void> },
+  options?: {
+    onConflictDetected?: (taskId: string) => Promise<void>;
+    repoRoot?: string;
+    directMergeCommitStrategy?: DirectMergeCommitStrategy;
+  },
 ): Promise<void> {
   try {
     let owner: string;
@@ -1240,10 +1245,27 @@ export async function refreshPrInBackground(
     const reviewSnapshot = await client.getPrReviewSnapshot(owner, repo, currentPrInfo.number);
     const mergeStatus = await client.getPrMergeStatus(owner, repo, currentPrInfo.number);
     const prior = task.prInfo;
+    let conflictDiagnostics = mergeStatus.prInfo.conflictDiagnostics;
+    if (mergeStatus.prInfo.mergeable === "conflicting" && mergeStatus.prInfo.headBranch && mergeStatus.prInfo.baseBranch) {
+      try {
+        conflictDiagnostics = await client.getPrConflictDiagnostics(owner, repo, currentPrInfo.number, {
+          baseBranch: mergeStatus.prInfo.baseBranch,
+          headBranch: mergeStatus.prInfo.headBranch,
+          repoRoot: options?.repoRoot,
+          directMergeCommitStrategy: options?.directMergeCommitStrategy,
+        });
+      } catch (err) {
+        console.error("[pr-conflict-diagnostics]", err);
+      }
+    } else {
+      conflictDiagnostics = undefined;
+    }
+
     const prInfo = {
       ...prior,
       ...mergeStatus.prInfo,
       mergeable: mergeStatus.prInfo.mergeable,
+      conflictDiagnostics,
       autoMergeOnGreen: prior?.autoMergeOnGreen,
       autoMergeStrategy: prior?.autoMergeStrategy,
       lastMergeError: prior?.lastMergeError,
@@ -3360,7 +3382,11 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
 
       // Trigger background refresh if stale (don't await, let it run)
       if (isStale) {
-        refreshPrInBackground(scopedStore, task.id, task.prInfo, githubToken);
+        const settings = await scopedStore.getSettings();
+        refreshPrInBackground(scopedStore, task.id, task.prInfo, githubToken, {
+          repoRoot: scopedStore.getRootDir(),
+          directMergeCommitStrategy: settings.directMergeCommitStrategy,
+        });
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -3429,11 +3455,29 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       const client = new GitHubClient();
       const reviewSnapshot = await client.getPrReviewSnapshot(owner, repo, task.prInfo.number);
       const mergeStatus = await client.getPrMergeStatus(owner, repo, task.prInfo.number);
+      const settings = await scopedStore.getSettings();
+
+      let conflictDiagnostics = mergeStatus.prInfo.conflictDiagnostics;
+      if (mergeStatus.prInfo.mergeable === "conflicting" && mergeStatus.prInfo.headBranch && mergeStatus.prInfo.baseBranch) {
+        try {
+          conflictDiagnostics = await client.getPrConflictDiagnostics(owner, repo, task.prInfo.number, {
+            baseBranch: mergeStatus.prInfo.baseBranch,
+            headBranch: mergeStatus.prInfo.headBranch,
+            repoRoot: scopedStore.getRootDir(),
+            directMergeCommitStrategy: settings.directMergeCommitStrategy,
+          });
+        } catch (err) {
+          console.error("[pr-conflict-diagnostics]", err);
+        }
+      } else {
+        conflictDiagnostics = undefined;
+      }
 
       const prInfo: PrInfo = {
         ...task.prInfo,
         ...mergeStatus.prInfo,
         mergeable: mergeStatus.prInfo.mergeable,
+        conflictDiagnostics,
         autoMergeOnGreen: task.prInfo.autoMergeOnGreen,
         autoMergeStrategy: task.prInfo.autoMergeStrategy,
         lastMergeError: task.prInfo.lastMergeError,
@@ -3476,6 +3520,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       const refreshedTask = await scopedStore.getTask(task.id);
       res.json({
         prInfo: refreshedTask.prInfo ?? prInfo,
+        conflictDiagnostics: (refreshedTask.prInfo ?? prInfo).conflictDiagnostics,
         mergeReady: mergeStatus.mergeReady,
         mergeable: prInfo.mergeable,
         blockingReasons: mergeStatus.blockingReasons,

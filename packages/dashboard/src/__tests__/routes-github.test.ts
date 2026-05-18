@@ -2426,6 +2426,7 @@ describe("PR conflict refresh + reclaim routes", () => {
   beforeEach(() => {
     store = createMockStore({
       getTask: vi.fn(),
+      getSettings: vi.fn().mockResolvedValue({ directMergeCommitStrategy: "auto" }),
       updatePrInfo: vi.fn().mockResolvedValue(undefined),
       applyPrMergedTransition: vi.fn().mockResolvedValue(undefined),
     });
@@ -2469,8 +2470,13 @@ describe("PR conflict refresh + reclaim routes", () => {
       mergeReady: false,
       blockingReasons: ["conflict"],
       checks: [],
-      prInfo: { status: "open", merged: false, mergeable: "conflicting" },
+      prInfo: { status: "open", merged: false, mergeable: "conflicting", headBranch: "fusion/fn-900", baseBranch: "main" },
     } as any);
+    vi.spyOn(GitHubClient.prototype, "getPrConflictDiagnostics").mockResolvedValue({
+      conflictingFiles: ["packages/dashboard/src/github.ts"],
+      suggestedCommands: ["git fetch origin"],
+      capturedAt: "2026-05-18T00:00:00.000Z",
+    });
 
     const reclaimSpy = vi.fn().mockResolvedValue({ outcome: "reclaimed" });
     const engine = {
@@ -2481,6 +2487,14 @@ describe("PR conflict refresh + reclaim routes", () => {
     const res = await REQUEST(buildApp({ engine } as any), "POST", `/api/tasks/${task.id}/pr/refresh`, JSON.stringify({}), { "content-type": "application/json" });
     expect(res.status).toBe(200);
     expect(res.body.conflictReclaimQueued).toBe(true);
+    expect(store.updatePrInfo).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({
+        conflictDiagnostics: expect.objectContaining({
+          conflictingFiles: ["packages/dashboard/src/github.ts"],
+        }),
+      }),
+    );
     expect(reclaimSpy).toHaveBeenCalledWith(task.id);
   });
 
@@ -2523,6 +2537,97 @@ describe("PR conflict refresh + reclaim routes", () => {
     expect(res.status).toBe(200);
     expect(res.body.conflictReclaimQueued).toBe(false);
     expect(reclaimSpy).not.toHaveBeenCalled();
+  });
+
+  it("clears persisted conflict diagnostics when PR becomes clean", async () => {
+    const task = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-905",
+      branch: "fusion/fn-905",
+      worktree: "/tmp/test/.worktrees/fn-905",
+      prInfo: {
+        url: "https://github.com/owner/repo/pull/905",
+        number: 905,
+        status: "open",
+        title: "PR",
+        headBranch: "fusion/fn-905",
+        baseBranch: "main",
+        commentCount: 0,
+        mergeable: "conflicting",
+        conflictDiagnostics: {
+          conflictingFiles: ["stale.txt"],
+          suggestedCommands: ["git fetch origin"],
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    vi.spyOn(GitHubClient.prototype, "getPrReviewSnapshot").mockResolvedValue({
+      decision: "approved",
+      items: [],
+      summary: { approved: 0, changesRequested: 0, commented: 0 },
+    } as any);
+    vi.spyOn(GitHubClient.prototype, "getPrMergeStatus").mockResolvedValue({
+      mergeReady: true,
+      blockingReasons: [],
+      checks: [],
+      prInfo: { status: "open", merged: false, mergeable: "clean", headBranch: "fusion/fn-905", baseBranch: "main" },
+    } as any);
+
+    const res = await REQUEST(buildApp(), "POST", `/api/tasks/${task.id}/pr/refresh`, JSON.stringify({}), { "content-type": "application/json" });
+
+    expect(res.status).toBe(200);
+    expect(store.updatePrInfo).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({
+        mergeable: "clean",
+        conflictDiagnostics: undefined,
+      }),
+    );
+  });
+
+  it("returns fallback diagnostics when repoRoot is unavailable", async () => {
+    const task = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-906",
+      branch: "fusion/fn-906",
+      worktree: "/tmp/test/.worktrees/fn-906",
+      prInfo: {
+        url: "https://github.com/owner/repo/pull/906",
+        number: 906,
+        status: "open",
+        title: "PR",
+        headBranch: "fusion/fn-906",
+        baseBranch: "main",
+        commentCount: 0,
+      },
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    vi.spyOn(GitHubClient.prototype, "getPrReviewSnapshot").mockResolvedValue({ decision: "approved", items: [], summary: { approved: 0, changesRequested: 0, commented: 0 } } as any);
+    vi.spyOn(GitHubClient.prototype, "getPrMergeStatus").mockResolvedValue({
+      mergeReady: false,
+      blockingReasons: ["conflict"],
+      checks: [],
+      prInfo: { status: "open", merged: false, mergeable: "conflicting", headBranch: "fusion/fn-906", baseBranch: "main" },
+    } as any);
+    vi.spyOn(GitHubClient.prototype, "getPrConflictDiagnostics").mockResolvedValue({
+      conflictingFiles: ["a.ts"],
+      suggestedCommands: ["git fetch origin", "# Note: file list reflects PR changes; resolve conflicts as reported by git status during rebase."],
+      capturedAt: "2026-05-18T00:00:00.000Z",
+    });
+
+    const res = await REQUEST(buildApp(), "POST", `/api/tasks/${task.id}/pr/refresh`, JSON.stringify({}), { "content-type": "application/json" });
+
+    expect(res.status).toBe(200);
+    expect(store.updatePrInfo).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({
+        conflictDiagnostics: expect.objectContaining({
+          conflictingFiles: ["a.ts"],
+          suggestedCommands: expect.any(Array),
+        }),
+      }),
+    );
   });
 
   it("returns queued true for manual reclaim when conflict reclaim is available", async () => {

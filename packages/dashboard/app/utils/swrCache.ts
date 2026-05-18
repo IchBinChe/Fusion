@@ -17,6 +17,7 @@ export const SWR_CACHE_KEYS = {
   DOCUMENTS_PREFIX: "kb-dashboard-documents-cache:",
   TODO_LISTS_PREFIX: "kb-dashboard-todo-lists-cache:",
   CHAT_ROOMS: "kb-dashboard-chat-rooms-cache",
+  CHAT_SESSIONS_PREFIX: "kb-dashboard-chat-sessions-cache:",
   ACTIVE_CHAT_ROOM_ID: "kb-dashboard-active-chat-room-cache",
   INSIGHTS_PREFIX: "kb-dashboard-insights-cache:",
   INSIGHT_LATEST_RUN_PREFIX: "kb-dashboard-insight-latest-run-cache:",

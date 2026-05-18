@@ -126,7 +126,7 @@
 /* Two-pane layout */
 .github-import-workspace {
   display: flex;
-  gap: var(--space-lg);
+  gap: var(--space-sm);
   min-height: 0;
   flex: 1;
 }
@@ -139,9 +139,30 @@
 }
 
 .github-import-list-pane {
-  flex: 0 0 clamp(280px, 40%, 400px);
-  border-right: 1px solid var(--border);
-  padding-right: var(--space-lg);
+  /* Desktop width is controlled by inline flex-basis from the resize handle. */
+  flex: 0 0 auto;
+  /* Keep separator ownership on the resize handle to avoid a doubled divider. */
+  padding-right: var(--space-md);
+}
+
+.github-import-workspace__resize-handle {
+  flex: 0 0 var(--space-xs);
+  align-self: stretch;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+  transition: background var(--transition-fast);
+}
+
+.github-import-workspace__resize-handle:hover {
+  background: color-mix(in srgb, var(--todo) 50%, transparent);
+}
+
+.github-import-workspace__resize-handle:focus-visible {
+  outline: var(--focus-ring-strong);
+  outline-offset: 0;
+  background: color-mix(in srgb, var(--todo) 60%, transparent);
 }
 
 .github-import-preview-pane {
@@ -712,6 +733,10 @@
 
   .github-import-workspace {
     flex-direction: column;
+  }
+
+  .github-import-workspace__resize-handle {
+    display: none;
   }
 
   .github-import-list-pane {

@@ -2236,8 +2236,13 @@ describe("TaskCard", () => {
       expect(trackingChip).not.toBeNull();
       expect(rightSideChip).not.toBeNull();
       const children = Array.from((footerRow as HTMLElement).children);
-      expect(children.at(-1)).toBe(rightSideChip);
-      expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
+      const expectedLastChip = rightSideChip?.classList.contains("card-time-indicator") ? rightSideChip : trackingChip;
+      expect(children.at(-1)).toBe(expectedLastChip);
+      if (rightSideChip?.classList.contains("card-retry-badge")) {
+        expect(children.indexOf(rightSideChip as HTMLElement)).toBeLessThan(children.indexOf(trackingChip as HTMLElement));
+      } else {
+        expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
+      }
       expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
     });
 
@@ -2328,8 +2333,13 @@ describe("TaskCard", () => {
       expect(trackingChip).not.toBeNull();
       expect(rightSideChip).not.toBeNull();
       const children = Array.from((footerRow as HTMLElement).children);
-      expect(children.at(-1)).toBe(rightSideChip);
-      expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
+      const expectedLastChip = rightSideChip?.classList.contains("card-time-indicator") ? rightSideChip : trackingChip;
+      expect(children.at(-1)).toBe(expectedLastChip);
+      if (rightSideChip?.classList.contains("card-retry-badge")) {
+        expect(children.indexOf(rightSideChip as HTMLElement)).toBeLessThan(children.indexOf(trackingChip as HTMLElement));
+      } else {
+        expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
+      }
       expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
     });
 

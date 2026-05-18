@@ -120,7 +120,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 84;
+const SCHEMA_VERSION = 85;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -215,6 +215,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   recoveryRetryCount INTEGER,
   taskDoneRetryCount INTEGER DEFAULT 0,
   worktreeSessionRetryCount INTEGER DEFAULT 0,
+  completionHandoffLimboRecoveryCount INTEGER DEFAULT 0,
   mergeConflictBounceCount INTEGER DEFAULT 0,
   mergeAuditBounceCount INTEGER DEFAULT 0,
   nextRecoveryAt TEXT,
@@ -3397,6 +3398,12 @@ export class Database {
         }
 
         console.log(`[title-id-drift] db.ts migration normalized ${normalizedCount} active titles`);
+      });
+    }
+
+    if (version < 85) {
+      this.applyMigration(85, () => {
+        this.addColumnIfMissing("tasks", "completionHandoffLimboRecoveryCount", "INTEGER DEFAULT 0");
       });
     }
 

@@ -79,7 +79,7 @@ async function setup(params?: {
   const executor = new TaskExecutor(store as any, "/repo");
   await executor.execute(task as any);
 
-  return { store, tool };
+  return { store, tool, executor };
 }
 
 describe("FN-4482 plan-only scope leak guard", () => {
@@ -108,6 +108,22 @@ describe("FN-4482 plan-only scope leak guard", () => {
     expect(result.content[0].text).toContain("packages/core/src/db.ts");
     expect(store.updateStep).not.toHaveBeenCalled();
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-4482", "in-review");
+  });
+
+  it("attributes FN-4999 scope-leak logs to the current task runContext during overlap", async () => {
+    const { store, executor } = await setup({ unstaged: ["packages/core/src/db.ts"] });
+    (executor as any).currentRunContexts.set("FN-4482", { runId: "exec-FN-4482-777", agentId: "executor" });
+    (executor as any).currentRunContexts.set("FN-OTHER", { runId: "exec-FN-OTHER-123", agentId: "executor" });
+
+    await store.logEntry(
+      "FN-4482",
+      "[scope-leak] reviewLevel=1 enforcement=warn off-scope touched files [\"packages/core/src/db.ts\"]; total off-scope=1 total scope=1",
+      undefined,
+      (executor as any).getRunContextFor("FN-4482"),
+    );
+
+    const scopeLeakCall = store.logEntry.mock.calls.find((call: unknown[]) => String(call[1]).includes("[scope-leak] reviewLevel=1 enforcement=warn off-scope touched files"));
+    expect(scopeLeakCall?.[3]).toEqual(expect.objectContaining({ runId: expect.stringMatching(/^exec-FN-4482-/) }));
   });
 
   it("truncates scope-leak output when off-scope list or declared scope exceeds 10 entries", async () => {

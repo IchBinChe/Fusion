@@ -90,6 +90,7 @@ interface TaskRow {
   recoveryRetryCount: number | null;
   taskDoneRetryCount: number | null;
   worktreeSessionRetryCount: number | null;
+  completionHandoffLimboRecoveryCount: number | null;
   verificationFailureCount: number | null;
   mergeConflictBounceCount: number | null;
   mergeAuditBounceCount: number | null;
@@ -1145,6 +1146,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       recoveryRetryCount: row.recoveryRetryCount ?? undefined,
       taskDoneRetryCount: row.taskDoneRetryCount ?? undefined,
       worktreeSessionRetryCount: row.worktreeSessionRetryCount ?? undefined,
+      completionHandoffLimboRecoveryCount: row.completionHandoffLimboRecoveryCount ?? undefined,
       verificationFailureCount: row.verificationFailureCount ?? undefined,
       mergeConflictBounceCount: row.mergeConflictBounceCount ?? undefined,
       mergeAuditBounceCount: row.mergeAuditBounceCount ?? undefined,
@@ -1496,7 +1498,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
@@ -1545,7 +1547,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
@@ -1614,6 +1616,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.recoveryRetryCount ?? null,
       task.taskDoneRetryCount ?? 0,
       task.worktreeSessionRetryCount ?? 0,
+      task.completionHandoffLimboRecoveryCount ?? 0,
       task.verificationFailureCount ?? 0,
       task.mergeConflictBounceCount ?? 0,
       task.mergeAuditBounceCount ?? 0,
@@ -1702,7 +1705,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
         worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
-        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
+        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, completionHandoffLimboRecoveryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, tokenBudgetSoftAlertedAt, tokenBudgetHardAlertedAt, tokenBudgetOverride, createdAt, updatedAt, columnMovedAt,
         firstExecutionAt, cumulativeActiveMs, executionStartedAt, executionCompletedAt,
@@ -1729,7 +1732,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
         worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
-        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
+        workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, completionHandoffLimboRecoveryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, tokenBudgetSoftAlertedAt, tokenBudgetHardAlertedAt, tokenBudgetOverride, createdAt, updatedAt, columnMovedAt,
         firstExecutionAt, cumulativeActiveMs, executionStartedAt, executionCompletedAt,
@@ -1771,6 +1774,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         recoveryRetryCount = excluded.recoveryRetryCount,
         taskDoneRetryCount = excluded.taskDoneRetryCount,
         worktreeSessionRetryCount = excluded.worktreeSessionRetryCount,
+        completionHandoffLimboRecoveryCount = excluded.completionHandoffLimboRecoveryCount,
         verificationFailureCount = excluded.verificationFailureCount,
         mergeConflictBounceCount = excluded.mergeConflictBounceCount,
         mergeAuditBounceCount = excluded.mergeAuditBounceCount,
@@ -4456,7 +4460,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -4756,6 +4760,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.worktreeSessionRetryCount = undefined;
       } else if (updates.worktreeSessionRetryCount !== undefined) {
         task.worktreeSessionRetryCount = updates.worktreeSessionRetryCount;
+      }
+      if (updates.completionHandoffLimboRecoveryCount === null) {
+        task.completionHandoffLimboRecoveryCount = undefined;
+      } else if (updates.completionHandoffLimboRecoveryCount !== undefined) {
+        task.completionHandoffLimboRecoveryCount = updates.completionHandoffLimboRecoveryCount;
       }
       if (updates.verificationFailureCount === null) {
         task.verificationFailureCount = undefined;

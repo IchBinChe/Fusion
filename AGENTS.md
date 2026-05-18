@@ -208,6 +208,10 @@ const { stdout, stderr } = await execAsync(command, {
 
 User-initiated `moveTask(in-progress → todo)` is a hard cancel: executor listeners must abort active sessions before dispose, stop step/workflow subprocesses, and leave the task parked in `todo` with `userPaused` semantics intact. Engine-initiated rebounds (pause, stuck recovery, workflow rerun, self-healing) use default `moveSource: "engine"` plus the appropriate `preserve*` flags and must not set `userPaused`.
 
+### Executor run-context isolation
+
+`TaskExecutor` run mutation context is now keyed per task (`currentRunContexts: Map<taskId, RunMutationContext>`), not a single shared mutable field. This prevents FN-4987-style cross-task audit attribution leaks where one task's `runId` appeared in another task's `scope-leak`/`fn_task_done` logs.
+
 ## Git Conventions
 
 - Commit messages: `feat(FN-XXX):`, `fix(FN-XXX):`, `test(FN-XXX):`
@@ -477,5 +481,6 @@ Reliability-layer changes are in scope. Interaction regression backstops live in
 - FN-4935 backstop: `packages/engine/src/__tests__/reliability-interactions/executor-liveness-gate.test.ts` guards fresh-acquisition skip behavior, structured liveness classifications, and executor-gate audit/requeue outcomes.
 - FN-4887 backstop: `packages/engine/src/__tests__/reliability-interactions/foreign-only-contamination-recovery.real-git.test.ts` covers composition between bootstrap-misbinding, contamination dispatcher retry, misbound-in-review ordering, and FN-4811 active-session safeguards.
 - FN-4976 backstop: `packages/engine/src/__tests__/reliability-interactions/stale-self-owned-session-registry.test.ts` guards `cleanupConflictingWorktree` clearing stale same-task `activeSessionRegistry` entries before the FN-4811 foreign-owner check, while preserving refusal behavior for foreign owners and live same-task bindings.
+- FN-4999 backstop: `packages/engine/src/__tests__/reliability-interactions/completion-handoff-limbo.test.ts` covers the `recoverCompletionHandoffLimbo` sweep stage (grace window, active-task skip, merge-blocker guard, capped retries, and audit fan-out).
 
 The auto-recovery dispatcher at `packages/engine/src/auto-recovery.ts` (FN-4533) composes on top of existing layers (FN-4500 fast-path, FN-4508 deterministic branch-conflict, FN-4499 bootstrap-misbinding, FN-4428 contamination, `mergeAuditAutoRecovery` Stages 1–5, self-healing) to handle six residual classes: file-scope violation at squash, branch misbinding / ghost worktree, verification-fix scope leak, contamination, `branch-conflict-unrecoverable` residuals, and room-post/message-send failures. Invocation is additive — no existing layer's behavior changes.

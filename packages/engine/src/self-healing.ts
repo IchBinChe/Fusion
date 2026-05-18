@@ -11,6 +11,8 @@
  *    WAL checkpoint — all on a configurable interval (default 15 min).
  * 4. **Worktree cap enforcement**: Prevents unbounded worktree accumulation
  *    by cleaning oldest idle worktrees when count exceeds 2× maxWorktrees.
+ * 5. **Completion handoff limbo recovery**: Re-enqueues merge-eligible in-review
+ *    tasks stuck after `Task marked done by agent` with missing fan-out state.
  *
  * Worktrunk ownership/deference table (`worktrunk.enabled`):
  * - `pruneWorktrees`: defer to backend prune
@@ -61,6 +63,8 @@ const execAsync = promisify(exec);
 const DONE_TASK_INTEGRITY_SWEEP_LIMIT = 50;
 const BOARD_STALL_NOTIFICATION_COOLDOWN_MS = 60 * 60_000;
 export const STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS = 10 * 60_000;
+export const COMPLETION_HANDOFF_LIMBO_GRACE_MS = 5 * 60_000;
+export const MAX_COMPLETION_HANDOFF_LIMBO_RECOVERIES = 3;
 
 export async function archiveAsGhostBug(
   store: TaskStore,
@@ -218,6 +222,8 @@ export interface SelfHealingOptions {
    * the polling sweep's enqueue to silently no-op).
    */
   enqueueMerge?: (taskId: string) => boolean;
+  requeueForAutoMerge?: (taskId: string) => void | Promise<void>;
+  isTaskActive?: (taskId: string) => boolean;
   clearMergeActive?: (taskId: string) => void;
   /**
    * Minimum age before a transient merge status is considered stale when no
@@ -587,6 +593,7 @@ export class SelfHealingManager {
       { name: "done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata().then(() => undefined) },
       { name: "reconcile-done-task-integrity", fn: () => this.reconcileDoneTaskIntegrity().then(() => undefined) },
       { name: "recover-already-merged-review", fn: () => this.recoverAlreadyMergedReviewTasks().then(() => undefined) },
+      { name: "recover-completion-handoff-limbo", fn: () => this.recoverCompletionHandoffLimbo().then(() => undefined) },
       { name: "recover-branch-misbound-in-review", fn: () => this.recoverBranchMisboundInReviewTasks().then(() => undefined) },
       { name: "recover-foreign-only-contamination-in-review", fn: () => this.recoverForeignOnlyContaminatedInReviewTasks().then(() => undefined) },
       { name: "recover-orphan-only-scope-violations", fn: () => this.recoverOrphanOnlyScopeViolations().then(() => undefined) },
@@ -1164,6 +1171,7 @@ export class SelfHealingManager {
           { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
           { name: "recover-merged-review", fn: () => this.recoverMergedReviewTasks() },
           { name: "recover-already-merged-review", fn: () => this.recoverAlreadyMergedReviewTasks() },
+          { name: "recover-completion-handoff-limbo", fn: () => this.recoverCompletionHandoffLimbo() },
           { name: "recover-branch-misbound-in-review", fn: () => this.recoverBranchMisboundInReviewTasks() },
           { name: "recover-foreign-only-contamination-in-review", fn: () => this.recoverForeignOnlyContaminatedInReviewTasks() },
           { name: "recover-orphan-only-scope-violations", fn: () => this.recoverOrphanOnlyScopeViolations() },
@@ -4542,6 +4550,70 @@ export class SelfHealingManager {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Already-merged review recovery failed: ${errorMessage}`);
       return 0;
+    }
+  }
+
+  async recoverCompletionHandoffLimbo(): Promise<void> {
+    const tasks = await this.store.listTasks({ column: "in-review", slim: false });
+    const now = Date.now();
+
+    for (const task of tasks) {
+      if (task.column !== "in-review" || task.paused) continue;
+      if (task.status != null || task.mergeDetails != null || task.review != null || task.reviewState != null) continue;
+      if (this.options.isTaskActive?.(task.id)) continue;
+      if (getTaskMergeBlocker(task) !== undefined) continue;
+
+      const doneMarker = [...(task.log ?? [])].reverse().find((entry) => entry.action === "Task marked done by agent");
+      if (!doneMarker?.timestamp) continue;
+      const markerTs = Date.parse(doneMarker.timestamp);
+      if (!Number.isFinite(markerTs)) continue;
+      const ageMs = now - markerTs;
+      if (ageMs < COMPLETION_HANDOFF_LIMBO_GRACE_MS) continue;
+
+      const currentCount = task.completionHandoffLimboRecoveryCount ?? 0;
+      if (currentCount >= MAX_COMPLETION_HANDOFF_LIMBO_RECOVERIES) {
+        await this.store.updateTask(task.id, {
+          status: "failed",
+          error: "Completion handoff limbo recovery exhausted",
+        });
+        const exhaustedAudit = createRunAuditor(this.store, {
+          runId: generateSyntheticRunId("self-heal", task.id),
+          agentId: "self-healing",
+          taskId: task.id,
+          taskLineageId: task.lineageId,
+          phase: "recover-completion-handoff-limbo",
+        });
+        await exhaustedAudit.database({
+          type: "task:auto-recover-completion-handoff-limbo-exhausted",
+          target: task.id,
+          metadata: { ageMs, attempts: currentCount },
+        });
+        continue;
+      }
+
+      await this.store.updateTask(task.id, {
+        completionHandoffLimboRecoveryCount: currentCount + 1,
+      });
+
+      const audit = createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("self-heal", task.id),
+        agentId: "self-healing",
+        taskId: task.id,
+        taskLineageId: task.lineageId,
+        phase: "recover-completion-handoff-limbo",
+      });
+      await audit.database({
+        type: "task:auto-recover-completion-handoff-limbo",
+        target: task.id,
+        metadata: { ageMs, source: "self-healing-in-review-sweep" },
+      });
+
+      await this.store.logEntry(task.id, "Auto-recovered (FN-4999): task in 'in-review' past handoff grace with no merge fan-out — re-emitting auto-merge handoff");
+      if (this.options.requeueForAutoMerge) {
+        await this.options.requeueForAutoMerge(task.id);
+      } else {
+        log.warn(`recoverCompletionHandoffLimbo: requeueForAutoMerge callback missing for ${task.id}`);
+      }
     }
   }
 

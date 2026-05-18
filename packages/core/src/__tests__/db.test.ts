@@ -291,7 +291,7 @@ describe("Database", () => {
     });
 
     it("seeds schema version", () => {
-      expect(db.getSchemaVersion()).toBe(84);
+      expect(db.getSchemaVersion()).toBe(85);
     });
 
     it("includes tokenUsageCacheWriteTokens on freshly initialized tasks table", () => {
@@ -319,7 +319,7 @@ describe("Database", () => {
 
     it("is idempotent - calling init() twice does not fail", () => {
       expect(() => db.init()).not.toThrow();
-      expect(db.getSchemaVersion()).toBe(84);
+      expect(db.getSchemaVersion()).toBe(85);
     });
     it("does not overwrite existing config on re-init", () => {
       // Update the config
@@ -1384,7 +1384,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29 (includes v1→v2 through v26→v29)
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -1409,11 +1409,11 @@ describe("schema migrations", () => {
     const db = new Database(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     // Re-init should not fail
     db.init();
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     db.close();
   });
@@ -1448,7 +1448,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("priority");
@@ -1489,7 +1489,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1561,7 +1561,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1801,7 +1801,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("attachments");
@@ -1875,7 +1875,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'agentRatings'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "agentRatings" }]);
@@ -1899,7 +1899,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'mission_events'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "mission_events" }]);
@@ -2003,7 +2003,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -2222,7 +2222,7 @@ describe("schema migrations", () => {
 
     localDb.init();
 
-    expect(localDb.getSchemaVersion()).toBe(84);
+    expect(localDb.getSchemaVersion()).toBe(85);
     const columns = localDb.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("tokenUsageCacheWriteTokens");
 
@@ -2533,7 +2533,7 @@ describe("createDatabase factory", () => {
     const db = createDatabase(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(84);
+    expect(db.getSchemaVersion()).toBe(85);
     expect(db.getLastModified()).toBeGreaterThan(0);
 
     db.close();
@@ -2687,7 +2687,7 @@ describe("migration v77 task token budget columns", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(84);
+      expect(migrated.getSchemaVersion()).toBe(85);
       const rows = migrated.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
       const names = new Set(rows.map((row) => row.name));
       expect(names.has("tokenBudgetSoftAlertedAt")).toBe(true);
@@ -2733,7 +2733,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(84);
+      expect(migrated.getSchemaVersion()).toBe(85);
       const tables = migrated
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;
@@ -2760,7 +2760,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(84);
+      expect(fresh.getSchemaVersion()).toBe(85);
       const tables = fresh
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;

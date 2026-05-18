@@ -1624,6 +1624,12 @@ export interface Task {
    *  `in-review` for human inspection. Cleared on successful completion / move
    *  out of failed state by the executor. */
   worktreeSessionRetryCount?: number;
+  /** Number of completion-handoff limbo recoveries attempted for this task.
+   *  Incremented by self-healing when an `in-review` task has a stale
+   *  "Task marked done by agent" marker but no merge fan-out state.
+   *  Capped by `MAX_COMPLETION_HANDOFF_LIMBO_RECOVERIES`; exhaustion leaves
+   *  the task failed in-review for human inspection. */
+  completionHandoffLimboRecoveryCount?: number;
   /** Number of times this task has bounced from `in-review` back to `in-progress`
    *  due to a deterministic verification failure during auto-merge. Incremented
    *  by the auto-merge error handler (project-engine.ts). When this reaches

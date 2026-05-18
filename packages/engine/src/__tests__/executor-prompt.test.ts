@@ -2118,10 +2118,12 @@ describe("TaskExecutor global pause behavior", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress");
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "in-review");
     expect(watchdogSpy).not.toHaveBeenCalledWith("FN-001", "fn_task_done");
-    expect(store.logEntry).toHaveBeenCalledWith(
-      "FN-001",
-      expect.stringContaining("fn_task_done called while task was in todo during pause"),
-    );
+    expect(
+      store.logEntry.mock.calls.some(
+        ([id, action]: [string, string]) =>
+          id === "FN-001" && action.includes("fn_task_done called while task was in todo during pause"),
+      ),
+    ).toBe(true);
     expect(
       store.logEntry.mock.calls.some(
         ([id, action]: [string, string]) =>

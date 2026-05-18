@@ -206,6 +206,8 @@ export type DatabaseMutationType =
   | "task:auto-recover-lease-partial-write"
   | "task:auto-recover-lease-reconciled"
   | "task:auto-recover-completion-fanout"
+  | "task:auto-recover-completion-handoff-limbo"
+  | "task:auto-recover-completion-handoff-limbo-exhausted"
   | "task:auto-recover-worktree-session-exhausted"
   | "task:auto-recover-starved-refinement"
   /** Metadata: { taskId, pausedAgeMs, blockedFollowerIds: string[], previousPausedReason: string | null } */

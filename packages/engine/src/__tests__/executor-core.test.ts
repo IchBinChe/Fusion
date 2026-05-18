@@ -214,7 +214,7 @@ describe("TaskExecutor action gate context", () => {
     } as any;
 
     const executor = new TaskExecutor(store as any, "/tmp/project", { agentStore });
-    (executor as any).currentRunContext = { runId: "run-1" };
+    (executor as any).currentRunContexts.set("FN-1", { runId: "run-1", agentId: "executor" });
 
     const context = (executor as any).buildActionGateContext("FN-1", { id: "agent-1", name: "Agent One", permissionPolicy: undefined });
 
@@ -232,7 +232,12 @@ describe("TaskExecutor action gate context", () => {
       },
     });
 
-    expect(store.pauseTask).toHaveBeenCalledWith("FN-1", true, { runId: "run-1" }, { pausedByAgentId: "agent-1" });
+    expect(store.pauseTask).toHaveBeenCalledWith(
+      "FN-1",
+      true,
+      expect.objectContaining({ runId: "run-1" }),
+      { pausedByAgentId: "agent-1" },
+    );
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-1", "paused");
     expect(agentStore.updateAgent).toHaveBeenCalledWith("agent-1", { pauseReason: "awaiting-approval" });
 

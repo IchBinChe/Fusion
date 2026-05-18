@@ -473,4 +473,27 @@ describe("registerGithubTrackingHook", () => {
       }),
     );
   });
+
+  it("records a github-tracking-no-repo activity for agent-created tasks when defaults enable tracking", async () => {
+    registerGithubTrackingHook();
+
+    await store.updateSettings({
+      githubTrackingEnabledByDefault: true,
+      githubAuthMode: "token",
+      githubAuthToken: "tok",
+    });
+
+    const task = await store.createTask({
+      description: "agent-created task with missing repo",
+      source: { sourceType: "api" },
+    });
+
+    const activity = await store.getActivityLog({ type: "task:updated" });
+    const trackingNoRepoEntries = activity.filter((entry) =>
+      entry.taskId === task.id && (entry.metadata as { type?: string } | undefined)?.type === "github-tracking-no-repo",
+    );
+
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(trackingNoRepoEntries).toHaveLength(1);
+  });
 });

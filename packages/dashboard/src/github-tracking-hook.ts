@@ -26,8 +26,9 @@ export async function createTrackingIssueForTask(
       rootDir: taskStore.getRootDir(),
       logger,
     });
-  } catch {
-    // Best-effort only.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn?.(`[github-tracking-hook] ${task.id}: createTrackingIssueForTask failed: ${message}`);
   }
 }
 

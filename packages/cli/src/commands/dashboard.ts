@@ -24,6 +24,7 @@ import {
   getCliPackageVersion,
   getProjectSettingsPath,
   loadTlsCredentialsFromEnv,
+  registerGithubTrackingHook,
   stopAllDevServers,
   type RuntimeLogger,
 } from "@fusion/dashboard";
@@ -1499,6 +1500,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       await centralCoreForEngine.init();
     } catch {
       // Non-fatal — engine uses fallback concurrency defaults
+    }
+
+    try {
+      registerGithubTrackingHook?.();
+    } catch {
+      // Some tests partially mock @fusion/dashboard and omit this export.
     }
 
     const engineManager = new ProjectEngineManager(centralCoreForEngine, {

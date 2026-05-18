@@ -193,10 +193,12 @@ export async function maybeCreateTrackingIssue(
   const inlineTracking = task.githubTracking;
   const resolvedTracking = resolveTaskGithubTracking(task, deps.projectSettings, deps.globalSettings);
   if (!resolvedTracking.enabled) {
+    deps.logger?.info?.(`[github-tracking] ${task.id}: skipped (tracking_disabled)`);
     return { created: false, reason: "tracking_disabled" };
   }
 
   if (inlineTracking?.issue) {
+    deps.logger?.info?.(`[github-tracking] ${task.id}: skipped (issue_already_linked)`);
     return { created: false, reason: "issue_already_linked" };
   }
 
@@ -214,6 +216,7 @@ export async function maybeCreateTrackingIssue(
 
   const tracking = latestTask.githubTracking ?? inlineTracking;
   if (tracking?.issue) {
+    deps.logger?.info?.(`[github-tracking] ${task.id}: skipped (issue_already_linked)`);
     return { created: false, reason: "issue_already_linked" };
   }
 

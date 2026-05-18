@@ -6,6 +6,26 @@
 
 Fusion's secrets subsystem provides encrypted-at-rest secret storage with project scope (`.fusion/fusion.db`) and global scope (`~/.fusion/fusion-central.db`).
 
+## Implementation Status
+
+| Surface | Status | Follow-up | Source of truth |
+|---|---|---|---|
+| AES-256-GCM encryption primitives | Shipped | — | `packages/core/src/secrets-crypto.ts` |
+| `SecretsStore` CRUD + `revealSecret` | Shipped | — | `packages/core/src/secrets-store.ts` |
+| Per-secret access policy + global fallback resolver | Shipped | — | `packages/core/src/secret-access-policy.ts` |
+| `MasterKeyManager` (keychain primary, file fallback) | Shipped | — | `packages/core/src/master-key.ts` |
+| `fn_secret_get` pi-extension tool (auto/prompt/deny + missing-key) | Shipped | — | `packages/cli/src/extension.ts` |
+| `secret:read` / `secret:approval-requested` / `secret:approval-denied` audit events | Shipped | — | `packages/cli/src/extension.ts` (`emitSecretAudit`) |
+| Approval API integration for `prompt` policy (`ApprovalRequestStore` + `POST /api/approvals/:id/decision`) | Shipped | — | `packages/cli/src/extension.ts` |
+| `secrets-sync.ts` wrap/unwrap core (scrypt → AES-256-GCM, version 1, typed errors) | Shipped | — | `packages/core/src/secrets-sync.ts` |
+| Dashboard `SecretsView` CRUD UI | Shipped | — | `packages/dashboard/app/components/SecretsView.tsx` |
+| `secretsEnv.*` settings + worktree `.env` materialization + fingerprint cleanup | Shipped | — | `packages/core/src/types.ts`, `packages/engine/src/secrets-env-writer.ts` |
+| `secretsSyncPassphrase` project setting integration | Shipped | — | `packages/core/src/types.ts`, `packages/dashboard/src/routes/register-secrets-sync-routes.ts` |
+| Cross-node sync REST endpoints (`/api/nodes/:id/secrets/{push,pull}`, `/api/secrets/sync-receive`, `/api/secrets/sync-export`) | Shipped | — | `packages/dashboard/src/routes/register-secrets-sync-routes.ts`, `packages/dashboard/src/routes/register-secrets-sync-inbound-routes.ts` |
+| Audit-event registration on `FilesystemMutationType` for `secret:env-*` and `secret:sync-*` | Shipped | — | `packages/engine/src/run-audit.ts` |
+| Master-key rotation UX | Pending | FN-4867 (historical umbrella; implementation still open) | n/a |
+| Per-secret TTL / rotation, KMS/Vault backends, per-node asymmetric sync | Out of scope | — | n/a |
+
 Current shipped behavior in this branch includes:
 
 - AES-256-GCM encryption primitives (`packages/core/src/secrets-crypto.ts`)
@@ -64,7 +84,7 @@ The current implementation exposes a `MasterKeyProvider` abstraction consumed by
 - Required contract: async provider that returns a **32-byte** key.
 - Validation failures return non-sensitive `SecretCryptoError` codes.
 
-Runtime keychain/filesystem resolution is wired via `MasterKeyProvider` and consumed by `SecretsStore`; rotation UX remains follow-up work.
+Runtime keychain/filesystem resolution is shipped via `MasterKeyManager` (`packages/core/src/master-key.ts`) with keychain-primary lookup and `~/.fusion/master.key` fallback (mode `0600`); rotation UX remains follow-up work.
 
 ## Access Policies
 
@@ -96,11 +116,11 @@ Secret persistence primitives are shipped at the store/API layer; a dedicated en
 `fn_secret_get` is shipped in `packages/cli/src/extension.ts:1542-1629`.
 
 Tool contract:
-- Params: `key` (required), `scope` (`project` or `global`, optional).
-- Resolution: key lookup in requested scope; missing key returns not-found result without plaintext.
+- Params: `key` (required), `scope?: "project" | "global"`.
+- Resolution: when `scope` is omitted, lookup is project → global; when provided, only that scope is queried. Missing key returns `{ error: "not-found" }`.
 - Policy outcomes:
   - `auto` → reveals and returns plaintext value (`secret:read` audit at `extension.ts:1615`).
-  - `prompt` → creates approval request and returns `details.outcome: "pending_approval"` (`extension.ts:1607-1611`).
+  - `prompt` → creates `ApprovalRequestStore` request (`secret-read:{scope}:{key}:{agentId}` dedupe key) and returns `{ outcome: "pending_approval", approvalRequestId }` (`extension.ts:1607-1611`).
   - `deny` → immediate refusal and `secret:approval-denied` audit (`extension.ts:1581-1583`).
 
 ## `.env` Auto-write into Worktrees
@@ -159,7 +179,6 @@ Filesystem-domain secret audit taxonomy:
 All listed events are enumerated in `packages/engine/src/run-audit.ts:261-274` (union at `run-audit.ts:325`). Route/tool emitters include: `secret:sync-push` (`packages/dashboard/src/routes/register-secrets-sync-routes.ts:92`), `secret:sync-pull` (`register-secrets-sync-routes.ts:180`, `register-secrets-sync-inbound-routes.ts:158-164`), `secret:read` + approval events (`packages/cli/src/extension.ts:1581-1615`), env materialization/cleanup (`packages/engine/src/secrets-env-writer.ts:99-217`).
 
 Track follow-up: **FN-5031** (missing `packages/core/src/__tests__/secrets-env.test.ts` contract file).
-Track follow-up: **FN-5032** (`docs/settings-reference.md` still marks shipped secrets settings as planned in some rows).
 
 **Plaintext prohibition:** audit payload metadata must never include plaintext, decrypted values, ciphertext, or nonce fields. Use `assertNoSecretPlaintext(...)` as the canonical enforcement helper before emitting secret audit events.
 
@@ -168,5 +187,5 @@ Track follow-up: **FN-5032** (`docs/settings-reference.md` still marks shipped s
 - Backups: preserve both SQLite data and master-key material/provider source used by deployment.
 - If master key material is lost, encrypted secret values become unrecoverable.
 - Pending advanced capabilities:
-  - Full rotation UX and key lifecycle tooling
+  - Master-key rotation UX and key lifecycle tooling
   - TTL/rotation automation, env-set profiles, KMS/Vault backends, per-node asymmetric sync

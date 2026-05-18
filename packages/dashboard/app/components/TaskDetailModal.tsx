@@ -2534,7 +2534,14 @@ export function TaskDetailContent({
           ) : activeTab === "changes" ? (
             <TaskChangesTab taskId={task.id} worktree={task.worktree} projectId={projectId} column={task.column} mergeDetails={task.mergeDetails} modifiedFiles={task.modifiedFiles} />
           ) : activeTab === "review" ? (
-            <TaskReviewTab task={task} addToast={addToast} projectId={projectId} onTaskUpdated={onTaskUpdated} />
+            <TaskReviewTab
+              task={task}
+              addToast={addToast}
+              projectId={projectId}
+              onTaskUpdated={onTaskUpdated}
+              prAuthAvailable={prAuthAvailable}
+              onRequestCreatePr={() => setPrCreateOpen(true)}
+            />
           ) : activeTab === "comments" ? (
             <TaskComments task={task} addToast={addToast} projectId={projectId} onTaskUpdated={onTaskUpdated} />
           ) : activeTab === "documents" ? (
@@ -3332,9 +3339,11 @@ export function TaskDetailContent({
                 open={prCreateOpen}
                 taskId={task.id}
                 projectId={projectId}
+                defaultBaseBranch={undefined}
                 onClose={() => setPrCreateOpen(false)}
                 onCreated={(prInfo) => {
                   (task as TaskDetail).prInfo = prInfo;
+                  onTaskUpdated?.({ ...workingTask, prInfo } as Task);
                   setPrCreateOpen(false);
                 }}
                 addToast={addToast}

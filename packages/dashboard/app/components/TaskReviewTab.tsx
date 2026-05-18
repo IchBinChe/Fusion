@@ -1,5 +1,6 @@
 import "./TaskReviewTab.css";
 import type { Task, TaskDetail } from "@fusion/core";
+import { GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,6 +14,8 @@ interface Props {
   task: Task | TaskDetail;
   projectId?: string;
   onTaskUpdated?: (task: Task) => void;
+  onRequestCreatePr?: () => void;
+  prAuthAvailable?: boolean;
   addToast: (message: string, type?: ToastType) => void;
 }
 
@@ -129,7 +132,14 @@ function getDisplayReviewItems(review: ReviewState): DisplayReviewItem[] {
   return [...items, ...snapshots];
 }
 
-export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Props) {
+export function TaskReviewTab({
+  task,
+  projectId,
+  onTaskUpdated,
+  onRequestCreatePr,
+  prAuthAvailable,
+  addToast,
+}: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [revising, setRevising] = useState(false);
@@ -275,6 +285,12 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
           {decisionLabel ? <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span> : null}
         </div>
         <div className="task-review-tab__actions">
+          {task.column === "in-review" && !task.prInfo && prAuthAvailable === true && typeof onRequestCreatePr === "function" ? (
+            <button className="btn btn-sm" onClick={() => onRequestCreatePr?.()} data-testid="task-review-create-pr">
+              <GitPullRequest />
+              Create PR
+            </button>
+          ) : null}
           <button
             className="btn btn-sm"
             onClick={() => setRenderMarkdown((prev) => !prev)}

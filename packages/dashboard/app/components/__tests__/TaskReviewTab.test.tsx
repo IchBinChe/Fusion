@@ -493,6 +493,64 @@ describe("TaskReviewTab", () => {
     expect(mobileCss).not.toMatch(/\.task-review-tab__actions\s+\.btn\s*\{[^}]*flex\s*:\s*1\s*;[^}]*\}/);
   });
 
+  it("shows create PR action when in-review without prInfo and auth is available", async () => {
+    const onRequestCreatePr = vi.fn();
+    const task = makeTask({ column: "in-review", prInfo: undefined });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    render(
+      <TaskReviewTab
+        task={task}
+        addToast={vi.fn()}
+        prAuthAvailable
+        onRequestCreatePr={onRequestCreatePr}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("task-review-create-pr"));
+    expect(onRequestCreatePr).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides create PR action outside in-review column", async () => {
+    const task = makeTask({ column: "todo", prInfo: undefined });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "Refresh" });
+    expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
+  });
+
+  it("hides create PR action when prInfo already exists", async () => {
+    const task = makeTask({
+      column: "in-review",
+      prInfo: {
+        number: 1,
+        title: "Existing PR",
+        url: "https://example.com/pr/1",
+        status: "open",
+        headBranch: "fusion/FN-1",
+        baseBranch: "main",
+      },
+    });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "Refresh" });
+    expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
+  });
+
+  it("hides create PR action when auth is unavailable", async () => {
+    const task = makeTask({ column: "in-review", prInfo: undefined });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable={false} onRequestCreatePr={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "Refresh" });
+    expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
+  });
+
   it("submits reviewer-agent selections through same revision action", async () => {
     const task = makeTask();
     apiMocks.fetchTaskReview.mockResolvedValue({

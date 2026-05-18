@@ -164,6 +164,7 @@ export function PrPanel({
           className="btn btn-primary btn-sm"
           onClick={onRequestCreatePr}
           disabled={createDisabled}
+          data-testid="pr-panel-create-pr"
           title={prAuthAvailable ? "Create a PR for this task" : "PR auth unavailable — run 'gh auth login'"}
         >
           <Plus />

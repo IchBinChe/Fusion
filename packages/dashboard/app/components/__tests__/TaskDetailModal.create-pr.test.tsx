@@ -10,6 +10,10 @@ const prCreateModalState = vi.hoisted(() => ({
   latestProps: null as any,
 }));
 
+const taskReviewTabState = vi.hoisted(() => ({
+  latestProps: null as any,
+}));
+
 vi.mock("../PrPanel", () => ({
   PrPanel: (props: any) => {
     prPanelState.latestPrInfo = props.prInfo;
@@ -48,7 +52,21 @@ vi.mock("../PrCreateModal", () => ({
         >
           Stub create
         </button>
+        <button type="button" onClick={() => props.onClose()}>
+          Stub close
+        </button>
       </div>
+    );
+  },
+}));
+
+vi.mock("../TaskReviewTab", () => ({
+  TaskReviewTab: (props: any) => {
+    taskReviewTabState.latestProps = props;
+    return (
+      <button type="button" data-testid="task-review-create-pr" onClick={() => props.onRequestCreatePr?.()}>
+        Review create PR
+      </button>
     );
   },
 }));
@@ -71,10 +89,12 @@ describe("TaskDetailModal create-PR wiring", () => {
     vi.clearAllMocks();
     prPanelState.latestPrInfo = undefined;
     prCreateModalState.latestProps = null;
+    taskReviewTabState.latestProps = null;
   });
 
   it("opens PrCreateModal from PrPanel and updates prInfo on create", async () => {
     const addToast = vi.fn();
+    const onTaskUpdated = vi.fn();
     const task = makeTask({ id: "FN-5020", prInfo: undefined, column: "in-review" });
 
     render(
@@ -87,6 +107,7 @@ describe("TaskDetailModal create-PR wiring", () => {
         onMergeTask={noopMerge}
         onOpenDetail={noopOpenDetail}
         addToast={addToast}
+        onTaskUpdated={onTaskUpdated}
       />,
     );
 
@@ -101,6 +122,7 @@ describe("TaskDetailModal create-PR wiring", () => {
     expect(prCreateModalState.latestProps?.open).toBe(true);
     expect(prCreateModalState.latestProps?.taskId).toBe("FN-5020");
     expect(prCreateModalState.latestProps?.projectId).toBe("project-123");
+    expect(prCreateModalState.latestProps?.defaultBaseBranch).toBeUndefined();
     expect(prCreateModalState.latestProps?.addToast).toBe(addToast);
 
     fireEvent.click(screen.getByRole("button", { name: "Stub create" }));
@@ -109,5 +131,41 @@ describe("TaskDetailModal create-PR wiring", () => {
     expect(prCreateModalState.latestProps?.open).toBe(false);
     expect(screen.getByTestId("pr-panel-pr-number")).toHaveTextContent("321");
     expect(prPanelState.latestPrInfo?.number).toBe(321);
+    expect(onTaskUpdated).toHaveBeenCalledWith(expect.objectContaining({
+      id: "FN-5020",
+      prInfo: expect.objectContaining({ number: 321 }),
+    }));
+  });
+
+  it("opens the same PrCreateModal from TaskReviewTab and closes via onClose", async () => {
+    const task = makeTask({ id: "FN-5021", prInfo: undefined, column: "in-review" });
+
+    render(
+      <TaskDetailModal
+        task={task}
+        projectId="project-123"
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={vi.fn()}
+        prAuthAvailable
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(screen.getByTestId("task-review-create-pr")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("task-review-create-pr"));
+    expect(screen.getByTestId("pr-create-modal-stub")).toBeInTheDocument();
+    expect(prCreateModalState.latestProps?.taskId).toBe("FN-5021");
+    expect(prCreateModalState.latestProps?.projectId).toBe("project-123");
+    expect(prCreateModalState.latestProps?.defaultBaseBranch).toBeUndefined();
+    expect(taskReviewTabState.latestProps?.prAuthAvailable).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stub close" }));
+    expect(screen.queryByTestId("pr-create-modal-stub")).toBeNull();
+    expect(prCreateModalState.latestProps?.open).toBe(false);
   });
 });

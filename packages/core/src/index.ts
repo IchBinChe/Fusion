@@ -248,6 +248,11 @@ export {
 } from "./stale-paused-review.js";
 export type { StalePausedReviewCode, StalePausedReviewSignal } from "./stale-paused-review.js";
 export {
+  getStalePausedTodoSignal,
+  DEFAULT_STALE_PAUSED_TODO_THRESHOLD_MS,
+} from "./stale-paused-todo.js";
+export type { StalePausedTodoCode, StalePausedTodoSignal } from "./stale-paused-todo.js";
+export {
   getTaskAgeStalenessSignal,
   DEFAULT_TASK_AGE_STALENESS_THRESHOLDS,
 } from "./task-age-staleness.js";

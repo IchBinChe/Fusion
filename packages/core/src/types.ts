@@ -1,5 +1,6 @@
 import type { InReviewStallSignal } from "./in-review-stall.js";
 import type { StalePausedReviewSignal } from "./stale-paused-review.js";
+import type { StalePausedTodoSignal } from "./stale-paused-todo.js";
 import type { StalledReviewSignal } from "./stalled-review-detector.js";
 import type { TaskAgeStalenessSignal } from "./task-age-staleness.js";
 
@@ -1596,6 +1597,9 @@ export interface Task {
   /** Server-computed stale paused review diagnostic signal. Undefined when no rule matches.
    *  Diagnostic-only: must not trigger automatic state mutation. */
   stalePausedReview?: StalePausedReviewSignal;
+  /** Server-computed stale paused todo diagnostic signal. Undefined when no rule matches.
+   *  Diagnostic-only: must not trigger automatic state mutation. */
+  stalePausedTodo?: StalePausedTodoSignal;
   /** Heuristic stalled-review diagnostic signal (legacy compatibility contract). */
   stalledReview?: StalledReviewSignal;
   /** Durable aggregate token usage totals for the task. Undefined when no usage has been recorded yet. */
@@ -2971,6 +2975,10 @@ export interface ProjectSettings {
    *  Age is measured from columnMovedAt when present, otherwise updatedAt.
    *  Default: 86400000 (24 hours). Set to 0 or undefined to disable surfacing. */
   stalePausedReviewThresholdMs?: number;
+  /** Threshold in milliseconds for surfacing paused todo tasks as stale.
+   *  Age is measured from columnMovedAt when present, otherwise updatedAt.
+   *  Default: 86400000 (24 hours). Set to 0 or undefined to disable surfacing. */
+  stalePausedTodoThresholdMs?: number;
   /** Minimum age in milliseconds that a paused in-progress task may continue holding
    *  file-scope reservation while one or more followers are blocked by it.
    *  Self-healing rebounds qualifying holders to todo when this threshold is met.

@@ -842,6 +842,7 @@ describe("ModelOnboardingModal", () => {
 
     it("renders github copilot device-code panel in onboarding", async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
+      const addToast = vi.fn();
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
         value: { writeText },
@@ -869,7 +870,7 @@ describe("ModelOnboardingModal", () => {
       const mockWindowOpen = vi.fn();
       vi.spyOn(window, "open").mockImplementation(mockWindowOpen);
 
-      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={addToast} projectId="proj_123" />);
 
       await waitFor(() => {
         expect(screen.getByRole("button", { name: /Advanced provider settings/ })).toBeTruthy();
@@ -888,10 +889,72 @@ describe("ModelOnboardingModal", () => {
       fireEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
       expect(writeText).toHaveBeenCalledWith("ABCD-1234");
       expect(writeText).toHaveBeenCalledTimes(2);
+      expect(addToast).toHaveBeenCalledWith("Copied code to clipboard", "success");
 
       fireEvent.click(within(copilotCard).getByRole("button", { name: "Open GitHub" }));
       expect(mockWindowOpen).toHaveBeenCalledWith("https://github.com/login/device", "_blank");
+    });
 
+    it("uses execCommand fallback in onboarding when clipboard API is unavailable", async () => {
+      const addToast = vi.fn();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+      const execSpy = vi.spyOn(document, "execCommand").mockReturnValue(true);
+
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth" }] })
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth", loginInProgress: true }] });
+      mockLoginProvider.mockResolvedValueOnce({
+        url: "https://auth.example.com/login",
+        deviceCode: { userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={addToast} projectId="proj_123" />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Advanced provider settings/ })).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Advanced provider settings/ }));
+      const copilotCard = await screen.findByTestId("onboarding-provider-card-github-copilot");
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      await within(copilotCard).findByText("ABCD-1234");
+
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      expect(execSpy).toHaveBeenCalledWith("copy");
+      expect(addToast).toHaveBeenCalledWith(expect.stringContaining("Copied"), "success");
+    });
+
+    it("shows error toast in onboarding when clipboard and fallback fail", async () => {
+      const addToast = vi.fn();
+      const writeText = vi.fn().mockRejectedValue(new Error("NotAllowedError"));
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      vi.spyOn(document, "execCommand").mockReturnValue(false);
+
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth" }] })
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth", loginInProgress: true }] });
+      mockLoginProvider.mockResolvedValueOnce({
+        url: "https://auth.example.com/login",
+        deviceCode: { userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={addToast} projectId="proj_123" />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Advanced provider settings/ })).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Advanced provider settings/ }));
+      const copilotCard = await screen.findByTestId("onboarding-provider-card-github-copilot");
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      await within(copilotCard).findByText("ABCD-1234");
+
+      fireEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      expect(addToast).toHaveBeenCalledWith(expect.stringContaining("manually"), "error");
     });
 
     it("keeps OpenAI Codex manual-code UX available in onboarding", async () => {

@@ -1937,8 +1937,9 @@ describe("SettingsModal", () => {
       });
     });
 
-    it.skip("renders github copilot device code panel and handles copy/open actions", async () => {
+    it("renders github copilot device code panel and handles copy/open actions", async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
+      const addToast = vi.fn();
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
         value: { writeText },
@@ -1964,7 +1965,7 @@ describe("SettingsModal", () => {
         },
       });
 
-      renderModal();
+      render(<SettingsModal onClose={noop} addToast={addToast} />);
       await waitForSettingsModalReady();
 
       const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
@@ -1979,6 +1980,7 @@ describe("SettingsModal", () => {
       await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
       expect(writeText).toHaveBeenCalledWith("ABCD-1234");
       expect(writeText).toHaveBeenCalledTimes(2);
+      expect(addToast).toHaveBeenCalledWith("Copied code to clipboard", "success");
 
       await userEvent.click(within(copilotCard).getByRole("button", { name: "Open GitHub" }));
       expect(openSpy).toHaveBeenCalledWith("https://github.com/login/device", "_blank");
@@ -1986,6 +1988,58 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(within(copilotCard).queryByText("ABCD-1234")).not.toBeInTheDocument();
       }, { timeout: 5000 });
+    });
+
+    it("uses execCommand fallback when clipboard API is unavailable", async () => {
+      const addToast = vi.fn();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+      const execSpy = vi.spyOn(document, "execCommand").mockReturnValue(true);
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth" }] })
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth", loginInProgress: true }] });
+      mockLoginProvider.mockResolvedValueOnce({
+        url: "https://auth.example.com/login",
+        deviceCode: { userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" },
+      });
+
+      render(<SettingsModal onClose={noop} addToast={addToast} />);
+      await waitForSettingsModalReady();
+      const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      await within(copilotCard).findByText("ABCD-1234");
+
+      await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      expect(execSpy).toHaveBeenCalledWith("copy");
+      expect(addToast).toHaveBeenCalledWith(expect.stringContaining("Copied"), "success");
+    });
+
+    it("shows error toast when clipboard API and fallback both fail", async () => {
+      const addToast = vi.fn();
+      const writeText = vi.fn().mockRejectedValue(new Error("NotAllowedError"));
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      vi.spyOn(document, "execCommand").mockReturnValue(false);
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth" }] })
+        .mockResolvedValueOnce({ providers: [{ id: "github-copilot", name: "GitHub Copilot", authenticated: false, type: "oauth", loginInProgress: true }] });
+      mockLoginProvider.mockResolvedValueOnce({
+        url: "https://auth.example.com/login",
+        deviceCode: { userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" },
+      });
+
+      render(<SettingsModal onClose={noop} addToast={addToast} />);
+      await waitForSettingsModalReady();
+      const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      await within(copilotCard).findByText("ABCD-1234");
+
+      await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      expect(addToast).toHaveBeenCalledWith(expect.stringContaining("manually"), "error");
     });
 
     it("scrolls settings content to top after API key save succeeds", async () => {

@@ -127,10 +127,12 @@ export function computeSplitPlan(packages, total, options = {}) {
 }
 
 /**
- * Best-fit-decreasing assignment (FN-5002): iterate entries in descending
- * weight order and place each entry into the shard that is closest to the
- * per-shard budget without exceeding it; if all candidates would exceed budget,
- * choose the minimum overshoot shard. Split-slice isolation rules are preserved.
+ * Best-fit-decreasing assignment (FN-5002/FN-5036): iterate entries in
+ * descending weight order and place each entry into the shard that is closest
+ * to the per-shard budget without exceeding it; if all candidates would exceed
+ * budget, choose the minimum overshoot shard. This best-fit-under-budget rule
+ * now applies uniformly to split and non-split entries while preserving
+ * split-slice isolation rules.
  *
  * @param {Array<{name:string, testFileCount:number}>} packages
  * @param {number} total
@@ -168,14 +170,7 @@ export function planShardAssignments(packages, total, options = {}) {
       );
     }
 
-    let targetIndex = candidates[0] ?? 0;
-    if (entry.shardCount) {
-      for (const index of candidates) {
-        if (shardWeights[index] < shardWeights[targetIndex]) {
-          targetIndex = index;
-        }
-      }
-    } else {
+    const selectBestFitCandidate = () => {
       let bestUnderBudgetIndex = null;
       let bestUnderBudgetProjected = Number.NEGATIVE_INFINITY;
       let bestOvershootIndex = null;
@@ -203,12 +198,10 @@ export function planShardAssignments(packages, total, options = {}) {
         }
       }
 
-      if (bestUnderBudgetIndex !== null) {
-        targetIndex = bestUnderBudgetIndex;
-      } else if (bestOvershootIndex !== null) {
-        targetIndex = bestOvershootIndex;
-      }
-    }
+      return bestUnderBudgetIndex ?? bestOvershootIndex ?? candidates[0] ?? 0;
+    };
+
+    const targetIndex = selectBestFitCandidate();
 
     shardAssignments[targetIndex].push(entry.shardCount ? {
       name: entry.name,

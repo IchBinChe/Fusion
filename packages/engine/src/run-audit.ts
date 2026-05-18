@@ -171,6 +171,10 @@ export type DatabaseMutationType =
   | "task:auto-recover-node-unreachable"
   | "task:auto-recover-worktree-metadata-rebound"
   | "task:auto-recover-worktree-metadata-cleared"
+  // task:auto-archived-ghost-bug metadata: { findings: Array<{ construct: { kind: string; raw: string; filePath?: string; line?: number }; matched: boolean; probeError?: string; output?: string }>; reason: string }
+  // task:auto-archived-duplicate metadata: { siblingTaskIds: string[]; scores: Record<string, number> }
+  | "task:auto-archived-ghost-bug"
+  | "task:auto-archived-duplicate"
   | "task:auto-reconciled-self-defeating-dep"
   /**
    * Metadata shape for node:handoff:* and node:lease:* events:

@@ -2174,8 +2174,8 @@ describe("TaskCard", () => {
 
       const orderedSelectors = [
         ".card-source-provenance",
-        ".card-github-tracking-chip",
         ".card-retry-badge",
+        ".card-github-tracking-chip",
         ".card-time-indicator",
       ];
       const orderedNodes = orderedSelectors.map((selector) => footerRow?.querySelector(selector));

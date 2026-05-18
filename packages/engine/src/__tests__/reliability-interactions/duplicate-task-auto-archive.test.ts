@@ -32,12 +32,12 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     const a = await fx.store.createTask({
       title: "fix: secrets sync typecheck",
       description: "typecheck error in secrets-sync",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
     const b = await fx.store.createTask({
       title: "fix: secrets sync typecheck regression",
       description: "typecheck error in secrets-sync",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
 
     expect((await fx.store.getTask(a.id)).column).toBe("triage");
@@ -55,12 +55,12 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     const a = await fx.store.createTask({
       title: "fix: secrets sync typecheck",
       description: "typecheck error in secrets-sync",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
     const b = await fx.store.createTask({
       title: "fix: secrets sync typecheck regression",
       description: "typecheck error in secrets-sync",
-      source: { sourceType: "agent", sourceAgentId: "agent-y" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-y" },
     });
 
     expect((await fx.store.getTask(a.id)).column).toBe("triage");
@@ -74,12 +74,12 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     const a = await fx.store.createTask({
       title: "fix: api timeout",
       description: "network timeout issue",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
     const b = await fx.store.createTask({
       title: "feat: add mission detail panel",
       description: "new dashboard ui",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
 
     expect((await fx.store.getTask(a.id)).column).toBe("triage");
@@ -96,13 +96,13 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     const a = await fx.store.createTask({
       title: "fix: secrets sync typecheck",
       description: "typecheck error in secrets-sync",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
     vi.setSystemTime(new Date(start.getTime() + 25 * 60 * 60 * 1000));
     const b = await fx.store.createTask({
       title: "fix: secrets sync typecheck regression",
       description: "typecheck error in secrets-sync",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
 
     expect((await fx.store.getTask(a.id)).column).toBe("triage");
@@ -116,7 +116,7 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     await fx.store.createTask({
       title: "fix: baseline",
       description: "desc",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
 
     vi.spyOn(fx.store, "listTasks").mockRejectedValueOnce(new Error("boom"));
@@ -124,7 +124,7 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     const b = await fx.store.createTask({
       title: "fix: baseline clone",
       description: "desc",
-      source: { sourceType: "agent", sourceAgentId: "agent-x" },
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
     });
 
     expect((await fx.store.getTask(b.id)).column).toBe("triage");

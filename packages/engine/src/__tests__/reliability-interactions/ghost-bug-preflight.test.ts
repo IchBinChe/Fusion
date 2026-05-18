@@ -49,7 +49,7 @@ describe("reliability interactions: ghost-bug preflight", () => {
   it("auto-archives when cited construct is missing", async () => {
     const fx = await createFixture();
     fixtures.push(fx);
-    const task = await fx.store.createTask({ title: "fix: missing construct", description: "typecheck error", prompt: "draft" });
+    const task = await fx.store.createTask({ title: "fix: missing construct", description: "typecheck error" });
 
     await (fx.triage as any).finalizeApprovedTask(
       task,
@@ -69,7 +69,7 @@ describe("reliability interactions: ghost-bug preflight", () => {
   it("passes to todo when construct exists", async () => {
     const fx = await createFixture();
     fixtures.push(fx);
-    const task = await fx.store.createTask({ title: "fix: existing construct", description: "typecheck error", prompt: "draft" });
+    const task = await fx.store.createTask({ title: "fix: existing construct", description: "typecheck error" });
 
     await (fx.triage as any).finalizeApprovedTask(
       task,
@@ -85,7 +85,7 @@ describe("reliability interactions: ghost-bug preflight", () => {
   it("keeps task when title is non-bug-shape and no constructs are cited", async () => {
     const fx = await createFixture();
     fixtures.push(fx);
-    const task = await fx.store.createTask({ title: "chore: dependency refresh", description: "typecheck error still reported", prompt: "draft" });
+    const task = await fx.store.createTask({ title: "chore: dependency refresh", description: "typecheck error still reported" });
 
     await (fx.triage as any).finalizeApprovedTask(
       task,
@@ -101,7 +101,7 @@ describe("reliability interactions: ghost-bug preflight", () => {
   it("fails open when probe throws", async () => {
     const fx = await createFixture();
     fixtures.push(fx);
-    const task = await fx.store.createTask({ title: "fix: throwing probe", description: "typecheck error", prompt: "draft" });
+    const task = await fx.store.createTask({ title: "fix: throwing probe", description: "typecheck error" });
     vi.spyOn(triagePreflight, "runGhostBugPreflight").mockRejectedValueOnce(new Error("boom"));
 
     await (fx.triage as any).finalizeApprovedTask(

@@ -295,6 +295,13 @@ export function assertNoSecretPlaintext(metadata?: Record<string, unknown>): voi
   }
 }
 
+/**
+ * Filesystem mutation metadata contracts for env-materialization events:
+ * - secret:env-write -> { filename, keyCount, fingerprint, overwritePolicy, keys: string[] }
+ * - secret:env-write-skipped -> { filename, reason: "disabled"|"no-secrets"|"not-gitignored"|"skip-existing"|"invalid-filename"|"no-store"|"list-failed", overwritePolicy?, checkIgnoreError?, symlink? }
+ * - secret:env-cleanup -> { filename, fingerprint, reason: "fingerprint-match"|"directory-missing" }
+ * - secret:env-cleanup-skipped -> { filename, reason: "fingerprint-mismatch"|"file-missing"|"no-record"|"disabled"|"stat-failed", checkError? }
+ */
 export type FilesystemMutationType =
   | "file:write"
   | "file:delete"

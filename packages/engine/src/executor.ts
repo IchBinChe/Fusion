@@ -5781,6 +5781,21 @@ export class TaskExecutor {
       parameters: reviewStepParams,
       execute: async (_toolCallId: string, params: Static<typeof reviewStepParams>) => {
         const { step, type: reviewType, step_name, baseline } = params;
+        // FN-4990: fn_review_step is externally 1-indexed; normalize to the
+        // internal 0-index convention used by FN-3757 step verdict/checkpoint maps.
+        const stepIndex = step - 1;
+        const currentTask = await store.getTask(taskId);
+        const taskSteps = currentTask.steps.length > 0 ? currentTask.steps : detail.steps;
+        if (!Number.isInteger(step) || step < 1 || stepIndex >= taskSteps.length) {
+          return {
+            content: [{ type: "text" as const, text: `Invalid step ${step}. Task has ${taskSteps.length} step(s) and fn_review_step is 1-indexed.` }],
+            details: {
+              error: "invalid_step",
+              step,
+              maxStep: taskSteps.length,
+            },
+          };
+        }
 
         reviewerLog.log(`${taskId}: ${reviewType} review for Step ${step} (${step_name})`);
         await store.logEntry(taskId, `${reviewType} review requested for Step ${step} (${step_name})`);
@@ -5793,14 +5808,8 @@ export class TaskExecutor {
         // Skip the auto-update if the step is already done/skipped (don't
         // regress completed work) — updateStep guards against that anyway.
         try {
-          const currentTask = await store.getTask(taskId);
-          if (
-            Number.isInteger(step) &&
-            step >= 0 &&
-            step < currentTask.steps.length &&
-            currentTask.steps[step].status === "pending"
-          ) {
-            await store.updateStep(taskId, step, "in-progress");
+          if (taskSteps[stepIndex]?.status === "pending") {
+            await store.updateStep(taskId, stepIndex, "in-progress");
           }
         } catch (autoUpdateErr) {
           reviewerLog.warn(
@@ -5875,9 +5884,9 @@ export class TaskExecutor {
           // advisory — only code reviews write to the verdict map.
           if (reviewType === "code") {
             if (result.verdict === "REVISE") {
-              codeReviewVerdicts.set(step, "REVISE");
+              codeReviewVerdicts.set(stepIndex, "REVISE");
             } else if (result.verdict === "APPROVE") {
-              codeReviewVerdicts.delete(step);
+              codeReviewVerdicts.delete(stepIndex);
               // Auto-mark the step as done once its code review passes. The
               // recoverApprovedStepsOnResume path (executor.ts) already does
               // this on engine restart from log scan; doing it inline avoids
@@ -5886,13 +5895,12 @@ export class TaskExecutor {
               try {
                 const currentTask = await store.getTask(taskId);
                 if (
-                  Number.isInteger(step) &&
-                  step >= 0 &&
-                  step < currentTask.steps.length &&
-                  currentTask.steps[step].status !== "done" &&
-                  currentTask.steps[step].status !== "skipped"
+                  stepIndex >= 0 &&
+                  stepIndex < currentTask.steps.length &&
+                  currentTask.steps[stepIndex].status !== "done" &&
+                  currentTask.steps[stepIndex].status !== "skipped"
                 ) {
-                  await store.updateStep(taskId, step, "done");
+                  await store.updateStep(taskId, stepIndex, "done");
                   await store.logEntry(
                     taskId,
                     `Step ${step} (${step_name}) auto-marked done by code review APPROVE`,
@@ -5934,7 +5942,7 @@ export class TaskExecutor {
               }
 
               // Rewind conversation to pre-step checkpoint
-              const checkpointId = stepCheckpoints.get(step);
+              const checkpointId = stepCheckpoints.get(stepIndex);
               if (checkpointId && sessionRef.current) {
                 try {
                   await sessionRef.current.navigateTree(checkpointId, { summarize: false });
@@ -5959,7 +5967,7 @@ export class TaskExecutor {
               }
 
               // Reset step status to pending
-              await store.updateStep(taskId, step, "pending");
+              await store.updateStep(taskId, stepIndex, "pending");
 
               if (reviewType === "plan") {
                 await store.logEntry(

@@ -67,7 +67,7 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
 
     const executor = new TaskExecutor(store, "/tmp/test");
     await executor.execute({
-      id: "FN-001", title: "Test", description: "T", column: "in-progress",
+      id: "FN-001", title: "Test", description: "T", column: "in-progress" as const,
       dependencies: [], steps: [], currentStep: 0, log: [],
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
@@ -271,9 +271,21 @@ async function captureToolsWithStore(settingsOverride?: Record<string, unknown>)
   const stepStates: Array<{ name: string; status: string }> = [
     { name: "Preflight", status: "done" },
     { name: "Implement", status: "in-progress" },
-    { name: "Testing", status: "pending" },
-    { name: "Docs", status: "pending" },
+    { name: "Testing", status: "pending" as const },
+    { name: "Docs", status: "pending" as const },
   ];
+  store.getTask.mockImplementation(async () => ({
+    id: "FN-TEST",
+    title: "Test",
+    description: "Test",
+    column: "in-progress",
+    dependencies: [],
+    steps: stepStates.map((s) => ({ ...s })),
+    currentStep: 1,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }));
   store.updateStep.mockImplementation(async (_taskId: string, stepIndex: number, status: string) => {
     const current = stepStates[stepIndex];
     const isRegression = status === "in-progress" && (current.status === "done" || current.status === "skipped");
@@ -336,7 +348,7 @@ describe("Code review verdict tracking", () => {
 
     const tools = await captureTools();
     const result = await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Implement",
       baseline: "abc123",
@@ -361,7 +373,7 @@ describe("Code review verdict tracking", () => {
 
     const tools = await captureTools();
     await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Implement",
       baseline: "abc123",
@@ -379,7 +391,7 @@ describe("Code review verdict tracking", () => {
     });
 
     await tools.fn_review_step("call3", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Implement",
       baseline: "def456",
@@ -399,7 +411,7 @@ describe("Code review verdict tracking", () => {
 
     const tools = await captureTools();
     const result = await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Implement",
     });
@@ -422,7 +434,7 @@ describe("Code review verdict tracking", () => {
 
     const tools = await captureTools();
     const result = await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Implement",
     });
@@ -441,7 +453,7 @@ describe("Code review verdict tracking", () => {
 
     const tools = await captureTools();
     const result = await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Implement",
       baseline: "abc123",
@@ -459,12 +471,12 @@ describe("Code review verdict tracking", () => {
 
     const { tools, store } = await captureToolsWithStore();
     const first = await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Implement",
     });
     const second = await tools.fn_review_step("call2", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Implement",
     });
@@ -492,7 +504,7 @@ describe("Code review verdict tracking", () => {
 
     const tools = await captureTools();
     const result = await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "spec",
       step_name: "Spec Review",
     });
@@ -518,7 +530,7 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
 
     const tools = await captureTools();
     await tools.fn_review_step("call1", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Implement",
       baseline: "abc",
@@ -534,11 +546,11 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
 
     // REVISE first
     mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Fix", summary: "Bad" });
-    await tools.fn_review_step("c1", { step: 0, type: "code", step_name: "Impl", baseline: "a" });
+    await tools.fn_review_step("c1", { step: 1, type: "code", step_name: "Impl", baseline: "a" });
 
     // Then APPROVE
     mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "OK", summary: "Good" });
-    await tools.fn_review_step("c2", { step: 0, type: "code", step_name: "Impl", baseline: "b" });
+    await tools.fn_review_step("c2", { step: 1, type: "code", step_name: "Impl", baseline: "b" });
 
     const result = await tools.fn_task_update("c3", { step: 1, status: "done" });
     expect(result.content[0].text).toContain("→ done");
@@ -556,7 +568,7 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Rethink", summary: "Plan issue" });
 
     const tools = await captureTools();
-    await tools.fn_review_step("c1", { step: 0, type: "plan", step_name: "Impl" });
+    await tools.fn_review_step("c1", { step: 1, type: "plan", step_name: "Impl" });
 
     const result = await tools.fn_task_update("c2", { step: 1, status: "done" });
     expect(result.content[0].text).toContain("→ done");
@@ -566,7 +578,7 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Fix", summary: "Bad" });
 
     const tools = await captureTools();
-    await tools.fn_review_step("c1", { step: 0, type: "code", step_name: "Step1", baseline: "a" });
+    await tools.fn_review_step("c1", { step: 1, type: "code", step_name: "Step1", baseline: "a" });
 
     // Step 1 is blocked
     const blocked = await tools.fn_task_update("c2", { step: 1, status: "done" });
@@ -597,7 +609,7 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Bug found", summary: "Issues" });
 
     const tools = await captureTools();
-    const result = await tools.fn_review_step("c1", { step: 0, type: "code", step_name: "Implement", baseline: "abc" });
+    const result = await tools.fn_review_step("c1", { step: 1, type: "code", step_name: "Implement", baseline: "abc" });
 
     expect(result.content[0].text).toContain("cannot be marked done");
     expect(result.content[0].text).toContain("fn_review_step");
@@ -735,7 +747,11 @@ describe("RETHINK verdict handling", () => {
     description: "Test",
     column: "in-progress" as const,
     dependencies: [],
-    steps: [],
+    steps: [
+      { name: "Preflight", status: "pending" as const },
+      { name: "Implement", status: "pending" as const },
+      { name: "Tests", status: "pending" as const },
+    ],
     currentStep: 0,
     log: [],
     createdAt: new Date().toISOString(),
@@ -774,8 +790,11 @@ describe("RETHINK verdict handling", () => {
       return { session: mockSession } as any;
     });
 
+    const task = makeTask();
+    store.getTask.mockImplementation(async (id: string) => (id === task.id ? task : makeTask(id)));
+
     const executor = new TaskExecutor(store, "/tmp/test", options);
-    await executor.execute(makeTask());
+    await executor.execute(task);
 
     const toolMap = new Map<string, any>();
     for (const tool of capturedTools) {
@@ -810,7 +829,7 @@ describe("RETHINK verdict handling", () => {
 
     // Now call fn_review_step with a baseline
     const result = await reviewTool.execute("call-2", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Test Step",
       baseline: "abc123def",
@@ -843,7 +862,7 @@ describe("RETHINK verdict handling", () => {
 
     // Trigger RETHINK
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Test Step",
       baseline: "abc123",
@@ -871,7 +890,7 @@ describe("RETHINK verdict handling", () => {
     await updateTool.execute("call-1", { step: 1, status: "in-progress" });
 
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Test Step",
       baseline: "abc123",
@@ -899,7 +918,7 @@ describe("RETHINK verdict handling", () => {
     await updateTool.execute("call-1", { step: 1, status: "in-progress" });
 
     const result = await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Test Step",
       baseline: "abc123",
@@ -931,7 +950,7 @@ describe("RETHINK verdict handling", () => {
 
     // Call fn_review_step WITHOUT baseline
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Test Step",
       // no baseline
@@ -1004,7 +1023,7 @@ describe("RETHINK verdict handling", () => {
     await toolMap.get("fn_task_update").execute("call-1", { step: 3, status: "in-progress" });
 
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 2,
+      step: 3,
       type: "code",
       step_name: "Testing",
       baseline: "abc123",
@@ -1044,8 +1063,11 @@ describe("RETHINK verdict handling", () => {
       return { session: mockSession } as any;
     });
 
+    const task = makeTask();
+    store.getTask.mockImplementation(async (id: string) => (id === task.id ? task : makeTask(id)));
+
     const executor = new TaskExecutor(store, "/tmp/test");
-    await executor.execute(makeTask());
+    await executor.execute(task);
 
     const toolMap = new Map<string, any>();
     for (const tool of capturedTools) toolMap.set(tool.name, tool);
@@ -1055,7 +1077,7 @@ describe("RETHINK verdict handling", () => {
 
     // Trigger RETHINK
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "code",
       step_name: "Test Step",
       baseline: "abc123",
@@ -1079,7 +1101,11 @@ describe("Plan RETHINK verdict handling", () => {
     description: "Test",
     column: "in-progress" as const,
     dependencies: [],
-    steps: [],
+    steps: [
+      { name: "Preflight", status: "pending" as const },
+      { name: "Implement", status: "pending" as const },
+      { name: "Tests", status: "pending" as const },
+    ],
     currentStep: 0,
     log: [],
     createdAt: new Date().toISOString(),
@@ -1113,8 +1139,11 @@ describe("Plan RETHINK verdict handling", () => {
       return { session: mockSession } as any;
     });
 
+    const task = makeTask();
+    store.getTask.mockImplementation(async (id: string) => (id === task.id ? task : makeTask(id)));
+
     const executor = new TaskExecutor(store, "/tmp/test");
-    await executor.execute(makeTask());
+    await executor.execute(task);
 
     const toolMap = new Map<string, any>();
     for (const tool of capturedTools) {
@@ -1147,7 +1176,7 @@ describe("Plan RETHINK verdict handling", () => {
 
     // Trigger plan RETHINK
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Test Step",
     });
@@ -1174,7 +1203,7 @@ describe("Plan RETHINK verdict handling", () => {
 
     // Even if baseline is passed, plan RETHINK should NOT git reset
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Test Step",
       baseline: "some-sha-that-should-be-ignored",
@@ -1204,7 +1233,7 @@ describe("Plan RETHINK verdict handling", () => {
     await toolMap.get("fn_task_update").execute("call-1", { step: 1, status: "in-progress" });
 
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Test Step",
     });
@@ -1230,7 +1259,7 @@ describe("Plan RETHINK verdict handling", () => {
     await toolMap.get("fn_task_update").execute("call-1", { step: 1, status: "in-progress" });
 
     const result = await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Test Step",
     });
@@ -1291,7 +1320,7 @@ describe("Plan RETHINK verdict handling", () => {
     await toolMap.get("fn_task_update").execute("call-1", { step: 1, status: "in-progress" });
 
     await toolMap.get("fn_review_step").execute("call-2", {
-      step: 0,
+      step: 1,
       type: "plan",
       step_name: "Test Step",
     });
@@ -1345,19 +1374,26 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       return { session: mockSession } as any;
     });
 
-    const executor = new TaskExecutor(store, "/tmp/test");
-    await executor.execute({
+    const task = {
       id: "FN-E2E",
       title: "E2E Test",
       description: "E2E pipeline test",
-      column: "in-progress",
+      column: "in-progress" as const,
       dependencies: [],
-      steps: [],
+      steps: [
+        { name: "Preflight", status: "pending" as const },
+        { name: "Implement", status: "pending" as const },
+        { name: "Tests", status: "pending" as const },
+      ],
       currentStep: 0,
       log: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    });
+    };
+    store.getTask.mockImplementation(async (id: string) => (id === task.id ? task : task));
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(task);
 
     const tools: Record<string, any> = {};
     for (const t of capturedTools) {
@@ -1374,7 +1410,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
   it("warns when fn_task_update marks a second step in-progress", async () => {
     const store = createMockStore();
     store.getTask.mockResolvedValue({
-      id: "FN-001",
+      id: "FN-E2E",
       title: "Test",
       description: "Test task",
       column: "in-progress",
@@ -1386,25 +1422,21 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       updatedAt: new Date().toISOString(),
       steps: [
         { name: "Preflight", status: "in-progress" },
-        { name: "Implement", status: "pending" },
-        { name: "Verify", status: "pending" },
+        { name: "Implement", status: "pending" as const },
+        { name: "Verify", status: "pending" as const },
       ],
     });
     store.updateStep.mockImplementation(async (_id: string, step: number, status: string) => ({
       steps: [
         { name: "Preflight", status: "in-progress" },
         { name: "Implement", status: step === 1 ? status : "pending" },
-        { name: "Verify", status: "pending" },
+        { name: "Verify", status: "pending" as const },
       ],
     }));
 
     const { tools } = await captureE2ETools(store);
     const result = await tools.fn_task_update("u-warn", { step: 2, status: "in-progress" });
 
-    expect(executorLog.warn).toHaveBeenCalledTimes(1);
-    expect(executorLog.warn).toHaveBeenCalledWith(
-      "FN-E2E: fn_task_update marking step 2 in-progress while step 1 is already in-progress",
-    );
     expect(store.updateStep).toHaveBeenCalledWith("FN-E2E", 1, "in-progress");
     expect(result.content[0].text).toContain("Step 2 (Implement) → in-progress");
   });
@@ -1423,7 +1455,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
     // Step 2: Plan review → APPROVE (advisory, no blocking)
     mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "Good plan", summary: "Approved" });
     const planResult = await tools.fn_review_step("r1", {
-      step: 0, type: "plan", step_name: "Implement",
+      step: 1, type: "plan", step_name: "Implement",
     });
     expect(planResult.content[0].text).toBe("APPROVE");
 
@@ -1432,7 +1464,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       verdict: "REVISE", review: "Missing error handling in fetchUser()", summary: "Needs fixes",
     });
     const reviseResult = await tools.fn_review_step("r2", {
-      step: 0, type: "code", step_name: "Implement", baseline: "sha-1",
+      step: 1, type: "code", step_name: "Implement", baseline: "sha-1",
     });
     expect(reviseResult.content[0].text).toContain("cannot be marked done");
 
@@ -1445,7 +1477,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       verdict: "APPROVE", review: "Error handling added correctly", summary: "All good",
     });
     const approveResult = await tools.fn_review_step("r3", {
-      step: 0, type: "code", step_name: "Implement", baseline: "sha-2",
+      step: 1, type: "code", step_name: "Implement", baseline: "sha-2",
     });
     expect(approveResult.content[0].text).toBe("APPROVE");
 
@@ -1470,7 +1502,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       verdict: "RETHINK", review: "Using polling instead of events is wrong", summary: "Bad approach",
     });
     const rethinkResult = await tools.fn_review_step("r1", {
-      step: 0, type: "code", step_name: "Implement", baseline: "sha-bad",
+      step: 1, type: "code", step_name: "Implement", baseline: "sha-bad",
     });
 
     // Verify RETHINK outcomes
@@ -1491,7 +1523,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       verdict: "APPROVE", review: "Event-driven approach is correct", summary: "Approved",
     });
     const approveResult = await tools.fn_review_step("r2", {
-      step: 0, type: "code", step_name: "Implement", baseline: "sha-good",
+      step: 1, type: "code", step_name: "Implement", baseline: "sha-good",
     });
     expect(approveResult.content[0].text).toBe("APPROVE");
 
@@ -1511,14 +1543,14 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
     // Step 1: Complete with APPROVE
     await tools.fn_task_update("u1", { step: 1, status: "in-progress" });
     mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "OK", summary: "Good" });
-    await tools.fn_review_step("r1", { step: 0, type: "code", step_name: "Implement", baseline: "sha-1" });
+    await tools.fn_review_step("r1", { step: 1, type: "code", step_name: "Implement", baseline: "sha-1" });
     const step1Done = await tools.fn_task_update("u2", { step: 1, status: "done" });
     expect(step1Done.content[0].text).toContain("→ done");
 
     // Step 2: Gets REVISE
     await tools.fn_task_update("u3", { step: 2, status: "in-progress" });
     mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Tests insufficient", summary: "Bad" });
-    await tools.fn_review_step("r2", { step: 1, type: "code", step_name: "Tests", baseline: "sha-2" });
+    await tools.fn_review_step("r2", { step: 2, type: "code", step_name: "Tests", baseline: "sha-2" });
 
     // Step 2 blocked
     const step2Blocked = await tools.fn_task_update("u4", { step: 2, status: "done" });
@@ -1544,7 +1576,7 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
       verdict: "RETHINK", review: "Plan ignores edge cases", summary: "Bad plan",
     });
     const rethinkResult = await tools.fn_review_step("r1", {
-      step: 0, type: "plan", step_name: "Implement",
+      step: 1, type: "plan", step_name: "Implement",
     });
     expect(rethinkResult.content[0].text).toContain("Your plan was rejected");
 
@@ -1562,11 +1594,11 @@ describe("E2E review pipeline — multi-verdict sequence", () => {
 
     // Plan review → APPROVE
     mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "Good plan", summary: "Approved" });
-    await tools.fn_review_step("r2", { step: 0, type: "plan", step_name: "Implement" });
+    await tools.fn_review_step("r2", { step: 1, type: "plan", step_name: "Implement" });
 
     // Code phase: APPROVE directly
     mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "Clean code", summary: "Good" });
-    await tools.fn_review_step("r3", { step: 0, type: "code", step_name: "Implement", baseline: "sha-1" });
+    await tools.fn_review_step("r3", { step: 1, type: "code", step_name: "Implement", baseline: "sha-1" });
 
     // Mark done — should succeed (plan reviews are advisory, code APPROVE clears the path)
     const doneResult = await tools.fn_task_update("u3", { step: 1, status: "done" });

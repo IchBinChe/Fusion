@@ -53,7 +53,6 @@ export async function archiveAsSameAgentDuplicate(
   siblingIds: string[],
   scores: Record<string, number>,
 ): Promise<void> {
-  await store.moveTask(taskId, "archived");
   await store.logEntry(
     taskId,
     "Auto-archived as same-agent duplicate",
@@ -66,4 +65,5 @@ export async function archiveAsSameAgentDuplicate(
     details: "Auto-archived as same-agent duplicate during intake",
     metadata: { siblingTaskIds: siblingIds, scores },
   });
+  await store.moveTask(taskId, "archived");
 }

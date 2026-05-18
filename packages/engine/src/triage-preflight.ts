@@ -106,7 +106,14 @@ export async function probeCitedConstructs(
 
       const { stdout, stderr } = await opts.exec(command, { cwd: opts.cwd, timeoutMs });
       if (construct.kind === "command") {
-        findings.push({ construct, matched: true, output: `${stdout}${stderr}`.trim() });
+        // FN-4892: command probes are intentionally non-definitive here because
+        // ProbeExec does not expose exit codes. Keep fail-open behavior.
+        findings.push({
+          construct,
+          matched: true,
+          output: `${stdout}${stderr}`.trim(),
+          probeError: "exit_code_unavailable",
+        });
         continue;
       }
       const output = `${stdout}${stderr}`.trim();

@@ -67,7 +67,6 @@ export async function archiveAsGhostBug(
   taskTitle: string,
   decision: GhostBugDecision,
 ): Promise<void> {
-  await store.moveTask(taskId, "archived");
   await store.logEntry(
     taskId,
     "Auto-archived as ghost bug — cited code construct not present on main",
@@ -83,6 +82,7 @@ export async function archiveAsGhostBug(
       findings: decision.findings.slice(0, 10),
     },
   });
+  await store.moveTask(taskId, "archived");
 }
 
 async function classifyOwnedLandedEvidenceForSelfHealing(rootDir: string, task: Task, mergeTargetBranch: string): Promise<OwnedLandedClassification> {

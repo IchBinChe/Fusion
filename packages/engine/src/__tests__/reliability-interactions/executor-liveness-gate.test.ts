@@ -42,7 +42,7 @@ describe("reliability interactions: FN-4935 executor liveness gate", () => {
     }) as any);
   });
 
-  it("skips gate for fresh acquisition", async () => {
+  it("FN-4935 regression: fresh post-create acquisition does not emit not_usable_task_worktree startup failure", async () => {
     const classifySpy = vi.spyOn(worktreePool, "classifyTaskWorktree").mockResolvedValue({ ok: false, classification: "unregistered", reason: "not registered in git worktree list" });
     vi.spyOn(worktreeAcquisition, "acquireTaskWorktree").mockResolvedValue({
       worktreePath: "/repo/.worktrees/new-path",
@@ -58,9 +58,14 @@ describe("reliability interactions: FN-4935 executor liveness gate", () => {
 
     expect(classifySpy).not.toHaveBeenCalled();
     expect(mockedCreateFnAgent).toHaveBeenCalled();
+    expect(
+      store.logEntry.mock.calls.some(
+        (call: unknown[]) => call[0] === "FN-4935-T" && typeof call[1] === "string" && call[1].includes("not_usable_task_worktree"),
+      ),
+    ).toBe(false);
   });
 
-  it("gates pooled acquisition and requeues with audit event", async () => {
+  it("FN-4935 regression guard: pooled unusable worktree still fails with recoverable unregistered classification", async () => {
     vi.spyOn(worktreeAcquisition, "acquireTaskWorktree").mockResolvedValue({
       worktreePath: "/repo/.worktrees/new-path",
       branch: "fusion/fn-4935-t",

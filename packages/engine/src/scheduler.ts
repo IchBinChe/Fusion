@@ -103,6 +103,91 @@ export function filterPathsByIgnoreList(paths: string[], ignorePaths?: string[])
   return paths.filter((path) => !normalizedIgnorePaths.some((ignore) => isIgnoredOverlapPath(path, ignore)));
 }
 
+type ConcurrencyGateName = "maxConcurrent" | "maxWorktrees" | "semaphore";
+
+interface ConcurrencyGateSnapshot {
+  used: number;
+  limit: number;
+  slack: number;
+}
+
+interface ConcurrencyGateDiagnostic {
+  available: number;
+  bindingGates: ConcurrencyGateName[];
+  maxConcurrentGate: ConcurrencyGateSnapshot;
+  maxWorktreesGate: ConcurrencyGateSnapshot;
+  semaphoreGate?: ConcurrencyGateSnapshot;
+  holders: {
+    maxConcurrent: string[];
+    maxWorktrees: string[];
+    semaphore?: string[];
+  };
+}
+
+function computeConcurrencyGateDiagnostic(params: {
+  agentSlots: number;
+  maxConcurrent: number;
+  activeWorktrees: number;
+  maxWorktrees: number;
+  semaphore?: AgentSemaphore;
+  inProgressTaskIds: string[];
+  available: number;
+}): ConcurrencyGateDiagnostic {
+  const maxConcurrentGate: ConcurrencyGateSnapshot = {
+    used: params.agentSlots,
+    limit: params.maxConcurrent,
+    slack: params.maxConcurrent - params.agentSlots,
+  };
+  const maxWorktreesGate: ConcurrencyGateSnapshot = {
+    used: params.activeWorktrees,
+    limit: params.maxWorktrees,
+    slack: params.maxWorktrees - params.activeWorktrees,
+  };
+  const semaphoreGate = params.semaphore
+    ? {
+      used: params.semaphore.activeCount,
+      limit: params.semaphore.limit,
+      slack: params.semaphore.availableCount,
+    }
+    : undefined;
+
+  const bindingGates: ConcurrencyGateName[] = [];
+  if (maxConcurrentGate.slack === params.available) bindingGates.push("maxConcurrent");
+  if (maxWorktreesGate.slack === params.available) bindingGates.push("maxWorktrees");
+  if (semaphoreGate && semaphoreGate.slack === params.available) bindingGates.push("semaphore");
+
+  return {
+    available: params.available,
+    bindingGates,
+    maxConcurrentGate,
+    maxWorktreesGate,
+    semaphoreGate,
+    holders: {
+      maxConcurrent: [...params.inProgressTaskIds],
+      maxWorktrees: [...params.inProgressTaskIds],
+      semaphore: semaphoreGate ? [...params.inProgressTaskIds] : undefined,
+    },
+  };
+}
+
+function formatConcurrencyLimitReason(diagnostic: ConcurrencyGateDiagnostic): string {
+  const holdersText = (gate: ConcurrencyGateName): string => {
+    const holders = diagnostic.holders[gate];
+    return holders && holders.length > 0 ? holders.join(", ") : "none";
+  };
+  const gateLabel = diagnostic.bindingGates.join(", ");
+  const details = [
+    `maxConcurrent used=${diagnostic.maxConcurrentGate.used}/${diagnostic.maxConcurrentGate.limit} (holders: ${holdersText("maxConcurrent")})`,
+    `maxWorktrees used=${diagnostic.maxWorktreesGate.used}/${diagnostic.maxWorktreesGate.limit} (holders: ${holdersText("maxWorktrees")})`,
+  ];
+  if (diagnostic.semaphoreGate) {
+    details.push(
+      `semaphore used=${diagnostic.semaphoreGate.used}/${diagnostic.semaphoreGate.limit} (holders: ${holdersText("semaphore")}; note: semaphore slots may include triage/merge agents outside in-progress)`,
+    );
+  }
+  return `queued — concurrency limit reached: gate=${gateLabel}; ${details.join("; ")}`;
+}
+
 export interface SchedulerOptions {
   /** Max concurrent in-progress tasks. Default: 2 */
   maxConcurrent?: number;
@@ -501,15 +586,41 @@ export class Scheduler {
     }
   }
 
-  private async logDispatchQueuedReason(taskId: string, reason: string): Promise<void> {
+  private async logDispatchQueuedReason(taskId: string, reason: string): Promise<boolean> {
     const key = `${taskId}:${reason}`;
     if (this.wasDispatchQueuedReasonLogged.has(key)) {
-      return;
+      return false;
     }
 
     this.clearDispatchQueuedReasonMemo(taskId);
     this.wasDispatchQueuedReasonLogged.add(key);
     await this.store.logEntry(taskId, reason);
+    return true;
+  }
+
+  private async emitDispatchQueuedConcurrencyAudit(task: Task, diagnostic: ConcurrencyGateDiagnostic): Promise<void> {
+    try {
+      await this.store.recordRunAuditEvent?.({
+        taskId: task.id,
+        agentId: "scheduler",
+        runId: generateSyntheticRunId("scheduler", task.id),
+        domain: "database",
+        mutationType: "scheduler:dispatch-queued-concurrency",
+        target: task.id,
+        metadata: {
+          bindingGates: diagnostic.bindingGates,
+          maxConcurrent: diagnostic.maxConcurrentGate,
+          maxWorktrees: diagnostic.maxWorktreesGate,
+          semaphore: diagnostic.semaphoreGate,
+          holders: diagnostic.holders,
+          available: diagnostic.available,
+        },
+      });
+    } catch (error) {
+      schedulerLog.warn(
+        `Task ${task.id} failed to emit dispatch queued concurrency audit: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private async emitNodeUnreachableRecoveryAudit(
@@ -771,6 +882,16 @@ export class Scheduler {
         maxWorktrees - activeWorktrees,
         semaphoreAvailable,
       );
+      const inProgressTaskIds = inProgress.map((task) => task.id);
+      const concurrencyGateDiagnostic = computeConcurrencyGateDiagnostic({
+        agentSlots,
+        maxConcurrent,
+        activeWorktrees,
+        maxWorktrees,
+        semaphore: this.options.semaphore,
+        inProgressTaskIds,
+        available,
+      });
       if (available <= 0) return;
 
       const now = Date.now();
@@ -999,7 +1120,11 @@ export class Scheduler {
 
         // Dependencies met — check concurrency
         if (started >= available) {
-          await this.logDispatchQueuedReason(task.id, `queued — concurrency limit reached (${available} available)`);
+          const reason = formatConcurrencyLimitReason(concurrencyGateDiagnostic);
+          const didLog = await this.logDispatchQueuedReason(task.id, reason);
+          if (didLog) {
+            await this.emitDispatchQueuedConcurrencyAudit(task, concurrencyGateDiagnostic);
+          }
           continue;
         }
 

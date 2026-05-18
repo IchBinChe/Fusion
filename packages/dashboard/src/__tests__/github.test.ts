@@ -316,6 +316,113 @@ describe("GitHubClient", () => {
 
       await expect(client.createPr(mockPrParams)).rejects.toThrow("gh auth login");
     });
+
+    it.each([
+      {
+        name: "draft true with reviewers",
+        draft: true,
+        reviewers: ["alice", "bob"],
+        expectedFlags: ["--draft", "--reviewer", "alice,bob"],
+      },
+      {
+        name: "no draft and empty reviewers",
+        draft: undefined,
+        reviewers: [],
+        expectedFlags: [],
+      },
+    ])("passes optional gh create flags: $name", async ({ draft, reviewers, expectedFlags }) => {
+      mockRunGh.mockReturnValue("https://github.com/test-owner/test-repo/pull/42\n");
+
+      await client.createPr({
+        ...mockPrParams,
+        draft,
+        reviewers,
+      });
+
+      const callArgs = mockRunGh.mock.calls[0][0];
+      if (expectedFlags.length > 0) {
+        expect(callArgs).toEqual(expect.arrayContaining(expectedFlags));
+      } else {
+        expect(callArgs).not.toContain("--draft");
+        expect(callArgs).not.toContain("--reviewer");
+      }
+    });
+
+    it("sends draft body + reviewer request via REST API", async () => {
+      mockRunGh.mockImplementation(() => {
+        throw new Error("gh command failed");
+      });
+      const clientWithToken = new GitHubClient("ghp_token");
+      const fetchSpy = vi.spyOn(global, "fetch" as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            number: 42,
+            html_url: "https://github.com/test-owner/test-repo/pull/42",
+            title: "Test PR",
+            state: "open",
+            draft: true,
+            head: { ref: "feature-branch" },
+            base: { ref: "main" },
+            comments: 0,
+          }),
+        } as any)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({}) } as any);
+
+      const result = await clientWithToken.createPr({
+        ...mockPrParams,
+        draft: true,
+        reviewers: ["alice", "bob"],
+      });
+
+      const createPrRequest = fetchSpy.mock.calls[0];
+      expect(createPrRequest[0]).toContain("/repos/test-owner/test-repo/pulls");
+      expect(createPrRequest[1]?.body).toContain('"draft":true');
+
+      const reviewersRequest = fetchSpy.mock.calls[1];
+      expect(reviewersRequest[0]).toContain("/repos/test-owner/test-repo/pulls/42/requested_reviewers");
+      expect(reviewersRequest[1]?.body).toBe(JSON.stringify({ reviewers: ["alice", "bob"] }));
+      expect(result.draft).toBe(true);
+
+      fetchSpy.mockRestore();
+    });
+
+    it("returns PR result when REST reviewer request fails", async () => {
+      mockRunGh.mockImplementation(() => {
+        throw new Error("gh command failed");
+      });
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      const clientWithToken = new GitHubClient("ghp_token");
+      const fetchSpy = vi.spyOn(global, "fetch" as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            number: 99,
+            html_url: "https://github.com/test-owner/test-repo/pull/99",
+            title: "Test PR",
+            state: "open",
+            head: { ref: "feature-branch" },
+            base: { ref: "main" },
+            comments: 0,
+          }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 422,
+          statusText: "Unprocessable",
+          json: async () => ({ message: "Reviewers are invalid" }),
+        } as any);
+
+      const result = await clientWithToken.createPr({
+        ...mockPrParams,
+        reviewers: ["alice", "bob"],
+      });
+
+      expect(result.number).toBe(99);
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("failed to request reviewers for PR #99"));
+      fetchSpy.mockRestore();
+      stderrSpy.mockRestore();
+    });
   });
 
   describe("getPrStatus", () => {

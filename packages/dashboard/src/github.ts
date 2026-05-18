@@ -58,6 +58,10 @@ export interface CreatePrParams {
   body?: string;
   head: string;
   base?: string;
+  /** Open the PR in draft state (gh `--draft`, REST `draft: true`). Default false. */
+  draft?: boolean;
+  /** GitHub login handles to request review from. Empty/undefined → no reviewers requested. */
+  reviewers?: string[];
 }
 
 export interface CreateIssueParams {
@@ -625,7 +629,7 @@ export class GitHubClient {
   }
 
   private createPrWithGh(params: CreatePrParams): PrInfo {
-    const { owner: paramOwner, repo: paramRepo, title, body, head, base } = params;
+    const { owner: paramOwner, repo: paramRepo, title, body, head, base, draft, reviewers } = params;
     const { owner, repo } = this.resolveRepo(paramOwner, paramRepo);
 
     // Build gh pr create command arguments (as array for safety)
@@ -641,6 +645,13 @@ export class GitHubClient {
     }
     if (base) {
       args.push("--base", base);
+    }
+    if (draft) {
+      args.push("--draft");
+    }
+    if (reviewers && reviewers.length > 0) {
+      // Prefer single create call: gh supports `pr create --reviewer <login[,login...]>`.
+      args.push("--reviewer", reviewers.join(","));
     }
 
     // Use gh-cli module to execute
@@ -667,7 +678,7 @@ export class GitHubClient {
   }
 
   private async createPrWithApi(params: CreatePrParams): Promise<PrInfo> {
-    const { owner: paramOwner, repo: paramRepo, title, body, head, base = "main" } = params;
+    const { owner: paramOwner, repo: paramRepo, title, body, head, base = "main", draft, reviewers } = params;
     const { owner, repo } = this.resolveRepo(paramOwner, paramRepo);
 
     const url = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`;
@@ -682,6 +693,7 @@ export class GitHubClient {
         body: body || "",
         head,
         base,
+        draft: draft === true,
       }),
     });
 
@@ -695,10 +707,31 @@ export class GitHubClient {
       html_url: string;
       title: string;
       state: string;
+      draft?: boolean;
       head: { ref: string };
       base: { ref: string };
       comments: number;
     };
+
+    if (reviewers && reviewers.length > 0) {
+      const requestedReviewersUrl = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${data.number}/requested_reviewers`;
+      try {
+        const requestedReviewersResponse = await fetch(requestedReviewersUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reviewers }),
+        });
+        if (!requestedReviewersResponse.ok) {
+          const reviewerError = await requestedReviewersResponse.json().catch(() => ({ message: requestedReviewersResponse.statusText }));
+          process.stderr.write(
+            `[github] failed to request reviewers for PR #${data.number}: ${requestedReviewersResponse.status} ${reviewerError.message || requestedReviewersResponse.statusText}\n`,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`[github] failed to request reviewers for PR #${data.number}: ${message}\n`);
+      }
+    }
 
     return toPrInfo({
       url: data.html_url,
@@ -708,6 +741,7 @@ export class GitHubClient {
       headBranch: data.head.ref,
       baseBranch: data.base.ref,
       commentCount: data.comments,
+      isDraft: data.draft,
     });
   }
 

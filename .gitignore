@@ -14,10 +14,22 @@ dist-electron/
 # Desktop packaging artifacts
 *.dmg
 *.dmg.blockmap
+*.zip
 *.zip.blockmap
 *.AppImage
 *.exe
 *.nupkg
+*.tgz
+*.tar.gz
+*.pkg
+*.msi
+*.deb
+*.rpm
+*.snap
+*.blockmap
+latest*.yml
+builder-debug.yml
+builder-effective-config.yaml
 
 # Coverage reports
 coverage/

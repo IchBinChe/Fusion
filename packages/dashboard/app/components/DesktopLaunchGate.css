@@ -30,7 +30,7 @@
 
 .desktop-launch-gate__panel p {
   margin: 0 0 1.25rem;
-  color: var(--text-secondary, #9ca3af);
+  color: var(--text-muted, #9ca3af);
   font-size: 0.9375rem;
   line-height: 1.5;
 }

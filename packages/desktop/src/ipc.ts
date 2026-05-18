@@ -174,6 +174,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, tray: Tray, optio
     return emitShellState(mainWindow, options.getRuntimeStatus);
   });
 
+  ipcMain.handle("shell:resetDesktopMode", async () => {
+    const settings = await readShellSettings();
+    settings.desktopMode = null;
+    settings.hasCompletedModeSelection = false;
+    await writeShellSettings(settings);
+    // Stop the embedded runtime so a subsequent local choice spins up fresh.
+    await options.stopLocalRuntime?.().catch(() => undefined);
+    return emitShellState(mainWindow, options.getRuntimeStatus);
+  });
+
   ipcMain.handle("shell:startQrScan", async () => {
     throw new Error("QR scanning is not available in desktop shell");
   });

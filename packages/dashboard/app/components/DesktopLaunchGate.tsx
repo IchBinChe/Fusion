@@ -117,6 +117,27 @@ export function DesktopLaunchGate({ children }: PropsWithChildren) {
     };
   }, []);
 
+  useEffect(() => {
+    const shell = getFusionShell();
+    if (!shell?.onResetDesktopModeRequest || !shell.resetDesktopMode) {
+      return;
+    }
+    return shell.onResetDesktopModeRequest(() => {
+      void (async () => {
+        try {
+          await shell.resetDesktopMode?.();
+        } catch {
+          // Reset best-effort; we still reload to give the user a fresh
+          // chooser even if the IPC failed.
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.delete("serverBaseUrl");
+        url.searchParams.delete("shellMode");
+        window.location.replace(url.toString());
+      })();
+    });
+  }, []);
+
   if (phase.kind === "loading" || phase.kind === "starting-local") {
     const message = phase.kind === "loading" ? "Loading Fusion…" : phase.message;
     return (

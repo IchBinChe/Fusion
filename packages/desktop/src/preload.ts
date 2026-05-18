@@ -114,6 +114,12 @@ const fusionShell = {
   getDesktopModeState: (): Promise<{ isFirstRun: boolean; desktopMode: "local" | "remote" | null }> =>
     ipcRenderer.invoke("shell:getDesktopModeState"),
   setDesktopMode: (mode: "local" | "remote"): Promise<ShellConnectionState> => ipcRenderer.invoke("shell:setDesktopMode", mode),
+  resetDesktopMode: (): Promise<ShellConnectionState> => ipcRenderer.invoke("shell:resetDesktopMode"),
+  onResetDesktopModeRequest: (callback: () => void): (() => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("shell:reset-desktop-mode-request", handler);
+    return () => ipcRenderer.removeListener("shell:reset-desktop-mode-request", handler);
+  },
   startQrScan: (): Promise<{ serverUrl: string; authToken?: string | null }> => ipcRenderer.invoke("shell:startQrScan"),
   openConnectionManager: (): Promise<void> => ipcRenderer.invoke("shell:openConnectionManager"),
   subscribe: (listener: (state: ShellConnectionState) => void): (() => void) => {

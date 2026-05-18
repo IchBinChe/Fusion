@@ -45,6 +45,8 @@ export interface FusionShellApi {
   deleteProfile(profileId: string): Promise<void>;
   setActiveProfile(profileId: string | null): Promise<ShellConnectionState>;
   setDesktopMode(mode: "local" | "remote"): Promise<ShellConnectionState>;
+  resetDesktopMode?(): Promise<ShellConnectionState>;
+  onResetDesktopModeRequest?(callback: () => void): () => void;
   startQrScan(): Promise<{ serverUrl: string; authToken?: string | null }>;
   openConnectionManager(): Promise<void>;
   subscribe(listener: (state: ShellConnectionState) => void): () => void;

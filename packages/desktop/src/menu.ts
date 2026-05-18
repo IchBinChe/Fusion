@@ -10,6 +10,24 @@ export interface AppMenuOptions {
   appName: string;
 }
 
+function buildConnectionSubmenu(options: AppMenuOptions): MenuItemConstructorOptions {
+  const { mainWindow } = options;
+  return {
+    label: "Connection",
+    submenu: [
+      {
+        label: "Change Launch Mode…",
+        click: () => {
+          // The renderer-side gate listens for this and calls
+          // shell.resetDesktopMode() before reloading without the cached
+          // serverBaseUrl query param.
+          mainWindow.webContents.send("shell:reset-desktop-mode-request");
+        },
+      },
+    ],
+  };
+}
+
 function buildAppSubmenu(options: AppMenuOptions): MenuItemConstructorOptions {
   return {
     label: options.appName,
@@ -219,6 +237,7 @@ export function buildMenuTemplate(options: AppMenuOptions): MenuItemConstructorO
   const template: MenuItemConstructorOptions[] = [
     buildEditSubmenu(),
     buildViewSubmenu(options),
+    buildConnectionSubmenu(options),
     buildWindowSubmenu(isMac),
     buildHelpSubmenu(),
   ];

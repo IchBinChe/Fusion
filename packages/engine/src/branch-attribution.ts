@@ -34,7 +34,7 @@ function quoteShellArg(value: string): string {
 }
 
 function extractAttributedTaskId(body: string): string | null {
-  const trailerPattern = /(?:^|\n)Fusion-Task-Id:\s*(\S+)\s*(?:\n|$)/gim;
+  const trailerPattern = /(?:^|\n)(?:Fusion-Task-Id|Task-Id):\s*(\S+)\s*(?:\n|$)/gim;
   let match: RegExpExecArray | null = null;
   let last: RegExpExecArray | null = null;
   while (true) {
@@ -43,6 +43,35 @@ function extractAttributedTaskId(body: string): string | null {
     last = match;
   }
   return last?.[1] ?? null;
+}
+
+/**
+ * FN-5083/FN-5060 hotfix: extract a task-id reference from a commit subject when the
+ * `Fusion-Task-Id` trailer is missing. Recognizes conventional commits
+ * (`feat(FN-123): ...`, `fix(FN-123): ...`, etc.), bracketed prefixes
+ * (`[FN-123] ...`) and legacy colon prefixes (`FN-123: ...`).
+ *
+ * Accepts any uppercase-letter task prefix (FN, KB, RF, PROJ, JIRA, ...) so this is
+ * project-agnostic. Returns the canonical `<PREFIX>-<digits>` string.
+ */
+function extractTaskIdFromSubject(subject: string): string | null {
+  if (!subject) return null;
+  // Conventional commit: feat(FN-123): ... or fix(FN-123)!: ... (case-insensitive)
+  const conventional =
+    /^(?:feat|fix|test|chore|docs|refactor|perf|build|ci|style|revert)\s*\(([A-Z]+-\d+)\)!?:/i.exec(subject);
+  if (conventional?.[1]) return conventional[1].toUpperCase();
+  // Bracketed: [FN-123] ...
+  const bracketed = /^\s*\[([A-Z]+-\d+)\]/i.exec(subject);
+  if (bracketed?.[1]) return bracketed[1].toUpperCase();
+  // Legacy colon: FN-123: ...
+  const colon = /^\s*([A-Z]+-\d+):/i.exec(subject);
+  if (colon?.[1]) return colon[1].toUpperCase();
+  return null;
+}
+
+function taskIdsMatch(a: string | null, b: string): boolean {
+  if (!a) return false;
+  return a.toUpperCase() === b.toUpperCase();
 }
 
 export async function filterFilesToOwnTaskCommits(opts: BranchAttributionOptions): Promise<AttributionResult> {
@@ -90,8 +119,13 @@ export async function filterFilesToOwnTaskCommits(opts: BranchAttributionOptions
       throw new BranchAttributionError("malformed git log output: missing commit sha");
     }
     const body = bodyParts.join("\x00");
-    const attributedTaskId = extractAttributedTaskId(body);
-    if (attributedTaskId === opts.taskId) {
+    const trailerAttributedTaskId = extractAttributedTaskId(body);
+    // FN-5083/FN-5060 hotfix: trailer is primary; fall back to subject parsing so
+    // commits without the `Fusion-Task-Id` trailer (the common case for agent-driven
+    // commits today) still attribute correctly by their conventional-commit subject.
+    const subjectAttributedTaskId = trailerAttributedTaskId ? null : extractTaskIdFromSubject(subject);
+    const attributedTaskId = trailerAttributedTaskId ?? subjectAttributedTaskId;
+    if (taskIdsMatch(attributedTaskId, opts.taskId)) {
       ownCommitShas.push(sha);
       continue;
     }

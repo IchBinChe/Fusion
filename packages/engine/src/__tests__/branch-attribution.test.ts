@@ -92,6 +92,65 @@ describe("FN-5039 branch-attribution", () => {
     ).rejects.toBeInstanceOf(BranchAttributionError);
   });
 
+  it("FN-5083 hotfix: falls back to conventional-commit subject when trailer is missing", async () => {
+    // Commit subjects use feat(FN-5039):, fix(FN-5039):, test(FN-5039): with EMPTY trailers —
+    // the exact pattern that stranded FN-5060/FN-5083/FN-5053 in production.
+    const log = [
+      "sha-a\x00feat(FN-5039): step 2\x00body without trailer\x1e",
+      "sha-b\x00fix(FN-5039): step 3 fixup\x00body without trailer\x1e",
+      "sha-c\x00test(FN-5039): step 4 coverage\x00body without trailer\x1e",
+      "sha-d\x00chore(FN-1111): foreign commit\x00body without trailer\x1e",
+    ].join("");
+
+    const execMock = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "a.ts\nb.ts\nc.ts\nd.ts\n" })
+      .mockResolvedValueOnce({ stdout: log })
+      .mockResolvedValueOnce({ stdout: "a.ts\n" })
+      .mockResolvedValueOnce({ stdout: "b.ts\n" })
+      .mockResolvedValueOnce({ stdout: "c.ts\n" });
+
+    const result = await filterFilesToOwnTaskCommits({
+      worktreePath: "/tmp/wt",
+      baseRef: "base",
+      taskId: "FN-5039",
+      execAsyncImpl: execMock as never,
+    });
+
+    // Three own commits attributed by subject; one foreign attributed by subject.
+    expect(result.ownCommitCount).toBe(3);
+    expect(result.files).toEqual(["a.ts", "b.ts", "c.ts"]);
+    expect(result.foreignCommits).toEqual([
+      { sha: "sha-d", subject: "chore(FN-1111): foreign commit", attributedTaskId: "FN-1111" },
+    ]);
+  });
+
+  it("FN-5083 hotfix: accepts bracketed and colon-prefix legacy subject styles", async () => {
+    const log = [
+      "sha-a\x00[KB-42] legacy bracket style\x00body\x1e",
+      "sha-b\x00KB-42: legacy colon style\x00body\x1e",
+      "sha-c\x00feat(kb-42): lowercase convention\x00body\x1e",
+    ].join("");
+
+    const execMock = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "a.ts\nb.ts\nc.ts\n" })
+      .mockResolvedValueOnce({ stdout: log })
+      .mockResolvedValueOnce({ stdout: "a.ts\n" })
+      .mockResolvedValueOnce({ stdout: "b.ts\n" })
+      .mockResolvedValueOnce({ stdout: "c.ts\n" });
+
+    const result = await filterFilesToOwnTaskCommits({
+      worktreePath: "/tmp/wt",
+      baseRef: "base",
+      taskId: "KB-42",
+      execAsyncImpl: execMock as never,
+    });
+
+    expect(result.ownCommitCount).toBe(3);
+    expect(result.foreignCommits).toEqual([]);
+  });
+
   it("throws BranchAttributionError when git command fails", async () => {
     const execMock = vi.fn().mockRejectedValueOnce(new Error("fatal: bad revision"));
 

@@ -209,6 +209,12 @@ export {
 } from "./distributed-task-id.js";
 export type { DistributedTaskIdAllocator } from "./distributed-task-id.js";
 export { Database, createDatabase, toJson, toJsonNullable, fromJson } from "./db.js";
+export { ProcessSupervisor, superviseSpawn } from "./process-supervisor.js";
+export type {
+  SuperviseSpawnOptions,
+  SupervisedChild,
+  SupervisedExit,
+} from "./process-supervisor.js";
 export { DatabaseSync } from "./sqlite-adapter.js";
 export type { Statement, VacuumResult } from "./db.js";
 export { ArchiveDatabase } from "./archive-db.js";

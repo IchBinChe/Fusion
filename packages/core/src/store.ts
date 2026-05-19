@@ -767,6 +767,8 @@ export function detectSelfDefeatingDependency(
 }
 
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
+  private static readonly ACTIVE_TASKS_WHERE = '"deletedAt" IS NULL';
+
   static async getOrCreateForProject(
     projectId?: string,
     centralCore?: CentralCore,
@@ -1954,11 +1956,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Read a task from SQLite by ID.
    */
-  private readTaskFromDb(id: string, options?: { activityLogLimit?: number }): Task | undefined {
+  private readTaskFromDb(id: string, options?: { activityLogLimit?: number; includeDeleted?: boolean }): Task | undefined {
     const selectClause = options?.activityLogLimit
       ? this.getTaskSelectClauseWithActivityLogLimit(options.activityLogLimit)
       : "*";
-    const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE id = ?`).get(id) as unknown as TaskRow | undefined;
+    const whereClause = options?.includeDeleted ? "id = ?" : `id = ? AND ${TaskStore.ACTIVE_TASKS_WHERE}`;
+    const row = this.db.prepare(`SELECT ${selectClause} FROM tasks WHERE ${whereClause}`).get(id) as unknown as TaskRow | undefined;
     if (!row) return undefined;
     return this.rowToTask(row);
   }
@@ -1973,7 +1976,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   private taskIdExistsAnywhere(id: string): boolean {
-    if (this.readTaskFromDb(id)) {
+    // FN-5105: include soft-deleted rows so IDs remain permanently reserved.
+    if (this.readTaskFromDb(id, { includeDeleted: true })) {
       return true;
     }
     if (this.isTaskIdPresentInArchivedTasksTable(id)) {
@@ -1989,7 +1993,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   private isTaskArchived(id: string): boolean {
-    const row = this.db.prepare('SELECT "column" FROM tasks WHERE id = ?').get(id) as { column: Column } | undefined;
+    const row = this.db.prepare(`SELECT "column" FROM tasks WHERE id = ? AND ${TaskStore.ACTIVE_TASKS_WHERE}`).get(id) as { column: Column } | undefined;
     if (row) {
       return row.column === "archived";
     }
@@ -2006,7 +2010,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   private findLiveDependents(id: string): string[] {
     const rows = this.db
-      .prepare(`SELECT id, dependencies FROM tasks WHERE dependencies LIKE ? AND id != ?`)
+      .prepare(`SELECT id, dependencies FROM tasks WHERE dependencies LIKE ? AND id != ? AND ${TaskStore.ACTIVE_TASKS_WHERE}`)
       .all(`%${id}%`, id) as Array<{ id: string; dependencies: string | null }>;
 
     const dependents: string[] = [];
@@ -3544,7 +3548,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Read a task and its prompt content.
    */
-  async getTask(id: string, options?: { activityLogLimit?: number }): Promise<TaskDetail> {
+  async getTask(id: string, options?: { activityLogLimit?: number; includeDeleted?: boolean }): Promise<TaskDetail> {
     return this.withTaskLock(id, async () => {
       const task = this.readTaskFromDb(id, options);
       if (!task) {
@@ -3586,7 +3590,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const uniqueIds = [...new Set(ids)];
     const placeholders = uniqueIds.map(() => "?").join(",");
     const rows = this.db
-      .prepare(`SELECT id, "column" FROM tasks WHERE id IN (${placeholders})`)
+      .prepare(`SELECT id, "column" FROM tasks WHERE id IN (${placeholders}) AND ${TaskStore.ACTIVE_TASKS_WHERE}`)
       .all(...uniqueIds) as Array<{ id: string; column: Column }>;
 
     const activeById = new Map<string, Column>();
@@ -3670,6 +3674,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const selectClause = this.getTaskSelectClause(slim);
     const whereParts: string[] = [];
     const params: string[] = [];
+    whereParts.push(TaskStore.ACTIVE_TASKS_WHERE);
     if (columnFilter) {
       whereParts.push(`"column" = ?`);
       params.push(columnFilter);
@@ -3779,7 +3784,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const selectClause = this.getTaskSelectClause(false);
     const rows = this.db.prepare(
-      `SELECT ${selectClause} FROM tasks WHERE "sourceType" = 'task_refine' AND "column" = 'triage' ORDER BY createdAt ASC`,
+      `SELECT ${selectClause} FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND "sourceType" = 'task_refine' AND "column" = 'triage' ORDER BY createdAt ASC`,
     ).all() as unknown as TaskRow[];
 
     const now = Date.now();
@@ -3864,10 +3869,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const rows = includeArchived
       ? (this.db.prepare(
-        `SELECT ${selectClause} FROM tasks WHERE updatedAt > ? ORDER BY updatedAt ASC LIMIT ?`,
+        `SELECT ${selectClause} FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND updatedAt > ? ORDER BY updatedAt ASC LIMIT ?`,
       ).all(since, resolvedLimit + 1) as TaskRow[])
       : (this.db.prepare(
-        `SELECT ${selectClause} FROM tasks WHERE updatedAt > ? AND "column" != 'archived' ORDER BY updatedAt ASC LIMIT ?`,
+        `SELECT ${selectClause} FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND updatedAt > ? AND "column" != 'archived' ORDER BY updatedAt ASC LIMIT ?`,
       ).all(since, resolvedLimit + 1) as TaskRow[]);
 
     const hasMore = rows.length > resolvedLimit;
@@ -3932,8 +3937,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   getActiveMergingTask(excludeTaskId?: string): string | undefined {
     const sql = excludeTaskId
-      ? `SELECT id FROM tasks WHERE status IN ('merging', 'merging-pr') AND id != ? LIMIT 1`
-      : `SELECT id FROM tasks WHERE status IN ('merging', 'merging-pr') LIMIT 1`;
+      ? `SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND status IN ('merging', 'merging-pr') AND id != ? LIMIT 1`
+      : `SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND status IN ('merging', 'merging-pr') LIMIT 1`;
     const params = excludeTaskId ? [excludeTaskId] : [];
     const row = this.db.prepare(sql).get(...params) as { id: string } | undefined;
     return row?.id;
@@ -3986,7 +3991,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           return `${token}*`;
         })
         .join(" OR ");
-      const whereClause = includeArchived ? "" : ` AND t."column" != 'archived'`;
+      const whereClause = `${includeArchived ? "" : ` AND t."column" != 'archived'`} AND t."deletedAt" IS NULL`;
       rows = this.db.prepare(`
         SELECT ${selectClause} FROM tasks t
         JOIN tasks_fts fts ON t.rowid = fts.rowid
@@ -4009,7 +4014,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         const pattern = `%${token.replace(/[\\%_]/g, "\\$&")}%`;
         for (let i = 0; i < searchColumns.length; i++) params.push(pattern);
       }
-      const archivedClause = includeArchived ? "" : ` AND t."column" != 'archived'`;
+      const archivedClause = `${includeArchived ? "" : ` AND t."column" != 'archived'`} AND t."deletedAt" IS NULL`;
       rows = this.db.prepare(`
         SELECT ${selectClause} FROM tasks t
         WHERE (${whereTokens})${archivedClause}
@@ -4098,7 +4103,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const rows = this.db.prepare(`
       SELECT ${selectClause}
       FROM tasks t
-      WHERE json_extract(t.sourceMetadata, '$.contentFingerprint') = ?
+      WHERE t."deletedAt" IS NULL
+        AND json_extract(t.sourceMetadata, '$.contentFingerprint') = ?
         AND t.createdAt >= ?
         ${includeArchived ? "" : "AND t.\"column\" != 'archived'"}
       ORDER BY t.createdAt ASC
@@ -4111,7 +4117,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     agentId: string,
     options?: { pausedOnly?: boolean; excludeArchived?: boolean },
   ): Promise<Task[]> {
-    const whereClauses = ["assignedAgentId = ?"];
+    const whereClauses = ["assignedAgentId = ?", TaskStore.ACTIVE_TASKS_WHERE];
     const params: Array<string | number> = [agentId];
 
     if (options?.pausedOnly) {
@@ -4158,6 +4164,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         checkoutLeaseRenewedAt = ?,
         checkoutLeaseEpoch = ?
       WHERE id = ?
+        AND "deletedAt" IS NULL
         AND COALESCE(checkedOutBy, '') = COALESCE(?, '')
         AND COALESCE(checkoutNodeId, '') = COALESCE(?, '')
         AND COALESCE(checkoutLeaseEpoch, 0) = COALESCE(?, 0)
@@ -5407,7 +5414,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
       // Fast path for high-volume log entries: update only the log + updatedAt fields
       // instead of reading/writing the entire task payload on every append.
-      const row = this.db.prepare('SELECT log, "column" FROM tasks WHERE id = ?').get(id) as
+      const row = this.db.prepare(`SELECT log, "column" FROM tasks WHERE id = ? AND ${TaskStore.ACTIVE_TASKS_WHERE}`).get(id) as
         | { log: string | null; column: Column }
         | undefined;
       if (!row) {
@@ -5452,7 +5459,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Scans all tasks' logs for entries whose runContext.runId matches.
    */
   async getMutationsForRun(runId: string): Promise<TaskLogEntry[]> {
-    const rows = this.db.prepare("SELECT log FROM tasks").all() as Array<{ log: string | null }>;
+    const rows = this.db.prepare(`SELECT log FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ log: string | null }>;
     const mutations: TaskLogEntry[] = [];
     for (const row of rows) {
       const logEntries = fromJson<TaskLogEntry[]>(row.log) || [];
@@ -5677,13 +5684,17 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return paths.filter((path) => isValidFileScopeEntry(path));
   }
 
+  /**
+   * Soft-delete a live task by setting tasks.deletedAt/updatedAt while leaving
+   * the row and on-disk task artifacts in place for potential recovery.
+   */
   async deleteTask(
     id: string,
     options?: { removeDependencyReferences?: boolean; githubIssueAction?: GithubIssueAction },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
       // Flush buffered agent logs inside the lock so no new appends for this
-      // task can sneak in between flush and DELETE.
+      // task can sneak in between flush and soft-delete mutation.
       this.flushAgentLogBuffer();
       const task = this.readTaskFromDb(id);
       if (!task) {
@@ -5708,17 +5719,17 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         });
       }
 
-      const rewrittenDependents = this.rewriteDependentsAndDeleteTask(id, dependentIds);
+      let rewrittenDependents: Task[] = [];
+      this.db.transaction(() => {
+        rewrittenDependents = this.rewriteDependentsForRemoval(id, dependentIds);
+        const deletedAt = new Date().toISOString();
+        this.db.prepare("UPDATE tasks SET deletedAt = ?, updatedAt = ? WHERE id = ?").run(deletedAt, deletedAt, id);
+        this.clearLinkedAgentTaskIds(id, deletedAt);
+        this.db.bumpLastModified();
+      });
 
       // Remove from cache if watcher is active
       if (this.isWatching) this.taskCache.delete(id);
-
-      // Delete directory from disk
-      const dir = this.taskDir(id);
-      if (existsSync(dir)) {
-        const { rm } = await import("node:fs/promises");
-        await rm(dir, { recursive: true });
-      }
 
       for (const dependentTask of rewrittenDependents) {
         this.emit("task:updated", dependentTask);
@@ -5735,40 +5746,34 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.bumpLastModified();
   }
 
-  private rewriteDependentsAndDeleteTask(taskId: string, dependentIds: string[]): Task[] {
+  private rewriteDependentsForRemoval(taskId: string, dependentIds: string[]): Task[] {
     const rewrittenDependents: Task[] = [];
 
-    this.db.transaction(() => {
-      for (const dependentId of dependentIds) {
-        const dependentTask = this.readTaskFromDb(dependentId);
-        if (!dependentTask) continue;
+    for (const dependentId of dependentIds) {
+      const dependentTask = this.readTaskFromDb(dependentId);
+      if (!dependentTask) continue;
 
-        const nextDependencies = dependentTask.dependencies.filter((dependencyId) => dependencyId !== taskId);
-        if (nextDependencies.length === dependentTask.dependencies.length) {
-          continue;
-        }
-
-        const updatedDependent = {
-          ...dependentTask,
-          dependencies: nextDependencies,
-          updatedAt: new Date().toISOString(),
-        };
-
-        this.db.prepare("UPDATE tasks SET dependencies = ?, updatedAt = ? WHERE id = ?").run(
-          toJson(updatedDependent.dependencies),
-          updatedDependent.updatedAt,
-          updatedDependent.id,
-        );
-        if (this.isWatching) {
-          this.taskCache.set(updatedDependent.id, updatedDependent);
-        }
-        rewrittenDependents.push(updatedDependent);
+      const nextDependencies = dependentTask.dependencies.filter((dependencyId) => dependencyId !== taskId);
+      if (nextDependencies.length === dependentTask.dependencies.length) {
+        continue;
       }
 
-      this.clearLinkedAgentTaskIds(taskId);
-      this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
-      this.db.bumpLastModified();
-    });
+      const updatedDependent = {
+        ...dependentTask,
+        dependencies: nextDependencies,
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db.prepare("UPDATE tasks SET dependencies = ?, updatedAt = ? WHERE id = ?").run(
+        toJson(updatedDependent.dependencies),
+        updatedDependent.updatedAt,
+        updatedDependent.id,
+      );
+      if (this.isWatching) {
+        this.taskCache.set(updatedDependent.id, updatedDependent);
+      }
+      rewrittenDependents.push(updatedDependent);
+    }
 
     return rewrittenDependents;
   }
@@ -5920,7 +5925,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       params.push(ownerTaskId);
     }
     const rows = this.db
-      .prepare(`SELECT id FROM tasks WHERE ${whereClause}`)
+      .prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND ${whereClause}`)
       .all(...params) as Array<{ id: string }>;
 
     if (rows.length === 0) return [];
@@ -6462,6 +6467,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // same DB can't tell the difference from this view alone — without the
       // archive check below they emit spurious task:deleted events for every
       // archived task, which the activity log records as a deletion.
+      // FN-5105: intentionally include soft-deleted rows here so a deletedAt
+      // transition can be observed and emit task:deleted exactly once.
       const idRows = this.db.prepare('SELECT id FROM tasks').all() as Array<{ id: string }>;
       const currentIds = new Set(idRows.map((r) => r.id));
       const missingIds: string[] = [];
@@ -6500,6 +6507,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         const row = changedRows[i];
         const task = this.rowToTask(row);
         const cached = this.taskCache.get(task.id);
+
+        if (task.deletedAt) {
+          if (cached) {
+            this.taskCache.delete(task.id);
+            this.emit("task:deleted", cached);
+          }
+          continue;
+        }
+
         if (!cached) {
           this.taskCache.set(task.id, { ...task });
           this.emit("task:created", task);
@@ -6781,7 +6797,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         // Query live task IDs inside the transaction so the check is
         // atomic with the inserts (prevents TOCTOU FK violations).
         const liveTaskIds = new Set(
-          (this.db.prepare("SELECT id FROM tasks").all() as Array<{ id: string }>).map((r) => r.id),
+          (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((r) => r.id),
         );
         validEntries = batch.filter((e) => liveTaskIds.has(e.taskId));
         const dropped = batch.length - validEntries.length;
@@ -7274,7 +7290,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       );
     }
 
-    const taskExists = this.db.prepare('SELECT id, "column" FROM tasks WHERE id = ?').get(taskId) as
+    const taskExists = this.db.prepare(`SELECT id, "column" FROM tasks WHERE id = ? AND ${TaskStore.ACTIVE_TASKS_WHERE}`).get(taskId) as
       | { id: string; column: Column }
       | undefined;
     if (taskExists?.column === "archived") {

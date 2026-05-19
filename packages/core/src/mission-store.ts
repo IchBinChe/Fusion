@@ -776,7 +776,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     // 4. Batch query all failed task IDs
     const failedTaskRows = this.db.prepare(
-      "SELECT id FROM tasks WHERE status = 'failed'"
+      "SELECT id FROM tasks WHERE status = 'failed' AND \"deletedAt\" IS NULL"
     ).all() as Array<{ id: string }>;
     const failedTaskIds = new Set(failedTaskRows.map((row) => row.id));
 
@@ -1034,7 +1034,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       const failedTaskRows = this.db.prepare(`
         SELECT id
         FROM tasks
-        WHERE status = 'failed' AND id IN (${placeholders})
+        WHERE "deletedAt" IS NULL AND status = 'failed' AND id IN (${placeholders})
       `).all(...uniqueTaskIds) as Array<{ id: string }>;
       const failedTaskIds = new Set(failedTaskRows.map((row) => row.id));
       tasksFailed = featureTaskIds.filter((taskId) => failedTaskIds.has(taskId)).length;
@@ -1894,7 +1894,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
       // Also update the task's mission/slice linkage for bidirectional linking.
       this.db.prepare(`
-        UPDATE tasks SET missionId = ?, sliceId = ? WHERE id = ?
+        UPDATE tasks SET missionId = ?, sliceId = ? WHERE id = ? AND "deletedAt" IS NULL
       `).run(linkage.missionId, linkage.sliceId, taskId);
       this.db.bumpLastModified();
 
@@ -1935,7 +1935,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       // Clear the task's mission/slice linkage together.
       if (taskId) {
         this.db.prepare(`
-          UPDATE tasks SET missionId = NULL, sliceId = NULL WHERE id = ?
+          UPDATE tasks SET missionId = NULL, sliceId = NULL WHERE id = ? AND "deletedAt" IS NULL
         `).run(taskId);
         this.db.bumpLastModified();
       }

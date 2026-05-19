@@ -1361,7 +1361,8 @@ export class Database {
       `);
 
       this.db.exec(`
-        CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks BEGIN
+        CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks
+        WHEN NEW.deletedAt IS NULL BEGIN
           INSERT INTO tasks_fts(rowid, id, title, description, comments)
           VALUES (new.rowid, new.id, COALESCE(new.title, ''), new.description, COALESCE(new.comments, '[]'));
         END
@@ -1369,8 +1370,8 @@ export class Database {
 
       const hasTaskTitle = this.hasColumn("tasks", "title");
       const updateColumns = hasTaskTitle
-        ? "id, title, description, comments"
-        : "id, description, comments";
+        ? "id, title, description, comments, deletedAt"
+        : "id, description, comments, deletedAt";
       const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
       const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
 
@@ -1379,7 +1380,8 @@ export class Database {
           INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
             VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
           INSERT INTO tasks_fts(rowid, id, title, description, comments)
-            VALUES (new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]'));
+            SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
+            WHERE new.deletedAt IS NULL;
         END
       `);
 
@@ -2012,7 +2014,8 @@ export class Database {
 
         // AFTER INSERT trigger - index new tasks
         this.db.exec(`
-          CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks BEGIN
+          CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks
+          WHEN NEW.deletedAt IS NULL BEGIN
             INSERT INTO tasks_fts(rowid, id, title, description, comments)
             VALUES (new.rowid, new.id, COALESCE(new.title, ''), new.description, COALESCE(new.comments, '[]'));
           END
@@ -2020,8 +2023,8 @@ export class Database {
 
         const hasTaskTitle = this.hasColumn("tasks", "title");
         const updateColumns = hasTaskTitle
-          ? "id, title, description, comments"
-          : "id, description, comments";
+          ? "id, title, description, comments, deletedAt"
+          : "id, description, comments, deletedAt";
         const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
         const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
 
@@ -2033,7 +2036,8 @@ export class Database {
             INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
               VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
             INSERT INTO tasks_fts(rowid, id, title, description, comments)
-              VALUES (new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]'));
+              SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
+              WHERE new.deletedAt IS NULL;
           END
         `);
 
@@ -2468,8 +2472,8 @@ export class Database {
         }
         const hasTaskTitle = this.hasColumn("tasks", "title");
         const updateColumns = hasTaskTitle
-          ? "id, title, description, comments"
-          : "id, description, comments";
+          ? "id, title, description, comments, deletedAt"
+          : "id, description, comments, deletedAt";
         const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
         const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
 
@@ -2479,7 +2483,8 @@ export class Database {
             INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
               VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
             INSERT INTO tasks_fts(rowid, id, title, description, comments)
-              VALUES (new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]'));
+              SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
+              WHERE new.deletedAt IS NULL;
           END;
         `);
 

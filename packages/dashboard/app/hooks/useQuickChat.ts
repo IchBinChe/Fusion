@@ -573,7 +573,7 @@ export function useQuickChat(
     resetTransientComposerState();
     setActiveSession(session);
 
-    void fetchChatSession(session.id, projectId)
+    void Promise.resolve(fetchChatSession(session.id, projectId))
       .then(({ session: refreshedSession }) => {
         if (!refreshedSession.isGenerating || !refreshedSession.inFlightGeneration) {
           return;

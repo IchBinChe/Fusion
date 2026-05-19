@@ -5350,10 +5350,14 @@ export class SelfHealingManager {
     }
   }
 
+  /**
+   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   */
   async recoverForeignOnlyContaminatedInReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      if (settings.autoMerge === false) return 0;
 
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const inReview = await this.store.listTasks({ column: "in-review", slim: true });

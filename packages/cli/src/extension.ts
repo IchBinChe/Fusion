@@ -1163,13 +1163,15 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_task_delete",
     label: "fn: Delete Task",
     description:
-      "Permanently delete a task from the Fusion board. " +
-      "Tasks are deleted immediately and cannot be recovered.",
-    promptSnippet: "Delete a Fusion task",
+      "Soft-delete a task from active Fusion board views. " +
+      "The task row and artifacts are preserved, and the task ID remains reserved for potential operator recovery.",
+    promptSnippet: "Soft-delete a Fusion task",
     promptGuidelines: [
-      "Use for cleaning up test tasks or tasks created in error",
-      "Tasks are permanently deleted and cannot be recovered",
-      "Consider archiving instead of deleting for completed work you may need to reference later",
+      "Use for cleaning up test tasks or tasks created in error when you want the task hidden from active board views",
+      "This tool performs a soft delete: task data is preserved and the ID stays reserved",
+      "Tasks cannot be undeleted through the current pi/CLI tool surface",
+      "Use fn_task_archive for completed work you want to keep referenceable in the board",
+      "True hard removal is handled by archive cleanup paths (archiveTaskAndCleanup / cleanupArchivedTasks), not fn_task_delete",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Task ID to delete (e.g. FN-001)" }),

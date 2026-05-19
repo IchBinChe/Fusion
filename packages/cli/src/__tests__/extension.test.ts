@@ -136,6 +136,25 @@ async function enableResearch(cwd: string): Promise<TaskStore> {
 
 // ── Tests ──────────────────────────────────────────────────────────
 
+describe("fn pi extension tool copy guardrails", () => {
+  it("describes fn_task_delete as soft delete and avoids irrecoverability claims (FN-5141)", () => {
+    const api = createMockAPI();
+    kbExtension(api);
+
+    const tool = api.tools.get("fn_task_delete") as
+      | { description?: string; promptGuidelines?: string[] }
+      | undefined;
+
+    expect(tool).toBeDefined();
+    expect(tool?.description ?? "").not.toMatch(/permanent|cannot be recovered|cannot be undone|deleted immediately/i);
+    expect(tool?.description ?? "").toMatch(/soft.?delete/i);
+
+    const guidelines = (tool?.promptGuidelines ?? []).join(" ");
+    expect(guidelines).toMatch(/soft.?delete/i);
+    expect(guidelines).not.toMatch(/permanent|cannot be recovered|cannot be undone|deleted immediately|irrecoverable/i);
+  });
+});
+
 // Audited in FN-3189: this exhaustive suite is expensive (~62s) and stale
 // against modern extension behavior/tooling (see FN-3204). The maintained
 // release lane lives in extension-integration.test.ts and uses

@@ -10,6 +10,12 @@ If you find yourself opening `SettingsModal.css`, `TaskCard.css`, `ChatView.css`
 
 Exception: explicit named user request in chat that overrides this directive.
 
+## Spec Generation Hygiene
+
+- Do not cite `.fusion/tasks/<id>/<file>` paths in Context/Steps/File Scope unless the file already exists, is explicitly created as a `(new)` Artifact, or is sibling `PROMPT.md`/`task.json`/`attachments/*`.
+- Dangling task-local file references are a blocking spec REVISE.
+- Save planning scratch and interim notes via `fn_task_document_write` instead of inventing on-disk task-local files.
+
 ## Finalizing Changes
 
 When a change affects the published `@runfusion/fusion` package, add a changeset:

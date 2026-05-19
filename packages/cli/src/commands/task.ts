@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, getTaskDuplicateLineage, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry } from "@fusion/core";
+import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry } from "@fusion/core";
 import { aiMergeTask, listBranchRecoveryCandidates, type BranchRecoveryCandidate } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
@@ -288,7 +288,7 @@ async function resolveNodeByNameOrId(nodeNameOrId: string): Promise<{ id: string
   }
 }
 
-export async function runTaskCreate(descriptionArg?: string, attachFiles?: string[], depends?: string[], projectName?: string, nodeName?: string) {
+export async function runTaskCreate(descriptionArg?: string, attachFiles?: string[], depends?: string[], projectName?: string, nodeName?: string, noDedup = false) {
   let description = descriptionArg;
   const projectContext = await getProjectContext(projectName);
 
@@ -304,11 +304,47 @@ export async function runTaskCreate(descriptionArg?: string, attachFiles?: strin
   }
 
   const store = projectContext?.store ?? await getStore(projectName);
-  const task = await store.createTask({
-    description: description.trim(),
-    dependencies: depends,
-    source: { sourceType: "cli" },
-  });
+  const guard = await runDeterministicDuplicateGuard(
+    store,
+    { description: description.trim() },
+    {
+      lockScope: projectContext?.projectId ?? store.getRootDir?.() ?? process.cwd(),
+      bypass: noDedup,
+    },
+  );
+
+  let task = guard.existing;
+  let linkedExisting = false;
+
+  try {
+    if (guard.action === "duplicate" && guard.existing) {
+      task = guard.existing;
+      linkedExisting = true;
+    } else {
+      const created = await store.createTask({
+        description: description.trim(),
+        dependencies: depends,
+        source: {
+          sourceType: "cli",
+          sourceMetadata: guard.fingerprint ? { contentFingerprint: guard.fingerprint } : undefined,
+        },
+      });
+
+      const reconcileResult = await reconcileDeterministicDuplicate(store, {
+        createdTask: created,
+        fingerprint: guard.fingerprint,
+      });
+      task = reconcileResult.canonical;
+      linkedExisting = reconcileResult.outcome === "archived";
+    }
+  } finally {
+    guard.releaseLock();
+  }
+
+  if (!task) {
+    console.error("Failed to create or link task");
+    process.exit(1);
+  }
 
   let resolvedNode: { id: string; name?: string } | undefined;
   if (nodeName) {
@@ -329,8 +365,12 @@ export async function runTaskCreate(descriptionArg?: string, attachFiles?: strin
   if (projectContext) {
     console.log(`  Project: ${projectContext.projectName}`);
   }
-  console.log(`  ✓ Created ${task.id}: ${label}`);
-  console.log(`    Column: triage`);
+  if (linkedExisting) {
+    console.log(`  ✓ Linked existing ${task.id}: ${label}`);
+  } else {
+    console.log(`  ✓ Created ${task.id}: ${label}`);
+  }
+  console.log(`    Column: ${task.column}`);
   if (task.dependencies.length > 0) {
     console.log(`    Dependencies: ${task.dependencies.join(", ")}`);
   }
@@ -1180,6 +1220,7 @@ export async function runTaskImportGitHubInteractive(
     const description = `${body}\n\nSource: ${issue.html_url}`;
 
     // Create the task
+    // FN-5060: intentional same-content sibling; deterministic guard skipped here.
     const source = buildGitHubIssueSource(owner, repo, issue);
     const task = await store.createTask({
       title: title || undefined,
@@ -1335,6 +1376,7 @@ export async function runTaskImportFromGitHub(
     const description = `${body}\n\nSource: ${issue.html_url}`;
 
     // Create the task
+    // FN-5060: intentional same-content sibling; deterministic guard skipped here.
     const source = buildGitHubIssueSource(owner, repo, issue);
     const task = await store.createTask({
       title: title || undefined,
@@ -1943,6 +1985,7 @@ export async function runTaskPlan(initialPlanArg?: string, yesFlag = false, proj
 
         if (confirmed) {
           // Create the task
+          // FN-5060: intentional same-content sibling; deterministic guard skipped here.
           const task = await store.createTask({
             title: result.data.title,
             description: result.data.description,

@@ -42,6 +42,8 @@ vi.mock("@fusion/core", () => {
     TaskStore: vi.fn(),
     COLUMNS,
     COLUMN_LABELS,
+    runDeterministicDuplicateGuard: vi.fn(),
+    reconcileDeterministicDuplicate: vi.fn(),
     getTaskDuplicateLineage: vi.fn((task: { sourceType?: string; sourceParentTaskId?: string; sourceMetadata?: any }) => {
       const ids: string[] = [];
       if (task.sourceType === "task_duplicate" && task.sourceParentTaskId) ids.push(task.sourceParentTaskId);
@@ -113,7 +115,7 @@ vi.mock("../../project-context.js", () => ({
 }));
 
 import { createInterface } from "node:readline/promises";
-import { TaskStore, CentralCore } from "@fusion/core";
+import { TaskStore, CentralCore, runDeterministicDuplicateGuard, reconcileDeterministicDuplicate } from "@fusion/core";
 import { watchFile, unwatchFile, statSync, existsSync, readFileSync } from "node:fs";
 import { exec } from "node:child_process";
 import { runTaskShow, runTaskCreate, runTaskList, runTaskDuplicate, runTaskRefine, runTaskDelete, runTaskRetry, runTaskBranchRecovery, runTaskLogs, runTaskComment, runTaskComments, runTaskPrCreate, runTaskPlan, runTaskMove, runTaskAttach, runTaskPause, runTaskUnpause, runTaskArchive, runTaskUnarchive, runTaskSteer, runTaskSetNode, runTaskClearNode, runTaskImportFromGitHub, runTaskImportGitHubInteractive, runTaskUpdate, runTaskLog, runTaskMerge, type LogsOptions } from "../task.js";
@@ -144,6 +146,18 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({
+    action: "proceed",
+    fingerprint: null,
+    releaseLock: vi.fn(),
+  });
+  vi.mocked(reconcileDeterministicDuplicate).mockImplementation(async (_store, args) => ({
+    outcome: "kept",
+    canonical: args.createdTask,
+  }));
+});
 
 describe("runTaskShow", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -488,18 +502,29 @@ describe("project-aware task command behavior", () => {
     const mockCreateTask = vi.fn().mockResolvedValue(makeTask({ id: "FN-002", description: "test task" }));
     const mockAddAttachment = vi.fn();
 
+    vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({
+      action: "proceed",
+      fingerprint: "fp-1",
+      releaseLock: vi.fn(),
+    });
+    vi.mocked(reconcileDeterministicDuplicate).mockResolvedValue({ outcome: "kept", canonical: makeTask({ id: "FN-002", description: "test task" }) });
+
     vi.mocked(resolveProject).mockResolvedValue({
       projectId: "proj_test",
       projectPath: "/test",
       projectName: "demo-project",
       isRegistered: true,
-      store: { createTask: mockCreateTask, addAttachment: mockAddAttachment } as unknown as TaskStore,
+      store: { createTask: mockCreateTask, addAttachment: mockAddAttachment, getRootDir: vi.fn().mockReturnValue("/test") } as unknown as TaskStore,
     });
 
     await runTaskCreate("test task", undefined, undefined, "demo-project");
 
     expect(resolveProject).toHaveBeenCalledWith("demo-project");
-    expect(mockCreateTask).toHaveBeenCalledWith({ description: "test task", dependencies: undefined, source: { sourceType: "cli" } });
+    expect(mockCreateTask).toHaveBeenCalledWith({
+      description: "test task",
+      dependencies: undefined,
+      source: { sourceType: "cli", sourceMetadata: { contentFingerprint: "fp-1" } },
+    });
     expect(logSpy.mock.calls.some((call) => String(call[0]).includes("Project: demo-project"))).toBe(true);
 
     logSpy.mockRestore();
@@ -507,24 +532,30 @@ describe("project-aware task command behavior", () => {
 
   it("runTaskCreate without project flag uses shared resolution flow", async () => {
     const mockCreateTask = vi.fn().mockResolvedValue(makeTask({ id: "FN-003", description: "default task" }));
+    vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({ action: "proceed", fingerprint: null, releaseLock: vi.fn() });
+    vi.mocked(reconcileDeterministicDuplicate).mockResolvedValue({ outcome: "kept", canonical: makeTask({ id: "FN-003", description: "default task" }) });
+
     vi.mocked(resolveProject).mockResolvedValue({
       projectId: "proj_default",
       projectPath: "/default/project",
       projectName: "default-project",
       isRegistered: true,
-      store: { createTask: mockCreateTask, addAttachment: vi.fn() } as unknown as TaskStore,
+      store: { createTask: mockCreateTask, addAttachment: vi.fn(), getRootDir: vi.fn().mockReturnValue("/default/project") } as unknown as TaskStore,
     });
 
     await runTaskCreate("default task");
 
     expect(resolveProject).toHaveBeenCalledWith(undefined);
-    expect(mockCreateTask).toHaveBeenCalledWith({ description: "default task", dependencies: undefined, source: { sourceType: "cli" } });
+    expect(mockCreateTask).toHaveBeenCalledWith({ description: "default task", dependencies: undefined, source: { sourceType: "cli", sourceMetadata: undefined } });
   });
 
   it("runTaskCreate without project flag falls back to TaskStore(process.cwd()) when resolution fails", async () => {
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/current/project");
     const mockCreateTask = vi.fn().mockResolvedValue(makeTask({ id: "FN-004", description: "local task" }));
     const init = vi.fn();
+
+    vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({ action: "proceed", fingerprint: "fp-local", releaseLock: vi.fn() });
+    vi.mocked(reconcileDeterministicDuplicate).mockResolvedValue({ outcome: "kept", canonical: makeTask({ id: "FN-004", description: "local task" }) });
 
     vi.mocked(resolveProject).mockRejectedValueOnce(
       new Error("No fn project found in current directory. Use --project or run from a project directory.")
@@ -534,6 +565,7 @@ describe("project-aware task command behavior", () => {
       init,
       createTask: mockCreateTask,
       addAttachment: vi.fn(),
+      getRootDir: vi.fn().mockReturnValue(projectPath),
       projectPath,
     }));
 
@@ -542,8 +574,86 @@ describe("project-aware task command behavior", () => {
     expect(resolveProject).toHaveBeenCalledWith(undefined);
     expect(TaskStore).toHaveBeenCalledWith("/current/project");
     expect(init).toHaveBeenCalledOnce();
-    expect(mockCreateTask).toHaveBeenCalledWith({ description: "local task", dependencies: undefined, source: { sourceType: "cli" } });
+    expect(mockCreateTask).toHaveBeenCalledWith({ description: "local task", dependencies: undefined, source: { sourceType: "cli", sourceMetadata: { contentFingerprint: "fp-local" } } });
     cwdSpy.mockRestore();
+  });
+
+  it("runTaskCreate links existing task on deterministic duplicate", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const existing = makeTask({ id: "FN-777", description: "same task", column: "todo" });
+    const mockCreateTask = vi.fn();
+
+    vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({
+      action: "duplicate",
+      fingerprint: "fp-dupe",
+      existing,
+      releaseLock: vi.fn(),
+    });
+
+    vi.mocked(resolveProject).mockResolvedValue({
+      projectId: "proj_test",
+      projectPath: "/test",
+      projectName: "demo-project",
+      isRegistered: true,
+      store: { createTask: mockCreateTask, addAttachment: vi.fn(), getRootDir: vi.fn().mockReturnValue("/test") } as unknown as TaskStore,
+    });
+
+    await runTaskCreate("same task");
+
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(logSpy.mock.calls.some((call) => String(call[0]).includes("Linked existing FN-777"))).toBe(true);
+    logSpy.mockRestore();
+  });
+
+  it("runTaskCreate --no-dedup bypasses deterministic guard", async () => {
+    const mockCreateTask = vi.fn().mockResolvedValue(makeTask({ id: "FN-008", description: "same task" }));
+
+    vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({
+      action: "proceed",
+      fingerprint: "fp-no-dedup",
+      releaseLock: vi.fn(),
+    });
+    vi.mocked(reconcileDeterministicDuplicate).mockResolvedValue({ outcome: "kept", canonical: makeTask({ id: "FN-008", description: "same task" }) });
+
+    vi.mocked(resolveProject).mockResolvedValue({
+      projectId: "proj_test",
+      projectPath: "/test",
+      projectName: "demo-project",
+      isRegistered: true,
+      store: { createTask: mockCreateTask, addAttachment: vi.fn(), getRootDir: vi.fn().mockReturnValue("/test") } as unknown as TaskStore,
+    });
+
+    await runTaskCreate("same task", undefined, undefined, undefined, undefined, true);
+
+    expect(runDeterministicDuplicateGuard).toHaveBeenCalledWith(expect.anything(), { description: "same task" }, expect.objectContaining({ bypass: true }));
+    expect(mockCreateTask).toHaveBeenCalledOnce();
+  });
+
+  it("runTaskCreate creates separate tasks when description differs", async () => {
+    const mockCreateTask = vi
+      .fn()
+      .mockResolvedValueOnce(makeTask({ id: "FN-010", description: "task a" }))
+      .mockResolvedValueOnce(makeTask({ id: "FN-011", description: "task b" }));
+
+    vi.mocked(runDeterministicDuplicateGuard)
+      .mockResolvedValueOnce({ action: "proceed", fingerprint: "fp-a", releaseLock: vi.fn() })
+      .mockResolvedValueOnce({ action: "proceed", fingerprint: "fp-b", releaseLock: vi.fn() });
+    vi.mocked(reconcileDeterministicDuplicate)
+      .mockResolvedValueOnce({ outcome: "kept", canonical: makeTask({ id: "FN-010", description: "task a" }) })
+      .mockResolvedValueOnce({ outcome: "kept", canonical: makeTask({ id: "FN-011", description: "task b" }) });
+
+    vi.mocked(resolveProject).mockResolvedValue({
+      projectId: "proj_test",
+      projectPath: "/test",
+      projectName: "demo-project",
+      isRegistered: true,
+      store: { createTask: mockCreateTask, addAttachment: vi.fn(), getRootDir: vi.fn().mockReturnValue("/test") } as unknown as TaskStore,
+    });
+
+    await runTaskCreate("task a");
+    await runTaskCreate("task b");
+
+    expect(mockCreateTask).toHaveBeenCalledTimes(2);
   });
 
   it("runTaskLogs uses resolved project path in follow mode", async () => {

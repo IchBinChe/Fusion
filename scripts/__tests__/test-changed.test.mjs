@@ -677,6 +677,20 @@ test("createIsolatedHomeEnv: returns temp HOME/USERPROFILE pair without mutating
   rmSync(isolatedHome, { recursive: true, force: true });
 });
 
+
+test("createIsolatedHomeEnv: preserves a stable COREPACK_HOME outside the isolated HOME", () => {
+  const baseEnv = {
+    PATH: process.env.PATH || "",
+    HOME: "/tmp/original-home",
+  };
+  const { env, isolatedHome } = createIsolatedHomeEnv(baseEnv);
+
+  assert.equal(env.HOME, isolatedHome);
+  assert.equal(env.COREPACK_HOME, path.join(baseEnv.HOME, ".cache", "node", "corepack"));
+
+  rmSync(isolatedHome, { recursive: true, force: true });
+});
+
 test("cleanupIsolatedHomePath: removes existing isolated HOME directory", () => {
   const homePath = mkdtempSync(path.join(tmpdir(), "fusion-test-home-root-cleanup-"));
   assert.equal(path.basename(homePath).startsWith("fusion-test-home-root-cleanup-"), true);

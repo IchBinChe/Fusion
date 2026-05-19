@@ -766,10 +766,16 @@ export function createIsolatedHomeEnv(env = process.env) {
   knownIsolatedHomeBasenames.add(path.basename(rawIsolatedHome));
   knownIsolatedHomeBasenames.add(path.basename(isolatedHome));
 
+  const inheritedHome = env.HOME || env.USERPROFILE;
+  const corepackHome = env.COREPACK_HOME || (inheritedHome
+    ? path.join(inheritedHome, ".cache", "node", "corepack")
+    : undefined);
+
   const nextEnv = {
     ...env,
     HOME: isolatedHome,
     USERPROFILE: isolatedHome,
+    ...(corepackHome ? { COREPACK_HOME: corepackHome } : {}),
   };
 
   if (process.platform === "win32") {

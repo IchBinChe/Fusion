@@ -3943,6 +3943,9 @@ export class SelfHealingManager {
    * each kick refreshes `updatedAt`, so a task that re-enters review and gets
    * stuck again can only be kicked once per `taskStuckTimeoutMs` window.
    *
+   * When `settings.autoMerge === false`, this sweep is a no-op because those
+   * projects intentionally use PR-based/manual in-review ownership.
+   *
    * @returns Number of tasks kicked back to todo
    */
   async surfaceInReviewStalls(): Promise<number> {

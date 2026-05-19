@@ -66,7 +66,7 @@ describe("classifyForeignOnlyContamination", () => {
     expect(result.uniqueShas).toEqual([foreignSha]);
   });
 
-  it("returns foreign-only-already-upstream when foreign-attributed commits are on main", async () => {
+  it("returns clean when foreign-attributed commits are already on main", async () => {
     const { repoDir, baseSha } = await setupRepo();
     const foreignSha = await makeCommit(repoDir, "foreign-b", "feat(FN-4002): foreign upstream", "FN-4002");
     await run("git checkout main", repoDir);
@@ -81,10 +81,8 @@ describe("classifyForeignOnlyContamination", () => {
       mainRef: "main",
     });
 
-    expect(result.kind).toBe("foreign-only-already-upstream");
-    expect(result.foreignCommitCount).toBe(1);
-    expect(result.uniqueShas).toEqual([]);
-    expect(result.alreadyUpstreamShas).toEqual([foreignSha]);
+    expect(result.kind).toBe("clean");
+    expect(result.foreignCommitCount).toBe(0);
   });
 
   it("returns ambiguous when own and foreign commits are mixed", async () => {

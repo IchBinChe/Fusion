@@ -2191,8 +2191,7 @@ describe("TaskCard", () => {
     expect(trackingLink).not.toBeNull();
 
     const css = loadAllAppCssBaseOnly();
-    expect(css).toMatch(/\.card-footer-row\s*>\s*\.card-source-provenance:first-of-type[\s\S]*\.card-footer-row\s*>\s*\.card-time-indicator:first-of-type\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
-    expect(css).toMatch(/\.card-source-provenance\s*\+\s*\.card-source-provenance[\s\S]*\.card-footer-row\s*>\s*\.card-retry-badge\s*\+\s*\.card-time-indicator\s*\{[^}]*margin-left:\s*0;[^}]*\}/);
+    expect(css).toMatch(/\.card-footer-row-right\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
     const provenanceRule = css.match(/\.card-source-provenance\s*\{[^}]*\}/)?.[0] ?? "";
     expect(provenanceRule).not.toMatch(/margin-left\s*:\s*auto/);
   });
@@ -2222,20 +2221,21 @@ describe("TaskCard", () => {
 
       const footerRow = container.querySelector(".card-footer-row");
       const sourceBadge = container.querySelector(".card-footer-row > .card-source-provenance");
-      const trackingChip = container.querySelector(".card-footer-row > .card-github-tracking-chip");
+      const trackingChip = container.querySelector(".card-footer-row-right > .card-github-tracking-chip");
       expect(footerRow).not.toBeNull();
       expect(sourceBadge).not.toBeNull();
       expect(trackingChip).not.toBeNull();
-      expect((sourceBadge as Element).nextElementSibling).toBe(trackingChip);
+      const rightCluster = container.querySelector(".card-footer-row > .card-footer-row-right");
+      expect(rightCluster).not.toBeNull();
+      expect((sourceBadge as Element).nextElementSibling).toBe(rightCluster);
 
       const css = loadAllAppCssBaseOnly();
-      expect(css).toMatch(/\.card-footer-row\s*>\s*\.card-source-provenance:first-of-type[\s\S]*\.card-footer-row\s*>\s*\.card-time-indicator:first-of-type\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
-      expect(css).toMatch(/\.card-footer-row\s*>\s*\.card-source-provenance\s*\+\s*\.card-github-tracking-chip:first-of-type[\s\S]*\.card-footer-row\s*>\s*\.card-retry-badge\s*\+\s*\.card-time-indicator\s*\{[^}]*margin-left:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.card-footer-row-right\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
     });
 
     it("applies right-alignment rule when only tracking chip is rendered", () => {
       const css = loadAllAppCssBaseOnly();
-      expect(css).toMatch(/\.card-footer-row\s*>\s*\.card-source-provenance:first-of-type[\s\S]*\.card-footer-row\s*>\s*\.card-github-tracking-chip:first-of-type[\s\S]*\{[^}]*margin-left:\s*auto;[^}]*\}/);
+      expect(css).toMatch(/\.card-footer-row-right\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
 
       const { container } = render(
         <TaskCard
@@ -2258,7 +2258,7 @@ describe("TaskCard", () => {
       );
 
       const footerRow = container.querySelector(".card-footer-row");
-      const trackingChip = container.querySelector(".card-footer-row > .card-github-tracking-chip");
+      const trackingChip = container.querySelector(".card-footer-row-right > .card-github-tracking-chip");
       expect(footerRow).not.toBeNull();
       expect(trackingChip).not.toBeNull();
       expect(container.querySelector(".card-footer-row > .card-source-provenance")).toBeNull();
@@ -2293,20 +2293,17 @@ describe("TaskCard", () => {
       const footerRow = container.querySelector(".card-footer-row");
       expect(footerRow).not.toBeNull();
 
-      const orderedSelectors = [
-        ".card-source-provenance",
-        ".card-retry-badge",
-        ".card-github-tracking-chip",
-        ".card-time-indicator",
+      const sourceNode = footerRow?.querySelector(".card-source-provenance");
+      const rightCluster = footerRow?.querySelector(".card-footer-row-right");
+      expect(sourceNode).not.toBeNull();
+      expect(rightCluster).not.toBeNull();
+      const orderedNodes = [
+        rightCluster?.querySelector(".card-github-tracking-chip"),
+        rightCluster?.querySelector(".card-retry-badge"),
+        rightCluster?.querySelector(".card-time-indicator"),
       ];
-      const orderedNodes = orderedSelectors.map((selector) => footerRow?.querySelector(selector));
       orderedNodes.forEach((node) => expect(node).not.toBeNull());
-
-      const elementChildren = Array.from((footerRow as Element).children);
-      const orderedIndexes = orderedNodes.map((node) => elementChildren.indexOf(node as Element));
-      expect(orderedIndexes[0]).toBeLessThan(orderedIndexes[1]);
-      expect(orderedIndexes[1]).toBeLessThan(orderedIndexes[2]);
-      expect(orderedIndexes[2]).toBeLessThan(orderedIndexes[3]);
+      expect(Array.from((rightCluster as Element).children)).toEqual(orderedNodes);
     });
   });
 
@@ -2356,15 +2353,17 @@ describe("TaskCard", () => {
       expect(footerRow).toHaveClass("card-footer-row--chip-far-right");
       expect(trackingChip).not.toBeNull();
       expect(rightSideChip).not.toBeNull();
-      const children = Array.from((footerRow as HTMLElement).children);
-      const expectedLastChip = rightSideChip?.classList.contains("card-time-indicator") ? rightSideChip : trackingChip;
+      const rightCluster = container.querySelector(".card-footer-row-right") as HTMLElement | null;
+      expect(rightCluster).not.toBeNull();
+      const children = Array.from((rightCluster as HTMLElement).children);
+      const expectedLastChip = rightSideChip;
       expect(children.at(-1)).toBe(expectedLastChip);
       if (rightSideChip?.classList.contains("card-retry-badge")) {
-        expect(children.indexOf(rightSideChip as HTMLElement)).toBeLessThan(children.indexOf(trackingChip as HTMLElement));
+        expect(children.indexOf(rightSideChip as HTMLElement)).toBeGreaterThan(children.indexOf(trackingChip as HTMLElement));
       } else {
         expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
       }
-      expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
+      expect(getComputedStyle(rightCluster as HTMLElement).marginLeft).toBe("auto");
     });
 
     it.each(["in-progress", "in-review"] as const)("renders time indicator to the right of tracking chip in %s", (column) => {
@@ -2390,7 +2389,9 @@ describe("TaskCard", () => {
       expect(footerRow).not.toBeNull();
       expect(trackingChip).not.toBeNull();
       expect(timeChip).not.toBeNull();
-      const children = Array.from((footerRow as HTMLElement).children);
+      const rightCluster = container.querySelector(".card-footer-row-right") as HTMLElement | null;
+      expect(rightCluster).not.toBeNull();
+      const children = Array.from((rightCluster as HTMLElement).children);
       expect(children.indexOf(timeChip as HTMLElement)).toBeGreaterThan(children.indexOf(trackingChip as HTMLElement));
       expect(children.at(-1)).toBe(timeChip);
     });
@@ -2453,15 +2454,17 @@ describe("TaskCard", () => {
       expect(footerRow).toHaveClass("card-footer-row--chip-far-right");
       expect(trackingChip).not.toBeNull();
       expect(rightSideChip).not.toBeNull();
-      const children = Array.from((footerRow as HTMLElement).children);
-      const expectedLastChip = rightSideChip?.classList.contains("card-time-indicator") ? rightSideChip : trackingChip;
+      const rightCluster = container.querySelector(".card-footer-row-right") as HTMLElement | null;
+      expect(rightCluster).not.toBeNull();
+      const children = Array.from((rightCluster as HTMLElement).children);
+      const expectedLastChip = rightSideChip;
       expect(children.at(-1)).toBe(expectedLastChip);
       if (rightSideChip?.classList.contains("card-retry-badge")) {
-        expect(children.indexOf(rightSideChip as HTMLElement)).toBeLessThan(children.indexOf(trackingChip as HTMLElement));
+        expect(children.indexOf(rightSideChip as HTMLElement)).toBeGreaterThan(children.indexOf(trackingChip as HTMLElement));
       } else {
         expect(children.indexOf(trackingChip as HTMLElement)).toBeLessThan(children.indexOf(rightSideChip as HTMLElement));
       }
-      expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
+      expect(getComputedStyle(rightCluster as HTMLElement).marginLeft).toBe("auto");
     });
 
     it("does not force far-right modifier when in-review card has files changed", () => {
@@ -2521,7 +2524,9 @@ describe("TaskCard", () => {
         expect(footerRow).toHaveClass("card-footer-row--chip-far-right");
         expect(trackingChip).not.toBeNull();
         expect(timerChip).not.toBeNull();
-        expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
+        const rightCluster = container.querySelector(".card-footer-row-right") as HTMLElement | null;
+        expect(rightCluster).not.toBeNull();
+        expect(getComputedStyle(rightCluster as HTMLElement).marginLeft).toBe("auto");
         expect((trackingChip as HTMLElement).nextElementSibling).toBe(timerChip);
       } finally {
         cleanupCss();
@@ -2556,8 +2561,10 @@ describe("TaskCard", () => {
         );
 
         const trackingChip = container.querySelector(".card-github-tracking-chip") as HTMLElement | null;
+        const rightCluster = container.querySelector(".card-footer-row-right") as HTMLElement | null;
         expect(trackingChip).not.toBeNull();
-        expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
+        expect(rightCluster).not.toBeNull();
+        expect(getComputedStyle(rightCluster as HTMLElement).marginLeft).toBe("auto");
       } finally {
         cleanupCss();
       }
@@ -2598,9 +2605,11 @@ describe("TaskCard", () => {
         expect(footerRow).not.toHaveClass("card-footer-row--chip-far-right");
         expect(trackingChip).not.toBeNull();
         expect(timerChip).not.toBeNull();
+        const rightCluster = container.querySelector(".card-footer-row-right") as HTMLElement | null;
         expect(filesChangedButton.compareDocumentPosition(trackingChip as HTMLElement)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-        expect(getComputedStyle(trackingChip as HTMLElement).marginLeft).toBe("auto");
-        expect(getComputedStyle(timerChip as HTMLElement).marginLeft).toBe("0px");
+        expect(rightCluster).not.toBeNull();
+        expect(getComputedStyle(rightCluster as HTMLElement).marginLeft).toBe("auto");
+        expect(getComputedStyle(timerChip as HTMLElement).marginLeft).not.toBe("auto");
       } finally {
         cleanupCss();
       }
@@ -3189,7 +3198,9 @@ describe("TaskCard", () => {
     expect(footerRow?.contains(filesChanged)).toBe(true);
     expect(footerRow?.contains(timer)).toBe(true);
     expect(header?.contains(timer)).toBe(false);
-    expect(Array.from(footerRow?.children ?? [])).toEqual([filesChanged, timer]);
+    const rightCluster = container.querySelector(".card-footer-row-right");
+    expect(Array.from(footerRow?.children ?? [])).toEqual([filesChanged, rightCluster]);
+    expect(Array.from((rightCluster as HTMLElement | null)?.children ?? [])).toEqual([timer]);
   });
 
   it("shows timer chip for in-review cards", () => {

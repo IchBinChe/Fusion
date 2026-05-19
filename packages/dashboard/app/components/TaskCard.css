@@ -693,30 +693,13 @@
   color: var(--text-muted);
 }
 
-.card-footer-row > .card-source-provenance:first-of-type,
-.card-footer-row > .card-github-tracking-chip:first-of-type,
-.card-footer-row > .card-retry-badge:first-of-type,
-.card-footer-row > .card-time-indicator:first-of-type {
+.card-footer-row-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
   margin-left: auto;
-}
-
-.card-source-provenance + .card-source-provenance,
-.card-footer-row > .card-source-provenance + .card-github-tracking-chip:first-of-type,
-.card-footer-row > .card-source-provenance + .card-retry-badge,
-.card-footer-row > .card-source-provenance + .card-time-indicator,
-.card-footer-row > .card-github-tracking-chip + .card-retry-badge,
-.card-footer-row > .card-github-tracking-chip + .card-time-indicator,
-.card-footer-row > .card-retry-badge + .card-time-indicator {
-  margin-left: 0;
-}
-
-.card-footer-row.card-footer-row--chip-far-right > .card-source-provenance:first-of-type,
-.card-footer-row.card-footer-row--chip-far-right > .card-source-provenance + .card-github-tracking-chip:first-of-type {
-  margin-left: 0;
-}
-
-.card-footer-row.card-footer-row--chip-far-right > .card-github-tracking-chip {
-  margin-left: auto;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .card-source-provenance .provider-icon {
@@ -1320,10 +1303,6 @@
   .card-footer-row {
     margin-top: var(--space-xs);
     gap: var(--space-xs);
-  }
-
-  .card-footer-row.card-footer-row--chip-far-right > .card-github-tracking-chip {
-    margin-left: auto;
   }
 
   .card-time-indicator,

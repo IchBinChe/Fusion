@@ -1847,49 +1847,68 @@ function TaskCardComponent({
               <ProviderIcon provider="github" size="sm" />
             </span>
           )}
-          {(task.retrySummary?.total ?? 0) > 0 && (
-            <span
-              className={`card-retry-badge${(retryWarningThreshold != null && (task.retrySummary?.total ?? 0) >= retryWarningThreshold) ? " card-retry-badge--error" : " card-retry-badge--warning"}`}
-              onClick={handleOpenRetries}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onOpenDetailWithTab?.(task, "retries");
-                }
-              }}
-              aria-label={`${task.retrySummary?.total ?? 0} retries`}
-              title="Open retry breakdown"
-            >
-              <RotateCw size={11} />
-              <span>{task.retrySummary?.total ?? 0}</span>
-            </span>
-          )}
-          {(showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
-            <a
-              className="card-github-tracking-chip card-github-tracking-link"
-              href={githubTrackedIssue.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
-              aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ProviderIcon provider="github" size="sm" />
-              <span>{`#${githubTrackedIssue.number}`}</span>
-            </a>
-          )}
-          {timeIndicator && (
-            <span
-              className="card-time-indicator"
-              title={timeIndicator.title}
-              aria-label={timeIndicator.ariaLabel}
-            >
-              <Clock size={12} />
-              <span>{timeIndicator.label}</span>
-            </span>
+          {(((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
+            <div className="card-footer-row-right">
+              {chipFarRight && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
+                <a
+                  className="card-github-tracking-chip card-github-tracking-link"
+                  href={githubTrackedIssue.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
+                  aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ProviderIcon provider="github" size="sm" />
+                  <span>{`#${githubTrackedIssue.number}`}</span>
+                </a>
+              )}
+              {(task.retrySummary?.total ?? 0) > 0 && (
+                <span
+                  className={`card-retry-badge${(retryWarningThreshold != null && (task.retrySummary?.total ?? 0) >= retryWarningThreshold) ? " card-retry-badge--error" : " card-retry-badge--warning"}`}
+                  onClick={handleOpenRetries}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onOpenDetailWithTab?.(task, "retries");
+                    }
+                  }}
+                  aria-label={`${task.retrySummary?.total ?? 0} retries`}
+                  title="Open retry breakdown"
+                >
+                  <RotateCw size={11} />
+                  <span>{task.retrySummary?.total ?? 0}</span>
+                </span>
+              )}
+              {(!chipFarRight || !((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue))
+                && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
+                  <a
+                    className="card-github-tracking-chip card-github-tracking-link"
+                    href={githubTrackedIssue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
+                    aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ProviderIcon provider="github" size="sm" />
+                    <span>{`#${githubTrackedIssue.number}`}</span>
+                  </a>
+                )}
+              {timeIndicator && (
+                <span
+                  className="card-time-indicator"
+                  title={timeIndicator.title}
+                  aria-label={timeIndicator.ariaLabel}
+                >
+                  <Clock size={12} />
+                  <span>{timeIndicator.label}</span>
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}

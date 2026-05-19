@@ -2377,7 +2377,9 @@ export class TriageProcessor {
             return;
           }
 
-          if (canonicalTask.createdAt <= taskCreatedAt) {
+          // FN-5152: only archive the task being finalized when it is the newer-or-equal
+          // sibling. Older tasks never lose to a newer near-duplicate candidate.
+          if (taskCreatedAt >= canonicalTask.createdAt) {
             await this.store.updateTask(task.id, {
               sourceMetadataPatch: {
                 nearDuplicateOf: canonical.id,

@@ -3309,6 +3309,7 @@ describe("TaskExecutor loop recovery", () => {
       noProgressMs: 600000,
       inactivityMs: 0,
       activitySinceProgress: 100,
+      ignoredStepUpdateCount: 0,
       shouldRequeue: true,
     });
 
@@ -3332,6 +3333,7 @@ describe("TaskExecutor loop recovery", () => {
       noProgressMs: 600000,
       inactivityMs: 0,
       activitySinceProgress: 100,
+      ignoredStepUpdateCount: 0,
       shouldRequeue: true,
     });
 
@@ -3349,6 +3351,7 @@ describe("TaskExecutor loop recovery", () => {
       noProgressMs: 600000,
       inactivityMs: 0,
       activitySinceProgress: 100,
+      ignoredStepUpdateCount: 0,
       shouldRequeue: true,
     });
     expect(result1).toBe(true);
@@ -3360,6 +3363,7 @@ describe("TaskExecutor loop recovery", () => {
       noProgressMs: 600000,
       inactivityMs: 0,
       activitySinceProgress: 200,
+      ignoredStepUpdateCount: 0,
       shouldRequeue: true,
     });
     expect(result2).toBe(false);
@@ -3375,6 +3379,7 @@ describe("TaskExecutor loop recovery", () => {
       noProgressMs: 600000,
       inactivityMs: 0,
       activitySinceProgress: 100,
+      ignoredStepUpdateCount: 0,
       shouldRequeue: true,
     });
 

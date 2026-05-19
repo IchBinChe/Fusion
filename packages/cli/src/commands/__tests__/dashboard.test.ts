@@ -1231,22 +1231,23 @@ describe("runDashboard — WorktreePool wiring", () => {
   it("passes a WorktreePool instance to TaskExecutor", async () => {
     await runDashboard(0, { open: false });
 
-    expect(capturedExecutorOpts).toBeDefined();
-    expect(capturedExecutorOpts!.pool).toBeInstanceOf(WorktreePool);
+    await waitForAsyncExpectation(() => {
+      expect(capturedExecutorOpts).toBeDefined();
+      expect(capturedExecutorOpts!.pool).toBeInstanceOf(WorktreePool);
+    });
   });
 
   it("passes a WorktreePool instance to aiMergeTask via rawMerge", async () => {
-    const { aiMergeTask } = await import("@fusion/engine");
-    const { createServer } = await import("@fusion/dashboard");
+    const { aiMergeTask, ProjectEngineManager } = await import("@fusion/engine");
 
     await runDashboard(0, { open: false });
 
-    // rawMerge is exposed as the onMerge callback wired into createServer.
-    const createServerCall = (createServer as ReturnType<typeof vi.fn>).mock.calls[0];
-    const serverOpts = createServerCall[1] as { onMerge: (taskId: string) => Promise<unknown> };
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    await waitForAsyncExpectation(() => {
+      expect(managerInstance?.getEngine("project-1")).toBeDefined();
+    });
 
-    // Invoke the merge handler
-    await serverOpts.onMerge("FN-TEST");
+    await managerInstance.getEngine("project-1").onMerge("FN-TEST");
 
     expect(aiMergeTask).toHaveBeenCalled();
     const mergeCallOpts = (aiMergeTask as ReturnType<typeof vi.fn>).mock.calls[0][3];
@@ -1254,15 +1255,17 @@ describe("runDashboard — WorktreePool wiring", () => {
   });
 
   it("shares the same WorktreePool instance between executor and merger", async () => {
-    const { aiMergeTask } = await import("@fusion/engine");
-    const { createServer } = await import("@fusion/dashboard");
+    const { aiMergeTask, ProjectEngineManager } = await import("@fusion/engine");
 
     await runDashboard(0, { open: false });
 
-    // Trigger merger via onMerge
-    const createServerCall = (createServer as ReturnType<typeof vi.fn>).mock.calls[0];
-    const serverOpts = createServerCall[1] as { onMerge: (taskId: string) => Promise<unknown> };
-    await serverOpts.onMerge("FN-TEST");
+    const managerInstance = (ProjectEngineManager as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    await waitForAsyncExpectation(() => {
+      expect(capturedExecutorOpts).toBeDefined();
+      expect(managerInstance?.getEngine("project-1")).toBeDefined();
+    });
+
+    await managerInstance.getEngine("project-1").onMerge("FN-TEST");
 
     const executorPool = capturedExecutorOpts!.pool;
     const mergerPool = (aiMergeTask as ReturnType<typeof vi.fn>).mock.calls[0][3].pool;
@@ -1496,12 +1499,12 @@ describe("runDashboard — immediate resume on unpause", () => {
   it("registers a settings:updated listener on the store", async () => {
     await runDashboard(0, { open: false });
 
-    // The store.on should have been called with "settings:updated" at least once
-    const settingsUpdatedCalls = mockStore.on.mock.calls.filter(
-      (call: any[]) => call[0] === "settings:updated",
-    );
-    // At least 2 listeners: one for pause→true (merge kill), one for unpause
-    expect(settingsUpdatedCalls.length).toBeGreaterThanOrEqual(2);
+    await waitForAsyncExpectation(() => {
+      const settingsUpdatedCalls = mockStore.on.mock.calls.filter(
+        (call: any[]) => call[0] === "settings:updated",
+      );
+      expect(settingsUpdatedCalls.length).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it("calls executor.resumeOrphaned() when globalPause transitions true → false", async () => {
@@ -1533,12 +1536,14 @@ describe("runDashboard — immediate resume on unpause", () => {
   it("passes executor recovery callbacks into SelfHealingManager", async () => {
     await runDashboard(0, { open: false });
 
-    expect(capturedSelfHealingOpts).toMatchObject({
-      rootDir: process.cwd(),
-      recoverCompletedTask: expect.any(Function),
-      getExecutingTaskIds: expect.any(Function),
+    await waitForAsyncExpectation(() => {
+      expect(capturedSelfHealingOpts).toMatchObject({
+        rootDir: process.cwd(),
+        recoverCompletedTask: expect.any(Function),
+        getExecutingTaskIds: expect.any(Function),
+      });
+      expect(mockSelfHealingStart).toHaveBeenCalled();
     });
-    expect(mockSelfHealingStart).toHaveBeenCalled();
   });
 
   it("sweeps merge queue on unpause when autoMerge is enabled", async () => {
@@ -1658,6 +1663,13 @@ describe("runDashboard — stuck task timeout listener guards", () => {
     try {
       await runDashboard(0, { open: false });
 
+      await waitForAsyncExpectation(() => {
+        const settingsUpdatedCalls = mockStore.on.mock.calls.filter(
+          (call: any[]) => call[0] === "settings:updated",
+        );
+        expect(settingsUpdatedCalls.length).toBeGreaterThanOrEqual(1);
+      });
+
       mockStore.emit("settings:updated", {
         settings: { taskStuckTimeoutMs: 600_000 },
         previous: { taskStuckTimeoutMs: 1_200_000 },
@@ -1708,9 +1720,13 @@ describe("runDashboard — port fallback on EADDRINUSE", () => {
     expect(mockListen).toHaveBeenCalledWith(4040, "127.0.0.1");
 
     // Banner should show the resolved localhost URL from the bound server.
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("http://localhost:"),
-    );
+    await waitForAsyncExpectation(() => {
+      expect(
+        consoleSpy.mock.calls.some(
+          (call) => typeof call[0] === "string" && call[0].includes("http://localhost:"),
+        ),
+      ).toBe(true);
+    });
 
     // No warning should be printed
     const warningCalls = consoleSpy.mock.calls.filter(
@@ -2132,9 +2148,11 @@ describe("runDashboard — --dev mode", () => {
     const { TriageProcessor, TaskExecutor, Scheduler } = await import("@fusion/engine");
     await runDashboard(0, { open: false });
 
-    expect(TriageProcessor).toHaveBeenCalled();
-    expect(TaskExecutor).toHaveBeenCalled();
-    expect(Scheduler).toHaveBeenCalled();
+    await waitForAsyncExpectation(() => {
+      expect(TriageProcessor).toHaveBeenCalled();
+      expect(TaskExecutor).toHaveBeenCalled();
+      expect(Scheduler).toHaveBeenCalled();
+    });
   });
 
   it("shows 'AI engine: ✓ active' when not in dev mode", async () => {
@@ -2494,8 +2512,9 @@ describe("runDashboard — PR feedback follow-up wiring", () => {
 
     await runDashboard(0, { open: false });
 
-    // Verify the callback was passed to the scheduler
-    expect(capturedOnClosedPrFeedback).toBeDefined();
+    await waitForAsyncExpectation(() => {
+      expect(capturedOnClosedPrFeedback).toBeDefined();
+    });
 
     // Invoke it to verify it reaches createFollowUpTask
     const mockPrInfo = { status: "merged", number: 42 };
@@ -2526,8 +2545,9 @@ describe("runDashboard — PR feedback follow-up wiring", () => {
 
     await runDashboard(0, { open: false });
 
-    // The onNewComments callback should still be wired to handleNewComments
-    expect(capturedOnNewComments).toBeDefined();
+    await waitForAsyncExpectation(() => {
+      expect(capturedOnNewComments).toBeDefined();
+    });
     const handlerInstance = (PrCommentHandler as unknown as ReturnType<typeof vi.fn>).mock.results[0].value;
     const mockComments = [
       { id: 1, body: "Fix this", user: { login: "reviewer" }, created_at: "2024-01-01", updated_at: "2024-01-01", html_url: "" },

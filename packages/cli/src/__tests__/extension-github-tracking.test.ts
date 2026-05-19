@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTaskCreatedHook } from "@fusion/core";
+import { TaskStore, setTaskCreatedHook } from "@fusion/core";
 
 const hookSpy = vi.hoisted(() => vi.fn(async () => {}));
 const registerGithubTrackingHookMock = vi.hoisted(() => vi.fn(() => {
@@ -68,6 +68,13 @@ describe("extension github tracking hook wiring", () => {
       expect(registerGithubTrackingHookMock).toHaveBeenCalledTimes(2);
 
       const tool = tools.get("fn_task_create");
+      const taskStore = new TaskStore(repoRoot, undefined, { inMemoryDb: false });
+      await taskStore.init();
+      await taskStore.updateSettings({
+        githubTrackingEnabledByDefault: true,
+        githubTrackingDefaultRepo: "owner/repo",
+      });
+
       const result = await tool.execute(
         "call-1",
         { description: "extension-created task" },
@@ -81,6 +88,11 @@ describe("extension github tracking hook wiring", () => {
       expect(hookSpy.mock.calls[0]?.[0]).toEqual(
         expect.objectContaining({ id: result.details.taskId }),
       );
+
+      const persisted = await taskStore.getTask(result.details.taskId);
+      expect(persisted).toBeTruthy();
+      expect(persisted?.githubTracking?.enabled).toBe(true);
+      taskStore.close();
     } finally {
       await rm(repoRoot, { recursive: true, force: true });
     }

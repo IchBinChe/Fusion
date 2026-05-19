@@ -24,6 +24,7 @@ import {
   TASK_PRIORITIES,
   resolveSecretAccessPolicy,
   getProjectRootFromWorktree,
+  resolveTaskGithubTracking,
   type SecretScope,
 } from "@fusion/core";
 import {
@@ -508,12 +509,28 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
 
       try {
+        const projectSettings = await store.getSettings();
+        const globalSettings = await store.getGlobalSettingsStore().getSettings();
+        const resolvedTracking = resolveTaskGithubTracking(
+          { githubTracking: undefined },
+          projectSettings,
+          globalSettings,
+        );
+
         const task = await store.createTask({
           description: params.description.trim(),
           dependencies: params.depends,
           assignedAgentId: normalizedAgentId === null ? undefined : normalizedAgentId,
           priority: params.priority as TaskPriority | undefined,
           source: { sourceType: "api" },
+          githubTracking: resolvedTracking.enabled
+            ? {
+                enabled: true,
+                ...(resolvedTracking.repo
+                  ? { repoOverride: `${resolvedTracking.repo.owner}/${resolvedTracking.repo.repo}` }
+                  : {}),
+              }
+            : undefined,
         });
 
         const label =

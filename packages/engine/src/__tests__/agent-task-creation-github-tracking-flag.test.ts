@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { TaskStore, setTaskCreatedHook } from "@fusion/core";
+import { HeartbeatMonitor } from "../agent-heartbeat.js";
 import { createDelegateTaskTool, createTaskCreateTool } from "../agent-tools.js";
 
 const githubTrackingHookModulePromise: Promise<any> = import("../../../dashboard/src/github-tracking-hook.js");
@@ -60,6 +61,18 @@ describe("agent task creation githubTracking.enabled persistence", () => {
         undefined,
         {} as never,
       ),
+    },
+    {
+      name: "heartbeat trackedCreateTool",
+      run: async () => {
+        const monitor = new HeartbeatMonitor({
+          store: { listAgents: vi.fn().mockResolvedValue([]), getAgent: vi.fn().mockResolvedValue(null), getRatingSummary: vi.fn().mockResolvedValue({ averageScore: null, trend: "stable", totalRatings: 0, categoryAverages: {} }), getRatings: vi.fn().mockResolvedValue([]), updateAgent: vi.fn().mockResolvedValue(undefined) } as never,
+          taskStore: store,
+          rootDir,
+        });
+        const tool = monitor.createHeartbeatTools("agent-1", store, "FN-000").find((entry) => entry.name === "fn_task_create");
+        return tool!.execute("call-1", { description: "heartbeat tracked task" } as never, undefined, undefined, {} as never);
+      },
     },
   ])("persists githubTracking.enabled and invokes tracking hook for $name", async ({ run }) => {
     const githubTrackingHookModule = await githubTrackingHookModulePromise;

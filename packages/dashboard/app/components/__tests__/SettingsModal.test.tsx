@@ -347,6 +347,15 @@ describe("SettingsModal", () => {
     expect(await screen.findByTestId("pi-extensions-manager")).toBeInTheDocument();
   });
 
+  it("fires onNavigateToSecrets when Manage secrets is clicked", async () => {
+    const onNavigateToSecrets = vi.fn();
+    renderModal({ onNavigateToSecrets });
+    await waitForSettingsModalReady();
+
+    await userEvent.click(screen.getByRole("link", { name: "Manage secrets" }));
+    expect(onNavigateToSecrets).toHaveBeenCalledTimes(1);
+  });
+
   it("shows direct merge commit routing only for direct merges", async () => {
     renderModal();
     await waitForSettingsModalReady();

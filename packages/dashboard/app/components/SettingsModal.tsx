@@ -393,6 +393,8 @@ interface SettingsModalProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open approvals/mailbox view. */
   onOpenApprovals?: (approvalId?: string) => void;
+  /** Optional callback to navigate from settings to Secrets view. */
+  onNavigateToSecrets?: () => void;
 }
 
 export function SettingsModal({
@@ -408,6 +410,7 @@ export function SettingsModal({
   onDashboardFontScaleChange,
   onReopenOnboarding,
   onOpenApprovals,
+  onNavigateToSecrets,
 }: SettingsModalProps) {
   const { confirm } = useConfirm();
   const worktrunkInstall = useWorktrunkInstallStatus(projectId);
@@ -7219,6 +7222,16 @@ export function SettingsModal({
         )}
         <div className="modal-actions">
           <div className="modal-actions-left">
+            <a
+              href="?view=secrets"
+              className="settings-inline-link"
+              onClick={(event) => {
+                event.preventDefault();
+                onNavigateToSecrets?.();
+              }}
+            >
+              Manage secrets
+            </a>
             <button
               type="button"
               className="btn btn-sm"

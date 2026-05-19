@@ -20,3 +20,16 @@ Operator interpretation:
 - `ageBucket: "fresh"` → expected dependency queueing.
 - `ageBucket: "aging"` → review blocker progress.
 - `ageBucket: "stale"` → emerging stall; escalate/unblock blocker.
+
+## Self-healing surfacing passes (`[self-healing]`)
+
+- `surface-in-review-stalls`
+  - Log prefix: `In-review stall surfaced [`
+  - Purpose: reason-driven in-review stall detector (`merge-blocker`, retry exhaustion, no-worktree, transient merge-status orphaning).
+- `surface-in-review-stalled`
+  - Log prefix: `In-review stalled surfaced [in-review-stalled]: quiet ...`
+  - Purpose: time-quiet detector for unpaused in-review tasks beyond `inReviewStalledThresholdMs`.
+  - Non-overlap: skipped when reason-driven `In-review stall surfaced [` is fresh, and skipped for paused tasks (owned by stale-paused-review).
+- `surface-stale-paused-reviews`
+  - Log prefix: `Stale paused review surfaced [stale-paused-review]: paused ...`
+  - Purpose: paused in-review backlog-health detector gated by `stalePausedReviewThresholdMs`.

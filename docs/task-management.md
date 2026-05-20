@@ -83,6 +83,10 @@ To avoid false positives from broad hot files, the matcher treats an overlap con
 
 Layer 1 persists `source.sourceMetadata.intentSignature` on created tasks so later checks can reuse pre-extracted vectors.
 
+##### CLI direct-store coverage (FN-5171)
+
+CLI `fn task create` now runs the same near-duplicate intent guard after the FN-4918 deterministic fingerprint guard, using shared `extractIntentSignature` / `findNearDuplicates` helpers from `@fusion/core`. Thresholds and the 7-day comparison window match the dashboard layer exactly. `--no-dedup` remains the single bypass across both duplicate layers: it skips the comparison but still stamps `source.sourceMetadata.intentSignature` when high-signal tokens were extracted. When a near-duplicate is detected, interactive TTY runs prompt `Create anyway? [y/N]`; non-interactive runs refuse creation with exit code 1 and instruct the caller to re-run with `--no-dedup`. The guard is still fail-open: extraction/list/query errors log a warning and continue. `fn task import` (GitHub import) and `fn task plan` intentionally continue to skip both duplicate guards per the FN-5060 same-content-sibling contract.
+
 Layer 2 runs in triage `finalizeApprovedTask` after `PROMPT.md` is written and parses `## File Scope` as an additional backstop. If the new spec overlaps an older active task on concrete File Scope / intent tokens and still clears the title threshold, the newer task is auto-archived instead of moved to `todo`.
 
 Near-duplicate archival is reversible and leaves lineage markers behind:

@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry } from "@fusion/core";
+import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch } from "@fusion/core";
 import { aiMergeTask, listBranchRecoveryCandidates, type BranchRecoveryCandidate } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
@@ -288,6 +288,109 @@ async function resolveNodeByNameOrId(nodeNameOrId: string): Promise<{ id: string
   }
 }
 
+function truncateNearDuplicateLabel(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return "(untitled)";
+  return normalized.length > 60 ? `${normalized.slice(0, 60)}…` : normalized;
+}
+
+function formatNearDuplicateMatch(match: NearDuplicateMatch, candidates: Map<string, NearDuplicateCandidate>): string[] {
+  const candidate = candidates.get(match.id);
+  const labelSource = candidate?.title?.trim() || candidate?.description?.trim() || "(untitled)";
+  const shared = match.sharedTokens.slice(0, 6).join(", ");
+  return [
+    `  ${match.id}  (${candidate?.column ?? "unknown"})  ${truncateNearDuplicateLabel(labelSource)}`,
+    `           score: ${match.score.toFixed(2)}  shared: ${shared}`,
+  ];
+}
+
+interface CliNearDuplicateOutcome {
+  signature?: IntentSignature;
+}
+
+function hasIntentSignal(signature?: IntentSignature): signature is IntentSignature {
+  return !!signature && (signature.routePaths.length + signature.filePaths.length + signature.identifiers.length) > 0;
+}
+
+async function runCliNearDuplicateCheck(args: {
+  store: TaskStore;
+  description: string;
+  bypass: boolean;
+}): Promise<CliNearDuplicateOutcome> {
+  let signature: IntentSignature | undefined;
+  let matches: NearDuplicateMatch[] = [];
+  const candidates = new Map<string, NearDuplicateCandidate>();
+
+  try {
+    signature = extractIntentSignature({ description: args.description });
+    const signalCount = signature.routePaths.length + signature.filePaths.length + signature.identifiers.length;
+    if (signalCount === 0) {
+      return { signature };
+    }
+    if (!args.bypass) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const taskCandidates = (await args.store.listTasks({ slim: false, includeArchived: false }))
+        .filter((task) => task.column !== "done")
+        .filter((task) => {
+          const createdAtMs = Date.parse(task.createdAt);
+          return Number.isFinite(createdAtMs) && createdAtMs >= cutoff;
+        })
+        .slice(0, 200)
+        .map((task) => ({
+          id: task.id,
+          title: task.title ?? "",
+          description: task.description,
+          column: task.column,
+          fileScope: Array.isArray(task.source?.sourceMetadata?.fileScope)
+            ? task.source.sourceMetadata.fileScope.filter((entry): entry is string => typeof entry === "string")
+            : undefined,
+          createdAt: Date.parse(task.createdAt),
+        } satisfies NearDuplicateCandidate));
+      for (const candidate of taskCandidates) {
+        candidates.set(candidate.id, candidate);
+      }
+      matches = findNearDuplicates(
+        { description: args.description },
+        taskCandidates,
+        { windowMs: 7 * 24 * 60 * 60 * 1000 },
+      );
+    }
+  } catch (error) {
+    console.error(`Warning: near-duplicate check failed (${error instanceof Error ? error.message : String(error)}); proceeding.`);
+    return { signature: undefined };
+  }
+
+  if (matches.length === 0) {
+    return { signature };
+  }
+
+  console.error("Possible near-duplicate of existing task(s):");
+  for (const match of matches) {
+    for (const line of formatNearDuplicateMatch(match, candidates)) {
+      console.error(line);
+    }
+  }
+  console.error("Pass --no-dedup to create anyway.");
+
+  if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+    console.error("Refusing to create near-duplicate task in non-interactive mode. Re-run with --no-dedup to override.");
+    process.exit(1);
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question("Create anyway? [y/N]: ")).trim().toLowerCase();
+    if (answer === "y" || answer === "yes") {
+      return { signature };
+    }
+  } finally {
+    rl.close();
+  }
+
+  console.error("Task creation cancelled. Use --no-dedup to bypass.");
+  process.exit(0);
+}
+
 export async function runTaskCreate(descriptionArg?: string, attachFiles?: string[], depends?: string[], projectName?: string, nodeName?: string, noDedup = false) {
   let description = descriptionArg;
   const projectContext = await getProjectContext(projectName);
@@ -321,12 +424,23 @@ export async function runTaskCreate(descriptionArg?: string, attachFiles?: strin
       task = guard.existing;
       linkedExisting = true;
     } else {
+      // FN-5171: create ordering remains deterministic duplicate (FN-4918) -> near-duplicate intent.
+      // Mirrors the dashboard FN-5152 guard while keeping CLI create fail-open.
+      const nearDuplicate = await runCliNearDuplicateCheck({
+        store,
+        description: description.trim(),
+        bypass: noDedup,
+      });
+      const sourceMetadata = {
+        ...(guard.fingerprint ? { contentFingerprint: guard.fingerprint } : {}),
+        ...(hasIntentSignal(nearDuplicate.signature) ? { intentSignature: nearDuplicate.signature } : {}),
+      };
       const created = await store.createTask({
         description: description.trim(),
         dependencies: depends,
         source: {
           sourceType: "cli",
-          sourceMetadata: guard.fingerprint ? { contentFingerprint: guard.fingerprint } : undefined,
+          sourceMetadata: Object.keys(sourceMetadata).length > 0 ? sourceMetadata : undefined,
         },
       });
 

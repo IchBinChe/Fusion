@@ -420,6 +420,24 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
       acquiredTaskId: lease && "taskId" in lease ? lease.taskId : null,
     });
   }
+  // Re-check executor lease after acquiring the merge-queue lease: the
+  // checks above (lines ~362–391) are non-atomic with acquisition, so a
+  // local executor could grab the task between them. Releasing here gives
+  // a precise diagnostic instead of letting the merge proceed with a
+  // conflicting executor lease and surfacing as a generic failure later.
+  if (executingTaskLock.has(input.task.id)) {
+    (input.store as TaskStore & {
+      releaseMergeQueueLease(taskId: string, workerId: string, outcome: MergeQueueReleaseOutcome): void;
+    }).releaseMergeQueueLease(input.task.id, MERGE_HANDOFF_WORKER_ID, {
+      kind: "failure",
+      error: "executor-lease-acquired-after-queue-lease",
+    });
+    throw new MergeHandoffRefusedError("lease-handoff-failed", "executor-lease-race-detected", {
+      taskId: input.task.id,
+      worktreePath,
+      reason: "executor_lease_acquired_after_queue_lease",
+    });
+  }
 
   return {
     ok: true,

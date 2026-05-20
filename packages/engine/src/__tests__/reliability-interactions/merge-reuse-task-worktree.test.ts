@@ -22,7 +22,7 @@ import { git, hasGit, makeReliabilityFixture } from "./_helpers.js";
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
 
 describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
-  it.skipIf(!hasGit)("happy path merges from a reused task worktree without mutating the project root", async () => {
+  it.skipIf(!hasGit)("happy path merges from a reused task worktree and applies the squash to the project root's integration branch", async () => {
     const fixture = await makeReliabilityFixture({
       taskId: "FN-5279-RI-HAPPY",
       settings: {
@@ -71,7 +71,14 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       const acquired = audits.find((event) => event.mutationType === "merge:reuse-handoff-acquired");
       expect(acquired?.metadata).toMatchObject({ integrationRemote: "origin", integrationBranch: "master" });
 
-      expect(git(rootDir, "git rev-parse HEAD")).toBe(rootHeadBefore);
+      // Step 5c (FN-5279 reuse mode) advances the project root's integration
+      // branch to the new squash commit so changes actually land on master.
+      expect(auditTypes).toContain("merge:reuse-integration-branch-advanced");
+      const advanced = audits.find(
+        (event) => event.mutationType === "merge:reuse-integration-branch-advanced",
+      );
+      expect(advanced?.metadata).toMatchObject({ via: "ff-merge" });
+      expect(git(rootDir, "git rev-parse HEAD")).not.toBe(rootHeadBefore);
       expect(git(rootDir, "git status --porcelain --untracked-files=no")).toBe(rootTrackedStatusBefore);
     } finally {
       await fixture.cleanup();

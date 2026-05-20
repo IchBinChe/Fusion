@@ -8400,6 +8400,142 @@ export async function aiMergeTask(
     mergerLog.warn(`${taskId}: failed to collect/store merge details: ${err.message}`);
   }
 
+  // 5c. Apply squash commit to the project root's local integration branch
+  // (FN-5279). In reuse-task-worktree mode step 3b detached HEAD in the task
+  // worktree, so the squash commit landed on a detached HEAD and the local
+  // integration branch ref in the project root still points at the pre-merge
+  // tip. Advance it now via `git merge --ff-only` so the changes are
+  // actually applied to local main. If main has diverged in the meantime
+  // (rare — merge queue lease should prevent concurrent advances), fall back
+  // to a regular merge and let the existing AI conflict resolution helper
+  // resolve any conflicts.
+  if (reuseTaskWorktreeMerge) {
+    try {
+      const worktreeHeadSha = execSyncText("git rev-parse HEAD", {
+        cwd: rootDir,
+        stdio: "pipe",
+        encoding: "utf-8",
+      }).trim();
+      if (worktreeHeadSha) {
+        const integrationBranch = mergeTarget.branch;
+        try {
+          await execAsync(`git merge --ff-only ${quoteArg(worktreeHeadSha)}`, {
+            cwd: projectRootDir,
+            encoding: "utf-8",
+            timeout: 60_000,
+          });
+          await (audit as any).git({
+            type: "merge:reuse-integration-branch-advanced",
+            target: integrationBranch,
+            metadata: { taskId, sha: worktreeHeadSha, via: "ff-merge", projectRootDir },
+          });
+          mergerLog.log(
+            `${taskId}: applied squash ${worktreeHeadSha.slice(0, 8)} to ${integrationBranch} in project root (ff-merge)`,
+          );
+        } catch (ffErr: unknown) {
+          const ffMsg = ffErr instanceof Error ? ffErr.message : String(ffErr);
+          mergerLog.warn(
+            `${taskId}: ff-merge of ${worktreeHeadSha.slice(0, 8)} into ${integrationBranch} failed (${ffMsg}); attempting non-ff merge with AI conflict resolution`,
+          );
+          try {
+            await execAsync(`git merge --no-edit ${quoteArg(worktreeHeadSha)}`, {
+              cwd: projectRootDir,
+              encoding: "utf-8",
+              timeout: 120_000,
+            });
+            await (audit as any).git({
+              type: "merge:reuse-integration-branch-advanced",
+              target: integrationBranch,
+              metadata: { taskId, sha: worktreeHeadSha, via: "non-ff-merge", projectRootDir },
+            });
+            mergerLog.log(
+              `${taskId}: applied squash ${worktreeHeadSha.slice(0, 8)} to ${integrationBranch} in project root (non-ff merge, no conflicts)`,
+            );
+          } catch (mergeErr: unknown) {
+            const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+            const conflicted = await getConflictedFiles(projectRootDir).catch(() => [] as string[]);
+            if (conflicted.length === 0) {
+              await execAsync("git merge --abort", { cwd: projectRootDir, timeout: 30_000 }).catch(() => undefined);
+              throw new Error(
+                `Non-ff merge of ${worktreeHeadSha} into ${integrationBranch} failed without conflict markers: ${mergeMsg}`,
+              );
+            }
+            mergerLog.log(
+              `${taskId}: ${conflicted.length} conflict(s) applying squash to ${integrationBranch} — invoking AI conflict resolution`,
+            );
+            const conflictAssignedAgentId = task.assignedAgentId?.trim();
+            const conflictAgentStoreWithGetAgent = options.agentStore
+              && typeof (options.agentStore as { getAgent?: unknown }).getAgent === "function"
+              ? options.agentStore
+              : null;
+            const conflictAssignedAgent = conflictAssignedAgentId && conflictAgentStoreWithGetAgent
+              ? await (conflictAgentStoreWithGetAgent as any).getAgent(conflictAssignedAgentId).catch(() => null)
+              : null;
+            const conflictRuntimeHint = extractRuntimeHint(conflictAssignedAgent?.runtimeConfig);
+            await resolveComplexRebaseConflictsWithAi(
+              store,
+              projectRootDir,
+              taskId,
+              settings,
+              conflicted,
+              {
+                onAgentText: options.onAgentText,
+                signal: options.signal,
+                runtimeHint: conflictRuntimeHint,
+                assignedAgentRuntimeConfig: conflictAssignedAgent?.runtimeConfig,
+                onSession: options.onSession,
+              },
+            );
+            const stillConflicted = await getConflictedFiles(projectRootDir).catch(() => [] as string[]);
+            if (stillConflicted.length > 0) {
+              await execAsync("git merge --abort", { cwd: projectRootDir, timeout: 30_000 }).catch(() => undefined);
+              throw new Error(
+                `AI conflict resolution left ${stillConflicted.length} unresolved file(s) when applying squash to ${integrationBranch}: ${stillConflicted.join(", ")}`,
+              );
+            }
+            await execAsync(`git commit --no-edit`, {
+              cwd: projectRootDir,
+              encoding: "utf-8",
+              timeout: 60_000,
+            });
+            await (audit as any).git({
+              type: "merge:reuse-integration-branch-advanced",
+              target: integrationBranch,
+              metadata: {
+                taskId,
+                sha: worktreeHeadSha,
+                via: "non-ff-merge-ai-resolved",
+                projectRootDir,
+                conflictedFiles: conflicted,
+              },
+            });
+            mergerLog.log(
+              `${taskId}: applied squash ${worktreeHeadSha.slice(0, 8)} to ${integrationBranch} in project root after AI conflict resolution (${conflicted.length} file(s))`,
+            );
+          }
+        }
+      }
+    } catch (advErr: unknown) {
+      const advMsg = advErr instanceof Error ? advErr.message : String(advErr);
+      mergerLog.error(
+        `${taskId}: failed to apply squash to ${mergeTarget.branch} in project root: ${advMsg}`,
+      );
+      await (audit as any).git({
+        type: "merge:reuse-integration-branch-advance-failed",
+        target: mergeTarget.branch,
+        metadata: { taskId, error: advMsg, projectRootDir },
+      });
+      // Abort: leaving reuseTaskWorktreeMerge=true would cause the subsequent
+      // push step to operate on projectRootDir where the squash was never
+      // applied, shipping the pre-merge ref. Mark the reuse-merge as failed
+      // and surface the error so the merge can be retried cleanly.
+      reuseTaskWorktreeMerge = false;
+      throw new Error(
+        `Failed to advance ${mergeTarget.branch} in project root after reuse-task-worktree squash: ${advMsg}`,
+      );
+    }
+  }
+
   // 6. Delete branch
   try {
     await execAsync(`git branch -d "${branch}"`, { cwd: rootDir });
@@ -8538,7 +8674,12 @@ export async function aiMergeTask(
         ? await pushAgentStoreWithGetAgent.getAgent(pushAssignedAgentId).catch(() => null)
         : null;
       const pushRuntimeHint = extractRuntimeHint(pushAssignedAgent?.runtimeConfig);
-      const pushResult = await pushToRemoteAfterMerge(store, rootDir, taskId, settings, {
+      // In reuse-task-worktree mode, rootDir is the task worktree with a
+      // detached HEAD; step 5c already advanced the project root's
+      // integration branch to the new squash commit, so push from
+      // projectRootDir where the branch is checked out and at the new tip.
+      const pushRootDir = reuseTaskWorktreeMerge ? projectRootDir : rootDir;
+      const pushResult = await pushToRemoteAfterMerge(store, pushRootDir, taskId, settings, {
         onAgentText: options.onAgentText,
         signal: options.signal,
         runtimeHint: pushRuntimeHint,
@@ -8552,7 +8693,7 @@ export async function aiMergeTask(
         // mergeDetails / recovery don't reference a now-orphaned commit.
         try {
           const postPushSha = execSync("git rev-parse HEAD", {
-            cwd: rootDir,
+            cwd: pushRootDir,
             stdio: "pipe",
             encoding: "utf-8",
           }).trim() || undefined;
@@ -8568,7 +8709,7 @@ export async function aiMergeTask(
               try {
                 const { stdout: postPushStatsOutput } = await execAsync(
                   `git show --shortstat --format= ${quoteArg(postPushSha)}`,
-                  { cwd: rootDir, encoding: "utf-8" },
+                  { cwd: pushRootDir, encoding: "utf-8" },
                 );
                 const normalized = postPushStatsOutput.trim().replace(/\n/g, " ");
                 const filesMatch = normalized.match(/(\d+) files? changed/);

@@ -3135,7 +3135,7 @@ describe("TaskCard", () => {
     expect(filesChangedButton).toBeNull();
   });
 
-  it("prefers landedFiles fallback label for done tasks when lineage stats are unavailable", () => {
+  it("prefers landedFiles fallback files-changed label for done tasks when lineage stats are unavailable", () => {
     const onOpenDetailWithTab = vi.fn();
     useTaskDiffStatsMock.mockReturnValue({ stats: null, loading: false });
 
@@ -3144,7 +3144,6 @@ describe("TaskCard", () => {
         task={makeTask({
           column: "done",
           mergeDetails: { landedFiles: ["a.ts", "b.ts"] },
-          modifiedFiles: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"],
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -3152,7 +3151,7 @@ describe("TaskCard", () => {
       />,
     );
 
-    const landedButton = screen.getByRole("button", { name: "2 files in merged commit" });
+    const landedButton = screen.getByRole("button", { name: "2 files changed" });
     expect(landedButton).toBeDefined();
 
     fireEvent.click(landedButton);
@@ -3160,11 +3159,10 @@ describe("TaskCard", () => {
     expect(onOpenDetailWithTab.mock.calls[0]?.[1]).toBe("changes");
   });
 
-  it("shows execution-touched fallback label for done tasks when lineage stats are unavailable", () => {
-    const onOpenDetailWithTab = vi.fn();
+  it("hides the done-task file chip when only execution-touched modifiedFiles exist", () => {
     useTaskDiffStatsMock.mockReturnValue({ stats: null, loading: false });
 
-    render(
+    const { container } = render(
       <TaskCard
         task={makeTask({
           column: "done",
@@ -3172,17 +3170,13 @@ describe("TaskCard", () => {
         })}
         onOpenDetail={noop}
         addToast={noop}
-        onOpenDetailWithTab={onOpenDetailWithTab}
+        onOpenDetailWithTab={vi.fn()}
       />,
     );
 
-    const touchedButton = screen.getByRole("button", { name: "6 files touched during execution" });
-    expect(touchedButton).toBeDefined();
-    expect(screen.queryByText(/\d+ files? changed/i)).toBeNull();
-
-    fireEvent.click(touchedButton);
-    expect(onOpenDetailWithTab).toHaveBeenCalledTimes(1);
-    expect(onOpenDetailWithTab.mock.calls[0]?.[1]).toBe("changes");
+    expect(screen.queryByText(/touched during execution/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /files changed/i })).toBeNull();
+    expect(container.querySelector(".card-session-files")).toBeNull();
   });
 
   it("prefers lineage files-changed stats over stale execution-touched modifiedFiles for done tasks", () => {
@@ -3215,7 +3209,26 @@ describe("TaskCard", () => {
     );
 
     expect(screen.getByRole("button", { name: "4 files changed" })).toBeDefined();
-    expect(screen.queryByText("10 files touched during execution")).toBeNull();
+    expect(screen.queryByText(/touched during execution/i)).toBeNull();
+    expect(screen.queryByText(/in merged commit/i)).toBeNull();
+  });
+
+  it("uses singular 'file changed' grammar for landedFiles-only done tasks", () => {
+    useTaskDiffStatsMock.mockReturnValue({ stats: null, loading: false });
+
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "done",
+          mergeDetails: { landedFiles: ["a.ts"] },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onOpenDetailWithTab={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "1 file changed" })).toBeDefined();
   });
 
   it("hides done-task file chip when lineage stats are unavailable and no execution fallback exists", () => {

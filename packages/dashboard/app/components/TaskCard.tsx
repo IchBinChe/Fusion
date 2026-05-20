@@ -1522,11 +1522,8 @@ function TaskCardComponent({
     }
 
     if (task.column === "done") {
-      // Per FN-4527/FN-4647: /api/tasks/:id/diff is authoritative for done-task
-      // landed file counts. mergeDetails.filesChanged can be stale after
-      // rebase-and-push (FN-4526), so only use it as a transient loading
-      // placeholder. Executor-captured modifiedFiles are labeled as
-      // "touched during execution" and never as landed "files changed".
+      // Done cards only display committed diff counts from authoritative lineage
+      // stats or recorded landed files; transient execution-touched files are not shown.
       let displayCount: number | undefined;
       if (diffStats) {
         const landed = task.mergeDetails?.landedFiles;
@@ -1537,7 +1534,7 @@ function TaskCardComponent({
       } else if (diffLoading) {
         displayCount = task.mergeDetails?.filesChanged ?? undefined;
       } else {
-        displayCount = undefined;
+        displayCount = task.mergeDetails?.landedFiles?.length;
       }
       if (displayCount != null && displayCount > 0) {
         return (
@@ -1549,25 +1546,6 @@ function TaskCardComponent({
           >
             <Folder size={12} />
             <span>{displayCount} {displayCount === 1 ? "file" : "files"} changed</span>
-          </button>
-        );
-      }
-
-      const landedFallbackCount = task.mergeDetails?.landedFiles?.length;
-      const modifiedCount = landedFallbackCount && landedFallbackCount > 0
-        ? landedFallbackCount
-        : task.modifiedFiles?.length;
-      if (!diffLoading && (modifiedCount ?? 0) > 0) {
-        return (
-          <button
-            type="button"
-            className="card-session-files"
-            onClick={handleOpenFiles}
-            disabled={!onOpenDetailWithTab}
-            title="Captured from worktree during execution; may not match the landed diff. Open the task to view the recorded merge."
-          >
-            <Folder size={12} />
-            <span>{modifiedCount} {modifiedCount === 1 ? "file" : "files"} {landedFallbackCount ? "in merged commit" : "touched during execution"}</span>
           </button>
         );
       }

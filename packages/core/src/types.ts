@@ -1573,10 +1573,10 @@ export interface Task {
    * task worktree (`TaskExecutor.captureModifiedFiles`).
    *
    * This may be a stale/transient superset of files that actually landed after
-   * merge resolution or follow-up commits. UI surfaces must label this as
-   * "files touched during execution" (never landed "files changed" for done
-   * tasks). The authoritative landed diff for done tasks is
-   * `/api/tasks/:id/diff`.
+   * merge resolution or follow-up commits. Done-task cards must not use this
+   * field for their files-changed chip; the authoritative landed diff comes
+   * from `/api/tasks/:id/diff`, with `mergeDetails.landedFiles` as committed
+   * metadata fallback when live stats are unavailable.
    */
   modifiedFiles?: string[];
   /** Opt out of the squash file-scope invariant for this task. */

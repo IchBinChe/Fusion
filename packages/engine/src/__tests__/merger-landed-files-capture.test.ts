@@ -16,7 +16,12 @@ describe("FN-4646 aiMergeTask landedFiles capture", () => {
       { id: "FN-4646", worktree: "/tmp/root/.worktrees/FN-4646" },
       [{ id: "FN-4646", worktree: "/tmp/root/.worktrees/FN-4646", column: "in-review" } as Task],
     );
-    (store.getSettings as any).mockResolvedValue({ includeTaskIdInCommit: true, mergeConflictStrategy: "smart-prefer-main", ...settings });
+    (store.getSettings as any).mockResolvedValue({
+      includeTaskIdInCommit: true,
+      mergeConflictStrategy: "smart-prefer-main",
+      mergeIntegrationWorktree: "cwd-main" as const,
+      ...settings,
+    });
     return store;
   }
 

@@ -98,6 +98,14 @@ import { checkDiffVolume, DiffVolumeRegressionError } from "./merger-diff-volume
 import { ReadonlyViolationError, filterCustomToolsForReadonly } from "./workflow-step-tool-policy.js";
 import { detectAlreadyLandedOnMain, type AlreadyMergedDetectionStrategy } from "./already-merged-detector.js";
 import { decideAutoPrerebase, probeDivergence, runAutoPrerebase } from "./merger-auto-prerebase.js";
+import {
+  acquireReuseHandoff,
+  MergeHandoffRefusedError,
+  releaseReuseHandoff,
+  resolveIntegrationRemote,
+  resolveMergeIntegrationRoot,
+  type HandoffResult,
+} from "./merger-integration-worktree.js";
 
 export { DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 
@@ -1248,11 +1256,13 @@ async function attemptInMergeVerificationFix(
       : null;
     const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
     const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
+    // FN-5279: verification-fix sessions run in the resolved integration root,
+    // which is the reused task worktree in handoff mode.
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "merger",
       runtimeHint: mergerRuntimeHint,
       pluginRunner: options.pluginRunner,
-      cwd: rootDir, // Runs on the main branch in the project root
+      cwd: rootDir,
       systemPrompt: `You are a verification fix agent running during a merge on the main branch.
 
 A merge has been applied and the verification command failed. Your job is to fix the failing code directly in the working directory.
@@ -4274,6 +4284,8 @@ interface DiffBaseResolutionInput {
   headRef: string;
   baseBranch?: string;
   baseCommitSha?: string;
+  integrationBranchFallback?: string;
+  integrationRemoteFallback?: string;
 }
 
 /**
@@ -4294,13 +4306,17 @@ export async function resolveTaskDiffBaseRef({
   headRef,
   baseBranch,
   baseCommitSha,
+  integrationBranchFallback,
+  integrationRemoteFallback,
 }: DiffBaseResolutionInput): Promise<string | undefined> {
   // When baseBranch was nulled (e.g., upstream dep merged and its branch was
   // deleted) but a task-scoped baseCommitSha is still recorded, skip the
-  // merge-base step so we don't widen the diff range to merge-base(HEAD, main)
-  // and surface unrelated history. Only fall back to "main" when neither hint
-  // is available (legacy tasks).
-  const resolvedBaseBranch = baseBranch?.trim() || (baseCommitSha ? undefined : "main");
+  // merge-base step so we don't widen the diff range to merge-base(HEAD, integration)
+  // and surface unrelated history. Only fall back to the resolved integration
+  // branch when neither hint is available.
+  const fallbackBranch = integrationBranchFallback?.trim() || undefined;
+  const fallbackRemote = integrationRemoteFallback?.trim() || undefined;
+  const resolvedBaseBranch = baseBranch?.trim() || (baseCommitSha ? undefined : fallbackBranch);
   const quotedHeadRef = quoteArg(headRef);
   let mergeBase: string | undefined;
 
@@ -4313,7 +4329,10 @@ export async function resolveTaskDiffBaseRef({
         });
         mergeBase = stdout.trim() || undefined;
       } catch {
-        const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} ${quoteArg(`origin/${resolvedBaseBranch}`)}`, {
+        if (!fallbackRemote) {
+          throw new Error("missing integration remote fallback");
+        }
+        const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} ${quoteArg(`${fallbackRemote}/${resolvedBaseBranch}`)}`, {
           cwd,
           encoding: "utf-8",
         });
@@ -4341,28 +4360,30 @@ export async function resolveTaskDiffBaseRef({
 
   // Display recovery (mirrors dashboard `resolveDiffBase` with
   // `enableDisplayRecovery: true`): when baseBranch is missing — common for
-  // legacy/imported tasks — compute merge-base(headRef, main) so we can
-  // tighten an outdated-but-still-ancestor baseCommitSha after a pre-merge
-  // rebase. Without this the scope warning compares against a stale
-  // baseCommitSha and surfaces every unrelated commit landed on main since
-  // the task forked.
+  // legacy/imported tasks — compute merge-base(headRef, integration branch) so
+  // we can tighten an outdated-but-still-ancestor baseCommitSha after a
+  // pre-merge rebase. Without this the scope warning compares against a stale
+  // baseCommitSha and surfaces every unrelated commit landed on the integration
+  // branch since the task forked.
   let recoveredBase: string | undefined;
-  if (!baseBranch?.trim()) {
+  if (!baseBranch?.trim() && fallbackBranch) {
     try {
-      const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} main`, {
+      const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} ${quoteArg(fallbackBranch)}`, {
         cwd,
         encoding: "utf-8",
       });
       recoveredBase = stdout.trim() || undefined;
     } catch {
-      try {
-        const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} ${quoteArg("origin/main")}`, {
-          cwd,
-          encoding: "utf-8",
-        });
-        recoveredBase = stdout.trim() || undefined;
-      } catch {
-        // no recovery available
+      if (fallbackRemote) {
+        try {
+          const { stdout } = await execAsync(`git merge-base ${quotedHeadRef} ${quoteArg(`${fallbackRemote}/${fallbackBranch}`)}`, {
+            cwd,
+            encoding: "utf-8",
+          });
+          recoveredBase = stdout.trim() || undefined;
+        } catch {
+          // no recovery available
+        }
       }
     }
   }
@@ -6342,8 +6363,125 @@ export async function aiMergeTask(
     throw new Error(`Cannot merge ${taskId}: ${mergeBlocker}`);
   }
 
+  const projectRootDir = rootDir;
+  const settings = await store.getSettings();
+  const projectDefaultBranch = typeof settings.baseBranch === "string" ? settings.baseBranch : undefined;
+  const mergeTarget = resolveTaskMergeTarget(task, {
+    projectDefaultBranch,
+  });
   const branch = task.branch || canonicalFusionBranchName(taskId);
-  const requestedBaseRef = task.mergeDetails?.mergeTargetBranch || "main";
+
+  const mergeRunId = generateSyntheticRunId("merge", taskId);
+  const engineRunContext: EngineRunContext = {
+    runId: mergeRunId,
+    agentId: "merger",
+    taskId,
+    taskLineageId: task.lineageId,
+    phase: "merge",
+  };
+  const audit = createRunAuditor(store, engineRunContext);
+  const emitReuseHandoffAuditEvent = async (
+    type:
+      | "merge:reuse-handoff-acquired"
+      | "merge:reuse-handoff-refused"
+      | "merge:reuse-handoff-released"
+      | "merge:reuse-handoff-deferred-to-worktrunk"
+      | "branch:auto-canonicalize-case",
+    metadata: Record<string, unknown>,
+    target: string,
+  ): Promise<void> => {
+    try {
+      await audit.git({ type, target, metadata });
+    } catch (auditErr: unknown) {
+      mergerLog.warn(
+        `${taskId}: failed to emit ${type}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+      );
+    }
+  };
+
+  const requestedIntegrationMode = settings.mergeIntegrationWorktree === "cwd-main"
+    ? "cwd-main"
+    : "reuse-task-worktree";
+  const integrationRoot = resolveMergeIntegrationRoot({
+    task,
+    settings,
+    projectRoot: projectRootDir,
+  });
+  const reuseTaskWorktreeMerge = integrationRoot.mode === "reuse-task-worktree";
+  rootDir = integrationRoot.rootDir;
+  const integrationRemote = await resolveIntegrationRemote({
+    settings,
+    rootDir: rootDir,
+    integrationBranch: mergeTarget.branch,
+  });
+  if (
+    settings.worktrunk?.enabled === true
+    && requestedIntegrationMode === "reuse-task-worktree"
+    && integrationRoot.mode === "cwd-main"
+  ) {
+    await emitReuseHandoffAuditEvent(
+      "merge:reuse-handoff-deferred-to-worktrunk",
+      {
+        taskId,
+        worktreePath: task.worktree ?? null,
+        integrationRemote: integrationRemote ?? null,
+        integrationBranch: mergeTarget.branch,
+      },
+      projectRootDir,
+    );
+  }
+
+  let reuseHandoff: HandoffResult | undefined;
+  if (integrationRoot.mode === "reuse-task-worktree") {
+    try {
+      reuseHandoff = await acquireReuseHandoff({
+        task,
+        store,
+        projectRoot: projectRootDir,
+        settings,
+        worktreePath: integrationRoot.rootDir,
+        auditEmit: (event) => emitReuseHandoffAuditEvent(event.type as any, event.metadata ?? {}, event.target ?? integrationRoot.rootDir),
+      });
+      await emitReuseHandoffAuditEvent(
+        "merge:reuse-handoff-acquired",
+        {
+          taskId,
+          branch: reuseHandoff.branch,
+          worktreePath: reuseHandoff.worktreePath,
+          integrationRemote: integrationRemote ?? null,
+          integrationBranch: mergeTarget.branch,
+        },
+        reuseHandoff.worktreePath,
+      );
+    } catch (error) {
+      if (error instanceof MergeHandoffRefusedError) {
+        await emitReuseHandoffAuditEvent(
+          "merge:reuse-handoff-refused",
+          {
+            taskId,
+            gate: error.gate,
+            reason: error.reason,
+            diagnostics: error.payload,
+          },
+          integrationRoot.rootDir,
+        );
+      }
+      throw error;
+    }
+  }
+
+  const requestedBaseRef = task.mergeDetails?.mergeTargetBranch?.trim() || mergeTarget.branch;
+  const releaseReuseHandoffEarly = async (outcome: string): Promise<void> => {
+    if (!reuseHandoff) return;
+    const handoff = reuseHandoff;
+    reuseHandoff = undefined;
+    await releaseReuseHandoff({
+      handoff,
+      outcome,
+      auditEmit: (event) => emitReuseHandoffAuditEvent(event.type as any, event.metadata ?? {}, event.target ?? handoff.worktreePath),
+    });
+  };
+
   const resolveAheadCount = async (): Promise<{ aheadCount: number; baseRef: string } | null> => {
     try {
       await execAsync(`git rev-parse --verify ${quoteArg(branch)}`, { cwd: rootDir, timeout: 30_000 });
@@ -6355,7 +6493,10 @@ export async function aiMergeTask(
     try {
       await execAsync(`git rev-parse --verify ${quoteArg(baseRef)}`, { cwd: rootDir, timeout: 30_000 });
     } catch {
-      const remoteRef = `origin/${requestedBaseRef}`;
+      if (!integrationRemote) {
+        return null;
+      }
+      const remoteRef = `${integrationRemote}/${requestedBaseRef}`;
       try {
         await execAsync(`git rev-parse --verify ${quoteArg(remoteRef)}`, { cwd: rootDir, timeout: 30_000 });
         baseRef = remoteRef;
@@ -6408,6 +6549,7 @@ export async function aiMergeTask(
         mergeTargetBranch: aheadInfo.baseRef,
       };
       await completeTask(store, taskId, result);
+      await releaseReuseHandoffEarly("success");
       return result;
     }
 
@@ -6446,6 +6588,7 @@ export async function aiMergeTask(
         mergeTargetBranch: classification.baseRef,
       };
       await completeTask(store, taskId, result);
+      await releaseReuseHandoffEarly("success");
       return result;
     }
 
@@ -6463,6 +6606,7 @@ export async function aiMergeTask(
       metadata: { reason: classification.reason, details: classification.details, autoRetry: true },
     });
     await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as any);
+    await releaseReuseHandoffEarly(unprovenError);
     return {
       task,
       branch,
@@ -6506,6 +6650,7 @@ export async function aiMergeTask(
   // Hoisted so the finally block (below) can attach the autostash outcome
   // to the result object the caller will receive.
   let resultForFinally: MergeResult | undefined;
+  let reuseHandoffOutcome = "success";
   try {
 
   const sourceIssueRef = buildSourceIssueRef(task.sourceIssue);
@@ -6519,25 +6664,12 @@ export async function aiMergeTask(
   };
   resultForFinally = result;
 
-  // Build merge-run context for audit instrumentation (FN-1404)
-  const mergeRunId = generateSyntheticRunId("merge", taskId);
-  const engineRunContext: EngineRunContext = {
-    runId: mergeRunId,
-    agentId: "merger",
-    taskId,
-    taskLineageId: task.lineageId,
-    phase: "merge",
-  };
-
-  // Create run auditor for TaskStore-backed audit emission (no-ops if store doesn't support it)
-  const audit = createRunAuditor(store, engineRunContext);
 
   if (!worktreePath) {
     mergerLog.warn(`${taskId}: no worktree path set — skipping worktree cleanup`);
   }
 
   // 2. Read settings
-  const settings = await store.getSettings();
   const includeTaskId = settings.includeTaskIdInCommit !== false;
   // Support both setting names: smartConflictResolution (new) and autoResolveConflicts (legacy)
   const smartConflictResolution = (settings.smartConflictResolution ?? settings.autoResolveConflicts) !== false;
@@ -6553,7 +6685,7 @@ export async function aiMergeTask(
   // by `-X ours`/`-X theirs` falling back to a stale base. Best-effort: any
   // failure (no remote, network down, divergent local) logs and continues.
   if (mergeConflictStrategy === "smart-prefer-main" || mergeConflictStrategy === "smart-prefer-branch") {
-    await tryFastForwardFromOrigin(rootDir, taskId);
+    await tryFastForwardFromOrigin(rootDir, taskId, mergeTarget.branch, integrationRemote);
   }
 
   // Tracks the "empty squash" success path — when `git merge --squash`
@@ -6564,11 +6696,6 @@ export async function aiMergeTask(
   // sites in mergeAttempt + attemptWithSideStrategy.
   let mergeWasEmpty = false;
   let recoveredMergeSha: string | undefined;
-
-  const projectDefaultBranch = typeof settings.baseBranch === "string" ? settings.baseBranch : undefined;
-  const mergeTarget = resolveTaskMergeTarget(task, {
-    projectDefaultBranch,
-  });
 
   // 3. Check branch exists
   try {
@@ -6637,8 +6764,11 @@ export async function aiMergeTask(
     return result;
   }
 
-  // 3b. Ensure rootDir is on the resolved merge target before merging.
-  // Without this, a merge could land on whatever branch was last checked out.
+  // 3b. Ensure rootDir is based on the resolved integration target before merging.
+  // In reuse-task-worktree mode the task worktree is branch-bound, so we detach
+  // to the integration branch tip instead of checking out the integration branch
+  // directly; this keeps the project root untouched while preserving the merge
+  // cascade's expected `preAttemptHeadSha === integration target` invariant.
   try {
     throwIfAborted(options.signal, taskId);
     const currentBranch = execSyncText("git symbolic-ref --short HEAD", {
@@ -6646,7 +6776,15 @@ export async function aiMergeTask(
       encoding: "utf-8",
       stdio: "pipe",
     }).trim();
-    if (currentBranch !== mergeTarget.branch) {
+    if (reuseTaskWorktreeMerge) {
+      mergerLog.log(
+        `${taskId}: reusing task worktree — detaching HEAD at '${mergeTarget.branch}' before merge (${mergeTarget.source})`,
+      );
+      await execAsync(`git checkout --detach "${mergeTarget.branch}"`, {
+        cwd: rootDir,
+      });
+      await audit.git({ type: "branch:checkout", target: mergeTarget.branch });
+    } else if (currentBranch !== mergeTarget.branch) {
       mergerLog.log(`${taskId}: rootDir on '${currentBranch}', checking out '${mergeTarget.branch}' before merge (${mergeTarget.source})`);
       await execAsync(`git checkout "${mergeTarget.branch}"`, {
         cwd: rootDir,
@@ -6659,6 +6797,10 @@ export async function aiMergeTask(
   }
 
   // 3c. Pre-merge remote rebase.
+  // `rootDir` is the resolved integration root for this merge attempt: either
+  // the project root (`cwd-main`) or the reused task worktree after the FN-5279
+  // handoff gates. All fetch/rebase commands below intentionally stay on that
+  // resolved root so the full conflict cascade runs in one place.
   //
   // When another collaborator (or another fusion worker on a different
   // machine) pushes to the remote while our task branch is in flight, the
@@ -6858,61 +7000,19 @@ export async function aiMergeTask(
   // ── Stage 1: remote rebase ────────────────────────────────────────────
   if (settings.worktreeRebaseBeforeMerge !== false) {
     try {
-      // Resolve which remote to fetch. An explicit setting wins; otherwise
-      // the repo's configured default (branch.<main>.remote) or the sole
-      // remote if there's exactly one.
-      let remote = settings.worktreeRebaseRemote?.trim();
-      if (!remote) {
-        try {
-          const { stdout: mainBranchOut } = await execAsync(
-            "git rev-parse --abbrev-ref HEAD",
-            { cwd: rootDir, encoding: "utf-8" },
-          );
-          const mainBranch = mainBranchOut.trim();
-          const { stdout: configuredRemote } = await execAsync(
-            `git config --get branch.${mainBranch}.remote`,
-            { cwd: rootDir, encoding: "utf-8" },
-          ).catch(() => ({ stdout: "" }));
-          remote = configuredRemote.trim();
-        } catch {
-          // Fall through to listing remotes below.
-        }
-      }
-      if (!remote) {
-        try {
-          const { stdout: remotesOut } = await execAsync("git remote", {
-            cwd: rootDir,
-            encoding: "utf-8",
-          });
-          const remotes = remotesOut.trim().split(/\s+/).filter(Boolean);
-          if (remotes.length === 1) {
-            remote = remotes[0];
-          } else if (remotes.includes("origin")) {
-            remote = "origin";
-          }
-        } catch {
-          // Ignore — we'll skip the rebase if no remote is resolvable.
-        }
-      }
-
-      if (!remote) {
-        mergerLog.log(`${taskId}: no remote resolvable — skipping remote rebase stage (local-base stage may still run)`);
+      if (!integrationRemote) {
+        mergerLog.log(`${taskId}: no integration remote resolvable — skipping remote rebase stage (local-base stage may still run)`);
       } else if (!worktreePath) {
         mergerLog.warn(`${taskId}: no worktreePath — skipping remote rebase stage`);
       } else {
         throwIfAborted(options.signal, taskId);
-        mergerLog.log(`${taskId}: fetching ${remote} before merge`);
-        await execAsync(`git fetch "${remote}"`, { cwd: rootDir });
+        mergerLog.log(`${taskId}: fetching ${integrationRemote} before merge`);
+        await execAsync(`git fetch ${quoteArg(integrationRemote)}`, { cwd: rootDir });
 
         try {
-          const { stdout: mainBranchOut } = await execAsync(
-            "git rev-parse --abbrev-ref HEAD",
-            { cwd: rootDir, encoding: "utf-8" },
-          );
-          const mainBranch = mainBranchOut.trim();
-          const remoteRef = `${remote}/${mainBranch}`;
+          const remoteRef = `${integrationRemote}/${mergeTarget.branch}`;
           throwIfAborted(options.signal, taskId);
-          await execAsync(`git rebase "${remoteRef}"`, { cwd: worktreePath });
+          await execAsync(`git rebase ${quoteArg(remoteRef)}`, { cwd: worktreePath });
           rebaseHappened = true;
           mergerLog.log(`${taskId}: rebased ${branch} onto ${remoteRef}`);
           await store.appendAgentLog(
@@ -6934,7 +7034,7 @@ export async function aiMergeTask(
             }
           }
           if (mergeConflictStrategy === "smart-prefer-main") {
-            preferMainRebaseFailureMessage = `Pre-merge rebase onto remote main aborted (${msg})`;
+            preferMainRebaseFailureMessage = `Pre-merge rebase onto remote ${mergeTarget.branch} aborted (${msg})`;
           }
         }
       }
@@ -7226,6 +7326,8 @@ export async function aiMergeTask(
     headRef: branch,
     baseBranch: task.baseBranch,
     baseCommitSha: task.baseCommitSha,
+    integrationBranchFallback: mergeTarget.branch,
+    integrationRemoteFallback: integrationRemote,
   });
   const preferBranchOnOverlapFiles = new Set<string>();
   if (
@@ -8429,6 +8531,9 @@ export async function aiMergeTask(
   await completeTask(store, taskId, result);
   return result;
 
+  } catch (error) {
+    reuseHandoffOutcome = error instanceof Error ? error.message : String(error);
+    throw error;
   } finally {
     if (autostashHandle) {
       try {
@@ -8482,6 +8587,18 @@ export async function aiMergeTask(
     // threw — a stale advisory makes the dashboard show a phantom "merge
     // running" indefinitely, which is worse than a missing one.
     clearActiveMergerStatus(activeStatusPath, taskId);
+    if (reuseHandoff) {
+      const handoff = reuseHandoff;
+      reuseHandoff = undefined;
+      const handoffOutcome = reuseHandoffOutcome === "success"
+        ? resultForFinally?.error ?? "success"
+        : reuseHandoffOutcome;
+      await releaseReuseHandoff({
+        handoff,
+        outcome: handoffOutcome,
+        auditEmit: (event) => emitReuseHandoffAuditEvent(event.type as any, event.metadata ?? {}, event.target ?? handoff.worktreePath),
+      });
+    }
   }
 }
 
@@ -8490,21 +8607,18 @@ export async function aiMergeTask(
  *  (no remote configured, network down, divergent local commits, etc.).
  *  Only called for the smart strategies, which want to avoid resolving a
  *  conflict against a stale local base. */
-async function tryFastForwardFromOrigin(rootDir: string, taskId: string): Promise<void> {
-  let currentBranch: string;
-  try {
-    currentBranch = execSyncText("git rev-parse --abbrev-ref HEAD", {
-      cwd: rootDir,
-      encoding: "utf-8",
-      stdio: "pipe",
-    }).trim();
-  } catch {
-    return;
-  }
-  if (!currentBranch || currentBranch === "HEAD") return;
+async function tryFastForwardFromOrigin(
+  rootDir: string,
+  taskId: string,
+  integrationBranch: string,
+  integrationRemote?: string,
+): Promise<void> {
+  const currentBranch = integrationBranch.trim();
+  const remote = integrationRemote?.trim();
+  if (!currentBranch || !remote) return;
 
   try {
-    await execAsync(`git fetch origin "${currentBranch}"`, { cwd: rootDir });
+    await execAsync(`git fetch ${quoteArg(remote)} ${quoteArg(currentBranch)}`, { cwd: rootDir });
   } catch (err) {
     mergerLog.log(`${taskId}: pre-merge fetch failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
     return;
@@ -8513,8 +8627,9 @@ async function tryFastForwardFromOrigin(rootDir: string, taskId: string): Promis
   // Detect divergence: local must be strictly behind remote (no local-only commits).
   let behind = 0;
   let ahead = 0;
+  const remoteRef = `${remote}/${currentBranch}`;
   try {
-    const counts = execSyncText(`git rev-list --left-right --count "origin/${currentBranch}...HEAD"`, {
+    const counts = execSyncText(`git rev-list --left-right --count ${quoteArg(`${remoteRef}...HEAD`)}`, {
       cwd: rootDir,
       encoding: "utf-8",
       stdio: "pipe",
@@ -8533,8 +8648,8 @@ async function tryFastForwardFromOrigin(rootDir: string, taskId: string): Promis
   }
 
   try {
-    await execAsync(`git merge --ff-only "origin/${currentBranch}"`, { cwd: rootDir });
-    mergerLog.log(`${taskId}: fast-forwarded ${currentBranch} by ${behind} commit(s) from origin`);
+    await execAsync(`git merge --ff-only ${quoteArg(remoteRef)}`, { cwd: rootDir });
+    mergerLog.log(`${taskId}: fast-forwarded ${currentBranch} by ${behind} commit(s) from ${remote}`);
   } catch (err) {
     mergerLog.log(`${taskId}: fast-forward failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -9453,6 +9568,9 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
   const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
+  // FN-5279: Layer 3 / merge-authoring AI runs in the resolved integration
+  // root so arbiter edits land in the reused task worktree when handoff mode
+  // is active.
   const { session } = await createResolvedAgentSession({
     sessionPurpose: "merger",
     runtimeHint: mergerRuntimeHint,

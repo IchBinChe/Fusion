@@ -117,6 +117,7 @@ function makeStore(dir: string, taskId: string, settingsOverrides: Record<string
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
     getSettings: vi.fn().mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       commitAuthorEnabled: false,
       mergeConflictStrategy: "smart-prefer-main",
       ...settingsOverrides,

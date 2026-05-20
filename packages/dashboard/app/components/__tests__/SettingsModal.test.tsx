@@ -189,6 +189,7 @@ const defaultSettings = {
   autoMerge: true,
   mergeStrategy: "direct",
   directMergeCommitStrategy: "auto",
+  mergeIntegrationWorktree: "reuse-task-worktree",
   pushAfterMerge: false,
   pushRemote: "origin",
   verificationFixRetries: 2,
@@ -365,6 +366,34 @@ describe("SettingsModal", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Auto-completion mode"), "pull-request");
     expect(screen.queryByLabelText("Direct merge commit routing")).not.toBeInTheDocument();
+  });
+
+  it("defaults the integration worktree select to reuse-task-worktree when the server omits it", async () => {
+    mockFetchSettings.mockResolvedValueOnce({
+      ...defaultSettings,
+      mergeIntegrationWorktree: undefined,
+    });
+    mockFetchSettingsByScope.mockResolvedValueOnce({ global: defaultSettings, project: {} });
+
+    renderModal({ initialSection: "merge" });
+    await waitForSettingsModalReady();
+
+    expect(screen.getByLabelText("Integration worktree")).toHaveValue("reuse-task-worktree");
+  });
+
+  it("persists cwd-main through the save payload", async () => {
+    renderModal({ initialSection: "merge" });
+    await waitForSettingsModalReady();
+
+    await userEvent.selectOptions(screen.getByLabelText("Integration worktree"), "cwd-main");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.mergeIntegrationWorktree).toBe("cwd-main");
   });
 
   it("persists the legacy sibling branch rename escape hatch in worktree settings", async () => {

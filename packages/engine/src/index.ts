@@ -35,6 +35,15 @@ export {
   type AutostashOrphanRecord,
 } from "./merger.js";
 export {
+  resolveMergeIntegrationRoot,
+  resolveIntegrationRemote,
+  acquireReuseHandoff,
+  releaseReuseHandoff,
+  MergeHandoffRefusedError,
+  type HandoffResult,
+  type MergeIntegrationRootResolution,
+} from "./merger-integration-worktree.js";
+export {
   auditSquashMerge,
   formatSquashAuditReport,
   type SquashAuditFindings,

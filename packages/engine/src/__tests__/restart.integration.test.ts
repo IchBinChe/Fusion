@@ -288,7 +288,10 @@ function createMockStore(overrides: Record<string, any> = {}) {
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
     parseStepsFromPrompt: vi.fn().mockResolvedValue([]),
     parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
-    getSettings: vi.fn().mockResolvedValue({ ...DEFAULT_SETTINGS }),
+    getSettings: vi.fn().mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+    }),
     setPluginWorkflowStepTemplates: vi.fn(),
     getRootDir: vi.fn().mockReturnValue("/tmp/root"),
     getFusionDir: vi.fn().mockReturnValue("/tmp/root/.fusion"),
@@ -518,6 +521,7 @@ describe("In-progress task resume after restart", () => {
     const store = createMockStore();
     store.getSettings.mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       worktreeInitCommand: "pnpm install --frozen-lockfile",
     });
     const task = makeTask("FN-030", "in-progress");
@@ -1126,7 +1130,8 @@ describe("Scheduler after restart", () => {
       const t = allTasks.find((t) => t.id === id)!;
       return makeTaskDetail(id, t.column);
     });
-    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS, autoMerge: true });
+    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const, autoMerge: true });
 
     mockAgentSuccess();
 
@@ -1423,6 +1428,7 @@ describe("Worktree pool restart with recycleWorktrees=true", () => {
     store.listTasks.mockResolvedValue([]);
     store.getSettings.mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       recycleWorktrees: true,
     });
     store.getTask.mockResolvedValue(makeTaskDetail("FN-110", "in-progress"));
@@ -1663,7 +1669,8 @@ describe("Engine pause/unpause cycle", () => {
     const store = createMockStore();
     const todoTask = makeTask("FN-EP3", "todo");
     store.listTasks.mockResolvedValue([todoTask]);
-    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS, enginePaused: false });
+    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const, enginePaused: false });
     store.parseFileScopeFromPrompt.mockResolvedValue([]);
     // Mock getTask for compare-and-swap verification in schedule()
     store.getTask.mockResolvedValue(todoTask);
@@ -1688,17 +1695,21 @@ describe("Engine pause/unpause cycle", () => {
     onSchedule.mockClear();
 
     // During pause, scheduler halts
-    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS, enginePaused: true });
+    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const, enginePaused: true });
 
     // Add a new todo task
     const newTask = makeTask("FN-EP4", "todo");
     store.listTasks.mockResolvedValue([newTask]);
 
     // Unpause — trigger settings:updated to wake the scheduler
-    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS, enginePaused: false });
+    store.getSettings.mockResolvedValue({ ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const, enginePaused: false });
     store._trigger("settings:updated", {
-      settings: { ...DEFAULT_SETTINGS, enginePaused: false },
-      previous: { ...DEFAULT_SETTINGS, enginePaused: true },
+      settings: { ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const, enginePaused: false },
+      previous: { ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const, enginePaused: true },
     });
 
     await waitForAsyncExpectation(() => {

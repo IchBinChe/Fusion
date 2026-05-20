@@ -184,7 +184,10 @@ function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = [
     logEntry: vi.fn().mockResolvedValue(undefined),
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
     updateSettings: vi.fn().mockResolvedValue({}),
-    getSettings: vi.fn().mockResolvedValue({ ...DEFAULT_SETTINGS }),
+    getSettings: vi.fn().mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+    }),
     getActiveMergingTask: vi.fn().mockReturnValue(null),
     emit: vi.fn(),
     on: vi.fn(),
@@ -297,6 +300,7 @@ describe("aiMergeTask — includeTaskIdInCommit setting", () => {
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       includeTaskIdInCommit: false,
     });
 
@@ -359,6 +363,7 @@ describe("aiMergeTask — includeTaskIdInCommit setting", () => {
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       includeTaskIdInCommit: false,
     });
 
@@ -399,6 +404,7 @@ describe("aiMergeTask — model settings threading", () => {
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       defaultProvider: "openai",
       defaultModelId: "gpt-4o",
     });
@@ -782,6 +788,7 @@ describe("aiMergeTask — merge details collection", () => {
     mockedExistsSync.mockReturnValue(false);
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       directMergeCommitStrategy: "always-rebase",
     });
 
@@ -816,6 +823,7 @@ describe("aiMergeTask — merge details collection", () => {
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       useAiMergeCommitSummary: true,
     });
 
@@ -873,6 +881,7 @@ describe("aiMergeTask — merge details collection", () => {
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       useAiMergeCommitSummary: true,
     });
 
@@ -972,6 +981,7 @@ describe("aiMergeTask — merge details collection", () => {
     // test isn't about prefer-main semantics, so opt out.
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
       mergeConflictStrategy: "smart-prefer-branch",
     });
 

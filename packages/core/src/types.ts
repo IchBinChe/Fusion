@@ -179,6 +179,16 @@ export type ColorTheme = (typeof COLOR_THEMES)[number];
 
 export type PrStatus = "open" | "closed" | "merged" | "draft";
 export type MergeStrategy = "direct" | "pull-request";
+export type MergeIntegrationWorktreeMode = "reuse-task-worktree" | "cwd-main";
+
+export function normalizeMergeIntegrationWorktreeMode(
+  value: unknown,
+): MergeIntegrationWorktreeMode {
+  return value === "cwd-main" || value === "reuse-task-worktree"
+    ? value
+    : "reuse-task-worktree";
+}
+
 export const DIRECT_MERGE_COMMIT_STRATEGIES = ["auto", "always-squash", "always-rebase"] as const;
 export type DirectMergeCommitStrategy = (typeof DIRECT_MERGE_COMMIT_STRATEGIES)[number];
 /** How merge conflicts are resolved when the AI agent can't (or shouldn't) decide.
@@ -2691,6 +2701,11 @@ export interface ProjectSettings {
    *  - "always-rebase": always preserve individual branch commits during direct merges
    *  Only applies when mergeStrategy is "direct". Default: "auto". */
   directMergeCommitStrategy?: DirectMergeCommitStrategy;
+  /** Auto-merge integration-root mode.
+   *  - "reuse-task-worktree" (default): run the auto-merge cascade in the task worktree
+   *  - "cwd-main": preserve the legacy project-root integration flow
+   *  Auto-merge only; manual/direct merge entrypoints outside auto-merge are unchanged. */
+  mergeIntegrationWorktree?: MergeIntegrationWorktreeMode;
   /** When true, automatically push to the configured remote after a successful direct merge.
    *  The push process includes pulling the latest from the remote (rebase) first.
    *  If conflicts arise during the pull, they are resolved using the AI conflict resolution pipeline.

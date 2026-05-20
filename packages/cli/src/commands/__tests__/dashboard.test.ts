@@ -661,49 +661,52 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     ProjectEngine,
     ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, options: any) => {
       const engines = new Map<string, any>();
-      const startPromises = new Map<string, Promise<void>>();
+      const starting = new Map<string, Promise<any>>();
+      // Keep the chosen HEAD startEngine/starting async shape from the conflict resolution.
+      const startEngine = async (id: string, pathHint?: string) => {
+        const existing = engines.get(id);
+        if (existing) return existing;
+        const pending = starting.get(id);
+        if (pending) return pending;
 
-      const materializeEngine = (id: string, path: string = process.cwd()) => {
-        let engine = engines.get(id);
-        if (!engine) {
-          const lastStore = taskStoreMock.mock?.results?.at(-1)?.value;
-          engine = new ProjectEngine(
-            { workingDirectory: path },
+        const promise = (async () => {
+          const { TaskStore: TSMock } = await import("@fusion/core");
+          const lastStore = (TSMock as any).mock?.results?.at(-1)?.value;
+          const project = pathHint ? { path: pathHint } : await centralCore.getProject(id);
+          const engine = new ProjectEngine(
+            { workingDirectory: project?.path ?? process.cwd() },
             centralCore,
             { ...options, externalTaskStore: lastStore, projectId: id },
           );
+          await engine.start();
           engines.set(id, engine);
-        }
-        if (!startPromises.has(id)) {
-          startPromises.set(id, Promise.resolve(engine.start()).then(() => undefined));
-        }
-        return engine;
+          starting.delete(id);
+          return engine;
+        })();
+
+        starting.set(id, promise);
+        return promise;
       };
 
       return {
         startAll: vi.fn(async () => {
           const projects = await centralCore.listProjects();
           for (const project of projects) {
-            materializeEngine(project.id, project.path);
+            await startEngine(project.id, project.path);
           }
-          await Promise.all([...startPromises.values()]);
         }),
-        getEngine: vi.fn((id: string) => materializeEngine(id)),
+        getEngine: vi.fn((id: string) => engines.get(id)),
         getAllEngines: vi.fn(() => engines),
         getStore: vi.fn((id: string) => engines.get(id)?.getTaskStore()),
-        has: vi.fn((id: string) => engines.has(id)),
-        ensureEngine: vi.fn(async (id: string) => {
-          const project = await centralCore.getProject?.(id).catch(() => null);
-          return materializeEngine(id, project?.path ?? process.cwd());
-        }),
+        has: vi.fn((id: string) => engines.has(id) || starting.has(id)),
+        ensureEngine: vi.fn(async (id: string) => startEngine(id)),
         stopAll: vi.fn(async () => {
-          await Promise.all([...startPromises.values()]);
           for (const engine of engines.values()) await engine.stop();
           engines.clear();
-          startPromises.clear();
+          starting.clear();
         }),
         onProjectAccessed: vi.fn((id: string) => {
-          materializeEngine(id);
+          void startEngine(id);
         }),
         startReconciliation: vi.fn(),
       };

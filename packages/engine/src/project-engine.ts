@@ -236,6 +236,7 @@ export class ProjectEngine {
   private settingsHandlers: Array<(...args: any[]) => void> = [];
   private taskMovedHandler?: (...args: any[]) => void;
   private taskUpdatedHandler?: (...args: any[]) => void;
+  private taskDeletedHandler?: (...args: any[]) => void;
   private autostashOrphansHandler?: (...args: any[]) => void;
 
   constructor(
@@ -565,6 +566,9 @@ export class ProjectEngine {
       }
       if (this.taskUpdatedHandler) {
         store.off("task:updated", this.taskUpdatedHandler);
+      }
+      if (this.taskDeletedHandler) {
+        store.off("task:deleted", this.taskDeletedHandler);
       }
       if (this.autostashOrphansHandler) {
         store.off("merger:autostashOrphans", this.autostashOrphansHandler as any);
@@ -2247,7 +2251,39 @@ export class ProjectEngine {
       }
     };
 
+    this.taskDeletedHandler = (task: Task) => {
+      this.pausedReviewTaskIds.delete(task.id);
+
+      const queueLengthBefore = this.mergeQueue.length;
+      this.mergeQueue = this.mergeQueue.filter((queuedTaskId) => queuedTaskId !== task.id);
+      const removedFromQueue = this.mergeQueue.length !== queueLengthBefore;
+
+      if (removedFromQueue) {
+        if (this.activeMergeTaskId !== task.id) {
+          this.mergeActive.delete(task.id);
+        }
+        runtimeLog.log(`Soft-deleted task removed from merge queue: ${task.id}`);
+      }
+
+      if (this.activeMergeTaskId !== task.id) {
+        return;
+      }
+
+      runtimeLog.log(`Soft-deleted task interrupting active merge: ${task.id}`);
+      this.mergeAbortController?.abort();
+      this.mergeAbortController = null;
+
+      if (this.activeMergeSession) {
+        this.activeMergeSession.dispose();
+        this.activeMergeSession = null;
+      }
+
+      this.mergeActive.delete(task.id);
+      this.activeMergeTaskId = null;
+    };
+
     store.on("task:updated", this.taskUpdatedHandler);
+    store.on("task:deleted", this.taskDeletedHandler);
   }
 
   private async startupMergeSweep(store: TaskStore): Promise<void> {

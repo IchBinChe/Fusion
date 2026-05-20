@@ -22,6 +22,8 @@ import { ensureRoadmapSchema } from "../../../../plugins/fusion-plugin-roadmap/s
 import { createSharedTaskStoreTestHarness } from "./store-test-helpers.js";
 
 const createdTmpDirs = new Set<string>();
+const TMP_DIR_RM_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
+const TMP_DIR_CLEANUP_HOOK_KEY = Symbol.for("fusion.core.db-test.tmp-cleanup-hooks-installed");
 
 function makeTmpDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "kb-db-test-"));
@@ -32,9 +34,13 @@ function makeTmpDir(): string {
 async function removeTrackedTmpDir(dir: string | undefined): Promise<void> {
   if (!dir) return;
   try {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, TMP_DIR_RM_OPTIONS);
   } catch {
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      rmSync(dir, TMP_DIR_RM_OPTIONS);
+    } catch {
+      // best-effort fallback during teardown
+    }
   } finally {
     createdTmpDirs.delete(dir);
   }
@@ -48,7 +54,7 @@ async function cleanupTmpDirsAsync(): Promise<void> {
 function removeTrackedTmpDirSync(dir: string | undefined): void {
   if (!dir) return;
   try {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, TMP_DIR_RM_OPTIONS);
   } catch {
     // best-effort fallback during teardown
   } finally {
@@ -59,20 +65,20 @@ function removeTrackedTmpDirSync(dir: string | undefined): void {
 function cleanupTmpDirsSync(): void {
   const cleanup = Array.from(createdTmpDirs);
   for (const dir of cleanup) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // best-effort fallback during teardown
-    } finally {
-      createdTmpDirs.delete(dir);
-    }
+    removeTrackedTmpDirSync(dir);
   }
 }
 
 // Full-suite worker shutdown can skip Vitest's normal afterAll timing if the worker
 // is already draining, so keep a process-level sync cleanup backstop for kb-db-test-*.
-process.once("beforeExit", cleanupTmpDirsSync);
-process.once("exit", cleanupTmpDirsSync);
+const processWithCleanupFlag = process as typeof process & {
+  [TMP_DIR_CLEANUP_HOOK_KEY]?: boolean;
+};
+if (!processWithCleanupFlag[TMP_DIR_CLEANUP_HOOK_KEY]) {
+  process.once("beforeExit", cleanupTmpDirsSync);
+  process.once("exit", cleanupTmpDirsSync);
+  processWithCleanupFlag[TMP_DIR_CLEANUP_HOOK_KEY] = true;
+}
 
 afterAll(() => {
   cleanupTmpDirsSync();

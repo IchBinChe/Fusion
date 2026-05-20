@@ -580,6 +580,7 @@ export class TriageProcessor {
   private pauseAborted = new Set<string>();
   /** Tasks killed by the stuck task detector (to avoid reporting as errors). */
   private stuckAborted = new Set<string>();
+  private taskDeletedHandler?: (task: Task) => void;
 
   /**
    * @param store — Task store instance (also used to listen for `settings:updated` events)
@@ -629,11 +630,37 @@ export class TriageProcessor {
         this.poll();
       }
     });
+
+    this.taskDeletedHandler = (task: Task) => {
+      if (this.activeSubagentSessions.has(task.id)) {
+        this.disposeSubagentsForTask(task.id, "task soft-deleted");
+      }
+      if (this.activeSessions.has(task.id)) {
+        const session = this.activeSessions.get(task.id)!;
+        planLog.log(`task soft-deleted — terminating triage session for ${task.id}`);
+        this.pauseAborted.add(task.id);
+        this.options.stuckTaskDetector?.untrackTask(task.id);
+        const sessionWithAbort = session as {
+          abort?: () => Promise<void>;
+          dispose: () => void;
+        };
+        if (typeof sessionWithAbort.abort === "function") {
+          void sessionWithAbort.abort().catch((err) => {
+            planLog.warn(`Failed to abort triage session for ${task.id}: ${err}`);
+          });
+        }
+        session.dispose();
+        this.activeSessions.delete(task.id);
+      }
+    };
   }
 
   start(): void {
     if (this.running) return;
     this.running = true;
+    if (this.taskDeletedHandler && typeof this.store.on === "function") {
+      this.store.on("task:deleted", this.taskDeletedHandler);
+    }
 
     // Clear stale "planning" statuses left by a prior crash/restart.
     // No triage agent is actually running at startup, so any task still
@@ -671,6 +698,9 @@ export class TriageProcessor {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
       this.activePollMs = null;
+    }
+    if (this.taskDeletedHandler && typeof this.store.off === "function") {
+      this.store.off("task:deleted", this.taskDeletedHandler);
     }
     // Tear down any in-flight specify sessions and reviewer subagents so they
     // don't keep streaming LLM tokens / tool calls past engine shutdown.

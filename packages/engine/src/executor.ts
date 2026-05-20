@@ -770,14 +770,18 @@ If the task's PROMPT.md includes a "Documentation Requirements" section listing 
 ## Git discipline
 - Commit after completing each step (not after every file change)
 - Use conventional commit messages prefixed with the task ID
+- Always include a short, specific summary after the em dash (5–10 words)
+- Do NOT commit just \`complete Step N\` — the summary is what makes the commit useful in \`git log\`, merger subject derivation, and step reconciliation
 - When the task has a GitHub issue reference, include \`Ref: owner/repo#N\` in the commit body
 - Do NOT commit broken or half-implemented code
 
 Good commit message examples:
 - \`feat(FN-1234): complete Step 2 — add retry guard for workflow step timeouts\`
+- \`feat(FN-1234): complete Step 4 — tighten prompt examples for commit summaries\`
 - \`test(FN-1234): add regression tests for paused-session cleanup\`
 
 Bad commit message examples:
+- \`feat(FN-1234): complete Step 2\`
 - \`misc updates\`
 - \`fix stuff\`
 - \`wip\`
@@ -10261,7 +10265,8 @@ ${hasProgress
 Use \`fn_task_update\` to report progress on every step transition.
 Use \`fn_task_log\` for important actions and decisions.
 Use \`fn_task_create\` for truly separate follow-up work, not for fixes required to get tests, build, or typecheck back to green.
-Commit at step boundaries: \`git commit -m "feat(${task.id}): complete Step N — description"${sourceIssueRef ? ` -m "Ref: ${sourceIssueRef}"` : ""}${authorArg}\`
+Commit at step boundaries: \`git commit -m "feat(${task.id}): complete Step N — <short summary>"${sourceIssueRef ? ` -m "Ref: ${sourceIssueRef}"` : ""}${authorArg}\`
+The \`<short summary>\` is required — replace it with a concrete 5–10 word description of what the step changed.
 When all steps are complete: call \`fn_task_done()\`
 
 If a build command is configured, run that exact command in this worktree before calling \`fn_task_done()\`.

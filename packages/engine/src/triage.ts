@@ -185,9 +185,16 @@ Follow this structure exactly:
 
 Commits at step boundaries. All commits include the task ID:
 
-- **Step completion:** \`feat({ID}): complete Step N — description\`
-- **Bug fixes:** \`fix({ID}): description\`
-- **Tests:** \`test({ID}): description\`
+- **Step completion:** \`feat({ID}): complete Step N — <short summary>\` (the \`<short summary>\` is required — use a concrete 5–10 word description)
+- **Bug fixes:** \`fix({ID}): description\` (short, concrete summary required)
+- **Tests:** \`test({ID}): description\` (short, concrete summary required)
+
+Good examples:
+- \`feat(FN-1234): complete Step 2 — add retry guard for workflow step timeouts\`
+- \`test(FN-1234): add regression tests for paused-session cleanup\`
+
+Bad example:
+- \`feat(FN-1234): complete Step 2\`
 
 ## Do NOT
 
@@ -455,9 +462,16 @@ Follow this structure exactly:
 
 Commits at step boundaries. All commits include the task ID:
 
-- **Step completion:** \`feat({ID}): complete Step N — description\`
-- **Bug fixes:** \`fix({ID}): description\`
-- **Tests:** \`test({ID}): description\`
+- **Step completion:** \`feat({ID}): complete Step N — <short summary>\` (the \`<short summary>\` is required — use a concrete 5–10 word description)
+- **Bug fixes:** \`fix({ID}): description\` (short, concrete summary required)
+- **Tests:** \`test({ID}): description\` (short, concrete summary required)
+
+Good examples:
+- \`feat(FN-1234): complete Step 2 — add retry guard for workflow step timeouts\`
+- \`test(FN-1234): add regression tests for paused-session cleanup\`
+
+Bad example:
+- \`feat(FN-1234): complete Step 2\`
 
 ## Do NOT
 

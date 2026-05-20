@@ -106,6 +106,7 @@ import {
   resolveMergeIntegrationRoot,
   type HandoffResult,
 } from "./merger-integration-worktree.js";
+import { acquireTaskWorktree } from "./worktree-acquisition.js";
 
 export { DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 
@@ -6369,7 +6370,7 @@ export async function aiMergeTask(
   const mergeTarget = resolveTaskMergeTarget(task, {
     projectDefaultBranch,
   });
-  const branch = task.branch || canonicalFusionBranchName(taskId);
+  let branch = task.branch || canonicalFusionBranchName(taskId);
 
   const mergeRunId = generateSyntheticRunId("merge", taskId);
   const engineRunContext: EngineRunContext = {
@@ -6387,6 +6388,7 @@ export async function aiMergeTask(
       | "merge:reuse-handoff-released"
       | "merge:reuse-handoff-deferred-to-worktrunk"
       | "merge:reuse-fallback-cwd-main"
+      | "merge:reuse-fallback-new-worktree"
       | "branch:auto-canonicalize-case",
     metadata: Record<string, unknown>,
     target: string,
@@ -6415,33 +6417,59 @@ export async function aiMergeTask(
     rootDir: rootDir,
     integrationBranch: mergeTarget.branch,
   });
-  const fallbackReuseIntegrationToCwdMain = async (
+  const reacquireReuseIntegrationWorktree = async (
     reason: string,
     diagnostics: Record<string, unknown>,
   ): Promise<void> => {
+    const acquisition = await acquireTaskWorktree({
+      task,
+      rootDir: projectRootDir,
+      store,
+      settings,
+      pool: options.pool,
+      logger: mergerLog,
+      audit,
+      runContext: engineRunContext,
+      runInitCommand: false,
+      createWorktree: async (branchName, worktreePath) => {
+        await execAsync(`git worktree add -f ${quoteArg(worktreePath)} ${quoteArg(branchName)}`, {
+          cwd: projectRootDir,
+          encoding: "utf-8",
+          timeout: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        return { path: worktreePath, branch: branchName };
+      },
+    });
+    task.worktree = acquisition.worktreePath;
+    task.branch = acquisition.branch;
+    branch = acquisition.branch;
     integrationRoot = {
       ...integrationRoot,
-      mode: "cwd-main",
-      rootDir: projectRootDir,
+      mode: "reuse-task-worktree",
+      rootDir: acquisition.worktreePath,
+      branchName: acquisition.branch,
     };
-    reuseTaskWorktreeMerge = false;
-    rootDir = projectRootDir;
+    reuseTaskWorktreeMerge = true;
+    rootDir = acquisition.worktreePath;
     integrationRemote = await resolveIntegrationRemote({
       settings,
       rootDir,
       integrationBranch: mergeTarget.branch,
     });
     await emitReuseHandoffAuditEvent(
-      "merge:reuse-fallback-cwd-main",
+      "merge:reuse-fallback-new-worktree",
       {
         taskId,
         reason,
-        worktreePath: task.worktree ?? null,
+        branch: acquisition.branch,
+        worktreePath: acquisition.worktreePath,
+        source: acquisition.source,
         diagnostics,
         integrationRemote: integrationRemote ?? null,
         integrationBranch: mergeTarget.branch,
       },
-      rootDir,
+      acquisition.worktreePath,
     );
   };
   if (
@@ -6463,18 +6491,97 @@ export async function aiMergeTask(
 
   let reuseHandoff: HandoffResult | undefined;
   if (integrationRoot.mode === "reuse-task-worktree") {
+    // Check if the task has a usable worktree synchronously (two fast-path checks: dir exists + .git marker).
     const reusableWorktreePath = task.worktree?.trim();
-    if (!reusableWorktreePath) {
-      await fallbackReuseIntegrationToCwdMain("missing-task-worktree", {
-        requestedMode: requestedIntegrationMode,
-      });
+    const isWorktreeUnusable = !reusableWorktreePath
+      || !existsSync(reusableWorktreePath)
+      || !existsSync(join(reusableWorktreePath, ".git"));
+    if (isWorktreeUnusable) {
+      // Task has no/reusable worktree. Acquire/recreate a fresh one inline.
+      await emitReuseHandoffAuditEvent(
+        "merge:reuse-worktree-fresh-acquire",
+        { taskId, priorWorktreePath: task.worktree ?? null, reason: !reusableWorktreePath ? "missing-task-worktree" : "unusable-task-worktree" },
+        projectRootDir,
+      );
+      const worktreeName = generateWorktreeName(projectRootDir, settings);
+      const newWorktreePath = resolveTaskWorktreePath(projectRootDir, settings, worktreeName);
+      const branchName = canonicalFusionBranchName(task.id);
+      try {
+        await execAsync(
+          `git worktree add -b "${branchName}" ${JSON.stringify(newWorktreePath)} ${JSON.stringify(task.baseCommitSha ?? "HEAD")}`,
+          { cwd: projectRootDir, encoding: "utf-8", timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
+        );
+        await installTaskWorktreeIdentityGuard({
+          worktreePath: newWorktreePath,
+          taskId: task.id,
+          commitMsgHookEnabled: settings.commitMsgHookEnabled,
+          taskPrefix: settings.taskPrefix,
+          taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+        });
+        await store.updateTask(taskId, { worktree: newWorktreePath, branch: branchName });
+        await emitReuseHandoffAuditEvent(
+          "merge:reuse-worktree-fresh-acquired",
+          { taskId, newWorktreePath, branch: branchName },
+          newWorktreePath,
+        );
+        integrationRoot = { ...integrationRoot, rootDir: newWorktreePath };
+        rootDir = newWorktreePath;
+      } catch (acquireErr: unknown) {
+        const msg = acquireErr instanceof Error ? acquireErr.message : String(acquireErr);
+        mergerLog.warn(`${taskId}: fresh worktree acquisition failed (${msg}) — falling back to cwd-main`);
+        await emitReuseHandoffAuditEvent(
+          "merge:reuse-fallback-cwd-main",
+          { taskId, reason: "fresh-worktree-acquisition-failed", priorWorktreePath: task.worktree ?? null, acquisitionError: msg },
+          projectRootDir,
+        );
+        integrationRoot = { ...integrationRoot, mode: "cwd-main", rootDir: projectRootDir };
+        reuseTaskWorktreeMerge = false;
+        rootDir = projectRootDir;
+      }
     } else {
       const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
       if (!classification.ok) {
-        await fallbackReuseIntegrationToCwdMain("unusable-task-worktree", {
-          requestedMode: requestedIntegrationMode,
-          classification,
-        });
+        // Worktree path exists but fails async classification. Use fresh acquisition.
+        await emitReuseHandoffAuditEvent(
+          "merge:reuse-worktree-fresh-acquire",
+          { taskId, priorWorktreePath: reusableWorktreePath, reason: "unusable-task-worktree", classification },
+          projectRootDir,
+        );
+        const worktreeName = generateWorktreeName(projectRootDir, settings);
+        const newWorktreePath = resolveTaskWorktreePath(projectRootDir, settings, worktreeName);
+        const branchName = canonicalFusionBranchName(task.id);
+        try {
+          await execAsync(
+            `git worktree add -b "${branchName}" ${JSON.stringify(newWorktreePath)} ${JSON.stringify(task.baseCommitSha ?? "HEAD")}`,
+            { cwd: projectRootDir, encoding: "utf-8", timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
+          );
+          await installTaskWorktreeIdentityGuard({
+            worktreePath: newWorktreePath,
+            taskId: task.id,
+            commitMsgHookEnabled: settings.commitMsgHookEnabled,
+            taskPrefix: settings.taskPrefix,
+            taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+          });
+          await store.updateTask(taskId, { worktree: newWorktreePath, branch: branchName });
+          await emitReuseHandoffAuditEvent(
+            "merge:reuse-worktree-fresh-acquired",
+            { taskId, newWorktreePath, branch: branchName },
+            newWorktreePath,
+          );
+          integrationRoot = { ...integrationRoot, rootDir: newWorktreePath };
+          rootDir = newWorktreePath;
+        } catch (acquireErr: unknown) {
+          const msg = acquireErr instanceof Error ? acquireErr.message : String(acquireErr);
+          mergerLog.warn(`${taskId}: fresh worktree acquisition failed (${msg}) — falling back to cwd-main`);
+          await emitReuseHandoffAuditEvent(
+            "merge:reuse-fallback-cwd-main",
+            { taskId, reason: "fresh-worktree-acquisition-failed", priorWorktreePath: reusableWorktreePath, acquisitionError: msg },
+            projectRootDir,
+          );
+          integrationRoot = { ...integrationRoot, mode: "cwd-main", rootDir: projectRootDir };
+          reuseTaskWorktreeMerge = false;
+          rootDir = projectRootDir;
+        }
       }
     }
   }
@@ -6515,7 +6622,7 @@ export async function aiMergeTask(
       );
       const reusableWorktreePath = task.worktree?.trim();
       if (!reusableWorktreePath) {
-        await fallbackReuseIntegrationToCwdMain("missing-task-worktree-after-refusal", {
+        await reacquireReuseIntegrationWorktree("missing-task-worktree-after-refusal", {
           requestedMode: requestedIntegrationMode,
           gate: error.gate,
           reason: error.reason,
@@ -6523,7 +6630,7 @@ export async function aiMergeTask(
       } else {
         const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
         if (!classification.ok) {
-          await fallbackReuseIntegrationToCwdMain("unusable-task-worktree-after-refusal", {
+          await reacquireReuseIntegrationWorktree("unusable-task-worktree-after-refusal", {
             requestedMode: requestedIntegrationMode,
             gate: error.gate,
             reason: error.reason,

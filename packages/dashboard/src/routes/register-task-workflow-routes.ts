@@ -31,6 +31,7 @@ import {
   extractIntentSignature,
   findNearDuplicates,
   isEphemeralAgent,
+  parseExplicitDuplicateMarker,
   type NearDuplicateCandidate,
 } from "@fusion/core";
 import { GitHubClient } from "../github.js";
@@ -655,6 +656,56 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
             error: error instanceof Error ? error.message : String(error),
           });
         }
+      }
+
+      // FN-5220: layered intake ordering remains deterministic -> similarity -> near-duplicate intent -> explicit-marker.
+      try {
+        const combinedText = `${normalizedTitle ?? ""}\n${normalizedDescription}`;
+        const explicitDuplicateMarker = parseExplicitDuplicateMarker(combinedText);
+        const explicitMarkerBypassed =
+          bypassDuplicateCheck === true ||
+          (explicitDuplicateMarker ? acknowledgedDuplicateIds.includes(explicitDuplicateMarker.canonicalId) : false);
+        if (explicitDuplicateMarker && !explicitMarkerBypassed) {
+          const canonical = await scopedStore.getTask(explicitDuplicateMarker.canonicalId).catch(() => null);
+          if (canonical && !canonical.deletedAt) {
+            try {
+              // The intake guard runs before createTask, so there is no new task row yet.
+              // Record against the canonical target to leave a traceable audit breadcrumb.
+              await scopedStore.recordActivity({
+                type: "task:auto-archived-duplicate",
+                taskId: canonical.id,
+                taskTitle: canonical.title ?? "",
+                details: `Rejected explicit duplicate-marker intake redirect to ${canonical.id}`,
+                metadata: {
+                  canonicalTaskId: canonical.id,
+                  source: "explicit-marker-intake",
+                },
+              });
+            } catch (activityError) {
+              runtimeLogger.warn("Explicit duplicate-marker intake activity recording failed; proceeding with conflict response", {
+                canonicalTaskId: canonical.id,
+                error: activityError instanceof Error ? activityError.message : String(activityError),
+              });
+            }
+            throw conflict("duplicate_candidates", {
+              matches: [{
+                id: canonical.id,
+                title: canonical.title ?? "",
+                description: canonical.description ?? "",
+                column: canonical.column,
+                score: 1,
+                reason: "explicit-marker",
+              }],
+            });
+          }
+        }
+      } catch (error) {
+        if (error instanceof ApiError) {
+          throw error;
+        }
+        runtimeLogger.warn("Explicit duplicate-marker intake guard failed; proceeding", {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
 
       const normalizedTaskSource = normalizedSource as TaskSource;

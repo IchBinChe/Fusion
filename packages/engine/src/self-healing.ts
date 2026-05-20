@@ -26,9 +26,9 @@
 
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { RemovalReason, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
@@ -1298,6 +1298,7 @@ export class SelfHealingManager {
           { name: "recover-partial-progress-no-task-done", fn: () => this.recoverPartialProgressNoTaskDoneFailures() },
           { name: "recover-orphaned-executions", fn: () => this.recoverOrphanedExecutions() },
           { name: "recover-approved-triage", fn: () => this.recoverApprovedTriageTasks() },
+          { name: "resolve-explicit-duplicate-markers", fn: () => this.resolveExplicitDuplicateMarkerTasks() },
           { name: "recover-starved-refinement", fn: () => this.recoverStarvedRefinementTriageTasks() },
           { name: "recover-orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks() },
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
@@ -6555,6 +6556,76 @@ export class SelfHealingManager {
       return recovered;
     } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Approved triage recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  async resolveExplicitDuplicateMarkerTasks(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      const enabled = (settings as Settings & { resolveExplicitDuplicateMarkerEnabled?: boolean }).resolveExplicitDuplicateMarkerEnabled !== false;
+      if (!enabled) {
+        return 0;
+      }
+
+      const tasks = await this.store.listTasks({ slim: true, includeArchived: false, limit: 500 });
+      const candidates = tasks.filter((task) => task.column === "triage" || task.column === "todo");
+
+      let resolved = 0;
+      let processedMarkers = 0;
+      for (const task of candidates) {
+        try {
+          const promptPath = join(this.options.rootDir, ".fusion", "tasks", task.id, "PROMPT.md");
+          if (!existsSync(promptPath)) {
+            continue;
+          }
+
+          const written = readFileSync(promptPath, "utf-8");
+          const marker = parseExplicitDuplicateMarker(written);
+          if (!marker) {
+            continue;
+          }
+          if (processedMarkers >= 50) {
+            break;
+          }
+          processedMarkers += 1;
+
+          const canonicalTask = await this.store.getTask(marker.canonicalId).catch(() => null);
+          if (
+            !canonicalTask ||
+            canonicalTask.deletedAt ||
+            canonicalTask.id.toLowerCase() === task.id.toLowerCase()
+          ) {
+            continue;
+          }
+
+          await this.store.deleteTask(task.id, {
+            removeLineageReferences: true,
+            auditContext: {
+              agentId: "self-healing",
+              runId: generateSyntheticRunId("self-heal-explicit-duplicate", task.id),
+            },
+          });
+          await this.store.recordActivity({
+            type: "task:auto-archived-duplicate",
+            taskId: task.id,
+            taskTitle: task.title ?? "",
+            details: `Duplicate of ${canonicalTask.id} — closed`,
+            metadata: {
+              canonicalTaskId: canonicalTask.id,
+              source: "explicit-marker-sweep",
+            },
+          });
+          log.log(`[self-healing] resolved explicit duplicate marker ${task.id} → ${canonicalTask.id}`);
+          resolved += 1;
+        } catch (error) {
+          log.warn(`Failed explicit duplicate-marker sweep for ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      return resolved;
+    } catch (error) {
+      log.error(`Explicit duplicate-marker sweep failed: ${error instanceof Error ? error.message : String(error)}`);
       return 0;
     }
   }

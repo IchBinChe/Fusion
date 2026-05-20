@@ -11,6 +11,7 @@ import {
   TaskDeletedError,
   buildTriageMemoryInstructions,
   getTaskDuplicateLineage,
+  parseExplicitDuplicateMarker,
   resolveAgentPrompt,
   resolvePersistAgentThinkingLog,
   compareTaskPriority,
@@ -1508,6 +1509,25 @@ export class TriageProcessor {
             }
           }
 
+          const written = await readFile(
+            join(this.rootDir, promptPath),
+            "utf-8",
+          ).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            planLog.warn(`${task.id}: failed to read generated PROMPT.md before finalization (${promptPath}): ${msg}`);
+            return "";
+          });
+
+          // FN-5220: planning agents that emit a `DUPLICATE: FN-NNNN` redirect
+          // do not call `fn_review_spec()`; short-circuit the APPROVE gate.
+          if (await this.tryFinalizeExplicitDuplicateMarker(task, written, settings, {
+            isReplan,
+            feedback,
+          })) {
+            this.options.onSpecifyComplete?.(task);
+            return;
+          }
+
           // Post-session APPROVE gate: only advance to todo when the spec
           // reviewer explicitly approved. Any other verdict (REVISE,
           // RETHINK, UNAVAILABLE) or a missing review (null) stays in triage
@@ -1575,15 +1595,6 @@ export class TriageProcessor {
             await this.store.updateTask(task.id, { status: "needs-replan" });
             return;
           }
-
-          const written = await readFile(
-            join(this.rootDir, promptPath),
-            "utf-8",
-          ).catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            planLog.warn(`${task.id}: failed to read generated PROMPT.md before finalization (${promptPath}): ${msg}`);
-            return "";
-          });
 
           await this.finalizeApprovedTask(task, written, settings, {
             isReplan,
@@ -2243,6 +2254,41 @@ export class TriageProcessor {
     };
   }
 
+  private async tryFinalizeExplicitDuplicateMarker(
+    task: Task,
+    written: string,
+    settings: Settings,
+    options: {
+      isReplan?: boolean;
+      feedback?: string;
+    } = {},
+  ): Promise<boolean> {
+    try {
+      const explicitDuplicateMarker = parseExplicitDuplicateMarker(written);
+      if (!explicitDuplicateMarker) {
+        return false;
+      }
+
+      const canonicalId = explicitDuplicateMarker.canonicalId;
+      const canonicalTask = await this.store.getTask(canonicalId).catch(() => null);
+      if (
+        !canonicalTask ||
+        canonicalTask.deletedAt ||
+        canonicalTask.id.toLowerCase() === task.id.toLowerCase()
+      ) {
+        return false;
+      }
+
+      planLog.log(`${task.id} explicit duplicate marker detected — redirecting to ${canonicalId}`);
+      await this.finalizeApprovedTask(task, written, settings, options);
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      planLog.warn(`${task.id}: explicit duplicate marker short-circuit failed; proceeding with normal approval gate (${msg})`);
+      return false;
+    }
+  }
+
   private async finalizeApprovedTask(
     task: Task,
     written: string,
@@ -2262,6 +2308,21 @@ export class TriageProcessor {
         task.id,
         `Duplicate of ${dupId} — closed`,
       );
+      try {
+        await this.store.recordActivity({
+          type: "task:auto-archived-duplicate",
+          taskId: task.id,
+          taskTitle: task.title ?? "",
+          details: `Duplicate of ${dupId} — closed`,
+          metadata: {
+            canonicalTaskId: dupId,
+            source: "explicit-marker",
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        planLog.warn(`${task.id}: failed to record explicit duplicate-marker activity (${msg})`);
+      }
       // Pass removeLineageReferences so a duplicate-close cannot be blocked by lineage children (FN-5129 / FN-5131).
       await this.store.deleteTask(task.id, {
         removeLineageReferences: true,

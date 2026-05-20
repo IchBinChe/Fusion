@@ -96,6 +96,44 @@ Near-duplicate archival is reversible and leaves lineage markers behind:
 
 This layer complements, rather than replaces, FN-4829 similarity detection, FN-4918 deterministic deduplication, and FN-4892 same-agent intake heuristics.
 
+#### Explicit duplicate-marker guard (FN-5220)
+
+Fusion also recognizes the canonical one-line redirect marker:
+
+- `DUPLICATE: FN-1234`
+- `` `DUPLICATE: FN-1234` ``
+- `**DUPLICATE: FN-1234**`
+- fenced single-line wrappers such as:
+
+  ```text
+  DUPLICATE: FN-1234
+  ```
+
+The shared parser lives in `packages/core/src/explicit-duplicate-marker.ts` (`parseExplicitDuplicateMarker`). It is intentionally strict: after trimming outer whitespace and one optional wrapper layer, the content must reduce to exactly one substantive line matching `^DUPLICATE:\s*FN-\d+$`. Any extra prose, multiple markers, or full PROMPT bodies that merely mention duplicate text are ignored.
+
+This guard adds three fail-open layers on top of the existing duplicate stack, in final order:
+
+1. Deterministic fingerprint guard (FN-4918 / FN-5060)
+2. Similarity warning gate (FN-4829)
+3. Near-duplicate intent guard (FN-5152)
+4. Explicit duplicate-marker guard (FN-5220)
+
+Layer behavior:
+
+- **Dashboard intake (`POST /api/tasks`)** — after deterministic/similarity/near-duplicate checks and before `createTask`, intake returns `409 duplicate_candidates` with `reason: "explicit-marker"` when the combined title/description is exactly a canonical redirect and the canonical target exists. `acknowledgedDuplicates` and `bypassDuplicateCheck: true` both suppress the conflict. Because this guard runs before task creation, the activity breadcrumb is attached to the canonical target.
+- **Triage planning loop** — after triage reads the generated `PROMPT.md` but before the `fn_review_spec()` APPROVE gate, an exact redirect marker short-circuits directly into `finalizeApprovedTask()`. This prevents one-line redirect specs from burning review reminders or fallback planning retries.
+- **Self-healing sweep** — maintenance Batch 2 runs `resolveExplicitDuplicateMarkerTasks()` across `triage`/`todo` tasks to clean up older stuck marker tasks. The sweep is best-effort, capped at 50 marker tasks per cycle, and can be disabled with the internal setting `resolveExplicitDuplicateMarkerEnabled: false` (default `true`).
+
+All three layers fail open: parse errors, task lookup failures, file-read failures, activity-recording errors, or other unexpected exceptions log a warning and continue normal intake/triage/self-healing flow instead of blocking task creation or recovery.
+
+Activity uses the existing `task:auto-archived-duplicate` event with `metadata.source` disambiguators:
+
+- `explicit-marker` — triage short-circuit / duplicate finalize path
+- `explicit-marker-sweep` — self-healing maintenance sweep
+- `explicit-marker-intake` — dashboard intake rejection breadcrumb
+
+The duplicate-close task log line remains `Duplicate of <canonicalTaskId> — closed` for triage/sweep paths.
+
 ### Intake auto-archive (ghost-bug preflight + same-agent duplicate)
 
 Fusion applies two conservative intake heuristics that may auto-archive newly filed tasks before execution starts:

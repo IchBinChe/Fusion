@@ -1251,6 +1251,7 @@ export class Database {
   /** Returns the database file path (or ":memory:" for in-memory databases). */
   get path(): string { return this.dbPath; }
   corruptionDetected = false;
+  integrityCheckErrors: string[] = [];
   integrityCheckPending = false;
   integrityCheckLastRunAt: string | null = null;
   /** Tracks transaction nesting depth for savepoint-based nested transactions. */
@@ -3684,6 +3685,7 @@ export class Database {
         participant.integrityCheckPending = false;
         participant.integrityCheckLastRunAt = startedAt;
         participant.corruptionDetected = !integrity.ok;
+        participant.integrityCheckErrors = integrity.ok ? [] : [...integrity.errors];
       }
 
       if (!integrity.ok) {

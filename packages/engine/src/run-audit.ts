@@ -254,6 +254,8 @@ export type DatabaseMutationType =
   | "task:auto-board-stall-broken"
   /** Metadata: { holderIds: string[], followerCount: number, windowMs: number, ntfyDispatched: boolean } */
   | "task:auto-board-stall-unrecovered"
+  /** Metadata: { errors: string[], lastCheckedAt: string | null, notificationDispatched: boolean } */
+  | "task:auto-db-corruption-detected"
   | "task:in-review-stall-deadlock-disposed"
   | "task:finalize-unproven-blocked"
   | "task:integrity-reconcile-modified-files"

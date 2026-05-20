@@ -98,7 +98,7 @@ function buildHealthPayload(store: TaskStore, cliPackageVersion: string) {
   const database = store.getDatabaseHealth();
   const taskIdIntegrity = buildTaskIdIntegrityHealth(store.getTaskIdIntegrityReport());
   return {
-    status: !database.healthy || taskIdIntegrity.status === "anomaly" ? "degraded" : "ok",
+    status: !database.healthy || database.corruptionDetected || taskIdIntegrity.status === "anomaly" ? "degraded" : "ok",
     version: cliPackageVersion,
     uptime: Math.floor(process.uptime()),
     database,
@@ -1325,7 +1325,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     const report = store.refreshTaskIdIntegrityReport();
     const database = store.getDatabaseHealth();
     res.json({
-      status: !database.healthy || report.status === "anomaly" ? "degraded" : "ok",
+      status: !database.healthy || database.corruptionDetected || report.status === "anomaly" ? "degraded" : "ok",
       version: cliPackageVersion,
       uptime: Math.floor(process.uptime()),
       database,

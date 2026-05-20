@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } f
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
-import { createLogger } from "./logger.js";
+import { createLogger, schedulerLog } from "./logger.js";
 import { RemovalReason, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
   classifyMissingWorktreeSessionStartFailure,
@@ -51,6 +51,7 @@ import type { OwnedLandedClassification } from "./merger.js";
 import { recoverForeignOnlyContamination } from "./recovery/foreign-only-contamination.js";
 import {
   buildNtfyClickUrl,
+  getActiveNotificationService,
   isNtfyEventEnabled,
   resolveNtfyEvents,
   sendNtfyNotification,
@@ -64,6 +65,7 @@ const worktreeMetadataReconcileLog = createLogger("worktree-metadata-reconcile")
 const execAsync = promisify(exec);
 const DONE_TASK_INTEGRITY_SWEEP_LIMIT = 50;
 const BOARD_STALL_NOTIFICATION_COOLDOWN_MS = 60 * 60_000;
+const DB_CORRUPTION_NOTIFICATION_COOLDOWN_MS = 60 * 60 * 1000;
 export const STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS = 10 * 60_000;
 export const COMPLETION_HANDOFF_LIMBO_GRACE_MS = 5 * 60_000;
 export const MAX_COMPLETION_HANDOFF_LIMBO_RECOVERIES = 3;
@@ -534,6 +536,7 @@ export class SelfHealingManager {
   private maintenanceTickCounter = 0;
   private readonly processBootStartedAt = Date.now();
   private dependencyBlockedTodoReporter: DependencyBlockedTodoReporter | null = null;
+  private lastDbCorruptionNotifiedAt: number | null = null;
 
   private boardStallWindow: {
     windowStartMs: number;
@@ -1317,6 +1320,7 @@ export class SelfHealingManager {
           { name: "surface-in-review-stalled", fn: () => this.surfaceInReviewStalled() },
           { name: "surface-stale-paused-reviews", fn: () => this.surfaceStalePausedReviews() },
           { name: "surface-stale-paused-todos", fn: () => this.surfaceStalePausedTodos() },
+          { name: "surface-db-corruption", fn: () => this.surfaceDbCorruption() },
           { name: "audit-no-commits-expected-candidates", fn: () => this.auditNoCommitsExpectedCandidates() },
         ];
         for (const fn of batch2Fns) {
@@ -3197,6 +3201,78 @@ export class SelfHealingManager {
     }
 
     return { holders: [], recovered: 0, unrecovered: false };
+  }
+
+  private async surfaceDbCorruption(): Promise<void> {
+    const health = this.store.getDatabaseHealth();
+    if (!health.corruptionDetected) {
+      this.lastDbCorruptionNotifiedAt = null;
+      return;
+    }
+
+    const now = Date.now();
+    if (
+      this.lastDbCorruptionNotifiedAt !== null
+      && now - this.lastDbCorruptionNotifiedAt < DB_CORRUPTION_NOTIFICATION_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    const settings = await this.store.getSettings();
+    const errors = health.corruptionErrors.slice(0, 5);
+    let notificationDispatched = false;
+
+    try {
+      const notificationService = getActiveNotificationService();
+      if (notificationService) {
+        await notificationService.dispatch("db-corruption-detected", {
+          event: "db-corruption-detected",
+          timestamp: new Date().toISOString(),
+          metadata: {
+            errors,
+            lastCheckedAt: health.lastCheckedAt?.toISOString() ?? null,
+          },
+        });
+        notificationDispatched = true;
+      } else {
+        const enabled = Boolean(settings.ntfyEnabled && settings.ntfyTopic);
+        const events = resolveNtfyEvents(settings.ntfyEvents);
+        if (enabled && isNtfyEventEnabled(events, "db-corruption-detected")) {
+          const clickUrl = buildNtfyClickUrl({ dashboardHost: settings.ntfyDashboardHost });
+          await sendNtfyNotification({
+            ntfyBaseUrl: settings.ntfyBaseUrl,
+            ntfyAccessToken: settings.ntfyAccessToken,
+            topic: settings.ntfyTopic!,
+            title: "Database corruption detected",
+            message: `Background SQLite integrity check detected corruption. Errors: ${errors.join(" | ") || "unknown"}.`,
+            priority: "urgent",
+            clickUrl,
+          });
+          notificationDispatched = true;
+        }
+      }
+    } catch (error: unknown) {
+      schedulerLog.log(
+        `Failed to dispatch db-corruption-detected notification: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const auditor = createRunAuditor(this.store, {
+      runId: generateSyntheticRunId("fn5284-db-corruption", "global"),
+      agentId: "self-healing",
+      phase: "db-corruption-detected",
+    });
+    await auditor.database({
+      type: "task:auto-db-corruption-detected",
+      target: "database",
+      metadata: {
+        errors,
+        lastCheckedAt: health.lastCheckedAt?.toISOString() ?? null,
+        notificationDispatched,
+      },
+    });
+
+    this.lastDbCorruptionNotifiedAt = now;
   }
 
   async clearStaleBlockedBy(): Promise<number> {

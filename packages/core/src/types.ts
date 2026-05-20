@@ -404,6 +404,7 @@ export type NtfyNotificationEvent =
   | "planning-awaiting-input"
   | "gridlock"
   | "board-stall-unrecovered"
+  | "db-corruption-detected"
   | "fallback-used"
   | "memory-dreams-processed"
   | "token-budget"
@@ -422,6 +423,7 @@ export const NOTIFICATION_EVENTS = [
   "planning-awaiting-input",
   "gridlock",
   "board-stall-unrecovered",
+  "db-corruption-detected",
   "fallback-used",
   "memory-dreams-processed",
   "token-budget",

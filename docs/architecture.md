@@ -969,9 +969,11 @@ A `prefetchLazyViews()` function runs once on mount via `requestIdleCallback` to
 ### Health and monitoring endpoints
 - **Health check**: `GET /api/health`
   - Returns liveness status for load balancers and monitoring
-  - Response: `{ status: "ok" | "degraded", version: string, uptime: number, database: { healthy: boolean, isRunning: boolean, lastCheckedAt: string | null } }`
+  - Response: `{ status: "ok" | "degraded", version: string, uptime: number, database: { healthy: boolean, corruptionDetected: boolean, corruptionErrors: string[], isRunning: boolean, lastCheckedAt: string | null }, taskIdIntegrity: { status: "ok" | "anomaly", checkedAt: string | null, anomalies: [...], recommendedAction: string | null } }`
   - Startup does not block on full `PRAGMA integrity_check(100)`; Fusion schedules it in the background shortly after boot.
-  - Background integrity checks are deduplicated process-wide per on-disk SQLite path: multiple `Database` instances sharing the same `fusion.db` join one shared run, and each instance still updates the underlying integrity state (`integrityCheckPending`, `integrityCheckLastRunAt`, `corruptionDetected`) that maps to `database.isRunning`, `database.lastCheckedAt`, and `database.healthy`.
+  - Background integrity checks are deduplicated process-wide per on-disk SQLite path: multiple `Database` instances sharing the same `fusion.db` join one shared run, and each instance still updates the underlying integrity state (`integrityCheckPending`, `integrityCheckLastRunAt`, `corruptionDetected`, `integrityCheckErrors`) that maps to `database.isRunning`, `database.lastCheckedAt`, `database.healthy`, `database.corruptionDetected`, and `database.corruptionErrors`.
+  - Self-healing watches `store.getDatabaseHealth()` during maintenance. Each fresh corruption detection emits a `task:auto-db-corruption-detected` run-audit database event and attempts a `db-corruption-detected` notification through the active notification service (or the ntfy fallback) with a one-hour cooldown between repeats until the health state clears.
+  - `POST /api/health/refresh` recomputes the task-ID integrity section on demand and returns the same top-level shape, including the current database corruption fields.
   - No authentication required
 
 ### Custom Provider endpoints

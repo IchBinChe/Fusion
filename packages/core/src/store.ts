@@ -9329,11 +9329,16 @@ ${stepsSection}`;
 
   getDatabaseHealth(): {
     healthy: boolean;
+    corruptionDetected: boolean;
+    corruptionErrors: string[];
     lastCheckedAt: Date | null;
     isRunning: boolean;
   } {
+    const corruptionDetected = this.db.corruptionDetected;
     return {
-      healthy: !this.db.corruptionDetected,
+      healthy: !corruptionDetected,
+      corruptionDetected,
+      corruptionErrors: this.db.integrityCheckErrors.slice(0, 5),
       lastCheckedAt: this.db.integrityCheckLastRunAt ? new Date(this.db.integrityCheckLastRunAt) : null,
       isRunning: this.db.integrityCheckPending,
     };

@@ -211,6 +211,8 @@ export interface DashboardHealthResponse {
   uptime: number;
   database: {
     healthy: boolean;
+    corruptionDetected: boolean;
+    corruptionErrors: string[];
     lastCheckedAt: string | null;
     isRunning: boolean;
   };

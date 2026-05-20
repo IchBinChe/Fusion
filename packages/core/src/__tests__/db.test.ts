@@ -465,6 +465,8 @@ describe("Database", () => {
         expect(dbB.integrityCheckLastRunAt).toBeTruthy();
         expect(dbA.corruptionDetected).toBe(false);
         expect(dbB.corruptionDetected).toBe(false);
+        expect(dbA.integrityCheckErrors).toEqual([]);
+        expect(dbB.integrityCheckErrors).toEqual([]);
       } finally {
         dbA.close();
         dbB.close();
@@ -478,7 +480,7 @@ describe("Database", () => {
       vi.useFakeTimers();
       const integritySpy = vi.spyOn(Database.prototype, "integrityCheck").mockReturnValue({
         ok: false,
-        errors: ["malformed database"],
+        errors: ["malformed database", "broken index"],
       });
       const freshDir = makeTmpDir();
       const freshFusionDir = join(freshDir, ".fusion");
@@ -498,6 +500,8 @@ describe("Database", () => {
         expect(dbB.integrityCheckLastRunAt).toBeTruthy();
         expect(dbA.corruptionDetected).toBe(true);
         expect(dbB.corruptionDetected).toBe(true);
+        expect(dbA.integrityCheckErrors).toEqual(["malformed database", "broken index"]);
+        expect(dbB.integrityCheckErrors).toEqual(["malformed database", "broken index"]);
       } finally {
         dbA.close();
         dbB.close();
@@ -1036,6 +1040,7 @@ describe("Database", () => {
     it("returns ok for healthy databases and leaves corruption flag false", () => {
       expect(db.corruptionDetected).toBe(false);
       expect(db.integrityCheck()).toEqual({ ok: true });
+      expect(db.integrityCheckErrors).toEqual([]);
     });
 
     it("keeps corruptionDetected false after init for healthy database", () => {

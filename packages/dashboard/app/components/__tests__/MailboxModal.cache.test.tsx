@@ -64,8 +64,8 @@ describe("MailboxModal cache hydration", () => {
     await waitFor(() => {
       const cachedRaw = localStorage.getItem(`${SWR_CACHE_KEYS.MAILBOX_INBOX_PREFIX}p1`);
       expect(cachedRaw).not.toBeNull();
-      const cached = JSON.parse(cachedRaw ?? "{}");
-      expect(cached.messages[0].id).toBe("msg-1");
+      const cached = JSON.parse(cachedRaw ?? "{}").data;
+      expect(cached?.messages?.[0]?.id).toBe("msg-1");
       expect(cached).not.toHaveProperty("conversationMessages");
     });
   });
@@ -88,8 +88,8 @@ describe("MailboxModal cache hydration", () => {
     const { rerender } = render(<MailboxModal isOpen onClose={() => {}} projectId="p1" agents={[]} />);
 
     await waitFor(() => {
-      const cached = JSON.parse(localStorage.getItem(`${SWR_CACHE_KEYS.MAILBOX_INBOX_PREFIX}p1`) ?? "{}");
-      expect(cached.messages).toHaveLength(100);
+      const cached = JSON.parse(localStorage.getItem(`${SWR_CACHE_KEYS.MAILBOX_INBOX_PREFIX}p1`) ?? "{}").data;
+      expect(cached?.messages).toHaveLength(100);
     });
 
     localStorage.setItem(`${SWR_CACHE_KEYS.MAILBOX_INBOX_PREFIX}p2`, JSON.stringify({ messages: [{ id: "msg-p2", fromId: "agent-2", fromType: "agent", toId: "dashboard", toType: "user", content: "p2", type: "agent-to-user", read: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }], total: 1, unreadCount: 1 }));

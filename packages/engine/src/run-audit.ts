@@ -159,6 +159,7 @@ export type GitMutationType =
   | "merge:reuse-handoff-refused"
   | "merge:reuse-handoff-released"
   | "merge:reuse-handoff-deferred-to-worktrunk"
+  | "merge:reuse-fallback-cwd-main"
   | "merge:audit-failure"
   | "branch:auto-reclaim"
   | "branch:auto-canonicalize-case"

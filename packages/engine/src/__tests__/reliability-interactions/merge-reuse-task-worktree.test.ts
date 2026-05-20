@@ -349,6 +349,52 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
     }
   }, 30_000);
 
+  it.skipIf(!hasGit)("falls back to cwd-main when reuse is requested without a task worktree", async () => {
+    const fixture = await makeReliabilityFixture({
+      taskId: "FN-5353-RI-MISSING-WORKTREE",
+      settings: {
+        baseBranch: "master",
+        mergeIntegrationWorktree: "reuse-task-worktree",
+      } as any,
+    });
+
+    try {
+      const { rootDir, store, task } = fixture;
+      const actualTask = await store.getTask(task.id);
+      const branch = `fusion/${actualTask!.id.toLowerCase()}`;
+
+      git(rootDir, "git branch -m main master");
+      const completedSteps = (actualTask?.steps ?? []).map((step) => ({ ...step, status: "done" as const }));
+      await store.updateTask(task.id, {
+        baseBranch: "master",
+        branch,
+        worktree: null,
+        steps: completedSteps,
+        currentStep: completedSteps.length,
+      } as any);
+      await fixture.createBranch(branch);
+      await fixture.writeAndCommit("packages/engine/src/fn-5353-ri-missing-worktree.ts", "export const fallback = true;\n", "feat: add fallback merge content");
+      await fixture.checkout("master");
+      store.enqueueMergeQueue(task.id);
+
+      const result = await aiMergeTask(store, rootDir, task.id);
+      expect(result.merged).toBe(true);
+      expect((await store.getTask(task.id))?.column).toBe("done");
+      const audits = store.getRunAuditEvents({ taskId: task.id });
+      const auditTypes = audits.map((event) => event.mutationType);
+      expect(auditTypes).toContain("merge:reuse-fallback-cwd-main");
+      expect(auditTypes).not.toContain("merge:reuse-handoff-acquired");
+      const fallback = audits.find((event) => event.mutationType === "merge:reuse-fallback-cwd-main");
+      expect(fallback?.metadata).toMatchObject({
+        reason: "missing-task-worktree",
+        worktreePath: null,
+        integrationBranch: "master",
+      });
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
   it.skipIf(!hasGit)("cwd-main mode stays on the legacy path and emits no reuse handoff events", async () => {
     const fixture = await makeReliabilityFixture({
       taskId: "FN-5279-RI-CWD-MAIN",

@@ -74,7 +74,7 @@ import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import { RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { classifyTaskWorktree, RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
@@ -6386,6 +6386,7 @@ export async function aiMergeTask(
       | "merge:reuse-handoff-refused"
       | "merge:reuse-handoff-released"
       | "merge:reuse-handoff-deferred-to-worktrunk"
+      | "merge:reuse-fallback-cwd-main"
       | "branch:auto-canonicalize-case",
     metadata: Record<string, unknown>,
     target: string,
@@ -6402,18 +6403,47 @@ export async function aiMergeTask(
   const requestedIntegrationMode = settings.mergeIntegrationWorktree === "cwd-main"
     ? "cwd-main"
     : "reuse-task-worktree";
-  const integrationRoot = resolveMergeIntegrationRoot({
+  let integrationRoot = resolveMergeIntegrationRoot({
     task,
     settings,
     projectRoot: projectRootDir,
   });
-  const reuseTaskWorktreeMerge = integrationRoot.mode === "reuse-task-worktree";
+  let reuseTaskWorktreeMerge = integrationRoot.mode === "reuse-task-worktree";
   rootDir = integrationRoot.rootDir;
-  const integrationRemote = await resolveIntegrationRemote({
+  let integrationRemote = await resolveIntegrationRemote({
     settings,
     rootDir: rootDir,
     integrationBranch: mergeTarget.branch,
   });
+  const fallbackReuseIntegrationToCwdMain = async (
+    reason: string,
+    diagnostics: Record<string, unknown>,
+  ): Promise<void> => {
+    integrationRoot = {
+      ...integrationRoot,
+      mode: "cwd-main",
+      rootDir: projectRootDir,
+    };
+    reuseTaskWorktreeMerge = false;
+    rootDir = projectRootDir;
+    integrationRemote = await resolveIntegrationRemote({
+      settings,
+      rootDir,
+      integrationBranch: mergeTarget.branch,
+    });
+    await emitReuseHandoffAuditEvent(
+      "merge:reuse-fallback-cwd-main",
+      {
+        taskId,
+        reason,
+        worktreePath: task.worktree ?? null,
+        diagnostics,
+        integrationRemote: integrationRemote ?? null,
+        integrationBranch: mergeTarget.branch,
+      },
+      rootDir,
+    );
+  };
   if (
     settings.worktrunk?.enabled === true
     && requestedIntegrationMode === "reuse-task-worktree"
@@ -6432,6 +6462,22 @@ export async function aiMergeTask(
   }
 
   let reuseHandoff: HandoffResult | undefined;
+  if (integrationRoot.mode === "reuse-task-worktree") {
+    const reusableWorktreePath = task.worktree?.trim();
+    if (!reusableWorktreePath) {
+      await fallbackReuseIntegrationToCwdMain("missing-task-worktree", {
+        requestedMode: requestedIntegrationMode,
+      });
+    } else {
+      const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
+      if (!classification.ok) {
+        await fallbackReuseIntegrationToCwdMain("unusable-task-worktree", {
+          requestedMode: requestedIntegrationMode,
+          classification,
+        });
+      }
+    }
+  }
   if (integrationRoot.mode === "reuse-task-worktree") {
     try {
       reuseHandoff = await acquireReuseHandoff({
@@ -6453,20 +6499,40 @@ export async function aiMergeTask(
         },
         reuseHandoff.worktreePath,
       );
-    } catch (error) {
-      if (error instanceof MergeHandoffRefusedError) {
-        await emitReuseHandoffAuditEvent(
-          "merge:reuse-handoff-refused",
-          {
-            taskId,
+    } catch (error: unknown) {
+      if (!(error instanceof MergeHandoffRefusedError)) {
+        throw error;
+      }
+      await emitReuseHandoffAuditEvent(
+        "merge:reuse-handoff-refused",
+        {
+          taskId,
+          gate: error.gate,
+          reason: error.reason,
+          diagnostics: error.payload,
+        },
+        integrationRoot.rootDir,
+      );
+      const reusableWorktreePath = task.worktree?.trim();
+      if (!reusableWorktreePath) {
+        await fallbackReuseIntegrationToCwdMain("missing-task-worktree-after-refusal", {
+          requestedMode: requestedIntegrationMode,
+          gate: error.gate,
+          reason: error.reason,
+        });
+      } else {
+        const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
+        if (!classification.ok) {
+          await fallbackReuseIntegrationToCwdMain("unusable-task-worktree-after-refusal", {
+            requestedMode: requestedIntegrationMode,
             gate: error.gate,
             reason: error.reason,
-            diagnostics: error.payload,
-          },
-          integrationRoot.rootDir,
-        );
+            classification,
+          });
+        } else {
+          throw error;
+        }
       }
-      throw error;
     }
   }
 

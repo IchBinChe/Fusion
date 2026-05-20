@@ -82,7 +82,7 @@ vi.mock("@fusion/core", () => ({
   AgentStore: MockAgentStore,
 }));
 
-const executeApprovedWorktrunkInstall = vi.fn(async () => ({ binaryPath: "~/.fusion/bin/worktrunk", source: "installed-release" }));
+const executeApprovedWorktrunkInstall = vi.fn(async () => ({ binaryPath: "~/.fusion/bin/wt", source: "installed-release" }));
 
 vi.mock("@fusion/engine", () => ({
   executeApprovedAgentProvisioning,
@@ -221,7 +221,7 @@ describe("approval routes", async () => {
           summary: "Install worktrunk",
           action: "worktrunk_install",
           resourceType: "binary",
-          resourceId: "~/.fusion/bin/worktrunk",
+          resourceId: "~/.fusion/bin/wt",
         },
         taskId: "FN-1",
         runId: "run-4",

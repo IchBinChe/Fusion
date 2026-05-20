@@ -696,11 +696,13 @@ Guardrails: this routine does **not** retry merges, does **not** apply to mixed/
 
 ### Worktree and naming helpers
 - `WorktreePool` (`worktree-pool.ts`) — idle worktree reuse
-- `WorktreeBackend` (`worktree-backend.ts`) — abstraction for worktree operations used by `acquireTaskWorktree`. `native` (default) preserves existing `git worktree` behavior (including sibling-branch retry semantics), while `resolveWorktreeBackend(settings)` selects `worktrunk` when `settings.worktrunk?.enabled === true`.
+- `WorktreeBackend` (`worktree-backend.ts`) — abstraction for worktree operations used by `acquireTaskWorktree`. `native` (default) preserves existing `git worktree` behavior (including sibling-branch retry semantics), while `resolveWorktreeBackend(settings)` selects [worktrunk](https://github.com/max-sixty/worktrunk) when `settings.worktrunk?.enabled === true`.
   - Worktrunk path delegates five decisions with per-op timeouts: `create` (120s), `sync` (180s), `prune` (60s), `remove` (60s), and layout resolution (5s).
   - Direct worktrunk CLI delegates: `create` → `wt switch --create ... --no-hooks --no-cd`, `remove` → `wt remove --foreground`.
+  - Fusion probes the canonical `wt` binary on `$PATH`; explicit `worktrunk.binaryPath` overrides still win when operators pin a different location.
   - Worktrunk-aware fallback implementations where worktrunk lacks a dedicated primitive: `sync` uses git fetch+rebase semantics, and `prune` uses `git worktree list --porcelain` plus per-branch `remove` calls.
   - Layout precedence: when `worktrunk.enabled=true`, `resolveTaskWorktreePathForBackend(...)` defers to backend `resolveWorktreePath(...)` (using `wt config show --format json` template data with default `{{ repo_path }}/.worktrees/{{ branch | sanitize }}` fallback); otherwise it remains byte-identical to FN-4606 `resolveTaskWorktreePath(...)` behavior.
+  - Auto-install remains fail-closed while the pinned release manifest is `upstream-pending-verification`: the pre-approved install path now rejects missing asset URLs/checksums instead of fabricating a local binary. This preserves the FN-4704/FN-4705 disabled-install contract until a human verifies a real upstream release manifest.
   - `worktrunk.onFailure` controls fail-hard vs fallback-native create behavior and emits `worktree:worktrunk-*` run-audit events for create/fallback paths.
 - `WorktreeNames` (`worktree-names.ts`) — deterministic worktree/branch naming
 
@@ -1534,7 +1536,7 @@ The GitHub tracking state listener now attaches to every registered project stor
 
 #### WorktreeBackend abstraction
 - Backend contract: `WorktreeBackend` (`packages/engine/src/worktree-backend.ts`, re-exported via `packages/engine/src/worktree-pool.ts`).
-- Implementations: `NativeWorktreeBackend` (Fusion-managed `git worktree` flow) and `WorktrunkWorktreeBackend` (delegates to external `worktrunk` CLI).
+- Implementations: `NativeWorktreeBackend` (Fusion-managed `git worktree` flow) and `WorktrunkWorktreeBackend` (delegates to the external `wt` CLI from [max-sixty/worktrunk](https://github.com/max-sixty/worktrunk)).
 - Backend selection is driven by `worktrunk.enabled`; when enabled, worktrunk-managed layout overrides `worktreesDir` for delegated operations.
 - Worktrunk layout is authoritative on create: after `wt switch --create`, Fusion resolves the actual registered worktree path via `git worktree list --porcelain` and uses that path (instead of assuming `resolveTaskWorktreePath` alignment).
 - Delegated operation surface in the interface: `create`, `sync`, `prune`, `remove` (plus backend path resolution via `resolveWorktreePath`).
@@ -1542,6 +1544,7 @@ The GitHub tracking state listener now attaches to every registered project stor
 - Worktree removal is backend-mediated across merger, self-healing, worktree-pool, executor, and step-session cleanup paths via `removeWorktree(...)` (`WorktreeBackend.remove()`).
 - Self-healing is worktrunk-aware for failure recovery: tasks paused with `pausedReason: "worktrunk_operation_failed"` are explicitly skipped in reclaim sweeps (`self-healing.ts`) until operator intervention.
 - Failure contract: delegated worktrunk errors preserve stderr context (`WorktrunkOperationError`) and are handled by `worktrunk.onFailure` — `"fail"` pauses the task, while `"fallback-native"` retries on the native backend and emits one-shot fallback telemetry.
+- Install contract: Fusion only auto-installs from a source-of-truth manifest. The shipped placeholder manifest intentionally stays in `upstream-pending-verification` until a human verifies upstream asset URLs and checksums, so install attempts fail closed rather than guessing release metadata.
 
 #### Stale `index.lock` recovery on worktree create
 - Native worktree create paths now classify `git worktree add` failures containing `.../index.lock: File exists` before falling back to generic branch-conflict handling.

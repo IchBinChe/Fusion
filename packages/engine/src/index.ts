@@ -137,9 +137,11 @@ export {
   clearWorktrunkResolveCache,
   requestWorktrunkInstallApproval,
   executeApprovedWorktrunkInstall,
+  validateWorktrunkManifest,
   WorktrunkBinaryUnavailableError,
   WorktrunkInstallDeniedError,
   WorktrunkInstallFailedError,
+  WORKTRUNK_BINARY_NAME,
   WORKTRUNK_INSTALL_DIR,
   WORKTRUNK_INSTALL_PATH,
   WORKTRUNK_PINNED_RELEASE,
@@ -147,6 +149,10 @@ export {
   WORKTRUNK_DOWNLOAD_TIMEOUT_MS,
   WORKTRUNK_DOWNLOAD_MAX_BYTES,
   WORKTRUNK_CARGO_TIMEOUT_MS,
+  type WorktrunkReleaseAsset,
+  type WorktrunkReleaseManifest,
+  type WorktrunkManifestValidationError,
+  type WorktrunkManifestValidationResult,
 } from "./worktrunk-installer.js";
 export {
   handleWorktrunkOperationFailure,

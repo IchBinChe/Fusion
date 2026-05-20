@@ -341,8 +341,8 @@ async function runCliNearDuplicateCheck(args: {
           title: task.title ?? "",
           description: task.description,
           column: task.column,
-          fileScope: Array.isArray(task.source?.sourceMetadata?.fileScope)
-            ? task.source.sourceMetadata.fileScope.filter((entry): entry is string => typeof entry === "string")
+          fileScope: Array.isArray(task.sourceMetadata?.fileScope)
+            ? task.sourceMetadata.fileScope.filter((entry: unknown): entry is string => typeof entry === "string")
             : undefined,
           createdAt: Date.parse(task.createdAt),
         } satisfies NearDuplicateCandidate));

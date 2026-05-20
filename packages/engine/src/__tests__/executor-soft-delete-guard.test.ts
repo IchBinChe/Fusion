@@ -22,6 +22,8 @@ function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
     currentStep: overrides.currentStep ?? 0,
     log: overrides.log ?? [],
     assignedAgentId: overrides.assignedAgentId,
+    checkedOutBy: overrides.checkedOutBy,
+    checkoutLeaseEpoch: overrides.checkoutLeaseEpoch,
     paused: overrides.paused,
     deletedAt: overrides.deletedAt,
   } as unknown as Task;
@@ -47,13 +49,18 @@ describe("TaskExecutor soft-delete guards", () => {
     resetExecutorMocks();
   });
 
-  it("refuses to execute soft-deleted tasks and releases execution lock", async () => {
+  it("refuses to execute soft-deleted tasks even when checked out and releases execution lock", async () => {
     const store = createStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const warnSpy = vi.spyOn(executorLog, "warn");
     const execSyncSpy = vi.spyOn(childProcess, "execSync");
 
-    const task = makeTask({ id: "FN-5137", deletedAt: "2026-01-02T00:00:00.000Z" });
+    const task = makeTask({
+      id: "FN-5137",
+      checkedOutBy: "agent-1",
+      checkoutLeaseEpoch: 2,
+      deletedAt: "2026-01-02T00:00:00.000Z",
+    });
     await executor.execute(task);
 
     expect(execSyncSpy).not.toHaveBeenCalled();
@@ -62,10 +69,31 @@ describe("TaskExecutor soft-delete guards", () => {
     executingTaskLock.release(task.id);
   });
 
-  it("resumeOrphaned skips in-progress tasks that are soft-deleted", async () => {
+  it("resumeTaskForAgent skips checked-out soft-deleted tasks", async () => {
+    const deletedTask = makeTask({
+      id: "FN-assigned-deleted",
+      column: "in-progress",
+      assignedAgentId: "agent-1",
+      checkedOutBy: "agent-1",
+      checkoutLeaseEpoch: 3,
+      paused: false,
+      deletedAt: "2026-01-03T00:00:00.000Z",
+    });
+    const store = createStore({ tasks: [deletedTask] });
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const executeSpy = vi.spyOn(executor, "execute");
+
+    await executor.resumeTaskForAgent("agent-1");
+
+    expect(executeSpy).not.toHaveBeenCalled();
+  });
+
+  it("resumeOrphaned skips checked-out soft-deleted in-progress tasks", async () => {
     const deletedTask = makeTask({
       id: "FN-deleted",
       column: "in-progress",
+      checkedOutBy: "agent-1",
+      checkoutLeaseEpoch: 4,
       paused: false,
       deletedAt: "2026-01-03T00:00:00.000Z",
     });

@@ -37,6 +37,24 @@ describe("AutoClaimSnapshotManager soft-delete guards", () => {
     expect(snapshot.tasks.map((task) => task.id)).toEqual([live.id]);
   });
 
+  it("omits a checked-out task once it is soft-deleted", async () => {
+    const live = await store.createTask({ title: "Live", description: "live" });
+    const checkedOutDeleted = await store.createTask({ title: "Checked out", description: "checked out" });
+    await store.moveTask(live.id, "todo");
+    await store.moveTask(checkedOutDeleted.id, "todo");
+    await store.updateTask(checkedOutDeleted.id, {
+      checkedOutBy: "agent-1",
+      checkoutLeaseEpoch: 1,
+      checkoutNodeId: "node-1",
+    });
+    await store.deleteTask(checkedOutDeleted.id);
+
+    const manager = new AutoClaimSnapshotManager({ taskStore: store });
+    const snapshot = await manager.getSnapshot();
+
+    expect(snapshot.tasks.map((task) => task.id)).toEqual([live.id]);
+  });
+
   it("drops deleted ids after cache invalidation and rebuild", async () => {
     let includeDeletedCandidate = true;
     const listTasks = vi.fn(async () => ([
@@ -85,7 +103,7 @@ describe("AutoClaimSnapshotManager soft-delete guards", () => {
     expect(afterDelete.tasks.map((task) => task.id)).toEqual(["FN-001"]);
   });
 
-  it("defense-in-depth filters deleted candidates from synthetic listTasks results", async () => {
+  it("defense-in-depth filters checked-out soft-deleted candidates from synthetic listTasks results", async () => {
     const listTasks = vi.fn(async () => ([
       {
         id: "FN-live",
@@ -100,6 +118,7 @@ describe("AutoClaimSnapshotManager soft-delete guards", () => {
         steps: [],
         currentStep: 0,
         log: [],
+        checkedOutBy: null,
         deletedAt: null,
       },
       {
@@ -115,6 +134,7 @@ describe("AutoClaimSnapshotManager soft-delete guards", () => {
         steps: [],
         currentStep: 0,
         log: [],
+        checkedOutBy: "agent-1",
         deletedAt: "2026-01-02T00:00:00.000Z",
       },
     ] as unknown as Task[]));

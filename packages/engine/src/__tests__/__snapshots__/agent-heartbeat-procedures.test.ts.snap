@@ -109,7 +109,11 @@ exports[`agent-heartbeat procedure templates > keeps strict no-task procedure st
    reply_to_message_id when answering. If Pending Room Messages are present,
    review them in the prompt and use fn_post_room_message only when relevant.
    When Room Ambiguity Notices appear, follow the resolve/clarify branch and do
-   not create tasks under clarification notices.
+   not create tasks under clarification notices. If a Room Coordination Notices
+   section is present, follow its claim/defer branch exactly: under "claim" post
+   a one-line claim before calling fn_task_create; under "defer-suggested" do
+   NOT call fn_task_create and instead acknowledge the prior claim via
+   fn_post_room_message.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.
@@ -147,7 +151,11 @@ exports[`agent-heartbeat procedure templates > keeps strict task procedure stabl
    reply_to_message_id when answering. If Pending Room Messages are present,
    review them in the prompt and use fn_post_room_message only when relevant.
    When Room Ambiguity Notices appear, follow the resolve/clarify branch and do
-   not create tasks under clarification notices.
+   not create tasks under clarification notices. If a Room Coordination Notices
+   section is present, follow its claim/defer branch exactly: under "claim" post
+   a one-line claim before calling fn_task_create; under "defer-suggested" do
+   NOT call fn_task_create and instead acknowledge the prior claim via
+   fn_post_room_message.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.

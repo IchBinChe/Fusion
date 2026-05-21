@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentStore, ChatStore, TaskStore } from "@fusion/core";
 import { HeartbeatMonitor } from "../agent-heartbeat.js";
+import * as roomCoordination from "../room-coordination.js";
 
 const sessionCapture = vi.hoisted(() => ({
   prompt: "",
@@ -281,6 +282,176 @@ describe("heartbeat room messages", () => {
 
     expect(sessionCapture.prompt).toContain("Do NOT create a task or spawn work");
     expect(sessionCapture.prompt).not.toContain("Resolved Referent:");
+  });
+
+  describe("multi-agent room coordination (FN-5425)", () => {
+    async function seedMultiAgentRoom(
+      localHarness: Harness,
+      { peerAgentId = "agent-peer", roomName }: { peerAgentId?: string; roomName: string },
+    ): Promise<{ room: ReturnType<ChatStore["createRoom"]>; peerAgentId: string }> {
+      const peerAgent = await localHarness.agentStore.createAgent({
+        name: peerAgentId,
+        role: "executor",
+        soul: "Peer room member",
+        runtimeConfig: { enabled: true },
+      });
+      const room = localHarness.chatStore.createRoom({ name: roomName, memberAgentIds: [localHarness.agentId] });
+      localHarness.chatStore.addRoomMember(room.id, peerAgent.id);
+      return { room, peerAgentId: peerAgent.id };
+    }
+
+    it("renders claim branch and emits coordination audit in multi-agent room", async () => {
+      harness = await createHarness();
+      const { room } = await seedMultiAgentRoom(harness, { roomName: "coord-claim" });
+      const userMessage = harness.chatStore.addRoomMessage(room.id, {
+        role: "user",
+        content: "please file a task for the secrets-sync regression",
+      });
+
+      const monitor = new HeartbeatMonitor({
+        store: harness.agentStore,
+        taskStore: harness.taskStore,
+        rootDir: harness.rootDir,
+        chatStore: harness.chatStore,
+      });
+
+      const run = await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+
+      expect(sessionCapture.prompt).toContain("Room Coordination Notices:");
+      expect(sessionCapture.prompt).toContain("branch: claim");
+      expect(sessionCapture.prompt).toContain("Claiming:");
+      expect(sessionCapture.prompt).toContain("fn_task_create");
+      expect(sessionCapture.prompt).toContain("fn_post_room_message");
+      expect(sessionCapture.prompt).toContain("FN-4918");
+
+      const event = harness.taskStore
+        .getRunAuditEvents({ runId: run!.id })
+        .find((auditEvent) => auditEvent.mutationType === "room:coordination:branch" && auditEvent.target === userMessage.id);
+      expect(event?.metadata).toMatchObject({ branch: "claim" });
+    });
+
+    it("renders defer branch when peer already claimed", async () => {
+      harness = await createHarness();
+      const { room, peerAgentId } = await seedMultiAgentRoom(harness, { roomName: "coord-defer-claim" });
+      const priorClaim = harness.chatStore.addRoomMessage(room.id, {
+        role: "assistant",
+        senderAgentId: peerAgentId,
+        content: "Claiming: filing task for the secrets-sync regression",
+      });
+      harness.chatStore.addRoomMessage(room.id, {
+        role: "user",
+        content: "please file a task for the secrets-sync regression",
+      });
+
+      const monitor = new HeartbeatMonitor({
+        store: harness.agentStore,
+        taskStore: harness.taskStore,
+        rootDir: harness.rootDir,
+        chatStore: harness.chatStore,
+      });
+
+      const run = await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+      expect(sessionCapture.prompt).toContain("branch: defer-suggested");
+      expect(sessionCapture.prompt).toContain(peerAgentId);
+      expect(sessionCapture.prompt).toContain("Do NOT call fn_task_create");
+
+      const event = harness.taskStore
+        .getRunAuditEvents({ runId: run!.id })
+        .find((auditEvent) => auditEvent.mutationType === "room:coordination:branch");
+      expect(event?.metadata).toMatchObject({ branch: "defer-suggested", priorClaimMessageId: priorClaim.id });
+    });
+
+    it("captures prior task id from peer announcement", async () => {
+      harness = await createHarness();
+      const { room, peerAgentId } = await seedMultiAgentRoom(harness, { roomName: "coord-defer-task" });
+      harness.chatStore.addRoomMessage(room.id, {
+        role: "assistant",
+        senderAgentId: peerAgentId,
+        content: "Filed FN-9042 for the secrets-sync regression",
+      });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "please file a task for the secrets-sync regression" });
+
+      const monitor = new HeartbeatMonitor({
+        store: harness.agentStore,
+        taskStore: harness.taskStore,
+        rootDir: harness.rootDir,
+        chatStore: harness.chatStore,
+      });
+
+      const run = await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+      expect(sessionCapture.prompt).toContain("FN-9042");
+      const event = harness.taskStore.getRunAuditEvents({ runId: run!.id }).find((auditEvent) => auditEvent.mutationType === "room:coordination:branch");
+      expect(event?.metadata).toMatchObject({ priorTaskId: "FN-9042" });
+    });
+
+    it("does not render coordination notices for single-agent room", async () => {
+      harness = await createHarness();
+      const room = harness.chatStore.createRoom({ name: "single-agent", memberAgentIds: [harness.agentId] });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "file a task for X" });
+
+      const monitor = new HeartbeatMonitor({ store: harness.agentStore, taskStore: harness.taskStore, rootDir: harness.rootDir, chatStore: harness.chatStore });
+      const run = await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+
+      expect(sessionCapture.prompt).not.toContain("Room Coordination Notices:");
+      expect(harness.taskStore.getRunAuditEvents({ runId: run!.id }).some((event) => event.mutationType === "room:coordination:branch")).toBe(false);
+    });
+
+    it("does not render coordination notices for non-task-filing content", async () => {
+      harness = await createHarness();
+      const { room } = await seedMultiAgentRoom(harness, { roomName: "coord-non-intent" });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "what do you think about the secrets-sync regression?" });
+
+      const monitor = new HeartbeatMonitor({ store: harness.agentStore, taskStore: harness.taskStore, rootDir: harness.rootDir, chatStore: harness.chatStore });
+      const run = await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+
+      expect(sessionCapture.prompt).not.toContain("Room Coordination Notices:");
+      expect(harness.taskStore.getRunAuditEvents({ runId: run!.id }).some((event) => event.mutationType === "room:coordination:branch")).toBe(false);
+    });
+
+    it("keeps deictic-only messages in ambiguity layer only", async () => {
+      harness = await createHarness();
+      const { room } = await seedMultiAgentRoom(harness, { roomName: "coord-deictic-only" });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "we should investigate the secrets-sync regression" });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "yeah, create it" });
+
+      const monitor = new HeartbeatMonitor({ store: harness.agentStore, taskStore: harness.taskStore, rootDir: harness.rootDir, chatStore: harness.chatStore });
+      await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+
+      expect(sessionCapture.prompt).toContain("Room Ambiguity Notices:");
+      expect(sessionCapture.prompt).not.toContain("Room Coordination Notices:");
+    });
+
+    it("does not defer to a self-authored prior claim", async () => {
+      harness = await createHarness();
+      const { room } = await seedMultiAgentRoom(harness, { roomName: "coord-self-claim" });
+      harness.chatStore.addRoomMessage(room.id, {
+        role: "assistant",
+        senderAgentId: harness.agentId,
+        content: "Claiming: filing task for the secrets-sync regression",
+      });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "please file a task for the secrets-sync regression" });
+
+      const monitor = new HeartbeatMonitor({ store: harness.agentStore, taskStore: harness.taskStore, rootDir: harness.rootDir, chatStore: harness.chatStore });
+      await monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any });
+
+      expect(sessionCapture.prompt).toContain("branch: claim");
+      expect(sessionCapture.prompt).not.toContain("branch: defer-suggested");
+    });
+
+    it("fails open when coordination helper throws", async () => {
+      harness = await createHarness();
+      const { room } = await seedMultiAgentRoom(harness, { roomName: "coord-throw" });
+      harness.chatStore.addRoomMessage(room.id, { role: "user", content: "please file a task for the secrets-sync regression" });
+      const spy = vi.spyOn(roomCoordination, "decideRoomCoordination").mockImplementation(() => {
+        throw new Error("boom");
+      });
+
+      const monitor = new HeartbeatMonitor({ store: harness.agentStore, taskStore: harness.taskStore, rootDir: harness.rootDir, chatStore: harness.chatStore });
+      await expect(monitor.executeHeartbeat({ agentId: harness.agentId, source: "timer" as any })).resolves.toBeTruthy();
+      expect(sessionCapture.prompt).not.toContain("Room Coordination Notices:");
+
+      spy.mockRestore();
+    });
   });
 
   it("registers fn_post_room_message and posts through the real ChatStore under restrictive policy", async () => {

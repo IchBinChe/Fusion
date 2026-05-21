@@ -307,7 +307,8 @@ export type DatabaseMutationType =
    * ```
    */
   | "worktree:pool-double-lease-detected"
-  | "room:ambiguity:branch";
+  | "room:ambiguity:branch"
+  | "room:coordination:branch";
 
 // ── Filesystem mutation types ─────────────────────────────────────────────────
 

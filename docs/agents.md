@@ -950,6 +950,32 @@ Heartbeat runs now surface both direct-message inbox traffic and recent room act
 5. **Mark as Read**: After successful heartbeat completion, direct inbox messages are marked as read.
 6. **Failed Runs**: If the heartbeat execution fails, inbox messages remain unread for retry on the next run.
 
+### Room Coordination Notices (FN-5425)
+
+Heartbeat prompts may include a **Room Coordination Notices** section after **Room Ambiguity Notices** when both conditions are true:
+
+1. A pending room message contains explicit task-filing intent (for example, "file a task" / "create a task").
+2. The room currently has at least two active agent members.
+
+This notice is advisory prompt-layer routing (not server-side serialization), with two branches:
+
+- **claim**: the agent should post a one-line claim via `fn_post_room_message` first, then call `fn_task_create`, then post the resulting `FN-NNNN` task ID back to the room.
+- **defer-suggested**: a peer claim or task announcement was already seen in recent room history; the agent should **not** call `fn_task_create`, and should instead acknowledge the prior claim/announcement via `fn_post_room_message`.
+
+Deterministic duplicate prevention remains authoritative: FN-4918, FN-4829, FN-5152, and FN-5220 are still the hard intake backstop. The coordination notice reduces upstream duplicate pressure but does not replace those guards.
+
+Each coordination decision emits a run-audit `mutationType` of `room:coordination:branch` with metadata:
+
+- `roomId`
+- `agentId`
+- `branch` (`"claim" | "defer-suggested"`)
+- `memberCount`
+- `intentCue`
+- `priorClaimMessageId`
+- `priorTaskId`
+
+Layering order is intentional: ambiguity guidance renders first, coordination guidance renders second.
+
 ### Message Response Modes
 
 The `messageResponseMode` runtime configuration controls when agents are triggered by incoming messages:

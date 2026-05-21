@@ -42,6 +42,7 @@ import { buildSessionSkillContextSync } from "./session-skill-context.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { trimPromptMd, trimTaskDescription, trimTriggeringComments } from "./heartbeat-prompt-trim.js";
 import { detectDeicticReference, extractAntecedentCandidates, renderAmbiguityPromptBlock, scoreReferentConfidence } from "./room-ambiguity.js";
+import { countActiveAgentMembers, decideRoomCoordination, detectTaskFilingIntent, renderRoomCoordinationPromptBlock } from "./room-coordination.js";
 
 const promptSizeLog = createLogger("prompt-size");
 
@@ -400,6 +401,7 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
 4. If a Pending Room Messages section is present, review it too:
    - Use fn_post_room_message only when the room content is relevant to your role, soul, or identity.
    - If a Room Ambiguity Notices section is present, follow it exactly: echo resolved referents before acting, and under clarification notices do not create tasks.
+   - If a Room Coordination Notices section is present, follow its claim/defer branch exactly: under "claim" post a one-line claim before calling fn_task_create; under "defer-suggested" do NOT call fn_task_create and instead acknowledge the prior claim via fn_post_room_message.
    - Reference room message IDs when replying so humans can trace context.
 5. After processing messages, continue with your normal heartbeat duties.
 
@@ -486,7 +488,7 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
    - If the message is informational, acknowledge it and respond via fn_send_message when appropriate.
    - If the message requests work, create a follow-up task with fn_task_create.
    - If the request has a clear owner and fn_delegate_task is available, delegate it directly.
-3. If a Pending Room Messages section is present, review it too and use fn_post_room_message only when the room content is relevant to your role or identity; if Room Ambiguity Notices are present, follow their resolve/clarify branch instructions exactly.
+3. If a Pending Room Messages section is present, review it too and use fn_post_room_message only when the room content is relevant to your role or identity; if Room Ambiguity Notices are present, follow their resolve/clarify branch instructions exactly. If a Room Coordination Notices section is present, follow its claim/defer branch exactly: under "claim" post a one-line claim before calling fn_task_create; under "defer-suggested" do NOT call fn_task_create and instead acknowledge the prior claim via fn_post_room_message.
 4. After processing messages, continue with your ambient work.
 
 Example flow:
@@ -518,7 +520,11 @@ export const HEARTBEAT_PROCEDURE_STRICT = `## Heartbeat Procedure (run every tic
    reply_to_message_id when answering. If Pending Room Messages are present,
    review them in the prompt and use fn_post_room_message only when relevant.
    When Room Ambiguity Notices appear, follow the resolve/clarify branch and do
-   not create tasks under clarification notices.
+   not create tasks under clarification notices. If a Room Coordination Notices
+   section is present, follow its claim/defer branch exactly: under "claim" post
+   a one-line claim before calling fn_task_create; under "defer-suggested" do
+   NOT call fn_task_create and instead acknowledge the prior claim via
+   fn_post_room_message.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.
@@ -618,7 +624,11 @@ export const HEARTBEAT_NO_TASK_PROCEDURE_STRICT = `## Heartbeat Procedure (run e
    reply_to_message_id when answering. If Pending Room Messages are present,
    review them in the prompt and use fn_post_room_message only when relevant.
    When Room Ambiguity Notices appear, follow the resolve/clarify branch and do
-   not create tasks under clarification notices.
+   not create tasks under clarification notices. If a Room Coordination Notices
+   section is present, follow its claim/defer branch exactly: under "claim" post
+   a one-line claim before calling fn_task_create; under "defer-suggested" do
+   NOT call fn_task_create and instead acknowledge the prior claim via
+   fn_post_room_message.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.
@@ -948,6 +958,86 @@ export class HeartbeatMonitor {
         heartbeatLog.log(
           `[room-ambiguity] agent=${agent.id} run=${runId} room=${entry.room.id} messageId=${message.id} branch=${branch} candidates=${candidates.length}`,
         );
+      }
+    }
+
+    return lines;
+  }
+
+  private async getRoomCoordinationNoticesSection(
+    agent: Agent,
+    runId: string,
+    entries: Array<{ room: ChatRoom; messages: ChatRoomMessage[] }>,
+    audit: ReturnType<typeof createRunAuditor>,
+  ): Promise<string[]> {
+    if (!this.chatStore || entries.length === 0) {
+      return [];
+    }
+
+    const lines: string[] = [];
+
+    for (const entry of entries) {
+      for (const message of entry.messages) {
+        try {
+          const detection = detectTaskFilingIntent(message.content);
+          if (!detection.isTaskFilingIntent) {
+            continue;
+          }
+
+          const members = this.chatStore.listRoomMembers(entry.room.id);
+          if (countActiveAgentMembers(members) < 2) {
+            continue;
+          }
+
+          const roomTimeline = this.chatStore.getRoomMessages(entry.room.id, { limit: 100 });
+          const messageIndex = roomTimeline.findIndex((roomMessage) => roomMessage.id === message.id);
+          if (messageIndex < 0) {
+            continue;
+          }
+          // messageIndex === 0 means no prior messages; coordination correctly defaults to claim.
+          const recentMessages = messageIndex === 0
+            ? []
+            : roomTimeline.slice(Math.max(0, messageIndex - 15), messageIndex);
+
+          const decision = decideRoomCoordination({
+            detection,
+            members,
+            recentMessages,
+            pendingSenderAgentId: message.senderAgentId ?? agent.id,
+          });
+          if (!decision) {
+            continue;
+          }
+
+          if (lines.length === 0) {
+            lines.push("", "Room Coordination Notices:");
+          }
+
+          lines.push(
+            `- [room: ${entry.room.name} (${entry.room.id})] [message: ${message.id}] [branch: ${decision.branch}]`,
+            ...renderRoomCoordinationPromptBlock(decision, message).map((line) => `  - ${line}`),
+          );
+
+          await audit.database({
+            type: "room:coordination:branch",
+            target: message.id,
+            metadata: {
+              roomId: entry.room.id,
+              agentId: agent.id,
+              branch: decision.branch,
+              memberCount: decision.memberCount,
+              intentCue: detection.cues[0] ?? null,
+              priorClaimMessageId: decision.priorClaimMessageId ?? null,
+              priorTaskId: decision.priorTaskId ?? null,
+            },
+          });
+
+          heartbeatLog.log(
+            `[room-coordination] agent=${agent.id} run=${runId} room=${entry.room.id} messageId=${message.id} branch=${decision.branch} members=${decision.memberCount}`,
+          );
+        } catch (err) {
+          heartbeatLog.warn(`Room coordination notice failed for ${message.id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }
 
@@ -2493,6 +2583,12 @@ export class HeartbeatMonitor {
             pendingRoomMessages.entries,
             audit,
           );
+          const roomCoordinationNoticesLines = await this.getRoomCoordinationNoticesSection(
+            agent,
+            run.id,
+            pendingRoomMessages.entries,
+            audit,
+          );
 
           // Fetch unread messages when messageStore is available (for all trigger types)
           if (this.messageStore) {
@@ -2679,6 +2775,7 @@ export class HeartbeatMonitor {
               ...pendingMessagesLines,
               ...pendingRoomMessagesLines,
               ...roomAmbiguityNoticesLines,
+              ...roomCoordinationNoticesLines,
               "",
               "Your soul, instructions, and memory are already loaded in the system prompt.",
               "Focus on work that benefits the project without requiring a specific task context.",
@@ -2767,6 +2864,7 @@ export class HeartbeatMonitor {
               ...pendingMessagesLines,
               ...pendingRoomMessagesLines,
               ...roomAmbiguityNoticesLines,
+              ...roomCoordinationNoticesLines,
               ...(reportsHealthSection ? ["", reportsHealthSection] : []),
               "",
               "Run the Heartbeat Procedure above. Call fn_heartbeat_done when finished.",

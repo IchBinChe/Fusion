@@ -3458,10 +3458,12 @@ export class SelfHealingManager {
                 await this.store.updateTask(task.id, { blockedBy: null, status: "queued" });
                 await this.store.logEntry(task.id, `Auto-recovered: preserved queued status — still blocked by file scope overlap with ${task.overlapBlockedBy}`);
               } else {
+                // FN-5434: routine scheduler↔self-healing queued-status churn should stay silent; keep state cleanup only.
                 await this.store.updateTask(task.id, { blockedBy: null, overlapBlockedBy: null, status: null });
-                await this.store.logEntry(task.id, "Auto-recovered: cleared stale queued status — all dependencies satisfied");
               }
-              recovered++;
+              if (hasActiveOverlapBlocker) {
+                recovered++;
+              }
             } catch (err: unknown) {
               const errorMessage = err instanceof Error ? err.message : String(err);
               log.error(`Failed to clear stale queued status for ${task.id}: ${errorMessage}`);

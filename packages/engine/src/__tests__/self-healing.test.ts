@@ -6148,11 +6148,12 @@ describe("clearStaleBlockedBy", () => {
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
     const recovered = await manager.clearStaleBlockedBy();
 
-    expect(recovered).toBe(1);
+    // FN-5434: stale queued-status cleanup remains stateful but is no longer logged/count-recovered.
+    expect(recovered).toBe(0);
     expect(store.updateTask).toHaveBeenCalledWith("FN-3170", { blockedBy: null, overlapBlockedBy: null, status: null });
-    expect(store.logEntry).toHaveBeenCalledWith(
+    expect(store.logEntry).not.toHaveBeenCalledWith(
       "FN-3170",
-      "Auto-recovered: cleared stale queued status — all dependencies satisfied",
+      expect.stringContaining("cleared stale queued status"),
     );
     manager.stop();
   });
@@ -6239,6 +6240,10 @@ describe("FN-4538 overlapBlockedBy self-healing", () => {
     await manager.clearStaleBlockedBy();
 
     expect(store.updateTask).toHaveBeenCalledWith("FN-TARGET", { blockedBy: null, status: "queued" });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-TARGET",
+      "Auto-recovered: preserved queued status — still blocked by file scope overlap with FN-ACTIVE",
+    );
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-TARGET", expect.objectContaining({ status: null }));
     manager.stop();
   });

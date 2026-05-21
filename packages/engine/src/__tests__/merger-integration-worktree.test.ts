@@ -164,6 +164,7 @@ describe("acquireReuseHandoff", () => {
     ]);
     store.acquireMergeQueueLease = vi.fn().mockReturnValue({ taskId: "FN-5279" });
     store.releaseMergeQueueLease = vi.fn();
+    store.peekMergeQueueHead = vi.fn().mockReturnValue({ taskId: "FN-5000", leasedBy: "merger-reuse-handoff", column: "todo" });
     return store;
   }
 
@@ -440,8 +441,9 @@ describe("acquireReuseHandoff", () => {
   it("refuses when no merge queue lease can be acquired", async () => {
     const store = createStore();
     store.acquireMergeQueueLease.mockReturnValue(null);
+    store.peekMergeQueueHead.mockReturnValue({ taskId: "FN-5329", leasedBy: "merger-reuse-handoff", column: "todo" });
 
-    await expectRefusal(
+    const refusal = await expectRefusal(
       acquireReuseHandoff({
         task: await store.getTask("FN-5279"),
         store,
@@ -452,6 +454,10 @@ describe("acquireReuseHandoff", () => {
       "lease-handoff-failed",
       "no-lease",
     );
+    expect(refusal.payload).toMatchObject({
+      queueHeadTaskId: "FN-5329",
+      queueHeadLeasedBy: "merger-reuse-handoff",
+    });
   });
 
   // FN-5363 regression: when the merge queue head is polluted with unrelated tasks

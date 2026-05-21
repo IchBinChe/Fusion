@@ -251,6 +251,13 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       await mkdir(worktreeRoot, { recursive: true });
       git(rootDir, `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(branch)}`);
       await store.updateTask(task.id, { worktree: worktreePath, branch } as any);
+      store.enqueueMergeQueue(task.id, { now: "2026-05-19T00:00:00.000Z" });
+      store.getDatabase().prepare("UPDATE mergeQueue SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ? WHERE taskId = ?").run(
+        "worker-other",
+        "2026-05-19T00:01:00.000Z",
+        "2099-05-19T00:10:00.000Z",
+        task.id,
+      );
 
       await expect(aiMergeTask(store, rootDir, task.id)).rejects.toMatchObject({
         name: "MergeHandoffRefusedError",
@@ -258,7 +265,117 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
         reason: "no-lease",
       });
       const refused = store.getRunAuditEvents({ taskId: task.id }).find((event) => event.mutationType === "merge:reuse-handoff-refused");
-      expect(refused?.metadata).toMatchObject({ gate: "lease-handoff-failed", reason: "no-lease" });
+      expect(refused?.metadata).toMatchObject({
+        gate: "lease-handoff-failed",
+        reason: "no-lease",
+      });
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it.skipIf(!hasGit)("FN-5363: queue-head pollution by non-in-review tasks does not block target reuse handoff", async () => {
+    const fixture = await makeReliabilityFixture({
+      taskId: "FN-5363-RI-POLLUTED",
+      settings: {
+        baseBranch: "master",
+        mergeIntegrationWorktree: "reuse-task-worktree",
+        worktreeRebaseRemote: "origin",
+      } as any,
+    });
+
+    try {
+      const { rootDir, store, task } = fixture;
+      const actualTask = await store.getTask(task.id);
+      const branch = `fusion/${actualTask!.id.toLowerCase()}`;
+      const worktreeRoot = `${rootDir}-worktrees`;
+      const worktreePath = join(worktreeRoot, actualTask!.id.toLowerCase());
+
+      git(rootDir, "git branch -m main master");
+      const completedSteps = (actualTask?.steps ?? []).map((step) => ({ ...step, status: "done" as const }));
+      await store.updateTask(task.id, { baseBranch: "master", branch, steps: completedSteps, currentStep: completedSteps.length } as any);
+      await fixture.createBranch(branch);
+      await fixture.writeAndCommit("packages/engine/src/fn-5363-ri-polluted.ts", "export const polluted = true;\n", "feat: add polluted queue merge content");
+      await fixture.checkout("master");
+      await mkdir(worktreeRoot, { recursive: true });
+      git(rootDir, `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(branch)}`);
+      await store.updateTask(task.id, { worktree: worktreePath, branch } as any);
+      store.enqueueMergeQueue(task.id, { now: "2026-05-19T00:00:02.000Z" });
+
+      const todoTask = await store.createTask({ description: "polluter todo", priority: "normal" });
+      await store.moveTask(todoTask.id, "todo");
+      const inProgressTask = await store.createTask({ description: "polluter progress", priority: "normal" });
+      await store.moveTask(inProgressTask.id, "todo");
+      await store.moveTask(inProgressTask.id, "in-progress");
+
+      store.getDatabase().prepare("INSERT INTO mergeQueue (taskId, enqueuedAt, priority, attemptCount) VALUES (?, ?, ?, 0)").run(todoTask.id, "2026-05-19T00:00:00.000Z", "normal");
+      store.getDatabase().prepare("INSERT INTO mergeQueue (taskId, enqueuedAt, priority, attemptCount) VALUES (?, ?, ?, 0)").run(inProgressTask.id, "2026-05-19T00:00:01.000Z", "normal");
+      store.getDatabase().prepare("UPDATE mergeQueue SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ? WHERE taskId = ?").run(
+        "merger-reuse-handoff",
+        "2026-05-19T00:10:00.000Z",
+        "2099-05-19T00:20:00.000Z",
+        todoTask.id,
+      );
+
+      const result = await aiMergeTask(store, rootDir, task.id);
+      expect(result.merged).toBe(true);
+      expect((await store.getTask(task.id))?.column).toBe("done");
+      expect(store.getDatabase().prepare("SELECT leasedBy FROM mergeQueue WHERE taskId = ?").get(task.id)).toBeUndefined();
+      expect(store.getDatabase().prepare("SELECT taskId FROM mergeQueue WHERE taskId IN (?, ?)").all(todoTask.id, inProgressTask.id)).toEqual([]);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it.skipIf(!hasGit)("FN-5363: target row leased by another worker refuses with no-lease and queue-head diagnostics", async () => {
+    const fixture = await makeReliabilityFixture({
+      taskId: "FN-5363-RI-NO-LEASE-TARGET",
+      settings: {
+        baseBranch: "master",
+        mergeIntegrationWorktree: "reuse-task-worktree",
+      } as any,
+    });
+
+    try {
+      const { rootDir, store, task } = fixture;
+      const actualTask = await store.getTask(task.id);
+      const branch = `fusion/${actualTask!.id.toLowerCase()}`;
+      const worktreeRoot = `${rootDir}-worktrees`;
+      const worktreePath = join(worktreeRoot, actualTask!.id.toLowerCase());
+
+      git(rootDir, "git branch -m main master");
+      const completedSteps = (actualTask?.steps ?? []).map((step) => ({ ...step, status: "done" as const }));
+      await store.updateTask(task.id, { baseBranch: "master", branch, steps: completedSteps, currentStep: completedSteps.length } as any);
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.handoffToReview(task.id, {
+        ownerAgentId: "agent-1",
+        evidence: { reason: "fn_task_done", runId: "run-1", agentId: "agent-1" },
+      });
+      await store.updateTask(task.id, {
+        steps: completedSteps,
+        currentStep: completedSteps.length,
+      } as any);
+      await fixture.createBranch(branch);
+      await fixture.writeAndCommit("packages/engine/src/fn-5363-ri-no-lease-target.ts", "export const noLeaseTarget = true;\n", "feat: add leased target merge content");
+      await fixture.checkout("master");
+      await mkdir(worktreeRoot, { recursive: true });
+      git(rootDir, `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(branch)}`);
+      await store.updateTask(task.id, { worktree: worktreePath, branch } as any);
+      store.getDatabase().prepare("UPDATE mergeQueue SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ? WHERE taskId = ?").run(
+        "worker-other",
+        "2026-05-19T00:01:00.000Z",
+        "2099-05-19T00:10:00.000Z",
+        task.id,
+      );
+
+      await expect(aiMergeTask(store, rootDir, task.id)).rejects.toMatchObject({
+        name: "MergeHandoffRefusedError",
+        gate: "lease-handoff-failed",
+        reason: "no-lease",
+      });
+      const refused = store.getRunAuditEvents({ taskId: task.id }).find((event) => event.mutationType === "merge:reuse-handoff-refused");
+      expect(refused?.metadata).toMatchObject({ reason: "no-lease" });
     } finally {
       await fixture.cleanup();
     }

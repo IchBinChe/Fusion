@@ -908,6 +908,16 @@ export class MergeQueueTaskNotFoundError extends Error {
   }
 }
 
+export class MergeQueueInvalidColumnError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly column: Column,
+  ) {
+    super(`Cannot enqueue merge queue entry for task ${taskId} in column ${column}; only in-review is allowed`);
+    this.name = "MergeQueueInvalidColumnError";
+  }
+}
+
 export class MergeQueueLeaseOwnershipError extends Error {
   constructor(
     public readonly taskId: string,
@@ -4977,6 +4987,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           moveSource,
         },
       });
+      this.dequeueMergeQueueOnColumnExit(id, fromColumn, toColumn, movedAt);
 
       if (toColumn === "in-review" && !internal.fromHandoff && options?.allowDirectInReviewMove !== true) {
         this.insertRunAuditEventRow({
@@ -6134,20 +6145,25 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   enqueueMergeQueue(taskId: string, opts: MergeQueueEnqueueOptions = {}): MergeQueueEntry {
-    return this.db.transactionImmediate(() => {
+    let invalidColumn: Column | null = null;
+    const entry = this.db.transactionImmediate(() => {
       const existing = this.db.prepare("SELECT * FROM mergeQueue WHERE taskId = ?").get(taskId) as MergeQueueRow | undefined;
-      const taskRow = this.db.prepare("SELECT priority FROM tasks WHERE id = ?").get(taskId) as { priority: string | null } | undefined;
+      const taskRow = this.db.prepare("SELECT priority, column FROM tasks WHERE id = ?").get(taskId) as { priority: string | null; column: Column } | undefined;
       if (!taskRow) {
         throw new MergeQueueTaskNotFoundError(taskId);
+      }
+      if (taskRow.column !== "in-review") {
+        invalidColumn = taskRow.column;
+        return null;
       }
 
       const now = opts.now ?? new Date().toISOString();
       const priority = opts.priority ?? normalizeTaskPriority(taskRow.priority);
 
-      let entry: MergeQueueEntry;
+      let nextEntry: MergeQueueEntry;
       let alreadyEnqueued = true;
       if (existing) {
-        entry = this.rowToMergeQueueEntry(existing);
+        nextEntry = this.rowToMergeQueueEntry(existing);
       } else {
         this.db.prepare(`
           INSERT INTO mergeQueue (taskId, enqueuedAt, priority, attemptCount)
@@ -6158,7 +6174,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         if (!inserted) {
           throw new Error(`Failed to read merge queue entry for ${taskId} after enqueue`);
         }
-        entry = this.rowToMergeQueueEntry(inserted);
+        nextEntry = this.rowToMergeQueueEntry(inserted);
         alreadyEnqueued = false;
       }
 
@@ -6169,13 +6185,111 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         target: taskId,
         metadata: {
           taskId,
-          priority: entry.priority,
-          enqueuedAt: entry.enqueuedAt,
+          priority: nextEntry.priority,
+          enqueuedAt: nextEntry.enqueuedAt,
           alreadyEnqueued,
         },
       });
 
-      return entry;
+      return nextEntry;
+    });
+
+    if (invalidColumn) {
+      this.db.transactionImmediate(() => {
+        this.insertRunAuditEventRow({
+          taskId,
+          domain: "database",
+          mutationType: "mergeQueue:enqueue-rejected",
+          target: taskId,
+          metadata: {
+            taskId,
+            column: invalidColumn,
+            reason: "not-in-review",
+          },
+        });
+      });
+      throw new MergeQueueInvalidColumnError(taskId, invalidColumn);
+    }
+
+    if (!entry) {
+      throw new Error(`Failed to enqueue merge queue entry for ${taskId}`);
+    }
+    return entry;
+  }
+
+  private cleanupStaleMergeQueueRows(now: string): void {
+    const staleRows = this.db.prepare(`
+      SELECT mq.taskId, mq.leasedBy, mq.leaseExpiresAt, t.column
+        FROM mergeQueue mq
+        LEFT JOIN tasks t ON t.id = mq.taskId
+       WHERE t.id IS NULL OR t.column != 'in-review'
+    `).all() as Array<{ taskId: string; leasedBy: string | null; leaseExpiresAt: string | null; column: Column | null }>;
+
+    for (const staleRow of staleRows) {
+      this.db.prepare("DELETE FROM mergeQueue WHERE taskId = ?").run(staleRow.taskId);
+      this.insertRunAuditEventRow({
+        taskId: staleRow.taskId,
+        domain: "database",
+        mutationType: "mergeQueue:auto-cleanup-stale-row",
+        target: staleRow.taskId,
+        metadata: {
+          taskId: staleRow.taskId,
+          column: staleRow.column,
+          leasedBy: staleRow.leasedBy,
+          leaseExpiresAt: staleRow.leaseExpiresAt,
+          cleanedAt: now,
+          reason: "not-in-review",
+        },
+      });
+    }
+  }
+
+  private dequeueMergeQueueOnColumnExit(taskId: string, previousColumn: Column, nextColumn: Column, now: string): void {
+    if (previousColumn !== "in-review" || nextColumn === "in-review") {
+      return;
+    }
+
+    const queueRow = this.db.prepare("SELECT leasedBy, leaseExpiresAt FROM mergeQueue WHERE taskId = ?").get(taskId) as {
+      leasedBy: string | null;
+      leaseExpiresAt: string | null;
+    } | undefined;
+    if (!queueRow) {
+      return;
+    }
+
+    const leaseIsExpired = queueRow.leaseExpiresAt != null && queueRow.leaseExpiresAt <= now;
+    if (!queueRow.leasedBy || leaseIsExpired) {
+      this.db.prepare("DELETE FROM mergeQueue WHERE taskId = ?").run(taskId);
+      this.insertRunAuditEventRow({
+        taskId,
+        domain: "database",
+        mutationType: "mergeQueue:auto-cleanup-stale-row",
+        target: taskId,
+        metadata: {
+          taskId,
+          previousColumn,
+          nextColumn,
+          leasedBy: queueRow.leasedBy,
+          leaseExpiresAt: queueRow.leaseExpiresAt,
+          cleanedAt: now,
+          reason: "column-exit",
+        },
+      });
+      return;
+    }
+
+    this.insertRunAuditEventRow({
+      taskId,
+      domain: "database",
+      mutationType: "mergeQueue:stale-lease-on-column-exit",
+      target: taskId,
+      metadata: {
+        taskId,
+        previousColumn,
+        nextColumn,
+        leasedBy: queueRow.leasedBy,
+        leaseExpiresAt: queueRow.leaseExpiresAt,
+      },
     });
   }
 
@@ -6187,67 +6301,81 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return this.db.transactionImmediate(() => {
       const now = opts.now ?? new Date().toISOString();
       const leaseExpiresAt = new Date(Date.parse(now) + opts.leaseDurationMs).toISOString();
+      this.cleanupStaleMergeQueueRows(now);
 
-      // Target the specific task if provided; return null immediately when unavailable
-      // rather than falling back to the queue head, so callers that pass targetTaskId
-      // can distinguish "target not available" from "no tasks available".
       let leased: MergeQueueRow | undefined;
       if (opts.targetTaskId) {
         leased = this.db.prepare(`
           UPDATE mergeQueue
              SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ?
            WHERE taskId = ?
+             AND EXISTS (
+               SELECT 1
+                 FROM tasks t
+                WHERE t.id = mergeQueue.taskId
+                  AND t.column = 'in-review'
+             )
              AND (leasedBy IS NULL OR leaseExpiresAt <= ?)
            RETURNING *
         `).get(workerId, now, leaseExpiresAt, opts.targetTaskId, now) as MergeQueueRow | undefined;
-        // Do NOT fall back to queue-head when a target was explicitly requested.
-        // Callers (e.g. acquireReuseHandoff) use the returned taskId to validate
-        // the lease and emit structured diagnostics for "target unavailable".
+
+        if (!leased) {
+          const queueHead = this.db.prepare(`
+            SELECT mq.taskId, mq.leasedBy, t.column
+              FROM mergeQueue mq
+              LEFT JOIN tasks t ON t.id = mq.taskId
+             ORDER BY CASE mq.priority
+                        WHEN 'urgent' THEN 0
+                        WHEN 'high'   THEN 1
+                        WHEN 'normal' THEN 2
+                        WHEN 'low'    THEN 3
+                        ELSE 4
+                      END ASC,
+                      mq.enqueuedAt ASC
+             LIMIT 1
+          `).get() as { taskId: string; leasedBy: string | null; column: string | null } | undefined;
+
+          this.insertRunAuditEventRow({
+            taskId: opts.targetTaskId,
+            domain: "database",
+            mutationType: "mergeQueue:lease-target-unavailable",
+            target: opts.targetTaskId,
+            metadata: {
+              targetTaskId: opts.targetTaskId,
+              workerId,
+              queueHeadTaskId: queueHead?.taskId ?? null,
+              queueHeadLeasedBy: queueHead?.leasedBy ?? null,
+              queueHeadColumn: queueHead?.column ?? null,
+            },
+          });
+          return null;
+        }
       } else {
-        // Backward-compatible queue-head selection for callers that don't target a task.
         leased = this.db.prepare(`
           UPDATE mergeQueue
              SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ?
            WHERE taskId = (
-             SELECT taskId FROM mergeQueue
-              WHERE leasedBy IS NULL OR leaseExpiresAt <= ?
-              ORDER BY CASE priority
+             SELECT mq.taskId
+               FROM mergeQueue mq
+               JOIN tasks t ON t.id = mq.taskId
+              WHERE t.column = 'in-review'
+                AND (mq.leasedBy IS NULL OR mq.leaseExpiresAt <= ?)
+              ORDER BY CASE mq.priority
                          WHEN 'urgent' THEN 0
                          WHEN 'high'   THEN 1
                          WHEN 'normal' THEN 2
                          WHEN 'low'    THEN 3
                          ELSE 4
                        END ASC,
-                       enqueuedAt ASC
+                       mq.enqueuedAt ASC
               LIMIT 1
            )
            RETURNING *
         `).get(workerId, now, leaseExpiresAt, now) as MergeQueueRow | undefined;
-      }
 
-      if (!leased) {
-        leased = this.db.prepare(`
-          UPDATE mergeQueue
-             SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ?
-           WHERE taskId = (
-             SELECT taskId FROM mergeQueue
-              WHERE leasedBy IS NULL OR leaseExpiresAt <= ?
-              ORDER BY CASE priority
-                         WHEN 'urgent' THEN 0
-                         WHEN 'high'   THEN 1
-                         WHEN 'normal' THEN 2
-                         WHEN 'low'    THEN 3
-                         ELSE 4
-                       END ASC,
-                       enqueuedAt ASC
-              LIMIT 1
-           )
-           RETURNING *
-        `).get(workerId, now, leaseExpiresAt, now) as MergeQueueRow | undefined;
-      }
-
-      if (!leased) {
-        return null;
+        if (!leased) {
+          return null;
+        }
       }
 
       const entry = this.rowToMergeQueueEntry(leased);
@@ -6375,6 +6503,24 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
                enqueuedAt ASC
     `).all() as MergeQueueRow[];
     return rows.map((row) => this.rowToMergeQueueEntry(row));
+  }
+
+  peekMergeQueueHead(): { taskId: string; leasedBy: string | null; column: Column | null } | null {
+    const row = this.db.prepare(`
+      SELECT mq.taskId, mq.leasedBy, t.column
+        FROM mergeQueue mq
+        LEFT JOIN tasks t ON t.id = mq.taskId
+       ORDER BY CASE mq.priority
+                  WHEN 'urgent' THEN 0
+                  WHEN 'high'   THEN 1
+                  WHEN 'normal' THEN 2
+                  WHEN 'low'    THEN 3
+                  ELSE 4
+                END ASC,
+                mq.enqueuedAt ASC
+       LIMIT 1
+    `).get() as { taskId: string; leasedBy: string | null; column: Column | null } | undefined;
+    return row ?? null;
   }
 
   // ── End Run Audit APIs ───────────────────────────────────────────────

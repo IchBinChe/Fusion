@@ -423,10 +423,15 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
     throw error;
   }
   if (!lease || !("taskId" in lease) || lease.taskId !== input.task.id) {
+    const queueHead = (input.store as TaskStore & {
+      peekMergeQueueHead?: () => { taskId: string; leasedBy: string | null; column: string | null } | null;
+    }).peekMergeQueueHead?.();
     throw new MergeHandoffRefusedError("lease-handoff-failed", "no-lease", {
       taskId: input.task.id,
       worktreePath,
       acquiredTaskId: lease && "taskId" in lease ? lease.taskId : null,
+      queueHeadTaskId: queueHead?.taskId ?? null,
+      queueHeadLeasedBy: queueHead?.leasedBy ?? null,
     });
   }
   // Re-check executor lease after acquiring the merge-queue lease: the

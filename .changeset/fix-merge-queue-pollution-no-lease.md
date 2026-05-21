@@ -2,4 +2,4 @@
 "@runfusion/fusion": patch
 ---
 
-Fix merge queue lease race causing all in-review tasks to fail with merge:reuse-handoff-refused (no-lease) when unrelated tasks pollute the queue head. acquireReuseHandoff now targets the specific task ID rather than blindly grabbing the queue head, so the correct task gets the lease regardless of stale queue entries.
+Fix merge-queue reuse-handoff contention that caused `merge:reuse-handoff-refused` (`reason=no-lease`) for valid in-review tasks when unrelated rows polluted queue head state. `acquireMergeQueueLease({ targetTaskId })` now honors the target strictly (no queue-head fallback), and merge-queue lifecycle handling is now column-aware: enqueue is rejected for non-`in-review` tasks, lease selection auto-cleans stale non-review rows, and `in-review` column exits scrub queue rows when leases are absent or expired.

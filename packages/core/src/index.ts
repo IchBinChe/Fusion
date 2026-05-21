@@ -135,6 +135,7 @@ export {
   DependencyCycleError,
   TaskDeletedError,
   MergeQueueTaskNotFoundError,
+  MergeQueueInvalidColumnError,
   MergeQueueLeaseOwnershipError,
   InvalidMergeQueueLeaseDurationError,
   HandoffInvariantViolationError,

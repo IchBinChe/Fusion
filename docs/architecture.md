@@ -1059,6 +1059,7 @@ The run-audit system records every mutation performed by the engine across four 
 - **Git / `merge:no-op-attribution-mismatch`** — emitted by the rebase landed-files attribution guard (FN-5304) when `<rebaseBaseSha>..HEAD` has zero attributable own commits but the source `fusion/<id>` tip still carries attributable own commits. `target` is the task ID; metadata includes `recordedSha`, `rebaseMergeBaseSha`, `sourceBranchRef`, `sourceBranchOwnCommitCount`, and `sourceBranchOwnCommitShas`.
 - **Git / `merge:no-op-attribution-mismatch-skipped`** — emitted when the FN-5304 source-tip guard cannot run because the source branch ref is unavailable (for example already pruned). `target` is the task ID; metadata includes `reason` (`"source-ref-unavailable"`).
 - **Database / `task:auto-recover-misrouted-foreign-commit`** — emitted per dropped misrouted commit during FN-4948 contamination recovery. `target` is the recovering task; metadata carries `{ droppedSha, foreignTaskId, paths }`.
+- **Database / `task:orphan-detected-no-action`** — emitted by `recoverOrphanedExecutions` (FN-5337) when row metadata looks orphaned after grace windows; annotation-only event with no lifecycle mutation (`in-progress` task stays put).
 - **Filesystem** — file:write, prompt:write, attachment:create, etc.
 - **Sandbox** — backend lifecycle events from `SandboxBackend` wiring in executor/merger/routine-runner (`sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`) introduced after FN-4636.
 

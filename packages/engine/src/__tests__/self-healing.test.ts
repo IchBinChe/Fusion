@@ -5379,236 +5379,124 @@ describe("SelfHealingManager", () => {
   });
 
   describe("recoverOrphanedExecutions", () => {
-    it("requeues in-progress tasks whose reserved worktree is missing", async () => {
+    const expectNoMutation = () => {
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.logEntry).not.toHaveBeenCalled();
+    };
+
+    it("emits no-action audit for missing worktree candidates past grace", async () => {
       const getExecuting = vi.fn().mockReturnValue(new Set<string>());
+      const recoverAbandonedLease = vi.fn();
+      const reconcileLeaseRow = vi.fn();
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
         getExecutingTaskIds: getExecuting,
+        leaseManager: { recoverAbandonedLease, reconcileLeaseRow } as any,
       });
-
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
         {
           id: "FN-200",
           column: "in-progress",
           paused: false,
           worktree: undefined,
+          branch: undefined,
           steps: [{ status: "in-progress" }],
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
       ]);
-
-      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
-
-      const result = await managerWithRecovery.recoverOrphanedExecutions();
-
-      expect(result).toBe(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-200", {
-        status: "stuck-killed",
-        worktree: null,
-        branch: null,
-      });
-      expect(store.logEntry).toHaveBeenCalledWith(
-        "FN-200",
-        "Auto-recovered orphaned executor task — missing worktree/session, moved back to todo",
-      );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveProgress: true });
-
-      managerWithRecovery.stop();
-    });
-
-    it("skips orphan recovery for actively executing tasks", async () => {
-      const getExecuting = vi.fn().mockReturnValue(new Set(["FN-201"]));
-      const managerWithRecovery = new SelfHealingManager(store, {
-        rootDir: "/tmp/test-project",
-        getExecutingTaskIds: getExecuting,
-      });
-
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-201",
-          column: "in-progress",
-          paused: false,
-          worktree: "/tmp/test-project/.worktrees/missing-tree",
-          steps: [{ status: "in-progress" }],
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-      ]);
-
       vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
 
       const result = await managerWithRecovery.recoverOrphanedExecutions();
 
       expect(result).toBe(0);
-      expect(store.moveTask).not.toHaveBeenCalled();
-
+      expectNoMutation();
+      expect(recoverAbandonedLease).not.toHaveBeenCalled();
+      expect(reconcileLeaseRow).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:orphan-detected-no-action",
+        target: "FN-200",
+        metadata: expect.objectContaining({ reason: "missing-worktree-or-session" }),
+      }));
       managerWithRecovery.stop();
     });
 
-    it("skips tasks that are already complete", async () => {
-      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
-      const managerWithRecovery = new SelfHealingManager(store, {
-        rootDir: "/tmp/test-project",
-        getExecutingTaskIds: getExecuting,
-      });
-
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-202",
-          column: "in-progress",
-          paused: false,
-          worktree: "/tmp/test-project/.worktrees/missing-tree",
-          steps: [{ status: "done" }],
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-      ]);
-
-      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
-
-      const result = await managerWithRecovery.recoverOrphanedExecutions();
-
-      expect(result).toBe(0);
-      expect(store.moveTask).not.toHaveBeenCalled();
-
-      managerWithRecovery.stop();
-    });
-
-    it("skips tasks still within the grace window", async () => {
-      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
-      const managerWithRecovery = new SelfHealingManager(store, {
-        rootDir: "/tmp/test-project",
-        getExecutingTaskIds: getExecuting,
-      });
-
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-203",
-          column: "in-progress",
-          paused: false,
-          worktree: "/tmp/test-project/.worktrees/missing-tree",
-          steps: [{ status: "in-progress" }],
-          updatedAt: "2026-01-01T00:04:30.000Z",
-        },
-      ]);
-
-      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
-
-      const result = await managerWithRecovery.recoverOrphanedExecutions();
-
-      expect(result).toBe(0);
-      expect(store.moveTask).not.toHaveBeenCalled();
-
-      managerWithRecovery.stop();
-    });
-
-    it("recovers tasks with existing worktree but no active session after grace period", async () => {
+    it("emits no-action audit for existing worktree candidates past grace", async () => {
       const getExecuting = vi.fn().mockReturnValue(new Set<string>());
       const mockedExistsSync = vi.mocked(existsSync);
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
         getExecutingTaskIds: getExecuting,
       });
-
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
         {
           id: "FN-210",
           column: "in-progress",
           paused: false,
           worktree: "/tmp/test-project/.worktrees/active-tree",
-          steps: [{ status: "done" }, { status: "in-progress" }, { status: "pending" }],
+          steps: [{ status: "done" }, { status: "in-progress" }],
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
       ]);
-
-      // Worktree directory exists on disk
-      mockedExistsSync.mockImplementation((p) =>
-        p === "/tmp/test-project/.worktrees/active-tree" ? true : false,
-      );
-
-      // 10 minutes past — well beyond the 5-minute grace period
+      mockedExistsSync.mockImplementation((p) => p === "/tmp/test-project/.worktrees/active-tree");
       vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
 
       const result = await managerWithRecovery.recoverOrphanedExecutions();
 
-      expect(result).toBe(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-210", {
-        status: "stuck-killed",
-        worktree: null,
-        branch: null,
-      });
-      expect(store.logEntry).toHaveBeenCalledWith(
-        "FN-210",
-        expect.stringContaining("worktree exists but no active session"),
-      );
-      expect(store.moveTask).toHaveBeenCalledWith("FN-210", "todo", { preserveProgress: true });
-
-      managerWithRecovery.stop();
-    });
-
-    it("skips tasks with existing worktree within the extended grace period", async () => {
-      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
-      const mockedExistsSync = vi.mocked(existsSync);
-      const managerWithRecovery = new SelfHealingManager(store, {
-        rootDir: "/tmp/test-project",
-        getExecutingTaskIds: getExecuting,
-      });
-
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-211",
-          column: "in-progress",
-          paused: false,
-          worktree: "/tmp/test-project/.worktrees/active-tree",
-          steps: [{ status: "in-progress" }],
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-      ]);
-
-      mockedExistsSync.mockImplementation((p) =>
-        p === "/tmp/test-project/.worktrees/active-tree" ? true : false,
-      );
-
-      // Only 2 minutes past — within the 5-minute grace period for existing worktrees
-      vi.setSystemTime(new Date("2026-01-01T00:02:00.000Z"));
-
-      const result = await managerWithRecovery.recoverOrphanedExecutions();
-
       expect(result).toBe(0);
-      expect(store.moveTask).not.toHaveBeenCalled();
-
+      expectNoMutation();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:orphan-detected-no-action",
+        target: "FN-210",
+        metadata: expect.objectContaining({ reason: "worktree-exists-no-active-session" }),
+      }));
       managerWithRecovery.stop();
     });
 
-    it("reconciles lease state once when abandoned-lease recovery returns false", async () => {
-      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
-      const reconcileLeaseRow = vi.fn().mockResolvedValue(false);
+    it("skips within grace, executing, paused, and complete candidates", async () => {
+      const getExecuting = vi.fn().mockReturnValue(new Set(["FN-201"]));
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
         getExecutingTaskIds: getExecuting,
-        leaseManager: {
-          recoverAbandonedLease: vi.fn().mockResolvedValue(false),
-          reconcileLeaseRow,
-        } as any,
       });
-
       (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-212",
-          column: "in-progress",
-          paused: false,
-          checkedOutBy: "agent-1",
-          worktree: undefined,
-          steps: [{ status: "in-progress" }],
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
+        { id: "FN-201", column: "in-progress", paused: false, worktree: undefined, steps: [{ status: "in-progress" }], updatedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "FN-202", column: "in-progress", paused: true, worktree: undefined, steps: [{ status: "in-progress" }], updatedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "FN-203", column: "in-progress", paused: false, worktree: undefined, steps: [{ status: "done" }], updatedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "FN-204", column: "in-progress", paused: false, worktree: undefined, steps: [{ status: "in-progress" }], updatedAt: "2026-01-01T00:04:30.000Z" },
       ]);
-
       vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
 
       const result = await managerWithRecovery.recoverOrphanedExecutions();
 
-      expect(result).toBe(1);
-      expect(reconcileLeaseRow).toHaveBeenCalledTimes(1);
-      expect(reconcileLeaseRow).toHaveBeenCalledWith("FN-212");
+      expect(result).toBe(0);
+      expectNoMutation();
+      expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:orphan-detected-no-action",
+      }));
+      managerWithRecovery.stop();
+    });
+
+    it("emits one audit event per candidate per sweep", async () => {
+      const getExecuting = vi.fn().mockReturnValue(new Set<string>());
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: getExecuting,
+      });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "FN-220", column: "in-progress", paused: false, worktree: undefined, steps: [{ status: "in-progress" }], updatedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "FN-221", column: "in-progress", paused: false, worktree: undefined, steps: [{ status: "in-progress" }], updatedAt: "2026-01-01T00:00:00.000Z" },
+      ]);
+      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      const result = await managerWithRecovery.recoverOrphanedExecutions();
+
+      expect(result).toBe(0);
+      const orphanAudits = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([arg]) => arg?.mutationType === "task:orphan-detected-no-action",
+      );
+      expect(orphanAudits).toHaveLength(2);
+      expectNoMutation();
       managerWithRecovery.stop();
     });
   });

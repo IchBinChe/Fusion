@@ -5813,6 +5813,14 @@ export class SelfHealingManager {
     }
   }
 
+  /**
+   * FN-5337 contract: observation-only. Emits `task:orphan-detected-no-action`
+   * for row-metadata orphan candidates but never moves tasks backward.
+   * Proof-based recovery belongs to recoverInProgressLimbo (FN-5219),
+   * RestartRecoveryCoordinator, and recoverMissingWorktreeReviewFailures.
+   * Do not reintroduce lifecycle mutation here without hard git/session proof
+   * and explicit CEO+CTO+PM sign-off.
+   */
   async recoverOrphanedExecutions(): Promise<number> {
     try {
       const tasks = await this.store.listTasks({ column: "in-progress", slim: true });
@@ -5833,53 +5841,44 @@ export class SelfHealingManager {
 
       if (orphaned.length === 0) return 0;
 
-      log.warn(`Found ${orphaned.length} orphaned executor task(s) stuck in in-progress`);
+      log.warn(`[orphan-detected] observed ${orphaned.length} candidate(s) — no lifecycle action taken`);
 
-      let recovered = 0;
       for (const task of orphaned) {
         try {
-          const hadWorktree = task.worktree && existsSync(task.worktree);
+          const hadWorktree = Boolean(task.worktree && existsSync(task.worktree));
+          const stalenessMs = now - new Date(task.updatedAt).getTime();
           const reason = hadWorktree
-            ? "worktree exists but no active session"
-            : "missing worktree/session";
+            ? "worktree-exists-no-active-session"
+            : "missing-worktree-or-session";
 
-          if (this.options.leaseManager && task.checkedOutBy) {
-            const leaseRecovered = await this.options.leaseManager.recoverAbandonedLease(
-              task.id,
-              `orphaned execution: ${reason}`,
-              { preserveProgress: true },
-            );
-            if (leaseRecovered) {
-              recovered++;
-              continue;
-            }
-            await this.options.leaseManager.reconcileLeaseRow(task.id);
-          }
-
-          // Reset steps whose work was never committed before clearing the worktree
-          await this.resetStepsIfWorkLost(task);
-
-          await this.store.updateTask(task.id, {
-            status: "stuck-killed",
-            worktree: null,
-            branch: null,
+          await createRunAuditor(this.store, {
+            runId: generateSyntheticRunId("self-healing-orphan-detected", task.id),
+            agentId: "self-healing",
+            taskId: task.id,
+            taskLineageId: task.lineageId,
+            phase: "recover-orphaned-executions",
+          }).database({
+            type: "task:orphan-detected-no-action",
+            target: task.id,
+            metadata: {
+              priorWorktree: task.worktree ?? null,
+              priorBranch: task.branch ?? null,
+              hadWorktree,
+              stalenessMs,
+              reason,
+            },
           });
-          await this.store.logEntry(
-            task.id,
-            `Auto-recovered orphaned executor task — ${reason}, moved back to todo`,
-          );
-          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
-          recovered++;
-        } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
-          log.error(`Failed to recover orphaned executor task ${task.id}: ${errorMessage}`);
+
+          log.log(`[orphan-detected] ${task.id}: ${reason} — no action (operator-decides)`);
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to annotate orphaned executor candidate ${task.id}: ${errorMessage}`);
         }
       }
 
-      if (recovered > 0) {
-        log.log(`Recovered ${recovered} orphaned executor task(s) → todo`);
-      }
-      return recovered;
-    } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
+      return 0;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Orphaned executor recovery failed: ${errorMessage}`);
       return 0;
     }

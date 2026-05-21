@@ -107,29 +107,30 @@ describe("reliability interactions: lease recovery central claim", () => {
     expect(reconcileLeaseRow).toHaveBeenCalledWith("FN-X");
   });
 
-  it("self-healing orphan recovery invokes reconcile once when recovery returns false", async () => {
+  it("self-healing orphan sweep is observation-only and does not mutate lease state", async () => {
     const task = makeTask({ column: "in-progress", worktree: undefined, updatedAt: "2026-01-01T00:00:00.000Z" });
     const store = {
       listTasks: vi.fn().mockResolvedValue([task]),
       updateTask: vi.fn().mockResolvedValue(task),
       logEntry: vi.fn().mockResolvedValue(undefined),
       moveTask: vi.fn().mockResolvedValue(task),
+      recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
     } as unknown as TaskStore;
 
     vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+    const recoverAbandonedLease = vi.fn().mockResolvedValue(false);
     const reconcileLeaseRow = vi.fn().mockResolvedValue(true);
     const manager = new SelfHealingManager(store, {
       rootDir: "/tmp/test-project",
       getExecutingTaskIds: () => new Set<string>(),
-      leaseManager: {
-        recoverAbandonedLease: vi.fn().mockResolvedValue(false),
-        reconcileLeaseRow,
-      } as any,
+      // FN-5337: recoverOrphanedExecutions no longer touches lease manager.
+      leaseManager: { recoverAbandonedLease, reconcileLeaseRow } as any,
     });
 
     const recovered = await manager.recoverOrphanedExecutions();
-    expect(recovered).toBe(1);
-    expect(reconcileLeaseRow).toHaveBeenCalledWith("FN-X");
+    expect(recovered).toBe(0);
+    expect(recoverAbandonedLease).not.toHaveBeenCalled();
+    expect(reconcileLeaseRow).not.toHaveBeenCalled();
     manager.stop();
     vi.useRealTimers();
   });

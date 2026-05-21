@@ -15,7 +15,15 @@ export interface ReconcileStaleSelfOwnedResult {
   reason: "no-entry" | "foreign-task" | "reconciled";
 }
 
-class ActiveSessionRegistry {
+export type LiveBindingProbe = (worktreePath: string, taskId: string) => boolean;
+
+export type SelfOwnedReconcileOutcome =
+  | { action: "no-entry" }
+  | { action: "foreign-task"; ownerTaskId: string }
+  | { action: "live-binding-refuses"; ownerTaskId: string }
+  | { action: "reconciled" };
+
+export class ActiveSessionRegistry {
   private readonly records = new Map<string, ActiveSessionRecord>();
 
   registerPath(worktreePath: string, registration: ActiveSessionRegistration): void {
@@ -66,6 +74,29 @@ class ActiveSessionRegistry {
   clear(): void {
     this.records.clear();
   }
+}
+
+export function reconcileSelfOwnedActiveSessionForRemoval(
+  registry: ActiveSessionRegistry,
+  worktreePath: string,
+  requestingTaskId: string,
+  liveBindingProbe: LiveBindingProbe,
+): SelfOwnedReconcileOutcome {
+  const record = registry.lookupByPath(worktreePath);
+  if (!record) {
+    return { action: "no-entry" };
+  }
+
+  if (record.taskId !== requestingTaskId) {
+    return { action: "foreign-task", ownerTaskId: record.taskId };
+  }
+
+  if (liveBindingProbe(worktreePath, requestingTaskId)) {
+    return { action: "live-binding-refuses", ownerTaskId: requestingTaskId };
+  }
+
+  registry.unregisterPath(worktreePath);
+  return { action: "reconciled" };
 }
 
 export const activeSessionRegistry = new ActiveSessionRegistry();

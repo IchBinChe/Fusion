@@ -4,7 +4,11 @@ import { access } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Settings } from "@fusion/core";
-import { activeSessionRegistry } from "./active-session-registry.js";
+import {
+  activeSessionRegistry,
+  reconcileSelfOwnedActiveSessionForRemoval,
+  type LiveBindingProbe,
+} from "./active-session-registry.js";
 import type { RunAuditor } from "./run-audit.js";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { inspectBranchConflict } from "./branch-conflicts.js";
@@ -776,6 +780,8 @@ export async function removeWorktree(input: {
   audit?: RunAuditor;
   force?: boolean;
   timeout?: number;
+  expectedOwnerTaskId?: string;
+  liveOwnerProbe?: LiveBindingProbe;
 }): Promise<void> {
   const logger = {
     log: (_message: string): void => {},
@@ -784,6 +790,22 @@ export async function removeWorktree(input: {
 
   if (input.force === true && !ALLOWED_FORCE_REASONS.has(input.reason)) {
     throw new InvalidForceUsageError(input.reason);
+  }
+
+  if (input.expectedOwnerTaskId && input.liveOwnerProbe) {
+    const reconciled = reconcileSelfOwnedActiveSessionForRemoval(
+      activeSessionRegistry,
+      input.worktreePath,
+      input.expectedOwnerTaskId,
+      input.liveOwnerProbe,
+    );
+    if (reconciled.action === "reconciled") {
+      await input.audit?.git({
+        type: "worktree:active-session-reconciled",
+        target: input.worktreePath,
+        metadata: { taskId: input.expectedOwnerTaskId, source: "removeWorktree-defensive" },
+      });
+    }
   }
 
   const active = activeSessionRegistry.lookupByPath(input.worktreePath);

@@ -134,6 +134,7 @@ export type GitMutationType =
   | "worktree:admin-entry-pruned"
   | "worktree:removal-refused-active-session"
   | "worktree:removal-forced-over-active-session"
+  | "worktree:active-session-reconciled"
   | "worktree:stale-lock-detected"
   | "worktree:stale-lock-recovered"
   | "worktree:stale-lock-recovery-failed"

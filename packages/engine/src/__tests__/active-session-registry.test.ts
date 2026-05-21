@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { activeSessionRegistry } from "../active-session-registry.js";
+import {
+  activeSessionRegistry,
+  reconcileSelfOwnedActiveSessionForRemoval,
+} from "../active-session-registry.js";
 
 describe("activeSessionRegistry", () => {
   beforeEach(() => {
@@ -61,5 +64,49 @@ describe("activeSessionRegistry", () => {
       reason: "reconciled",
     });
     expect(activeSessionRegistry.lookupByPath("/tmp/w1")).toBeNull();
+  });
+
+  it("reconcileSelfOwnedActiveSessionForRemoval returns no-entry when path is unregistered", () => {
+    expect(
+      reconcileSelfOwnedActiveSessionForRemoval(activeSessionRegistry, "/tmp/missing", "FN-1", () => false),
+    ).toEqual({ action: "no-entry" });
+  });
+
+  it("reconcileSelfOwnedActiveSessionForRemoval returns foreign-task without clearing", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-2", kind: "executor", ownerKey: "FN-2" });
+
+    expect(
+      reconcileSelfOwnedActiveSessionForRemoval(activeSessionRegistry, "/tmp/w1", "FN-1", () => false),
+    ).toEqual({ action: "foreign-task", ownerTaskId: "FN-2" });
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")?.taskId).toBe("FN-2");
+  });
+
+  it("reconcileSelfOwnedActiveSessionForRemoval returns live-binding-refuses without clearing", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "executor", ownerKey: "FN-1" });
+
+    expect(
+      reconcileSelfOwnedActiveSessionForRemoval(activeSessionRegistry, "/tmp/w1", "FN-1", () => true),
+    ).toEqual({ action: "live-binding-refuses", ownerTaskId: "FN-1" });
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")?.taskId).toBe("FN-1");
+  });
+
+  it("reconcileSelfOwnedActiveSessionForRemoval clears stale same-task entry", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "executor", ownerKey: "FN-1" });
+
+    expect(
+      reconcileSelfOwnedActiveSessionForRemoval(activeSessionRegistry, "/tmp/w1", "FN-1", () => false),
+    ).toEqual({ action: "reconciled" });
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")).toBeNull();
+  });
+
+  it("reconcileSelfOwnedActiveSessionForRemoval is idempotent", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "executor", ownerKey: "FN-1" });
+
+    expect(
+      reconcileSelfOwnedActiveSessionForRemoval(activeSessionRegistry, "/tmp/w1", "FN-1", () => false),
+    ).toEqual({ action: "reconciled" });
+    expect(
+      reconcileSelfOwnedActiveSessionForRemoval(activeSessionRegistry, "/tmp/w1", "FN-1", () => false),
+    ).toEqual({ action: "no-entry" });
   });
 });

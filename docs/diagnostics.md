@@ -55,6 +55,13 @@ Time-based stuck/stalled/stale surfaces now floor activity timestamps using `set
 - Audit event: `task:stuck-no-progress-churn-terminalized` with `{ taskId, ignoredStepUpdateCount, stuckKillStreak, lastReason: "no-progress-churn" }`.
 - Outcome: task is marked `status: "failed"`, moved to `in-review`, and not requeued; operators should decompose/rescope the task instead of waiting for more automatic stuck-kill retries.
 
+## Stale self-owned active-session cleanup diagnostics (`[executor]`)
+
+FN-5346 adds a same-task stale-binding reconcile marker before worktree removal:
+
+- `[FN-5346] <taskId>: dropped stale self-owned activeSessionRegistry entry before removeWorktree at <worktreePath>`
+- Follow-up task log entry: `Cleared stale self-owned active-session entry before remove`
+
 ## Reports health stale-classifier diagnostics (`[reports-health]`)
 
 Direct-report stale decisions in `HeartbeatMonitor.buildReportsHealthSection()` now emit a structured log when an agent is marked `**stale**`.

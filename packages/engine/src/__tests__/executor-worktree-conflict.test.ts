@@ -28,7 +28,7 @@ describe("FN-4973: executor worktree conflict cleanup", () => {
     expect(activeSessionRegistry.lookupByPath(CONFLICT_PATH)).toBeNull();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-4973",
-      "Cleared stale self-owned activeSessionRegistry entry",
+      "Cleared stale self-owned active-session entry before remove",
       CONFLICT_PATH,
     );
   });

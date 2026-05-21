@@ -35,7 +35,7 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     expect(activeSessionRegistry.lookupByPath(PATH)).toBeNull();
     expect(store.logEntry).toHaveBeenCalledWith(
       TASK_ID,
-      "Cleared stale self-owned activeSessionRegistry entry",
+      "Cleared stale self-owned active-session entry before remove",
       PATH,
     );
   });
@@ -53,7 +53,7 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     expect(activeSessionRegistry.lookupByPath(PATH)?.taskId).toBe("FN-OTHER");
     const messages = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
     expect(messages.some((m: string) => m.includes("Refused to remove conflicting worktree"))).toBe(true);
-    expect(messages.some((m: string) => m.includes("Cleared stale self-owned activeSessionRegistry entry"))).toBe(false);
+    expect(messages.some((m: string) => m.includes("Cleared stale self-owned active-session entry before remove"))).toBe(false);
   });
 
   it("FN-4976 leaves behavior unchanged when no stale entry exists", async () => {
@@ -70,6 +70,6 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     expect(result).toBe(true);
     expect(unregisterSpy).not.toHaveBeenCalledWith(PATH);
     const messages = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
-    expect(messages.some((m: string) => m.includes("Cleared stale self-owned activeSessionRegistry entry"))).toBe(false);
+    expect(messages.some((m: string) => m.includes("Cleared stale self-owned active-session entry before remove"))).toBe(false);
   });
 });

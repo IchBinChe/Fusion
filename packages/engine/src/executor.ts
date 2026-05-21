@@ -46,7 +46,11 @@ import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
 import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { attemptBranchAutocorrect } from "./branch-autocorrect.js";
 import { ActiveSessionWorktreeRemovalError } from "./worktree-backend.js";
-import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
+import {
+  activeSessionRegistry,
+  executingTaskLock,
+  reconcileSelfOwnedActiveSessionForRemoval,
+} from "./active-session-registry.js";
 import {
   StaleWorktreeIndexLockError,
   classifyStaleLock,
@@ -3478,6 +3482,8 @@ export class TaskExecutor {
                     taskId: task.id,
                     audit,
                     reason: RemovalReason.ExecutorTransientRetry,
+                    expectedOwnerTaskId: task.id,
+                    liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                   });
                 } catch (wtErr: unknown) {
                   const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
@@ -3565,6 +3571,8 @@ export class TaskExecutor {
                       settings,
                       taskId: task.id,
                       reason: RemovalReason.ExecutorStuckKilled,
+                      expectedOwnerTaskId: task.id,
+                      liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                     });
                   } catch (wtErr: unknown) {
                     const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
@@ -4490,6 +4498,8 @@ export class TaskExecutor {
                 taskId: task.id,
                 audit,
                 reason: RemovalReason.ExecutorDispose,
+                expectedOwnerTaskId: task.id,
+                liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
               });
               executorLog.log(`Removed old worktree for paused task: ${worktreePath}`);
             } catch (cleanupErr: unknown) {
@@ -4896,6 +4906,8 @@ export class TaskExecutor {
                   taskId: task.id,
                   audit,
                   reason: RemovalReason.ExecutorTransientRetry,
+                  expectedOwnerTaskId: task.id,
+                  liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                 });
                 executorLog.log(`Removed old worktree for transient retry: ${worktreePath}`);
               } catch (cleanupErr: unknown) {
@@ -5025,6 +5037,8 @@ export class TaskExecutor {
                   taskId: task.id,
                   audit,
                   reason: RemovalReason.ExecutorStuckKilled,
+                  expectedOwnerTaskId: task.id,
+                  liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                 });
                 executorLog.log(`Removed old worktree for stuck-killed retry: ${worktreePath}`);
               } catch (cleanupErr: unknown) {
@@ -6146,9 +6160,8 @@ export class TaskExecutor {
     // Remove worktree
     try {
       const settings = await this.store.getSettings();
-      await removeWorktree({
+      await this.removeOwnWorktreeWithReconcile({
         worktreePath,
-        rootDir: this.rootDir,
         settings,
         taskId,
         reason: RemovalReason.ExecutorDispose,
@@ -8507,6 +8520,8 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           reason: RemovalReason.PoolPrune,
           taskId: task.id,
           audit,
+          expectedOwnerTaskId: task.id,
+          liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
         });
       } catch (removeErr) {
         executorLog.warn(`${task.id}: failed to remove unusable session-start worktree ${staleWorktreePath}: ${formatError(removeErr)}`);
@@ -9151,19 +9166,68 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     return false;
   }
 
+  private async reconcileSelfOwnedBeforeRemove(worktreePath: string, taskId: string): Promise<void> {
+    const outcome = reconcileSelfOwnedActiveSessionForRemoval(
+      activeSessionRegistry,
+      worktreePath,
+      taskId,
+      (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+    );
+    if (outcome.action === "reconciled") {
+      executorLog.warn(
+        `[FN-5346] ${taskId}: dropped stale self-owned activeSessionRegistry entry before removeWorktree at ${worktreePath}`,
+      );
+      await this.store.logEntry(taskId, "Cleared stale self-owned active-session entry before remove", worktreePath);
+    }
+  }
+
+  private async removeOwnWorktreeWithReconcile(input: {
+    worktreePath: string;
+    settings: Settings;
+    taskId: string;
+    reason: RemovalReason;
+    audit?: Parameters<typeof removeWorktree>[0]["audit"];
+  }): Promise<void> {
+    await this.reconcileSelfOwnedBeforeRemove(input.worktreePath, input.taskId);
+    const removeArgs = {
+      worktreePath: input.worktreePath,
+      rootDir: this.rootDir,
+      settings: input.settings,
+      taskId: input.taskId,
+      reason: input.reason,
+      audit: input.audit,
+      expectedOwnerTaskId: input.taskId,
+      liveOwnerProbe: (path: string, ownerTaskId: string) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+    } as const;
+    try {
+      await removeWorktree(removeArgs);
+    } catch (error: unknown) {
+      if (
+        error instanceof ActiveSessionWorktreeRemovalError
+        && error.details.taskId === input.taskId
+        && !this.hasActiveWorktreeBinding(input.taskId, input.worktreePath)
+      ) {
+        const reconcileResult = activeSessionRegistry.reconcileStaleSelfOwned(input.worktreePath, input.taskId);
+        if (reconcileResult.reconciled) {
+          await this.store.logEntry(
+            input.taskId,
+            "Reconciled stale self-owned active-session registration (post-throw)",
+            input.worktreePath,
+          );
+        }
+        await removeWorktree(removeArgs);
+        return;
+      }
+      throw error;
+    }
+  }
+
   private async cleanupConflictingWorktree(
     worktreePath: string,
     branch: string,
     taskId: string,
   ): Promise<boolean> {
-    const activeSessionRecord = activeSessionRegistry.lookupByPath(worktreePath);
-    if (activeSessionRecord?.taskId === taskId && !this.hasActiveWorktreeBinding(taskId, worktreePath)) {
-      executorLog.warn(
-        `[FN-4976] ${taskId}: clearing stale self-owned activeSessionRegistry entry before cleanup for ${worktreePath}`,
-      );
-      activeSessionRegistry.unregisterPath(worktreePath);
-      await this.store.logEntry(taskId, "Cleared stale self-owned activeSessionRegistry entry", worktreePath);
-    }
+    await this.reconcileSelfOwnedBeforeRemove(worktreePath, taskId);
 
     // FN-4811: Hard liveness gate — refuse to remove a worktree that is currently bound to
     // an active executor/merger session, regardless of git-level conflict classification.
@@ -9192,33 +9256,12 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
 
       // Remove the worktree
       const settings = await this.store.getSettings();
-      const removeArgs = {
+      await this.removeOwnWorktreeWithReconcile({
         worktreePath,
-        rootDir: this.rootDir,
         settings,
         taskId,
         reason: RemovalReason.ExecutorDispose,
-      } as const;
-      try {
-        await removeWorktree(removeArgs);
-      } catch (error: unknown) {
-        if (
-          error instanceof ActiveSessionWorktreeRemovalError
-          && error.details.taskId === taskId
-          && !this.hasActiveWorktreeBinding(taskId, worktreePath)
-        ) {
-          const reconcileResult = activeSessionRegistry.reconcileStaleSelfOwned(worktreePath, taskId);
-          if (reconcileResult.reconciled) {
-            await this.store.logEntry(taskId, "Reconciled stale self-owned active-session registration", worktreePath);
-            executorLog.log(
-              `[executor] reconciled stale self-owned active-session entry taskId=${taskId} worktreePath=${worktreePath} reason=${reconcileResult.reason}`,
-            );
-          }
-          await removeWorktree(removeArgs);
-        } else {
-          throw error;
-        }
-      }
+      });
       await this.store.logEntry(taskId, `Removed conflicting worktree`, worktreePath);
 
       // Delete the branch if it exists
@@ -9433,9 +9476,8 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
 
     try {
       const settings = await this.store.getSettings();
-      await removeWorktree({
+      await this.removeOwnWorktreeWithReconcile({
         worktreePath,
-        rootDir: this.rootDir,
         settings,
         taskId,
         reason: RemovalReason.ExecutorDispose,

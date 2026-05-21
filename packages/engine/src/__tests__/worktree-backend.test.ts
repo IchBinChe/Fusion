@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  ActiveSessionWorktreeRemovalError,
   NativeWorktreeBackend,
   WorktrunkOperationError,
   WorktrunkWorktreeBackend,
@@ -7,6 +8,7 @@ import {
   resolveWorktreeBackend,
   RemovalReason,
 } from "../worktree-backend.js";
+import { activeSessionRegistry } from "../active-session-registry.js";
 
 const { execMock, accessMock, existsSyncMock, parseIndexLockPathMock, classifyStaleLockMock, tryRemoveStaleLockMock, parseStaleRegistrationPathMock, recoverStaleRegistrationMock, installGuardMock } = vi.hoisted(() => {
   const mock = vi.fn();
@@ -73,6 +75,7 @@ beforeEach(() => {
   recoverStaleRegistrationMock.mockResolvedValue({ recovered: true, actions: ["prune"] });
   classifyStaleLockMock.mockResolvedValue({ kind: "fresh", reason: "fresh" });
   tryRemoveStaleLockMock.mockResolvedValue({ removed: true });
+  activeSessionRegistry.clear();
 });
 
 describe("NativeWorktreeBackend", () => {
@@ -851,6 +854,93 @@ describe("removeWorktree", () => {
         reason: RemovalReason.SelfHealingReclaim,
       }),
     ).rejects.toMatchObject({ code: "worktrunk_binary_missing", operation: "remove" });
+  });
+
+  it("reconciles same-task stale active session when defensive owner probe says not live", async () => {
+    execMock.mockResolvedValue({ stdout: "", stderr: "" });
+    const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-1",
+      kind: "executor",
+      ownerKey: "FN-1/executor",
+    });
+
+    await removeWorktree({
+      rootDir: "/repo",
+      worktreePath: "/repo/.worktrees/fn-1",
+      settings: {},
+      audit,
+      reason: RemovalReason.ExecutorDispose,
+      expectedOwnerTaskId: "FN-1",
+      liveOwnerProbe: () => false,
+    });
+
+    expect(activeSessionRegistry.lookupByPath("/repo/.worktrees/fn-1")).toBeNull();
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "worktree:active-session-reconciled",
+        target: "/repo/.worktrees/fn-1",
+        metadata: { taskId: "FN-1", source: "removeWorktree-defensive" },
+      }),
+    );
+  });
+
+  it("preserves refusal when same-task owner is still live", async () => {
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-1",
+      kind: "executor",
+      ownerKey: "FN-1/executor",
+    });
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        settings: {},
+        reason: RemovalReason.ExecutorDispose,
+        expectedOwnerTaskId: "FN-1",
+        liveOwnerProbe: () => true,
+      }),
+    ).rejects.toBeInstanceOf(ActiveSessionWorktreeRemovalError);
+  });
+
+  it("preserves foreign-owner refusal with defensive owner hints", async () => {
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-2",
+      kind: "executor",
+      ownerKey: "FN-2/executor",
+    });
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        settings: {},
+        reason: RemovalReason.ExecutorDispose,
+        expectedOwnerTaskId: "FN-1",
+        liveOwnerProbe: () => false,
+      }),
+    ).rejects.toMatchObject({
+      name: "ActiveSessionWorktreeRemovalError",
+      details: expect.objectContaining({ taskId: "FN-2" }),
+    });
+  });
+
+  it("keeps pre-FN-5346 behavior when defensive owner hints are omitted", async () => {
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-1",
+      kind: "executor",
+      ownerKey: "FN-1/executor",
+    });
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        settings: {},
+        reason: RemovalReason.ExecutorDispose,
+      }),
+    ).rejects.toBeInstanceOf(ActiveSessionWorktreeRemovalError);
   });
 });
 

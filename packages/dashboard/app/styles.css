@@ -3219,6 +3219,11 @@ input[type="range"]:focus-visible {
   html,
   body {
     overflow: hidden;
+    /* Disable pinch-zoom on mobile — Android Chrome ignores user-scalable=no
+       for a11y, and the kanban board's horizontally-scrollable layout
+       interacts badly with zoom-out (exposes the offscreen-right area).
+       `pan-x pan-y` keeps scroll panning but blocks pinch-zoom. */
+    touch-action: pan-x pan-y;
   }
 
   #root {

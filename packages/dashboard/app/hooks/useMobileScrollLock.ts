@@ -21,7 +21,7 @@ function isMobileDevice(): boolean {
  * Chrome shrinks the layout viewport with the keyboard, so no drift
  * compensation is needed there.
  */
-function isIOS(): boolean {
+export function isIOS(): boolean {
   if (typeof window === "undefined") return false;
   const ua = navigator.userAgent || "";
   // iPad on iPadOS 13+ reports as MacIntel + touch — handle that too.

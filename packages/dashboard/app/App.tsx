@@ -57,7 +57,7 @@ import { useDeepLink } from "./hooks/useDeepLink";
 import { useFavorites } from "./hooks/useFavorites";
 import { useAuthOnboarding } from "./hooks/useAuthOnboarding";
 import { useMobileKeyboard } from "./hooks/useMobileKeyboard";
-import { useMobileScrollLock } from "./hooks/useMobileScrollLock";
+import { isIOS, useMobileScrollLock } from "./hooks/useMobileScrollLock";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { useViewState, type TaskView } from "./hooks/useViewState";
@@ -463,7 +463,15 @@ function AppInner() {
   // affecting the underlying dashboard layout — the modal handles its own
   // viewport. Without this guard, modal keyboard state leaks into the app-level
   // layout, causing stale bottom-padding offsets after the keyboard closes.
-  const mobileKeyboardOpen = isMobile && keyboardOpen && !modalManager.anyModalOpen;
+  //
+  // Android-gated: with `interactive-widget=resizes-content` the layout
+  // viewport itself shrinks with the soft keyboard, so we DON'T want to
+  // also hide the nav bar / strip its padding — that produces a layout
+  // jump while the focused input is settling, which Android Chrome treats
+  // as the focus target moving and dismisses the keyboard immediately.
+  // iOS doesn't shrink the layout viewport, so the iOS path keeps the
+  // hide-nav-on-keyboard behavior intact.
+  const mobileKeyboardOpen = isMobile && keyboardOpen && !modalManager.anyModalOpen && isIOS();
   // App-level scroll lock for inline editing (TaskCard inline edit, etc.):
   // when the keyboard is up outside of any modal, pin the body so iOS can't
   // shift the document or visualViewport, and so the dashboard snaps back

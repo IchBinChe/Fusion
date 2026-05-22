@@ -31,6 +31,13 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const MERGE_HANDOFF_WORKER_ID = "merger-reuse-handoff";
 
+/** Shell-quote a value for safe interpolation into `git` command strings.
+ *  Mirrors the `quoteArg` helper in merger.ts; kept local to avoid an
+ *  import cycle. */
+function quoteAutostashArg(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
 export interface MergeIntegrationRootResolution {
   mode: MergeIntegrationWorktreeMode;
   // Sentinel: empty string means reuse mode is requested but no reusable
@@ -327,21 +334,28 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
       stashSha = String(createOut).trim() || null;
       if (stashSha) {
         await execAsync(
-          `git stash store -m "${stashLabel}" ${stashSha}`,
+          `git stash store -m ${quoteAutostashArg(stashLabel)} ${stashSha}`,
           { cwd: worktreePath },
         );
+        // Only reset/clean once the dirty content is safely captured by the
+        // stash. If the stash failed (no SHA), leaving the working tree as-is
+        // preserves the user's edits for manual recovery.
+        await execAsync("git reset --hard HEAD", { cwd: worktreePath });
+        await execAsync("git clean -fd", { cwd: worktreePath });
       }
-      // Either way, reset the worktree so the merge has a clean slate.
-      await execAsync("git reset --hard HEAD", { cwd: worktreePath });
-      await execAsync("git clean -fd", { cwd: worktreePath });
     } catch (err: unknown) {
       stashError = err instanceof Error ? err.message : String(err);
     }
 
     if (!stashSha || stashError) {
       // Stash creation failed: do NOT proceed (the merge's destructive ops
-      // would wipe the user's edits). Surface clearly so they can recover
-      // by hand.
+      // would wipe the user's edits). Best-effort unstage so the worktree
+      // isn't left with a half-staged index from the `git add -A` above.
+      try {
+        await execAsync("git reset", { cwd: worktreePath });
+      } catch {
+        // Nothing more we can do.
+      }
       throw new MergeHandoffRefusedError("working-tree-dirty", "dirty-worktree-autostash-failed", {
         taskId: input.task.id,
         worktreePath,

@@ -146,17 +146,9 @@ Per-task opt-out exists: `task.scopeOverride = true` (log the reason).
 
 When `settings.autoMerge: false`, `in-review` is terminal-until-merged by a human. Lifecycle-mutating self-healing must not move these tasks backward, pause/fail them, or re-enqueue them for execution.
 
-### Completion-handoff limbo budget invariant (FN-5479)
-
-`recoverCompletionHandoffLimbo` may only increment `completionHandoffLimboRecoveryCount` after merge requeue is **accepted** by the in-memory merge scheduler. Queue-row writes alone are insufficient. If enqueue is not accepted, skip budget consumption so tasks do not hit generic `Completion handoff limbo recovery exhausted` without a real merge attempt. Backstop: `packages/engine/src/__tests__/reliability-interactions/completion-handoff-limbo.test.ts` (`FN-5479` case).
-
 ### Mock provider (test mode)
 
 `testMode?: boolean` is now available in both project and global settings. If project `testMode === true` (or the resolved default provider is `"mock"` at any tier), every AI lane is forced to `mock/scripted`, overriding per-task and per-lane model selections. The dashboard exposes this via the Settings Modal "Enable test mode" toggle and a persistent "Test mode — no real AI calls" banner.
-
-### Reliability Mechanism Coverage
-
-- FN-5448: composition backstop for stranded-completed todo recovery × ghost-review fallback at `packages/engine/src/__tests__/reliability-interactions/completed-task-oscillation.test.ts`.
 
 ---
 

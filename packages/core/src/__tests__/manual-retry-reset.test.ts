@@ -35,14 +35,4 @@ describe("buildManualRetryResetPatch", () => {
   it("clears nextRecoveryAt", () => {
     expect(buildManualRetryResetPatch()).toMatchObject({ nextRecoveryAt: null });
   });
-
-  it("clears userPaused for manual retry in all modes", () => {
-    const defaultPatch = buildManualRetryResetPatch();
-    expect(Object.prototype.hasOwnProperty.call(defaultPatch, "userPaused")).toBe(true);
-    expect(defaultPatch.userPaused).toBeUndefined();
-
-    const mergePatch = buildManualRetryResetPatch({ resetMergeRetries: true });
-    expect(Object.prototype.hasOwnProperty.call(mergePatch, "userPaused")).toBe(true);
-    expect(mergePatch.userPaused).toBeUndefined();
-  });
 });

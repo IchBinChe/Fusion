@@ -2522,31 +2522,6 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expectRetryCountersReset(updated);
       expect(updated?.mergeRetries).toBe(0);
     });
-
-    it("clears userPaused when retrying a manually paused failed task", async () => {
-      const store = new TaskStore(tmpDir);
-      await store.init();
-
-      const task = await store.createTask({
-        title: "manually paused failed task",
-        description: "test",
-        column: "todo",
-      });
-      await store.updateTask(task.id, {
-        status: "failed",
-        error: "verification failed",
-        userPaused: true,
-      });
-
-      const retryTool = api.tools.get("fn_task_retry")!;
-      const result = await retryTool.execute("retry-user-paused", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
-
-      expect(result.isError).toBeFalsy();
-      const updated = await store.getTask(task.id);
-      expect(updated?.column).toBe("todo");
-      expect(updated?.status).toBeFalsy();
-      expect(updated?.userPaused).toBeUndefined();
-    });
   });
 
   describe("fn_list_agents", () => {

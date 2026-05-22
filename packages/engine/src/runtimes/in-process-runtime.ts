@@ -694,7 +694,7 @@ export class InProcessRuntime
         getPlanningTaskIds: () => this.triageProcessor?.getProcessingTaskIds() ?? new Set<string>(),
         evictStaleTriageProcessing: () => this.triageProcessor?.evictStaleProcessing() ?? new Set<string>(),
         enqueueMerge: this.mergeEnqueuer ? (taskId: string) => this.mergeEnqueuer?.(taskId) ?? false : undefined,
-        requeueForAutoMerge: this.mergeEnqueuer ? (taskId: string) => this.mergeEnqueuer?.(taskId) ?? false : undefined,
+        requeueForAutoMerge: this.mergeEnqueuer ? (taskId: string) => { this.mergeEnqueuer?.(taskId); } : undefined,
         isTaskActive: (taskId: string) => this.executor.isTaskActive(taskId),
         clearMergeActive: this.clearMergeActive ? (taskId: string) => this.clearMergeActive?.(taskId) : undefined,
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,

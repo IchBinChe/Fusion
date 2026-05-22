@@ -1,5 +1,5 @@
 import "./MobileNavBar.css";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   Bot,
@@ -148,10 +148,21 @@ export function MobileNavBar({
   shellConnectionControl,
 }: MobileNavBarProps) {
   const mode = useViewportMode();
+  // vpdebug: surface MobileNavBar render decision inputs for diagnostic overlay
+  if (typeof window !== "undefined") {
+    (window as unknown as { __mNavDebug?: unknown }).__mNavDebug = {
+      mode,
+      modalOpen,
+      keyboardOpen,
+      footerVisible,
+      view,
+    };
+  }
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isScriptsSubmenuOpen, setIsScriptsSubmenuOpen] = useState(false);
   const [scripts, setScripts] = useState<Record<string, string>>({});
   const [scriptsLoading, setScriptsLoading] = useState(false);
+  const navRef = useRef<HTMLElement | null>(null);
 
   const scriptEntries = useMemo(
     () => Object.entries(scripts).sort(([a], [b]) => a.localeCompare(b)),
@@ -204,6 +215,36 @@ export function MobileNavBar({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [isMoreOpen]);
 
+  useLayoutEffect(() => {
+    const navEl = navRef.current;
+    if (!navEl || typeof document === "undefined") {
+      return;
+    }
+
+    const publishMeasuredHeight = () => {
+      const computed = window.getComputedStyle(navEl);
+      const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+      const contentHeight = navEl.offsetHeight - paddingBottom;
+      const publishedHeight = Math.max(44, Math.ceil(contentHeight));
+      document.documentElement.style.setProperty("--mobile-nav-height", `${publishedHeight}px`);
+    };
+
+    publishMeasuredHeight();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        publishMeasuredHeight();
+      });
+      observer.observe(navEl);
+    }
+
+    return () => {
+      observer?.disconnect();
+      document.documentElement.style.removeProperty("--mobile-nav-height");
+    };
+  }, []);
+
   if (mode !== "mobile" || modalOpen || keyboardOpen) {
     return null;
   }
@@ -249,6 +290,7 @@ export function MobileNavBar({
   return (
     <>
       <nav
+        ref={navRef}
         className={`mobile-nav-bar${footerVisible ? " mobile-nav-bar--with-footer" : ""}`}
         role="tablist"
         aria-label="Primary navigation"

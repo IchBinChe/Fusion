@@ -226,7 +226,7 @@ export interface SelfHealingOptions {
    * the polling sweep's enqueue to silently no-op).
    */
   enqueueMerge?: (taskId: string) => boolean;
-  requeueForAutoMerge?: (taskId: string) => boolean | void | Promise<boolean | void>;
+  requeueForAutoMerge?: (taskId: string) => void | Promise<void>;
   isTaskActive?: (taskId: string) => boolean;
   clearMergeActive?: (taskId: string) => void;
   /**
@@ -4842,9 +4842,6 @@ export class SelfHealingManager {
         !task.paused &&
         !executingIds.has(task.id) &&
         !(task.status && GHOST_REVIEW_PRESERVED_STATUSES.has(task.status)) &&
-        // FN-5448: completed tasks promoted by stranded-completed recovery must
-        // not be kicked back to todo by ghost-review fallback.
-        !(Array.isArray(task.steps) && task.steps.length > 0 && task.steps.every((step) => step.status === "done" || step.status === "skipped")) &&
         // Confirmed merges belong in `done` (handled by `recoverMergedReviewTasks`).
         task.mergeDetails?.mergeConfirmed !== true &&
         now - new Date(task.columnMovedAt ?? task.updatedAt).getTime() >= timeoutMs
@@ -5784,33 +5781,6 @@ export class SelfHealingManager {
         continue;
       }
 
-      let accepted = false;
-      if (this.options.requeueForAutoMerge || this.options.enqueueMerge) {
-        try {
-          // FN-5353: strict targetTaskId leasing in reuse handoff requires an
-          // explicit queue row before re-emitting auto-merge.
-          await this.store.enqueueMergeQueue(task.id);
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          log.warn(`recoverCompletionHandoffLimbo: enqueue failed for ${task.id}: ${errorMessage}`);
-          continue;
-        }
-
-        if (this.options.enqueueMerge) {
-          accepted = this.options.enqueueMerge(task.id);
-        } else if (this.options.requeueForAutoMerge) {
-          const enqueueResult = await this.options.requeueForAutoMerge(task.id);
-          accepted = enqueueResult !== false;
-        }
-      } else {
-        log.warn(`recoverCompletionHandoffLimbo: requeueForAutoMerge callback missing for ${task.id}`);
-      }
-
-      if (!accepted) {
-        log.warn(`recoverCompletionHandoffLimbo: merge requeue not accepted for ${task.id}; skipping limbo recovery budget increment`);
-        continue;
-      }
-
       await this.store.updateTask(task.id, {
         completionHandoffLimboRecoveryCount: currentCount + 1,
       });
@@ -5829,6 +5799,20 @@ export class SelfHealingManager {
       });
 
       await this.store.logEntry(task.id, "Auto-recovered (FN-4999): task in 'in-review' past handoff grace with no merge fan-out — re-emitting auto-merge handoff");
+      if (this.options.requeueForAutoMerge) {
+        try {
+          // FN-5353: strict targetTaskId leasing in reuse handoff requires an
+          // explicit queue row before re-emitting auto-merge.
+          await this.store.enqueueMergeQueue(task.id);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`recoverCompletionHandoffLimbo: enqueue failed for ${task.id}: ${errorMessage}`);
+          continue;
+        }
+        await this.options.requeueForAutoMerge(task.id);
+      } else {
+        log.warn(`recoverCompletionHandoffLimbo: requeueForAutoMerge callback missing for ${task.id}`);
+      }
     }
   }
 

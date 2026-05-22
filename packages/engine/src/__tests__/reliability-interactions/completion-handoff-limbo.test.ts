@@ -123,29 +123,4 @@ describe("FN-4999 reliability interactions: completion-handoff-limbo", () => {
       .filter((value: unknown) => typeof value === "number");
     expect(increments).toEqual([1, 2, 3]);
   });
-
-  it("FN-5479: does not consume limbo recovery budget when merge requeue is not accepted", async () => {
-    const task = makeTask({
-      status: undefined,
-      review: undefined,
-      reviewState: undefined,
-      mergeDetails: undefined,
-      completionHandoffLimboRecoveryCount: 2,
-      log: [{ action: "Task marked done by agent", timestamp: new Date(Date.now() - 6 * 60_000).toISOString() } as any],
-    });
-    const store = createStore(task);
-    const manager = new SelfHealingManager(store, {
-      rootDir: "/repo",
-      enqueueMerge: vi.fn(() => false),
-      requeueForAutoMerge: vi.fn(() => false),
-    });
-
-    await manager.recoverCompletionHandoffLimbo();
-
-    expect(store.enqueueMergeQueue).toHaveBeenCalledWith("FN-4999-T");
-    expect(store.updateTask).not.toHaveBeenCalledWith("FN-4999-T", expect.objectContaining({ completionHandoffLimboRecoveryCount: 3 }));
-    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:auto-recover-completion-handoff-limbo" }));
-    expect(store.logEntry).not.toHaveBeenCalledWith("FN-4999-T", expect.stringMatching(/Auto-recovered \(FN-4999\)/));
-    expect(store._get().completionHandoffLimboRecoveryCount).toBe(2);
-  });
 });

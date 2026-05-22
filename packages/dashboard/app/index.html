@@ -27,6 +27,10 @@
           }
           var dialogs = document.querySelectorAll('[role="dialog"],.modal,.modal-overlay').length;
           var focused = document.activeElement && document.activeElement.tagName;
+          var d = window.__mNavDebug || {};
+          var dbg = 'mode=' + d.mode + ' modal=' + d.modalOpen + ' kb=' + d.keyboardOpen + ' fv=' + d.footerVisible + ' v=' + d.view;
+          var pc = document.querySelector('.project-content');
+          var pcCls = pc ? pc.className.replace('project-content', '').trim() : 'none';
           box.textContent =
             'win ' + window.innerWidth + 'x' + window.innerHeight + '\n' +
             'vv ' + (vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) + ' s' + vv.scale.toFixed(2) + ' o' + Math.round(vv.offsetLeft) + ',' + Math.round(vv.offsetTop) : 'n/a') + '\n' +
@@ -36,6 +40,8 @@
             'root ' + f(document.getElementById('root')) + '\n' +
             'board ' + f(document.getElementById('board')) + '\n' +
             'mNav ' + navInfo + '\n' +
+            'mNavR ' + dbg + '\n' +
+            'pcCls ' + pcCls + '\n' +
             'mq768 ' + window.matchMedia('(max-width: 768px)').matches + '\n' +
             'dialogs ' + dialogs + ' focus ' + focused + '\n' +
             'sx ' + window.scrollX + ' sy ' + window.scrollY + '\n' +

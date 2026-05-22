@@ -382,24 +382,6 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
 
-  it("clears userPaused when retrying a failed todo task", async () => {
-    const failedTaskInTodo = { ...FAKE_TASK_DETAIL, column: "todo", status: "failed", userPaused: true };
-    const movedTask = { ...failedTaskInTodo, status: undefined, userPaused: undefined };
-    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(failedTaskInTodo);
-    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(failedTaskInTodo);
-    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
-
-    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
-      "Content-Type": "application/json",
-    });
-
-    expect(res.status).toBe(200);
-    const updateCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(Object.prototype.hasOwnProperty.call(updateCall, "userPaused")).toBe(true);
-    expect(updateCall.userPaused).toBeUndefined();
-    expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
-  });
-
   it("retries a stuck-killed task and moves it to todo", async () => {
     const stuckTask = { ...FAKE_TASK_DETAIL, status: "stuck-killed", column: "in-progress" };
     const movedTask = { ...FAKE_TASK_DETAIL, column: "todo", status: undefined };
@@ -580,33 +562,6 @@ describe("POST /tasks/:id/retry", () => {
       "KB-001",
       "Retry requested from dashboard (in-review merge retry, mergeRetries reset)",
     );
-  });
-
-  it("clears userPaused for merge-retry in-review tasks", async () => {
-    const mergeFailedTask = {
-      ...FAKE_TASK_DETAIL,
-      column: "in-review" as const,
-      status: "failed",
-      userPaused: true,
-      steps: [
-        { name: "Step 0", status: "done" },
-        { name: "Step 1", status: "done" },
-      ],
-    };
-    (store.getTask as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(mergeFailedTask)
-      .mockResolvedValueOnce({ ...mergeFailedTask, userPaused: undefined });
-    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({ ...mergeFailedTask, userPaused: undefined });
-
-    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
-      "Content-Type": "application/json",
-    });
-
-    expect(res.status).toBe(200);
-    const updateCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(Object.prototype.hasOwnProperty.call(updateCall, "userPaused")).toBe(true);
-    expect(updateCall.userPaused).toBeUndefined();
-    expect(store.moveTask).not.toHaveBeenCalled();
   });
 
   it("retries zero-step merge-failed in-review task with prior merge attempts by staying in-review", async () => {

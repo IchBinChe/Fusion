@@ -7698,7 +7698,7 @@ describe("FN-5335 triple-proof no-action unit coverage", () => {
   it("emits ghost-review no-action when triple proof fails", async () => {
     const store = createMockStore({
       getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, autoMerge: true, taskStuckTimeoutMs: 1_000 } as any),
-      listTasks: vi.fn().mockResolvedValue([{ id: "FN-GHOST", column: "in-review", worktree: "/tmp/fn-ghost", updatedAt: new Date(Date.now() - 5_000).toISOString(), columnMovedAt: new Date(Date.now() - 5_000).toISOString(), paused: false, status: null, mergeDetails: {}, steps: [{ status: "pending" }] }]),
+      listTasks: vi.fn().mockResolvedValue([{ id: "FN-GHOST", column: "in-review", worktree: "/tmp/fn-ghost", updatedAt: new Date(Date.now() - 5_000).toISOString(), columnMovedAt: new Date(Date.now() - 5_000).toISOString(), paused: false, status: null, mergeDetails: {} }]),
     });
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
     const recovered = await manager.recoverGhostReviewTasks();

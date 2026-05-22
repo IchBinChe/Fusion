@@ -423,6 +423,15 @@ describe("getTaskCompletionBlocker", () => {
     }, { resolveTask })).resolves.toBeUndefined();
   });
 
+  it("treats soft-deleted blockedBy as non-blocking when resolveTask returns null", async () => {
+    const resolveTask = async (_taskId: string) => null;
+
+    await expect(getTaskCompletionBlocker({
+      ...baseCompletionTask,
+      blockedBy: "FN-SOFT-DELETED",
+    }, { resolveTask })).resolves.toBeUndefined();
+  });
+
   it.each(["done", "archived"] as const)("ignores blockedBy when resolveTask reports the blocker is %s", async (column) => {
     const resolveTask = async () => ({ id: "FN-4054", column });
 

@@ -574,6 +574,58 @@ export class Scheduler {
       this.wasNodeBlocked.delete(task.id);
       this.wasPermanentAgentUnavailable.delete(task.id);
       this.clearDispatchQueuedReasonMemo(task.id);
+
+      void (async () => {
+        try {
+          const settings = await this.store.getSettings();
+          if (settings.globalPause || settings.enginePaused) {
+            return;
+          }
+
+          const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
+          const inProgressTasks = await this.store.listTasks({ column: "in-progress", slim: true });
+          const dependents = [...todoTasks, ...inProgressTasks];
+          const allTasks = await this.store.listTasks({ slim: true, includeArchived: true });
+          const taskById = new Map(allTasks.map((candidate) => [candidate.id, candidate]));
+
+          for (const dependent of dependents) {
+            const mentionsDeletedTask = dependent.dependencies.includes(task.id);
+            const currentlyBlockedByDeletedTask = dependent.blockedBy === task.id;
+            if (!mentionsDeletedTask && !currentlyBlockedByDeletedTask) continue;
+
+            const unresolvedDeps = dependent.dependencies.filter((depId) => {
+              const dep = taskById.get(depId);
+              return dep && dep.column !== "done" && dep.column !== "in-review" && dep.column !== "archived";
+            });
+
+            try {
+              if (unresolvedDeps.length > 0) {
+                const nextBlocker = unresolvedDeps[0]!;
+                await this.store.updateTask(dependent.id, {
+                  blockedBy: nextBlocker,
+                  status: "queued",
+                });
+                await this.store.logEntry(
+                  dependent.id,
+                  `Auto-reblocked (FN-5496): unresolved dependency ${nextBlocker} remains after blocker ${task.id} was soft-deleted`,
+                );
+              } else if (dependent.column === "todo") {
+                await this.store.updateTask(dependent.id, { blockedBy: null, status: null });
+                await this.store.logEntry(dependent.id, `Auto-unblocked (FN-5496): blocker ${task.id} was soft-deleted`);
+              } else {
+                await this.store.updateTask(dependent.id, { blockedBy: null });
+                await this.store.logEntry(dependent.id, `Auto-unblocked (FN-5496): blocker ${task.id} was soft-deleted`);
+              }
+            } catch (error) {
+              schedulerLog.error(`Failed to reconcile dependent ${dependent.id} for soft-deleted blocker ${task.id}`, error);
+            }
+          }
+
+          this.schedule();
+        } catch (error) {
+          schedulerLog.error(`Failed event-driven soft-delete blocker reconciliation for ${task.id}`, error);
+        }
+      })();
     });
   }
 

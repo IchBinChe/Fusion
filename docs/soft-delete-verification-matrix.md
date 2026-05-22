@@ -75,5 +75,6 @@ No public API flag exposes deleted-task forensics today. Adding one requires a n
 
 ## Notes
 
+- FN-5496: `task:deleted` now triggers immediate scheduler-side downstream `blockedBy` reconciliation for `todo`/`in-progress` dependents, and stale-blockedBy self-healing logs now discriminate soft-deleted blockers with `soft-deleted at ...` reasons.
 - Store-level soft-delete invariants live in `packages/core/src/store.ts` (`ACTIVE_TASKS_WHERE`, `deleteTask`, `readTaskFromDb(..., { includeDeleted: true })`) and `packages/core/src/__tests__/soft-delete-tasks.test.ts`.
 - Cross-reference `docs/storage.md` for the persisted-row model; FN-5140 and FN-5143 own the storage-doc deltas for document and agent-log visibility.

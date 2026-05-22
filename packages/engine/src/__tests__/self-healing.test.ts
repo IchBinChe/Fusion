@@ -5837,6 +5837,103 @@ describe("clearStaleBlockedBy", () => {
     manager.stop();
   });
 
+  it("clears stale blockedBy with explicit reason when blocker is soft-deleted", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { blockedBy: "FN-DELETED" });
+    mockSweepTasks(store, { todo: [taskA] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, overlapBlockedBy: null, status: null });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("soft-deleted at 2026-05-22T00:00:00.000Z"));
+    manager.stop();
+  });
+
+  it("clears stale blockedBy for in-progress task when blocker is soft-deleted", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { column: "in-progress", blockedBy: "FN-DELETED" });
+    mockSweepTasks(store, { inProgress: [taskA], all: [taskA] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("Auto-recovered (FN-4091): cleared stale blockedBy — blocker FN-DELETED soft-deleted at 2026-05-22T00:00:00.000Z"));
+    manager.stop();
+  });
+
+  it("refreshes to next live dependency when one dependency is soft-deleted", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { blockedBy: "FN-DELETED", status: "queued", dependencies: ["FN-DELETED", "FN-LIVE"] });
+    const liveBlocker = createTask("FN-LIVE", { column: "todo" });
+    mockSweepTasks(store, { todo: [taskA, liveBlocker], all: [taskA, liveBlocker] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: "FN-LIVE", status: "queued" });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("soft-deleted"));
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("now blocked by FN-LIVE"));
+    manager.stop();
+  });
+
+  it("is idempotent after recovering soft-deleted blockers", async () => {
+    const store = createRunningStore();
+    const deletedAt = "2026-05-22T00:00:00.000Z";
+    (store.getTask as ReturnType<typeof vi.fn>).mockImplementation(async (id: string, options?: { includeDeleted?: boolean }) => {
+      if (id === "FN-DELETED" && options?.includeDeleted) {
+        return createTask("FN-DELETED", { deletedAt }) as unknown as Task;
+      }
+      throw new Error(`Task ${id} not found`);
+    });
+
+    const taskA = createTask("A", { blockedBy: "FN-DELETED" });
+    mockSweepTasks(store, { todo: [taskA], all: [taskA] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const firstRecovered = await manager.clearStaleBlockedBy();
+    expect(firstRecovered).toBe(1);
+
+    const healedTask = createTask("A", { blockedBy: null, status: null });
+    mockSweepTasks(store, { todo: [healedTask], all: [healedTask] });
+    (store.updateTask as ReturnType<typeof vi.fn>).mockClear();
+    (store.logEntry as ReturnType<typeof vi.fn>).mockClear();
+
+    const secondRecovered = await manager.clearStaleBlockedBy();
+    expect(secondRecovered).toBe(0);
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.logEntry).not.toHaveBeenCalled();
+    manager.stop();
+  });
+
   it.each(["done", "archived"] as const)("clears stale blockedBy when blocker is %s", async (column) => {
     const store = createRunningStore();
     const blockerId = "FN-100";

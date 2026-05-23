@@ -681,6 +681,45 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
         reason: "missing-task-worktree",
         source: "fresh",
       });
+
+      const freshAcquire = audits.find((event) => event.mutationType === "merge:reuse-worktree-fresh-acquire");
+      expect(freshAcquire?.metadata).toMatchObject({
+        taskId: task.id,
+        reason: "missing-task-worktree",
+        expectedBranch: branch,
+      });
+
+      const freshAcquired = audits.find((event) => event.mutationType === "merge:reuse-worktree-fresh-acquired");
+      expect(freshAcquired?.metadata).toMatchObject({
+        taskId: task.id,
+        reason: "missing-task-worktree",
+        branch,
+        priorWorktreePath: null,
+      });
+      const freshAcquiredWorktreePath = (freshAcquired?.metadata as Record<string, unknown> | undefined)?.worktreePath;
+      expect(typeof freshAcquiredWorktreePath).toBe("string");
+      expect(freshAcquiredWorktreePath).toBe((fallback?.metadata as Record<string, unknown> | undefined)?.worktreePath);
+
+      const orderedFreshAcquireIndex = audits.findIndex(
+        (event) =>
+          event.mutationType === "merge:reuse-worktree-fresh-acquire" &&
+          (event.metadata as Record<string, unknown> | undefined)?.reason === "missing-task-worktree",
+      );
+      const orderedFreshAcquiredIndex = audits.findIndex(
+        (event) =>
+          event.mutationType === "merge:reuse-worktree-fresh-acquired" &&
+          (event.metadata as Record<string, unknown> | undefined)?.reason === "missing-task-worktree",
+      );
+      const orderedFallbackIndex = audits.findIndex(
+        (event) =>
+          event.mutationType === "merge:reuse-fallback-new-worktree" &&
+          (event.metadata as Record<string, unknown> | undefined)?.reason === "missing-task-worktree",
+      );
+      expect(orderedFreshAcquireIndex).toBeGreaterThanOrEqual(0);
+      expect(orderedFreshAcquiredIndex).toBeGreaterThanOrEqual(0);
+      expect(orderedFallbackIndex).toBeGreaterThanOrEqual(0);
+      expect(orderedFreshAcquireIndex).toBeLessThan(orderedFreshAcquiredIndex);
+      expect(orderedFreshAcquiredIndex).toBeLessThan(orderedFallbackIndex);
     } finally {
       await fixture.cleanup();
     }

@@ -6814,6 +6814,8 @@ export async function aiMergeTask(
       | "merge:reuse-fallback-new-worktree"
       | "merge:reuse-fallback-pruned-stale-registration"
       | "merge:reuse-fallback-reused-existing-registration"
+      | "merge:reuse-worktree-fresh-acquire"
+      | "merge:reuse-worktree-fresh-acquired"
       | "branch:auto-canonicalize-case",
     metadata: Record<string, unknown>,
     target: string,
@@ -6886,6 +6888,8 @@ export async function aiMergeTask(
     reason: string,
     diagnostics: Record<string, unknown>,
   ): Promise<void> => {
+    const priorWorktreePath = task.worktree ?? null;
+
     // FN-5345/FN-5377: consult existing registration of `fusion/<id>` before
     // creating a fresh worktree. If the branch is already registered at a
     // usable extant path, rebind `task.worktree` to it (avoids FN-5083-class
@@ -7031,6 +7035,19 @@ export async function aiMergeTask(
       }
     }
 
+    await emitReuseHandoffAuditEvent(
+      "merge:reuse-worktree-fresh-acquire",
+      {
+        taskId,
+        reason,
+        expectedBranch,
+        priorWorktreePath,
+        integrationBranch: mergeTarget.branch,
+        diagnostics,
+      },
+      projectRootDir,
+    );
+
     const acquisition = await acquireTaskWorktree({
       task,
       rootDir: projectRootDir,
@@ -7067,6 +7084,21 @@ export async function aiMergeTask(
       rootDir,
       integrationBranch: mergeTarget.branch,
     });
+    await emitReuseHandoffAuditEvent(
+      "merge:reuse-worktree-fresh-acquired",
+      {
+        taskId,
+        reason,
+        branch: acquisition.branch,
+        worktreePath: acquisition.worktreePath,
+        source: acquisition.source,
+        priorWorktreePath: priorWorktreePath ?? null,
+        integrationRemote: integrationRemote ?? null,
+        integrationBranch: mergeTarget.branch,
+        diagnostics,
+      },
+      acquisition.worktreePath,
+    );
     await emitReuseHandoffAuditEvent(
       "merge:reuse-fallback-new-worktree",
       {

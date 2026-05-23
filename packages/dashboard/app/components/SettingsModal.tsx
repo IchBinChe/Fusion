@@ -14,7 +14,7 @@ import {
   normalizeMergeAdvanceAutoSyncMode,
 } from "@fusion/core";
 import type { AgentPermissionPolicyRules, Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
-import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
+import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteSettings, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -621,6 +621,13 @@ export function SettingsModal({
   // Git remotes for the worktree rebase dropdown. Loaded lazily; empty list
   // is a valid state (fresh repo, no remotes configured yet).
   const [gitRemotes, setGitRemotes] = useState<GitRemoteDetailed[]>([]);
+  // Branch list for the Integration branch dropdown. Loaded lazily when the
+  // merge section becomes visible. Empty list is a valid state (fresh repo /
+  // permissions issue); the UI falls back to allowing custom free-text entry.
+  const [integrationBranchOptions, setIntegrationBranchOptions] = useState<string[]>([]);
+  // Sticky toggle: once the user picks "Custom..." we keep them in text-input
+  // mode even when the typed value happens to match an existing branch.
+  const [integrationBranchCustomMode, setIntegrationBranchCustomMode] = useState(false);
   const [projectTrackingRepoOptions, setProjectTrackingRepoOptions] = useState<TrackingRepoOption[]>([]);
   const [projectTrackingRepoLoading, setProjectTrackingRepoLoading] = useState(false);
   const [projectTrackingRepoError, setProjectTrackingRepoError] = useState<string | null>(null);
@@ -974,6 +981,36 @@ export function SettingsModal({
     fetchGitRemotesDetailed(projectId)
       .then((remotes) => setGitRemotes(remotes))
       .catch(() => setGitRemotes([]));
+  }, [activeSection, projectId]);
+
+  // Load local branch list when the merge section becomes visible, so the
+  // Integration branch dropdown shows actual options instead of forcing
+  // free-text entry. Best-effort — falls back to empty list (custom-only).
+  useEffect(() => {
+    if (activeSection !== "merge") return;
+    fetchGitBranches(projectId)
+      .then((branches) => {
+        const names = branches
+          .map((b) => b.name)
+          .filter((name): name is string => typeof name === "string" && name.length > 0);
+        // Dedup + sort, with common integration names first.
+        const seen = new Set<string>();
+        const priority = ["main", "master", "trunk", "develop"];
+        const ordered: string[] = [];
+        for (const name of priority) {
+          if (names.includes(name) && !seen.has(name)) {
+            ordered.push(name);
+            seen.add(name);
+          }
+        }
+        for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          ordered.push(name);
+        }
+        setIntegrationBranchOptions(ordered);
+      })
+      .catch(() => setIntegrationBranchOptions([]));
   }, [activeSection, projectId]);
 
   useEffect(() => {
@@ -4619,32 +4656,83 @@ export function SettingsModal({
             </div>
             <div className="form-group">
               <label htmlFor="integrationBranch">Integration branch</label>
-              <input
-                id="integrationBranch"
-                type="text"
-                className="input"
-                placeholder="auto-detect (origin/HEAD → main)"
-                value={form.integrationBranch ?? ""}
-                onChange={(e) => {
-                  const trimmed = e.target.value.trim();
-                  setForm((f) => ({
-                    ...f,
-                    integrationBranch: trimmed.length === 0 ? undefined : trimmed,
-                  }));
-                }}
-                data-testid="integration-branch-input"
-              />
+              {(() => {
+                const currentValue = form.integrationBranch ?? "";
+                const valueIsKnown = currentValue.length > 0 && integrationBranchOptions.includes(currentValue);
+                const isCustomMode = integrationBranchCustomMode || (currentValue.length > 0 && !valueIsKnown);
+                if (isCustomMode) {
+                  return (
+                    <div className="form-inline-group">
+                      <input
+                        id="integrationBranch"
+                        type="text"
+                        className="input"
+                        placeholder="branch name"
+                        value={currentValue}
+                        onChange={(e) => {
+                          const trimmed = e.target.value.trim();
+                          setForm((f) => ({
+                            ...f,
+                            integrationBranch: trimmed.length === 0 ? undefined : trimmed,
+                          }));
+                        }}
+                        data-testid="integration-branch-custom-input"
+                      />
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => {
+                          setIntegrationBranchCustomMode(false);
+                          setForm((f) => ({ ...f, integrationBranch: undefined }));
+                        }}
+                        data-testid="integration-branch-use-dropdown"
+                      >
+                        Use dropdown
+                      </button>
+                    </div>
+                  );
+                }
+                const CUSTOM = "__fusion-custom__";
+                const AUTO = "";
+                return (
+                  <select
+                    id="integrationBranch"
+                    className="select"
+                    value={currentValue}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === CUSTOM) {
+                        setIntegrationBranchCustomMode(true);
+                        return;
+                      }
+                      setForm((f) => ({
+                        ...f,
+                        integrationBranch: next === AUTO ? undefined : next,
+                      }));
+                    }}
+                    data-testid="integration-branch-select"
+                  >
+                    <option value={AUTO}>(auto-detect — origin/HEAD → main)</option>
+                    {integrationBranchOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value={CUSTOM}>Custom…</option>
+                  </select>
+                );
+              })()}
               <details className="settings-option-details">
                 <summary>More details</summary>
                 <small>
                   The canonical branch Fusion merges tasks into and uses as the reference for all
-                  ahead/behind / overlap / pre-rebase computations. Leave blank to auto-resolve
+                  ahead/behind / overlap / pre-rebase computations. Leave on <em>auto-detect</em>
+                  to resolve via the standard cascade
                   (<code>integrationBranch</code> → legacy <code>baseBranch</code> →
-                  <code>origin/HEAD</code> symbolic ref → fallback <code>main</code>). Set
-                  explicitly for projects whose default branch is <code>master</code>,
-                  <code>trunk</code>, <code>develop</code>, or any other name. Applies to both
-                  direct merges and pull-request mode; individual tasks can still override via
-                  task metadata.
+                  <code>origin/HEAD</code> symbolic ref → fallback <code>main</code>). Pick a
+                  local branch from the dropdown — common integration names like <code>main</code>,
+                  <code>master</code>, <code>trunk</code>, and <code>develop</code> are listed
+                  first — or choose <em>Custom…</em> to type a branch that doesn&apos;t exist
+                  locally yet. Applies to both direct merges and pull-request mode; individual
+                  tasks can still override via task metadata.
                 </small>
               </details>
             </div>

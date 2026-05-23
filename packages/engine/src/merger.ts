@@ -43,7 +43,7 @@ export {
   type VerificationResult,
 } from "./verification-utils.js";
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
@@ -461,7 +461,7 @@ async function syncDependenciesForMerge(
 interface InferredTestCommand {
   command: string;
   /** Source indicates whether this was explicitly configured or inferred from project files */
-  testSource: "explicit" | "inferred";
+  testSource: "explicit" | "inferred" | "inferred-scoped";
   buildSource?: "explicit" | "inferred";
 }
 
@@ -746,14 +746,199 @@ export async function classifyOwnedLandedEvidence(
 }
 
 /**
+ * Parse a pnpm-workspace.yaml file and return the list of package glob patterns.
+ * Handles only the `packages:` list format used in pnpm workspace configs.
+ * Returns an empty array on any parse failure (best-effort).
+ *
+ * @internal Exported for testing only.
+ */
+export function parsePnpmWorkspaceGlobs(workspaceYamlContent: string): string[] {
+  const globs: string[] = [];
+  let inPackages = false;
+  for (const rawLine of workspaceYamlContent.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (/^packages\s*:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages) {
+      // A new top-level key ends the packages block
+      if (/^\S/.test(line) && line.trim() !== "") {
+        break;
+      }
+      // List item: "  - 'some/glob'" or `  - "some/glob"` or `  - some/glob`
+      const match = line.match(/^\s+-\s+['"]?([^'"#\s]+)['"]?/);
+      if (match && match[1]) {
+        globs.push(match[1]);
+      }
+    }
+  }
+  return globs;
+}
+
+/**
+ * Given a list of workspace package globs (e.g. "packages/*") and a rootDir,
+ * return all package root directories (dirs that contain a package.json) that
+ * match at least one glob.
+ *
+ * Glob matching: only simple single-star patterns at the last path segment are
+ * supported (covering the `packages/*` and `plugins/examples/*` patterns used
+ * in practice). Literal paths (no glob) are treated as direct package roots.
+ *
+ * @internal Exported for testing only.
+ */
+export function resolveWorkspacePackageRoots(
+  rootDir: string,
+  globs: string[],
+): string[] {
+  const roots: string[] = [];
+  for (const glob of globs) {
+    const starIdx = glob.indexOf("*");
+    if (starIdx === -1) {
+      // Literal path — treat the glob itself as a package root
+      const candidate = join(rootDir, glob);
+      if (existsSync(join(candidate, "package.json"))) {
+        roots.push(glob); // Store relative to rootDir
+      }
+      continue;
+    }
+    // Pattern like "packages/*" or "plugins/examples/*"
+    // The prefix is everything before the last slash before the star
+    const prefix = glob.slice(0, starIdx);
+    const parentDir = join(rootDir, prefix.replace(/\/$/, ""));
+    let entries: string[];
+    try {
+      entries = readdirSync(parentDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const relPath = `${prefix.replace(/\/$/, "")}/${entry}`;
+      const absPath = join(rootDir, relPath);
+      if (existsSync(join(absPath, "package.json"))) {
+        roots.push(relPath); // Store relative to rootDir
+      }
+    }
+  }
+  return roots;
+}
+
+/**
+ * Given a list of changed files (relative to rootDir) and a list of package
+ * root paths (relative to rootDir), return the unique package names (from each
+ * package.json's "name" field) whose root is the longest prefix-match for at
+ * least one changed file.
+ *
+ * @internal Exported for testing only.
+ */
+export function mapChangedFilesToPackageNames(
+  changedFiles: string[],
+  packageRoots: string[],
+  rootDir: string,
+): string[] {
+  const nameSet = new Set<string>();
+  for (const file of changedFiles) {
+    // Find the longest package root that is a prefix of this file
+    let bestRoot: string | null = null;
+    let bestLen = -1;
+    for (const pkgRoot of packageRoots) {
+      const prefix = pkgRoot.endsWith("/") ? pkgRoot : `${pkgRoot}/`;
+      if (file === pkgRoot || file.startsWith(prefix)) {
+        if (pkgRoot.length > bestLen) {
+          bestLen = pkgRoot.length;
+          bestRoot = pkgRoot;
+        }
+      }
+    }
+    if (bestRoot !== null) {
+      // Read the package name from package.json
+      try {
+        const pkgJsonPath = join(rootDir, bestRoot, "package.json");
+        const raw = readFileSync(pkgJsonPath, "utf-8");
+        const parsed = JSON.parse(raw) as { name?: string };
+        if (parsed.name) {
+          nameSet.add(parsed.name);
+        }
+      } catch {
+        // If we can't read the package name, use the relative root path
+        nameSet.add(bestRoot);
+      }
+    }
+  }
+  return Array.from(nameSet);
+}
+
+/**
+ * Attempt to derive the set of pnpm package names touched by the branch.
+ * Returns null when scoping cannot be determined (missing git context, no
+ * workspace file, root-only changes, etc.) — callers fall back to `pnpm test`.
+ *
+ * @internal Exported for testing only.
+ */
+export function deriveScopedPnpmTestCommand(
+  rootDir: string,
+  baseBranch: string,
+  branch: string,
+): string | null {
+  // 1. Read and parse pnpm-workspace.yaml
+  const workspacePath = join(rootDir, "pnpm-workspace.yaml");
+  let workspaceContent: string;
+  try {
+    workspaceContent = readFileSync(workspacePath, "utf-8");
+  } catch {
+    return null;
+  }
+  const globs = parsePnpmWorkspaceGlobs(workspaceContent);
+  if (globs.length === 0) return null;
+
+  // 2. Resolve actual package roots
+  const packageRoots = resolveWorkspacePackageRoots(rootDir, globs);
+  if (packageRoots.length === 0) return null;
+
+  // 3. Get the changed files between base and branch tip
+  let changedFilesOutput: string;
+  try {
+    changedFilesOutput = execSync(
+      `git diff --name-only ${quoteArg(baseBranch)}...HEAD`,
+      { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
+    ).toString();
+  } catch {
+    return null;
+  }
+  const changedFiles = changedFilesOutput
+    .split("\n")
+    .map((f) => f.trim())
+    .filter(Boolean);
+  if (changedFiles.length === 0) return null;
+
+  // 4. Map changed files to package names
+  const packageNames = mapChangedFilesToPackageNames(changedFiles, packageRoots, rootDir);
+  if (packageNames.length === 0) {
+    // All changes are at the root (e.g. workspace config) — fall back to full suite
+    return null;
+  }
+
+  // 5. Compose the scoped pnpm command
+  // `...^` includes dependents (packages that import the changed packages)
+  const filters = packageNames.map((name) => `--filter "${name}...^"`).join(" ");
+  return `pnpm ${filters} test`;
+}
+
+/**
  * Infer a default test command based on project files.
  * Returns the command and whether it was explicitly configured or inferred.
  *
  * Inference rules:
- * - pnpm-lock.yaml → "pnpm test"
+ * - pnpm-lock.yaml → "pnpm test" (or scoped when monorepo + git context available)
  * - yarn.lock → "yarn test"
  * - bun.lock/bun.lockb → "bun test"
  * - package-lock.json → "npm test"
+ *
+ * When a pnpm workspace is detected and git context (baseBranch + branch) is
+ * provided, the command is automatically scoped to the packages touched by the
+ * branch diff. testSource will be "inferred-scoped" in that case.
  *
  * Returns null if no test command can be inferred.
  */
@@ -761,6 +946,8 @@ export function inferDefaultTestCommand(
   rootDir: string,
   explicitTestCommand?: string,
   explicitBuildCommand?: string,
+  baseBranch?: string,
+  branch?: string,
 ): InferredTestCommand | null {
   // If explicit test command is set, use it (no inference needed)
   if (explicitTestCommand?.trim()) {
@@ -771,49 +958,46 @@ export function inferDefaultTestCommand(
     };
   }
 
+  const buildSource = explicitBuildCommand?.trim() ? "explicit" : undefined;
+
   // Infer test command from lock files
   if (existsSync(join(rootDir, "pnpm-lock.yaml"))) {
-    // Monorepo heuristic: a pnpm-workspace.yaml means `pnpm test` will fan out
-    // across every workspace package on every merge, which is usually far slower
-    // than necessary. Warn so the user sets an explicit scoped testCommand
-    // (e.g. `pnpm -r --filter "...[main]" test`). We don't auto-scope because
-    // the default branch name isn't guaranteed and git context may be unavailable.
+    // Monorepo heuristic: if pnpm-workspace.yaml exists and we have git context,
+    // scope the command to only the packages touched by this branch's diff.
     if (existsSync(join(rootDir, "pnpm-workspace.yaml"))) {
+      if (baseBranch?.trim() && branch?.trim()) {
+        try {
+          const scoped = deriveScopedPnpmTestCommand(rootDir, baseBranch.trim(), branch.trim());
+          if (scoped) {
+            mergerLog.log(
+              `Scoped inferred test command to changed packages: ${scoped}`,
+            );
+            return { command: scoped, testSource: "inferred-scoped", buildSource };
+          }
+        } catch {
+          // Fall through to unscoped fallback
+        }
+      }
+      // No git context or scoping failed — warn and use unscoped
       mergerLog.warn(
         `Inferred test command "pnpm test" in a pnpm workspace (${rootDir}). ` +
         `This runs the full monorepo suite on every merge. Consider setting an explicit ` +
         `scoped testCommand in project settings, e.g. \`pnpm -r --filter "...[main]" test\`.`,
       );
     }
-    return {
-      command: "pnpm test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "pnpm test", testSource: "inferred", buildSource };
   }
 
   if (existsSync(join(rootDir, "yarn.lock"))) {
-    return {
-      command: "yarn test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "yarn test", testSource: "inferred", buildSource };
   }
 
   if (existsSync(join(rootDir, "bun.lock")) || existsSync(join(rootDir, "bun.lockb"))) {
-    return {
-      command: "bun test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "bun test", testSource: "inferred", buildSource };
   }
 
   if (existsSync(join(rootDir, "package-lock.json"))) {
-    return {
-      command: "npm test",
-      testSource: "inferred",
-      buildSource: explicitBuildCommand?.trim() ? "explicit" : undefined,
-    };
+    return { command: "npm test", testSource: "inferred", buildSource };
   }
 
   // No inference possible — return null, letting the caller decide what to do
@@ -974,7 +1158,7 @@ async function runDeterministicVerification(
   taskId: string,
   testCommand?: string,
   buildCommand?: string,
-  testSource?: "explicit" | "inferred",
+  testSource?: "explicit" | "inferred" | "inferred-scoped",
   buildSource?: "explicit" | "inferred",
   signal?: AbortSignal,
 ): Promise<VerificationResult> {
@@ -1027,7 +1211,7 @@ async function runDeterministicVerification(
   // ── End cache lookup ───────────────────────────────────────────────────
 
   // Build source indicator for logging
-  const testSourceLabel = testSource === "inferred" ? " [inferred]" : "";
+  const testSourceLabel = (testSource === "inferred" || testSource === "inferred-scoped") ? ` [${testSource}]` : "";
   const buildSourceLabel = buildSource === "inferred" ? " [inferred]" : "";
 
   mergerLog.log(
@@ -1035,9 +1219,10 @@ async function runDeterministicVerification(
     (hasTestCommand ? ` [test:${testSourceLabel} ${normalizedTestCommand}]` : "") +
     (hasBuildCommand ? ` [build:${buildSourceLabel} ${normalizedBuildCommand}]` : ""),
   );
+  const testSourceDisplayLabel = (testSource === "inferred" || testSource === "inferred-scoped") ? ` [${testSource}]` : "";
   const deterministicVerificationMessage =
     "Running deterministic merge verification" +
-    (hasTestCommand ? ` (test${testSource === "inferred" ? " [inferred]" : ""}: ${normalizedTestCommand})` : "") +
+    (hasTestCommand ? ` (test${testSourceDisplayLabel}: ${normalizedTestCommand})` : "") +
     (hasBuildCommand ? ` (build${buildSource === "inferred" ? " [inferred]" : ""}: ${normalizedBuildCommand})` : "");
   await store.logEntry(taskId, deterministicVerificationMessage);
   await store.appendAgentLog(taskId, deterministicVerificationMessage, "text", undefined, "merger");
@@ -1283,7 +1468,7 @@ async function attemptInMergeVerificationFix(
   fixAttemptNumber?: number,
   testCommand?: string,
   buildCommand?: string,
-  testSource?: "explicit" | "inferred",
+  testSource?: "explicit" | "inferred" | "inferred-scoped",
   buildSource?: "explicit" | "inferred",
   fixModifiedFiles?: Set<string>,
 ): Promise<boolean> {
@@ -5019,7 +5204,7 @@ async function applyBranchCommitsPreservingHistory(params: {
   result: MergeResult;
   testCommand?: string;
   buildCommand?: string;
-  testSource?: "explicit" | "inferred";
+  testSource?: "explicit" | "inferred" | "inferred-scoped";
   buildSource?: "explicit" | "inferred";
   signal?: AbortSignal;
 }): Promise<{ landedCommitCount: number; landedCommitShas: string[]; baseSha: string; fullySubsumedByMain: boolean; skippedEmptyCount: number }> {
@@ -8281,8 +8466,15 @@ export async function aiMergeTask(
   const explicitBuildCommand = settings.buildCommand?.trim() || undefined;
 
   // Infer default test command if explicit testCommand is not set
-  // This ensures merge verification runs even when settings.testCommand is not configured
-  const inferredTest = inferDefaultTestCommand(rootDir, explicitTestCommand, explicitBuildCommand);
+  // This ensures merge verification runs even when settings.testCommand is not configured.
+  // Thread baseBranch + branch so pnpm workspaces can be scoped to changed packages.
+  const inferredTest = inferDefaultTestCommand(
+    rootDir,
+    explicitTestCommand,
+    explicitBuildCommand,
+    mergeTarget.branch,
+    branch,
+  );
   const effectiveTestCommand = inferredTest?.command || explicitTestCommand;
   const effectiveTestSource = inferredTest?.testSource;
   const effectiveBuildCommand = explicitBuildCommand;
@@ -9632,8 +9824,8 @@ interface MergeAttemptParams {
   mergeTargetBranch?: string;
   testCommand?: string;
   buildCommand?: string;
-  /** Source of the test command: 'explicit' from settings or 'inferred' from project files */
-  testSource?: "explicit" | "inferred";
+  /** Source of the test command: 'explicit' from settings or 'inferred'/'inferred-scoped' from project files */
+  testSource?: "explicit" | "inferred" | "inferred-scoped";
   /** Source of the build command: 'explicit' from settings or 'inferred' (future use) */
   buildSource?: "explicit" | "inferred";
   /** Set when the pre-merge rebase recovery cascade (Layers 1–2) failed and

@@ -221,6 +221,41 @@ export type GitMutationType =
    */
   | "merge:integration-ref-advance"
   /**
+   * Emitted by the merger's post-ref-advance auto-sync hook for each other
+   * worktree it attempts to fast-forward (typically the user's project-root
+   * checkout). Records the per-worktree outcome of the
+   * `mergeAdvanceAutoSync` pipeline (`stash → ff → pop`, or pure `ff-only`).
+   * Per-worktree `pull:fast-forward`, `stash:push`, `stash:pop`, and
+   * `stash:pop-conflict` events are still emitted in addition, with
+   * `metadata.autoSync = true` so downstream consumers can attribute them.
+   *
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   integrationBranch: string;
+   *   mode: "ff-only" | "stash-and-ff";
+   *   newSha?: string;
+   *   worktreePath?: string;
+   *   outcome:
+   *     | "clean-pull"
+   *     | "stash-pull-pop"
+   *     | "stash-pop-conflict"
+   *     | "skipped-dirty"
+   *     | "skipped-not-on-branch"
+   *     | "failed"
+   *     | "enumeration-failed"
+   *     | "exception";
+   *   stashSha?: string;
+   *   stashLabel?: string;
+   *   conflictedFiles?: string[];
+   *   stage?: "stash" | "pull" | "pop";
+   *   error?: string;
+   * }
+   * ```
+   */
+  | "merge:auto-sync"
+  /**
    * Emitted when contamination recovery detects a foreign commit attributable
    * to a `done` task that is not reachable from the integration branch — an
    * orphan produced by a pre-fix non-FF ref advance. `merger:orphan-rehome-ff`

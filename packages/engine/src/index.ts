@@ -63,6 +63,14 @@ export {
   type SmartPullAuditEmitter,
 } from "./smart-pull.js";
 export {
+  syncWorktreeToHead,
+  type SyncWorktreeInput,
+  type SyncWorktreeResult,
+  type SyncMode,
+  type WorktreeSyncAuditEvent,
+  type WorktreeSyncAuditEmitter,
+} from "./worktree-ref-sync.js";
+export {
   generateSyntheticRunId,
 } from "./run-audit.js";
 export {

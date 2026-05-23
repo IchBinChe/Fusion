@@ -518,19 +518,19 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const limit = parseMergeAdvanceLimit(req.query.limit);
-      const getRunAuditEvents = (scopedStore as TaskStore & {
+      const storeWithRunAudit = scopedStore as TaskStore & {
         getRunAuditEvents?: (filters: {
           taskId?: string;
           domain?: "database" | "git" | "filesystem" | "sandbox";
           mutationType?: string;
           limit?: number;
         }) => RunAuditEvent[];
-      }).getRunAuditEvents;
-      if (typeof getRunAuditEvents !== "function") {
+      };
+      if (typeof storeWithRunAudit.getRunAuditEvents !== "function") {
         throw notFound("run-audit unavailable");
       }
 
-      const advanceEvents = getRunAuditEvents({
+      const advanceEvents = storeWithRunAudit.getRunAuditEvents({
         domain: "git",
         mutationType: "merge:integration-ref-advance",
         limit,
@@ -544,7 +544,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         }
 
         let userCheckout: MergeAdvanceEvent["userCheckout"] = null;
-        const stateEvents = getRunAuditEvents({
+        const stateEvents = storeWithRunAudit.getRunAuditEvents({
           taskId: extracted.taskId,
           domain: "git",
           mutationType: "merge:integration-worktree-state",

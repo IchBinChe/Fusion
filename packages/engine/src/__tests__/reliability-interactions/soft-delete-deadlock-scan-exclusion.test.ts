@@ -58,7 +58,7 @@ function createStore(tasks: TestTask[], leakDeleted = false) {
   return store as any;
 }
 
-describe("reliability interactions: FN-5528 soft-delete deadlock scan exclusion", () => {
+describe("reliability interactions: FN-5566/FN-5528 soft-delete deadlock scan exclusion", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-22T02:00:00.000Z"));

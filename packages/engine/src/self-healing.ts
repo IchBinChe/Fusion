@@ -801,6 +801,7 @@ export class SelfHealingManager {
       { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
       { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks().then(() => undefined) },
       { name: "recover-drifted-agent-task-links", fn: () => this.recoverDriftedAgentTaskLinks().then(() => undefined) },
+      { name: "reconcile-soft-delete-column-drift", fn: () => this.reconcileSoftDeletedColumnDrift().then(() => undefined) },
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
       { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies().then(() => undefined) },
       { name: "reconcile-dependency-cycles", fn: () => this.reconcileDependencyCycles().then(() => undefined) },
@@ -1458,6 +1459,7 @@ export class SelfHealingManager {
           { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
           { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks() },
           { name: "recover-drifted-agent-task-links", fn: () => this.recoverDriftedAgentTaskLinks() },
+          { name: "reconcile-soft-delete-column-drift", fn: () => this.reconcileSoftDeletedColumnDrift() },
           { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy() },
           { name: "auto-rebound-paused-scope-decay", fn: () => this.autoReboundPausedScopeDecay() },
           { name: "auto-archive-meta-resolved", fn: () => this.autoArchiveResolvedMetaTasks() },
@@ -3607,6 +3609,48 @@ export class SelfHealingManager {
     this.lastDbCorruptionNotifiedAt = now;
   }
 
+  async reconcileSoftDeletedColumnDrift(): Promise<{ reconciled: number }> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return { reconciled: 0 };
+
+      const db = this.store.getDatabase();
+      // FN-5147 invariant: only rows with deletedAt are eligible, so live
+      // in-review tasks (including autoMerge: false workflows) are never moved.
+      const candidates = db.prepare("SELECT id, \"column\" AS column FROM tasks WHERE deletedAt IS NOT NULL AND \"column\" != 'archived'").all() as Array<{ id: string; column: Task["column"] }>;
+      if (candidates.length === 0) return { reconciled: 0 };
+
+      let reconciled = 0;
+      const now = new Date().toISOString();
+      const auditor = createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("fn5566-soft-delete-column", "global"),
+        agentId: "self-healing",
+        phase: "reconcile-soft-delete-column-drift",
+      });
+
+      for (const candidate of candidates) {
+        db.prepare("UPDATE tasks SET \"column\" = 'archived', updatedAt = ? WHERE id = ?").run(now, candidate.id);
+        await auditor.database({
+          type: "task:soft-delete-column-reconciled",
+          target: candidate.id,
+          metadata: { previousColumn: candidate.column },
+        });
+        log.log(`[self-heal] reconcile-soft-delete-column-drift: ${candidate.id} previous=${candidate.column} → archived`);
+        reconciled++;
+      }
+
+      if (reconciled > 0) {
+        db.bumpLastModified();
+      }
+
+      return { reconciled };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`reconcileSoftDeletedColumnDrift: failed: ${message}`);
+      return { reconciled: 0 };
+    }
+  }
+
   async clearStaleBlockedBy(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
@@ -3888,6 +3932,7 @@ export class SelfHealingManager {
     const seenCycleSignatures = new Set<string>();
 
     for (const task of tasks) {
+      if (task.deletedAt) continue;
       if (!task.dependencies.length) continue;
 
       try {
@@ -5461,6 +5506,7 @@ export class SelfHealingManager {
 
       let recovered = 0;
       for (const task of candidates) {
+        if (task.deletedAt) continue;
         const blockedDependents = dependentsByBlocker.get(task.id) ?? [];
         const blockedTaskIds = blockedDependents.map((dep) => dep.id);
         try {

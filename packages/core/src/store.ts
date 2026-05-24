@@ -6824,9 +6824,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       let rewrittenDependents: Task[] = [];
+      let rewrittenBlockedByResidueDependents: Task[] = [];
       let rewrittenLineageChildren: Task[] = [];
       this.db.transaction(() => {
         rewrittenDependents = this.rewriteDependentsForRemoval(id, dependentIds);
+        rewrittenBlockedByResidueDependents = this.rewriteBlockedByResidueDependentsForRemoval(id, new Set(dependentIds));
         rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
         const deletedAt = new Date().toISOString();
         const allowResurrection = options?.allowResurrection === true ? 1 : 0;
@@ -6873,6 +6875,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       for (const dependentTask of rewrittenDependents) {
         this.emit("task:updated", dependentTask);
       }
+      for (const dependentTask of rewrittenBlockedByResidueDependents) {
+        this.emit("task:updated", dependentTask);
+      }
       for (const lineageChild of rewrittenLineageChildren) {
         this.emit("task:updated", lineageChild);
       }
@@ -6901,21 +6906,77 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (!dependentTask) continue;
 
       const nextDependencies = dependentTask.dependencies.filter((dependencyId) => dependencyId !== taskId);
-      if (nextDependencies.length === dependentTask.dependencies.length) {
+      const clearsBlockedBy = dependentTask.blockedBy === taskId;
+      if (nextDependencies.length === dependentTask.dependencies.length && !clearsBlockedBy) {
         continue;
       }
 
-      const updatedDependent = {
+      const updatedLog = clearsBlockedBy
+        ? [
+          ...(dependentTask.log ?? []),
+          {
+            timestamp: new Date().toISOString(),
+            action: `Auto-unblocked: blocker ${taskId} was soft-deleted`,
+          },
+        ]
+        : dependentTask.log;
+      const updatedDependent: Task = {
         ...dependentTask,
         dependencies: nextDependencies,
+        blockedBy: clearsBlockedBy ? undefined : dependentTask.blockedBy,
+        status: clearsBlockedBy ? undefined : dependentTask.status,
+        log: updatedLog,
         updatedAt: new Date().toISOString(),
       };
 
-      this.db.prepare("UPDATE tasks SET dependencies = ?, updatedAt = ? WHERE id = ?").run(
+      this.db.prepare("UPDATE tasks SET dependencies = ?, blockedBy = ?, status = ?, log = ?, updatedAt = ? WHERE id = ?").run(
         toJson(updatedDependent.dependencies),
+        updatedDependent.blockedBy ?? null,
+        updatedDependent.status ?? null,
+        toJson(updatedDependent.log ?? []),
         updatedDependent.updatedAt,
         updatedDependent.id,
       );
+      if (this.isWatching) {
+        this.taskCache.set(updatedDependent.id, updatedDependent);
+      }
+      rewrittenDependents.push(updatedDependent);
+    }
+
+    return rewrittenDependents;
+  }
+
+  private rewriteBlockedByResidueDependentsForRemoval(taskId: string, excludedDependentIds: Set<string>): Task[] {
+    const rewrittenDependents: Task[] = [];
+    const candidates = this.db
+      .prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND blockedBy = ?`)
+      .all(taskId) as Array<{ id: string }>;
+
+    for (const candidate of candidates) {
+      if (excludedDependentIds.has(candidate.id)) continue;
+      const dependentTask = this.readTaskFromDb(candidate.id);
+      if (!dependentTask || dependentTask.blockedBy !== taskId) continue;
+
+      const updatedDependent: Task = {
+        ...dependentTask,
+        blockedBy: undefined,
+        status: undefined,
+        log: [
+          ...(dependentTask.log ?? []),
+          {
+            timestamp: new Date().toISOString(),
+            action: `Auto-unblocked: blocker ${taskId} was soft-deleted`,
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db.prepare("UPDATE tasks SET blockedBy = NULL, status = NULL, log = ?, updatedAt = ? WHERE id = ?").run(
+        toJson(updatedDependent.log ?? []),
+        updatedDependent.updatedAt,
+        updatedDependent.id,
+      );
+
       if (this.isWatching) {
         this.taskCache.set(updatedDependent.id, updatedDependent);
       }

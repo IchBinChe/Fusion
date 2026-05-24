@@ -418,6 +418,7 @@ export type DatabaseMutationType =
   | "task:auto-archived-ghost-bug"
   | "task:auto-archived-duplicate"
   | "task:auto-reconciled-self-defeating-dep"
+  | "task:soft-delete-column-reconciled"
   | "task:dependency-cycle-rejected"
   | "task:dependency-cycle-detected"
   | "task:auto-reconciled-dependency-cycle"

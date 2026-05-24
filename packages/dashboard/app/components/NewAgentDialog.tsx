@@ -736,12 +736,16 @@ export function NewAgentDialog({
                 Review your agent configuration before creating.
               </p>
               <div className="agent-dialog-summary">
-                <div className="agent-dialog-summary-row">
-                  <span className="agent-dialog-summary-row-label">Name</span>
-                  <span className="agent-dialog-summary-row-value">
-                    {icon && <span className="agent-dialog-icon-prefix">{icon}</span>}
-                    {name}
-                  </span>
+                  <div className="agent-dialog-summary-row agent-dialog-summary-row--editable">
+                  <label className="agent-dialog-summary-row-label" htmlFor="agent-review-name">Name</label>
+                  <input
+                    id="agent-review-name"
+                    type="text"
+                    className="input"
+                    placeholder="e.g. Frontend Reviewer"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                  />
                 </div>
                 <div className="agent-dialog-summary-row agent-dialog-summary-row--editable agent-dialog-summary-row--title">
                   <label className="agent-dialog-summary-row-label" htmlFor="agent-review-title">Title</label>

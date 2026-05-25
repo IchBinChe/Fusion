@@ -74,6 +74,8 @@ describe("FN-4973 reliability interactions: stale self-owned active-session reco
     store.listTasks.mockResolvedValue([]);
     const executor = new TaskExecutor(store, "/tmp/test");
     activeSessionRegistry.registerPath(CONFLICT_PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
+    // FN-5256: backdate so the new min-idle window doesn't refuse the reconcile.
+    (activeSessionRegistry.lookupByPath(CONFLICT_PATH) as any).registeredAt = 0;
 
     vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
 

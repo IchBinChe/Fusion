@@ -378,10 +378,6 @@ export function createMissionRouter(
         throw badRequest("missionTitle is required and must be a non-empty string");
       }
 
-      if (missionTitle.length > 500) {
-        throw badRequest("missionTitle must be 500 characters or less");
-      }
-
       // Validate model parameters - if one is provided, both must be provided
       if (modelProvider !== undefined && typeof modelProvider !== "string") {
         throw badRequest("modelProvider must be a string when provided");

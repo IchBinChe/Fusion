@@ -1,4 +1,4 @@
-import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch } from "@fusion/core";
+import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, buildManualRetryResetPatch, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch } from "@fusion/core";
 import { aiMergeTask } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
@@ -1009,8 +1009,7 @@ export async function runTaskRetry(id: string, projectName?: string) {
     branch: null,
     baseBranch: null,
     baseCommitSha: null,
-    recoveryRetryCount: null,
-    nextRecoveryAt: null,
+    ...buildManualRetryResetPatch({ resetMergeRetries: true }),
   });
   
   // Move to todo column
@@ -1024,7 +1023,7 @@ export async function runTaskRetry(id: string, projectName?: string) {
   console.log();
 }
 
-export async function runTaskDelete(id: string, force?: boolean, projectName?: string) {
+export async function runTaskDelete(id: string, force?: boolean, allowResurrection?: boolean, projectName?: string) {
   const store = await getStore(projectName);
 
   // Check if task exists first
@@ -1052,6 +1051,7 @@ export async function runTaskDelete(id: string, force?: boolean, projectName?: s
 
   try {
     await store.deleteTask(id, {
+      allowResurrection: allowResurrection === true,
       auditContext: {
         agentId: "cli",
         runId: `synthetic-cli-delete-${id}-${Date.now()}`,

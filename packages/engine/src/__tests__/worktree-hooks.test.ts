@@ -32,6 +32,23 @@ describe("worktree-hooks", () => {
     expect(hook).toContain(`EXPECTED_BRANCH=\"${expectedBranch}\"`);
   });
 
+  it("honors the merger bypass marker on detached HEAD before computing EXPECTED_BRANCH", () => {
+    const hook = buildIdentityGuardHook("FN-5483");
+    const bypassIndex = hook.indexOf('FUSION_MERGER_BYPASS_IDENTITY_GUARD:-');
+    const expectedBranchIndex = hook.indexOf('EXPECTED_BRANCH=');
+    const refuseIndex = hook.indexOf('refusing commit');
+
+    expect(bypassIndex).toBeGreaterThan(-1);
+    // bypass check must come before the branch comparison and before the refusal printf
+    expect(bypassIndex).toBeLessThan(expectedBranchIndex);
+    expect(bypassIndex).toBeLessThan(refuseIndex);
+    // bypass must require the exact value "1" — not a non-empty truthy check
+    expect(hook).toContain('"${FUSION_MERGER_BYPASS_IDENTITY_GUARD:-}" = "1"');
+    // bypass arm must short-circuit with exit 0 before reaching the refusal path
+    const bypassBlock = hook.slice(bypassIndex, expectedBranchIndex);
+    expect(bypassBlock).toContain("exit 0");
+  });
+
   it("builds commit-msg trailer hook with expected lines", () => {
     const hook = buildCommitMsgTrailerHook("FN-42");
     expect(hook).toContain("#!/bin/sh");

@@ -39,6 +39,10 @@ function assertIsolatedWorkspace(dir: string): void {
   expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
 }
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 const STUB_SETTINGS = {
   ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
@@ -49,7 +53,7 @@ describe("commitOrAmendMergeWithFixes no-op finalize", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-noop-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-noop-"));
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });

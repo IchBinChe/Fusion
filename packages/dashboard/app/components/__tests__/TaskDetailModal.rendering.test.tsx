@@ -333,6 +333,116 @@ describe("TaskDetailModal", () => {
     expect(screen.queryByText("File scope overlap blocker: FN-OVER (stale)")).toBeNull();
   });
 
+  it("renders clear overlap blocker button only when overlapBlockedBy is present", () => {
+    const { rerender } = render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: "FN-OVER" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
+
+    rerender(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: undefined })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+  });
+
+  it("clears overlap blocker and queued status when clicking Clear", async () => {
+    vi.mocked(dashboardApi.updateTask).mockResolvedValueOnce(
+      makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: undefined, status: undefined }),
+    );
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: "FN-OVER", status: "queued" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => {
+      expect(dashboardApi.updateTask).toHaveBeenCalledWith(
+        "FN-T",
+        { overlapBlockedBy: null, status: null },
+        undefined,
+      );
+    });
+  });
+
+  it("clears overlap blocker without status clear when task is not queued", async () => {
+    vi.mocked(dashboardApi.updateTask).mockResolvedValueOnce(
+      makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: undefined }),
+    );
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: "FN-OVER", status: "planning" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => {
+      expect(dashboardApi.updateTask).toHaveBeenCalledWith(
+        "FN-T",
+        { overlapBlockedBy: null, status: undefined },
+        undefined,
+      );
+    });
+  });
+
+  it("shows toast and restores overlap blocker when clear fails", async () => {
+    const addToast = vi.fn();
+    vi.mocked(dashboardApi.updateTask).mockRejectedValueOnce(new Error("boom"));
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-T", column: "todo", overlapBlockedBy: "FN-OVER", status: "queued" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={addToast}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith("boom", "error");
+    });
+    expect(screen.getByText("File scope overlap blocker: FN-OVER (stale)")).toBeInTheDocument();
+  });
+
   it("shows overlap blockedBy summary in Blocking section", () => {
     render(
       <TaskDetailModal

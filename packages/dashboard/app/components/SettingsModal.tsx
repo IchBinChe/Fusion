@@ -11,9 +11,10 @@ import {
   resolveProjectDefaultModel,
   resolveTitleSummarizerSettingsModel,
   normalizeMergeIntegrationWorktreeMode,
+  normalizeMergeAdvanceAutoSyncMode,
 } from "@fusion/core";
 import type { AgentPermissionPolicyRules, Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, NtfyNotificationEvent, AgentPromptsConfig, ThinkingLevel } from "@fusion/core";
-import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
+import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, updateRemoteSettings, fetchRemoteStatus, installCloudflared, startRemoteTunnel, stopRemoteTunnel, killExternalTunnel, regenerateRemotePersistentToken, generateShortLivedRemoteToken, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteSettings, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -443,6 +444,7 @@ export function SettingsModal({
     autoMerge: true,
     mergeStrategy: "direct",
     mergeIntegrationWorktree: "reuse-task-worktree",
+    mergeAdvanceAutoSync: "stash-and-ff",
     recycleWorktrees: false,
     executorAllowSiblingBranchRename: false,
     worktreeNaming: "random",
@@ -577,6 +579,10 @@ export function SettingsModal({
   const [manualCodeSubmitInProgress, setManualCodeSubmitInProgress] = useState<string | null>(null);
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
   const [apiKeyErrors, setApiKeyErrors] = useState<Record<string, string>>({});
+  const [opencodeApiKeyRefreshStatus, setOpencodeApiKeyRefreshStatus] = useState<Record<string, {
+    tone: "success" | "error";
+    message: string;
+  }>>({});
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastAutoCopiedDeviceCodesRef = useRef<Record<string, string>>({});
 
@@ -615,6 +621,13 @@ export function SettingsModal({
   // Git remotes for the worktree rebase dropdown. Loaded lazily; empty list
   // is a valid state (fresh repo, no remotes configured yet).
   const [gitRemotes, setGitRemotes] = useState<GitRemoteDetailed[]>([]);
+  // Branch list for the Integration branch dropdown. Loaded lazily when the
+  // merge section becomes visible. Empty list is a valid state (fresh repo /
+  // permissions issue); the UI falls back to allowing custom free-text entry.
+  const [integrationBranchOptions, setIntegrationBranchOptions] = useState<string[]>([]);
+  // Sticky toggle: once the user picks "Custom..." we keep them in text-input
+  // mode even when the typed value happens to match an existing branch.
+  const [integrationBranchCustomMode, setIntegrationBranchCustomMode] = useState(false);
   const [projectTrackingRepoOptions, setProjectTrackingRepoOptions] = useState<TrackingRepoOption[]>([]);
   const [projectTrackingRepoLoading, setProjectTrackingRepoLoading] = useState(false);
   const [projectTrackingRepoError, setProjectTrackingRepoError] = useState<string | null>(null);
@@ -684,6 +697,7 @@ export function SettingsModal({
         const normalizedSettings = {
           ...s,
           mergeIntegrationWorktree: normalizeMergeIntegrationWorktreeMode(s.mergeIntegrationWorktree),
+          mergeAdvanceAutoSync: normalizeMergeAdvanceAutoSyncMode(s.mergeAdvanceAutoSync),
         };
         setForm(normalizedSettings);
         setInitialValues(normalizedSettings); // Store initial values to detect explicit clears
@@ -695,6 +709,9 @@ export function SettingsModal({
             mergeIntegrationWorktree: scoped.project.mergeIntegrationWorktree === undefined
               ? undefined
               : normalizeMergeIntegrationWorktreeMode(scoped.project.mergeIntegrationWorktree),
+            mergeAdvanceAutoSync: scoped.project.mergeAdvanceAutoSync === undefined
+              ? undefined
+              : normalizeMergeAdvanceAutoSyncMode(scoped.project.mergeAdvanceAutoSync),
           },
         }); // Store initial scoped values for null-as-delete
         setLoading(false);
@@ -964,6 +981,36 @@ export function SettingsModal({
     fetchGitRemotesDetailed(projectId)
       .then((remotes) => setGitRemotes(remotes))
       .catch(() => setGitRemotes([]));
+  }, [activeSection, projectId]);
+
+  // Load local branch list when the merge section becomes visible, so the
+  // Integration branch dropdown shows actual options instead of forcing
+  // free-text entry. Best-effort — falls back to empty list (custom-only).
+  useEffect(() => {
+    if (activeSection !== "merge") return;
+    fetchGitBranches(projectId)
+      .then((branches) => {
+        const names = branches
+          .map((b) => b.name)
+          .filter((name): name is string => typeof name === "string" && name.length > 0);
+        // Dedup + sort, with common integration names first.
+        const seen = new Set<string>();
+        const priority = ["main", "master", "trunk", "develop"];
+        const ordered: string[] = [];
+        for (const name of priority) {
+          if (names.includes(name) && !seen.has(name)) {
+            ordered.push(name);
+            seen.add(name);
+          }
+        }
+        for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          ordered.push(name);
+        }
+        setIntegrationBranchOptions(ordered);
+      })
+      .catch(() => setIntegrationBranchOptions([]));
   }, [activeSection, projectId]);
 
   useEffect(() => {
@@ -1358,17 +1405,60 @@ export function SettingsModal({
       return next;
     });
     try {
-      await saveApiKey(providerId, key);
+      const saveResult = await saveApiKey(providerId, key);
       setApiKeyInputs((prev) => {
         const next = { ...prev };
         delete next[providerId];
         return next;
       });
       await loadAuthStatus();
+      if (providerId === "opencode" || providerId === "opencode-go") {
+        const modelsRefreshed = saveResult.modelsRefreshed;
+        const refreshReason = saveResult.refreshReason;
+        const refreshError = saveResult.refreshError;
+        if (refreshError) {
+          setOpencodeApiKeyRefreshStatus((prev) => ({
+            ...prev,
+            [providerId]: {
+              tone: "error",
+              message: `Saved, but model refresh failed: ${refreshError}. Make sure the \`opencode\` CLI is installed on PATH.`,
+            },
+          }));
+        } else if (refreshReason === "no-models-from-cli") {
+          setOpencodeApiKeyRefreshStatus((prev) => ({
+            ...prev,
+            [providerId]: {
+              tone: "error",
+              message: "Saved. The local `opencode` CLI returned no models — run `opencode auth login` and `opencode models opencode --refresh`, then click Save again.",
+            },
+          }));
+        } else if (typeof modelsRefreshed === "number" && modelsRefreshed > 0) {
+          setOpencodeApiKeyRefreshStatus((prev) => ({
+            ...prev,
+            [providerId]: {
+              tone: "success",
+              message: `Refreshed ${modelsRefreshed} opencode-go models.`,
+            },
+          }));
+        } else {
+          setOpencodeApiKeyRefreshStatus((prev) => {
+            const next = { ...prev };
+            delete next[providerId];
+            return next;
+          });
+        }
+      }
       addToast("API key saved", "success");
       scrollSettingsToTop();
     } catch (err) {
       setApiKeyErrors((prev) => ({ ...prev, [providerId]: getErrorMessage(err) || "Failed to save API key" }));
+      if (providerId === "opencode" || providerId === "opencode-go") {
+        setOpencodeApiKeyRefreshStatus((prev) => {
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+      }
     } finally {
       setAuthActionInProgress(null);
     }
@@ -1975,8 +2065,21 @@ export function SettingsModal({
             }
           }
         } else {
-          // For non-model settings: existing behavior
-          (projectPatch as Record<string, unknown>)[key] = value;
+          // For non-model settings: only write keys the user actually
+          // changed, matching the model-lane gate above. Without this,
+          // every effective/inherited value in `payload` would be
+          // serialized as an explicit project override, silently breaking
+          // inheritance for every project setting on every save.
+          // Within the changed-set, apply null-as-delete so an explicit
+          // clear (e.g. unpinning `integrationBranch` back to auto-detect)
+          // survives `JSON.stringify` instead of being silently dropped.
+          if (value !== initialProjectValue) {
+            if (value === undefined && initialProjectValue !== undefined && initialProjectValue !== null) {
+              (projectPatch as Record<string, unknown>)[key] = null;
+            } else if (value !== undefined) {
+              (projectPatch as Record<string, unknown>)[key] = value;
+            }
+          }
         }
       }
 
@@ -2338,13 +2441,13 @@ export function SettingsModal({
                 type="number"
                 min="1"
                 className="input"
-                placeholder="12"
+                placeholder="25"
                 value={form.chatRoomRecentVerbatimMessages ?? ""}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, chatRoomRecentVerbatimMessages: Number(e.target.value) || undefined }))
                 }
               />
-              <small>Number of most-recent chat-room messages kept verbatim in the responder transcript. Older messages are compacted into a summary block. Default: 12.</small>
+              <small>Number of most-recent chat-room messages kept verbatim in the responder transcript. Older messages are compacted into a summary block. Default: 25.</small>
             </div>
             <div className="form-group">
               <label htmlFor="chatRoomCompactionFetchLimit">Room compaction fetch limit</label>
@@ -2353,13 +2456,13 @@ export function SettingsModal({
                 type="number"
                 min="1"
                 className="input"
-                placeholder="80"
+                placeholder="200"
                 value={form.chatRoomCompactionFetchLimit ?? ""}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, chatRoomCompactionFetchLimit: Number(e.target.value) || undefined }))
                 }
               />
-              <small>Upper bound on messages fetched from the room store for compaction consideration. Default: 80.</small>
+              <small>Upper bound on messages fetched from the room store for compaction consideration. Default: 200.</small>
             </div>
             <div className="form-group">
               <label htmlFor="chatRoomSummaryMaxChars">Room summary max characters</label>
@@ -2368,13 +2471,13 @@ export function SettingsModal({
                 type="number"
                 min="200"
                 className="input"
-                placeholder="1500"
+                placeholder="3000"
                 value={form.chatRoomSummaryMaxChars ?? ""}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, chatRoomSummaryMaxChars: Number(e.target.value) || undefined }))
                 }
               />
-              <small>Hard cap on the synthesized "Earlier room context" summary block. Default: 1500.</small>
+              <small>Hard cap on the synthesized "Earlier room context" summary block. Default: 3000.</small>
             </div>
             <h4 className="settings-section-heading settings-section-heading--spaced">Capacity Risk Banner</h4>
             <div className="form-group">
@@ -4476,6 +4579,23 @@ export function SettingsModal({
               </details>
             </div>
             <div className="form-group">
+              <label htmlFor="testMode" className="checkbox-label">
+                <input
+                  id="testMode"
+                  type="checkbox"
+                  checked={form.testMode === true}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, testMode: e.target.checked }))
+                  }
+                />
+                Enable test mode
+              </label>
+              <details className="settings-option-details">
+                <summary>More details</summary>
+                <small>Forces all AI lanes to use the deterministic mock provider. No network calls, zero token cost.</small>
+              </details>
+            </div>
+            <div className="form-group">
               <label htmlFor="workflowRevisionForkOnScopeMismatch" className="checkbox-label">
                 <input
                   id="workflowRevisionForkOnScopeMismatch"
@@ -4547,6 +4667,88 @@ export function SettingsModal({
                 </small>
               </details>
             </div>
+            <div className="form-group">
+              <label htmlFor="integrationBranch">Integration branch</label>
+              {(() => {
+                const currentValue = form.integrationBranch ?? "";
+                const valueIsKnown = currentValue.length > 0 && integrationBranchOptions.includes(currentValue);
+                const isCustomMode = integrationBranchCustomMode || (currentValue.length > 0 && !valueIsKnown);
+                if (isCustomMode) {
+                  return (
+                    <div className="form-inline-group">
+                      <input
+                        id="integrationBranch"
+                        type="text"
+                        className="input"
+                        placeholder="branch name"
+                        value={currentValue}
+                        onChange={(e) => {
+                          const trimmed = e.target.value.trim();
+                          setForm((f) => ({
+                            ...f,
+                            integrationBranch: trimmed.length === 0 ? undefined : trimmed,
+                          }));
+                        }}
+                        data-testid="integration-branch-custom-input"
+                      />
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => {
+                          setIntegrationBranchCustomMode(false);
+                          setForm((f) => ({ ...f, integrationBranch: undefined }));
+                        }}
+                        data-testid="integration-branch-use-dropdown"
+                      >
+                        Use dropdown
+                      </button>
+                    </div>
+                  );
+                }
+                const CUSTOM = "__fusion-custom__";
+                const AUTO = "";
+                return (
+                  <select
+                    id="integrationBranch"
+                    className="select"
+                    value={currentValue}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === CUSTOM) {
+                        setIntegrationBranchCustomMode(true);
+                        return;
+                      }
+                      setForm((f) => ({
+                        ...f,
+                        integrationBranch: next === AUTO ? undefined : next,
+                      }));
+                    }}
+                    data-testid="integration-branch-select"
+                  >
+                    <option value={AUTO}>(auto-detect — origin/HEAD → main)</option>
+                    {integrationBranchOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value={CUSTOM}>Custom…</option>
+                  </select>
+                );
+              })()}
+              <details className="settings-option-details">
+                <summary>More details</summary>
+                <small>
+                  The canonical branch Fusion merges tasks into and uses as the reference for all
+                  ahead/behind / overlap / pre-rebase computations. Leave on <em>auto-detect</em>
+                  to resolve via the standard cascade
+                  (<code>integrationBranch</code> → legacy <code>baseBranch</code> →
+                  <code>origin/HEAD</code> symbolic ref → fallback <code>main</code>). Pick a
+                  local branch from the dropdown — common integration names like <code>main</code>,
+                  <code>master</code>, <code>trunk</code>, and <code>develop</code> are listed
+                  first — or choose <em>Custom…</em> to type a branch that doesn&apos;t exist
+                  locally yet. Applies to both direct merges and pull-request mode; individual
+                  tasks can still override via task metadata.
+                </small>
+              </details>
+            </div>
             {form.mergeStrategy !== "pull-request" && (
               <>
                 <div className="form-group">
@@ -4592,6 +4794,56 @@ export function SettingsModal({
                   <small>
                     Auto-merge runs in the task worktree by default. Switch to the legacy project-root path only if you need the pre-FN-5279 fallback; worktrunk-managed projects still defer to worktrunk.
                   </small>
+                  {(form.mergeIntegrationWorktree ?? "reuse-task-worktree") !== "reuse-task-worktree" && (
+                    <div
+                      className="settings-warning-banner"
+                      role="alert"
+                      aria-live="polite"
+                      data-testid="merge-integration-worktree-warning"
+                    >
+                      <strong>Legacy integration-branch mode.</strong>{" "}
+                      Auto-merge will run rebase, conflict resolution, and squash commits inside the
+                      project root (the user&apos;s checked-out integration-branch worktree) instead of
+                      the task worktree. Fusion assumes that directory is already on the integration
+                      branch and clean; if it isn&apos;t, merges may fail or touch the user&apos;s working
+                      tree. Reuse-task-worktree is the recommended default (FN-5279). Switch back unless
+                      you have a specific reason to opt in (FN-5348).
+                    </div>
+                  )}
+                </div>
+                <div className="form-group">
+                  <label htmlFor="mergeAdvanceAutoSync">Auto-sync project checkout after merge</label>
+                  <select
+                    id="mergeAdvanceAutoSync"
+                    className="select"
+                    value={form.mergeAdvanceAutoSync ?? "stash-and-ff"}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        mergeAdvanceAutoSync: e.target.value as "off" | "ff-only" | "stash-and-ff",
+                      }))
+                    }
+                    data-testid="merge-advance-auto-sync-select"
+                  >
+                    <option value="stash-and-ff">Stash + fast-forward (default) — preserve local edits</option>
+                    <option value="ff-only">Fast-forward only — skip dirty worktrees</option>
+                    <option value="off">Off — leave the project root stale (legacy behavior)</option>
+                  </select>
+                  <details className="settings-option-details">
+                    <summary>More details</summary>
+                    <small>
+                      After Fusion advances the integration branch ref, the merger can auto-sync other
+                      worktrees still checked out on that branch (typically your project-root
+                      checkout). <code>Stash + fast-forward</code> snapshots real local edits as a patch
+                      against the previous tip, snaps the worktree to the new tip, then reapplies the
+                      patch — untracked files that collide with newly-tracked paths are left in a temp
+                      dir for manual recovery. <code>Fast-forward only</code> snaps cleanly when the
+                      worktree has no edits and skips otherwise. <code>Off</code> is the legacy
+                      behavior: <code>git status</code> in your project root will show the new commits
+                      inverted as &quot;staged changes&quot; until you pull manually. Only applies to direct
+                      merges.
+                    </small>
+                  </details>
                 </div>
               </>
             )}
@@ -4672,13 +4924,14 @@ export function SettingsModal({
                     setForm((f) => ({ ...f, commitAuthorEnabled: e.target.checked }))
                   }
                 />
-                Add author attribution to commits
+                Add Fusion as co-author on commits
               </label>
               <details className="settings-option-details">
                 <summary>More details</summary>
                 <small>
-                  When enabled, all commits made by Fusion include <code>--author</code>{" "}
-                  attribution identifying them as AI-generated
+                  When enabled, commits made by Fusion keep your git identity as the
+                  primary author and append a <code>Co-authored-by</code> trailer crediting
+                  Fusion (recognized by GitHub for shared attribution).
                 </small>
               </details>
             </div>
@@ -4686,7 +4939,7 @@ export function SettingsModal({
             {form.commitAuthorEnabled !== false && (
               <>
                 <div className="form-group">
-                  <label htmlFor="commitAuthorName">Author Name</label>
+                  <label htmlFor="commitAuthorName">Co-author Name</label>
                   <input
                     id="commitAuthorName"
                     type="text"
@@ -4699,10 +4952,10 @@ export function SettingsModal({
                       }))
                     }
                   />
-                  <small>Name used in commit author attribution</small>
+                  <small>Name used in the <code>Co-authored-by</code> trailer</small>
                 </div>
                 <div className="form-group">
-                  <label htmlFor="commitAuthorEmail">Author Email</label>
+                  <label htmlFor="commitAuthorEmail">Co-author Email</label>
                   <input
                     id="commitAuthorEmail"
                     type="email"
@@ -4715,7 +4968,7 @@ export function SettingsModal({
                       }))
                     }
                   />
-                  <small>Email used in commit author attribution</small>
+                  <small>Email used in the <code>Co-authored-by</code> trailer</small>
                 </div>
               </>
             )}
@@ -6907,6 +7160,11 @@ export function SettingsModal({
                             {apiKeyErrors[provider.id] && (
                               <small className="auth-apikey-error">{apiKeyErrors[provider.id]}</small>
                             )}
+                            {(provider.id === "opencode" || provider.id === "opencode-go") && opencodeApiKeyRefreshStatus[provider.id] && (
+                              <small className={opencodeApiKeyRefreshStatus[provider.id].tone === "error" ? "form-error" : "text-muted"}>
+                                {opencodeApiKeyRefreshStatus[provider.id].message}
+                              </small>
+                            )}
                           </div>
                         ) : (
                           <div>
@@ -6988,6 +7246,11 @@ export function SettingsModal({
                             )}
                             {apiKeyErrors[provider.id] && (
                               <small className="auth-apikey-error">{apiKeyErrors[provider.id]}</small>
+                            )}
+                            {(provider.id === "opencode" || provider.id === "opencode-go") && opencodeApiKeyRefreshStatus[provider.id] && (
+                              <small className={opencodeApiKeyRefreshStatus[provider.id].tone === "error" ? "form-error" : "text-muted"}>
+                                {opencodeApiKeyRefreshStatus[provider.id].message}
+                              </small>
                             )}
                           </div>
                         ) : (

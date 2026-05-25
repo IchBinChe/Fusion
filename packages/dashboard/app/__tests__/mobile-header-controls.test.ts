@@ -23,7 +23,7 @@ describe("mobile-header-controls.css", () => {
   // This is a simplified approach - we find all mobile media blocks and join them
   function extractMobileMediaBlocks(content: string): string {
     const blocks: string[] = [];
-    const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+    const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
     let match;
     
     while ((match = regex.exec(content)) !== null) {

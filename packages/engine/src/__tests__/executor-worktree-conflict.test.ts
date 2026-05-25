@@ -19,6 +19,8 @@ describe("FN-4973: executor worktree conflict cleanup", () => {
     const executor = new TaskExecutor(store, "/tmp/test");
     store.listTasks.mockResolvedValue([]);
     activeSessionRegistry.registerPath(CONFLICT_PATH, { taskId: "FN-4973", kind: "executor", ownerKey: "FN-4973" });
+    // FN-5256: backdate so the new min-idle window doesn't refuse the reconcile.
+    (activeSessionRegistry.lookupByPath(CONFLICT_PATH) as any).registeredAt = 0;
 
     const removeSpy = vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
     const result = await (executor as any).cleanupConflictingWorktree(CONFLICT_PATH, "fusion/fn-4973", "FN-4973");
@@ -28,7 +30,7 @@ describe("FN-4973: executor worktree conflict cleanup", () => {
     expect(activeSessionRegistry.lookupByPath(CONFLICT_PATH)).toBeNull();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-4973",
-      "Cleared stale self-owned activeSessionRegistry entry",
+      "Cleared stale self-owned active-session entry before remove",
       CONFLICT_PATH,
     );
   });
@@ -85,6 +87,8 @@ describe("FN-4973: executor worktree conflict cleanup", () => {
     removeSpy
       .mockImplementationOnce(async () => {
         activeSessionRegistry.registerPath(CONFLICT_PATH, { taskId: "FN-4973", kind: "executor", ownerKey: "FN-4973" });
+        // FN-5256: backdate so the post-throw reconcile is not refused by min-idle.
+        (activeSessionRegistry.lookupByPath(CONFLICT_PATH) as any).registeredAt = 0;
         throw new ActiveSessionWorktreeRemovalError({
           worktreePath: CONFLICT_PATH,
           taskId: "FN-4973",

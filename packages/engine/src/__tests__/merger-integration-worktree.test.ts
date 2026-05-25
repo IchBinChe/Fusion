@@ -12,6 +12,7 @@ import * as branchAutocorrect from "../branch-autocorrect.js";
 import {
   acquireReuseHandoff,
   MergeHandoffRefusedError,
+  probeIntegrationWorktreeState,
   releaseReuseHandoff,
   resolveIntegrationRemote,
   resolveMergeIntegrationRoot,
@@ -34,7 +35,21 @@ describe("resolveMergeIntegrationRoot", () => {
     });
   });
 
-  it("preserves the legacy cwd-main mode when explicitly selected", () => {
+  it("maps explicit opt-in to canonical cwd-integration-branch mode", () => {
+    expect(
+      resolveMergeIntegrationRoot({
+        task: { id: "FN-5279", worktree: "/tmp/task-worktree" } as any,
+        settings: { mergeIntegrationWorktree: "cwd-integration-branch" as const, worktrunk: { enabled: false } } as any,
+        projectRoot: "/tmp/project-root",
+      }),
+    ).toEqual({
+      mode: "cwd-integration-branch",
+      rootDir: "/tmp/project-root",
+      branchName: "fusion/fn-5279",
+    });
+  });
+
+  it("maps legacy cwd-main input to canonical cwd-integration-branch mode", () => {
     expect(
       resolveMergeIntegrationRoot({
         task: { id: "FN-5279", worktree: "/tmp/task-worktree" } as any,
@@ -42,13 +57,13 @@ describe("resolveMergeIntegrationRoot", () => {
         projectRoot: "/tmp/project-root",
       }),
     ).toEqual({
-      mode: "cwd-main",
+      mode: "cwd-integration-branch",
       rootDir: "/tmp/project-root",
       branchName: "fusion/fn-5279",
     });
   });
 
-  it("uses the project root when the task worktree is missing", () => {
+  it("returns empty sentinel rootDir when the task worktree is missing", () => {
     expect(
       resolveMergeIntegrationRoot({
         task: { id: "FN-5279", worktree: undefined } as any,
@@ -57,12 +72,12 @@ describe("resolveMergeIntegrationRoot", () => {
       }),
     ).toEqual({
       mode: "reuse-task-worktree",
-      rootDir: "/tmp/project-root",
+      rootDir: "",
       branchName: "fusion/fn-5279",
     });
   });
 
-  it("defers to the project root when worktrunk owns merge orchestration", () => {
+  it("keeps reuse-task-worktree mode when worktrunk is enabled", () => {
     expect(
       resolveMergeIntegrationRoot({
         task: { id: "FN-5279", worktree: "/tmp/task-worktree" } as any,
@@ -70,8 +85,8 @@ describe("resolveMergeIntegrationRoot", () => {
         projectRoot: "/tmp/project-root",
       }),
     ).toEqual({
-      mode: "cwd-main",
-      rootDir: "/tmp/project-root",
+      mode: "reuse-task-worktree",
+      rootDir: "/tmp/task-worktree",
       branchName: "fusion/fn-5279",
     });
   });
@@ -107,6 +122,103 @@ describe("resolveIntegrationRemote", () => {
         integrationBranch: "master",
       }),
     ).resolves.toBe("fork");
+  });
+});
+
+describe("probeIntegrationWorktreeState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null state when integration branch is not checked out in any linked worktree", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["fusion/fn-1", "/tmp/task"]]));
+
+    await expect(
+      probeIntegrationWorktreeState({
+        rootDir: "/tmp/project-root",
+        integrationBranch: "main",
+        projectRoot: "/tmp/project-root",
+      }),
+    ).resolves.toEqual({ userCheckout: null, dirtyFingerprint: null });
+  });
+
+  it("returns clean user checkout state", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["main", "/tmp/project-root"]]));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const state = await probeIntegrationWorktreeState({
+      rootDir: "/tmp/project-root",
+      integrationBranch: "main",
+      projectRoot: "/tmp/project-root",
+    });
+
+    expect(state).toEqual({
+      userCheckout: {
+        worktreePath: "/tmp/project-root",
+        dirty: false,
+        untrackedCount: 0,
+        dirtyPathSample: [],
+      },
+      dirtyFingerprint: null,
+    });
+  });
+
+  it("returns dirty user checkout state with staged, unstaged, and untracked files", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["main", "/tmp/project-root"]]));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("unstaged.ts\0");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("staged.ts\0");
+      if (command === "git status -z --porcelain") return Buffer.from("M modified.ts\0?? untracked.txt\0");
+      if (command === "git diff HEAD") return Buffer.from("diff --git a/a b/a\n");
+      return Buffer.from("");
+    });
+
+    const state = await probeIntegrationWorktreeState({
+      rootDir: "/tmp/project-root",
+      integrationBranch: "main",
+      projectRoot: "/tmp/project-root",
+    });
+
+    expect(state.userCheckout).toMatchObject({
+      worktreePath: "/tmp/project-root",
+      dirty: true,
+      untrackedCount: 1,
+    });
+    expect(state.userCheckout?.dirtyPathSample).toEqual([
+      "staged.ts",
+      "unstaged.ts",
+      "untracked.txt",
+    ]);
+    expect(state.dirtyFingerprint).toEqual(expect.any(String));
+  });
+
+  it("supports master as integration branch", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["master", "/tmp/project-root"]]));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const state = await probeIntegrationWorktreeState({
+      rootDir: "/tmp/project-root",
+      integrationBranch: "master",
+      projectRoot: "/tmp/project-root",
+    });
+
+    expect(state.userCheckout?.worktreePath).toBe("/tmp/project-root");
+    expect(state.userCheckout?.dirty).toBe(false);
   });
 });
 
@@ -150,6 +262,7 @@ describe("acquireReuseHandoff", () => {
     ]);
     store.acquireMergeQueueLease = vi.fn().mockReturnValue({ taskId: "FN-5279" });
     store.releaseMergeQueueLease = vi.fn();
+    store.peekMergeQueueHead = vi.fn().mockReturnValue({ taskId: "FN-5000", leasedBy: "merger-reuse-handoff", column: "todo" });
     return store;
   }
 
@@ -201,7 +314,8 @@ describe("acquireReuseHandoff", () => {
     });
   });
 
-  it("refuses dirty reused worktrees with diagnostics", async () => {
+  it("autostashes dirty reused worktrees instead of refusing the handoff", async () => {
+    const stashSha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     mockedExecSync.mockImplementation((cmd: any) => {
       const command = String(cmd);
       if (command === "git diff -z --name-only") return Buffer.from("packages/engine/src/merger.ts\0");
@@ -209,6 +323,54 @@ describe("acquireReuseHandoff", () => {
       if (command === "git status -z --porcelain") return Buffer.from("?? stray.txt\0");
       if (command === "git diff HEAD") return Buffer.from("diff --git a/x b/x\n");
       if (command === "git rev-parse --abbrev-ref HEAD") return Buffer.from("fusion/fn-5279\n");
+      if (command === "git add -A") return Buffer.from("");
+      if (command === "git stash create") return Buffer.from(`${stashSha}\n`);
+      if (command.startsWith("git stash store ")) return Buffer.from("");
+      if (command === "git reset --hard HEAD") return Buffer.from("");
+      if (command === "git clean -fd") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const store = createStore();
+    const auditEmit = vi.fn();
+    const handoff = await acquireReuseHandoff({
+      task: await store.getTask("FN-5279"),
+      store,
+      projectRoot: "/tmp/project-root",
+      settings: {} as any,
+      worktreePath: "/tmp/task-worktree",
+      auditEmit,
+    });
+
+    expect(handoff).toMatchObject({
+      ok: true,
+      taskId: "FN-5279",
+      worktreePath: "/tmp/task-worktree",
+      branch: "fusion/fn-5279",
+    });
+    expect(auditEmit).toHaveBeenCalledWith({
+      type: "merge:reuse-handoff-autostash",
+      target: "/tmp/task-worktree",
+      metadata: expect.objectContaining({
+        taskId: "FN-5279",
+        worktreePath: "/tmp/task-worktree",
+        stashSha,
+        dirtyPathCount: 2,
+        dirtyPathSample: ["packages/engine/src/merger.ts", "stray.txt"],
+      }),
+    });
+  });
+
+  it("refuses the handoff when autostash of a dirty worktree itself fails", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("packages/engine/src/merger.ts\0");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("diff --git a/x b/x\n");
+      if (command === "git rev-parse --abbrev-ref HEAD") return Buffer.from("fusion/fn-5279\n");
+      if (command === "git add -A") return Buffer.from("");
+      if (command === "git stash create") return Buffer.from("");
       return Buffer.from("");
     });
 
@@ -221,12 +383,11 @@ describe("acquireReuseHandoff", () => {
         worktreePath: "/tmp/task-worktree",
       }),
       "working-tree-dirty",
-      "dirty-worktree",
+      "dirty-worktree-autostash-failed",
     );
     expect(refusal.payload).toMatchObject({
-      dirtyPaths: ["packages/engine/src/merger.ts", "stray.txt"],
+      dirtyPaths: ["packages/engine/src/merger.ts"],
     });
-    expect(refusal.payload.dirtyFingerprint).toEqual(expect.any(String));
   });
 
   it("attempts FN-5083 case canonicalization before continuing", async () => {
@@ -297,6 +458,75 @@ describe("acquireReuseHandoff", () => {
     );
   });
 
+  it("re-attaches a detached HEAD when the branch ref carries the task's trailer", async () => {
+    vi.spyOn(branchAutocorrect, "attemptBranchAutocorrect").mockResolvedValue({ status: "failed", reason: "case-not-applicable" });
+    const store = createStore();
+    const auditEmit = vi.fn();
+    let headReads = 0;
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git rev-parse --abbrev-ref HEAD") {
+        headReads += 1;
+        // First read sees the detached state, post-checkout read sees the branch.
+        return Buffer.from(headReads === 1 ? "HEAD\n" : "fusion/fn-5279\n");
+      }
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      if (command.startsWith("git rev-parse --verify")) return Buffer.from("abc123\n");
+      if (command.startsWith("git log -1 --pretty=%B")) {
+        return Buffer.from("feat(FN-5279): step 3\n\nFusion-Task-Id: FN-5279\n");
+      }
+      if (command === "git checkout fusion/fn-5279") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const handoff = await acquireReuseHandoff({
+      task: await store.getTask("FN-5279"),
+      store,
+      projectRoot: "/tmp/project-root",
+      settings: {} as any,
+      worktreePath: "/tmp/task-worktree",
+      auditEmit,
+    });
+
+    expect(handoff.ok).toBe(true);
+    expect(auditEmit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "branch:auto-reattach-authoritative",
+      metadata: expect.objectContaining({ taskId: "FN-5279", expectedBranch: "fusion/fn-5279" }),
+    }));
+  });
+
+  it("still refuses when HEAD is wrong AND the branch ref is not authoritative", async () => {
+    vi.spyOn(branchAutocorrect, "attemptBranchAutocorrect").mockResolvedValue({ status: "failed", reason: "case-not-applicable" });
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git rev-parse --abbrev-ref HEAD") return Buffer.from("feature/elsewhere\n");
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      if (command.startsWith("git rev-parse --verify")) return Buffer.from("abc123\n");
+      // Trailer absent => not authoritative.
+      if (command.startsWith("git log -1 --pretty=%B")) return Buffer.from("feat(FN-9999): unrelated\n");
+      return Buffer.from("");
+    });
+
+    const refusal = await expectRefusal(
+      acquireReuseHandoff({
+        task: await createStore().getTask("FN-5279"),
+        store: createStore(),
+        projectRoot: "/tmp/project-root",
+        settings: {} as any,
+        worktreePath: "/tmp/task-worktree",
+      }),
+      "head-branch-mismatch",
+      "unexpected-branch",
+    );
+    expect(refusal.payload).toMatchObject({ authorityProbe: "tip-missing-task-trailer" });
+  });
+
   it("reconciles stale same-task activeSessionRegistry entries before proceeding", async () => {
     const store = createStore();
     activeSessionRegistry.registerPath("/tmp/task-worktree", {
@@ -304,6 +534,8 @@ describe("acquireReuseHandoff", () => {
       kind: "executor",
       ownerKey: "FN-5279",
     });
+    // FN-5256: backdate so the new min-idle window doesn't refuse the reconcile.
+    (activeSessionRegistry.lookupByPath("/tmp/task-worktree") as any).registeredAt = 0;
 
     await acquireReuseHandoff({
       task: await store.getTask("FN-5279"),
@@ -421,11 +653,12 @@ describe("acquireReuseHandoff", () => {
     });
   });
 
-  it("refuses when no merge queue lease can be acquired", async () => {
+  it("FN-5444: no-lease refusal carries queue-head diagnostics and nulls when head is absent", async () => {
     const store = createStore();
-    store.acquireMergeQueueLease.mockReturnValue(null);
+    store.acquireMergeQueueLease.mockReturnValue({ taskId: "FN-5329" });
+    store.peekMergeQueueHead.mockReturnValue({ taskId: "FN-5329", leasedBy: "merger-reuse-handoff", column: "todo" });
 
-    await expectRefusal(
+    const refusalWithHead = await expectRefusal(
       acquireReuseHandoff({
         task: await store.getTask("FN-5279"),
         store,
@@ -436,6 +669,31 @@ describe("acquireReuseHandoff", () => {
       "lease-handoff-failed",
       "no-lease",
     );
+    expect(refusalWithHead.payload).toMatchObject({
+      taskId: "FN-5279",
+      worktreePath: "/tmp/task-worktree",
+      acquiredTaskId: "FN-5329",
+      queueHeadTaskId: "FN-5329",
+      queueHeadLeasedBy: "merger-reuse-handoff",
+    });
+
+    store.acquireMergeQueueLease.mockReturnValue({ taskId: "FN-5329" });
+    store.peekMergeQueueHead.mockReturnValue(null);
+    const refusalWithoutHead = await expectRefusal(
+      acquireReuseHandoff({
+        task: await store.getTask("FN-5279"),
+        store,
+        projectRoot: "/tmp/project-root",
+        settings: {} as any,
+        worktreePath: "/tmp/task-worktree",
+      }),
+      "lease-handoff-failed",
+      "no-lease",
+    );
+    expect(refusalWithoutHead.payload).toMatchObject({
+      queueHeadTaskId: null,
+      queueHeadLeasedBy: null,
+    });
   });
 
   // FN-5363 regression: when the merge queue head is polluted with unrelated tasks
@@ -505,6 +763,7 @@ describe("aiMergeTask integration-root behavior", () => {
     });
     store.acquireMergeQueueLease = vi.fn().mockReturnValue({ taskId: "FN-5279" });
     store.releaseMergeQueueLease = vi.fn();
+    store.enqueueMergeQueue = vi.fn();
     store.listTasks.mockResolvedValue([{ id: "FN-5279", column: "in-review", worktree: "/tmp/task-worktree" }]);
 
     const baseImpl = mockedExecSync.getMockImplementation();

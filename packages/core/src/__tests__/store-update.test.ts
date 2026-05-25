@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import * as projectMemory from "../project-memory.js";
 import { AgentStore } from "../agent-store.js";
 import { CentralDatabase } from "../central-db.js";
-import { TaskStore, TaskHasDependentsError } from "../store.js";
+import { DependencyCycleError, TaskStore, TaskHasDependentsError } from "../store.js";
 import { buildResearchDocumentKey, type Task } from "../types.js";
 import { createSharedTaskStoreTestHarness, makeTmpDir } from "./store-test-helpers.js";
 
@@ -76,34 +76,43 @@ describe("TaskStore", () => {
 
 
   describe("self-dependency validation", () => {
-    it("createTask should throw when dependencies include self", async () => {
-      // We can't know the ID before creation, so we test the update scenario
-      // or test that the check exists in the code path
+    const expectSelfLoopError = async (taskId: string, dependencies: string[]) => {
+      let error: unknown;
+      try {
+        await store.updateTask(taskId, { dependencies });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(DependencyCycleError);
+      expect(error).toMatchObject({
+        name: "DependencyCycleError",
+        taskId,
+        cyclePath: [taskId, taskId],
+      });
+    };
+
+    it("createTask should reject self-dependency update with DependencyCycleError", async () => {
       const task = await createTestTask();
-      // After creation, task.id is known (e.g., KB-001)
-      // Now try to update it to depend on itself
-      await expect(store.updateTask(task.id, { dependencies: [task.id] }))
-        .rejects.toThrow(`Task ${task.id} cannot depend on itself`);
+      await expectSelfLoopError(task.id, [task.id]);
     });
 
-    it("updateTask should throw when setting dependencies to include self", async () => {
+    it("updateTask should reject mixed self + other deps with self cyclePath first", async () => {
       const task = await createTestTask();
       expect(task.dependencies).toEqual([]);
 
-      await expect(store.updateTask(task.id, { dependencies: [task.id, "FN-002"] }))
-        .rejects.toThrow(`Task ${task.id} cannot depend on itself`);
+      await expectSelfLoopError(task.id, [task.id, "FN-002"]);
 
       // Verify the task was not modified
       const fetched = await store.getTask(task.id);
       expect(fetched.dependencies).toEqual([]);
     });
 
-    it("updateTask should throw when updating dependencies to add self (when task already has other dependencies)", async () => {
+    it("updateTask should reject existing dep + self with self cyclePath", async () => {
       const task = await store.createTask({ description: "Dep task", dependencies: ["KB-999"] });
       expect(task.dependencies).toEqual(["KB-999"]);
 
-      await expect(store.updateTask(task.id, { dependencies: ["KB-999", task.id] }))
-        .rejects.toThrow(`Task ${task.id} cannot depend on itself`);
+      await expectSelfLoopError(task.id, ["KB-999", task.id]);
 
       // Verify the task was not modified
       const fetched = await store.getTask(task.id);

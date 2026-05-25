@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MobileNavBar } from "../MobileNavBar";
+import { MOBILE_MEDIA_QUERY } from "../../hooks/useViewportMode";
 
 vi.mock("../../api", () => ({
   fetchScripts: vi.fn(),
@@ -12,7 +13,7 @@ function mockViewport(mode: "mobile" | "desktop") {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => {
-      const isMobileQuery = query === "(max-width: 768px)";
+      const isMobileQuery = query === MOBILE_MEDIA_QUERY || query.includes("max-width: 768px");
       const isTabletQuery = query === "(min-width: 769px) and (max-width: 1024px)";
       return {
         matches: mode === "mobile" ? isMobileQuery : false,
@@ -634,9 +635,9 @@ describe("MobileNavBar", () => {
     expect(container.querySelector(".mobile-nav-bar")).toBeNull();
   });
 
-  it("returns null when keyboardOpen is true on mobile", () => {
+  it("renders nav bar when keyboardOpen is true on mobile", () => {
     const { container } = render(<MobileNavBar {...createDefaultProps()} keyboardOpen={true} />);
-    expect(container.querySelector(".mobile-nav-bar")).toBeNull();
+    expect(container.querySelector(".mobile-nav-bar")).not.toBeNull();
   });
 
   it("renders nav bar when keyboardOpen is false on mobile", () => {

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { AutoRecoverySettings } from "@fusion/core";
 import { createLogger, type Logger } from "../logger.js";
 import type { RunAuditor } from "../run-audit.js";
@@ -84,7 +85,7 @@ export class MessageDeliveryAutoRecoveryHandler {
         }
         const delayMs = backoffs[Math.min(attempts - 1, backoffs.length - 1)];
         this.logger.warn(`message-delivery retrying ${attempt.correlation.kind} message for ${attempt.correlation.fromAgentId} attempt=${attempts + 1}`);
-        await (this.deps.sleep ? this.deps.sleep(delayMs) : new Promise((resolve) => setTimeout(resolve, delayMs)));
+        await (this.deps.sleep ? this.deps.sleep(delayMs) : delay(delayMs));
       }
     }
 

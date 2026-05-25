@@ -29,6 +29,6 @@ describe("SettingsModal backup CSS contract", () => {
   it("keeps mobile backup list scroll behavior", async () => {
     const css = await loadAllAppCss();
 
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.backup-list ul\s*\{[^}]*max-height\s*:[^;]+;[^}]*overflow-y\s*:\s*auto;[^}]*-webkit-overflow-scrolling\s*:\s*touch;[^}]*\}/);
+    expect(css).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.backup-list ul\s*\{[^}]*max-height\s*:[^;]+;[^}]*overflow-y\s*:\s*auto;[^}]*-webkit-overflow-scrolling\s*:\s*touch;[^}]*\}/);
   });
 });

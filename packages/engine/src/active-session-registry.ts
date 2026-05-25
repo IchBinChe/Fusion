@@ -15,7 +15,26 @@ export interface ReconcileStaleSelfOwnedResult {
   reason: "no-entry" | "foreign-task" | "reconciled";
 }
 
-class ActiveSessionRegistry {
+export type LiveBindingProbe = (worktreePath: string, taskId: string) => boolean;
+export type ProcessActiveProbe = (taskId: string) => boolean;
+
+export type SelfOwnedReconcileOutcome =
+  | { action: "no-entry" }
+  | { action: "foreign-task"; ownerTaskId: string }
+  | { action: "live-binding-refuses"; ownerTaskId: string }
+  | { action: "process-active-refuses"; ownerTaskId: string }
+  | { action: "too-recent-refuses"; ownerTaskId: string; ageMs: number; minIdleMs: number }
+  | { action: "reconciled" };
+
+/**
+ * FN-5256: default minimum age before a self-owned registry entry can be classified
+ * as stale. Recently-registered entries belong to an executor cycle that is still
+ * warming up (e.g., a pause/resume that hasn't repopulated activeWorktrees yet), so
+ * dropping them races with the live shell that just attached to the worktree.
+ */
+export const DEFAULT_SELF_OWNED_MIN_IDLE_MS = 5000;
+
+export class ActiveSessionRegistry {
   private readonly records = new Map<string, ActiveSessionRecord>();
 
   registerPath(worktreePath: string, registration: ActiveSessionRegistration): void {
@@ -66,6 +85,60 @@ class ActiveSessionRegistry {
   clear(): void {
     this.records.clear();
   }
+}
+
+export interface SelfOwnedReconcileOptions {
+  /**
+   * Process-wide "executor still owns this task" probe. When this returns true the
+   * caller's task is still in the middle of an `execute()` invocation, so dropping
+   * the registry entry would yank the worktree from a live shell (FN-5256).
+   */
+  processActiveProbe?: ProcessActiveProbe;
+  /**
+   * Minimum age (ms since `registeredAt`) before a same-task entry is eligible for
+   * stale reconciliation. Recently-registered entries belong to a warming executor
+   * cycle and must be left alone. Defaults to `DEFAULT_SELF_OWNED_MIN_IDLE_MS`.
+   */
+  minIdleMs?: number;
+  /** Test seam — defaults to `Date.now()`. */
+  now?: () => number;
+}
+
+export function reconcileSelfOwnedActiveSessionForRemoval(
+  registry: ActiveSessionRegistry,
+  worktreePath: string,
+  requestingTaskId: string,
+  liveBindingProbe: LiveBindingProbe,
+  options: SelfOwnedReconcileOptions = {},
+): SelfOwnedReconcileOutcome {
+  const record = registry.lookupByPath(worktreePath);
+  if (!record) {
+    return { action: "no-entry" };
+  }
+
+  if (record.taskId !== requestingTaskId) {
+    return { action: "foreign-task", ownerTaskId: record.taskId };
+  }
+
+  if (liveBindingProbe(worktreePath, requestingTaskId)) {
+    return { action: "live-binding-refuses", ownerTaskId: requestingTaskId };
+  }
+
+  if (options.processActiveProbe?.(requestingTaskId)) {
+    return { action: "process-active-refuses", ownerTaskId: requestingTaskId };
+  }
+
+  const minIdleMs = options.minIdleMs ?? DEFAULT_SELF_OWNED_MIN_IDLE_MS;
+  if (minIdleMs > 0) {
+    const now = options.now?.() ?? Date.now();
+    const ageMs = now - record.registeredAt;
+    if (ageMs < minIdleMs) {
+      return { action: "too-recent-refuses", ownerTaskId: requestingTaskId, ageMs, minIdleMs };
+    }
+  }
+
+  registry.unregisterPath(worktreePath);
+  return { action: "reconciled" };
 }
 
 export const activeSessionRegistry = new ActiveSessionRegistry();

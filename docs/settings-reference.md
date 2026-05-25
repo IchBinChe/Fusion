@@ -66,7 +66,7 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `openrouterAppAttribution` | `{ referer?: string; title?: string }` | `undefined` | Optional OpenRouter app attribution override. Use-time defaults are `referer: "https://runfusion.ai"` and `title: "Fusion"`; empty string suppresses that header. Applied to sync requests and registered OpenRouter provider request headers (`HTTP-Referer`, `X-Title`). |
 | `openrouterModelFilters` | `{ supported_parameters?: string[]; output_modalities?: string[] }` | `undefined` | Optional model-catalog filters appended to OpenRouter sync requests as comma-joined query params (`supported_parameters`, `output_modalities`). See OpenRouter models API: <https://openrouter.ai/docs/api-reference/models>. |
 | `openrouterProviderPreferences` | `{ order?: string[]; ignore?: string[]; only?: string[]; allow_fallbacks?: boolean; sort?: "price" \| "throughput" \| "latency"; require_parameters?: boolean }` | `undefined` | Optional OpenRouter provider routing preferences forwarded via `compat.openRouterRouting` on chat-completion requests. See OpenRouter provider routing: <https://openrouter.ai/docs/features/provider-routing>. |
-| `opencodeGoModelSync` | `boolean` | `true` | Sync opencode-go model catalog at startup via `opencode models opencode --refresh`, normalizing discovered `opencode/...` IDs into the `opencode-go` provider surface used by `/api/models`. |
+| `opencodeGoModelSync` | `boolean` | `true` | Sync opencode-go model catalog at startup via `opencode models opencode --refresh`, and re-run that refresh after saving an `opencode`/`opencode-go` API key in Dashboard Settings, normalizing discovered `opencode/...` IDs into the `opencode-go` provider surface used by `/api/models`. |
 | `updateCheckEnabled` | `boolean` | `true` | When enabled, Fusion performs a daily npm registry check for new `@runfusion/fusion` versions and shows update notices in CLI/dashboard. |
 | `githubTrackingDefaultRepo` | `string` | `undefined` | Global fallback issue-tracking repo (`owner/repo`) used when task-level tracking is enabled and no project/task override is set. In Settings UI this is a detected-remote dropdown with a Custom fallback for manual entry. This key is dual-scope: global saves go through `PUT /api/settings/global` (Settings → Global General). |
 | `autoReloadOnVersionChange` | `boolean` | `true` | When enabled (default), the dashboard automatically reloads when a new build version is detected via `/version.json` polling or service worker activation. Set to `false` to suppress automatic reloads — the user must manually refresh to pick up updates. |
@@ -186,7 +186,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `globalMaxConcurrent` | `number` | `4` | System-wide max concurrent agents across all projects. |
 | `maxWorktrees` | `number` | `4` | Max git worktrees. |
 | `pollIntervalMs` | `number` | `15000` | Scheduler poll interval (ms). |
-| `heartbeatMultiplier` | `number` | `1` | Global multiplier applied to all agent heartbeat intervals. Configured from the Agents screen (not Settings). |
+| `heartbeatMultiplier` | `number` | `1` | Global multiplier applied to agent heartbeat timing: both heartbeat intervals and unresponsive timeout bases. Configured from the Agents screen (not Settings). |
 | `heartbeatScopeDiscipline` | `"strict" \| "lite" \| "off"` | `"strict"` | Heartbeat prompt procedure mode. `strict` keeps coordination-heavy scope discipline, `lite` restores pre-2026-05-11 wording, and `off` uses a minimal procedure. Per-agent `runtimeConfig.heartbeatScopeDiscipline` can override this default. |
 | `heartbeatPromptTemplate` | `"default" \| "compact"` | `"default"` | Heartbeat execution-prompt trim template default. Per-agent `runtimeConfig.heartbeatPromptTemplate` overrides this value. Role fallback when unset everywhere is `executor`→`default`, non-executor coordination roles→`compact`. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Default no-task heartbeat candidate list length. Integer range `0-10`; `0` suppresses candidate prompt injection. |
@@ -201,8 +201,10 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `overlapIgnorePaths` | `string[]` | `[]` | Optional project-relative file or directory paths to exclude from overlap blocking (for example `docs` or `generated/openapi.json`). Entries are trimmed, deduplicated, and must not be absolute or contain `..` traversal. |
 | `autoMerge` | `boolean` | `true` | Auto-finalize tasks from `in-review`. |
 | `mergeStrategy` | `"direct" \| "pull-request"` | `"direct"` | Completion mode (local direct merge vs PR-first). |
-| `directMergeCommitStrategy` | `"auto" \| "always-squash" \| "always-rebase"` | `"auto"` | Direct-merge commit routing mode. `auto` keeps the legacy squash path for branches with zero or one substantive commit, but switches multi-substantive direct merges to a history-preserving rebase-and-merge/cherry-pick path so commit boundaries, subjects, and `Fusion-Task-Id` trailers survive on `main`. `always-squash` forces the legacy squash path; `always-rebase` always preserves per-commit history. Only applies when `mergeStrategy="direct"`. |
-| `mergeIntegrationWorktree` | `"reuse-task-worktree" \| "cwd-main"` | `"reuse-task-worktree"` | Auto-merge integration-root mode for direct merges only. `reuse-task-worktree` runs the rebase/conflict/audit/finalize cascade inside the task worktree so project-root `HEAD` and dirty state stay untouched. `cwd-main` preserves the legacy project-root integration path as an escape hatch. When `worktrunk.enabled=true`, worktrunk-managed merge/worktree handling still takes precedence and this setting is effectively advisory until the native path is used. |
+| `directMergeCommitStrategy` | `"auto" \| "always-squash" \| "always-rebase"` | `"always-squash"` | Direct-merge commit routing mode. `always-squash` (default) forces the legacy squash path. `auto` keeps the legacy squash path for branches with zero or one substantive commit, but switches multi-substantive direct merges to a history-preserving rebase-and-merge/cherry-pick path so commit boundaries, subjects, and `Fusion-Task-Id` trailers survive on `main`. `always-rebase` always preserves per-commit history. Only applies when `mergeStrategy="direct"`. |
+| `mergeIntegrationWorktree` | `"reuse-task-worktree" \| "cwd-integration-branch" \| "cwd-main"` | `"reuse-task-worktree"` | Auto-merge integration-root mode for direct merges only (`mergeStrategy="direct"`). `reuse-task-worktree` (default) runs the rebase/conflict/audit/finalize cascade inside the task worktree after FN-5279 reuse-handoff gates, leaving project-root `HEAD`/dirty state untouched. `cwd-integration-branch` is an explicit operator opt-in escape hatch that runs the cascade from the resolved integration branch in the project-root worktree and surfaces an operator-visible startup warning per FN-5348. `cwd-main` is a deprecated legacy alias: `normalizeMergeIntegrationWorktreeMode(...)` normalizes it to `cwd-integration-branch` at read time and emits a one-shot `[merger] settings.mergeIntegrationWorktree=cwd-main is legacy; normalized to cwd-integration-branch` warning; new configs must not use it. When `worktrunk.enabled=true`, worktrunk-managed merge/worktree handling takes precedence and this setting is advisory until the native path runs. Reuse-handoff refusal must never silently fall back to `cwd-integration-branch`: any future fallback path must emit `merge:cwd-integration-fallback-removed`, and current behavior leaves the task in `in-review` instead. |
+| `mergeAdvanceAutoSync` | `"off" \| "ff-only" \| "stash-and-ff"` | `"stash-and-ff"` | After the merger advances the integration-branch ref, what to do in **other** worktrees still on that branch (typically your project-root checkout). `off` leaves them alone; users must `git pull` or click the Merge Advance Notice banner's Pull button to bring their checkout forward — this is the surprise behavior that made `git status` look like the merge had been reverted. `ff-only` auto-fast-forwards only when the other worktree's index and working tree are clean; dirty worktrees stay untouched and the banner still surfaces for manual pull. `stash-and-ff` (default) runs the Smart Pull pipeline (stash → fast-forward → pop) so local edits survive across the auto-sync. Pop conflicts emit `merge:auto-sync` audit events with `outcome: "stash-pop-conflict"` and surface through the dashboard's existing stash-conflict modal. Only applies to direct merges. |
+| `integrationBranch` | `string` | `undefined` | Optional canonical project integration branch override. Resolution order for merge/self-healing/branch-conflict defaults is `integrationBranch` → legacy `baseBranch` → `origin/HEAD` symbolic ref → fallback `"main"`. This resolved value is used as `projectDefaultBranch` for `resolveTaskMergeTarget(...)`; task-level overrides still come from task metadata. |
 | `prerebaseAutoEnabled` | `boolean` | `true` | Master switch for pre-merge auto-prerebase policy. When enabled, merger checks divergence from `<task.baseCommitSha>` to local `main` and may rebase before Stage 1/2 rebases. Ignored when `worktrunk.enabled=true` (worktrunk-managed path defers this layer). |
 | `prerebaseHotFiles` | `string[]` | `[`"AGENTS.md"`, `"packages/core/src/store.ts"`, `"packages/core/src/db.ts"`, `"packages/engine/src/executor.ts"`, `"packages/engine/src/scheduler.ts"`, `"packages/engine/src/merger.ts"`, `"packages/dashboard/app/styles.css"`]` | Exact-path trigger list for auto-prerebase. If any listed file appears in `<task.baseCommitSha>..localMainHead`, merger runs prerebase first, then continues through the existing Stage 1/2 cascade. Empty array disables hot-file triggering. |
 | `prerebaseDivergenceThreshold` | `number` | `50` | Commit-count trigger for auto-prerebase. When `<task.baseCommitSha>..localMainHead` commit count is greater than this value, prerebase fires even without hot-file overlap. Set `0` (or unset) to disable threshold triggering. |
@@ -234,7 +236,7 @@ Accepted values:
 Override precedence for direct merges is:
 1. Task `PROMPT.md` line `**Direct Merge Commit Strategy:** ...`
 2. Project `directMergeCommitStrategy`
-3. Default `"auto"`
+3. Default `"always-squash"`
 
 ### Sandbox settings
 
@@ -320,6 +322,7 @@ Default notes:
 | `specStalenessEnabled` | `boolean` | `false` | Enforce automatic re-planning for stale plans. |
 | `specStalenessMaxAgeMs` | `number` | `21600000` | Spec staleness threshold in ms (6 hours). |
 | `taskStuckTimeoutMs` | `number` | `undefined` | Inactivity timeout for stuck-task recovery. |
+| `runtimeStopDrainMs` | `number` | `2000` | Maximum milliseconds `InProcessRuntime.stop()` waits for in-flight tasks to drain after aborting AI sessions. Set `0` to skip drain polling entirely (useful for test/CI). |
 | `engineActiveSinceMs` | `number` | `undefined` | Epoch ms when the in-process runtime last became active (startup or unpause). Time-based stuck/stalled/stale surfaces floor their activity anchor at this timestamp so paused/stopped downtime is not counted as quiet age. Runtime-managed; typically not set manually. |
 | `engineActivationGraceMs` | `number` | `300000` | Extra grace window (ms) added after `engineActiveSinceMs` before time-based stuck/stalled/stale surfaces can fire. Set `0` to disable warmup. |
 | `inReviewStallDeadlockThreshold` | `number` | `3` | Minimum number of identical consecutive in-review stall log entries (same stall code + reason) before self-healing auto-disposes the task by pausing it with `pausedReason="in-review-stall-deadlock"` and marking status `failed`. Set to `0` to disable. |
@@ -425,9 +428,9 @@ Default notes:
 | `showQuickChatFAB` | `boolean` | `false` | Show floating quick-chat button (chat remains available via More menu). |
 | `chatAutoCleanupDays` | `0 \| 7 \| 14 \| 30 \| 60 \| 90` | `0` | Auto-cleanup retention window for idle chat sessions and chat rooms. `0` is off (default). When enabled, periodic self-healing maintenance deletes rows with `updatedAt` older than the configured day window. |
 | `mailAutoCleanupDays` | `0 \| 7 \| 14 \| 30 \| 60 \| 90` | `0` | Auto-prune retention window for inbox/outbox mail messages. `0` is off (default). When enabled, periodic self-healing maintenance deletes `messages` rows where `updatedAt < cutoff` for the configured day window. Suggested setting: `7`. |
-| `chatRoomRecentVerbatimMessages` | `number` | `12` | Number of newest chat-room messages kept verbatim in responder context before older entries are compacted. |
-| `chatRoomCompactionFetchLimit` | `number` | `80` | Upper bound on room messages fetched for transcript compaction per responder turn. |
-| `chatRoomSummaryMaxChars` | `number` | `1500` | Hard cap for the synthesized “Earlier room context” summary block. |
+| `chatRoomRecentVerbatimMessages` | `number` | `25` | Number of newest chat-room messages kept verbatim in responder context before older entries are compacted (about 2× prior default history). |
+| `chatRoomCompactionFetchLimit` | `number` | `200` | Upper bound on room messages fetched for transcript compaction per responder turn (raised to support larger retained context windows). |
+| `chatRoomSummaryMaxChars` | `number` | `3000` | Hard cap for the synthesized “Earlier room context” summary block (about 2× the prior summary budget). |
 | `researchSettings` | `ResearchProjectSettings` | `{ enabled: true, searchProvider: undefined, synthesisProvider: undefined, synthesisModelId: undefined, enabledSources: { webSearch: true, pageFetch: true, github: false, localDocs: true, llmSynthesis: true }, limits: { maxConcurrentRuns: 3, maxSourcesPerRun: 20, maxDurationMs: 300000, requestTimeoutMs: 30000 } }` | Project-specific Research enablement/overrides. Resolved together with `researchGlobalDefaults` via `resolveResearchSettings()`. |
 | `researchEnabled` | `boolean` | `undefined` | Enable or disable research for this project. **Deprecated:** prefer `researchSettings.enabled`. |
 | `researchMaxConcurrentRuns` | `number` | `undefined` | Project-level max concurrent research runs. |
@@ -1283,3 +1286,37 @@ Project-scoped default permission policy for permanent-agent action gates.
 - Dispositions: `allow`, `require-approval`, `block`.
 - Missing categories default to `allow` via the built-in `unrestricted` seed.
 - Per-agent overrides take precedence over this project default.
+
+## Model selection hierarchy
+
+All three lanes (planning / executor / reviewer) follow the same 5-tier precedence:
+
+1. Per-task override (`planningModelProvider`/`Id`, `modelProvider`/`Id`, `validatorModelProvider`/`Id`)
+2. Project lane (`planningProvider`/`Id`, `executionProvider`/`Id`, `validatorProvider`/`Id`)
+3. Global lane (`planningGlobalProvider`/`Id`, `executionGlobalProvider`/`Id`, `validatorGlobalProvider`/`Id`)
+4. Project `defaultProviderOverride` / `defaultModelIdOverride`
+5. Global `defaultProvider` / `defaultModelId` → automatic resolution
+
+## Mock provider (test mode)
+
+Set `defaultProvider: "mock"` at any tier in that hierarchy (or the per-task lane override) to force planning, executor, reviewer/validator, merger, and heartbeat sessions onto the deterministic zero-network mock runtime.
+Default scripts are scripted by session purpose: executor marks unfinished steps done, triage writes a minimal PROMPT.md and calls `fn_review_spec` when available, reviewer/validation emit `Verdict: APPROVE`, and merger/heartbeat no-op safely.
+Per-task and global script overrides live in `mockScriptRegistry` (`setMockScript`, `clearMockScript`, `resetMockScripts`) exported from `@fusion/engine`.
+The mock runtime never registers with pi's `ModelRegistry` and is guarded by tests that fail on any `fetch`, `http.request`, or `https.request` usage.
+Activation UX/settings affordances are handled separately in FN-5204.
+
+`testMode?: boolean` exists at both global and project scopes. Project `testMode: true` takes precedence and forces planning, executor, reviewer/validator, merger, and heartbeat to `mock/scripted` regardless of per-task or per-lane overrides. The dashboard surfaces this with the Settings Modal "Enable test mode" toggle and the shell banner: "Test mode — no real AI calls".
+
+## Per-task token budget precedence
+
+1. `task.tokenBudgetOverride`
+2. Project `taskTokenBudget.perSize[task.size]`
+3. Project `taskTokenBudget.soft/hard`
+4. Global `taskTokenBudget.perSize[task.size]`
+5. Global `taskTokenBudget.soft/hard`
+
+Hard cap → pause with `pausedReason: "token_budget_exceeded"`. Soft cap → one-shot alert per task.
+
+## Model presets
+
+Standardize executor/validator pairs; auto-selectable by task size (Small → Budget, Medium → Normal, Large → Complex).

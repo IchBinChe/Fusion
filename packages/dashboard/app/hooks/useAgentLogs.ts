@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { AgentLogEntry } from "@fusion/core";
 import { fetchAgentLogsWithMeta } from "../api";
 import { subscribeSse } from "../sse-bus";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 const INITIAL_LOAD_LIMIT = 100;
 
@@ -63,6 +64,14 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
     previousProjectIdRef.current = projectId;
     previousEnabledRef.current = enabled;
     projectContextVersionRef.current++;
+    recordResumeEvent({
+      view: "useAgentLogs",
+      trigger: "project-context-change",
+      projectId,
+      replayAttempted: false,
+      reason: "context-version-bumped",
+      detail: { taskId },
+    });
     cancelledRef.current = true;
 
     // Clear entries immediately on context change to prevent stale data visibility
@@ -139,6 +148,26 @@ export function useAgentLogs(taskId: string | null, enabled: boolean, projectId?
       unsubscribeRef.current = subscribeSse(
         `/api/tasks/${currentTaskId}/logs/stream${query}`,
         {
+          onOpen: () => {
+            recordResumeEvent({
+              view: "useAgentLogs",
+              trigger: "sse-open",
+              projectId: currentProjectId,
+              replayAttempted: false,
+              sseChannel: `/api/tasks/${currentTaskId}/logs/stream`,
+              detail: { taskId: currentTaskId },
+            });
+          },
+          onReconnect: () => {
+            recordResumeEvent({
+              view: "useAgentLogs",
+              trigger: "sse-reconnect",
+              projectId: currentProjectId,
+              replayAttempted: false,
+              sseChannel: `/api/tasks/${currentTaskId}/logs/stream`,
+              detail: { taskId: currentTaskId },
+            });
+          },
           events: {
             "agent:log": (e) => {
               if (cancelledRef.current ||

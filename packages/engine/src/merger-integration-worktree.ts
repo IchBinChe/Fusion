@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  normalizeMergeIntegrationWorktreeMode,
+} from "@fusion/core";
 import type {
   MergeIntegrationWorktreeMode,
   MergeQueueReleaseOutcome,
@@ -8,8 +11,13 @@ import type {
   Task,
   TaskStore,
 } from "@fusion/core";
-import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
+import {
+  activeSessionRegistry,
+  executingTaskLock,
+  reconcileSelfOwnedActiveSessionForRemoval,
+} from "./active-session-registry.js";
 import { attemptBranchAutocorrect } from "./branch-autocorrect.js";
+import { isBranchAuthoritativeForTask } from "./branch-conflicts.js";
 import { MeshLeaseManager } from "./mesh-lease-manager.js";
 import {
   canonicalizePath,
@@ -23,8 +31,17 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const MERGE_HANDOFF_WORKER_ID = "merger-reuse-handoff";
 
+/** Shell-quote a value for safe interpolation into `git` command strings.
+ *  Mirrors the `quoteArg` helper in merger.ts; kept local to avoid an
+ *  import cycle. */
+function quoteAutostashArg(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
 export interface MergeIntegrationRootResolution {
   mode: MergeIntegrationWorktreeMode;
+  // Sentinel: empty string means reuse mode is requested but no reusable
+  // task.worktree is currently recorded; caller must reacquire before use.
   rootDir: string;
   branchName: string;
 }
@@ -40,22 +57,15 @@ export function resolveMergeIntegrationRoot(
 ): MergeIntegrationRootResolution {
   const branchName = canonicalFusionBranchName(input.task.id);
 
-  if (input.settings.worktrunk?.enabled === true) {
-    return {
-      mode: "cwd-main",
-      rootDir: input.projectRoot,
-      branchName,
-    };
-  }
+  const mode = normalizeMergeIntegrationWorktreeMode(
+    input.settings.mergeIntegrationWorktree,
+  );
 
-  const mode = input.settings.mergeIntegrationWorktree === "cwd-main"
-    ? "cwd-main"
-    : "reuse-task-worktree";
-
+  const reusablePath = input.task.worktree?.trim() || "";
   return {
     mode,
     rootDir: mode === "reuse-task-worktree"
-      ? input.task.worktree?.trim() || input.projectRoot
+      ? reusablePath
       : input.projectRoot,
     branchName,
   };
@@ -152,7 +162,7 @@ export interface ReuseHandoffInput {
   auditEmit?: (event: { type: string; target?: string; metadata?: Record<string, unknown> }) => Promise<void> | void;
 }
 
-async function snapshotDirtyFilesLocal(rootDir: string): Promise<Set<string>> {
+export async function snapshotDirtyFilesLocal(rootDir: string): Promise<Set<string>> {
   const paths = new Set<string>();
   try {
     const [unstagedOut, stagedOut, porcelainOut] = await Promise.all([
@@ -189,7 +199,7 @@ async function snapshotDirtyFilesLocal(rootDir: string): Promise<Set<string>> {
   return paths;
 }
 
-async function gitDirtyFingerprintLocal(rootDir: string): Promise<string> {
+export async function gitDirtyFingerprintLocal(rootDir: string): Promise<string> {
   try {
     const [diffOut, statusOut] = await Promise.all([
       execFileAsync("git", ["diff", "HEAD"], {
@@ -206,6 +216,65 @@ async function gitDirtyFingerprintLocal(rootDir: string): Promise<string> {
     return createHash("sha256").update(diffOut).update("\0").update(statusOut).digest("hex");
   } catch {
     return "";
+  }
+}
+
+export interface IntegrationWorktreeProbeResult {
+  userCheckout: {
+    worktreePath: string;
+    dirty: boolean;
+    untrackedCount: number;
+    dirtyPathSample: string[];
+  } | null;
+  dirtyFingerprint: string | null;
+}
+
+export interface ProbeIntegrationWorktreeStateInput {
+  rootDir: string;
+  integrationBranch: string;
+  projectRoot: string;
+}
+
+export async function probeIntegrationWorktreeState(
+  input: ProbeIntegrationWorktreeStateInput,
+): Promise<IntegrationWorktreeProbeResult> {
+  try {
+    const branchMap = await getRegisteredWorktreeBranchMap(input.projectRoot);
+    const caseInsensitiveMatches = Array.from(branchMap.entries())
+      .filter(([branch]) => branch.toLowerCase() === input.integrationBranch.toLowerCase())
+      .map(([, worktreePath]) => worktreePath);
+    const registeredPath = branchMap.get(input.integrationBranch)
+      ?? caseInsensitiveMatches.find((worktreePath) => canonicalizePath(worktreePath) === canonicalizePath(input.rootDir))
+      ?? caseInsensitiveMatches[0]
+      ?? null;
+    if (!registeredPath) {
+      return { userCheckout: null, dirtyFingerprint: null };
+    }
+
+    const dirtyPaths = Array.from(await snapshotDirtyFilesLocal(registeredPath)).sort();
+    const dirtyFingerprint = await gitDirtyFingerprintLocal(registeredPath);
+    let untrackedCount = 0;
+    try {
+      const { stdout } = await execFileAsync("git", ["status", "-z", "--porcelain"], {
+        cwd: registeredPath,
+        encoding: "utf-8",
+      });
+      untrackedCount = stdout.split("\0").filter((entry) => entry.startsWith("?? ")).length;
+    } catch {
+      // best-effort
+    }
+
+    return {
+      userCheckout: {
+        worktreePath: registeredPath,
+        dirty: dirtyPaths.length > 0 || Boolean(dirtyFingerprint),
+        untrackedCount,
+        dirtyPathSample: dirtyPaths.slice(0, 20),
+      },
+      dirtyFingerprint: dirtyFingerprint || null,
+    };
+  } catch {
+    return { userCheckout: null, dirtyFingerprint: null };
   }
 }
 
@@ -237,14 +306,77 @@ function asCentralClaimAccessor(store: TaskStore): {
 export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<HandoffResult> {
   const expectedBranch = canonicalFusionBranchName(input.task.id);
   const worktreePath = input.worktreePath;
+  if (canonicalizePath(worktreePath) === canonicalizePath(input.projectRoot)) {
+    throw new MergeHandoffRefusedError("reuse-misconfigured", "worktree-equals-project-root", {
+      taskId: input.task.id,
+      projectRoot: input.projectRoot,
+      worktreePath,
+    });
+  }
   const dirtyPaths = Array.from(await snapshotDirtyFilesLocal(worktreePath)).sort();
   const dirtyFingerprint = await gitDirtyFingerprintLocal(worktreePath);
   if (dirtyPaths.length > 0 || dirtyFingerprint) {
-    throw new MergeHandoffRefusedError("working-tree-dirty", "dirty-worktree", {
-      taskId: input.task.id,
-      worktreePath,
-      dirtyPaths,
-      dirtyFingerprint,
+    // Previously this refused the handoff and parked the task as
+    // in-review:failed. Instead, autostash the dirty state so the merge can
+    // proceed; the stash survives in the repo's stash list even after the
+    // worktree is later torn down, so the developer can always recover.
+    const stashLabel = `fusion-reuse-handoff-autostash:${input.task.id}:${Date.now()}`;
+    let stashSha: string | null = null;
+    let stashError: string | null = null;
+    try {
+      // Stage everything (including untracked) so `git stash create`
+      // captures the full dirty tree.
+      await execAsync("git add -A", { cwd: worktreePath });
+      const { stdout: createOut } = await execAsync("git stash create", {
+        cwd: worktreePath,
+        encoding: "utf-8",
+      });
+      stashSha = String(createOut).trim() || null;
+      if (stashSha) {
+        await execAsync(
+          `git stash store -m ${quoteAutostashArg(stashLabel)} ${stashSha}`,
+          { cwd: worktreePath },
+        );
+        // Only reset/clean once the dirty content is safely captured by the
+        // stash. If the stash failed (no SHA), leaving the working tree as-is
+        // preserves the user's edits for manual recovery.
+        await execAsync("git reset --hard HEAD", { cwd: worktreePath });
+        await execAsync("git clean -fd", { cwd: worktreePath });
+      }
+    } catch (err: unknown) {
+      stashError = err instanceof Error ? err.message : String(err);
+    }
+
+    if (!stashSha || stashError) {
+      // Stash creation failed: do NOT proceed (the merge's destructive ops
+      // would wipe the user's edits). Best-effort unstage so the worktree
+      // isn't left with a half-staged index from the `git add -A` above.
+      try {
+        await execAsync("git reset", { cwd: worktreePath });
+      } catch {
+        // Nothing more we can do.
+      }
+      throw new MergeHandoffRefusedError("working-tree-dirty", "dirty-worktree-autostash-failed", {
+        taskId: input.task.id,
+        worktreePath,
+        dirtyPaths,
+        dirtyFingerprint,
+        stashError,
+      });
+    }
+
+    await input.auditEmit?.({
+      type: "merge:reuse-handoff-autostash",
+      target: worktreePath,
+      metadata: {
+        taskId: input.task.id,
+        worktreePath,
+        stashSha,
+        stashLabel,
+        dirtyPathCount: dirtyPaths.length,
+        dirtyPathSample: dirtyPaths.slice(0, 20),
+        recoverCommand: `cd ${worktreePath} && git stash apply ${stashSha}`,
+      },
     });
   }
 
@@ -284,24 +416,78 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
     }
   }
   if (observedBranch !== expectedBranch) {
-    throw new MergeHandoffRefusedError("head-branch-mismatch", "unexpected-branch", {
-      taskId: input.task.id,
-      worktreePath,
-      observedBranch,
+    // The worktree's HEAD points elsewhere (detached or different branch) but
+    // the expected branch ref may still hold this task's authoritative work.
+    // If the branch tip carries the task's Fusion-Task-Id trailer and the
+    // range against base is contamination-free, re-attach via plain checkout
+    // (worktree was already asserted clean above, so this is safe and
+    // non-destructive — unlike `checkout -B` which would clobber the ref).
+    const authority = await isBranchAuthoritativeForTask(
+      input.projectRoot,
       expectedBranch,
-    });
+      input.task.id,
+    );
+    if (authority.ok) {
+      const reattach = await execAsync(`git checkout ${expectedBranch}`, {
+        cwd: worktreePath,
+        encoding: "utf-8",
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      }).then(
+        () => ({ ok: true as const }),
+        (err: unknown) => ({ ok: false as const, reason: err instanceof Error ? err.message : String(err) }),
+      );
+      if (reattach.ok) {
+        const { stdout: reattachedHead } = await execAsync("git rev-parse --abbrev-ref HEAD", {
+          cwd: worktreePath,
+          encoding: "utf-8",
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        });
+        observedBranch = reattachedHead.trim();
+        await input.auditEmit?.({
+          type: "branch:auto-reattach-authoritative",
+          target: worktreePath,
+          metadata: {
+            taskId: input.task.id,
+            previousHead: observedBranch === expectedBranch ? undefined : observedBranch,
+            expectedBranch,
+            worktreePath,
+          },
+        });
+      }
+    }
+    if (observedBranch !== expectedBranch) {
+      throw new MergeHandoffRefusedError("head-branch-mismatch", "unexpected-branch", {
+        taskId: input.task.id,
+        worktreePath,
+        observedBranch,
+        expectedBranch,
+        authorityProbe: authority.ok ? "ok" : authority.reason,
+      });
+    }
   }
 
   const activeRecord = activeSessionRegistry.lookupByPath(worktreePath);
   if (activeRecord) {
-    if (activeRecord.taskId === input.task.id && !executingTaskLock.has(input.task.id)) {
-      const reconciled = activeSessionRegistry.reconcileStaleSelfOwned(worktreePath, input.task.id);
-      if (!reconciled.reconciled) {
+    if (activeRecord.taskId === input.task.id) {
+      // FN-5256: route through the hardened helper so the minIdleMs window and
+      // processActiveProbe (executingTaskLock) gates apply — bare
+      // `reconcileStaleSelfOwned` would race a warming-down session.
+      const outcome = reconcileSelfOwnedActiveSessionForRemoval(
+        activeSessionRegistry,
+        worktreePath,
+        input.task.id,
+        () => false,
+        { processActiveProbe: (probeTaskId) => executingTaskLock.has(probeTaskId) },
+      );
+      if (outcome.action !== "reconciled") {
         throw new MergeHandoffRefusedError("active-session-binding", "active-session-present", {
           taskId: input.task.id,
           worktreePath,
           activeRecord,
           executingTaskLockHeld: executingTaskLock.has(input.task.id),
+          reconcileOutcome: outcome.action,
         });
       }
     } else {
@@ -413,11 +599,23 @@ export async function acquireReuseHandoff(input: ReuseHandoffInput): Promise<Han
     }
     throw error;
   }
-  if (!lease || !("taskId" in lease) || lease.taskId !== input.task.id) {
+  if (!lease) {
+    throw new MergeHandoffRefusedError("lease-handoff-failed", "target-not-queued", {
+      taskId: input.task.id,
+      worktreePath,
+    });
+  }
+
+  if (!("taskId" in lease) || lease.taskId !== input.task.id) {
+    const queueHead = (input.store as TaskStore & {
+      peekMergeQueueHead?: () => { taskId: string; leasedBy: string | null; column: string | null } | null;
+    }).peekMergeQueueHead?.();
     throw new MergeHandoffRefusedError("lease-handoff-failed", "no-lease", {
       taskId: input.task.id,
       worktreePath,
-      acquiredTaskId: lease && "taskId" in lease ? lease.taskId : null,
+      acquiredTaskId: "taskId" in lease ? lease.taskId : null,
+      queueHeadTaskId: queueHead?.taskId ?? null,
+      queueHeadLeasedBy: queueHead?.leasedBy ?? null,
     });
   }
   // Re-check executor lease after acquiring the merge-queue lease: the

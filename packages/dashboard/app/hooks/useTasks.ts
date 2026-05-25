@@ -5,6 +5,7 @@ import * as api from "../api";
 import { subscribeSse } from "../sse-bus";
 import { clearCache, readCache, SWR_CACHE_KEYS, SWR_TASKS_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 import { pushTrace } from "../utils/dashboardTraceBuffer";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 const loggedTaskCacheHitProjects = new Set<string>();
 
@@ -252,6 +253,13 @@ export function useTasks(options?: UseTasksOptions) {
           previousContextVersion,
           currentContextVersion: projectContextVersionRef.current,
         });
+        recordResumeEvent({
+          view: "useTasks",
+          trigger: "visibility",
+          projectId,
+          replayAttempted: false,
+          reason: "context-version-changed",
+        });
         void refreshTasks();
         return;
       }
@@ -263,6 +271,13 @@ export function useTasks(options?: UseTasksOptions) {
       }
 
       lastVisibilityRefreshRef.current = now;
+      recordResumeEvent({
+        view: "useTasks",
+        trigger: "visibility",
+        projectId,
+        replayAttempted: false,
+        reason: "debounced-refresh",
+      });
       void refreshTasks();
     };
 
@@ -455,6 +470,12 @@ export function useTasks(options?: UseTasksOptions) {
           traceDroppedStaleEvent();
           return;
         }
+        recordResumeEvent({
+          view: "useTasks",
+          trigger: "sse-reconnect",
+          projectId,
+          replayAttempted: false,
+        });
         void refreshTasksRef.current();
       },
     });
@@ -495,6 +516,7 @@ export function useTasks(options?: UseTasksOptions) {
       removeDependencyReferences?: boolean;
       removeLineageReferences?: boolean;
       githubIssueAction?: GithubIssueAction;
+      allowResurrection?: boolean;
     },
   ): Promise<Task> => {
     return normalizeTask(await api.deleteTask(id, projectId, options));

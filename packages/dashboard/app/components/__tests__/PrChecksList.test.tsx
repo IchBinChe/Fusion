@@ -24,7 +24,7 @@ describe("PrChecksList", () => {
 
   it("FN-5012: no mobile .btn overrides; failing details link uses component classes", () => {
     const css = loadAllAppCss();
-    const mediaBlocks = Array.from(css.matchAll(/@media \(max-width: 768px\)\s*\{([\s\S]*?)\n\}/g), (match) => match[1]);
+    const mediaBlocks = Array.from(css.matchAll(/@media[^{]*\(max-width: 768px\)[^{]*\{([\s\S]*?)\n\}/g), (match) => match[1]);
     const prChecksMobileBlock = mediaBlocks.find((block) => block.includes(".pr-checks__item"));
     expect(prChecksMobileBlock).toBeTruthy();
     expect(prChecksMobileBlock).not.toMatch(/\.(btn|btn-sm|btn-icon|btn-primary|btn-danger|btn-warning|modal-close)\b/);

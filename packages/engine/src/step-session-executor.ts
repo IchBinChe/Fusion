@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AgentStore, MessageStore, PermanentAgentGatingContext, TaskDetail, Settings, TaskStore } from "@fusion/core";
 import { resolvePersistAgentThinkingLog } from "@fusion/core";
@@ -35,6 +36,7 @@ import { StuckTaskDetector } from "./stuck-task-detector.js";
 import { AgentLogger } from "./agent-logger.js";
 import { createLogger } from "./logger.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
+import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { checkSessionError } from "./usage-limit-detector.js";
 import {
@@ -1014,6 +1016,15 @@ Follow instructions precisely and avoid unrelated changes.`,
             fallbackProvider: settings.fallbackProvider,
             fallbackModelId: settings.fallbackModelId,
             defaultThinkingLevel: taskDetail.thinkingLevel ?? settings.defaultThinkingLevel,
+            runAuditor: createRunAuditor(this.store, {
+              runId: generateSyntheticRunId("workflow-step", taskDetail.id),
+              agentId: taskDetail.assignedAgentId ?? "executor",
+              taskId: taskDetail.id,
+              taskLineageId: taskDetail.lineageId,
+              phase: "execute",
+              source: "step-session-executor",
+            }),
+            settings,
             customTools: [
               ...pluginTools,
               ...documentTools,
@@ -1339,7 +1350,7 @@ Follow instructions precisely and avoid unrelated changes.`,
       // Remove any partial directory left behind so the invariant holds:
       // "if .worktrees/<slug> exists on disk, it is a fully registered git worktree."
       try {
-        await execAsync(`rm -rf "${worktreePath}"`, { cwd: rootDir, env: this.options.taskEnv });
+        await rm(worktreePath, { recursive: true, force: true });
       } catch {
         // best-effort cleanup; log but don't mask the original error
         stepExecLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${worktreePath}`);
@@ -1363,7 +1374,7 @@ Follow instructions precisely and avoid unrelated changes.`,
       });
     } catch (err) {
       try {
-        await execAsync(`rm -rf "${worktreePath}"`, { cwd: rootDir, env: this.options.taskEnv });
+        await rm(worktreePath, { recursive: true, force: true });
       } catch {
         stepExecLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${worktreePath}`);
       }

@@ -75,6 +75,15 @@ function getKeyboardMetrics(previousMetrics: KeyboardMetrics = CLOSED_KEYBOARD_M
   const focused = isKeyboardFocusableElement(document.activeElement);
   const offsetTop = vv.offsetTop;
 
+  // Pinch-zoom also shrinks vv.height — distinguish from keyboard by
+  // checking vv.scale. Android Chrome ignores user-scalable=no for a11y,
+  // so a user can be zoomed in with a focused textarea, which otherwise
+  // makes (innerHeight - vv.height) huge and false-positives "keyboard open"
+  // → MobileNavBar disappears.
+  if (vv.scale > 1.01) {
+    return CLOSED_KEYBOARD_METRICS;
+  }
+
   // Only refresh baseline while keyboard is likely closed.
   if (!focused) {
     updateBaselineViewportHeight(vv.height);
@@ -93,7 +102,14 @@ function getKeyboardMetrics(previousMetrics: KeyboardMetrics = CLOSED_KEYBOARD_M
   // after the user has tapped Done, which leaves App-level layout (mobile
   // nav bar visibility, project-content padding) stuck in keyboard-up
   // mode and makes downstream components (ChatView) jump on settle.
-  const chromeOverlap = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+  //
+  // Prefer documentElement.clientHeight over window.innerHeight: Android
+  // Chrome can report a stale innerHeight (multi-window / shrink-to-fit
+  // edge cases — observed innerHeight=2848 while html.clientHeight=797),
+  // which makes the overlap calc explode and false-positives keyboard-open
+  // whenever a textarea has focus.
+  const layoutHeight = document.documentElement?.clientHeight || window.innerHeight;
+  const chromeOverlap = Math.max(0, layoutHeight - vv.offsetTop - vv.height);
   if (chromeOverlap > 0 && focused) {
     return { overlap: chromeOverlap, open: true, vvHeight: vv.height, vvOffsetTop: offsetTop };
   }

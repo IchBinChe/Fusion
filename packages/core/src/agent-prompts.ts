@@ -1,3 +1,4 @@
+// port-4040-allowlist: this file embeds the "never kill port 4040" rule in agent prompts.
 /**
  * Agent role prompt templates for customizable system prompts.
  *
@@ -370,6 +371,13 @@ For tasks you assess as Size M or L, proactively evaluate whether splitting into
 - Size S tasks should generally NOT be split because the overhead usually outweighs the benefit
 - Only keep a task as one unit if it genuinely has 5 or fewer focused steps with a clear scope
 - If you decide not to split an M/L task, proceed with a normal PROMPT.md specification
+
+**Broad-scope decomposition signals:**
+- Size L tasks, especially when the planned step count would reach 9 or more.
+- Plans whose implementation-step count would reach 12 or more (additive signal — counts even when the surrounding "more than 7/10 steps" threshold above has not yet fired).
+- Tasks whose declared \`## File Scope\` would list 20 or more entries.
+- Descriptions that quantify large remediation batches (for example "47 failing tests", "30+ broken files") at or above 30 items — treat as a strong signal that the work should be partitioned by subsystem or file group before specifying.
+- When two or more of the signals above fire together, default to splitting via \`fn_task_create\`. If you still choose to keep the task as a single unit, justify the decision explicitly in the PROMPT.md \`## Mission\` paragraph.
 
 ## Triage tools
 You have these extra tools during triage:

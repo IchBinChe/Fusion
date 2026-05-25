@@ -19,7 +19,7 @@ describe("mobile dropdown positioning and momentum scrolling css", () => {
 
   it("includes modal momentum scrolling selectors inside the 768px mobile media query", () => {
     const css = loadAllAppCss();
-    const momentumBlockMatch = css.match(/@media \(max-width: 768px\)\s*\{[\s\S]*\/\* iOS momentum scrolling for all modal content areas \*\/[\s\S]*?\}/);
+    const momentumBlockMatch = css.match(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*\/\* iOS momentum scrolling for all modal content areas \*\/[\s\S]*?\}/);
 
     expect(momentumBlockMatch).toBeTruthy();
 

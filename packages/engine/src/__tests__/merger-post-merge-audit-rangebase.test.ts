@@ -34,7 +34,8 @@ function createRepoWithFeatureCommit() {
   return { dir, baseSha, mainTipSha, auditSha };
 }
 
-describe("resolvePostMergeAuditInvocation", () => {
+// FN-5518 (FN-4807 pattern): rangebase resolution drives real-git rev-parse / merge-base ceremony; bound but lift the per-test deadline above Vitest's 5s default to absorb pnpm test contention without weakening subprocess guards.
+describe("resolvePostMergeAuditInvocation", { timeout: 30_000 }, () => {
   const cleanup: string[] = [];
   afterEach(() => {
     for (const dir of cleanup.splice(0)) rmSync(dir, { recursive: true, force: true });

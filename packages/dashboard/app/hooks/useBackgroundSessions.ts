@@ -10,6 +10,7 @@ import {
 import { useAiSessionSync } from "./useAiSessionSync";
 import { getSessionTabId } from "../utils/getSessionTabId";
 import { subscribeSse } from "../sse-bus";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 interface UseBackgroundSessionsResult {
   sessions: AiSessionSummary[];
@@ -273,7 +274,9 @@ export function useBackgroundSessions(projectId?: string): UseBackgroundSessions
       }
     };
 
-    return subscribeSse(`/api/events${params}`, {
+    const sseChannel = `/api/events${params}`;
+
+    const unsubscribe = subscribeSse(sseChannel, {
       events: {
         "ai_session:updated": handleUpdated,
         "ai_session:deleted": handleDeleted,
@@ -283,9 +286,25 @@ export function useBackgroundSessions(projectId?: string): UseBackgroundSessions
       // the channel was down stay invisible to this hook and the AI pill
       // count gets stuck on stale sessions.
       onReconnect: () => {
+        recordResumeEvent({
+          view: "useBackgroundSessions",
+          trigger: "sse-reconnect",
+          projectId,
+          replayAttempted: false,
+          sseChannel,
+        });
         refresh();
       },
     });
+    recordResumeEvent({
+      view: "useBackgroundSessions",
+      trigger: "sse-open",
+      projectId,
+      replayAttempted: false,
+      sseChannel,
+    });
+
+    return unsubscribe;
   }, [broadcastCompleted, broadcastUpdate, projectId, refresh]);
 
   const dismissSession = useCallback(async (id: string) => {

@@ -7,7 +7,8 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("index.html theme-data boot contract", () => {
   const indexHtml = readFileSync(resolve(PACKAGE_ROOT, "app/index.html"), "utf8");
-  const script = indexHtml.match(/<script>[\s\S]*?<\/script>/)?.[0] ?? "";
+  const scripts = [...indexHtml.matchAll(/<script>[\s\S]*?<\/script>/g)].map((m) => m[0]);
+  const script = scripts.find((candidate) => candidate.includes("setAttribute('data-theme'")) ?? "";
 
   it("includes a static theme-data stylesheet link", () => {
     expect(indexHtml).toMatch(/<link\s+[^>]*(id=["']theme-data["'][^>]*href=["']\/theme-data\.css["']|href=["']\/theme-data\.css["'][^>]*id=["']theme-data["'])[^>]*>/i);

@@ -7,6 +7,7 @@ import type { ResearchProviderOption } from "../research-types";
 import { ResearchTaskActionModal } from "./ResearchTaskActionModal";
 import type { SectionId } from "./SettingsModal";
 import "./ResearchView.css";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 interface ResearchViewProps {
   projectId?: string;
@@ -33,7 +34,28 @@ const PROVIDER_LABELS: Record<ResearchProviderOption, string> = {
   "llm-synthesis": "LLM Synthesis",
 };
 
+let researchViewWasPreviouslyInactive = false;
+
 export function ResearchView({ projectId, addToast, onOpenSettings, readinessVersion = 0 }: ResearchViewProps) {
+  useEffect(() => {
+    recordResumeEvent({
+      view: "ResearchView",
+      trigger: researchViewWasPreviouslyInactive ? "route-active" : "remount",
+      projectId,
+      replayAttempted: false,
+    });
+    researchViewWasPreviouslyInactive = false;
+
+    return () => {
+      researchViewWasPreviouslyInactive = true;
+      recordResumeEvent({
+        view: "ResearchView",
+        trigger: "route-inactive",
+        projectId,
+        replayAttempted: false,
+      });
+    };
+  }, [projectId]);
   const {
     runs,
     selectedRun,

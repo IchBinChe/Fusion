@@ -33,6 +33,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addToast = useCallback((message: string, type: ToastType = "info") => {
+    // Suppress bare network-failure toasts (TypeError "Failed to fetch" from
+    // aborted in-flight requests when the tab is backgrounded/resumed on
+    // mobile). Toasts with additional context still pass through.
+    if (type === "error" && /^\s*Failed to fetch\.?\s*$/i.test(message)) {
+      return;
+    }
     const id = nextId.current++;
     setToasts((prev) => [...prev, { id, message, type }]);
     const timer = setTimeout(() => removeToast(id), 4000);

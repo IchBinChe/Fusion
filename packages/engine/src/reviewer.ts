@@ -1,3 +1,4 @@
+// port-4040-allowlist: this file embeds the "never kill port 4040" rule in the reviewer prompt.
 /**
  * Reviewer — spawns a separate pi agent to review a worker's plan or code.
  *
@@ -24,6 +25,7 @@ import {
 } from "./agent-instructions.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
+import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { createMemoryGetTool, createMemorySearchTool, createWebFetchTool } from "./agent-tools.js";
 
 export const REVIEWER_SYSTEM_PROMPT = `You are an independent code and plan reviewer.
@@ -500,6 +502,15 @@ export async function reviewStep(
   const createReviewerSession = async (
     overrides?: { forceProvider?: string; forceModelId?: string },
   ): Promise<import("@mariozechner/pi-coding-agent").AgentSession> => {
+    const runAuditor = options.store
+      ? createRunAuditor(options.store, {
+        runId: generateSyntheticRunId("reviewer", options.taskId ?? "review"),
+        agentId: options.agentId ?? "reviewer",
+        taskId: options.taskId,
+        phase: "review",
+        source: "reviewer",
+      })
+      : undefined;
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "reviewer",
       runtimeHint: extractRuntimeHint(memoryAgent?.runtimeConfig),
@@ -518,6 +529,8 @@ export async function reviewStep(
       fallbackProvider: validatorFallbackProvider,
       fallbackModelId: validatorFallbackModelId,
       defaultThinkingLevel: options.defaultThinkingLevel,
+      runAuditor,
+      settings: options.settings,
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       taskId: options.taskId,
       taskTitle: options.taskTitle,
@@ -662,6 +675,13 @@ export async function reviewStep(
   const hasConfiguredFallback = Boolean(validatorFallbackProvider && validatorFallbackModelId);
   const retrySettings = liveSettings ?? options.settings;
 
+  const resetReviewerFallbackRetryCount = async (): Promise<void> => {
+    if (!options.store || !options.taskId || typeof options.store.updateTask !== "function") {
+      return;
+    }
+    await options.store.updateTask(options.taskId, { reviewerFallbackRetryCount: 0 }).catch(() => undefined);
+  };
+
   let firstAttempt: { verdict: ReviewVerdict; summary: string; review: string };
   try {
     firstAttempt = await runAttempt(request);
@@ -680,10 +700,14 @@ export async function reviewStep(
         });
       }
       try {
-        return await runAttempt(request, {
+        const fallbackResult = await runAttempt(request, {
           forceProvider: validatorFallbackProvider,
           forceModelId: validatorFallbackModelId,
         });
+        if (fallbackResult.verdict !== "UNAVAILABLE") {
+          await resetReviewerFallbackRetryCount();
+        }
+        return fallbackResult;
       } catch {
         throw err;
       }
@@ -702,13 +726,18 @@ export async function reviewStep(
       });
     }
     try {
-      return await runAttempt(fallbackReviewRequest);
+      const fallbackResult = await runAttempt(fallbackReviewRequest);
+      if (fallbackResult.verdict !== "UNAVAILABLE") {
+        await resetReviewerFallbackRetryCount();
+      }
+      return fallbackResult;
     } catch {
       throw err;
     }
   }
 
   if (firstAttempt.verdict !== "UNAVAILABLE") {
+    await resetReviewerFallbackRetryCount();
     return firstAttempt;
   }
 
@@ -725,10 +754,14 @@ export async function reviewStep(
         agentId: options.agentId,
       });
     }
-    return runAttempt(request, {
+    const fallbackResult = await runAttempt(request, {
       forceProvider: validatorFallbackProvider,
       forceModelId: validatorFallbackModelId,
     });
+    if (fallbackResult.verdict !== "UNAVAILABLE") {
+      await resetReviewerFallbackRetryCount();
+    }
+    return fallbackResult;
   }
 
   await logFallbackRetry("UNAVAILABLE verdict", "same-model strict prompt");
@@ -743,7 +776,11 @@ export async function reviewStep(
       agentId: options.agentId,
     });
   }
-  return runAttempt(fallbackReviewRequest);
+  const fallbackResult = await runAttempt(fallbackReviewRequest);
+  if (fallbackResult.verdict !== "UNAVAILABLE") {
+    await resetReviewerFallbackRetryCount();
+  }
+  return fallbackResult;
 }
 
 function isReviewerSessionReuseError(error: unknown): boolean {

@@ -111,6 +111,7 @@ vi.mock("node:child_process", async () => {
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   readFileSync: vi.fn(),
+  readdirSync: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock("../rate-limit-retry.js", () => ({
@@ -145,6 +146,13 @@ import {
   resolveTaskDiffBaseRef,
   commitOrAmendMergeWithFixes,
   MergeAbortedError,
+  OutOfScopeVerificationError,
+  parsePnpmWorkspaceGlobs,
+  resolveWorkspacePackageRoots,
+  mapChangedFilesToPackageNames,
+  deriveScopedPnpmTestCommand,
+  parseFailingFilesFromOutput,
+  getBranchChangedFiles,
   type ConflictCategory,
 } from "../merger.js";
 import { mergerLog } from "../logger.js";
@@ -156,9 +164,10 @@ import { type TaskStore, type Task, type MergeResult, DEFAULT_SETTINGS } from "@
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const mockedExec = vi.mocked(exec);
-const { existsSync: mockedExistsSyncRaw, readFileSync: mockedReadFileSyncRaw } = await import("node:fs");
+const { existsSync: mockedExistsSyncRaw, readFileSync: mockedReadFileSyncRaw, readdirSync: mockedReaddirSyncRaw } = await import("node:fs");
 const mockedExistsSync = vi.mocked(mockedExistsSyncRaw);
 const mockedReadFileSync = vi.mocked(mockedReadFileSyncRaw);
+const mockedReaddirSync = vi.mocked(mockedReaddirSyncRaw);
 
 function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = []) {
   const baseTask: Task = {
@@ -621,8 +630,64 @@ describe("aiMergeTask — build verification", () => {
     expect(installCall).toBeDefined();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-050",
-      "Syncing dependencies before merge build verification: pnpm install --frozen-lockfile",
+      "Syncing dependencies before merge verification: pnpm install --frozen-lockfile",
     );
+  });
+
+  it("syncs dependencies before test verification when install state is missing", async () => {
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      },
+    } as any);
+
+    mockedExistsSync.mockImplementation((path: any) => {
+      const pathStr = String(path);
+      if (pathStr.includes("node_modules") || pathStr.endsWith(".pnp.cjs")) return false;
+      return true;
+    });
+
+    let cachedQuietChecks = 0;
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
+      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "mergedcommit123";
+      if (cmdStr.includes("git log")) return "- feat: something" as any;
+      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
+      if (cmdStr.includes("git diff") && cmdStr.includes("--stat")) return "2 files changed" as any;
+      if (cmdStr.includes("merge --squash")) return Buffer.from("");
+      if (cmdStr.includes("diff --name-only --diff-filter=U")) return "" as any;
+      if (cmdStr.includes("git diff --cached --name-only")) {
+        return "package.json\npackages/desktop/package.json" as any;
+      }
+      if (cmdStr.includes("pnpm install --frozen-lockfile")) return "Lockfile is up to date" as any;
+      if (cmdStr.includes("diff --cached --quiet")) {
+        cachedQuietChecks += 1;
+        return cachedQuietChecks === 1 ? "1" as any : "0" as any;
+      }
+      if (cmdStr.includes("show --shortstat")) return "3 files changed, 10 insertions(+), 2 deletions(-)" as any;
+      if (cmdStr.includes("branch -d") || cmdStr.includes("branch -D")) return Buffer.from("");
+      if (cmdStr.includes("worktree remove")) return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const store = createMockStore(
+      { id: "FN-051", worktree: "/tmp/root/.worktrees/KB-051" },
+      [{ id: "FN-051", worktree: "/tmp/root/.worktrees/KB-051", column: "in-review" } as Task],
+    );
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      testCommand: "pnpm test",
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-051");
+
+    expect(result.merged).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm install --frozen-lockfile")),
+    ).toBe(true);
   });
 });
 
@@ -2670,4 +2735,364 @@ describe("aiMergeTask — in-merge verification fix", () => {
   });
 });
 
+// ── parsePnpmWorkspaceGlobs ───────────────────────────────────────────────
 
+describe("parsePnpmWorkspaceGlobs", () => {
+  it("parses a simple packages list", () => {
+    const content = `packages:\n  - "packages/*"\n  - "plugins/*"\n`;
+    expect(parsePnpmWorkspaceGlobs(content)).toEqual(["packages/*", "plugins/*"]);
+  });
+
+  it("handles single-quoted entries", () => {
+    const content = `packages:\n  - 'packages/*'\n`;
+    expect(parsePnpmWorkspaceGlobs(content)).toEqual(["packages/*"]);
+  });
+
+  it("handles unquoted entries", () => {
+    const content = `packages:\n  - packages/*\n`;
+    expect(parsePnpmWorkspaceGlobs(content)).toEqual(["packages/*"]);
+  });
+
+  it("stops at next top-level key", () => {
+    const content = `packages:\n  - packages/*\ncatalog:\n  react: ^18\n`;
+    expect(parsePnpmWorkspaceGlobs(content)).toEqual(["packages/*"]);
+  });
+
+  it("returns empty array for empty content", () => {
+    expect(parsePnpmWorkspaceGlobs("")).toEqual([]);
+  });
+
+  it("returns empty array when no packages key", () => {
+    expect(parsePnpmWorkspaceGlobs("name: root\n")).toEqual([]);
+  });
+
+  it("parses literal (non-glob) package paths", () => {
+    const content = `packages:\n  - "plugins/fusion-plugin-foo"\n`;
+    expect(parsePnpmWorkspaceGlobs(content)).toEqual(["plugins/fusion-plugin-foo"]);
+  });
+});
+
+// ── resolveWorkspacePackageRoots ──────────────────────────────────────────
+
+describe("resolveWorkspacePackageRoots", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves glob pattern to subdirectories with package.json", () => {
+    mockedReaddirSync.mockReturnValue([
+      { name: "dashboard", isDirectory: () => true },
+      { name: "engine", isDirectory: () => true },
+    ] as any);
+    mockedExistsSync.mockImplementation((p: any) => String(p).endsWith("package.json"));
+
+    const roots = resolveWorkspacePackageRoots("/repo", ["packages/*"]);
+    expect(roots).toEqual(["packages/dashboard", "packages/engine"]);
+  });
+
+  it("skips directories without package.json", () => {
+    mockedReaddirSync.mockReturnValue([
+      { name: "dashboard", isDirectory: () => true },
+      { name: ".cache", isDirectory: () => true },
+    ] as any);
+    mockedExistsSync.mockImplementation((p: any) => String(p).includes("dashboard/package.json"));
+
+    const roots = resolveWorkspacePackageRoots("/repo", ["packages/*"]);
+    expect(roots).toEqual(["packages/dashboard"]);
+  });
+
+  it("handles literal (non-glob) paths", () => {
+    mockedExistsSync.mockImplementation((p: any) => String(p).endsWith("package.json"));
+    const roots = resolveWorkspacePackageRoots("/repo", ["plugins/fusion-plugin-foo"]);
+    expect(roots).toEqual(["plugins/fusion-plugin-foo"]);
+  });
+
+  it("returns empty when readdirSync throws", () => {
+    mockedReaddirSync.mockImplementation(() => { throw new Error("ENOENT"); });
+    const roots = resolveWorkspacePackageRoots("/repo", ["packages/*"]);
+    expect(roots).toEqual([]);
+  });
+});
+
+// ── mapChangedFilesToPackageNames ─────────────────────────────────────────
+
+describe("mapChangedFilesToPackageNames", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps a changed file to the correct package name", () => {
+    mockedReadFileSync.mockReturnValue(JSON.stringify({ name: "@fusion/dashboard" }));
+    mockedExistsSync.mockReturnValue(true);
+
+    const names = mapChangedFilesToPackageNames(
+      ["packages/dashboard/src/index.ts"],
+      ["packages/dashboard", "packages/engine"],
+      "/repo",
+    );
+    expect(names).toEqual(["@fusion/dashboard"]);
+  });
+
+  it("assigns to the longest matching prefix", () => {
+    mockedReadFileSync.mockImplementation((p: any) => {
+      const path = String(p);
+      if (path.includes("plugins/examples/foo")) return JSON.stringify({ name: "@fusion/example-foo" });
+      if (path.includes("plugins")) return JSON.stringify({ name: "@fusion/plugins" });
+      return JSON.stringify({ name: "unknown" });
+    });
+    mockedExistsSync.mockReturnValue(true);
+
+    const names = mapChangedFilesToPackageNames(
+      ["plugins/examples/foo/index.ts"],
+      ["plugins", "plugins/examples/foo"],
+      "/repo",
+    );
+    expect(names).toEqual(["@fusion/example-foo"]);
+  });
+
+  it("returns empty array for files not in any package root", () => {
+    const names = mapChangedFilesToPackageNames(
+      ["root-file.ts"],
+      ["packages/dashboard"],
+      "/repo",
+    );
+    expect(names).toEqual([]);
+  });
+
+  it("deduplicates package names when multiple files touch same package", () => {
+    mockedReadFileSync.mockReturnValue(JSON.stringify({ name: "@fusion/dashboard" }));
+    mockedExistsSync.mockReturnValue(true);
+
+    const names = mapChangedFilesToPackageNames(
+      ["packages/dashboard/a.ts", "packages/dashboard/b.ts"],
+      ["packages/dashboard"],
+      "/repo",
+    );
+    expect(names).toEqual(["@fusion/dashboard"]);
+  });
+});
+
+// ── inferDefaultTestCommand — scoped pnpm workspace ──────────────────────
+
+describe("inferDefaultTestCommand — pnpm workspace scoping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(false);
+  });
+
+  it("returns pnpm test (unscoped/inferred) when no git context provided", () => {
+    mockedExistsSync.mockImplementation((p: any) => {
+      const path = String(p);
+      return path.includes("pnpm-lock.yaml") || path.includes("pnpm-workspace.yaml");
+    });
+
+    const result = inferDefaultTestCommand("/tmp/root");
+    expect(result?.command).toBe("pnpm test");
+    expect(result?.testSource).toBe("inferred");
+  });
+
+  it("returns scoped command (inferred-scoped) when monorepo + git context + 1 changed package", () => {
+    mockedExistsSync.mockImplementation((p: any) => {
+      const path = String(p);
+      // workspace files exist; package.json for dashboard exists
+      if (path.includes("pnpm-lock.yaml")) return true;
+      if (path.includes("pnpm-workspace.yaml")) return true;
+      if (path.includes("package.json")) return true;
+      return false;
+    });
+    mockedReadFileSync.mockImplementation((p: any) => {
+      const path = String(p);
+      if (path.includes("pnpm-workspace.yaml")) {
+        return `packages:\n  - "packages/*"\n`;
+      }
+      if (path.includes("dashboard/package.json")) {
+        return JSON.stringify({ name: "@fusion/dashboard" });
+      }
+      return JSON.stringify({ name: "unknown" });
+    });
+    mockedReaddirSync.mockReturnValue([
+      { name: "dashboard", isDirectory: () => true },
+    ] as any);
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git diff --name-only")) {
+        return "packages/dashboard/src/index.ts\n";
+      }
+      return "";
+    });
+
+    const result = inferDefaultTestCommand("/tmp/root", undefined, undefined, "main", "fusion/fn-123");
+    expect(result?.command).toBe(`pnpm --filter "@fusion/dashboard...^" test`);
+    expect(result?.testSource).toBe("inferred-scoped");
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      'git diff --name-only "main"..."fusion/fn-123"',
+      expect.objectContaining({ cwd: "/tmp/root", encoding: "utf-8" }),
+    );
+  });
+
+  it("returns command with 2 filters when 2 packages are changed", () => {
+    mockedExistsSync.mockImplementation((p: any) => {
+      const path = String(p);
+      if (path.includes("pnpm-lock.yaml")) return true;
+      if (path.includes("pnpm-workspace.yaml")) return true;
+      if (path.includes("package.json")) return true;
+      return false;
+    });
+    mockedReadFileSync.mockImplementation((p: any) => {
+      const path = String(p);
+      if (path.includes("pnpm-workspace.yaml")) return `packages:\n  - "packages/*"\n`;
+      if (path.includes("dashboard/package.json")) return JSON.stringify({ name: "@fusion/dashboard" });
+      if (path.includes("engine/package.json")) return JSON.stringify({ name: "@fusion/engine" });
+      return JSON.stringify({ name: "unknown" });
+    });
+    mockedReaddirSync.mockReturnValue([
+      { name: "dashboard", isDirectory: () => true },
+      { name: "engine", isDirectory: () => true },
+    ] as any);
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git diff --name-only")) {
+        return "packages/dashboard/src/index.ts\npackages/engine/src/merger.ts\n";
+      }
+      return "";
+    });
+
+    const result = inferDefaultTestCommand("/tmp/root", undefined, undefined, "main", "fusion/fn-123");
+    expect(result?.command).toContain("--filter");
+    expect(result?.command).toContain("@fusion/dashboard");
+    expect(result?.command).toContain("@fusion/engine");
+    expect(result?.testSource).toBe("inferred-scoped");
+  });
+
+  it("falls back to pnpm test (inferred) when all changes are root-only files", () => {
+    mockedExistsSync.mockImplementation((p: any) => {
+      const path = String(p);
+      if (path.includes("pnpm-lock.yaml")) return true;
+      if (path.includes("pnpm-workspace.yaml")) return true;
+      if (path.includes("package.json")) return true;
+      return false;
+    });
+    mockedReadFileSync.mockImplementation((p: any) => {
+      const path = String(p);
+      if (path.includes("pnpm-workspace.yaml")) return `packages:\n  - "packages/*"\n`;
+      return JSON.stringify({ name: "unknown" });
+    });
+    mockedReaddirSync.mockReturnValue([
+      { name: "dashboard", isDirectory: () => true },
+    ] as any);
+    // Changed file is at root (pnpm-workspace.yaml) — no package prefix match
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("git diff --name-only")) {
+        return "pnpm-workspace.yaml\n";
+      }
+      return "";
+    });
+
+    const result = inferDefaultTestCommand("/tmp/root", undefined, undefined, "main", "fusion/fn-123");
+    expect(result?.command).toBe("pnpm test");
+    expect(result?.testSource).toBe("inferred");
+  });
+
+  it("falls back to pnpm test (inferred) when no git context", () => {
+    mockedExistsSync.mockImplementation((p: any) => {
+      const path = String(p);
+      return path.includes("pnpm-lock.yaml") || path.includes("pnpm-workspace.yaml");
+    });
+
+    // No baseBranch or branch passed
+    const result = inferDefaultTestCommand("/tmp/root", undefined, undefined, undefined, undefined);
+    expect(result?.command).toBe("pnpm test");
+    expect(result?.testSource).toBe("inferred");
+  });
+
+  it("explicit testCommand always wins over scoping", () => {
+    mockedExistsSync.mockImplementation((p: any) => {
+      const path = String(p);
+      return path.includes("pnpm-lock.yaml") || path.includes("pnpm-workspace.yaml");
+    });
+
+    const result = inferDefaultTestCommand("/tmp/root", "vitest run --reporter=verbose", undefined, "main", "fusion/fn-123");
+    expect(result?.command).toBe("vitest run --reporter=verbose");
+    expect(result?.testSource).toBe("explicit");
+  });
+});
+
+// ── parseFailingFilesFromOutput ──────────────────────────────────────────
+
+describe("parseFailingFilesFromOutput", () => {
+  it("parses FAIL lines from jest/vitest output", () => {
+    const output = [
+      "FAIL packages/engine/src/__tests__/reliability-interactions/foo.test.ts",
+      "FAIL packages/engine/src/__tests__/bar.test.ts",
+      "● some test name",
+    ].join("\n");
+    const files = parseFailingFilesFromOutput(output);
+    expect(files).toContain("packages/engine/src/__tests__/reliability-interactions/foo.test.ts");
+    expect(files).toContain("packages/engine/src/__tests__/bar.test.ts");
+    expect(files.length).toBe(2);
+  });
+
+  it("parses vitest summary ❯ lines", () => {
+    const output = [
+      " ❯ packages/engine/src/__tests__/merger.test.ts (5 tests | 2 failed)",
+    ].join("\n");
+    const files = parseFailingFilesFromOutput(output);
+    expect(files).toContain("packages/engine/src/__tests__/merger.test.ts");
+  });
+
+  it("returns empty array when output has no file paths", () => {
+    const output = "● some test title\n● another test\n";
+    expect(parseFailingFilesFromOutput(output)).toEqual([]);
+  });
+
+  it("deduplicates repeated file paths", () => {
+    const output = [
+      "FAIL packages/engine/src/__tests__/foo.test.ts",
+      "FAIL packages/engine/src/__tests__/foo.test.ts",
+    ].join("\n");
+    expect(parseFailingFilesFromOutput(output)).toHaveLength(1);
+  });
+});
+
+// ── getBranchChangedFiles ────────────────────────────────────────────────
+
+describe("getBranchChangedFiles", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns changed files from git diff output", () => {
+    mockedExecSync.mockReturnValue("packages/dashboard/src/a.ts\npackages/dashboard/src/b.ts\n" as any);
+    const files = getBranchChangedFiles("/repo", "main", "fusion/fn-123");
+    expect(files).toEqual(["packages/dashboard/src/a.ts", "packages/dashboard/src/b.ts"]);
+  });
+
+  it("returns empty array when git diff fails", () => {
+    mockedExecSync.mockImplementation(() => { throw new Error("not a git repo"); });
+    const files = getBranchChangedFiles("/repo", "main", "fusion/fn-123");
+    expect(files).toEqual([]);
+  });
+
+  it("filters out empty lines", () => {
+    mockedExecSync.mockReturnValue("\npackages/engine/src/merger.ts\n\n" as any);
+    const files = getBranchChangedFiles("/repo", "main", "fusion/fn-123");
+    expect(files).toEqual(["packages/engine/src/merger.ts"]);
+  });
+});
+
+// ── OutOfScopeVerificationError ─────────────────────────────────────────
+
+describe("OutOfScopeVerificationError", () => {
+  it("is constructable with message, failingFiles, and branchFiles", () => {
+    const err = new OutOfScopeVerificationError(
+      "test failure outside branch scope",
+      ["packages/engine/src/__tests__/reliability-interactions/foo.test.ts"],
+      ["packages/dashboard/src/index.ts"],
+    );
+    expect(err.name).toBe("OutOfScopeVerificationError");
+    expect(err.message).toContain("outside branch scope");
+    expect(err.failingFiles).toHaveLength(1);
+    expect(err.branchFiles).toHaveLength(1);
+  });
+});

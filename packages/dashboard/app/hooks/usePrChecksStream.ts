@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchPrChecks, type PrCheckStatus, type PrChecksResponse } from "../api";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 type RollupState = PrChecksResponse["rollup"];
 
@@ -152,9 +153,24 @@ export function usePrChecksStream({
       return;
     }
 
+    recordResumeEvent({
+      view: "usePrChecksStream",
+      trigger: "remount",
+      projectId,
+      replayAttempted: false,
+      detail: { taskId, prNumber },
+    });
     void poll();
 
     const onVisibilityChange = () => {
+      recordResumeEvent({
+        view: "usePrChecksStream",
+        trigger: "visibility",
+        projectId,
+        replayAttempted: false,
+        reason: document.hidden ? "hidden" : "visible-resume",
+        detail: { taskId, prNumber },
+      });
       if (document.hidden) {
         clearTimer();
         abortRef.current?.abort();
@@ -169,7 +185,7 @@ export function usePrChecksStream({
       clearTimer();
       abortRef.current?.abort();
     };
-  }, [clearTimer, poll, shouldPoll]);
+  }, [clearTimer, poll, prNumber, projectId, shouldPoll, taskId]);
 
   return useMemo(() => ({
     checks,

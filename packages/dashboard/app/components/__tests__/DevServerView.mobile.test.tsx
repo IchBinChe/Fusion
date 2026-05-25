@@ -48,7 +48,7 @@ function createDevServerHookState() {
 describe("DevServerView mobile CSS/structure", () => {
   it("defines one mobile rule-set for preview header/actions and wraps badge correctly", () => {
     const css = loadAllAppCss();
-    const mobileBlockMatch = css.match(/@media \(max-width: 768px\)\s*\{([\s\S]*?)\n\}/g) ?? [];
+    const mobileBlockMatch = css.match(/@media[^{]*\(max-width: 768px\)[^{]*\{([\s\S]*?)\n\}/g) ?? [];
     const mobileCss = mobileBlockMatch.join("\n");
 
     const headerRuleCount = (mobileCss.match(/\.devserver-preview-header\s*\{/g) ?? []).length;

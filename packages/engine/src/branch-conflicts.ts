@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
+import { resolveIntegrationBranch } from "./integration-branch.js";
 
 const execAsync = promisify(exec);
 const FUSION_TASK_ID_TRAILER_KEY = "Fusion-Task-Id";
@@ -89,6 +90,7 @@ export interface InspectBranchConflictInput {
   requestingTaskId: string;
   ownerTaskId?: string;
   startPoint?: string;
+  integrationRef?: string;
 }
 
 export type BranchConflictInspectionResult =
@@ -163,7 +165,8 @@ async function resolveBranchComparisonRef(repoDir: string, startPoint: string, b
     await runGit(repoDir, `git merge-base ${quoteShellArg(startPoint)} ${quoteShellArg(branchName)}`);
     return startPoint;
   } catch {
-    return "main";
+    const resolved = await resolveIntegrationBranch(repoDir, undefined);
+    return resolved;
   }
 }
 
@@ -272,6 +275,153 @@ async function summarizeTaskAttributedCommits(repoDir: string, range: string, ta
   return { ownCount, foreignCount };
 }
 
+export interface BranchAttributionReport {
+  /** Commits whose subject matches `<type>(<taskId>):` AND carry the trailer. */
+  ownTrailed: number;
+  /** Commits attributed to taskId via subject but missing the Fusion-Task-Id trailer
+   *  (signals: hook didn't fire — worktree was used without identity guards). */
+  ownUntrailed: { sha: string; subject: string }[];
+  /** Commits attributed to a different FN-id via subject or trailer (contamination). */
+  foreign: { sha: string; subject: string; foreignTaskId: string }[];
+  /** Commits with neither a conventional subject nor any trailer (orphaned writes). */
+  unattributed: { sha: string; subject: string }[];
+}
+
+/**
+ * Post-session audit of every commit in `base..branch`. Used by the executor
+ * immediately after a step-session completes to detect three classes of
+ * contamination early — long before merge time:
+ *
+ *   1. ownUntrailed: agent committed legitimately but the commit-msg hook
+ *      didn't fire (missing fusion-task-id, --no-verify, plumbing commit).
+ *   2. foreign: another task's work landed on this branch (FN-5233 pattern).
+ *   3. unattributed: commit lacks both subject prefix and trailer (often a
+ *      hand-merged commit or plumbing-driven update).
+ *
+ * Returns counts/details rather than throwing so callers can decide whether
+ * to refuse, warn, or just audit.
+ */
+export async function reportBranchAttribution(
+  repoDir: string,
+  branch: string,
+  baseSha: string,
+  taskId: string,
+): Promise<BranchAttributionReport> {
+  const report: BranchAttributionReport = { ownTrailed: 0, ownUntrailed: [], foreign: [], unattributed: [] };
+  const output = await runGit(repoDir, `git log --format=%H%x1f%s%x1f%b%x1e ${quoteShellArg(`${baseSha}..${branch}`)}`)
+    .catch(() => "");
+  if (!output) return report;
+  const escapedTaskId = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ownSubjectPattern = new RegExp(`^(feat|fix|test|chore|docs|refactor|perf|build)\\(${escapedTaskId}\\):`, "i");
+  const ownTrailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}: ${escapedTaskId}\\s*(?:\\n|$)`, "i");
+  const genericSubjectPattern = /^(feat|fix|test|chore|docs|refactor|perf|build)\((FN-\d+)\):/i;
+  const genericTrailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}:\\s*(FN-\\d+)\\s*(?:\\n|$)`, "i");
+  const normalizedTaskId = taskId.toUpperCase();
+  for (const record of output.split("").map((entry) => entry.trim()).filter(Boolean)) {
+    const [sha = "", subject = "", body = ""] = record.split("");
+    const subjectMatch = subject.match(genericSubjectPattern);
+    const trailerMatch = body.match(genericTrailerPattern);
+    const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
+    if (attributedTaskId && attributedTaskId !== normalizedTaskId) {
+      report.foreign.push({ sha, subject, foreignTaskId: attributedTaskId });
+      continue;
+    }
+    if (!attributedTaskId) {
+      report.unattributed.push({ sha, subject });
+      continue;
+    }
+    const trailerPresent = ownTrailerPattern.test(body);
+    const subjectPresent = ownSubjectPattern.test(subject);
+    if (subjectPresent && trailerPresent) {
+      report.ownTrailed += 1;
+    } else if (subjectPresent && !trailerPresent) {
+      report.ownUntrailed.push({ sha, subject });
+    } else {
+      // trailer present, subject not — counts as trailed-own.
+      report.ownTrailed += 1;
+    }
+  }
+  return report;
+}
+
+/**
+ * True iff `branch`'s tip commit carries a `Fusion-Task-Id: <taskId>` trailer.
+ * Used as the cheap "is this branch ref authoritative for this task" probe
+ * at merge handoff so that HEAD drift (detached, wrong branch) can recover
+ * via a safe re-attach instead of refusing the handoff outright.
+ */
+export async function branchTipCarriesTaskIdTrailer(
+  repoDir: string,
+  branch: string,
+  taskId: string,
+): Promise<boolean> {
+  try {
+    const body = await runGit(repoDir, `git log -1 --pretty=%B ${quoteShellArg(branch)}`);
+    const escaped = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}: ${escaped}\\s*(?:\\n|$)`);
+    return pattern.test(body);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whole-branch authority check: the branch ref exists, its tip carries the
+ * task's Fusion-Task-Id trailer, and (when a base is supplied) the range
+ * `base..branch` has no foreign FN-attributed commits.
+ *
+ * Returns `{ ok: true }` when safe to treat the branch ref as authoritative
+ * for `taskId`. On failure, returns `{ ok: false, reason }` so callers can
+ * log/audit why the gentle recovery was refused.
+ */
+export async function isBranchAuthoritativeForTask(
+  repoDir: string,
+  branch: string,
+  taskId: string,
+  baseSha?: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    await revParse(repoDir, `refs/heads/${branch}`);
+  } catch {
+    return { ok: false, reason: "branch-ref-missing" };
+  }
+  const tipCarriesTrailer = await branchTipCarriesTaskIdTrailer(repoDir, branch, taskId);
+  if (!tipCarriesTrailer) {
+    return { ok: false, reason: "tip-missing-task-trailer" };
+  }
+  if (baseSha) {
+    try {
+      await assertCleanBranchAtBase(repoDir, branch, baseSha, taskId);
+    } catch (err) {
+      const reason = err instanceof BranchCrossContaminationError ? "foreign-contamination" : "clean-branch-check-failed";
+      return { ok: false, reason };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Cheap ancestry check: is `commitSha` reachable from `ref`?
+ *
+ * Used to recognize "promoted" commits during contamination audits: when
+ * the engine fast-forwards local `main` with a sibling task's commit, that
+ * commit's `Fusion-Task-Id` trailer still points at the sibling, but the
+ * commit itself is now integrated. Treating it as foreign contamination
+ * for downstream tasks branched from the same main tip is incorrect — the
+ * commit is, by definition, ancestral on the integration target.
+ *
+ * Returns `false` on any git error (missing ref, repo unreadable, etc.)
+ * so the caller falls back to the conservative trailer-only judgement.
+ */
+async function isAncestorOf(repoDir: string, commitSha: string, ref: string): Promise<boolean> {
+  try {
+    await runGit(repoDir, `git merge-base --is-ancestor ${quoteShellArg(commitSha)} ${quoteShellArg(ref)}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function assertCleanBranchAtBase(
   repoDir: string,
   branchName: string,
@@ -284,15 +434,28 @@ export async function assertCleanBranchAtBase(
 
   const subjectPattern = /^(feat|fix|test|chore|docs|refactor|perf|build)\((FN-\d+)\):/i;
   const trailerPattern = /(?:^|\n)Fusion-Task-Id:\s*(FN-\d+)\s*(?:\n|$)/i;
-  const foreignCommits: BranchCrossContaminationCommit[] = [];
+  const candidateForeign: BranchCrossContaminationCommit[] = [];
   for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
     const [sha, subject, body] = line.split("\u001f");
     const subjectMatch = (subject ?? "").match(subjectPattern);
     const trailerMatch = (body ?? "").match(trailerPattern);
     const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
     if (attributedTaskId && attributedTaskId !== taskId.toUpperCase()) {
-      foreignCommits.push({ sha, subject: subject ?? "", foreignTaskId: attributedTaskId });
+      candidateForeign.push({ sha, subject: subject ?? "", foreignTaskId: attributedTaskId });
     }
+  }
+
+  if (candidateForeign.length === 0) return;
+
+  // FN-5475: a commit attributed to another task that's already reachable
+  // from local `main` was promoted through integration. Treat it as
+  // ancestral, not contamination. This closes the race where a sibling
+  // task's commit briefly sat at local-main's tip while a downstream
+  // worktree was created (cross-task tip absorption).
+  const foreignCommits: BranchCrossContaminationCommit[] = [];
+  for (const commit of candidateForeign) {
+    if (await isAncestorOf(repoDir, commit.sha, "main")) continue;
+    foreignCommits.push(commit);
   }
 
   if (foreignCommits.length > 0) {
@@ -305,25 +468,34 @@ export interface ClassifyBootstrapMisbindingInput {
   branchName: string;
   baseSha: string;
   taskId: string;
-  foreignCommits: BranchCrossContaminationCommit[];
+  /**
+   * Optional and advisory only. The classifier derives the foreign-commit
+   * count from its own `git log baseSha..branchName` walk because callers
+   * such as the auto-recovery fallback in `branch-worktree.ts` only have a
+   * `BranchConflictInspectionResult` (no foreign-commit list) and used to
+   * pass `[]`, which silently disabled the predicate.
+   */
+  foreignCommits?: BranchCrossContaminationCommit[];
 }
 
 export interface ClassifyBootstrapMisbindingResult {
   isBootstrapMisbinding: boolean;
   ownCommitCount: number;
+  foreignCommitCount: number;
   nonAttributedCount: number;
 }
 
 export async function classifyBootstrapMisbinding(
   input: ClassifyBootstrapMisbindingInput,
 ): Promise<ClassifyBootstrapMisbindingResult> {
-  const { repoDir, branchName, baseSha, taskId, foreignCommits } = input;
+  const { repoDir, branchName, baseSha, taskId } = input;
   const output = await runGit(repoDir, `git log --format=%H%x1f%s%x1f%b ${quoteShellArg(`${baseSha}..${branchName}`)}`)
     .catch(() => "");
   if (!output) {
     return {
       isBootstrapMisbinding: false,
       ownCommitCount: 0,
+      foreignCommitCount: 0,
       nonAttributedCount: 0,
     };
   }
@@ -336,6 +508,7 @@ export async function classifyBootstrapMisbinding(
 
   let ownCommitCount = 0;
   let nonAttributedCount = 0;
+  let foreignCommitCount = 0;
   for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
     const [, subject = "", body = ""] = line.split("\u001f");
     if (ownSubjectPattern.test(subject) || ownTrailerPattern.test(body)) {
@@ -348,12 +521,15 @@ export async function classifyBootstrapMisbinding(
     const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
     if (!attributedTaskId) {
       nonAttributedCount += 1;
+    } else {
+      foreignCommitCount += 1;
     }
   }
 
   return {
-    isBootstrapMisbinding: foreignCommits.length > 0 && ownCommitCount === 0 && nonAttributedCount === 0,
+    isBootstrapMisbinding: foreignCommitCount > 0 && ownCommitCount === 0 && nonAttributedCount === 0,
     ownCommitCount,
+    foreignCommitCount,
     nonAttributedCount,
   };
 }
@@ -435,7 +611,9 @@ async function classifyForeignCommitsViaPatchId(
 export async function classifyForeignCommits(
   input: ClassifyForeignCommitsInput,
 ): Promise<ClassifyForeignCommitsResult> {
-  const { repoDir, branchName, baseSha, foreignCommits, mainRef = "main" } = input;
+  const resolvedIntegrationBranch = await resolveIntegrationBranch(input.repoDir, undefined);
+  const { repoDir, branchName, baseSha, foreignCommits } = input;
+  const mainRef = input.mainRef?.trim() || resolvedIntegrationBranch;
   const targetBySha = new Map(foreignCommits.map((commit) => [commit.sha, commit]));
   if (targetBySha.size === 0) {
     return { alreadyUpstream: [], unique: [] };
@@ -536,7 +714,9 @@ export async function classifyMisroutedForeignCommit(
 export async function classifyForeignOnlyContamination(
   input: ClassifyForeignOnlyContaminationInput,
 ): Promise<ClassifyForeignOnlyContaminationResult> {
-  const { repoDir, branchName, baseSha, taskId, mainRef = "main" } = input;
+  const resolvedIntegrationBranch = await resolveIntegrationBranch(input.repoDir, undefined);
+  const { repoDir, branchName, baseSha, taskId } = input;
+  const mainRef = input.mainRef?.trim() || resolvedIntegrationBranch;
   // FN-5090 hotfix: stale baseSha (older than the actual fork point with main) caused
   // classifyForeignOnlyContamination to see commits that have since been merged into main
   // as "foreign", returning kind:"ambiguous" and stranding the task. Prefer the live
@@ -848,7 +1028,8 @@ export async function inspectBranchConflict(
   }
 
   const existingTipSha = await revParse(input.repoDir, input.branchName);
-  const integrationRef = await resolveBranchComparisonRef(input.repoDir, "main", input.branchName);
+  const requestedIntegrationRef = input.integrationRef ?? await resolveIntegrationBranch(input.repoDir, undefined);
+  const integrationRef = await resolveBranchComparisonRef(input.repoDir, requestedIntegrationRef, input.branchName);
   if (await isAncestor(input.repoDir, existingTipSha, integrationRef)) {
     return {
       kind: "tip-already-merged",

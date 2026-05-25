@@ -55,7 +55,6 @@ Features:
 - PR/issue badges with live updates
 - GitHub provenance marker on task cards imported from GitHub (`sourceType: github_import`), shown alongside existing footer metadata like timers
 - Agent-created provenance badge in task card headers for agent-originated tasks (`sourceType: agent_heartbeat` or `sourceType: automation`, or legacy tasks with `sourceAgentId`), with labels preferring `sourceMetadata.agentName` over raw agent IDs
-- Broad-scope advisory surfacing from `task.sourceMetadata.broadScopeFlag`: TaskCard shows a warning-tinted `Broad scope` chip with score/reasons tooltip, and TaskDetailModal shows a read-only `Triage broad-scope advisory` banner with score, humanized reasons, and signal summary. This is informational only and does not alter lifecycle, scheduling, pause state, or merge behavior.
 - Column ordering semantics: `todo` mirrors scheduler pickup order (priority descending, then oldest `createdAt`, then task ID); `triage`, `in-progress`, `in-review`, and `archived` remain priority-first with task-ID tie-breaks; `done` is ordered by most recent completion first (`columnMovedAt`, then `updatedAt`, then `createdAt` fallback)
 
 ![Board view](./screenshots/dashboard-overview.png)
@@ -209,6 +208,61 @@ Features:
 - Remotes tab keeps "Recent commits on {remote}" in sync immediately after successful push/pull actions
 
 ![Git manager](./screenshots/git-manager.png)
+
+## Merge Advance Notice
+
+Merge Advance Notice is a global banner (`MergeAdvanceNotice`) mounted in the main app chrome that appears when the integration branch advances.
+
+When it appears:
+- Reacts to `task:merged` SSE events
+- Hydrates from `GET /api/tasks/merge-advance-events`
+- Shows the latest merge-advance event for the current project
+
+What it shows:
+- Integration branch name and the new tip short SHA
+- Advancing task ID and advance metadata from the event payload (`advanceMode`, `refName`, SHA details)
+- Checkout-state warnings when your current worktree is dirty or has untracked files
+
+How to react:
+- Click **Pull** to run Smart Pull (`POST /api/git/smart-pull`), including the stash-conflict flow in `StashConflictModal` when needed
+- Use the dismiss close button to hide the notice
+- Treat dirty/untracked warnings as a hint that local changes may be auto-stashed during pull
+
+Push follow-up (when shown):
+- If the integration branch is ahead of `origin`, the banner can show push controls with ahead count
+- Use **Push to origin** (or force-with-lease via **Advanced**) to publish the advanced branch tip
+- If push is rejected (`rejected-non-ff` / `sha-mismatch`), the banner offers a Smart Pull retry path
+
+Branch names are dynamic from merge/audit payloads; the banner is not hardcoded to `main`.
+
+## Smart Pull
+
+Smart Pull is a one-shot pull workflow that keeps local work safe while advancing your checked-out integration branch.
+
+What it does:
+- Calls `POST /api/git/smart-pull`
+- If your worktree is clean, runs a fast-forward pull and returns `kind: "clean-pull"`
+- If local changes exist, auto-stashes (including untracked files), runs `git pull --ff-only`, then restores the stash
+- Returns `kind: "stash-pull-pop"` when stash → pull → pop succeeds cleanly
+- Returns `kind: "stash-pop-conflict"` when stash restore conflicts, then opens `StashConflictModal`
+
+Where it is triggered:
+- From the merge-advance banner pull action (`MergeAdvanceNotice`)
+- From any dashboard surface that invokes `POST /api/git/smart-pull`
+
+When `stash-pop-conflict` occurs, `StashConflictModal` shows:
+- Stash short SHA + stash label
+- Per-file conflict list
+- Per-file resolution actions (**Keep mine** / **Keep incoming**, backed by `/api/git/stash-resolve` choices `ours`/`theirs`)
+- Stash actions: **Drop stash** (`POST /api/git/stash-drop`) and **Restore from stash ref** (`POST /api/git/stash-restore`)
+- A stash-SHA copy button for sharing the conflict list/reference
+
+After resolution:
+- As each file is resolved, `remainingConflicts` shrinks; when empty, the modal can be closed and the branch stays at the advanced integration tip with resolved stash content applied
+- Dropping the stash discards the saved local edits after conflicts are resolved
+- Restoring from stash ref re-applies the stash and may reintroduce conflicts for manual handling
+
+You may also see matching run-audit events in logs, including `pull:fast-forward` and `stash:pop-conflict`.
 
 ## Documents View
 
@@ -892,3 +946,117 @@ The `POST /api/agents/import` endpoint returns skill import results:
 ```
 
 The `skills` object contains detailed import outcomes for each skill from the package.
+
+## Styling Guide
+
+The dashboard's CSS is split into a global stylesheet (`packages/dashboard/app/styles.css`) and per-component files (`packages/dashboard/app/components/ComponentName.css`). Each `ComponentName.tsx` imports its stylesheet at the top.
+
+**Rule:** New CSS for a component goes in `app/components/ComponentName.css`, NOT `styles.css`. Only design tokens, primitives (`.btn`, `.card`, `.modal`, `.form-input`), and cross-component `@media` overrides belong in the global file.
+
+The `index.html` shell is templated server-side: the server injects a per-user `<link rel="modulepreload">` for the last-used `taskView` chunk, sourced from Vite's `dist/client/.vite/manifest.json` and `kb:<projectId>:kb-dashboard-task-view` in localStorage.
+
+### Design tokens
+
+`styles.css` is the source of truth for tokens (`--space-*`, `--radius-*`, `--shadow-*`, `--transition-*`, `--font-*`, `--header-height`, `--mobile-nav-height`, `--standalone-bottom-gap`, `--overlay-padding-top`) and color variables (`--bg`, `--surface`, `--card`, `--text`, `--text-muted`, status colors `--triage`/`--todo`/`--in-progress`/`--in-review`/`--done`, semantic `--color-success`/`--color-error`/`--color-warning`/`--color-info`, status backgrounds `--status-*-bg`).
+
+**Always reference tokens. Never hardcode pixels, hex, or `rgba()` in component CSS** — the only exception is inside `:root`/theme blocks where tokens are *defined*. For translucent backgrounds use `color-mix(in srgb, var(--color) X%, transparent)`, not `rgba()`.
+
+### Theme system
+
+Dark/light modes via `data-theme`; 54 color themes via `data-color-theme` (lazy-loaded from `app/public/theme-data.css`).
+
+- **Base tokens** (`--bg`, `--surface`, etc.) — redefine in `:root`, `[data-theme="light"]`, and every theme block.
+- **Semantic tokens** (`--autopilot-pulse`, `--event-error-text`, `--badge-mission-*`, `--fab-*`) — `:root` + `[data-theme="light"]` only; no per-color-theme overrides.
+- **Status tokens** (`--triage`, `--todo`, etc.) — redefine per theme block.
+
+`status-colors-theme.test.ts` iterates all theme blocks to catch regressions.
+
+### Component classes
+
+Reuse existing primitives from `styles.css`:
+- **Buttons**: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-warning`, `.btn-sm`, `.btn-icon`, `.btn-icon--active`, `.btn-badge`. All inherit `:focus-visible` via `--focus-ring-strong` and `:active` via `transform: scale(0.97)`.
+- **Modals**: `.modal-overlay[.open]`, `.modal`, `.modal-lg`, `.modal-header`, `.modal-close`, `.modal-actions`, `.modal-actions-left/right`. Overlay pads top with `--overlay-padding-top`.
+- **Forms**: `.form-group`, `.input`, `.select`, `.checkbox-label`, `.form-error`. Inputs in `.form-group` get focus styles automatically.
+- **Cards**: `.card`, `.card-header`, `.card-id`, `.card-title`, `.card-meta`, `.card-status-badge--{triage,todo,in-progress,in-review,done,archived}`.
+- **Utility**: `.touch-target` (44px min), `.visually-hidden`.
+
+Don't create parallel button/form variants — add states (`:hover`, `:focus-visible`, `:active`) to the existing primitives.
+
+### Mobile responsive
+
+Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-width: 1024px`), 640px (compact), 480px (xs). Mobile overrides go in `@media (max-width: 768px)` blocks at the bottom of `styles.css` after base styles.
+
+**Bottom spacing:** `--mobile-nav-height` (44px) + `env(safe-area-inset-bottom, 0px)` + `--standalone-bottom-gap` (0/8px PWA). All bottom-positioned mobile elements compose those.
+
+**Touch targets:** Standing button-freeze directive supersedes per-button touch-target guidance. For non-button elements, primary controls (nav bar, FAB, tab action rows, modal CTAs, list-row tap targets, form controls) must be ≥36px on mobile. Secondary controls inside a card/list-row where the row itself is the tap target stay compact (24–28px or small chips).
+
+**Safe area:** `max(var(--space-md), env(safe-area-inset-left, 0px))` for notch-aware horizontal padding.
+
+### Lazy-Loaded Heavy Views
+
+These 19 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**
+
+- `AgentsView`
+- `NodesView`
+- `ChatView`
+- `MemoryView`
+- `DevServerView`
+- `SecretsView`
+- `InsightsView`
+- `DocumentsView`
+- `SkillsView`
+- `ResearchView`
+- `ReliabilityView`
+- `EvalsView`
+- `TodoView`
+- `GoalsView`
+- `StashRecoveryView`
+- `SetupWizardModal`
+- `PluginManager`
+- `PiExtensionsManager`
+- `AgentDetailView`
+
+When adding or removing entries, update `packages/dashboard/app/__tests__/lazy-loaded-views-docs.test.ts` (expected set + count).
+
+### CSS testing
+
+Use `packages/dashboard/app/test/cssFixture.ts`:
+
+```ts
+import { loadAllAppCss, loadAllAppCssBaseOnly } from "../test/cssFixture";
+const allCss = await loadAllAppCss();          // styles.css + all component .css
+const baseOnly = await loadAllAppCssBaseOnly(); // strips @media/@supports
+```
+
+**Never** directly `readFileSync('../styles.css')` — an ESLint rule (`no-restricted-syntax` in `eslint.config.mjs`) bans this and points at `cssFixture.ts`. `vitest.config.ts` has `test.css: { include: [/.+/] }` so component CSS imports inject into jsdom for `getComputedStyle` assertions.
+
+### File browser editor & autosize textarea
+
+- `FileEditor.tsx` is CodeMirror 6-only (no `<textarea>` fallback). Language resolution: `packages/dashboard/app/utils/codemirror-language.ts`.
+- For chat-style composer fields use `packages/dashboard/app/hooks/useAutosizeTextarea.ts`. Pattern: `height = "auto"` then clamp `scrollHeight` to min/max in `useLayoutEffect`. Pair with `resize: none` and `overflow-y: auto`.
+
+### File-path links
+
+Reuse `packages/dashboard/app/utils/filePathLinkify.tsx` and `FileBrowserContext`. Wrap plain text with `linkifyFilePaths(...)`, mixed JSX with `linkifyReactChildren(...)`. Mount under `FileBrowserProvider` and route clicks through its `openFile(path, { workspace?, line?, col? })`.
+
+### Common pitfalls
+
+- **`--surface-hover` undefined** — reference with a fallback (`var(--surface-hover, rgba(0,0,0,0.03))`) or define explicitly.
+- **BEM specificity** — when a container state class and an element modifier target the same node, the container can win. Use `:not(.modifier)` to scope.
+- **CSS `@media` detection** — track brace depth to confirm a rule is mobile-scoped; don't scan backwards for the nearest `@media`. Many components are global even if visually mobile-only.
+- **Mobile board scroll-snap (FN-001)** — `scroll-snap-type: x mandatory` on mobile `.board` causes iOS Safari to compress the viewport when switching from ListView. Use `x proximity` + `overflow-anchor: none`.
+- **`lucide-react` icon adds** — update `vi.mock("lucide-react")` test mocks immediately; missing exports cascade.
+- **`.spin` is global** — don't redefine the generic spin keyframes in component CSS.
+
+## Integration Branch Push to Origin
+
+The merge-advance notice includes an explicit **Push to origin** action for the dynamically resolved integration branch.
+
+- The branch name is resolved from project settings, then `origin/HEAD`, then fallback; UI copy and API behavior must remain dynamic.
+- Push status probes compute ahead/behind counts and disable push when there is no `origin`, no upstream tracking ref, the branch is not ahead, or a Fusion merge lock is active.
+- The mutating route performs a TOCTOU merge-lock recheck immediately before building push argv.
+- Standard push is `git push origin refs/heads/<branch>:refs/heads/<branch>` with no plain `--force` path.
+- Advanced mode enables opt-in `--force-with-lease=refs/heads/<branch>:<localSha>` only.
+- Non-fast-forward and lease-stale failures surface actionable messaging with Smart Pull.
+- Every attempt records `mutationType: "push:origin"` run-audit metadata: `integrationBranch`, `remote`, `localSha`, `remoteSha`, `aheadCount`, `behindCount`, `forceWithLease`, `outcome`, optional `stderrPreview`, and `durationMs`.
+- Push remains explicit user authorization only through dashboard HTTP routes (no scheduler/heartbeat auto-push).

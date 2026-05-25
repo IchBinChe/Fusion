@@ -1127,6 +1127,39 @@ describe("ProjectEngine shutdown merge handling", () => {
   });
 });
 
+describe("ProjectEngine manual merge plumbing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mockStore.store.getTask.mockResolvedValue({
+      id: "FN-5438",
+      column: "in-review",
+      paused: false,
+      mergeRetries: 0,
+      status: "queued",
+    } as any);
+    mocks.currentStore = mockStore.store;
+  });
+
+  it("passes manual=true to aiMergeTask for onMerge requests", async () => {
+    mocks.aiMergeTask.mockResolvedValue({ merged: true, task: { id: "FN-5438" } } as any);
+
+    const engine = createEngine();
+    await engine.start();
+
+    await engine.onMerge("FN-5438");
+
+    expect(mocks.aiMergeTask).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "FN-5438",
+      expect.objectContaining({ manual: true }),
+    );
+
+    await engine.stop();
+  });
+});
+
 describe("ProjectEngine merge queue priority ordering", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -8,7 +8,7 @@ function getMainMobileBlock(css: string): string {
   // Mobile rules now live both in styles.css (cross-cutting) and in
   // co-located @media (max-width: 768px) blocks at the bottom of each
   // component CSS file. Aggregate all such media-query blocks.
-  const matches = [...css.matchAll(/@media\s*\(max-width:\s*768px\)\s*\{/g)];
+  const matches = [...css.matchAll(/@media[^{]*\(max-width:\s*768px\)[^{]*\{/g)];
   expect(matches.length).toBeGreaterThan(0);
 
   const parts: string[] = [];

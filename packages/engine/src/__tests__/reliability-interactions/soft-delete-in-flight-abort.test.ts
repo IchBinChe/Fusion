@@ -194,7 +194,7 @@ describe("reliability interactions: soft-delete in-flight abort", () => {
     });
 
     await store.deleteTask("FN-EXEC");
-    await Promise.resolve();
+    await (executor as any).pendingTaskDisposals.get("FN-EXEC");
 
     expect(abort).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
@@ -241,7 +241,7 @@ describe("reliability interactions: soft-delete in-flight abort", () => {
 
     await store.moveTask("FN-RACE", "todo");
     await store.deleteTask("FN-RACE");
-    await Promise.resolve();
+    await (executor as any).pendingTaskDisposals.get("FN-RACE");
 
     expect(abort).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);

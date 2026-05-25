@@ -182,18 +182,43 @@ export type ColorTheme = (typeof COLOR_THEMES)[number];
 
 export type PrStatus = "open" | "closed" | "merged" | "draft";
 export type MergeStrategy = "direct" | "pull-request";
-export type MergeIntegrationWorktreeMode = "reuse-task-worktree" | "cwd-main";
+export type MergeIntegrationWorktreeMode =
+  | "reuse-task-worktree"
+  | "cwd-integration-branch" // explicit opt-in; surfaces a warning at startup. See FN-5348.
+  | "cwd-main"; // legacy alias for cwd-integration-branch; deprecated. Normalized at read time.
+
+let warnedLegacyCwdMain = false;
+
+export function __resetLegacyCwdMainWarningForTests(): void {
+  warnedLegacyCwdMain = false;
+}
 
 export function normalizeMergeIntegrationWorktreeMode(
   value: unknown,
 ): MergeIntegrationWorktreeMode {
-  return value === "cwd-main" || value === "reuse-task-worktree"
-    ? value
-    : "reuse-task-worktree";
+  if (value === "reuse-task-worktree" || value === "cwd-integration-branch") {
+    return value;
+  }
+
+  if (value === "cwd-main") {
+    if (!warnedLegacyCwdMain) {
+      warnedLegacyCwdMain = true;
+      console.warn("[merger] settings.mergeIntegrationWorktree=cwd-main is legacy; normalized to cwd-integration-branch");
+    }
+    return "cwd-integration-branch";
+  }
+
+  return "reuse-task-worktree";
 }
 
 export const DIRECT_MERGE_COMMIT_STRATEGIES = ["auto", "always-squash", "always-rebase"] as const;
 export type DirectMergeCommitStrategy = (typeof DIRECT_MERGE_COMMIT_STRATEGIES)[number];
+
+export const MERGE_ADVANCE_AUTO_SYNC_MODES = ["off", "ff-only", "stash-and-ff"] as const;
+export type MergeAdvanceAutoSyncMode = (typeof MERGE_ADVANCE_AUTO_SYNC_MODES)[number];
+export function normalizeMergeAdvanceAutoSyncMode(value: unknown): MergeAdvanceAutoSyncMode {
+  return value === "off" || value === "ff-only" || value === "stash-and-ff" ? value : "stash-and-ff";
+}
 /** How merge conflicts are resolved when the AI agent can't (or shouldn't) decide.
  *
  *  Both `smart-*` strategies share the same cascade: pre-merge fetch +
@@ -1623,6 +1648,8 @@ export interface Task {
   scopeOverride?: boolean;
   /** Optional justification for bypassing the squash file-scope invariant. */
   scopeOverrideReason?: string;
+  /** Append-only list of file paths auto-widened into `## File Scope` by merger safety checks. */
+  scopeAutoWiden?: string[];
   /** Mission ID this task is linked to (for mission hierarchy) */
   missionId?: string;
   /** Slice ID this task is linked to (for mission hierarchy) */
@@ -1852,6 +1879,7 @@ export interface Task {
    *  todo/triage when resume state is not preserved. */
   executionCompletedAt?: string;
   deletedAt?: string;
+  allowResurrection?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -1888,6 +1916,11 @@ export interface TaskCreateInput {
   title?: string;
   /** Optional lineage override for trusted replication/import paths only. */
   lineageId?: string;
+  /**
+   * Opt-in createTask override for soft-deleted ID reuse.
+   * Not persisted to storage.
+   */
+  forceResurrect?: boolean;
   description: string;
   /** Configured merge target/base branch for this task (task intent).
    *  Defaults to the project default branch when omitted. */
@@ -1957,6 +1990,8 @@ export interface TaskCreateInput {
   scopeOverride?: boolean;
   /** Optional justification for bypassing the squash file-scope invariant. */
   scopeOverrideReason?: string;
+  /** Append-only list of file paths auto-widened into `## File Scope` by merger safety checks. */
+  scopeAutoWiden?: string[];
   /** Per-task GitHub issue tracking overrides for Fusion-created linked issues. */
   githubTracking?: Pick<TaskGithubTracking, "enabled" | "repoOverride">;
   /** Review level for task execution — controls review rigor: 0=None, 1=Plan Only, 2=Plan and Code, 3=Full */
@@ -2204,6 +2239,10 @@ export interface GlobalSettings {
    *  Must be set together with `defaultProvider`. When both are undefined,
    *  the engine uses pi's automatic model resolution. */
   defaultModelId?: string;
+  /** When true, force every AI lane onto the deterministic mock provider regardless
+   *  of per-task or per-lane overrides. No network calls, zero token cost.
+   *  Project `testMode` takes precedence over the global value. */
+  testMode?: boolean;
   /** Fallback AI model provider used when the primary default model fails due to
    *  transient provider-side issues such as rate limits or overloaded capacity.
    *  Must be set together with `fallbackModelId`. */
@@ -2668,6 +2707,9 @@ export interface ProjectSettings {
   heartbeatMultiplier?: number;
   /** Number of auto-claim candidates rendered in no-task heartbeat prompts. Range: 0-10. Default: 5. */
   autoClaimCandidatesInPrompt?: number;
+  /** Sticky window for intake duplicate checks against soft-deleted tasks.
+   * Unit: days. Default: 7. Set to 0 to disable tombstone-window widening. */
+  tombstoneStickyWindowDays?: number;
   /** Heartbeat scope-discipline procedure mode.
    * - "strict": coordination-focused scope discipline (default)
    * - "lite": pre-FN-3884 behavior
@@ -2687,6 +2729,9 @@ export interface ProjectSettings {
    *  active in-progress tasks and in-review tasks with unmerged worktrees. */
   overlapIgnorePaths?: string[];
   autoMerge: boolean;
+  /** When true, force every AI lane onto the deterministic mock provider regardless
+   *  of per-task or per-lane overrides. No network calls, zero token cost. */
+  testMode?: boolean;
   /** How completed in-review tasks should be finalized when autoMerge is enabled.
    *  - "direct": preserve the existing local squash-merge flow into the current branch
    *  - "pull-request": create or reuse a GitHub PR and wait for GitHub-side checks/reviews
@@ -2703,13 +2748,35 @@ export interface ProjectSettings {
    *  - "auto": squash single-substantive branches, preserve history for multi-substantive branches
    *  - "always-squash": always use the legacy squash path for direct merges
    *  - "always-rebase": always preserve individual branch commits during direct merges
-   *  Only applies when mergeStrategy is "direct". Default: "auto". */
+   *  Only applies when mergeStrategy is "direct". Default: "always-squash". */
   directMergeCommitStrategy?: DirectMergeCommitStrategy;
   /** Auto-merge integration-root mode.
    *  - "reuse-task-worktree" (default): run the auto-merge cascade in the task worktree
-   *  - "cwd-main": preserve the legacy project-root integration flow
+   *  - "cwd-integration-branch": explicit opt-in only. Runs merge operations in the user's
+   *    checked-out integration-branch worktree, violating the FN-5349 invariant unless the user
+   *    explicitly accepts that risk.
+   *  - "cwd-main": legacy alias for "cwd-integration-branch" (normalized at read time)
    *  Auto-merge only; manual/direct merge entrypoints outside auto-merge are unchanged. */
   mergeIntegrationWorktree?: MergeIntegrationWorktreeMode;
+  /** After the merger advances the integration branch ref, what to do in *other*
+   *  worktrees that have the same branch checked out (typically the user's
+   *  project-root checkout that sat at the previous tip).
+   *  - "off": do nothing; the user must `git pull` (or click the Merge Advance
+   *    Notice banner's Pull button) to bring their checkout forward.
+   *  - "ff-only": fast-forward the other worktree only when its index and
+   *    working tree are clean. Dirty worktrees are left alone and the banner
+   *    still surfaces for manual handling.
+   *  - "stash-and-ff" (default): run the Smart Pull pipeline
+   *    (stash → fast-forward → pop) so local edits survive across the
+   *    auto-sync. Pop conflicts surface as `merge:auto-sync` audit events with
+   *    `outcome: "stash-pop-conflict"` and are forwarded to the dashboard's
+   *    existing stash-conflict modal.
+   *  Only applies to direct merges (`mergeStrategy === "direct"`). */
+  mergeAdvanceAutoSync?: MergeAdvanceAutoSyncMode;
+  /** Explicit integration branch name (e.g. `main`, `master`, `trunk`, `develop`).
+   *  Resolution order: `integrationBranch` → `baseBranch` → `origin/HEAD` → `main`.
+   *  This value is used as the `projectDefaultBranch` input to `resolveTaskMergeTarget`. */
+  integrationBranch?: string;
   /** When true, automatically push to the configured remote after a successful direct merge.
    *  The push process includes pulling the latest from the remote (rebase) first.
    *  If conflicts arise during the pull, they are resolved using the AI conflict resolution pipeline.
@@ -2818,13 +2885,15 @@ export interface ProjectSettings {
    *  commit scope (e.g. `feat(KB-001): ...`). When false, the scope is
    *  omitted (e.g. `feat: ...`). Default: true. */
   includeTaskIdInCommit?: boolean;
-  /** When true, fusion adds --author attribution to all commits it creates.
-   *  When false, no author attribution is added. Default: true. */
+  /** When true, fusion appends a `Co-authored-by` trailer to all commits it
+   *  creates so Fusion is credited alongside the user's git identity (which
+   *  remains the primary author/committer). When false, no co-author trailer
+   *  is added. Default: true. */
   commitAuthorEnabled?: boolean;
-  /** Name used in the git --author flag for Fusion commits.
+  /** Name used in the `Co-authored-by` trailer for Fusion commits.
    *  Only used when commitAuthorEnabled is true. Default: "Fusion". */
   commitAuthorName?: string;
-  /** Email used in the git --author flag for Fusion commits.
+  /** Email used in the `Co-authored-by` trailer for Fusion commits.
    *  Only used when commitAuthorEnabled is true. Default: "noreply@runfusion.ai". */
   commitAuthorEmail?: string;
   /** AI model provider for planning/triage (specification) agent.
@@ -3045,6 +3114,10 @@ export interface ProjectSettings {
    *  than this duration, the task is considered stuck and will be terminated and retried.
    *  Default: 600000 (10 minutes). Set to 0 to disable. */
   taskStuckTimeoutMs?: number;
+  /** Maximum milliseconds InProcessRuntime.stop() waits for in-flight tasks to drain
+   *  AFTER aborting their AI sessions. Default: 2000. Set to 0 to skip drain waits
+   *  entirely (test/CI). Set to 30000 to preserve the historical 30s grace window. */
+  runtimeStopDrainMs?: number;
   /** Epoch ms when the in-process runtime last became active (startup or transition
    *  out of globalPause/enginePaused). Time-based stuck/stalled/stale detectors floor
    *  their activity anchor at this value so engine downtime is not counted as quiet time.
@@ -6032,6 +6105,8 @@ export interface DetectedProject {
   name: string;
   /** Whether the project has a valid fusion.db */
   hasDb: boolean;
+  /** Persisted project identity id if present */
+  identityId?: string;
 }
 
 /** Setup state for the first-run wizard UI */
@@ -6046,6 +6121,8 @@ export interface SetupState {
   registeredProjects: RegisteredProject[];
   /** Recommended action based on current state */
   recommendedAction: "auto-detect" | "create-new" | "manual-setup";
+  /** Local identities whose central rows are missing */
+  orphanIdentities?: Array<{ path: string; identityId: string }>;
 }
 
 /** Input for setting up a project via the wizard */
@@ -6056,6 +6133,8 @@ export interface ProjectSetupInput {
   name: string;
   /** Isolation mode preference */
   isolationMode?: "in-process" | "child-process";
+  /** Persisted local identity for central re-attachment */
+  identity?: { id: string; createdAt: string } | null;
 }
 
 /** Result of completing the first-run setup */

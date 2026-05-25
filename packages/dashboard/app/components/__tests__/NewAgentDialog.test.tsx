@@ -194,7 +194,7 @@ function getStepZeroField(label: string | RegExp) {
 
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(content)) !== null) {

@@ -1,6 +1,6 @@
 import "./TaskDetailModal.css";
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2 } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -288,6 +288,7 @@ export interface TaskDetailModalProps {
     removeDependencyReferences?: boolean;
     removeLineageReferences?: boolean;
     githubIssueAction?: GithubIssueAction;
+    allowResurrection?: boolean;
   }) => Promise<Task>;
   onArchiveTask?: (id: string, options?: { removeLineageReferences?: boolean }) => Promise<Task>;
   onMergeTask: (id: string) => Promise<MergeResult>;
@@ -373,57 +374,6 @@ function parseGithubIssueLabel(url: string): { label: string; href: string } | n
     label: `${owner}/${repo}#${number}`,
     href: url,
   };
-}
-
-const BROAD_SCOPE_REASON_LABELS: Record<string, string> = {
-  "size-l": "Size L",
-  "steps-high": "many steps",
-  "file-scope-high": "large file scope",
-  "failing-file-mentions-high": "many failing files mentioned",
-  "size-l-with-many-steps": "Size L + many steps",
-};
-
-function getBroadScopeFlag(sourceMetadata: Task["sourceMetadata"]): {
-  score: number;
-  reasons: string[];
-  signals?: {
-    size?: string | null;
-    stepCount?: number;
-    fileScopeCount?: number;
-    failingFileMentions?: number;
-  };
-} | null {
-  const candidate = sourceMetadata?.broadScopeFlag;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return null;
-  }
-
-  const score = (candidate as { score?: unknown }).score;
-  const reasons = (candidate as { reasons?: unknown }).reasons;
-  const signals = (candidate as { signals?: unknown }).signals;
-
-  if (typeof score !== "number" || !Number.isFinite(score) || !Array.isArray(reasons) || !reasons.every((reason) => typeof reason === "string")) {
-    return null;
-  }
-
-  if (signals != null && (typeof signals !== "object" || Array.isArray(signals))) {
-    return null;
-  }
-
-  return {
-    score,
-    reasons,
-    signals: signals as {
-      size?: string | null;
-      stepCount?: number;
-      fileScopeCount?: number;
-      failingFileMentions?: number;
-    } | undefined,
-  };
-}
-
-function formatBroadScopeReasons(reasons: string[]): string {
-  return reasons.map((reason) => BROAD_SCOPE_REASON_LABELS[reason] ?? reason).join(", ");
 }
 
 function getResearchContextInfo(metadata: Task["sourceMetadata"]): string | undefined {
@@ -597,7 +547,6 @@ export function TaskDetailContent({
   const provenanceDisplay = getProvenanceLabel(workingTask, {
     sourceAgentName: sourceAgent?.name,
   });
-  const broadScopeFlag = getBroadScopeFlag(workingTask.sourceMetadata);
 
   // Sync activeTab when the caller changes initialTab (e.g. opening a different tab)
   useEffect(() => {
@@ -1399,7 +1348,7 @@ export function TaskDetailContent({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { nodes } = useNodes();
-  const { confirm, confirmWithChoice } = useConfirm();
+  const { confirm, confirmWithChoice, confirmWithCheckbox } = useConfirm();
 
   const handleUnlinkGithubIssue = useCallback(async () => {
     if (!canEdit || !githubTrackedIssue || isSavingGithubTracking) return;
@@ -1490,6 +1439,8 @@ export function TaskDetailContent({
   );
 
   const handleDelete = useCallback(async () => {
+    let allowResurrection = false;
+
     if (task.column === "done" && onArchiveTask) {
       const deleteChoice = await confirmWithChoice({
         title: "Delete Task",
@@ -1536,12 +1487,18 @@ export function TaskDetailContent({
         return;
       }
     } else {
-      const shouldDelete = await confirm({
+      const { choice, checkboxValue } = await confirmWithCheckbox({
         title: "Delete Task",
         message: `Delete ${task.id}?`,
         danger: true,
+        checkbox: {
+          label: "Allow re-creation later (operator unlock)",
+          description: "Lets agents recreate this task ID without --force-resurrect. Leave unchecked to keep this task tombstoned.",
+          defaultChecked: false,
+        },
       });
-      if (!shouldDelete) return;
+      if (choice !== "primary") return;
+      allowResurrection = checkboxValue === true;
     }
 
     const trackedIssue = task.githubTracking?.enabled === true ? task.githubTracking.issue : undefined;
@@ -1571,9 +1528,9 @@ export function TaskDetailContent({
 
     try {
       if (githubIssueAction) {
-        await onDeleteTask(task.id, { githubIssueAction });
+        await onDeleteTask(task.id, { githubIssueAction, allowResurrection });
       } else {
-        await onDeleteTask(task.id);
+        await onDeleteTask(task.id, { allowResurrection });
       }
       requestClose();
       const issueSuffix = trackedIssue?.owner && trackedIssue.repo && trackedIssue.number && githubIssueAction
@@ -1600,6 +1557,7 @@ export function TaskDetailContent({
             removeDependencyReferences: true,
             removeLineageReferences: true,
             githubIssueAction,
+            allowResurrection,
           });
           requestClose();
           addToast(`Deleted ${task.id} after removing dependency references`, "info");
@@ -1626,6 +1584,7 @@ export function TaskDetailContent({
               removeDependencyReferences: true,
               removeLineageReferences: true,
               githubIssueAction,
+              allowResurrection,
             });
             requestClose();
             addToast(`Deleted ${task.id} after unlinking lineage references`, "info");
@@ -1658,6 +1617,7 @@ export function TaskDetailContent({
           removeDependencyReferences: true,
           removeLineageReferences: true,
           githubIssueAction,
+          allowResurrection,
         });
         requestClose();
         addToast(`Deleted ${task.id} after unlinking lineage references`, "info");
@@ -1665,7 +1625,7 @@ export function TaskDetailContent({
         addToast(getErrorMessage(retryErr), "error");
       }
     }
-  }, [task.column, task.githubTracking?.enabled, task.githubTracking?.issue, task.id, onDeleteTask, onArchiveTask, requestClose, addToast, confirm, confirmWithChoice]);
+  }, [task.column, task.githubTracking?.enabled, task.githubTracking?.issue, task.id, onDeleteTask, onArchiveTask, requestClose, addToast, confirm, confirmWithChoice, confirmWithCheckbox]);
 
   const handleMerge = useCallback(async () => {
     const shouldMerge = await confirm({
@@ -2004,6 +1964,46 @@ export function TaskDetailContent({
       addToast(getErrorMessage(err), "error");
     }
   }, [task.id, dependencies, addToast]);
+
+  const handleClearOverlapBlocker = useCallback(async () => {
+    if (!workingTask.overlapBlockedBy) return;
+
+    const requestTaskId = task.id;
+    const previousOverlapBlockedBy = workingTask.overlapBlockedBy;
+    const previousStatus = workingTask.status;
+
+    setFullDetail((prev) => prev
+      ? {
+        ...prev,
+        overlapBlockedBy: undefined,
+        ...(previousStatus === "queued" ? { status: undefined } : {}),
+      }
+      : prev);
+
+    try {
+      const updatedTask = await updateTask(task.id, {
+        overlapBlockedBy: null,
+        status: previousStatus === "queued" ? null : undefined,
+      }, projectId);
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
+      setFullDetail((prev) => prev ? ({ ...prev, ...updatedTask } as TaskDetail) : (updatedTask as TaskDetail));
+      onTaskUpdated?.(updatedTask);
+    } catch (err) {
+      if (activeTaskIdRef.current !== requestTaskId) {
+        return;
+      }
+      setFullDetail((prev) => prev
+        ? {
+          ...prev,
+          overlapBlockedBy: previousOverlapBlockedBy,
+          ...(previousStatus === "queued" ? { status: previousStatus } : {}),
+        }
+        : prev);
+      addToast(getErrorMessage(err), "error");
+    }
+  }, [activeTaskIdRef, addToast, onTaskUpdated, projectId, task.id, workingTask.overlapBlockedBy, workingTask.status]);
 
   const handleDepClick = useCallback(async (depId: string) => {
     try {
@@ -2489,26 +2489,6 @@ export function TaskDetailContent({
                         ""
                       )}
                     </span>
-                  </div>
-                )}
-                {broadScopeFlag && (
-                  <div className="detail-broad-scope-banner" aria-label="Triage broad-scope advisory">
-                    <AlertTriangle aria-hidden="true" />
-                    <div className="detail-broad-scope-banner-content">
-                      <div className="detail-broad-scope-banner-heading">Triage broad-scope advisory</div>
-                      <div>{`Score ${broadScopeFlag.score} · ${formatBroadScopeReasons(broadScopeFlag.reasons)}`}</div>
-                      <div>
-                        {[
-                          broadScopeFlag.signals?.size ? `Size: ${broadScopeFlag.signals.size}` : null,
-                          typeof broadScopeFlag.signals?.stepCount === "number" ? `Steps: ${broadScopeFlag.signals.stepCount}` : null,
-                          typeof broadScopeFlag.signals?.fileScopeCount === "number" ? `File scope: ${broadScopeFlag.signals.fileScopeCount}` : null,
-                          typeof broadScopeFlag.signals?.failingFileMentions === "number"
-                            ? `Failing-file mentions: ${broadScopeFlag.signals.failingFileMentions}`
-                            : null,
-                        ].filter(Boolean).join(" · ")}
-                      </div>
-                      <div className="detail-broad-scope-banner-note">Advisory only — task lifecycle is unaffected.</div>
-                    </div>
                   </div>
                 )}
                 {(task.prInfo?.number || task.mergeDetails?.prNumber) && (
@@ -3317,8 +3297,18 @@ export function TaskDetailContent({
             )}
             {workingTask.overlapBlockedBy && (
               <div className="detail-empty-inline">
-                File scope overlap blocker: {workingTask.overlapBlockedBy}
-                {!overlapBlockerActive && " (stale)"}
+                <span>
+                  File scope overlap blocker: {workingTask.overlapBlockedBy}
+                  {!overlapBlockerActive && " (stale)"}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void handleClearOverlapBlocker()}
+                  title={`Clear overlap blocker ${workingTask.overlapBlockedBy}`}
+                >
+                  Clear
+                </button>
               </div>
             )}
             <div className="dep-trigger-wrap">

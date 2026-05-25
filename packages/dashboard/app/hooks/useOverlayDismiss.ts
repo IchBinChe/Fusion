@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 /**
  * Returns props for a modal-overlay element that dismisses only when a real
@@ -18,11 +18,40 @@ import { useCallback, useRef } from "react";
 export function useOverlayDismiss(onClose: () => void): {
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseUp: (e: React.MouseEvent) => void;
+  onTouchStart: () => void;
+  onTouchEnd: () => void;
 } {
   const startedOnOverlayRef = useRef(false);
+  const lastTouchAtRef = useRef(0);
+
+  const markTouch = useCallback(() => {
+    lastTouchAtRef.current = Date.now();
+  }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
+    // Android/webview may emit compatibility mouse events right after touchend.
+    // Ignore those so a newly-mounted overlay is not dismissed immediately.
+    if (Date.now() - lastTouchAtRef.current < 500) {
+      startedOnOverlayRef.current = false;
+      return;
+    }
     startedOnOverlayRef.current = e.target === e.currentTarget;
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const handleDocumentTouch = () => {
+      lastTouchAtRef.current = Date.now();
+    };
+
+    document.addEventListener("touchstart", handleDocumentTouch, { passive: true });
+    document.addEventListener("touchend", handleDocumentTouch, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", handleDocumentTouch);
+      document.removeEventListener("touchend", handleDocumentTouch);
+    };
   }, []);
 
   const onMouseUp = useCallback(
@@ -34,5 +63,5 @@ export function useOverlayDismiss(onClose: () => void): {
     [onClose],
   );
 
-  return { onMouseDown, onMouseUp };
+  return { onMouseDown, onMouseUp, onTouchStart: markTouch, onTouchEnd: markTouch };
 }

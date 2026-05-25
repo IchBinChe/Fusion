@@ -6,6 +6,7 @@ describe("useMobileScrollLock", () => {
   let savedInnerWidth: number;
   let savedMaxTouchPoints: number;
   let savedOntouchstart: typeof window.ontouchstart;
+  let savedUserAgent: string;
   let scrollSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -13,6 +14,7 @@ describe("useMobileScrollLock", () => {
     savedInnerWidth = window.innerWidth;
     savedMaxTouchPoints = navigator.maxTouchPoints;
     savedOntouchstart = window.ontouchstart;
+    savedUserAgent = navigator.userAgent;
     document.documentElement.style.cssText = "";
     document.body.style.cssText = "";
     scrollSpy = vi.fn();
@@ -24,6 +26,7 @@ describe("useMobileScrollLock", () => {
     Object.defineProperty(window, "innerWidth", { value: savedInnerWidth, writable: true, configurable: true });
     Object.defineProperty(navigator, "maxTouchPoints", { value: savedMaxTouchPoints, configurable: true });
     Object.defineProperty(window, "ontouchstart", { value: savedOntouchstart, writable: true, configurable: true });
+    Object.defineProperty(navigator, "userAgent", { value: savedUserAgent, configurable: true });
     document.documentElement.style.cssText = "";
     document.body.style.cssText = "";
     _resetLockState();
@@ -33,6 +36,21 @@ describe("useMobileScrollLock", () => {
     (window as unknown as { ontouchstart: unknown }).ontouchstart = null;
     Object.defineProperty(navigator, "maxTouchPoints", { value: 5, configurable: true });
     Object.defineProperty(window, "innerWidth", { value: 375, writable: true, configurable: true });
+    // Hook is iOS-gated; default fixture uses an iPhone UA.
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      configurable: true,
+    });
+  }
+
+  function makeAndroid() {
+    (window as unknown as { ontouchstart: unknown }).ontouchstart = null;
+    Object.defineProperty(navigator, "maxTouchPoints", { value: 5, configurable: true });
+    Object.defineProperty(window, "innerWidth", { value: 388, writable: true, configurable: true });
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36",
+      configurable: true,
+    });
   }
 
   function makeDesktop() {
@@ -54,6 +72,14 @@ describe("useMobileScrollLock", () => {
 
   it("does nothing on desktop", () => {
     makeDesktop();
+    renderHook(() => useMobileScrollLock(true));
+    expect(document.body.style.position).toBe("");
+    expect(document.documentElement.style.overflow).toBe("");
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("does nothing on Android (avoids dismissing the soft keyboard)", () => {
+    makeAndroid();
     renderHook(() => useMobileScrollLock(true));
     expect(document.body.style.position).toBe("");
     expect(document.documentElement.style.overflow).toBe("");

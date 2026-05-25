@@ -40,7 +40,7 @@ describe("TaskExecutor user cancel handling", () => {
       source: "user",
     });
 
-    await Promise.resolve();
+    await (executor as any).pendingTaskDisposals.get("FN-001");
 
     expect(callOrder[0]).toBe("abort");
     expect(callOrder[1]).toBe("dispose");
@@ -93,5 +93,67 @@ describe("TaskExecutor user cancel handling", () => {
     });
 
     expect((executor as any).userCanceledTaskIds.has("FN-003")).toBe(false);
+  });
+
+  it("re-dispatch (task:moved → in-progress) awaits prior disposal before execute()", async () => {
+    resetExecutorMocks();
+    const store = createMockStore();
+    const executor = new TaskExecutor(store as any, "/tmp/test");
+
+    const callOrder: string[] = [];
+    let resolveAbort: (() => void) | null = null;
+    const abortPromise = new Promise<void>((resolve) => {
+      resolveAbort = () => {
+        callOrder.push("abort-resolved");
+        resolve();
+      };
+    });
+
+    const session = {
+      prompt: vi.fn(),
+      abort: vi.fn(() => {
+        callOrder.push("abort-started");
+        return abortPromise;
+      }),
+      dispose: vi.fn(() => {
+        callOrder.push("dispose");
+      }),
+    } as any;
+
+    (executor as any).activeSessions.set("FN-RACE", {
+      session,
+      seenSteeringIds: new Set<string>(),
+    });
+    const executeSpy = vi.spyOn(executor, "execute" as any).mockImplementation(async () => {
+      callOrder.push("execute");
+    });
+
+    // Move away first — kicks off async disposal.
+    (store as any)._trigger("task:moved", {
+      task: { id: "FN-RACE", column: "todo", dependencies: [], steps: [], currentStep: 0, log: [] },
+      from: "in-progress",
+      to: "todo",
+      source: "user",
+    });
+    // Immediate re-dispatch — must wait for the disposal above.
+    (store as any)._trigger("task:moved", {
+      task: { id: "FN-RACE", column: "in-progress", dependencies: [], steps: [], currentStep: 0, log: [] },
+      from: "todo",
+      to: "in-progress",
+      source: "user",
+    });
+
+    // execute() must not run yet — abort is still pending.
+    await Promise.resolve();
+    expect(callOrder).toEqual(["abort-started"]);
+
+    // Resolve abort. Dispose + execute should follow in order.
+    resolveAbort!();
+    await (executor as any).pendingTaskDisposals.get("FN-RACE");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(callOrder.indexOf("execute")).toBeGreaterThan(callOrder.indexOf("dispose"));
+    executeSpy.mockRestore();
   });
 });

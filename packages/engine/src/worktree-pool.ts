@@ -17,6 +17,7 @@ import {
 } from "./worktree-backend.js";
 import { cleanupSecretsEnvFile } from "./secrets-env-writer.js";
 import { removeDesktopBuildArtifacts } from "./worktree-desktop-artifacts.js";
+import { resolveIntegrationBranch } from "./integration-branch.js";
 import type { RunAuditor } from "./run-audit.js";
 import { pruneWorktreeAdminEntries } from "./worktree-prune.js";
 
@@ -127,8 +128,25 @@ export async function getRegisteredWorktreePaths(rootDir: string): Promise<Set<s
 }
 
 export async function getRegisteredWorktreeBranchMap(rootDir: string): Promise<Map<string, string>> {
-  const { rawOutput } = await describeRegisteredWorktrees(rootDir);
   const branchMap = new Map<string, string>();
+  for (const entry of await getRegisteredWorktreeBranches(rootDir)) {
+    branchMap.set(entry.branch, entry.worktreePath);
+  }
+  return branchMap;
+}
+
+/**
+ * Same source as `getRegisteredWorktreeBranchMap` but returns ALL
+ * (branch, worktreePath) pairs rather than collapsing duplicates by branch.
+ * Multiple worktrees can legitimately share a branch when the user has
+ * created secondary checkouts via `git worktree add --force -b <branch>`;
+ * callers that need to act on every such worktree (e.g. the merger's
+ * post-advance auto-sync) must use this array form to avoid silently
+ * skipping all but the last-iterated checkout.
+ */
+export async function getRegisteredWorktreeBranches(rootDir: string): Promise<Array<{ branch: string; worktreePath: string }>> {
+  const { rawOutput } = await describeRegisteredWorktrees(rootDir);
+  const entries: Array<{ branch: string; worktreePath: string }> = [];
   let currentWorktree: string | null = null;
 
   for (const line of rawOutput.split("\n")) {
@@ -143,12 +161,12 @@ export async function getRegisteredWorktreeBranchMap(rootDir: string): Promise<M
         ? branchRef.slice("refs/heads/".length)
         : branchRef;
       if (branchName) {
-        branchMap.set(branchName, currentWorktree);
+        entries.push({ branch: branchName, worktreePath: currentWorktree });
       }
     }
   }
 
-  return branchMap;
+  return entries;
 }
 
 export async function isRegisteredGitWorktree(rootDir: string, worktreePath: string): Promise<boolean> {
@@ -452,7 +470,20 @@ export class WorktreePool {
     await execAsync("git clean -fd", { cwd: worktreePath });
     await removeDesktopBuildArtifacts(worktreePath, worktreePoolLog);
 
-    const base = startPoint || "main";
+    const base = startPoint || await resolveIntegrationBranch(options?.repoDir ?? worktreePath, undefined);
+    // Reject base values that would cause the new branch to inherit the
+    // worktree's current HEAD instead of the intended start point. Historical
+    // contamination ("branch: Created from HEAD") landed FN-5472's tip on
+    // freshly-created fn-5432/fn-5255 branches because the recycled worktree
+    // was still pointing at the previous occupant's commit and base silently
+    // collapsed onto HEAD.
+    const trimmedBase = base?.trim() ?? "";
+    if (!trimmedBase || trimmedBase.toUpperCase() === "HEAD") {
+      throw new Error(
+        `prepareForTask: refusing to create branch ${branchName} from base ${JSON.stringify(base)} (worktree=${worktreePath}, startPoint=${String(startPoint)})`,
+      );
+    }
+
     await execAsync(`git checkout --detach ${base}`, {
       cwd: worktreePath,
     });
@@ -460,6 +491,22 @@ export class WorktreePool {
     // Create or force-reset the branch from the start point (or main)
     const checkoutCmd = `git checkout -B "${branchName}" ${base}`;
     const resolvedBase = (await execAsync(`git rev-parse --verify "${base}^{commit}"`, { cwd: worktreePath, encoding: "utf-8" })).stdout.trim();
+
+    // Verify HEAD actually landed at the resolved base after --detach. If
+    // detach silently leaves HEAD elsewhere (e.g. the base ref didn't exist
+    // and git fell through to current HEAD), creating the branch now would
+    // pin it to the wrong tip — exactly the FN-5432 / FN-5255 contamination
+    // pattern ("branch: Created from HEAD" pointing at the previous occupant's
+    // tip). Only enforced when we have real SHAs to compare; mock-driven
+    // unit tests that return empty buffers fall through harmlessly.
+    if (/^[0-9a-f]{40}$/i.test(resolvedBase)) {
+      const detachedHead = (await execAsync("git rev-parse HEAD", { cwd: worktreePath, encoding: "utf-8" })).stdout.trim();
+      if (detachedHead !== resolvedBase) {
+        throw new Error(
+          `prepareForTask: post-detach HEAD ${detachedHead} does not match resolved base ${resolvedBase} (${base}) for ${branchName} — refusing to create branch`,
+        );
+      }
+    }
     const taskId = deriveTaskIdFromBranch(branchName);
     try {
       await execAsync(checkoutCmd, {
@@ -482,13 +529,15 @@ export class WorktreePool {
       // conflict or, when explicitly enabled, fall back to the legacy sibling
       // suffix flow.
       const conflictingPath = match[1];
+      const repoDir = options?.repoDir ?? worktreePath;
       const inspection = await inspectBranchConflict({
-        repoDir: options?.repoDir ?? worktreePath,
+        repoDir,
         branchName,
         conflictingWorktreePath: conflictingPath,
         requestingTaskId: options?.requestingTaskId ?? taskId,
         ownerTaskId: taskId,
         startPoint: base,
+        integrationRef: await resolveIntegrationBranch(repoDir, undefined),
       });
       if (inspection.kind === "stale" || inspection.kind === "stale-resolved" || inspection.kind === "tip-already-merged") {
         const backend = resolveWorktreeBackendViaSettings({}, { logger: worktreePoolLog });

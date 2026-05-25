@@ -87,6 +87,20 @@ function isIgnoredOverlapPath(path: string, ignorePath: string): boolean {
   return normalizedPath === normalizedIgnore || normalizedPath.startsWith(`${normalizedIgnore}/`);
 }
 
+function computeAutoClaimFingerprint(task: Task): string {
+  const dependencies = [...(task.dependencies ?? [])].sort().join(",");
+  const sortAt = task.columnMovedAt ?? task.createdAt;
+  return [
+    task.column,
+    task.paused === true ? "1" : "0",
+    task.assignedAgentId ?? "",
+    task.checkedOutBy ?? "",
+    task.deletedAt ?? "",
+    dependencies,
+    sortAt,
+  ].join("|");
+}
+
 /**
  * Remove scope entries that match configured overlap-ignore paths.
  * Used by scheduler overlap gating so shared safe paths (docs/generated/etc.)
@@ -320,6 +334,8 @@ export class Scheduler {
   private wasPermanentAgentUnavailable = new Set<string>();
   /** Tracks dispatch-queued reason signatures to avoid per-tick log spam. */
   private wasDispatchQueuedReasonLogged = new Set<string>();
+  /** Tracks per-task candidacy fingerprints for task:updated auto-claim invalidation gating. */
+  private lastAutoClaimFingerprint = new Map<string, string>();
   private readonly staleTaskReporter: StaleTaskReporter;
   private readonly backlogPressureReporter: BacklogPressureReporter;
   private lastStaleTaskReportAt = 0;
@@ -348,7 +364,8 @@ export class Scheduler {
      * pass immediately instead of waiting for the next poll interval.
      * This reduces latency from up to 15 seconds to near-instant.
      */
-    this.store.on("task:created", () => {
+    this.store.on("task:created", (task) => {
+      this.lastAutoClaimFingerprint.set(task.id, computeAutoClaimFingerprint(task));
       this.options.snapshotManager?.invalidate("task:created");
       schedulerLog.log("Task created — triggering scheduling");
       this.schedule();
@@ -389,6 +406,7 @@ export class Scheduler {
      * update feature status and potentially activate next pending slice.
      */
     this.store.on("task:moved", async ({ task, from, to }) => {
+      this.lastAutoClaimFingerprint.set(task.id, computeAutoClaimFingerprint(task));
       if (from === "todo" || to === "todo") {
         this.options.snapshotManager?.invalidate(`task:moved:${from}->${to}`);
       }
@@ -502,7 +520,12 @@ export class Scheduler {
      * Also detects task-level unpause transitions and triggers immediate scheduling.
      */
     this.store.on("task:updated", (task) => {
-      this.options.snapshotManager?.invalidate("task:updated");
+      const nextFingerprint = computeAutoClaimFingerprint(task);
+      const previousFingerprint = this.lastAutoClaimFingerprint.get(task.id);
+      if (!previousFingerprint || previousFingerprint !== nextFingerprint) {
+        this.lastAutoClaimFingerprint.set(task.id, nextFingerprint);
+        this.options.snapshotManager?.invalidate("task:updated");
+      }
       // Track mission failure signals before moveTask clears failure metadata.
       if (task.sliceId && task.column === "in-progress" && task.status === "failed") {
         this.failedTaskIds.add(task.id);
@@ -543,6 +566,7 @@ export class Scheduler {
     });
 
     this.store.on("task:deleted", (task) => {
+      this.lastAutoClaimFingerprint.delete(task.id);
       this.options.snapshotManager?.invalidate("task:deleted");
       this.pausedTaskIds.delete(task.id);
       this.failedTaskIds.delete(task.id);
@@ -550,6 +574,58 @@ export class Scheduler {
       this.wasNodeBlocked.delete(task.id);
       this.wasPermanentAgentUnavailable.delete(task.id);
       this.clearDispatchQueuedReasonMemo(task.id);
+
+      void (async () => {
+        try {
+          const settings = await this.store.getSettings();
+          if (settings.globalPause || settings.enginePaused) {
+            return;
+          }
+
+          const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
+          const inProgressTasks = await this.store.listTasks({ column: "in-progress", slim: true });
+          const dependents = [...todoTasks, ...inProgressTasks];
+          const allTasks = await this.store.listTasks({ slim: true, includeArchived: true });
+          const taskById = new Map(allTasks.map((candidate) => [candidate.id, candidate]));
+
+          for (const dependent of dependents) {
+            const mentionsDeletedTask = dependent.dependencies.includes(task.id);
+            const currentlyBlockedByDeletedTask = dependent.blockedBy === task.id;
+            if (!mentionsDeletedTask && !currentlyBlockedByDeletedTask) continue;
+
+            const unresolvedDeps = dependent.dependencies.filter((depId) => {
+              const dep = taskById.get(depId);
+              return dep && dep.column !== "done" && dep.column !== "in-review" && dep.column !== "archived";
+            });
+
+            try {
+              if (unresolvedDeps.length > 0) {
+                const nextBlocker = unresolvedDeps[0]!;
+                await this.store.updateTask(dependent.id, {
+                  blockedBy: nextBlocker,
+                  status: "queued",
+                });
+                await this.store.logEntry(
+                  dependent.id,
+                  `Auto-reblocked (FN-5496): unresolved dependency ${nextBlocker} remains after blocker ${task.id} was soft-deleted`,
+                );
+              } else if (dependent.column === "todo") {
+                await this.store.updateTask(dependent.id, { blockedBy: null, status: null });
+                await this.store.logEntry(dependent.id, `Auto-unblocked (FN-5496): blocker ${task.id} was soft-deleted`);
+              } else {
+                await this.store.updateTask(dependent.id, { blockedBy: null });
+                await this.store.logEntry(dependent.id, `Auto-unblocked (FN-5496): blocker ${task.id} was soft-deleted`);
+              }
+            } catch (error) {
+              schedulerLog.error(`Failed to reconcile dependent ${dependent.id} for soft-deleted blocker ${task.id}`, error);
+            }
+          }
+
+          this.schedule();
+        } catch (error) {
+          schedulerLog.error(`Failed event-driven soft-delete blocker reconciliation for ${task.id}`, error);
+        }
+      })();
     });
   }
 

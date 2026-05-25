@@ -12,7 +12,16 @@ import {
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
-import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, SWR_LONG_MAX_AGE_MS, writeCache } from "../utils/swrCache";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
+import {
+  readCache,
+  SWR_CACHE_KEYS,
+  SWR_CHAT_ROOM_MAX_AGE_MS,
+  SWR_DEFAULT_MAX_AGE_MS,
+  SWR_LONG_MAX_AGE_MS,
+  writeCache,
+} from "../utils/swrCache";
+import { startRoomOpenTimer } from "../utils/roomOpenDiagnostics";
 
 const ACTIVE_ROOM_STORAGE_KEY = "fusion:chat-active-room";
 
@@ -83,6 +92,14 @@ export function useChatRooms(
 ): UseChatRoomsResult {
   const roomsCacheKey = `${SWR_CACHE_KEYS.CHAT_ROOMS}:${projectId ?? "global"}`;
   const activeRoomCacheKey = `${SWR_CACHE_KEYS.ACTIVE_CHAT_ROOM_ID}:${projectId ?? "global"}`;
+  const messagesCacheKey = useCallback(
+    (roomId: string) => `${SWR_CACHE_KEYS.CHAT_ROOM_MESSAGES_PREFIX}${projectId ?? "global"}:${roomId}`,
+    [projectId],
+  );
+  const membersCacheKey = useCallback(
+    (roomId: string) => `${SWR_CACHE_KEYS.CHAT_ROOM_MEMBERS_PREFIX}${projectId ?? "global"}:${roomId}`,
+    [projectId],
+  );
   const [rooms, setRooms] = useState<ChatRoom[]>(() => {
     const cached = readCache<ChatRoom[]>(roomsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     return Array.isArray(cached) ? cached : [];
@@ -112,7 +129,7 @@ export function useChatRooms(
     projectContextVersionRef.current += 1;
   }
 
-  const loadRoomData = useCallback(async (room: ChatRoom | null, clearFirst = true) => {
+  const loadRoomData = useCallback(async (room: ChatRoom | null) => {
     if (!room) {
       setActiveRoomMembers([]);
       setMessages([]);
@@ -120,25 +137,55 @@ export function useChatRooms(
       return;
     }
 
-    if (clearFirst) {
+    const timer = startRoomOpenTimer(room.id, { warm: false });
+    timer.mark("select");
+
+    const cachedMessages = readCache<ChatRoomMessage[]>(messagesCacheKey(room.id), { maxAgeMs: SWR_CHAT_ROOM_MAX_AGE_MS });
+    const cachedMembers = readCache<ChatRoomMember[]>(membersCacheKey(room.id), { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+    const hasCachedMessages = Array.isArray(cachedMessages) && cachedMessages.length > 0;
+    const hasCachedMembers = Array.isArray(cachedMembers) && cachedMembers.length > 0;
+
+    if (hasCachedMessages || hasCachedMembers) {
+      timer.mark("cache-hit");
+      if (hasCachedMessages) {
+        setMessages(cachedMessages);
+        timer.mark("hydrate");
+      }
+      if (hasCachedMembers) {
+        setActiveRoomMembers(cachedMembers);
+      }
+      setMessagesLoading(false);
+    } else {
       setMessages([]);
+      setMessagesLoading(true);
     }
-    setMessagesLoading(true);
 
     try {
       const [membersData, messagesData] = await Promise.all([
         fetchChatRoomMembers(room.id, projectId),
         fetchChatRoomMessages(room.id, { limit: 100, order: "desc" }, projectId),
       ]);
-      setActiveRoomMembers(membersData.members);
-      setMessages(messagesData.messages);
+      timer.mark("members-fetch");
+      timer.mark("messages-fetch");
+      writeCache(membersCacheKey(room.id), membersData.members, { maxBytes: 500_000 });
+      // Snapshot mirrors server `order: desc` shape.
+      writeCache(messagesCacheKey(room.id), messagesData.messages, { maxBytes: 500_000 });
+
+      if (activeRoomRef.current?.id === room.id) {
+        setActiveRoomMembers(membersData.members);
+        setMessages(messagesData.messages);
+        timer.mark("hydrate");
+      }
     } catch {
-      setActiveRoomMembers([]);
-      setMessages([]);
+      if (!hasCachedMessages && !hasCachedMembers) {
+        setActiveRoomMembers([]);
+        setMessages([]);
+      }
     } finally {
       setMessagesLoading(false);
+      timer.complete({ warm: hasCachedMessages, membersCached: hasCachedMembers });
     }
-  }, [projectId]);
+  }, [membersCacheKey, messagesCacheKey, projectId]);
 
   const refreshRooms = useCallback(async () => {
     if (roomsRef.current.length === 0) {
@@ -156,7 +203,7 @@ export function useChatRooms(
         const persistedRoom = sortedRooms.find((room) => room.id === persistedRoomId) ?? null;
         if (persistedRoom) {
           setActiveRoom(persistedRoom);
-          void loadRoomData(persistedRoom, true);
+          void loadRoomData(persistedRoom);
         } else {
           removeScopedItem(ACTIVE_ROOM_STORAGE_KEY, projectId);
           writeCache(activeRoomCacheKey, "", { maxBytes: 500_000 });
@@ -173,19 +220,21 @@ export function useChatRooms(
 
   const selectRoom = useCallback((roomId: string | null) => {
     if (!roomId) {
+      activeRoomRef.current = null;
       setActiveRoom(null);
       removeScopedItem(ACTIVE_ROOM_STORAGE_KEY, projectId);
       writeCache(activeRoomCacheKey, "", { maxBytes: 500_000 });
-      void loadRoomData(null, true);
+      void loadRoomData(null);
       return;
     }
 
     const room = roomsRef.current.find((candidate) => candidate.id === roomId) ?? null;
+    activeRoomRef.current = room;
     setActiveRoom(room);
     if (room) {
       setScopedItem(ACTIVE_ROOM_STORAGE_KEY, room.id, projectId);
       writeCache(activeRoomCacheKey, room.id, { maxBytes: 500_000 });
-      void loadRoomData(room, true);
+      void loadRoomData(room);
     }
   }, [activeRoomCacheKey, loadRoomData, projectId]);
 
@@ -194,10 +243,11 @@ export function useChatRooms(
     const nextRoom = created.room;
 
     setRooms((previous) => upsertRoom(previous, nextRoom));
+    activeRoomRef.current = nextRoom;
     setActiveRoom(nextRoom);
     setScopedItem(ACTIVE_ROOM_STORAGE_KEY, nextRoom.id, projectId);
     writeCache(activeRoomCacheKey, nextRoom.id, { maxBytes: 500_000 });
-    await loadRoomData(nextRoom, true);
+    await loadRoomData(nextRoom);
 
     return nextRoom;
   }, [activeRoomCacheKey, loadRoomData, projectId]);
@@ -205,15 +255,19 @@ export function useChatRooms(
   const deleteRoomLocal = useCallback(async (roomId: string) => {
     await deleteChatRoom(roomId, projectId);
     setRooms((previous) => previous.filter((room) => room.id !== roomId));
+    // Invalidate by writing empty snapshots for deterministic warm-open behavior.
+    writeCache(messagesCacheKey(roomId), [], { maxBytes: 500_000 });
+    writeCache(membersCacheKey(roomId), [], { maxBytes: 500_000 });
 
     if (activeRoomRef.current?.id === roomId) {
+      activeRoomRef.current = null;
       setActiveRoom(null);
       setActiveRoomMembers([]);
       setMessages([]);
       removeScopedItem(ACTIVE_ROOM_STORAGE_KEY, projectId);
       writeCache(activeRoomCacheKey, "", { maxBytes: 500_000 });
     }
-  }, [activeRoomCacheKey, projectId]);
+  }, [activeRoomCacheKey, membersCacheKey, messagesCacheKey, projectId]);
 
   /**
    * Sends a room message with optimistic UI.
@@ -229,6 +283,7 @@ export function useChatRooms(
       throw new Error("Select a room before sending a message");
     }
 
+    const timer = startRoomOpenTimer(roomId, { warm: false });
     const placeholderAttachments = opts?.files?.map((file) => ({
       id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       filename: file.name,
@@ -240,7 +295,12 @@ export function useChatRooms(
 
     const optimisticMessage = createOptimisticRoomMessage(roomId, content, placeholderAttachments?.length ? placeholderAttachments : opts?.attachments);
     if (activeRoomRef.current?.id === roomId) {
-      setMessages((previous) => [...previous, optimisticMessage]);
+      setMessages((previous) => {
+        const next = [...previous, optimisticMessage];
+        // Snapshot mirrors server `order: desc` shape.
+        writeCache(messagesCacheKey(roomId), next, { maxBytes: 500_000 });
+        return next;
+      });
     }
 
     let userMessageDelivered = false;
@@ -271,24 +331,40 @@ export function useChatRooms(
       }
 
       if (activeRoomRef.current?.id === roomId) {
-        setMessages((previous) => previous.map((message) =>
-          message.id === optimisticMessage.id ? postResult.message : message));
+        setMessages((previous) => {
+          const next = previous.map((message) =>
+            message.id === optimisticMessage.id ? postResult.message : message);
+          // Snapshot mirrors server `order: desc` shape.
+          writeCache(messagesCacheKey(roomId), next, { maxBytes: 500_000 });
+          return next;
+        });
       }
 
       const latestMessages = await fetchChatRoomMessages(roomId, { limit: 100, order: "desc" }, projectId);
+      // Snapshot mirrors server `order: desc` shape.
+      writeCache(messagesCacheKey(roomId), latestMessages.messages, { maxBytes: 500_000 });
       if (activeRoomRef.current?.id !== roomId) {
         return;
       }
       setMessages(latestMessages.messages);
+      timer.mark("hydrate");
     } catch (error) {
       try {
         const latestMessages = await fetchChatRoomMessages(roomId, { limit: 100, order: "desc" }, projectId);
+        // Snapshot mirrors server `order: desc` shape.
+        writeCache(messagesCacheKey(roomId), latestMessages.messages, { maxBytes: 500_000 });
         if (activeRoomRef.current?.id === roomId) {
           setMessages(latestMessages.messages);
+          timer.mark("hydrate");
         }
       } catch {
         if (activeRoomRef.current?.id === roomId) {
-          setMessages((previous) => previous.filter((message) => message.id !== optimisticMessage.id));
+          setMessages((previous) => {
+            const next = previous.filter((message) => message.id !== optimisticMessage.id);
+            // Snapshot mirrors server `order: desc` shape.
+            writeCache(messagesCacheKey(roomId), next, { maxBytes: 500_000 });
+            return next;
+          });
         }
       }
 
@@ -300,8 +376,10 @@ export function useChatRooms(
       }
 
       throw error;
+    } finally {
+      timer.complete({ source: "send-room-message" });
     }
-  }, [projectId]);
+  }, [messagesCacheKey, projectId]);
 
   const clearRoom = useCallback(async (roomId: string) => {
     if (!roomId || !roomsRef.current.some((room) => room.id === roomId)) {
@@ -309,10 +387,12 @@ export function useChatRooms(
     }
 
     await clearChatRoomMessages(roomId, projectId);
+    // Invalidate by writing an empty snapshot for deterministic warm-open behavior.
+    writeCache(messagesCacheKey(roomId), [], { maxBytes: 500_000 });
     if (activeRoomRef.current?.id === roomId) {
       setMessages([]);
     }
-  }, [projectId]);
+  }, [messagesCacheKey, projectId]);
 
   useEffect(() => {
     void refreshRooms();
@@ -324,6 +404,19 @@ export function useChatRooms(
 
     return subscribeSse(eventsUrl, {
       onReconnect: () => {
+        recordResumeEvent({
+          view: "useChatRooms",
+          trigger: "sse-reconnect",
+          projectId,
+          replayAttempted: false,
+        });
+        const roomId = activeRoomRef.current?.id;
+        if (roomId) {
+          const timer = startRoomOpenTimer(roomId, { warm: true });
+          timer.mark("sse-reconnect-refresh");
+          void refreshRooms().finally(() => timer.complete({ source: "sse-reconnect" }));
+          return;
+        }
         void refreshRooms();
       },
       events: {
@@ -347,7 +440,11 @@ export function useChatRooms(
           const payload = parseSsePayload<{ id: string }>(event);
           if (!payload?.id) return;
           setRooms((previous) => previous.filter((room) => room.id !== payload.id));
+          // Invalidate by writing empty snapshots for deterministic warm-open behavior.
+          writeCache(messagesCacheKey(payload.id), [], { maxBytes: 500_000 });
+          writeCache(membersCacheKey(payload.id), [], { maxBytes: 500_000 });
           if (activeRoomRef.current?.id === payload.id) {
+            activeRoomRef.current = null;
             setActiveRoom(null);
             setActiveRoomMembers([]);
             setMessages([]);
@@ -363,14 +460,20 @@ export function useChatRooms(
             if (previous.some((member) => member.agentId === payload.agentId)) {
               return previous;
             }
-            return [...previous, payload];
+            const next = [...previous, payload];
+            writeCache(membersCacheKey(payload.roomId), next, { maxBytes: 500_000 });
+            return next;
           });
         },
         "chat:room:member:removed": (event) => {
           if (projectContextVersionRef.current !== contextVersionAtStart) return;
           const payload = parseSsePayload<{ roomId: string; agentId: string }>(event);
           if (!payload || activeRoomRef.current?.id !== payload.roomId) return;
-          setActiveRoomMembers((previous) => previous.filter((member) => member.agentId !== payload.agentId));
+          setActiveRoomMembers((previous) => {
+            const next = previous.filter((member) => member.agentId !== payload.agentId);
+            writeCache(membersCacheKey(payload.roomId), next, { maxBytes: 500_000 });
+            return next;
+          });
         },
         "chat:room:message:added": (event) => {
           if (projectContextVersionRef.current !== contextVersionAtStart) return;
@@ -397,30 +500,50 @@ export function useChatRooms(
               if (optimisticIndex >= 0) {
                 const next = [...previous];
                 next[optimisticIndex] = message;
+                // Snapshot mirrors server `order: desc` shape.
+                writeCache(messagesCacheKey(message.roomId), next, { maxBytes: 500_000 });
                 return next;
               }
             }
 
-            return [...previous, message];
+            const next = [...previous, message];
+            // Snapshot mirrors server `order: desc` shape.
+            writeCache(messagesCacheKey(message.roomId), next, { maxBytes: 500_000 });
+            return next;
           });
         },
         "chat:room:message:updated": (event) => {
           if (projectContextVersionRef.current !== contextVersionAtStart) return;
           const message = parseSsePayload<ChatRoomMessage>(event);
           if (!message || activeRoomRef.current?.id !== message.roomId) return;
-          setMessages((previous) => previous.map((candidate) => (candidate.id === message.id ? message : candidate)));
+          setMessages((previous) => {
+            const next = previous.map((candidate) => (candidate.id === message.id ? message : candidate));
+            // Snapshot mirrors server `order: desc` shape.
+            writeCache(messagesCacheKey(message.roomId), next, { maxBytes: 500_000 });
+            return next;
+          });
         },
         "chat:room:message:deleted": (event) => {
           if (projectContextVersionRef.current !== contextVersionAtStart) return;
           const payload = parseSsePayload<{ id: string }>(event);
           if (!payload?.id) return;
-          setMessages((previous) => previous.filter((message) => message.id !== payload.id));
+          setMessages((previous) => {
+            const next = previous.filter((message) => message.id !== payload.id);
+            const activeRoomId = activeRoomRef.current?.id;
+            if (activeRoomId) {
+              // Snapshot mirrors server `order: desc` shape.
+              writeCache(messagesCacheKey(activeRoomId), next, { maxBytes: 500_000 });
+            }
+            return next;
+          });
         },
         "chat:room:messages:cleared": (event) => {
           if (projectContextVersionRef.current !== contextVersionAtStart) return;
           const payload = parseSsePayload<{ roomId: string; deletedCount: number }>(event);
           if (!payload?.roomId) return;
 
+          // Invalidate by writing an empty snapshot for deterministic warm-open behavior.
+          writeCache(messagesCacheKey(payload.roomId), [], { maxBytes: 500_000 });
           if (activeRoomRef.current?.id === payload.roomId) {
             setMessages([]);
           }
@@ -433,11 +556,12 @@ export function useChatRooms(
         },
       },
     });
-  }, [activeRoomCacheKey, projectId, refreshRooms]);
+  }, [activeRoomCacheKey, membersCacheKey, messagesCacheKey, projectId, refreshRooms]);
 
   useEffect(() => {
     if (!activeRoom) return;
     if (!rooms.some((room) => room.id === activeRoom.id)) {
+      activeRoomRef.current = null;
       setActiveRoom(null);
       setActiveRoomMembers([]);
       setMessages([]);

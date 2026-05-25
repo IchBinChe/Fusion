@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  ActiveSessionWorktreeRemovalError,
   NativeWorktreeBackend,
   WorktrunkOperationError,
   WorktrunkWorktreeBackend,
@@ -7,13 +8,15 @@ import {
   resolveWorktreeBackend,
   RemovalReason,
 } from "../worktree-backend.js";
+import { activeSessionRegistry } from "../active-session-registry.js";
 
-const { execMock, accessMock, existsSyncMock, parseIndexLockPathMock, classifyStaleLockMock, tryRemoveStaleLockMock, parseStaleRegistrationPathMock, recoverStaleRegistrationMock, installGuardMock } = vi.hoisted(() => {
+const { execMock, accessMock, rmMock, existsSyncMock, parseIndexLockPathMock, classifyStaleLockMock, tryRemoveStaleLockMock, parseStaleRegistrationPathMock, recoverStaleRegistrationMock, installGuardMock } = vi.hoisted(() => {
   const mock = vi.fn();
   (mock as any)[Symbol.for("nodejs.util.promisify.custom")] = mock;
   return {
     execMock: mock,
     accessMock: vi.fn(),
+    rmMock: vi.fn(),
     existsSyncMock: vi.fn(),
     parseIndexLockPathMock: vi.fn(),
     classifyStaleLockMock: vi.fn(),
@@ -26,12 +29,13 @@ const { execMock, accessMock, existsSyncMock, parseIndexLockPathMock, classifySt
 
 vi.mock("node:child_process", () => ({ exec: execMock }));
 vi.mock("node:fs", () => ({ existsSync: existsSyncMock }));
-vi.mock("node:fs/promises", () => ({ access: accessMock }));
+vi.mock("node:fs/promises", () => ({ access: accessMock, rm: rmMock }));
 vi.mock("../branch-conflicts.js", () => ({
   inspectBranchConflict: vi.fn().mockResolvedValue({ kind: "stale" }),
 }));
 vi.mock("../worktree-hooks.js", () => ({
   installTaskWorktreeIdentityGuard: installGuardMock,
+  IDENTITY_GUARD_BYPASS_ENV: "FUSION_MERGER_BYPASS_IDENTITY_GUARD",
 }));
 vi.mock("../worktree-stale-lock.js", () => ({
   StaleWorktreeIndexLockError: class StaleWorktreeIndexLockError extends Error {
@@ -58,6 +62,8 @@ vi.mock("../worktree-stale-registration.js", () => ({
 beforeEach(() => {
   execMock.mockReset();
   accessMock.mockReset();
+  rmMock.mockReset();
+  rmMock.mockResolvedValue(undefined as never);
   existsSyncMock.mockReset();
   accessMock.mockResolvedValue(undefined);
   existsSyncMock.mockReturnValue(true);
@@ -73,6 +79,7 @@ beforeEach(() => {
   recoverStaleRegistrationMock.mockResolvedValue({ recovered: true, actions: ["prune"] });
   classifyStaleLockMock.mockResolvedValue({ kind: "fresh", reason: "fresh" });
   tryRemoveStaleLockMock.mockResolvedValue({ removed: true });
+  activeSessionRegistry.clear();
 });
 
 describe("NativeWorktreeBackend", () => {
@@ -109,10 +116,7 @@ describe("NativeWorktreeBackend", () => {
       }),
     ).rejects.toThrow("guard failed");
 
-    expect(execMock).toHaveBeenCalledWith(
-      'rm -rf "/repo/.worktrees/fn-1"',
-      expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
-    );
+    expect(rmMock).toHaveBeenCalledWith("/repo/.worktrees/fn-1", { recursive: true, force: true });
   });
 
   it("retries with suffix and resolves", async () => {
@@ -663,8 +667,8 @@ describe("WorktrunkWorktreeBackend", () => {
     ).rejects.toMatchObject({ code: "worktrunk_timeout" });
   });
 
-  it("syncs by fetching then rebasing branch", async () => {
-    execMock.mockResolvedValue({ stdout: "", stderr: "" });
+  it("syncs by fetching then rebasing resolved integration branch", async () => {
+    execMock.mockResolvedValue({ stdout: "origin/main\n", stderr: "" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
@@ -673,11 +677,16 @@ describe("WorktrunkWorktreeBackend", () => {
 
     expect(execMock).toHaveBeenNthCalledWith(
       1,
+      "git symbolic-ref --short refs/remotes/origin/HEAD",
+      expect.objectContaining({ cwd: "/repo", timeout: 5000, maxBuffer: 1048576 }),
+    );
+    expect(execMock).toHaveBeenNthCalledWith(
+      2,
       'git fetch origin "main"',
       expect.objectContaining({ cwd: "/repo/.worktrees/fn-1", timeout: 180000, maxBuffer: 10485760 }),
     );
     expect(execMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       'git rebase "main"',
       expect.objectContaining({ cwd: "/repo/.worktrees/fn-1", timeout: 180000, maxBuffer: 10485760 }),
     );
@@ -851,6 +860,96 @@ describe("removeWorktree", () => {
         reason: RemovalReason.SelfHealingReclaim,
       }),
     ).rejects.toMatchObject({ code: "worktrunk_binary_missing", operation: "remove" });
+  });
+
+  it("reconciles same-task stale active session when defensive owner probe says not live", async () => {
+    execMock.mockResolvedValue({ stdout: "", stderr: "" });
+    const audit = { git: vi.fn().mockResolvedValue(undefined) } as any;
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-1",
+      kind: "executor",
+      ownerKey: "FN-1/executor",
+    });
+
+    await removeWorktree({
+      rootDir: "/repo",
+      worktreePath: "/repo/.worktrees/fn-1",
+      settings: {},
+      audit,
+      reason: RemovalReason.ExecutorDispose,
+      expectedOwnerTaskId: "FN-1",
+      liveOwnerProbe: () => false,
+      // FN-5256: opt out of the min-idle window so this defensive-reconcile test
+      // is unaffected by the new warm-up gate.
+      reconcileMinIdleMs: 0,
+    });
+
+    expect(activeSessionRegistry.lookupByPath("/repo/.worktrees/fn-1")).toBeNull();
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "worktree:active-session-reconciled",
+        target: "/repo/.worktrees/fn-1",
+        metadata: { taskId: "FN-1", source: "removeWorktree-defensive" },
+      }),
+    );
+  });
+
+  it("preserves refusal when same-task owner is still live", async () => {
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-1",
+      kind: "executor",
+      ownerKey: "FN-1/executor",
+    });
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        settings: {},
+        reason: RemovalReason.ExecutorDispose,
+        expectedOwnerTaskId: "FN-1",
+        liveOwnerProbe: () => true,
+      }),
+    ).rejects.toBeInstanceOf(ActiveSessionWorktreeRemovalError);
+  });
+
+  it("preserves foreign-owner refusal with defensive owner hints", async () => {
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-2",
+      kind: "executor",
+      ownerKey: "FN-2/executor",
+    });
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        settings: {},
+        reason: RemovalReason.ExecutorDispose,
+        expectedOwnerTaskId: "FN-1",
+        liveOwnerProbe: () => false,
+      }),
+    ).rejects.toMatchObject({
+      name: "ActiveSessionWorktreeRemovalError",
+      details: expect.objectContaining({ taskId: "FN-2" }),
+    });
+  });
+
+  it("keeps pre-FN-5346 behavior when defensive owner hints are omitted", async () => {
+    activeSessionRegistry.registerPath("/repo/.worktrees/fn-1", {
+      taskId: "FN-1",
+      kind: "executor",
+      ownerKey: "FN-1/executor",
+    });
+
+    await expect(
+      removeWorktree({
+        rootDir: "/repo",
+        worktreePath: "/repo/.worktrees/fn-1",
+        settings: {},
+        reason: RemovalReason.ExecutorDispose,
+      }),
+    ).rejects.toBeInstanceOf(ActiveSessionWorktreeRemovalError);
   });
 });
 

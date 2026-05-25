@@ -1,3 +1,4 @@
+// Branch-name resolution: callers must pass the resolved integration branch via Step 3 plumbing; never hardcode "main". See FN-5349.
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { ProjectSettings } from "@fusion/core";

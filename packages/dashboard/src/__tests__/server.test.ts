@@ -98,6 +98,13 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
       isRunning: false,
       lastCheckedAt: null,
     }),
+    refreshDatabaseHealth: vi.fn().mockReturnValue({
+      healthy: true,
+      corruptionDetected: false,
+      corruptionErrors: [],
+      isRunning: false,
+      lastCheckedAt: null,
+    }),
     getTaskIdIntegrityReport: vi.fn().mockReturnValue({
       status: "ok",
       checkedAt: "2026-05-12T00:00:00.000Z",
@@ -506,7 +513,7 @@ describe("createServer health and headless mode", () => {
 
   it("reports degraded status from /api/health/refresh when corruption is detected", async () => {
     const store = createMockStore({
-      getDatabaseHealth: vi.fn().mockReturnValue({
+      refreshDatabaseHealth: vi.fn().mockReturnValue({
         healthy: false,
         corruptionDetected: true,
         corruptionErrors: ["bad row"],

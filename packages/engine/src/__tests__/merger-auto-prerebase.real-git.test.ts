@@ -12,7 +12,8 @@ function git(repo: string, command: string): string {
   return execSync(command, { cwd: repo, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 }
 
-describeIfGit("merger auto-prerebase real-git scenarios", () => {
+// FN-5518 (FN-4807 pattern): real-git rebase scenarios exceed Vitest's 5s default under workspace pnpm test contention; bound but raise the per-test deadline without weakening subprocess guards.
+describeIfGit("merger auto-prerebase real-git scenarios", { timeout: 30_000 }, () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });

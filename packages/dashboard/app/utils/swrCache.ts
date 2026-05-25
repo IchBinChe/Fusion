@@ -3,6 +3,7 @@
  *
  * Board task hydration uses a dedicated soft bound (`SWR_TASKS_MAX_AGE_MS`) so reloads do not present obviously stale task snapshots.
  * Chat messages and chat agents maps reuse that short TTL for fast-moving thread state, while models and discovered skills use the default 10-minute window for effectively session-static hydration.
+ * Room message/member hydration uses `SWR_CHAT_ROOM_MAX_AGE_MS` for warm-first room opens while keeping background revalidation mandatory.
  * Failed task revalidation clears the per-project tasks envelope to avoid re-hydrating stale data on the next reload.
  *
  * Invalidation contract:
@@ -20,6 +21,8 @@ export const SWR_CACHE_KEYS = {
   CHAT_ROOMS: "kb-dashboard-chat-rooms-cache",
   CHAT_SESSIONS_PREFIX: "kb-dashboard-chat-sessions-cache:",
   CHAT_MESSAGES_PREFIX: "kb-dashboard-chat-messages-cache:",
+  CHAT_ROOM_MESSAGES_PREFIX: "kb-dashboard-chat-room-messages-cache:",
+  CHAT_ROOM_MEMBERS_PREFIX: "kb-dashboard-chat-room-members-cache:",
   CHAT_AGENTS_MAP_PREFIX: "kb-dashboard-chat-agents-map-cache:",
   MODELS: "kb-dashboard-models-cache",
   DISCOVERED_SKILLS_PREFIX: "kb-dashboard-discovered-skills-cache:",
@@ -48,6 +51,7 @@ interface CacheEnvelope<T> {
 export const SWR_DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
 // Board hydration soft bound: keep stale tasks visible briefly while forcing immediate revalidation.
 export const SWR_TASKS_MAX_AGE_MS = 60_000;
+export const SWR_CHAT_ROOM_MAX_AGE_MS = 60_000;
 export const SWR_LONG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function getLocalStorage(): Storage | null {

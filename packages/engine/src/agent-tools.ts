@@ -688,7 +688,7 @@ export async function createAgentTask(
  */
 export function createTaskCreateTool(
   store: TaskStore,
-  provenance?: { sourceType: SourceType; sourceAgentId?: string; sourceRunId?: string },
+  provenance?: { sourceType: SourceType; sourceAgentId?: string; sourceRunId?: string; sourceParentTaskId?: string },
   options?: AgentTaskCreationOptions,
 ): ToolDefinition {
   return {
@@ -697,6 +697,8 @@ export function createTaskCreateTool(
     description:
       "Create a new task for out-of-scope work discovered during execution. " +
       "The task goes into triage where it will be specified by the AI. " +
+      "Before creating, scan existing open tasks for similar work — if an open task " +
+      "already covers this, do not create a duplicate. " +
       "Optionally set dependencies (e.g., the new task depends on the current one, " +
       "or the current task should wait for the new one).",
     parameters: taskCreateParams,
@@ -711,6 +713,7 @@ export function createTaskCreateTool(
             sourceType: provenance.sourceType,
             sourceAgentId: provenance.sourceAgentId,
             sourceRunId: provenance.sourceRunId,
+            sourceParentTaskId: provenance.sourceParentTaskId,
           } : undefined,
         }, options);
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";

@@ -32,7 +32,7 @@ function extractRule(content: string, selector: string): string | null {
 /** Extract the content of a named @media block. */
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match;
 
   while ((match = regex.exec(content)) !== null) {

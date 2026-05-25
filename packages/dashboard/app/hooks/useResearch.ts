@@ -15,6 +15,7 @@ import {
   type ResearchActionErrorCode,
 } from "../api";
 import { subscribeSse } from "../sse-bus";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 import type { ResearchAvailability, ResearchRunDetail, ResearchRunListItem } from "../research-types";
 import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, SWR_LONG_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
@@ -211,7 +212,8 @@ export function useResearch(options?: { projectId?: string }) {
       }
     };
 
-    const unsubscribe = subscribeSse(`/api/events${query}`, {
+    const sseChannel = `/api/events${query}`;
+    const unsubscribe = subscribeSse(sseChannel, {
       events: {
         "research:run:created": refreshIfActive,
         "research:run:updated": refreshIfActive,
@@ -219,7 +221,23 @@ export function useResearch(options?: { projectId?: string }) {
         "research:run:failed": refreshIfActive,
         "research:run:cancelled": refreshIfActive,
       },
-      onReconnect: refreshIfActive,
+      onReconnect: () => {
+        recordResumeEvent({
+          view: "useResearch",
+          trigger: "sse-reconnect",
+          projectId,
+          replayAttempted: false,
+          sseChannel,
+        });
+        refreshIfActive();
+      },
+    });
+    recordResumeEvent({
+      view: "useResearch",
+      trigger: "sse-open",
+      projectId,
+      replayAttempted: false,
+      sseChannel,
     });
 
     const pollTimer = window.setInterval(refreshIfActive, POLL_INTERVAL_MS);

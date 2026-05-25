@@ -8,6 +8,7 @@ import { usePreviewEmbed } from "../hooks/usePreviewEmbed";
 import type { ToastType } from "../hooks/useToast";
 import { DevServerLogViewer } from "./DevServerLogViewer";
 import { PreviewIframe } from "./PreviewIframe";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 interface DevServerViewProps {
   addToast: (msg: string, type?: ToastType) => void;
@@ -28,6 +29,8 @@ const STATUS_BADGE_CONFIG: Record<"stopped" | "starting" | "running" | "failed" 
   stopping: { className: "dev-server-status-badge--starting", label: "Stopping..." },
   failed: { className: "dev-server-status-badge--failed", label: "Failed" },
 };
+
+let devServerViewWasPreviouslyInactive = false;
 
 function normalizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -79,6 +82,26 @@ function truncateCommand(command: string): string {
 }
 
 export function DevServerView({ addToast, projectId }: DevServerViewProps) {
+  useEffect(() => {
+    recordResumeEvent({
+      view: "DevServerView",
+      trigger: devServerViewWasPreviouslyInactive ? "route-active" : "remount",
+      projectId,
+      replayAttempted: false,
+    });
+    devServerViewWasPreviouslyInactive = false;
+
+    return () => {
+      devServerViewWasPreviouslyInactive = true;
+      recordResumeEvent({
+        view: "DevServerView",
+        trigger: "route-inactive",
+        projectId,
+        replayAttempted: false,
+      });
+    };
+  }, [projectId]);
+
   const {
     session,
     detectedCommands,

@@ -24,9 +24,11 @@ import { SessionNotificationBanner } from "./components/SessionNotificationBanne
 import { CliBinaryInstallBanner } from "./components/CliBinaryInstallBanner";
 import { SetupWarningBanner } from "./components/SetupWarningBanner";
 import { CapacityRiskBanner } from "./components/CapacityRiskBanner";
+import { TestModeBanner } from "./components/TestModeBanner";
 import { TaskIdIntegrityBanner } from "./components/TaskIdIntegrityBanner";
 import { DbCorruptionBanner } from "./components/DbCorruptionBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
+import MergeAdvanceNotice from "./components/MergeAdvanceNotice";
 import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
 import { PostOnboardingRecommendations } from "./components/PostOnboardingRecommendations";
@@ -55,7 +57,7 @@ import { useDeepLink } from "./hooks/useDeepLink";
 import { useFavorites } from "./hooks/useFavorites";
 import { useAuthOnboarding } from "./hooks/useAuthOnboarding";
 import { useMobileKeyboard } from "./hooks/useMobileKeyboard";
-import { useMobileScrollLock } from "./hooks/useMobileScrollLock";
+import { isIOS, useMobileScrollLock } from "./hooks/useMobileScrollLock";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { useViewState, type TaskView } from "./hooks/useViewState";
@@ -461,7 +463,21 @@ function AppInner() {
   // affecting the underlying dashboard layout — the modal handles its own
   // viewport. Without this guard, modal keyboard state leaks into the app-level
   // layout, causing stale bottom-padding offsets after the keyboard closes.
-  const mobileKeyboardOpen = isMobile && keyboardOpen && !modalManager.anyModalOpen;
+  //
+  // Android-gated: with `interactive-widget=resizes-content` the layout
+  // viewport itself shrinks with the soft keyboard, so we DON'T want to
+  // also hide the nav bar / strip its padding — that produces a layout
+  // jump while the focused input is settling, which Android Chrome treats
+  // as the focus target moving and dismisses the keyboard immediately.
+  // iOS doesn't shrink the layout viewport, so the iOS path keeps the
+  // hide-nav-on-keyboard behavior intact.
+  const mobileKeyboardOpen = isMobile && keyboardOpen && !modalManager.anyModalOpen && isIOS();
+  // Nav-bar-only: pin the bar to the page bottom whenever the keyboard is up on
+  // mobile, regardless of modal state or platform. The bar's `bottom` defaults
+  // to `var(--icb-bottom-offset)`, which equals the keyboard height on iOS and
+  // would otherwise float the bar above the keyboard. We want the keyboard to
+  // simply cover the bar instead.
+  const mobileNavKeyboardOpen = isMobile && keyboardOpen;
   // App-level scroll lock for inline editing (TaskCard inline edit, etc.):
   // when the keyboard is up outside of any modal, pin the body so iOS can't
   // shift the document or visualViewport, and so the dashboard snaps back
@@ -772,6 +788,7 @@ function AppInner() {
     autoMerge,
     globalPaused,
     enginePaused,
+    isTestMode,
     taskStuckTimeoutMs,
     staleHighFanoutBlockerAgeThresholdMs,
     capacityRiskBannerEnabled,
@@ -1776,6 +1793,9 @@ function AppInner() {
           ) : undefined
         }
       />
+      {viewMode === "project" && currentProject && (
+        <TestModeBanner isActive={isTestMode} />
+      )}
       {viewMode === "project" && currentProject && !nodesOpen && taskView !== "missions" && !modalManager.isPlanningOpen && !sessionBannersHidden && (
         <SessionNotificationBanner
           sessions={sessionsNeedingInput}
@@ -1804,6 +1824,9 @@ function AppInner() {
           currentVersion={currentVersion}
           onDismiss={dismissUpdateBanner}
         />
+      )}
+      {viewMode === "project" && currentProject && (
+        <MergeAdvanceNotice projectId={currentProject.id} />
       )}
       {viewMode === "project" && currentProject && dashboardHealth?.taskIdIntegrity?.status === "anomaly" && dashboardHealth.taskIdIntegrity.recommendedAction && (
         <TaskIdIntegrityBanner
@@ -1888,7 +1911,7 @@ function AppInner() {
         onChangeView={viewMode === "project" && currentProject ? handleTaskViewChange : () => {}}
         footerVisible={viewMode === "project" && !!currentProject}
         modalOpen={modalManager.anyModalOpen}
-        keyboardOpen={mobileKeyboardOpen}
+        keyboardOpen={mobileNavKeyboardOpen}
         onOpenSettings={openSettingsWithNav}
         onOpenActivityLog={openActivityLogWithNav}
         onOpenSystemStats={openSystemStatsWithNav}

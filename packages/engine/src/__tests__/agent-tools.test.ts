@@ -170,8 +170,38 @@ describe("createTaskCreateTool", () => {
     await tool.execute("call-1", { description: "Test" } as any, undefined, undefined, {} as any);
 
     expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
-      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-123", sourceRunId: undefined },
+      source: {
+        sourceType: "agent_heartbeat",
+        sourceAgentId: "agent-123",
+        sourceRunId: undefined,
+        sourceParentTaskId: undefined,
+      },
     }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+  });
+
+  it("threads sourceParentTaskId from provenance into store.createTask", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-101", description: "Test", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any, {
+      sourceType: "agent_heartbeat",
+      sourceAgentId: "agent-123",
+      sourceRunId: "run-abc",
+      sourceParentTaskId: "FN-5206",
+    });
+
+    await tool.execute("call-1", { description: "spawn follow-up" } as any, undefined, undefined, {} as any);
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      source: {
+        sourceType: "agent_heartbeat",
+        sourceAgentId: "agent-123",
+        sourceRunId: "run-abc",
+        sourceParentTaskId: "FN-5206",
+      },
+    }), expect.anything());
   });
 
   it("surfaces linked-existing text when deterministic duplicate is found", async () => {

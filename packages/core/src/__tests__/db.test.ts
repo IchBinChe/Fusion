@@ -47,6 +47,7 @@ async function removeTrackedTmpDir(dir: string | undefined): Promise<void> {
 }
 
 async function cleanupTmpDirsAsync(): Promise<void> {
+  killLockChildrenSync();
   const cleanup = Array.from(createdTmpDirs);
   await Promise.all(cleanup.map((dir) => removeTrackedTmpDir(dir)));
 }
@@ -62,7 +63,26 @@ function removeTrackedTmpDirSync(dir: string | undefined): void {
   }
 }
 
+// Lock-helper child processes hold open WAL/SHM file handles on the test db.
+// If a test is force-killed (timeout → fork recycle → SIGTERM) before its
+// `lock.release()` finally runs, those children outlive the test process and
+// block recursive removal of the parent tmp dir on macOS, leaking
+// `kb-db-test-*` directories. Track them so cleanup can kill stragglers.
+const activeLockChildren = new Set<ChildProcessWithoutNullStreams>();
+
+function killLockChildrenSync(): void {
+  for (const child of activeLockChildren) {
+    try {
+      if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+    } catch {
+      // best-effort
+    }
+  }
+  activeLockChildren.clear();
+}
+
 function cleanupTmpDirsSync(): void {
+  killLockChildrenSync();
   const cleanup = Array.from(createdTmpDirs);
   for (const dir of cleanup) {
     removeTrackedTmpDirSync(dir);
@@ -71,6 +91,10 @@ function cleanupTmpDirsSync(): void {
 
 // Full-suite worker shutdown can skip Vitest's normal afterAll timing if the worker
 // is already draining, so keep a process-level sync cleanup backstop for kb-db-test-*.
+// (Signal handlers were tried here but vitest forks deliver SIGHUP/SIGTERM during
+// the suite — re-raising killed the runner. The lock-child kill in
+// `cleanupTmpDirsAsync`/`afterEach` covers the macOS file-handle case that was
+// the actual leak driver.)
 const processWithCleanupFlag = process as typeof process & {
   [TMP_DIR_CLEANUP_HOOK_KEY]?: boolean;
 };
@@ -117,6 +141,10 @@ async function holdWriteLock(
 
   const child = spawn(process.execPath, ["-e", script], {
     stdio: ["pipe", "pipe", "pipe"],
+  });
+  activeLockChildren.add(child);
+  child.once("exit", () => {
+    activeLockChildren.delete(child);
   });
 
   const ready = new Promise<void>((resolve, reject) => {
@@ -302,7 +330,7 @@ describe("Database", () => {
     });
 
     it("seeds schema version", () => {
-      expect(db.getSchemaVersion()).toBe(89);
+      expect(db.getSchemaVersion()).toBe(90);
     });
 
     it("includes tokenUsageCacheWriteTokens on freshly initialized tasks table", () => {
@@ -345,7 +373,7 @@ describe("Database", () => {
 
     it("is idempotent - calling init() twice does not fail", () => {
       expect(() => db.init()).not.toThrow();
-      expect(db.getSchemaVersion()).toBe(89);
+      expect(db.getSchemaVersion()).toBe(90);
     });
     it("does not overwrite existing config on re-init", () => {
       // Update the config
@@ -1415,7 +1443,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29 (includes v1→v2 through v26→v29)
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -1440,11 +1468,11 @@ describe("schema migrations", () => {
     const db = new Database(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     // Re-init should not fail
     db.init();
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     db.close();
   });
@@ -1479,7 +1507,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("priority");
@@ -1520,7 +1548,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1592,7 +1620,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1832,7 +1860,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("attachments");
@@ -1906,7 +1934,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'agentRatings'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "agentRatings" }]);
@@ -1930,7 +1958,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'mission_events'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "mission_events" }]);
@@ -2034,7 +2062,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -2253,7 +2281,7 @@ describe("schema migrations", () => {
 
     localDb.init();
 
-    expect(localDb.getSchemaVersion()).toBe(89);
+    expect(localDb.getSchemaVersion()).toBe(90);
     const columns = localDb.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("tokenUsageCacheWriteTokens");
 
@@ -2564,7 +2592,7 @@ describe("createDatabase factory", () => {
     const db = createDatabase(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(89);
+    expect(db.getSchemaVersion()).toBe(90);
     expect(db.getLastModified()).toBeGreaterThan(0);
 
     db.close();
@@ -2718,7 +2746,7 @@ describe("migration v77 task token budget columns", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(89);
+      expect(migrated.getSchemaVersion()).toBe(90);
       const rows = migrated.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
       const names = new Set(rows.map((row) => row.name));
       expect(names.has("tokenBudgetSoftAlertedAt")).toBe(true);
@@ -2764,7 +2792,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(89);
+      expect(migrated.getSchemaVersion()).toBe(90);
       const tables = migrated
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;
@@ -2791,7 +2819,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(89);
+      expect(fresh.getSchemaVersion()).toBe(90);
       const tables = fresh
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;

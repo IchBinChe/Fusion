@@ -3,6 +3,7 @@ import { classifyForeignOnlyContamination } from "../branch-conflicts.js";
 import type { AutoRecoveryContext, AutoRecoveryDecision, AutoRecoveryFailure, AutoRecoveryHandlers } from "../auto-recovery.js";
 import { createLogger, type Logger } from "../logger.js";
 import { recoverForeignOnlyContamination } from "../recovery/foreign-only-contamination.js";
+import { resolveIntegrationBranch } from "../integration-branch.js";
 import type { RunAuditor } from "../run-audit.js";
 
 const baseLog = createLogger("auto-recovery:contamination");
@@ -53,7 +54,11 @@ export class ContaminationAutoRecoveryHandler implements Pick<AutoRecoveryHandle
     let subtype: "reanchor" | "branch-discard" | undefined;
 
     if (ownCommits === 0 && foreignAttributedCommits > 0 && task.branch && task.worktree) {
-      const baseSha = task.baseCommitSha ?? task.baseBranch ?? task.executionStartBranch ?? "main";
+      const integrationBranch = await resolveIntegrationBranch(
+        this.deps.repoDir,
+        ctx.settings as { integrationBranch?: string; baseBranch?: unknown },
+      );
+      const baseSha = task.baseCommitSha ?? task.baseBranch ?? task.executionStartBranch ?? integrationBranch;
       const classification = await classifyForeignOnlyContamination({
         repoDir: this.deps.repoDir,
         branchName: task.branch,
@@ -66,6 +71,7 @@ export class ContaminationAutoRecoveryHandler implements Pick<AutoRecoveryHandle
           repoDir: this.deps.repoDir,
           taskStore: this.deps.taskStore,
           runAudit: this.deps.runAudit,
+          integrationBranch,
         });
         if (recovered.recovered) {
           recoveryKind = "foreign-only";

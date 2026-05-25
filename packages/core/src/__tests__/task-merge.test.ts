@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { StepStatus } from "../types.js";
 import {
+  BLOCKING_TASK_STATUSES,
+  HARD_BLOCKING_TASK_STATUSES,
+  SCHEDULER_TRANSIENT_STATUSES,
   getTaskCompletionBlocker,
   getTaskHardMergeBlocker,
   getTaskMergeBlocker,
@@ -76,6 +79,55 @@ describe("resolveTaskMergeTarget", () => {
       source: "legacy-main",
     });
   });
+
+  // Regression for FN-5233/FN-5530: when a sibling-dispatched task inherits
+  // `baseBranch = fusion/fn-<id>`, the merger must NOT use that as the squash
+  // destination — otherwise the commit lands on the sibling branch and is
+  // lost from main. Falls through to projectDefault, and reports the rejection.
+  it("rejects task baseBranch when it points at a sibling fusion/fn-* branch", () => {
+    const result = resolveTaskMergeTarget(
+      { baseBranch: "fusion/fn-5339", branchContext: undefined },
+      { projectDefaultBranch: "main" },
+    );
+    expect(result.branch).toBe("main");
+    expect(result.source).toBe("project-default");
+    expect(result.rejected).toEqual({
+      branch: "fusion/fn-5339",
+      source: "task-base-branch",
+      reason: "fusion-sibling-branch",
+    });
+  });
+
+  it("rejects inherited branch context that points at a sibling fusion/fn-* branch", () => {
+    const result = resolveTaskMergeTarget(
+      {
+        baseBranch: undefined,
+        branchContext: {
+          groupId: "G-1",
+          source: "planning",
+          assignmentMode: "shared",
+          inheritedBaseBranch: "FUSION/FN-1234",
+        },
+      },
+      { projectDefaultBranch: "main" },
+    );
+    expect(result.branch).toBe("main");
+    expect(result.source).toBe("project-default");
+    expect(result.rejected).toEqual({
+      branch: "FUSION/FN-1234",
+      source: "task-branch-context",
+      reason: "fusion-sibling-branch",
+    });
+  });
+
+  it("does not reject non-fusion branches that happen to share a prefix", () => {
+    // `fusion/release-1.0` is a legitimate human-chosen base; only the
+    // canonical `fusion/fn-<id>` pattern is a sibling-task marker.
+    expect(resolveTaskMergeTarget({ baseBranch: "fusion/release-1.0", branchContext: undefined })).toEqual({
+      branch: "fusion/release-1.0",
+      source: "task-base-branch",
+    });
+  });
 });
 
 describe("getTaskMergeBlocker", () => {
@@ -141,6 +193,53 @@ describe("getTaskMergeBlocker", () => {
   it("returns reason when task is queued (scheduler transient)", () => {
     expect(getTaskMergeBlocker({ ...baseTask, status: "queued" }))
       .toContain("queued");
+  });
+
+  it("bypasses queued status when merge is manual", () => {
+    expect(getTaskMergeBlocker({ ...baseTask, status: "queued" }, { manual: true }))
+      .toBeUndefined();
+  });
+
+  it("still blocks hard statuses for manual merge", () => {
+    for (const status of HARD_BLOCKING_TASK_STATUSES) {
+      expect(getTaskMergeBlocker({ ...baseTask, status }, { manual: true }))
+        .toContain(status);
+    }
+  });
+
+  it("manual merge preserves non-status hard guards", () => {
+    expect(getTaskMergeBlocker({ ...baseTask, paused: true }, { manual: true }))
+      .toBe("task is paused");
+    expect(getTaskMergeBlocker({ ...baseTask, column: "todo" }, { manual: true }))
+      .toContain("must be in 'in-review'");
+    expect(getTaskMergeBlocker({
+      ...baseTask,
+      steps: [{ name: "Step 1", status: "pending" }],
+    }, { manual: true })).toBe("task has incomplete steps");
+    expect(getTaskMergeBlocker({
+      ...baseTask,
+      workflowStepResults: [{
+        workflowStepId: "WS-001",
+        workflowStepName: "Pre-merge Check",
+        phase: "pre-merge",
+        status: "failed",
+      }],
+    }, { manual: true })).toBe("task has failed pre-merge workflow steps");
+  });
+
+  it("manual false preserves default blocking behavior", () => {
+    expect(getTaskMergeBlocker({ ...baseTask, status: "queued" }, { manual: false }))
+      .toContain("queued");
+  });
+
+  it("blocking status partitions remain backward compatible", () => {
+    expect(SCHEDULER_TRANSIENT_STATUSES.has("queued")).toBe(true);
+    for (const status of HARD_BLOCKING_TASK_STATUSES) {
+      expect(BLOCKING_TASK_STATUSES.has(status)).toBe(true);
+    }
+    for (const status of SCHEDULER_TRANSIENT_STATUSES) {
+      expect(BLOCKING_TASK_STATUSES.has(status)).toBe(true);
+    }
   });
 
   it("returns reason when task is stuck-killed", () => {
@@ -370,6 +469,15 @@ describe("getTaskCompletionBlocker", () => {
     await expect(getTaskCompletionBlocker({
       ...baseCompletionTask,
       blockedBy: "FN-4054",
+    }, { resolveTask })).resolves.toBeUndefined();
+  });
+
+  it("treats soft-deleted blockedBy as non-blocking when resolveTask returns null", async () => {
+    const resolveTask = async (_taskId: string) => null;
+
+    await expect(getTaskCompletionBlocker({
+      ...baseCompletionTask,
+      blockedBy: "FN-SOFT-DELETED",
     }, { resolveTask })).resolves.toBeUndefined();
   });
 

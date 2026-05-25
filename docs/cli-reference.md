@@ -438,7 +438,7 @@ Use planning mode to turn a rough idea into a triage task through an interactive
 
 When supported by your configured runtime/model provider, planning sessions can also use builtin `WebSearch` and `WebFetch` tools for live context gathering.
 
-Planning sessions also have read-only board tools: `fn_task_list` (list active backlog tasks) and `fn_task_get` (read full task details, including PROMPT.md) so interviews can avoid duplicate in-flight plans and anchor questions to existing work.
+Planning sessions also have read-only board tools: `fn_task_list` (list active backlog tasks) and `fn_task_get` (read full task details, including PROMPT.md) so interviews can avoid duplicate in-flight plans and anchor questions to existing work. `fn_task_list` also accepts `includeDeleted: true` to surface soft-deleted blockers when diagnosing stalled dependency chains, and `fn_task_show` now auto-falls back to include soft-deleted tasks with a `[SOFT-DELETED at ...]` marker.
 
 ```bash
 fn task plan [description]

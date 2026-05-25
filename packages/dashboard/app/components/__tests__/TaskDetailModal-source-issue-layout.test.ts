@@ -14,10 +14,10 @@ describe("TaskDetailModal source issue layout CSS contract", () => {
     );
 
     expect(css).not.toMatch(
-      /@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.detail-source-section\s+\.detail-source-summary\s*\{[^}]*flex\s*:\s*1\s+1\s+100%\s*;/,
+      /@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.detail-source-section\s+\.detail-source-summary\s*\{[^}]*flex\s*:\s*1\s+1\s+100%\s*;/,
     );
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.detail-source-section\s+\.detail-source-summary\s*\{[^}]*flex\s*:\s*1\s+1\s+auto\s*;[^}]*min-width\s*:\s*0\s*;/,
+      /@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.detail-source-section\s+\.detail-source-summary\s*\{[^}]*flex\s*:\s*1\s+1\s+auto\s*;[^}]*min-width\s*:\s*0\s*;/,
     );
   });
 });

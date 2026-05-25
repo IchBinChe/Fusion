@@ -6,7 +6,7 @@ import { canonicalFusionBranchName, generateWorktreeName, slugify } from "./work
 import { resolveTaskWorktreePathForBackend } from "./worktree-paths.js";
 import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
 import { formatError } from "./logger.js";
-import { isBranchConflictError } from "./branch-conflicts.js";
+import { classifyBootstrapMisbinding, isBranchConflictError, reanchorBranchToBase } from "./branch-conflicts.js";
 import {
   type WorktreePool,
   classifyTaskWorktree,
@@ -258,8 +258,19 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
       await store.logEntry(task.id, `Removed desktop build artifacts from worktree: ${cleanup.removed.join(", ")}`, undefined, runContext);
     }
     const hydrated = await hydrate(worktreePath);
+    const resumedBranch = task.branch ?? branchName;
+    await verifyResumeBranchNotMisbound({
+      worktreePath,
+      branchName: resumedBranch,
+      taskId: task.id,
+      rootDir,
+      store,
+      audit,
+      logger,
+      runContext,
+    });
     // FN-4912: resume path reuses the prior on-disk .env (and its fingerprint sidecar). Rewrite is owned by the next fresh acquisition.
-    return { worktreePath, branch: task.branch ?? branchName, source: "existing", hydrated, isResume: true };
+    return { worktreePath, branch: resumedBranch, source: "existing", hydrated, isResume: true };
   }
 
   let acquiredFromPool = false;
@@ -462,6 +473,9 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
       }
       await store.logEntry(task.id, `[timing] Worktree init command completed in ${Date.now() - initStartedAt}ms`, settings.worktreeInitCommand, runContext);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw err;
+      }
       await store.logEntry(task.id, `[timing] Worktree init command failed after ${Date.now() - initStartedAt}ms`, undefined, runContext);
       const message = err instanceof Error ? err.message : String(err);
       const outcome = formatInitFailureOutcome(initResult, err);
@@ -495,4 +509,89 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
     logger?.warn?.(`${task.id}: secrets-env write failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
   return { worktreePath, branch, source: acquiredFromPool ? "pool" : "fresh", hydrated, isResume: false };
+}
+
+/**
+ * Resume-path safety check: before handing a reused worktree back to the
+ * executor, verify that its branch contains only this task's own commits
+ * since `main`. If the branch was created from a poisoned local-main tip
+ * (a sibling task's commit, observed in the FN-5475 cascade) the only
+ * commits between merge-base and HEAD are foreign-attributed and zero
+ * are this task's — the bootstrap-misbinding shape. Re-anchor inline so
+ * downstream checks see a clean branch.
+ *
+ * Mixed contamination (own + foreign, or non-attributed commits) is
+ * intentionally not handled here — those cases need richer adjudication
+ * and continue to flow through the executor's primary contamination
+ * path at `tryBootstrapMisbindingRecovery` / `classifyForeignCommits`.
+ */
+async function verifyResumeBranchNotMisbound(input: {
+  worktreePath: string;
+  branchName: string;
+  taskId: string;
+  rootDir: string;
+  store: TaskStore;
+  audit?: Pick<RunAuditor, "git" | "filesystem">;
+  logger?: { log?: (msg: string) => void; warn?: (msg: string) => void };
+  runContext: RunMutationContext | undefined;
+}): Promise<void> {
+  const { worktreePath, branchName, taskId, rootDir, store, audit, logger, runContext } = input;
+
+  let baseSha = "";
+  try {
+    const { stdout } = await execAsync(
+      "git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main",
+      { cwd: worktreePath, encoding: "utf-8" },
+    );
+    baseSha = stdout.trim();
+  } catch {
+    // Can't resolve a base — let executor's primary contamination path handle it.
+    return;
+  }
+  if (!baseSha) return;
+
+  let classification;
+  try {
+    classification = await classifyBootstrapMisbinding({
+      repoDir: rootDir,
+      branchName,
+      baseSha,
+      taskId,
+    });
+  } catch (err) {
+    logger?.warn?.(`${taskId}: resume misbinding check failed: ${formatError(err)}`);
+    return;
+  }
+
+  if (!classification.isBootstrapMisbinding) return;
+
+  await store.logEntry(
+    taskId,
+    `[recovery] resume-path bootstrap misbinding detected on ${branchName}: 0 own commits, ${classification.foreignCommitCount} foreign — re-anchoring to ${baseSha.slice(0, 12)}`,
+    undefined,
+    runContext,
+  );
+
+  try {
+    const reanchor = await reanchorBranchToBase({
+      repoDir: rootDir,
+      worktreePath,
+      branchName,
+      baseSha,
+      taskId,
+    });
+    await audit?.git({
+      type: "branch:reanchor",
+      target: branchName,
+      metadata: {
+        taskId,
+        baseSha,
+        previousTipSha: reanchor.previousTipSha,
+        newTipSha: reanchor.newTipSha,
+        trigger: "resume-misbinding",
+      },
+    });
+  } catch (err) {
+    logger?.warn?.(`${taskId}: resume re-anchor failed (continuing — executor preflight will handle): ${formatError(err)}`);
+  }
 }

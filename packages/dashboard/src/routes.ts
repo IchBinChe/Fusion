@@ -167,6 +167,7 @@ import { registerAuthRoutes } from "./routes/register-auth-routes.js";
 import { registerRuntimeProviderRoutes } from "./routes/register-runtime-provider-routes.js";
 import { registerFnBinaryRoutes } from "./routes/register-fn-binary-routes.js";
 import { registerUpdateCheckRoutes } from "./routes/register-update-check-routes.js";
+import { registerDiagnosticsRoutes } from "./routes/register-diagnostics-routes.js";
 import { registerIntegratedRouters, registerIntegratedDevServerRouter } from "./routes/register-integrated-routers.js";
 import { registerApprovalRoutes } from "./routes/register-approval-routes.js";
 import { registerWorktrunkRoutes } from "./routes/register-worktrunk-routes.js";
@@ -351,6 +352,7 @@ import {
   getExemptToolNames as engineGetExemptToolNames,
   promptWithFallback as enginePromptWithFallback,
   reloadExemptTools as engineReloadExemptTools,
+  resolveIntegrationBranch,
 } from "@fusion/engine";
 
 // Test-injectable override; defaults to the statically imported engine binding.
@@ -1001,6 +1003,15 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   const githubToken = options?.githubToken ?? process.env.GITHUB_TOKEN;
   const aiSessionStore = options?.aiSessionStore;
 
+  const isGitRepo = async (cwd: string): Promise<boolean> => {
+    try {
+      await runGitCommand(["rev-parse", "--git-dir"], cwd, 5_000);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   // Registrar mount order is precedence-sensitive and mirrors
   // .fusion/tasks/FN-2541/route-order-blueprint.md.
   // Keep this sequence stable unless route-matching invariants are re-audited.
@@ -1018,6 +1029,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     validateOptionalModelField,
     normalizeModelSelectionPair,
     runGitCommand,
+    isGitRepo,
+    resolveIntegrationBranch: (rootDir, settings) => resolveIntegrationBranch(rootDir, settings as { integrationBranch?: string; baseBranch?: unknown } | null | undefined),
     trimTaskDetailActivityLog,
     triggerCommentWakeForAssignedAgent: (...args) => triggerCommentWakeForAssignedAgent(...args),
     resolveSelfHealingManager: (...args) => resolveSelfHealingManager(...args),
@@ -1114,6 +1127,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           return {
             rootDir: engine.getWorkingDirectory(),
             reconcileInReviewBranchRebind: selfHealing.reconcileInReviewBranchRebind.bind(selfHealing),
+            getActiveMergeTaskId: selfHealing.getActiveMergeTaskId.bind(selfHealing),
           };
         }
       }
@@ -1865,6 +1879,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   registerUsageRoutes(routeContext);
   registerUpdateCheckRoutes(routeContext);
+  registerDiagnosticsRoutes(routeContext);
 
   // ── Automation / Scheduled Task Routes ────────────────────────────
   //

@@ -3,7 +3,7 @@ import { loadAllAppCss } from "../test/cssFixture";
 
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(content)) !== null) {

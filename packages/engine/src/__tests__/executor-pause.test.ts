@@ -2723,3 +2723,112 @@ describe("StepSessionExecutor integration", () => {
   });
 });
 
+describe("FN-5256 awaitAbortInFlightTaskWork pause synchronization", () => {
+  it("synchronously disposes activeSessions on pause via task:updated", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    let abortResolve: (() => void) | undefined;
+    const abortPromise = new Promise<void>((resolve) => {
+      abortResolve = resolve;
+    });
+    const abortSpy = vi.fn(() => abortPromise);
+    const disposeSpy = vi.fn();
+    (executor as any).activeSessions.set("FN-PAUSE-1", {
+      session: { abort: abortSpy, dispose: disposeSpy, steer: vi.fn() },
+      seenSteeringIds: new Set(),
+    });
+
+    const taskUpdatedHandler = (store.on as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .find((call: any[]) => call[0] === "task:updated")?.[1] as (task: any) => Promise<void>;
+    expect(taskUpdatedHandler).toBeTypeOf("function");
+
+    const settled = taskUpdatedHandler({
+      id: "FN-PAUSE-1",
+      title: "pause",
+      description: "pause",
+      column: "in-progress",
+      paused: true,
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } satisfies Task);
+
+    // Before abort resolves, dispose must NOT have been called — i.e. handler is
+    // truly awaiting the abort, not fire-and-forgetting it.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(disposeSpy).not.toHaveBeenCalled();
+
+    abortResolve?.();
+    await settled;
+
+    expect(abortSpy).toHaveBeenCalledTimes(1);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+    expect((executor as any).activeSessions.has("FN-PAUSE-1")).toBe(false);
+  });
+
+  it("synchronously reaps workflow-step + step-session surfaces on pause", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    const stepTerminate = vi.fn().mockResolvedValue(undefined);
+    (executor as any).activeStepExecutors.set("FN-PAUSE-2", {
+      terminateAllSessions: stepTerminate,
+    });
+
+    const workflowAbort = vi.fn().mockResolvedValue(undefined);
+    const workflowDispose = vi.fn();
+    (executor as any).activeWorkflowStepSessions.set("FN-PAUSE-2", {
+      abort: workflowAbort,
+      dispose: workflowDispose,
+    });
+
+    const taskUpdatedHandler = (store.on as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .find((call: any[]) => call[0] === "task:updated")?.[1] as (task: any) => Promise<void>;
+
+    await taskUpdatedHandler({
+      id: "FN-PAUSE-2",
+      title: "pause",
+      description: "pause",
+      column: "in-progress",
+      paused: true,
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } satisfies Task);
+
+    expect(stepTerminate).toHaveBeenCalledTimes(1);
+    expect(workflowAbort).toHaveBeenCalledTimes(1);
+    expect(workflowDispose).toHaveBeenCalledTimes(1);
+    expect((executor as any).activeStepExecutors.has("FN-PAUSE-2")).toBe(false);
+    expect((executor as any).activeWorkflowStepSessions.has("FN-PAUSE-2")).toBe(false);
+  });
+
+  it("awaitAbortInFlightTaskWork awaits abort before dispose for all surfaces", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    const order: string[] = [];
+    const sessionAbort = vi.fn().mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      order.push("session-abort");
+    });
+    const sessionDispose = vi.fn(() => order.push("session-dispose"));
+    (executor as any).activeSessions.set("FN-PAUSE-3", {
+      session: { abort: sessionAbort, dispose: sessionDispose, steer: vi.fn() },
+      seenSteeringIds: new Set(),
+    });
+
+    await (executor as any).awaitAbortInFlightTaskWork("FN-PAUSE-3", "test reason");
+
+    expect(order).toEqual(["session-abort", "session-dispose"]);
+    expect((executor as any).activeSessions.has("FN-PAUSE-3")).toBe(false);
+  });
+});
+

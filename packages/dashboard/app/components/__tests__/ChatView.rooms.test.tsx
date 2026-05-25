@@ -9,6 +9,11 @@ import { RoomMessageDeliveredButReplyFailedError, type UseChatRoomsResult } from
 import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
 
 vi.mock("../../hooks/useChat");
+vi.mock("../../hooks/useMobileScrollLock", () => ({
+  useMobileScrollLock: vi.fn(),
+  isIOS: () => true,
+  _resetLockState: vi.fn(),
+}));
 vi.mock("../../hooks/useChatRooms", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../hooks/useChatRooms")>();
   return {
@@ -111,7 +116,7 @@ function mockMobileViewport() {
   }
   Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
   return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-    matches: query === "(max-width: 768px)",
+    matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
     media: query,
     onchange: null,
     addListener: vi.fn(),

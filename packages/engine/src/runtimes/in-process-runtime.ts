@@ -898,8 +898,6 @@ export class InProcessRuntime
       // process group), so killing the worker alone leaks vitest / npm / build
       // grandchildren as orphans. This call routes through pi-coding-agent's
       // AbortController -> killProcessTree, taking down the whole subtree.
-      // Sessions are intentionally NOT disposed here so near-complete steps
-      // can still wrap up during the drain window below.
       if (this.executor) {
         try {
           this.executor.abortAllSessionBash();
@@ -909,26 +907,41 @@ export class InProcessRuntime
         }
       }
 
-      // 8. Wait for active tasks to complete (30 second timeout)
-      const shutdownTimeout = 30000;
+      // 7c. Abort and dispose all in-flight AI sessions so shutdown does not
+      // continue streaming LLM output or tool calls during the drain phase.
+      if (this.executor) {
+        try {
+          await this.executor.abortAllInFlight("engine stop");
+          runtimeLog.log("Aborted in-flight executor AI sessions");
+        } catch (err) {
+          runtimeLog.warn(`Failed to abort in-flight executor AI sessions: ${err}`);
+        }
+      }
+
+      // 8. Wait for active tasks to drain after aborting live sessions.
+      const settings = this.taskStore ? await this.taskStore.getSettings() : undefined;
+      const shutdownTimeout = settings?.runtimeStopDrainMs ?? 2000;
       const startTime = Date.now();
 
-      while (Date.now() - startTime < shutdownTimeout) {
-        const metrics = this.getMetrics();
-        if (metrics.inFlightTasks === 0) {
-          break;
+      if (shutdownTimeout > 0) {
+        const pollIntervalMs = Math.min(500, shutdownTimeout);
+        while (Date.now() - startTime < shutdownTimeout) {
+          const metrics = this.getMetrics();
+          if (metrics.inFlightTasks === 0) {
+            break;
+          }
+          runtimeLog.log(
+            `Waiting for ${metrics.inFlightTasks} in-flight tasks to complete...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
-        runtimeLog.log(
-          `Waiting for ${metrics.inFlightTasks} in-flight tasks to complete...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       // Check if we timed out
       const finalMetrics = this.getMetrics();
       if (finalMetrics.inFlightTasks > 0) {
         runtimeLog.warn(
-          `Shutdown timeout reached with ${finalMetrics.inFlightTasks} tasks still in-flight`
+          `post-abort drain timeout: shutdown reached with ${finalMetrics.inFlightTasks} tasks still in-flight`
         );
       }
 

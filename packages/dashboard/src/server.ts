@@ -258,6 +258,7 @@ export interface ServerOptions {
   selfHealingManager?: {
     rootDir: string;
     reconcileInReviewBranchRebind: (opts?: { includeTaskIds?: Set<string> }) => Promise<import("@fusion/engine").RebindResult>;
+    getActiveMergeTaskId: () => string | null;
   };
   /** Optional PluginStore for plugin management routes */
   pluginStore?: import("@fusion/core").PluginStore;
@@ -360,6 +361,12 @@ export interface ServerOptions {
   onUseDroidCliToggled?: (prev: boolean, next: boolean) => void;
   /** Called when the user toggles the `useLlamaCpp` global setting. */
   onUseLlamaCppToggled?: (prev: boolean, next: boolean) => void;
+  /** Optional hook fired after a successful API-key save. */
+  onApiKeySaved?: (providerId: string) => Promise<{
+    registeredCount: number;
+    reason?: "no-models-from-cli" | "cli-failed" | "disabled-by-settings";
+    error?: string;
+  } | void>;
   /**
    * Returns the host's last-observed resolution of the bundled `droid-cli`
    * extension wiring. Populated by serve/daemon/dashboard startup checks.
@@ -586,6 +593,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
           selfHealingManager: {
             rootDir: engine.getWorkingDirectory(),
             reconcileInReviewBranchRebind: selfHealing.reconcileInReviewBranchRebind.bind(selfHealing),
+            getActiveMergeTaskId: selfHealing.getActiveMergeTaskId.bind(selfHealing),
           },
         };
       }
@@ -1323,7 +1331,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
   app.post("/api/health/refresh", (_req, res) => {
     const report = store.refreshTaskIdIntegrityReport();
-    const database = store.getDatabaseHealth();
+    const database = store.refreshDatabaseHealth();
     res.json({
       status: !database.healthy || database.corruptionDetected || report.status === "anomaly" ? "degraded" : "ok",
       version: cliPackageVersion,

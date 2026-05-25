@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { acquireTaskWorktree } from "../worktree-acquisition.js";
 import { classifyTaskWorktree, PoolDoubleLeaseError } from "../worktree-pool.js";
 import * as desktopArtifacts from "../worktree-desktop-artifacts.js";
+import * as branchConflicts from "../branch-conflicts.js";
 
 vi.mock("../worktree-pool.js", async () => {
   const actual = await vi.importActual<any>("../worktree-pool.js");
@@ -10,6 +11,20 @@ vi.mock("../worktree-pool.js", async () => {
     ...actual,
     classifyTaskWorktree: vi.fn().mockResolvedValue({ ok: true }),
     isInsideWorktreesDir: vi.fn().mockReturnValue(true),
+  };
+});
+
+vi.mock("../branch-conflicts.js", async () => {
+  const actual = await vi.importActual<any>("../branch-conflicts.js");
+  return {
+    ...actual,
+    classifyBootstrapMisbinding: vi.fn().mockResolvedValue({
+      isBootstrapMisbinding: false,
+      ownCommitCount: 0,
+      foreignCommitCount: 0,
+      nonAttributedCount: 0,
+    }),
+    reanchorBranchToBase: vi.fn().mockResolvedValue({ previousTipSha: "abc", newTipSha: "def" }),
   };
 });
 
@@ -50,6 +65,48 @@ describe("acquireTaskWorktree", () => {
     });
     expect(result.source).toBe("existing");
     expect(result.worktreePath).toBe(process.cwd());
+  });
+
+  // Regression: FN-5475 — when a resumed worktree's branch was created from
+  // a poisoned local-main tip carrying a sibling task's commits and has zero
+  // commits of its own, acquireTaskWorktree must re-anchor inline so the
+  // executor preflight doesn't pause on contamination forever.
+  it("re-anchors a resumed branch when classified as bootstrap-misbinding", async () => {
+    const audit = { git: vi.fn().mockResolvedValue(undefined), filesystem: vi.fn() } as any;
+    vi.mocked(branchConflicts.classifyBootstrapMisbinding).mockResolvedValueOnce({
+      isBootstrapMisbinding: true,
+      ownCommitCount: 0,
+      foreignCommitCount: 2,
+      nonAttributedCount: 0,
+    });
+
+    const result = await acquireTaskWorktree({
+      task: { ...task, worktree: process.cwd(), branch: "fusion/fn-1" },
+      rootDir: process.cwd(),
+      store,
+      settings: {},
+      audit,
+      createWorktree: vi.fn(),
+    });
+
+    expect(result.source).toBe("existing");
+    expect(vi.mocked(branchConflicts.reanchorBranchToBase)).toHaveBeenCalledTimes(1);
+    expect(audit.git).toHaveBeenCalledWith(expect.objectContaining({
+      type: "branch:reanchor",
+      metadata: expect.objectContaining({ trigger: "resume-misbinding" }),
+    }));
+  });
+
+  it("does not re-anchor a resumed branch when not misbound", async () => {
+    const result = await acquireTaskWorktree({
+      task: { ...task, worktree: process.cwd(), branch: "fusion/fn-1" },
+      rootDir: process.cwd(),
+      store,
+      settings: {},
+      createWorktree: vi.fn(),
+    });
+    expect(result.source).toBe("existing");
+    expect(vi.mocked(branchConflicts.reanchorBranchToBase)).not.toHaveBeenCalled();
   });
 
   it("acquires from pool when enabled", async () => {
@@ -277,7 +334,7 @@ describe("acquireTaskWorktree foreign start-point warning", () => {
     const warn = vi.fn();
     const logEntry = vi.fn().mockResolvedValue(undefined);
 
-    const execMock: any = (command: string, _opts: any, cb: any) => cb(null, "", "");
+    const execMock: any = (_command: string, _opts: any, cb: any) => cb(null, "", "");
     execMock[promisify.custom] = (command: string) => {
       if (command.startsWith("git rev-parse --verify \"fusion/fn-4367^")) {
         return Promise.resolve({ stdout: "deadbeefdeadbeef\n", stderr: "" });

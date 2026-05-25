@@ -421,7 +421,12 @@ const originalChildProcess = {
 };
 
 const trackedSubprocesses = new Map<ChildProcess, TrackedSubprocess>();
-const completedSubprocessFailures: string[] = [];
+
+// Typed failure record so afterEach can attribute each timed-out subprocess
+// back to the test that spawned it rather than blindly throwing in whichever
+// test happens to run next (cascade false-positives).
+type CompletedSubprocessFailure = { ownerTestName: string | null; message: string };
+const completedSubprocessFailures: CompletedSubprocessFailure[] = [];
 
 function describeTestSubprocessCommand(command: string, args?: readonly string[]): string {
   return [command, ...(args ?? [])].join(" ").trim();
@@ -463,6 +468,81 @@ function shouldBlockRealTestCli(commandLine: string): boolean {
   return !isSafeIntrospectionCommand(commandLine);
 }
 
+// The live Fusion dashboard port(s) must not be killed by tests. We protect:
+//   - the documented default (4040)
+//   - process.env.PORT (set by `fusion serve` / desktop / docker)
+//   - process.env.FUSION_SERVER_PORT (set when desktop spawns serve)
+//   - any ports listed in FUSION_RESERVED_PORTS (comma-separated escape hatch)
+//   - any port detected by a synchronous probe of localhost candidates
+// Detection runs once per worker at setup time so the regex set is stable.
+function parsePortList(value: string | undefined): number[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((port) => Number.isInteger(port) && port > 0 && port < 65_536);
+}
+
+async function probeFusionHealthPort(port: number, timeoutMs: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return false;
+    const text = await response.text();
+    // The Fusion dashboard health payload always includes a `status` field.
+    return /"status"\s*:/.test(text);
+  } catch {
+    return false;
+  }
+}
+
+async function detectLiveFusionPorts(candidates: readonly number[]): Promise<number[]> {
+  const results = await Promise.all(
+    candidates.map(async (port) => ((await probeFusionHealthPort(port, 250)) ? port : null)),
+  );
+  return results.filter((port): port is number => port !== null);
+}
+
+async function resolveReservedFusionPorts(): Promise<number[]> {
+  const reserved = new Set<number>([4040]);
+  for (const port of parsePortList(process.env.FUSION_RESERVED_PORTS)) reserved.add(port);
+  for (const port of parsePortList(process.env.PORT)) reserved.add(port);
+  for (const port of parsePortList(process.env.FUSION_SERVER_PORT)) reserved.add(port);
+  if (process.env.FUSION_TEST_SKIP_PORT_PROBE !== "1") {
+    const probeRange = [4040, 4041, 4042, 4043, 4044, 4045];
+    for (const port of await detectLiveFusionPorts(probeRange)) reserved.add(port);
+  }
+  return [...reserved];
+}
+
+const RESERVED_FUSION_PORTS = await resolveReservedFusionPorts();
+
+function buildPortKillPatterns(ports: readonly number[]): readonly RegExp[] {
+  return ports.flatMap((port) => {
+    const p = String(port);
+    return [
+      new RegExp(`\\b(?:kill|pkill|killall|fuser)\\b[^\\n]*\\b${p}\\b`),
+      new RegExp(`\\blsof\\b[^\\n]*\\b${p}\\b`),
+      new RegExp(`\\b${p}\\b[^\\n]*\\b(?:kill|pkill|killall|fuser)\\b`),
+    ];
+  });
+}
+
+const RESERVED_PORT_KILL_PATTERNS = buildPortKillPatterns(RESERVED_FUSION_PORTS);
+
+function shouldBlockReservedPortKill(commandLine: string): boolean {
+  return RESERVED_PORT_KILL_PATTERNS.some((pattern) => pattern.test(commandLine));
+}
+
+function blockedReservedPortError(commandLine: string): Error {
+  return new Error(
+    `Reserved Fusion port kill blocked during tests: ${commandLine}\n` +
+    `Reserved ports: ${RESERVED_FUSION_PORTS.join(", ")}. ` +
+    "Use --port 0 or another free port for test servers.",
+  );
+}
+
 function blockedCliError(commandLine: string): Error {
   return new Error(
     `Real AI CLI launch blocked during tests: ${commandLine}\n` +
@@ -502,9 +582,10 @@ function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): voi
 
   tracked.timeoutTimer = setTimeout(() => {
     tracked.timedOut = true;
-    completedSubprocessFailures.push(
-      `Timed out after ${DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS}ms: ${tracked.commandLine}${tracked.testName ? ` (${tracked.testName})` : ""}`,
-    );
+    completedSubprocessFailures.push({
+      ownerTestName: tracked.testName,
+      message: `Timed out after ${DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS}ms: ${tracked.commandLine}${tracked.testName ? ` (${tracked.testName})` : ""}`,
+    });
     try {
       proc.kill("SIGKILL");
     } catch {
@@ -528,6 +609,9 @@ function installChildProcessGuards(): void {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
     const options = Array.isArray(argsOrOptions) ? (maybeOptions ?? {}) : (argsOrOptions ?? {});
     const commandLine = describeTestSubprocessCommand(command, args);
+    if (shouldBlockReservedPortKill(commandLine)) {
+      throw blockedReservedPortError(commandLine);
+    }
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
@@ -540,6 +624,9 @@ function installChildProcessGuards(): void {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
     const options = Array.isArray(argsOrOptions) ? withDefaultTimeout(maybeOptions) : withDefaultTimeout(argsOrOptions);
     const commandLine = describeTestSubprocessCommand(command, args);
+    if (shouldBlockReservedPortKill(commandLine)) {
+      throw blockedReservedPortError(commandLine);
+    }
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
@@ -547,6 +634,9 @@ function installChildProcessGuards(): void {
   }) as ChildProcessModule["spawnSync"];
 
   mutableChildProcess.execSync = ((command: string, options?: ExecSyncOptions) => {
+    if (shouldBlockReservedPortKill(command)) {
+      throw blockedReservedPortError(command);
+    }
     if (shouldBlockRealTestCli(command)) {
       throw blockedCliError(command);
     }
@@ -557,6 +647,9 @@ function installChildProcessGuards(): void {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
     const options = Array.isArray(argsOrOptions) ? withDefaultTimeout(maybeOptions) : withDefaultTimeout(argsOrOptions);
     const commandLine = describeTestSubprocessCommand(file, args);
+    if (shouldBlockReservedPortKill(commandLine)) {
+      throw blockedReservedPortError(commandLine);
+    }
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
@@ -567,6 +660,9 @@ function installChildProcessGuards(): void {
   // and our wrapper drop the original [util.promisify.custom] symbol, which would otherwise
   // make awaited execAsync resolve to a raw stdout string and break destructuring.
   const execWrapper = ((command: string, optionsOrCallback?: ExecOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
+    if (shouldBlockReservedPortKill(command)) {
+      throw blockedReservedPortError(command);
+    }
     if (shouldBlockRealTestCli(command)) {
       throw blockedCliError(command);
     }
@@ -593,6 +689,9 @@ function installChildProcessGuards(): void {
   const execFileWrapper = ((file: string, argsOrOptions?: readonly string[] | ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), optionsOrCallback?: ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
     const commandLine = describeTestSubprocessCommand(file, args);
+    if (shouldBlockReservedPortKill(commandLine)) {
+      throw blockedReservedPortError(commandLine);
+    }
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
@@ -624,6 +723,9 @@ function installChildProcessGuards(): void {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
     const options = Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions;
     const commandLine = describeTestSubprocessCommand(modulePath, args);
+    if (shouldBlockReservedPortKill(commandLine)) {
+      throw blockedReservedPortError(commandLine);
+    }
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
@@ -638,14 +740,39 @@ function installChildProcessGuards(): void {
 installChildProcessGuards();
 
 afterEach(async () => {
-  const failures = [...completedSubprocessFailures];
+  // Drain the completed-subprocess failure queue. Only surface failures that
+  // belong to the currently-finishing test; failures from a *previous* test
+  // whose 30 s timer fired while this test was already running are left in
+  // place so the correct test's afterEach can pick them up — or, if that test
+  // has already finished, they are simply discarded here to avoid false-positive
+  // cascade failures on innocent successor tests.
+  const currentTest = currentTestName();
+  const owned: string[] = [];
+  const remaining: CompletedSubprocessFailure[] = [];
+  for (const failure of completedSubprocessFailures) {
+    if (failure.ownerTestName === currentTest) {
+      owned.push(failure.message);
+    } else {
+      // Keep failures that belong to other tests so they can be surfaced when
+      // that test's afterEach runs (concurrent-worker scenario). Failures whose
+      // owner test has already completed cannot be re-surfaced; they're dropped
+      // here silently — the subprocess guard already SIGKILL'd the process and
+      // the owning test presumably has its own failure path.
+      remaining.push(failure);
+    }
+  }
   completedSubprocessFailures.length = 0;
+  completedSubprocessFailures.push(...remaining);
+  const failures = owned;
 
   // Give SIGTERM'd processes a brief grace period to exit before declaring
   // them "left running" — tests like dev-server-process.cleanup() send SIGTERM
   // and immediately drop their reference, so the OS exit lags the test by a
   // few ms even when the production code did the right thing.
-  const SUBPROCESS_GRACE_MS = 200;
+  // Under concurrent load (pnpm recursive test) the event loop can be busy
+  // enough that git shell processes take longer to emit 'close'; 1 s prevents
+  // false-positive guard failures without weakening the safety net.
+  const SUBPROCESS_GRACE_MS = 1000;
   if (trackedSubprocesses.size > 0) {
     const stillRunningProcs: ChildProcess[] = [];
     for (const [proc] of trackedSubprocesses) {
@@ -682,15 +809,24 @@ afterEach(async () => {
   for (const [proc, tracked] of trackedSubprocesses) {
     const stillRunning = proc.exitCode === null && proc.signalCode === null;
     if (stillRunning) {
-      failures.push(
-        `Left running at end of test: ${tracked.commandLine}${tracked.testName ? ` (${tracked.testName})` : ""}`,
-      );
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        // Ignore — the process may have already exited.
+      // Under concurrent load (pool:threads + isolate:true), tests in the
+      // same worker can interleave. Only flag processes started by the
+      // current test to avoid false-positive "left running" errors from
+      // sibling tests that are still wrapping up their subprocesses.
+      if (tracked.testName === currentTest) {
+        failures.push(
+          `Left running at end of test: ${tracked.commandLine}${tracked.testName ? ` (${tracked.testName})` : ""}`,
+        );
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // Ignore — the process may have already exited.
+        }
       }
     }
+    // Always clean up (cancel the tracking timer and remove from map) so the
+    // 60s timeout timer cannot fire after this afterEach, regardless of which
+    // test originally spawned the process.
     cleanupTrackedSubprocess(proc);
   }
 

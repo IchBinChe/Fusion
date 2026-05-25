@@ -48,6 +48,7 @@ import {
   assertCleanBranchAtBase,
   inspectBranchConflict,
   listUniqueBranchCommits,
+  reportBranchAttribution,
 } from "../branch-conflicts.js";
 
 const mockedExecSync = vi.mocked(execSync);
@@ -99,6 +100,43 @@ describe("branch-conflicts", () => {
     });
 
     expect(result).toEqual({ kind: "stale-resolved" });
+  });
+
+  it("prefers explicit integrationRef when inspecting branch conflicts", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command === "git worktree prune") return Buffer.from("");
+      if (command === "git worktree list --porcelain") {
+        return Buffer.from(["worktree /tmp/existing-wt", "HEAD 2222222", "branch refs/heads/fusion/fn-4068", ""].join("\n"));
+      }
+      if (command.includes("git rev-parse --verify 'refs/heads/fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'master^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git merge-base 'master' 'fusion/fn-4068'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git merge-base --is-ancestor 'abc123def456' 'master'")) {
+        return Buffer.from("");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await inspectBranchConflict({
+      repoDir: "/tmp/repo",
+      branchName: "fusion/fn-4068",
+      conflictingWorktreePath: "/tmp/existing-wt",
+      requestingTaskId: "FN-4068",
+      startPoint: "master",
+      integrationRef: "master",
+    });
+
+    expect(result).toMatchObject({ kind: "tip-already-merged", integrationRef: "master" });
   });
 
   it("FN-4476/FN-4471: classifies live branch at main tip as tip-already-merged even with stale-base churn", async () => {
@@ -428,5 +466,107 @@ describe("branch-conflicts", () => {
     await expect(assertion).resolves.toBeUndefined();
   });
 
+  // FN-5475 / option-2 promotion check: a commit attributed to another
+  // task that's already reachable from local `main` was integrated via
+  // fast-forward and shouldn't be treated as contamination on a
+  // downstream branch that briefly inherited it.
+  it("assertCleanBranchAtBase treats foreign-attributed commits that are ancestors of main as promoted", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
+      }
+      if (command.includes("git merge-base --is-ancestor 'bbb222' 'main'")) {
+        // Simulate the FN-5475 case: foreign commit is already on main.
+        return Buffer.from("");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await expect(
+      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("assertCleanBranchAtBase still throws when foreign-attributed commits are NOT on main", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
+      }
+      if (command.includes("git merge-base --is-ancestor")) {
+        // Not on main — exits non-zero.
+        const err = new Error("not an ancestor") as Error & { stderr?: string };
+        err.stderr = "";
+        throw err;
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await expect(
+      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
+    ).rejects.toBeInstanceOf(BranchCrossContaminationError);
+  });
+
+  describe("reportBranchAttribution", () => {
+    const RS = "\x1e";
+    const FS = "\x1f";
+
+    function setupLog(records: { sha: string; subject: string; body: string }[]) {
+      const log = records.map((r) => `${r.sha}${FS}${r.subject}${FS}${r.body}${RS}`).join("");
+      mockedExecSync.mockImplementation((cmd: string | string[]) => {
+        const command = typeof cmd === "string" ? cmd : cmd[0];
+        if (command.includes("git log --format=%H%x1f%s%x1f%b%x1e")) {
+          return Buffer.from(log);
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      });
+    }
+
+    it("counts own-trailed commits as healthy", async () => {
+      setupLog([
+        { sha: "aaa", subject: "feat(FN-1): add x", body: "Fusion-Task-Id: FN-1\n" },
+        { sha: "bbb", subject: "fix(FN-1): tweak", body: "Fusion-Task-Id: FN-1\n" },
+      ]);
+      const r = await reportBranchAttribution("/tmp/repo", "fusion/fn-1", "main", "FN-1");
+      expect(r.ownTrailed).toBe(2);
+      expect(r.ownUntrailed).toEqual([]);
+      expect(r.foreign).toEqual([]);
+      expect(r.unattributed).toEqual([]);
+    });
+
+    it("flags FN-5233-class foreign commits", async () => {
+      setupLog([
+        { sha: "fff", subject: "feat(FN-5353): wire something", body: "" },
+        { sha: "ggg", subject: "feat(FN-1): legit", body: "Fusion-Task-Id: FN-1\n" },
+      ]);
+      const r = await reportBranchAttribution("/tmp/repo", "fusion/fn-1", "main", "FN-1");
+      expect(r.foreign).toEqual([{ sha: "fff", subject: "feat(FN-5353): wire something", foreignTaskId: "FN-5353" }]);
+      expect(r.ownTrailed).toBe(1);
+    });
+
+    it("flags own-but-untrailed commits (hook didn't fire)", async () => {
+      setupLog([
+        { sha: "ccc", subject: "feat(FN-1): no trailer", body: "" },
+      ]);
+      const r = await reportBranchAttribution("/tmp/repo", "fusion/fn-1", "main", "FN-1");
+      expect(r.ownUntrailed).toEqual([{ sha: "ccc", subject: "feat(FN-1): no trailer" }]);
+      expect(r.ownTrailed).toBe(0);
+    });
+
+    it("flags unattributed commits (no subject pattern, no trailer)", async () => {
+      setupLog([
+        { sha: "ddd", subject: "hand-merge", body: "" },
+      ]);
+      const r = await reportBranchAttribution("/tmp/repo", "fusion/fn-1", "main", "FN-1");
+      expect(r.unattributed).toEqual([{ sha: "ddd", subject: "hand-merge" }]);
+    });
+
+    it("returns empty report when range is empty", async () => {
+      setupLog([]);
+      const r = await reportBranchAttribution("/tmp/repo", "fusion/fn-1", "main", "FN-1");
+      expect(r).toEqual({ ownTrailed: 0, ownUntrailed: [], foreign: [], unattributed: [] });
+    });
+  });
 
 });

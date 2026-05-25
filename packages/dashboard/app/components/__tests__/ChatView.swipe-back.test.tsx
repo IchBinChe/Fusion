@@ -45,7 +45,7 @@ function mockViewport(mode: "mobile" | "desktop") {
     configurable: true,
   });
   vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-    matches: mode === "mobile" && query === "(max-width: 768px)",
+    matches: mode === "mobile" && query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
     media: query,
     onchange: null,
     addListener: vi.fn(),

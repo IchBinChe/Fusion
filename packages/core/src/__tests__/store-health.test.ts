@@ -60,3 +60,31 @@ describe("TaskStore.getDatabaseHealth", () => {
     expect(health.corruptionErrors).toEqual(["one", "two", "three", "four", "five"]);
   });
 });
+
+describe("TaskStore.refreshDatabaseHealth", () => {
+  const harness = createTaskStoreTestHarness();
+  let store: TaskStore;
+
+  beforeEach(async () => {
+    await harness.beforeEach();
+    store = harness.store();
+  });
+
+  it("clears a stale corruption flag after the underlying DB is repaired", () => {
+    const db = store.getDatabase();
+    db.corruptionDetected = true;
+    db.integrityCheckErrors = ["wrong # of entries in index sqlite_autoindex_tasks_1"];
+    db.integrityCheckLastRunAt = "2026-05-11T12:34:56.000Z";
+
+    expect(store.getDatabaseHealth().corruptionDetected).toBe(true);
+
+    const health = store.refreshDatabaseHealth();
+
+    expect(health.corruptionDetected).toBe(false);
+    expect(health.healthy).toBe(true);
+    expect(health.corruptionErrors).toEqual([]);
+    expect(health.isRunning).toBe(false);
+    expect(health.lastCheckedAt).not.toBeNull();
+    expect(health.lastCheckedAt?.toISOString()).not.toBe("2026-05-11T12:34:56.000Z");
+  });
+});

@@ -1,5 +1,6 @@
 import { appendTokenQuery } from "./auth";
 import { pushTrace } from "./utils/dashboardTraceBuffer";
+import { recordResumeEvent } from "./utils/resumeInstrumentation";
 
 // Shared EventSource multiplexer.
 //
@@ -215,6 +216,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const reopenSubscribedChannels = (event: PageTransitionEvent) => {
     console.info("[sse-bus] pageshow", { persisted: event.persisted, channelCount: channels.size });
     pushTrace("sse-bus", "pageshow", { persisted: event.persisted, channelCount: channels.size });
+    recordResumeEvent({
+      view: "sse-bus",
+      trigger: "pageshow",
+      replayAttempted: false,
+      sseChannel: "all",
+      detail: { persisted: event.persisted, channelCount: channels.size },
+    });
     for (const channel of Array.from(channels.values())) {
       if (channel.subscribers.size === 0) continue;
       if (channel.es !== null && !channel.closed) continue;
@@ -231,6 +239,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
     console.info("[sse-bus] visibilitychange", { visibilityState: document.visibilityState, channelCount: channels.size });
     pushTrace("sse-bus", "visibilitychange", { visibilityState: document.visibilityState, channelCount: channels.size });
+    recordResumeEvent({
+      view: "sse-bus",
+      trigger: "visibility",
+      replayAttempted: false,
+      sseChannel: "all",
+      detail: { visibilityState: document.visibilityState, channelCount: channels.size },
+    });
 
     for (const channel of Array.from(channels.values())) {
       if (channel.subscribers.size === 0) continue;
@@ -277,6 +292,13 @@ function forceReconnect(channel: Channel, cause: "heartbeat-timeout" | "error" |
     subscriberCount: channel.subscribers.size,
     hasOpenedOnce: channel.hasOpenedOnce,
   });
+  recordResumeEvent({
+    view: "sse-bus",
+    trigger: "sse-reconnect",
+    replayAttempted: false,
+    sseChannel: channel.url,
+    reason: cause,
+  });
   if (channel.heartbeatTimer) {
     clearTimeout(channel.heartbeatTimer);
     channel.heartbeatTimer = null;
@@ -322,6 +344,18 @@ function openChannel(channel: Channel): void {
     closed: channel.closed,
     hasEventSource: channel.es !== null,
   });
+  recordResumeEvent({
+    view: "sse-bus",
+    trigger: "sse-open",
+    replayAttempted: false,
+    sseChannel: channel.url,
+    detail: {
+      subscriberCount: channel.subscribers.size,
+      hasOpenedOnce: channel.hasOpenedOnce,
+      closed: channel.closed,
+      hasEventSource: channel.es !== null,
+    },
+  });
   console.info("[sse-bus] openChannel", {
     url: channel.url,
     subscriberCount: channel.subscribers.size,
@@ -354,10 +388,18 @@ function openChannel(channel: Channel): void {
 
   es.addEventListener("error", (event) => {
     for (const sub of channel.subscribers) sub.onError?.(event);
+    recordResumeEvent({
+      view: "sse-bus",
+      trigger: "sse-error",
+      replayAttempted: false,
+      sseChannel: channel.url,
+      reason: "error",
+    });
     // Any error triggers a forced reconnect cycle — matches the pre-bus
     // behavior in useTasks and ensures the stream recovers even when
     // EventSource's own retry has stalled.
-    forceReconnect(channel, "error");  });
+    forceReconnect(channel, "error");
+  });
 
   // Unnamed `message` events and server "heartbeat" events both count as
   // liveness signals, regardless of whether a subscriber registered them.

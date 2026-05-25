@@ -21,7 +21,7 @@ describe("detail-body mobile overflow (FN-1331)", () => {
       resolve(__dirname, "../components/TaskDetailModal.css"),
       "utf-8",
     );
-    const mobileBlockMatch = detailModalCss.match(/@media\s*\(max-width:\s*768px\)\s*\{([\s\S]*)\}/);
+    const mobileBlockMatch = detailModalCss.match(/@media[^{]*\(max-width:\s*768px\)[^{]*\{([\s\S]*)\}/);
     expect(mobileBlockMatch).toBeTruthy();
     const mobileBlock = mobileBlockMatch![1];
 
@@ -37,7 +37,7 @@ describe("detail-body mobile overflow (FN-1331)", () => {
       resolve(__dirname, "../components/TaskDetailModal.css"),
       "utf-8",
     );
-    const mobileBlockMatch = detailModalCss.match(/@media\s*\(max-width:\s*768px\)\s*\{([\s\S]*)\}/);
+    const mobileBlockMatch = detailModalCss.match(/@media[^{]*\(max-width:\s*768px\)[^{]*\{([\s\S]*)\}/);
     expect(mobileBlockMatch).toBeTruthy();
     const mobileBlock = mobileBlockMatch![1];
 

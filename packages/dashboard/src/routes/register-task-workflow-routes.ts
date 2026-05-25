@@ -11,6 +11,7 @@ import type {
   GithubIssueAction,
   DuplicateCandidate,
   DuplicateMatch,
+  RunAuditEvent,
 } from "@fusion/core";
 import {
   COLUMNS,
@@ -27,6 +28,7 @@ import {
   findDuplicateMatches,
   deterministicGuardLocks,
   runDeterministicDuplicateGuard,
+  buildManualRetryResetPatch,
   reconcileDeterministicDuplicate,
   extractIntentSignature,
   findNearDuplicates,
@@ -47,6 +49,290 @@ const REVIEW_BLOCK_RE = /##\s+(Code|Plan)\s+Review:[\s\S]*?(?=\n##\s+(?:Code|Pla
 const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
+
+interface AutoSyncOutcome {
+  worktreePath: string | null;
+  outcome: string;
+  mode: string;
+  stashedFiles?: string[];
+  untrackedRestored?: string[];
+  untrackedSkippedAsTracked?: string[];
+  conflictedFiles?: string[];
+  patchPath?: string;
+  stage?: string;
+  error?: string;
+}
+
+interface MergeAdvanceEvent {
+  taskId: string;
+  integrationBranch: string;
+  refName: string;
+  toSha: string;
+  fromSha: string | null;
+  advanceMode: "fast-forward" | "non-fast-forward" | "update-ref" | string;
+  succeeded: boolean;
+  advancedAt: string;
+  userCheckout: {
+    worktreePath: string;
+    dirty: boolean;
+    untrackedCount: number;
+  } | null;
+  /** Per-worktree outcomes of the merger's post-advance auto-sync hook. Empty
+   *  array when `mergeAdvanceAutoSync: "off"` or no other worktree was on the
+   *  integration branch. A `synced-with-pop-conflict` entry carries
+   *  `patchPath` pointing at the user's saved edits and `conflictedFiles` /
+   *  `untrackedSkippedAsTracked` for surfacing in the conflict modal. */
+  autoSync: AutoSyncOutcome[];
+}
+
+interface MergeAdvanceEventsResponse {
+  events: MergeAdvanceEvent[];
+}
+
+type PushDisabledReason = "no-remote" | "no-upstream" | "not-ahead" | "merge-locked" | "not-a-git-repo";
+
+interface PushOriginStatus {
+  integrationBranch: string;
+  branchSource: "settings" | "origin-head" | "fallback";
+  hasOriginRemote: boolean;
+  hasUpstream: boolean;
+  localSha: string | null;
+  remoteSha: string | null;
+  aheadCount: number;
+  behindCount: number;
+  mergeActive: boolean;
+  canPush: boolean;
+  disabledReason?: PushDisabledReason;
+}
+
+function parseRevListCounts(raw: string): { behindCount: number; aheadCount: number } {
+  const [behindRaw, aheadRaw] = raw.trim().split(/\s+/);
+  const behindCount = Number.parseInt(behindRaw ?? "0", 10);
+  const aheadCount = Number.parseInt(aheadRaw ?? "0", 10);
+  return {
+    behindCount: Number.isFinite(behindCount) ? behindCount : 0,
+    aheadCount: Number.isFinite(aheadCount) ? aheadCount : 0,
+  };
+}
+
+function truncateStderr(stderr: string | undefined, max = 4_096): string | undefined {
+  if (!stderr) return undefined;
+  return stderr.length <= max ? stderr : stderr.slice(0, max);
+}
+
+function parsePushOriginBody(body: unknown): { forceWithLease: boolean; expectedLocalSha?: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { forceWithLease: false };
+  }
+  const candidate = body as { forceWithLease?: unknown; expectedLocalSha?: unknown };
+  if (candidate.forceWithLease !== undefined && typeof candidate.forceWithLease !== "boolean") {
+    throw badRequest("forceWithLease must be boolean");
+  }
+  if (candidate.expectedLocalSha !== undefined && typeof candidate.expectedLocalSha !== "string") {
+    throw badRequest("expectedLocalSha must be string");
+  }
+  return {
+    forceWithLease: candidate.forceWithLease === true,
+    expectedLocalSha: candidate.expectedLocalSha,
+  };
+}
+
+function parsePushOutcome(stderr: string): { outcome: "rejected-non-ff" | "rejected-other"; message?: string } {
+  const lowered = stderr.toLowerCase();
+  if (lowered.includes("stale info")) {
+    return { outcome: "rejected-non-ff", message: "Remote moved since you previewed — fetch and retry." };
+  }
+  if (lowered.includes("non-fast-forward") || lowered.includes("fetch first") || lowered.includes("[rejected]")) {
+    return { outcome: "rejected-non-ff", message: "Remote diverged — pull or fetch first." };
+  }
+  return { outcome: "rejected-other" };
+}
+
+function parseBranchSourceFromSettings(settings: unknown): "settings" | "fallback" {
+  if (!settings || typeof settings !== "object") return "fallback";
+  const integrationBranch = (settings as { integrationBranch?: unknown }).integrationBranch;
+  const baseBranch = (settings as { baseBranch?: unknown }).baseBranch;
+  if (typeof integrationBranch === "string" && integrationBranch.trim().length > 0) return "settings";
+  if (typeof baseBranch === "string" && baseBranch.trim().length > 0) return "settings";
+  return "fallback";
+}
+
+function parseGitErrorStderr(error: unknown): string {
+  if (error instanceof Error && typeof (error as Error & { stderr?: unknown }).stderr === "string") {
+    return String((error as Error & { stderr?: string }).stderr ?? "");
+  }
+  if (error instanceof Error) return error.message;
+  return String(error ?? "");
+}
+
+function parseDisabledOutcome(reason?: PushDisabledReason): "no-upstream" | "no-remote" | "merge-locked" | "not-ahead" | "failed" {
+  if (!reason) return "failed";
+  if (reason === "no-upstream" || reason === "no-remote" || reason === "merge-locked" || reason === "not-ahead") {
+    return reason;
+  }
+  return "failed";
+}
+
+async function buildPushOriginStatus(input: {
+  scopedStore: TaskStore;
+  runGitCommand: (args: string[], cwd: string, timeoutMs: number) => Promise<string>;
+  isGitRepo: (cwd: string) => Promise<boolean>;
+  resolveIntegrationBranch: (rootDir: string, settings: unknown) => Promise<string>;
+  resolveSelfHealingManager: (scopedStore: TaskStore) => { getActiveMergeTaskId: () => string | null } | undefined;
+}): Promise<PushOriginStatus> {
+  const rootDir = input.scopedStore.getRootDir();
+  const settings = await input.scopedStore.getSettingsFast();
+  const integrationBranch = await input.resolveIntegrationBranch(rootDir, settings);
+  const baseStatus: PushOriginStatus = {
+    integrationBranch,
+    branchSource: parseBranchSourceFromSettings(settings),
+    hasOriginRemote: false,
+    hasUpstream: false,
+    localSha: null,
+    remoteSha: null,
+    aheadCount: 0,
+    behindCount: 0,
+    mergeActive: false,
+    canPush: false,
+  };
+
+  if (!(await input.isGitRepo(rootDir))) {
+    return { ...baseStatus, disabledReason: "not-a-git-repo" };
+  }
+
+  const selfHealing = input.resolveSelfHealingManager(input.scopedStore);
+  const mergeActive = Boolean(selfHealing?.getActiveMergeTaskId?.());
+
+  try {
+    await input.runGitCommand(["remote", "get-url", "origin"], rootDir, 15_000);
+  } catch {
+    return { ...baseStatus, mergeActive, disabledReason: "no-remote" };
+  }
+
+  try {
+    await input.runGitCommand(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${integrationBranch}`], rootDir, 15_000);
+  } catch {
+    return { ...baseStatus, hasOriginRemote: true, mergeActive, disabledReason: "no-upstream" };
+  }
+
+  const [localSha, remoteSha, counts] = await Promise.all([
+    input.runGitCommand(["rev-parse", `refs/heads/${integrationBranch}`], rootDir, 15_000),
+    input.runGitCommand(["rev-parse", `refs/remotes/origin/${integrationBranch}`], rootDir, 15_000),
+    input.runGitCommand(["rev-list", "--left-right", "--count", `refs/remotes/origin/${integrationBranch}...refs/heads/${integrationBranch}`], rootDir, 15_000),
+  ]);
+  const { behindCount, aheadCount } = parseRevListCounts(counts);
+  const canPush = aheadCount > 0 && !mergeActive;
+  const disabledReason = mergeActive ? "merge-locked" : aheadCount > 0 ? undefined : "not-ahead";
+
+  return {
+    ...baseStatus,
+    hasOriginRemote: true,
+    hasUpstream: true,
+    localSha: localSha.trim() || null,
+    remoteSha: remoteSha.trim() || null,
+    behindCount,
+    aheadCount,
+    mergeActive,
+    canPush,
+    disabledReason,
+  };
+}
+
+function parseMergeAdvanceLimit(rawLimit: unknown): number {
+  if (rawLimit === undefined) {
+    return 20;
+  }
+  const parsed = Number.parseInt(String(rawLimit), 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw badRequest("limit must be a positive integer");
+  }
+  return Math.min(parsed, 100);
+}
+
+function extractUserCheckout(metadata: unknown): MergeAdvanceEvent["userCheckout"] {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+  const raw = (metadata as { userCheckout?: unknown }).userCheckout;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const candidate = raw as { worktreePath?: unknown; dirty?: unknown; untrackedCount?: unknown };
+  if (typeof candidate.worktreePath !== "string" || candidate.worktreePath.length === 0) {
+    return null;
+  }
+  return {
+    worktreePath: candidate.worktreePath,
+    dirty: candidate.dirty === true,
+    untrackedCount: typeof candidate.untrackedCount === "number" ? candidate.untrackedCount : 0,
+  };
+}
+
+function extractAutoSyncOutcome(event: RunAuditEvent): AutoSyncOutcome | null {
+  const metadata = event.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const candidate = metadata as {
+    worktreePath?: unknown;
+    outcome?: unknown;
+    mode?: unknown;
+    stashedFiles?: unknown;
+    untrackedRestored?: unknown;
+    untrackedSkippedAsTracked?: unknown;
+    conflictedFiles?: unknown;
+    patchPath?: unknown;
+    stage?: unknown;
+    error?: unknown;
+  };
+  if (typeof candidate.outcome !== "string" || candidate.outcome.length === 0) return null;
+  const stringArray = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : undefined;
+  return {
+    worktreePath: typeof candidate.worktreePath === "string" ? candidate.worktreePath : null,
+    outcome: candidate.outcome,
+    mode: typeof candidate.mode === "string" ? candidate.mode : "stash-and-ff",
+    stashedFiles: stringArray(candidate.stashedFiles),
+    untrackedRestored: stringArray(candidate.untrackedRestored),
+    untrackedSkippedAsTracked: stringArray(candidate.untrackedSkippedAsTracked),
+    conflictedFiles: stringArray(candidate.conflictedFiles),
+    patchPath: typeof candidate.patchPath === "string" ? candidate.patchPath : undefined,
+    stage: typeof candidate.stage === "string" ? candidate.stage : undefined,
+    error: typeof candidate.error === "string" ? candidate.error : undefined,
+  };
+}
+
+function extractMergeAdvanceEvent(event: RunAuditEvent): Omit<MergeAdvanceEvent, "userCheckout" | "autoSync"> | null {
+  const metadata = event.metadata;
+  if (!metadata || typeof metadata !== "object") {
+    console.warn(`[merge-advance-events] dropping run-audit event ${event.id}: missing metadata`);
+    return null;
+  }
+  const candidate = metadata as {
+    integrationBranch?: unknown;
+    refName?: unknown;
+    toSha?: unknown;
+    fromSha?: unknown;
+    advanceMode?: unknown;
+    succeeded?: unknown;
+  };
+  if (typeof candidate.integrationBranch !== "string" || candidate.integrationBranch.length === 0 || typeof candidate.toSha !== "string" || candidate.toSha.length === 0) {
+    console.warn(`[merge-advance-events] dropping run-audit event ${event.id}: missing integrationBranch or toSha`);
+    return null;
+  }
+  if (typeof event.taskId !== "string" || event.taskId.length === 0) {
+    console.warn(`[merge-advance-events] dropping run-audit event ${event.id}: missing taskId`);
+    return null;
+  }
+  return {
+    taskId: event.taskId,
+    integrationBranch: candidate.integrationBranch,
+    refName: typeof candidate.refName === "string" ? candidate.refName : `refs/heads/${candidate.integrationBranch}`,
+    toSha: candidate.toSha,
+    fromSha: typeof candidate.fromSha === "string" ? candidate.fromSha : null,
+    advanceMode: typeof candidate.advanceMode === "string" ? candidate.advanceMode : "update-ref",
+    succeeded: candidate.succeeded !== false,
+    advancedAt: event.timestamp,
+  };
+}
 
 export const __fingerprintCreateLocksForTests = deterministicGuardLocks;
 
@@ -250,11 +536,14 @@ interface TaskWorkflowRouteDeps {
   validateOptionalModelField: (value: unknown, name: string) => string | undefined;
   normalizeModelSelectionPair: (provider: string | undefined, modelId: string | undefined) => { provider?: string | null; modelId?: string | null };
   runGitCommand: (args: string[], cwd: string, timeoutMs: number) => Promise<string>;
+  isGitRepo: (cwd: string) => Promise<boolean>;
+  resolveIntegrationBranch: (rootDir: string, settings: unknown) => Promise<string>;
   trimTaskDetailActivityLog: (task: TaskDetail) => TaskDetail;
   triggerCommentWakeForAssignedAgent: (scopedStore: TaskStore, task: Task, wake: { triggeringCommentType: "steering" | "task" | "pr"; triggeringCommentIds?: string[]; triggerDetail: string }) => Promise<void>;
   resolveSelfHealingManager: (scopedStore: TaskStore) => {
     rootDir: string;
     reconcileInReviewBranchRebind: (opts?: { includeTaskIds?: Set<string> }) => Promise<import("@fusion/engine").RebindResult>;
+    getActiveMergeTaskId: () => string | null;
   } | undefined;
 }
 
@@ -267,13 +556,191 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     validateOptionalModelField,
     normalizeModelSelectionPair,
     runGitCommand,
+    isGitRepo,
+    resolveIntegrationBranch,
     trimTaskDetailActivityLog,
     triggerCommentWakeForAssignedAgent,
     resolveSelfHealingManager: _resolveSelfHealingManager,
   } = deps;
   const TASK_DETAIL_ACTIVITY_LOG_LIMIT = taskDetailActivityLogLimit;
 
-  // List all tasks
+  // Get recent integration-branch advance events for post-merge notice
+  router.get("/tasks/merge-advance-events", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const limit = parseMergeAdvanceLimit(req.query.limit);
+      const storeWithRunAudit = scopedStore as TaskStore & {
+        getRunAuditEvents?: (filters: {
+          taskId?: string;
+          domain?: "database" | "git" | "filesystem" | "sandbox";
+          mutationType?: string;
+          limit?: number;
+        }) => RunAuditEvent[];
+      };
+      if (typeof storeWithRunAudit.getRunAuditEvents !== "function") {
+        throw notFound("run-audit unavailable");
+      }
+
+      const advanceEvents = storeWithRunAudit.getRunAuditEvents({
+        domain: "git",
+        mutationType: "merge:integration-ref-advance",
+        limit,
+      });
+
+      const events: MergeAdvanceEvent[] = [];
+      for (const advanceEvent of advanceEvents) {
+        const extracted = extractMergeAdvanceEvent(advanceEvent);
+        if (!extracted) {
+          continue;
+        }
+
+        let userCheckout: MergeAdvanceEvent["userCheckout"] = null;
+        const stateEvents = storeWithRunAudit.getRunAuditEvents({
+          taskId: extracted.taskId,
+          domain: "git",
+          mutationType: "merge:integration-worktree-state",
+          limit,
+        });
+        const matchingState = stateEvents.find((stateEvent) => stateEvent.timestamp <= advanceEvent.timestamp);
+        if (matchingState) {
+          userCheckout = extractUserCheckout(matchingState.metadata);
+        }
+
+        // Join in any per-worktree auto-sync outcomes for this task. We keep
+        // events whose timestamp falls in a small window around the advance
+        // so a `synced-with-pop-conflict` (carrying patchPath) surfaces to
+        // the dashboard banner even when the sync ran slightly after the
+        // advance event was recorded.
+        const autoSyncEvents = storeWithRunAudit.getRunAuditEvents({
+          taskId: extracted.taskId,
+          domain: "git",
+          mutationType: "merge:auto-sync",
+          limit,
+        });
+        const advanceMs = Date.parse(advanceEvent.timestamp);
+        const AUTO_SYNC_WINDOW_MS = 5 * 60 * 1000;
+        const autoSync: AutoSyncOutcome[] = [];
+        for (const ev of autoSyncEvents) {
+          const evMs = Date.parse(ev.timestamp);
+          if (Math.abs(evMs - advanceMs) > AUTO_SYNC_WINDOW_MS) continue;
+          const outcome = extractAutoSyncOutcome(ev);
+          if (outcome) autoSync.push(outcome);
+        }
+
+        events.push({
+          ...extracted,
+          userCheckout,
+          autoSync,
+        });
+      }
+
+      const response: MergeAdvanceEventsResponse = {
+        events: events.sort((a, b) => Date.parse(b.advancedAt) - Date.parse(a.advancedAt)),
+      };
+      res.json(response);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/projects/:projectId/merge-advance/push-status", async (req, res) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const status = await buildPushOriginStatus({
+      scopedStore,
+      runGitCommand,
+      isGitRepo,
+      resolveIntegrationBranch,
+      resolveSelfHealingManager: _resolveSelfHealingManager,
+    });
+    res.json(status);
+  });
+
+  router.post("/projects/:projectId/merge-advance/push-origin", async (req, res) => {
+    const startedAt = Date.now();
+    const { store: scopedStore } = await getProjectContext(req);
+    const body = parsePushOriginBody(req.body);
+    const status = await buildPushOriginStatus({
+      scopedStore,
+      runGitCommand,
+      isGitRepo,
+      resolveIntegrationBranch,
+      resolveSelfHealingManager: _resolveSelfHealingManager,
+    });
+
+    const recordRunAuditEvent = (scopedStore as TaskStore & { recordRunAuditEvent?: (input: RunAuditEventInput) => Promise<void> }).recordRunAuditEvent;
+    const emit = async (outcome: string, extra?: Record<string, unknown>) => {
+      if (typeof recordRunAuditEvent !== "function") return;
+      await recordRunAuditEvent({
+        domain: "git",
+        mutationType: "push:origin",
+        target: `origin/${status.integrationBranch}`,
+        taskId: "FN-5359",
+        agentId: "user",
+        runId: `dashboard-push-origin-${Date.now()}`,
+        metadata: {
+          integrationBranch: status.integrationBranch,
+          remote: "origin",
+          localSha: status.localSha,
+          remoteSha: status.remoteSha,
+          aheadCount: status.aheadCount,
+          behindCount: status.behindCount,
+          forceWithLease: body.forceWithLease,
+          outcome,
+          durationMs: Date.now() - startedAt,
+          ...extra,
+        },
+      });
+    };
+
+    if (!status.canPush) {
+      const outcome = parseDisabledOutcome(status.disabledReason);
+      await emit(outcome);
+      return res.json({ ok: false, outcome, integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha: status.remoteSha, forceWithLease: body.forceWithLease });
+    }
+
+    if (body.expectedLocalSha && body.expectedLocalSha !== status.localSha) {
+      await emit("failed", { outcome: "sha-mismatch" });
+      return res.json({ ok: false, outcome: "sha-mismatch", integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha: status.remoteSha, forceWithLease: body.forceWithLease });
+    }
+
+    const mergeCheck = _resolveSelfHealingManager(scopedStore);
+    if (mergeCheck?.getActiveMergeTaskId()) {
+      await emit("merge-locked");
+      return res.json({ ok: false, outcome: "merge-locked", integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha: status.remoteSha, forceWithLease: body.forceWithLease });
+    }
+
+    const refspec = `refs/heads/${status.integrationBranch}:refs/heads/${status.integrationBranch}`;
+    const args = ["push", "origin", refspec];
+    if (body.forceWithLease && status.localSha) {
+      args.splice(1, 0, `--force-with-lease=refs/heads/${status.integrationBranch}:${status.localSha}`);
+    }
+
+    try {
+      await runGitCommand(args, scopedStore.getRootDir(), 60_000);
+      const remoteSha = (await runGitCommand(["rev-parse", `refs/remotes/origin/${status.integrationBranch}`], scopedStore.getRootDir(), 15_000)).trim() || status.remoteSha;
+      await emit("ok", { remoteSha });
+      return res.json({ ok: true, outcome: "ok", integrationBranch: status.integrationBranch, aheadCount: status.aheadCount, localSha: status.localSha, remoteSha, forceWithLease: body.forceWithLease });
+    } catch (error: unknown) {
+      const stderr = parseGitErrorStderr(error);
+      const parsed = parsePushOutcome(stderr);
+      await emit(parsed.outcome, { stderrPreview: truncateStderr(stderr) });
+      return res.json({
+        ok: false,
+        outcome: parsed.outcome,
+        message: parsed.message,
+        stderrPreview: truncateStderr(stderr),
+        integrationBranch: status.integrationBranch,
+        aheadCount: status.aheadCount,
+        localSha: status.localSha,
+        remoteSha: status.remoteSha,
+        forceWithLease: body.forceWithLease,
+      });
+    }
+  });
+
   router.get("/tasks", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -852,7 +1319,10 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     try {
       const { store: scopedStore, engine } = await getProjectContext(req);
       const merge = engine
-        ? (id: string) => engine.onMerge(id)
+        ? (id: string) => {
+          // Manual merge: bypasses scheduler-transient status blockers (FN-5438). Hard guards still apply.
+          return engine.onMerge(id);
+        }
         : options?.onMerge ?? ((id: string) => scopedStore.mergeTask(id));
       const result = await merge(req.params.id);
       res.json(result);
@@ -900,7 +1370,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           await scopedStore.updateTask(req.params.id, {
             status: null,
             error: null,
-            stuckKillCount: 0,
+            ...buildManualRetryResetPatch(),
           });
           await scopedStore.logEntry(
             req.params.id,
@@ -914,8 +1384,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         await scopedStore.updateTask(req.params.id, {
           status: null,
           error: null,
-          stuckKillCount: 0,
-          mergeRetries: 0,
+          ...buildManualRetryResetPatch({ resetMergeRetries: true }),
         });
         await scopedStore.logEntry(req.params.id, "Retry requested from dashboard (in-review merge retry, mergeRetries reset)");
         const updated = await scopedStore.getTask(req.params.id);
@@ -930,9 +1399,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         branch: null,
         baseBranch: null,
         baseCommitSha: null,
-        stuckKillCount: 0,
-        recoveryRetryCount: null,
-        nextRecoveryAt: null,
+        ...buildManualRetryResetPatch({ resetMergeRetries: true }),
       });
 
       if (retrySpecification) {
@@ -2232,7 +2699,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const { title, description, prompt, priority, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId, reviewLevel, executionMode, sourceIssue, nodeId, branch, baseBranch, githubTracking, noCommitsExpected } = req.body;
+      const { title, description, prompt, priority, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId, reviewLevel, executionMode, sourceIssue, nodeId, branch, baseBranch, githubTracking, noCommitsExpected, overlapBlockedBy, status } = req.body;
       const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(req.body, field);
 
       // Validate model fields are strings or undefined/null
@@ -2394,6 +2861,29 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         }
       }
 
+      let validatedOverlapBlockedBy: string | null | undefined;
+      if (hasBodyField("overlapBlockedBy")) {
+        if (overlapBlockedBy === null || overlapBlockedBy === undefined) {
+          validatedOverlapBlockedBy = overlapBlockedBy;
+        } else if (typeof overlapBlockedBy === "string") {
+          const trimmed = overlapBlockedBy.trim();
+          if (trimmed.length === 0) {
+            throw new Error("overlapBlockedBy must be a string or null");
+          }
+          validatedOverlapBlockedBy = trimmed;
+        } else {
+          throw new Error("overlapBlockedBy must be a string or null");
+        }
+      }
+
+      let validatedStatus: null | undefined;
+      if (hasBodyField("status")) {
+        if (status !== null) {
+          throw new Error("status may only be cleared via this endpoint (must be null)");
+        }
+        validatedStatus = null;
+      }
+
       const updates: Parameters<typeof scopedStore.updateTask>[1] = {};
       if (title !== undefined) updates.title = title;
       if (description !== undefined) updates.description = description;
@@ -2419,6 +2909,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (hasBodyField("githubTracking")) {
         (updates as Record<string, unknown>).githubTracking = validatedGithubTracking;
       }
+      if (hasBodyField("overlapBlockedBy")) updates.overlapBlockedBy = validatedOverlapBlockedBy;
+      if (hasBodyField("status")) updates.status = validatedStatus;
 
       if (hasBodyField("nodeId") && validatedNodeId !== undefined) {
         const currentTask = await scopedStore.getTask(req.params.id);
@@ -2463,7 +2955,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (err instanceof ApiError) {
         throw err;
       }
-      const status = (err instanceof Error ? err.message : String(err)).includes("must be a string") || (err instanceof Error ? err.message : String(err)).includes("must be a non-empty string") || (err instanceof Error ? err.message : String(err)).includes("must be a string or null") || (err instanceof Error ? err.message : String(err)).includes("must be an array of strings") || (err instanceof Error ? err.message : String(err)).includes("must be a boolean") || (err instanceof Error ? err.message : String(err)).includes("thinkingLevel must be one of") || (err instanceof Error ? err.message : String(err)).includes("reviewLevel must be an integer") || (err instanceof Error ? err.message : String(err)).includes("executionMode must be one of") || (err instanceof Error ? err.message : String(err)).includes("priority must be one of") || (err instanceof Error ? err.message : String(err)).includes("sourceIssue") ? 400 : 500;
+      const status = (err instanceof Error ? err.message : String(err)).includes("must be a string") || (err instanceof Error ? err.message : String(err)).includes("must be a non-empty string") || (err instanceof Error ? err.message : String(err)).includes("must be a string or null") || (err instanceof Error ? err.message : String(err)).includes("must be an array of strings") || (err instanceof Error ? err.message : String(err)).includes("must be a boolean") || (err instanceof Error ? err.message : String(err)).includes("thinkingLevel must be one of") || (err instanceof Error ? err.message : String(err)).includes("reviewLevel must be an integer") || (err instanceof Error ? err.message : String(err)).includes("executionMode must be one of") || (err instanceof Error ? err.message : String(err)).includes("priority must be one of") || (err instanceof Error ? err.message : String(err)).includes("sourceIssue") || (err instanceof Error ? err.message : String(err)).includes("status may only be cleared") ? 400 : 500;
       throw new ApiError(status, err instanceof Error ? err.message : String(err));
     }
   });
@@ -2923,6 +3415,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const removeLineageReferences = req.query.removeLineageReferences === "1"
         || req.query.removeLineageReferences === "true";
       const githubIssueActionRaw = req.query.githubIssueAction;
+      const allowResurrection = req.query.allowResurrection === "1"
+        || req.query.allowResurrection === "true";
       const githubIssueActionValues: readonly GithubIssueAction[] = ["close", "delete", "leave", "auto"];
       let githubIssueAction: GithubIssueAction | undefined;
       if (typeof githubIssueActionRaw === "string") {
@@ -2934,6 +3428,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const task = await scopedStore.deleteTask(req.params.id, {
         removeDependencyReferences,
         removeLineageReferences,
+        allowResurrection,
         githubIssueAction,
         auditContext: {
           agentId: "system",

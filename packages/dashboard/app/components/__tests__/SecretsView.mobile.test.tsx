@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAllAppCss, loadAllAppCssBaseOnly } from "../../test/cssFixture";
 import { SecretsView } from "../SecretsView";
+import { MOBILE_MEDIA_QUERY } from "../../hooks/useViewportMode";
 
 type JsonResponse = {
   ok: boolean;
@@ -40,9 +41,14 @@ function findRuleBodyContainingSelector(css: string, selector: string): string {
   return "";
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const queryPattern = `${escapeRegExp(MOBILE_MEDIA_QUERY)}(?:\\s*,\\s*\\([^)]*\\))*`;
+  const regex = new RegExp(`@media\\s*${queryPattern}\\s*\\{`, "g");
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(content)) !== null) {
@@ -110,7 +116,9 @@ describe("SecretsView mobile layout contracts", () => {
 
   it("keeps SecretsView.css token-only", () => {
     const normalizedCss = secretsViewCss
+      .replace(new RegExp(escapeRegExp(MOBILE_MEDIA_QUERY), "g"), "MOBILE_MEDIA_QUERY")
       .replace(/max-width:\s*768px/g, "max-width: MOBILE_BREAKPOINT")
+      .replace(/max-height:\s*480px/g, "max-height: MOBILE_HEIGHT_BREAKPOINT")
       .replace(/\b0px\b/g, "0");
 
     expect(normalizedCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);

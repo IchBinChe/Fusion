@@ -23,3 +23,4 @@ describe("getPrimaryPrInfo", () => {
     expect(getPrimaryPrInfo({})).toBeUndefined();
   });
 });
+

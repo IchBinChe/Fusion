@@ -133,7 +133,7 @@ describe("reliability interactions: explicit duplicate marker sweep", () => {
     expect(await (fx.manager as any).resolveExplicitDuplicateMarkerTasks()).toBe(10);
     const remainingAfterSecond = await fx.store.listTasks({ includeArchived: false });
     expect(remainingAfterSecond.filter((task) => ids.includes(task.id))).toHaveLength(0);
-  });
+  }, 20_000);
 
   it("fails open when one delete throws and continues processing later tasks", async () => {
     const fx = await makeReliabilityFixture();

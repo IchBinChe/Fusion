@@ -137,7 +137,7 @@ describe("FN-4812 mobile anchoring", () => {
     const css = await loadAllAppCss();
 
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*768px\)\s*\{[^{}]*\.file-mention-popup\s*\{[^}]*top:\s*auto\s*!important;[^}]*bottom:\s*calc\(100%\s*\+\s*var\(--space-xs\)\);[^}]*left:\s*max\(var\(--space-md\),\s*env\(safe-area-inset-left,\s*0px\)\)\s*!important;[^}]*right:\s*max\(var\(--space-md\),\s*env\(safe-area-inset-right,\s*0px\)\);/m,
+      /@media[^{]*\(max-width:\s*768px\)[^{]*\{[^{}]*\.file-mention-popup\s*\{[^}]*top:\s*auto\s*!important;[^}]*bottom:\s*calc\(100%\s*\+\s*var\(--space-xs\)\);[^}]*left:\s*max\(var\(--space-md\),\s*env\(safe-area-inset-left,\s*0px\)\)\s*!important;[^}]*right:\s*max\(var\(--space-md\),\s*env\(safe-area-inset-right,\s*0px\)\);/m,
     );
   });
 });

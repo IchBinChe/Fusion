@@ -54,13 +54,11 @@ describe("PWA configuration", () => {
     expect(indexHtml).toMatch(/<meta\s+name="viewport"[^>]*content="[^"]*viewport-fit=cover[^"]*"/i);
   });
 
-  it("viewport meta disables pinch-zoom on mobile", () => {
+  it("viewport meta keeps mobile baseline + safe-area support", () => {
     const indexHtml = readFileSync(resolve(__dirname, "../index.html"), "utf8");
 
     expect(indexHtml).toMatch(/<meta\s+name="viewport"[^>]*content="[^"]*width=device-width[^"]*"/i);
     expect(indexHtml).toMatch(/<meta\s+name="viewport"[^>]*content="[^"]*initial-scale=1\.0[^"]*"/i);
-    expect(indexHtml).toMatch(/<meta\s+name="viewport"[^>]*content="[^"]*maximum-scale=1\.0[^"]*"/i);
-    expect(indexHtml).toMatch(/<meta\s+name="viewport"[^>]*content="[^"]*user-scalable=no[^"]*"/i);
     expect(indexHtml).toMatch(/<meta\s+name="viewport"[^>]*content="[^"]*viewport-fit=cover[^"]*"/i);
   });
 

@@ -27,6 +27,7 @@ import { useDiscoveredSkillsCache } from "../hooks/useDiscoveredSkillsCache";
 import { FileMentionPopup } from "./FileMentionPopup";
 import { useFileMention } from "../hooks/useFileMention";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { isIOS } from "../hooks/useMobileScrollLock";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useAppSettings } from "../hooks/useAppSettings";
 import { useChatRooms } from "../hooks/useChatRooms";
@@ -2962,6 +2963,12 @@ export function QuickChatFAB({
                   onTouchStart={(event) => {
                     if (typeof window === "undefined") return;
                     if (window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
+                    // iOS-only workaround. On Android, preventDefault on
+                    // textarea touchstart prevents the soft keyboard from
+                    // opening at all (programmatic focus() does not raise
+                    // the keyboard on Android — only the default touch
+                    // action does), so the tap silently dismisses.
+                    if (!isIOS()) return;
                     if (document.activeElement === event.currentTarget) return;
                     event.preventDefault();
                     event.currentTarget.focus({ preventScroll: true });

@@ -10,9 +10,14 @@
 
 .mobile-nav-bar {
   position: fixed;
-  bottom: 0;
+  /* --icb-bottom-offset / --icb-right-offset are published by the viewport
+     compensation script in index.html. On healthy browsers they stay 0px.
+     On Android Chrome when the ICB is inflated past the visible canvas
+     (multi-window / split-screen quirk) and on pinch-zoom, they pull
+     fixed-position elements back into the visible viewport. */
+  bottom: var(--icb-bottom-offset, 0px);
   left: 0;
-  right: 0;
+  right: var(--icb-right-offset, 0px);
   z-index: 45;
   display: none;
   align-items: stretch;
@@ -22,7 +27,11 @@
   /* Extend the bar's surface into the iOS home-indicator area so icons sit above
      the indicator (PWA standalone) and the bar meets the executor status bar
      flush — its `bottom` already adds these same terms. */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+  /* Floor the inset to ~12px so the bar clears Android Chrome's gesture pill
+     even when the browser under-reports safe-area-inset-bottom (happens while
+     the address bar is visible / during URL-bar collapse). Devices that
+     correctly report a larger inset are unaffected. */
+  padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap));
   box-shadow: var(--shadow-md);
 }
 
@@ -32,18 +41,26 @@
   }
 
   .mobile-nav-bar--with-footer {
+    bottom: var(--icb-bottom-offset, 0px);
+  }
+
+  /* When the on-screen keyboard is open, ignore the visualViewport
+     compensation that would otherwise push the bar up by the keyboard
+     height (iOS shrinks vv.height; bottomOffset becomes ~keyboard height).
+     Pin the nav to the page bottom so the keyboard simply covers it. */
+  .mobile-nav-bar--keyboard-open {
     bottom: 0;
   }
 
   /* Content padding: mobile nav only (no footer). Bar is flush at bottom (no safe-area pad). */
   .project-content--with-mobile-nav:not(.project-content--with-footer) {
-    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+    padding-bottom: calc(var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap));
   }
 
   /* Content padding: both mobile nav AND footer */
   .project-content--with-footer.project-content--with-mobile-nav {
     padding-bottom: calc(
-      var(--executor-footer-height) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap)
+      var(--executor-footer-height) + var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap)
     );
   }
 }

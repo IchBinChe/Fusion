@@ -103,13 +103,22 @@ describe("TaskStore", () => {
       expect(settings.mergeStrategy).toBe("pull-request");
     });
 
-    it("defaults directMergeCommitStrategy to auto and persists updates", async () => {
+    it("defaults directMergeCommitStrategy to always-squash and persists updates", async () => {
       const defaults = await harness.store().getSettings();
-      expect(defaults.directMergeCommitStrategy).toBe("auto");
+      expect(defaults.directMergeCommitStrategy).toBe("always-squash");
 
       await harness.store().updateSettings({ directMergeCommitStrategy: "always-rebase" });
       const settings = await harness.store().getSettings();
       expect(settings.directMergeCommitStrategy).toBe("always-rebase");
+    });
+
+    it("defaults mergeAdvanceAutoSync to stash-and-ff and persists updates", async () => {
+      const defaults = await harness.store().getSettings();
+      expect(defaults.mergeAdvanceAutoSync).toBe("stash-and-ff");
+
+      await harness.store().updateSettings({ mergeAdvanceAutoSync: "off" });
+      const settings = await harness.store().getSettings();
+      expect(settings.mergeAdvanceAutoSync).toBe("off");
     });
   });
 
@@ -1463,6 +1472,20 @@ describe("TaskStore", () => {
       await harness.store().updateSettings({ maxConcurrent: 8 });
       const settings = await harness.store().getSettings();
       expect(settings.maxConcurrent).toBe(8);
+    });
+
+    it("round-trips testMode in both project and global scopes", async () => {
+      await harness.store().updateGlobalSettings({ testMode: true });
+      let merged = await harness.store().getSettings();
+      expect(merged.testMode).toBe(true);
+
+      await harness.store().updateSettings({ testMode: false });
+      merged = await harness.store().getSettings();
+      expect(merged.testMode).toBe(false);
+
+      const { global, project } = await harness.store().getSettingsByScope();
+      expect(global.testMode).toBe(true);
+      expect(project.testMode).toBe(false);
     });
 
     it("updateSettings silently filters out global-only fields", async () => {

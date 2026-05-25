@@ -111,6 +111,7 @@ export interface DeleteTaskOptions {
   removeDependencyReferences?: boolean;
   removeLineageReferences?: boolean;
   githubIssueAction?: GithubIssueAction;
+  allowResurrection?: boolean;
 }
 
 export interface ArchiveTaskOptions {
@@ -427,6 +428,8 @@ export function updateTask(
     prompt?: string;
     dependencies?: string[];
     enabledWorkflowSteps?: string[];
+    overlapBlockedBy?: string | null;
+    status?: null;
     modelProvider?: string | null;
     modelId?: string | null;
     validatorModelProvider?: string | null;
@@ -529,6 +532,10 @@ export function deleteTask(id: string, projectId?: string, options?: DeleteTaskO
   }
   if (options?.githubIssueAction) {
     search.set("githubIssueAction", options.githubIssueAction);
+  }
+  // FN-5233 route reads delete modifiers from query params, including allowResurrection.
+  if (options?.allowResurrection) {
+    search.set("allowResurrection", "true");
   }
 
   const suffix = search.size > 0 ? `?${search.toString()}` : "";
@@ -2054,8 +2061,18 @@ export function cancelProviderLogin(provider: string): Promise<{ success: boolea
 }
 
 /** Save an API key for an API-key-backed provider. */
-export function saveApiKey(provider: string, apiKey: string): Promise<{ success: boolean }> {
-  return api<{ success: boolean }>("/auth/api-key", {
+export function saveApiKey(provider: string, apiKey: string): Promise<{
+  success: boolean;
+  modelsRefreshed?: number;
+  refreshReason?: string;
+  refreshError?: string;
+}> {
+  return api<{
+    success: boolean;
+    modelsRefreshed?: number;
+    refreshReason?: string;
+    refreshError?: string;
+  }>("/auth/api-key", {
     method: "POST",
     body: JSON.stringify({ provider, apiKey }),
   });
@@ -2566,6 +2583,51 @@ export interface GitStatus {
   isDirty: boolean;
   ahead: number;
   behind: number;
+  // Returned only when `?extended=1` is passed to GET /api/git/status.
+  headSha?: string;
+  integrationBranch?: string;
+  integrationBranchSource?: "settings" | "origin-head" | "fallback";
+  isOnIntegrationBranch?: boolean;
+  /** True when `git branch --show-current` failed (transient git error,
+   *  permission, etc.). Distinct from detached HEAD (command succeeds with
+   *  empty stdout). UI surfaces "branch detection unavailable" rather than
+   *  silently hiding the wrong-branch warning. */
+  currentBranchDetectionFailed?: boolean;
+  integrationTipSha?: string | null;
+  /** "local" = `refs/heads/<branch>` exists; "remote-only" = only
+   *  `refs/remotes/origin/<branch>` exists and was used as fallback;
+   *  "missing" = neither ref exists. */
+  integrationTipSource?: "local" | "remote-only" | "missing";
+  originIntegrationTipSha?: string | null;
+  /** HEAD vs the **local** integration tip. Undefined when the branch
+   *  exists only as a remote-tracking ref. */
+  aheadOfIntegration?: number;
+  behindIntegration?: number;
+  /** HEAD vs `origin/<integrationBranch>`. Defined whenever the remote
+   *  tracking ref exists, regardless of whether the local ref does. */
+  aheadOfIntegrationRemote?: number;
+  behindIntegrationRemote?: number;
+  /** Local integration tip vs `origin/<integrationBranch>`. Defined only
+   *  when both refs exist. */
+  aheadOfOriginIntegration?: number;
+  behindOriginIntegration?: number;
+  dirtyDetails?: {
+    staged: number;
+    modified: number;
+    untracked: number;
+    conflicted: number;
+    sample: string[];
+  };
+  indexStaleVsHead?: boolean;
+  stashCount?: number;
+  recentMergeAdvances?: Array<{
+    taskId: string;
+    fromSha: string | null;
+    toSha: string;
+    advancedAt: string;
+    autoSyncOutcome?: string;
+    needsAction: boolean;
+  }>;
 }
 
 /** Git commit info */
@@ -2618,9 +2680,15 @@ export interface GitPushResult {
   message: string;
 }
 
-/** Fetch current git status */
-export function fetchGitStatus(projectId?: string): Promise<GitStatus> {
-  return api<GitStatus>(withProjectId("/git/status", projectId));
+/** Fetch current git status. Pass `extended` to also get integration-branch
+ *  resolution, ahead/behind vs both local and origin integration tip, dirty
+ *  breakdown, stash count, index-stale detection, and recent merge-advance
+ *  audit events for the project-root worktree. */
+export function fetchGitStatus(projectId?: string, opts?: { extended?: boolean }): Promise<GitStatus> {
+  const base = withProjectId("/git/status", projectId);
+  if (!opts?.extended) return api<GitStatus>(base);
+  const sep = base.includes("?") ? "&" : "?";
+  return api<GitStatus>(`${base}${sep}extended=1`);
 }
 
 /** Fetch recent commits */

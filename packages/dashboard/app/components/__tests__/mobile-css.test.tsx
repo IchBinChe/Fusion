@@ -10,7 +10,7 @@ function getMainMobileSection(css: string): string {
   // "Mobile Responsive Overrides" section AND in @media (max-width: 768px)
   // blocks at the bottom of each co-located component CSS file. Treat the
   // union of all 768px-and-below media blocks as the "main mobile section".
-  const matches = [...css.matchAll(/@media\s*\(max-width:\s*768px\)\s*\{/g)];
+  const matches = [...css.matchAll(/@media[^{]*\(max-width:\s*768px\)[^{]*\{/g)];
   expect(matches.length).toBeGreaterThan(0);
 
   const parts: string[] = [];

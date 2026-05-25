@@ -2,6 +2,11 @@ import type { AutoRecoveryFailureClass, AutoRecoveryMode, AutoRecoverySettings, 
 import { createLogger, type Logger } from "./logger.js";
 import type { RunAuditor } from "./run-audit.js";
 
+// FN-5348 invariant: auto-recovery paths MUST NOT select cwd-integration-branch
+// (or legacy cwd-main) as a fallback after reuse-task-worktree handoff refusal.
+// Reuse refusal handling must reacquire a fresh task worktree or preserve failed
+// in-review state; any future mode fallback must emit merge:cwd-integration-fallback-removed.
+
 export type AutoRecoveryAction = "retry" | "spawn-ai-recovery" | "pause";
 
 export interface AutoRecoveryFailure {

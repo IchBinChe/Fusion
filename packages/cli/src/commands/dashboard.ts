@@ -48,6 +48,7 @@ import {
   processPullRequestMergeTask,
 } from "./task-lifecycle.js";
 import { promptForPort } from "./port-prompt.js";
+import { ensureCwdProjectRegistered } from "./ensure-project-registered.js";
 import { createReadOnlyProviderSettingsView } from "./provider-settings.js";
 import { createReadOnlyAuthFileStorage, mergeAuthStorageReads, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
 import { getClaudeCodeCredentialPaths, getCodexCliAuthPath, getFusionAuthPath, getLegacyAuthPaths, getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
@@ -75,7 +76,7 @@ import { getCachedUpdateStatus, isUpdateCheckEnabled } from "../update-cache.js"
 import { resolveSelfExtension } from "./self-extension.js";
 import { ensureBundledDependencyGraphPluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
-import { syncStartupModels } from "./startup-model-sync.js";
+import { refreshOpencodeGoModels, syncStartupModels } from "./startup-model-sync.js";
 import { DashboardTUI, DashboardLogSink, isTTYAvailable, type SystemInfo, type GitStatus, type GitCommit, type GitCommitDetail, type GitBranch, type GitWorktree, type FileEntry, type FileReadResult, type TaskStep as TUITaskStep, type TaskLogEntry as TUITaskLogEntry, type TaskDetailData, type TaskEvent } from "./dashboard-tui/index.js";
 import { DASHBOARD_STARTUP_STATUS, runTuiStartupPrelude } from "./dashboard-startup-chain.js";
 
@@ -1197,7 +1198,13 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     const settings = await store.getSettings();
     if (getMergeStrategy(settings) === "pull-request") {
       const githubClient = new GitHubClient();
-      const outcome = await processPullRequestMergeTask(store, cwd, taskId, githubClient, getTaskMergeBlocker);
+      const outcome = await processPullRequestMergeTask(
+        store,
+        cwd,
+        taskId,
+        githubClient,
+        getTaskMergeBlocker,
+      );
       const task = await store.getTask(taskId);
       return {
         task,
@@ -1510,8 +1517,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
     const engineManager = new ProjectEngineManager(centralCoreForEngine, {
       getMergeStrategy,
-      processPullRequestMerge: (s, wd, taskId) =>
-        processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker),
+      processPullRequestMerge: (s, wd, taskId, pool) =>
+        processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker, pool),
       getTaskMergeBlocker,
     });
 
@@ -1583,7 +1590,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     // Phase 5 removes this fallback entirely.
     let cwdEngine: ReturnType<typeof engineManager.getEngine>;
     try {
-      const registered = await centralCoreForEngine.getProjectByPath(cwd).catch(() => null);
+      const registered = await ensureCwdProjectRegistered({
+        cwd,
+        central: centralCoreForEngine,
+        logPrefix: "dashboard",
+        autoRegister: true,
+      });
       if (registered) {
         // Ensure the cwd project's engine exists before handing HTTP defaults to
         // createServer; background startAll may still be warming other projects.
@@ -1625,6 +1637,19 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
       onProjectRegistered: ({ path }) => {
         maybeInstallClaudeSkillForNewProject(path);
+      },
+      onApiKeySaved: async (providerId: string) => {
+        if (providerId !== "opencode" && providerId !== "opencode-go") {
+          return undefined;
+        }
+        const settings = await store.getSettings();
+        if (settings.opencodeGoModelSync === false) {
+          return { registeredCount: 0, reason: "disabled-by-settings" };
+        }
+        return await refreshOpencodeGoModels({
+          modelRegistry,
+          log: (scope, message) => logSink.log(message, scope),
+        });
       },
       getClaudeCliExtensionStatus: () => {
         const r = getCachedClaudeCliResolution();
@@ -1929,6 +1954,19 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       ensureBundledPluginInstalled: ensureBundledPluginInstalledCallback,
       onProjectRegistered: ({ path }) => {
         maybeInstallClaudeSkillForNewProject(path);
+      },
+      onApiKeySaved: async (providerId: string) => {
+        if (providerId !== "opencode" && providerId !== "opencode-go") {
+          return undefined;
+        }
+        const settings = await store.getSettings();
+        if (settings.opencodeGoModelSync === false) {
+          return { registeredCount: 0, reason: "disabled-by-settings" };
+        }
+        return await refreshOpencodeGoModels({
+          modelRegistry,
+          log: (scope, message) => logSink.log(message, scope),
+        });
       },
       getClaudeCliExtensionStatus: () => {
         const r = getCachedClaudeCliResolution();

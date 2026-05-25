@@ -6,6 +6,7 @@ import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { fetchWorkflowSteps, type ModelInfo } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 interface BoardProps {
   tasks: Task[];
@@ -69,6 +70,7 @@ function areTaskArraysEqual(previous: Task[], next: Task[]): boolean {
 }
 
 const EMPTY_WORKFLOW_STEP_NAME_LOOKUP: ReadonlyMap<string, string> = new Map();
+let boardWasPreviouslyInactive = false;
 
 function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next: ReadonlyMap<string, string>): boolean {
   if (previous.size !== next.size) return false;
@@ -96,6 +98,26 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     done: [],
     archived: [],
   });
+
+  useEffect(() => {
+    recordResumeEvent({
+      view: "Board",
+      trigger: boardWasPreviouslyInactive ? "route-active" : "remount",
+      projectId,
+      replayAttempted: false,
+    });
+    boardWasPreviouslyInactive = false;
+
+    return () => {
+      boardWasPreviouslyInactive = true;
+      recordResumeEvent({
+        view: "Board",
+        trigger: "route-inactive",
+        projectId,
+        replayAttempted: false,
+      });
+    };
+  }, [projectId]);
 
   const handleToggleArchivedCollapse = useCallback(() => {
     setArchivedCollapsed((current) => {

@@ -1015,6 +1015,7 @@ describe("TaskExecutor worktree recovery", () => {
   });
 
   it("fails after 3 unsuccessful attempts with detailed error", async () => {
+    vi.useRealTimers();
     const store = createMockStore();
 
     // All worktree add calls fail
@@ -1039,10 +1040,7 @@ describe("TaskExecutor worktree recovery", () => {
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
 
-    const executePromise = executor.execute(makeTask());
-    // Advance past all retry delays (100 + 500 + 1000ms)
-    await vi.advanceTimersByTimeAsync(2000);
-    await executePromise;
+    await executor.execute(makeTask());
 
     // Should log final failure
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -1513,7 +1511,7 @@ describe("TaskExecutor worktree recovery", () => {
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
     const executePromise = executor.execute(makeTask());
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(5000);
     await executePromise;
 
     expect(worktreeAddCallCount).toBe(3);
@@ -1530,6 +1528,7 @@ describe("TaskExecutor worktree recovery", () => {
   });
 
   it("fails task when all stale reference cleanup steps fail", async () => {
+    vi.useRealTimers();
     const store = createMockStore();
 
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
@@ -1556,9 +1555,7 @@ describe("TaskExecutor worktree recovery", () => {
 
     const onError = vi.fn();
     const executor = new TaskExecutor(store, "/tmp/test", { onError });
-    const executePromise = executor.execute(makeTask());
-    await vi.advanceTimersByTimeAsync(2000);
-    await executePromise;
+    await executor.execute(makeTask());
 
     // Should have logged terminal failure for the stale reference
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -1697,9 +1694,14 @@ describe("TaskExecutor worktree recovery", () => {
 
   it("removes existing directory that is not a registered worktree", async () => {
     const store = createMockStore();
+    const fs = await import("node:fs/promises");
+    const staleWorktreePath = "/tmp/test/.worktrees/swift-falcon";
 
     // Directory exists but is not registered
     mockedExistsSync.mockReturnValue(true);
+
+    await fs.mkdir(staleWorktreePath, { recursive: true });
+    await fs.writeFile(`${staleWorktreePath}/marker.txt`, "stale");
 
     // Mock git worktree list to not include our path
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
@@ -1707,20 +1709,18 @@ describe("TaskExecutor worktree recovery", () => {
       if (command.includes("git worktree list")) {
         return Buffer.from("/other/path/.git/worktrees/other\n");
       }
-      if (command.includes("rm -rf")) {
-        return Buffer.from("");
-      }
       return Buffer.from("");
     });
 
     const executor = new TaskExecutor(store, "/tmp/test");
     await executor.execute(makeTask());
 
-    // Should have removed the existing directory
-    expect(mockedExecSync).toHaveBeenCalledWith(
-      expect.stringContaining("rm -rf"),
-      expect.any(Object),
-    );
+    expect(
+      mockedExecSync.mock.calls.some((call) =>
+        typeof call[0] === "string" && call[0].includes("rm -rf"),
+      ),
+    ).toBe(false);
+    await expect(fs.access(staleWorktreePath)).rejects.toThrow();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-050",
       expect.stringContaining("Removing existing directory (not a registered worktree)"),
@@ -1904,7 +1904,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
   });
 
   it("throws original error if cleanup also fails", async () => {
-    vi.useFakeTimers();
+    vi.useRealTimers();
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     const conflictingPath = "/tmp/test/.worktrees/sharp-stone";
@@ -1925,10 +1925,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
       return Buffer.from("");
     });
 
-    const executePromise = executor.execute(makeTask({ id: "FN-065" }));
-    await vi.advanceTimersByTimeAsync(2000);
-    await executePromise;
-    vi.useRealTimers();
+    await executor.execute(makeTask({ id: "FN-065" }));
 
     expect(store.updateTask).toHaveBeenCalledWith("FN-065", {
       status: "failed",

@@ -936,7 +936,11 @@
     padding: var(--space-md);
     padding-left: max(var(--space-md), env(safe-area-inset-left, 0px));
     padding-right: max(var(--space-md), env(safe-area-inset-right, 0px));
-    padding-top: max(var(--space-md), env(safe-area-inset-top, 0px));
+    /* Additive: keep normal top padding AND clear the system status bar.
+       Using max() alone replaced the default padding with the inset, which on
+       Android (edge-to-edge / Chrome viewport-fit=cover) left the brand row
+       sitting under the status bar. */
+    padding-top: calc(var(--space-md) + env(safe-area-inset-top, 0px));
   }
 
   /* Mobile: floating search must respect safe-area-inset to stay on-screen */

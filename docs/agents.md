@@ -527,7 +527,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `budgetConfig` | `AgentBudgetConfig` | — | Token budget governance settings |
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
-Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat intervals globally; per-agent `heartbeatIntervalMs` remains the base interval before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
+Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat timing globally: both the heartbeat interval (`pollIntervalMs`) and unresponsive timeout base (`heartbeatTimeoutMs`) are multiplied. Per-agent `heartbeatIntervalMs`/`heartbeatTimeoutMs` remain base values before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
 
 Project setting `heartbeatScopeDiscipline` defaults to `strict`; set per-agent `runtimeConfig.heartbeatScopeDiscipline` to `strict`, `lite`, or `off` in **Agent Detail → Settings → Heartbeat Settings** to override.
 Project setting `heartbeatPromptTemplate` defaults to `default`; per-agent `runtimeConfig.heartbeatPromptTemplate` overrides it. Role defaults are `executor` → `default`, and coordination roles (`triage`, `reviewer`, `merger`) → `compact`.
@@ -950,6 +950,32 @@ Heartbeat runs now surface both direct-message inbox traffic and recent room act
 5. **Mark as Read**: After successful heartbeat completion, direct inbox messages are marked as read.
 6. **Failed Runs**: If the heartbeat execution fails, inbox messages remain unread for retry on the next run.
 
+### Room Coordination Notices (FN-5425)
+
+Heartbeat prompts may include a **Room Coordination Notices** section after **Room Ambiguity Notices** when both conditions are true:
+
+1. A pending room message contains explicit task-filing intent (for example, "file a task" / "create a task").
+2. The room currently has at least two active agent members.
+
+This notice is advisory prompt-layer routing (not server-side serialization), with two branches:
+
+- **claim**: the agent should post a one-line claim via `fn_post_room_message` first, then call `fn_task_create`, then post the resulting `FN-NNNN` task ID back to the room.
+- **defer-suggested**: a peer claim or task announcement was already seen in recent room history; the agent should **not** call `fn_task_create`, and should instead acknowledge the prior claim/announcement via `fn_post_room_message`.
+
+Deterministic duplicate prevention remains authoritative: FN-4918, FN-4829, FN-5152, and FN-5220 are still the hard intake backstop. The coordination notice reduces upstream duplicate pressure but does not replace those guards.
+
+Each coordination decision emits a run-audit `mutationType` of `room:coordination:branch` with metadata:
+
+- `roomId`
+- `agentId`
+- `branch` (`"claim" | "defer-suggested"`)
+- `memberCount`
+- `intentCue`
+- `priorClaimMessageId`
+- `priorTaskId`
+
+Layering order is intentional: ambiguity guidance renders first, coordination guidance renders second.
+
 ### Message Response Modes
 
 The `messageResponseMode` runtime configuration controls when agents are triggered by incoming messages:
@@ -1185,7 +1211,7 @@ Lifecycle notes:
 
 ### Unresponsive Recovery (FN-3475)
 
-When a tracked agent misses heartbeat for `2 × heartbeatTimeoutMs`, the monitor now performs recovery (not termination):
+When a tracked agent misses heartbeat for `2 × heartbeatTimeoutMs`, the monitor now performs recovery (not termination). The base `heartbeatTimeoutMs` is already multiplier-scaled (`heartbeatMultiplier`) before applying this `× 2` window:
 
 1. Dispose the stuck session and untrack the stale run
 2. `pauseAgent(agentId, { pauseReason: "heartbeat-unresponsive", stopActiveRun: false })`
@@ -1193,6 +1219,7 @@ When a tracked agent misses heartbeat for `2 × heartbeatTimeoutMs`, the monitor
 
 Effects:
 - Agent state transitions `running/active → paused → active`
+- Orphan reconcile uses `3 × heartbeatTimeoutMs` where the timeout is likewise multiplier-scaled first
 - `pauseReason` is set to `heartbeat-unresponsive` during recovery and cleared on resume
 - Assigned tasks are auto-paused with `pausedByAgentId` during pause, then only those same tasks are auto-unpaused on resume
 - Resume triggers one on-demand heartbeat restart only when `runtimeConfig.enabled !== false`
@@ -1452,3 +1479,50 @@ Precedence:
 3. Built-in fallback preset (`unrestricted` / allow-all)
 
 Per-agent rows can inherit project defaults category-by-category.
+
+## Pi extension scope (`packages/cli/src/extension.ts`)
+
+The pi extension ships as part of `@runfusion/fusion` and provides tools + a `/fn` command for chat agents.
+
+**Update when:**
+- CLI commands change (behavior, flags, output)
+- Task store / Agent store API changes
+- New user-facing features chat agents should be able to use
+
+**Don't add tools for engine-internal operations** (move, step updates, logging, merge) — those are owned by the engine's own agents.
+
+The extension has no skills — tool descriptions give the LLM everything it needs.
+
+### `fn_web_fetch`
+
+Lightweight URL read from agent/chat sessions. HTTP GET, follows redirects, extracts readable text (HTML→text and JSON pretty-print), bounded.
+
+Universal baseline: available by default across executor, step-session, reviewer, merger, triage, and heartbeat (including engineer/custom direct-report paths). Gated under the `network_api` action-gate category (FN-4603).
+
+- Defaults: `timeoutMs=30000`, `maxBytes=512000` (500 KB)
+- Blocks private/loopback/link-local hosts (including DNS-resolved) unless explicitly overridden in internal/test contexts
+- Read-only (no JS rendering, no auth flows, no POST/cookie workflows)
+- Use the `agent-browser` skill when JS rendering or interactive navigation is required
+
+## Agent coordination tools summary
+
+Seven coordination tools support spawning, provisioning, discovery, delegation, and direct-report config.
+
+- `spawn_agent` — Parent-task-scoped ephemeral child in its own worktree. Limits via `maxSpawnedAgentsPerParent` (default 5) and `maxSpawnedAgentsGlobal` (default 20). Auto-terminated with parent. Gated under generic `task_agent_mutation` (FN-3973 explicitly excludes it from durable `agentProvisioning` policy).
+- `agent_create` / `agent_delete` — Non-ephemeral provisioning of direct reports. Policy-gated via `projectSettings.agentProvisioning` (`approvalMode`, `trustedRoles`, `trustedAgentIds`, `alwaysApproveDelete`). Tool responses use `details.outcome`: `created` / `deleted` / `pending_approval` / `denied`. Pending requests resolve via `POST /api/approvals/:id/decision`. Audit events: `agent:{create,delete}:{requested,approved,denied}`.
+- `list_agents` — Discovery with `role`/`state`/`includeEphemeral` filters.
+- `delegate_task` — Create + assign task to a specific agent. Implementation tasks require executor-role target unless `override: true`. Cannot target ephemeral agents (use `spawn_agent`).
+- `get_agent_config` / `update_agent_config` — Read/write soul, instructions, heartbeat interval/timeout, max concurrent runs, message response mode. **Authorization**: caller can only act on agents where `target.reportsTo === caller.id`. Cannot operate on ephemeral agents.
+
+## Checkout leasing
+
+- 409 Conflict = ownership contention. Response: `{ error, currentHolder, taskId }`. **Never auto-retry 409.**
+- `HeartbeatMonitor.executeHeartbeat()` validates checkout before work begins; mismatched `checkedOutBy` exits with `reason: "checkout_conflict"`. Heartbeat does not auto-checkout — callers obtain the lease.
+- With `CentralClaimStore` wired, the authoritative owner is the central `taskClaims` row; per-project lease fields mirror it. `MeshLeaseManager.recoverAbandonedLease()` releases central first then local. `reconcileLeaseRow(taskId)` converges divergent state on the next tick (emits `task:auto-recover-lease-*`). Without a claim store, behavior remains single-node per-project.
+
+## Agent runtime config
+
+Per-agent overrides via `runtimeConfig`:
+- **Heartbeat**: `heartbeatIntervalMs`, `heartbeatTimeoutMs`, `maxConcurrentRuns`. Triggered by timer, task assignment, or on-demand (`POST /api/agents/:id/runs`).
+- **Budgets**: per-agent token budget tracking; `HeartbeatMonitor.executeHeartbeat()` skips when `isOverBudget` or `isOverThreshold` (timer triggers). Hard caps pause the agent.
+- **Performance ratings**: 1–5 scale with trend analysis, injected into system prompts.

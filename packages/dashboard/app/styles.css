@@ -3189,6 +3189,16 @@ input[type="range"]:focus-visible {
   }
 }
 
+@media (min-width: 769px) and (max-width: 1024px) {
+  /* Tablet: 6 columns at 1fr collapse to ~130–170px each, which makes
+     task cards stack one word per line. Use a real minimum column width
+     and let the board scroll horizontally instead. */
+  .board {
+    grid-template-columns: repeat(6, minmax(260px, 1fr));
+    overflow-x: auto;
+  }
+}
+
 /* === Mobile Responsive Overrides ===
    Cross-cutting mobile rules only. Component-specific overrides have been
    moved into co-located @media blocks at the bottom of each component's
@@ -3212,6 +3222,19 @@ input[type="range"]:focus-visible {
   html,
   body {
     overflow: hidden;
+    /* Stop Chrome's overscroll/rubber-band on mobile — without this the user
+       can pull the page up to expose empty space above the dashboard. */
+    overscroll-behavior: none;
+  }
+
+  /* Disable pinch-zoom globally on mobile. Android Chrome ignores
+     `user-scalable=no` for a11y, and the kanban board's horizontally-
+     scrollable layout interacts badly with zoom-out (exposes the
+     offscreen-right area). `touch-action` is not inherited — it applies
+     to the target element only — so we have to set `pan-x pan-y`
+     (keep scroll panning, block pinch-zoom) on every element. */
+  * {
+    touch-action: pan-x pan-y;
   }
 
   #root {
@@ -3464,13 +3487,6 @@ input[type="range"]:focus-visible {
 /* === Tablet Responsive Tier (769px–1024px) === */
 /* Cross-cutting tablet rules only. Component-specific tablet overrides
    live in co-located @media blocks in app/components/. */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .board {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    overflow-x: hidden;
-    overflow-y: hidden;
-  }
-}
 
 /* === Badge Base === */
 .badge {

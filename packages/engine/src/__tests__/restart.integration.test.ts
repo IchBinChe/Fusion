@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../worktree-hooks.js", () => ({
   installTaskWorktreeIdentityGuard: vi.fn().mockResolvedValue(undefined),
+  IDENTITY_GUARD_BYPASS_ENV: "FUSION_MERGER_BYPASS_IDENTITY_GUARD",
 }));
 import { AgentSemaphore } from "../concurrency.js";
 
@@ -216,9 +217,14 @@ vi.mock("node:fs", async (importOriginal) => {
     readdirSync: vi.fn().mockReturnValue([]),
   };
 });
-vi.mock("node:fs/promises", () => ({
-  readFile: vi.fn().mockResolvedValue("# Task prompt content"),
-}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn().mockResolvedValue("# Task prompt content"),
+    rm: vi.fn().mockResolvedValue(undefined),
+  };
+});
 vi.mock("@mariozechner/pi-ai", () => ({
   Type: {
     Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),

@@ -193,6 +193,30 @@ describe("TaskStore handoffToReview", () => {
     expect(getAuditEventsByInsertion(task.id).filter((event) => event.mutationType === "task:handoff-invariant-violation")).toHaveLength(0);
   });
 
+  it("clears scheduler-state queued/blockedBy/overlapBlockedBy on handoff to in-review", async () => {
+    // Regression for FN-5434: a task that picked up status='queued' or
+    // overlapBlockedBy while waiting in todo would carry those todo-dispatch
+    // markers into in-review, where the merge gate then refuses to merge it
+    // with "task is marked 'queued'". Handoff must scrub those fields.
+    const task = await createInProgressTask("high");
+    await store.updateTask(task.id, {
+      status: "queued",
+      blockedBy: "FN-OTHER",
+      overlapBlockedBy: "FN-OTHER",
+    });
+
+    const handedOff = await store.handoffToReview(task.id, {
+      ownerAgentId: "agent-1",
+      evidence: { reason: "fn_task_done", runId: "run-1", agentId: "agent-1" },
+      now: "2026-05-19T00:00:00.000Z",
+    });
+
+    expect(handedOff.column).toBe("in-review");
+    expect(handedOff.status).toBeUndefined();
+    expect(handedOff.blockedBy).toBeUndefined();
+    expect(handedOff.overlapBlockedBy).toBeUndefined();
+  });
+
   it("preserves failed status and error details during handoff", async () => {
     const task = await createInProgressTask();
     await store.updateTask(task.id, {

@@ -42,6 +42,7 @@ import { buildSessionSkillContextSync } from "./session-skill-context.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { trimPromptMd, trimTaskDescription, trimTriggeringComments } from "./heartbeat-prompt-trim.js";
 import { detectDeicticReference, extractAntecedentCandidates, renderAmbiguityPromptBlock, scoreReferentConfidence } from "./room-ambiguity.js";
+import { countActiveAgentMembers, decideRoomCoordination, detectTaskFilingIntent, renderRoomCoordinationPromptBlock } from "./room-coordination.js";
 
 const promptSizeLog = createLogger("prompt-size");
 
@@ -227,6 +228,13 @@ function getHeartbeatAgeMs(agent: Agent, now: number = Date.now()): number {
   return Number.isFinite(lastTs) ? Math.max(0, now - lastTs) : Number.NaN;
 }
 
+function resolveHeartbeatMultiplier(rawMultiplier: unknown): number {
+  if (typeof rawMultiplier !== "number" || !Number.isFinite(rawMultiplier) || rawMultiplier <= 0) {
+    return 1;
+  }
+  return rawMultiplier;
+}
+
 async function terminatePersistedHeartbeatRun(
   store: AgentStore,
   agentId: string,
@@ -319,7 +327,7 @@ delegate, and route work to the right place. Think in single-pass interventions,
 Your job:
 1. Check your assigned task context — review its state, blockedBy field, and any new comments.
 2. Do ONE useful coordination action.
-3. Use fn_task_create to spawn follow-up work, fn_task_log to record observations, and fn_task_document_write for durable artifacts.
+3. Use fn_task_create to spawn follow-up work, fn_task_log to record observations, and fn_task_document_write for durable artifacts. Before calling fn_task_create, scan existing open tasks (the board context provided to you, or fn_task_list when in doubt) — if an open task already covers this work, log against it or update it instead of creating a duplicate.
 4. Use fn_list_agents + fn_delegate_task when work should be assigned to a specific capable agent now.
 5. Use fn_get_agent_config and fn_update_agent_config to tune direct reports before delegating recurring work.
 6. Call fn_heartbeat_done when finished with an optional summary of what was accomplished.
@@ -388,11 +396,12 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
    - If the message requires a response, use fn_send_message to reply.
    - When replying, include 'reply_to_message_id' with the original message ID from fn_read_messages output.
    - If the message is informational, acknowledge it by logging with fn_task_log.
-   - If the message requests net-new work, create a follow-up task with fn_task_create.
+   - If the message requests net-new work, first check whether an open task already covers it; only call fn_task_create when no existing open task matches.
    - If ownership is clear and an agent is available, delegate using fn_delegate_task.
 4. If a Pending Room Messages section is present, review it too:
    - Use fn_post_room_message only when the room content is relevant to your role, soul, or identity.
    - If a Room Ambiguity Notices section is present, follow it exactly: echo resolved referents before acting, and under clarification notices do not create tasks.
+   - If a Room Coordination Notices section is present, follow its claim/defer branch exactly: under "claim" post a one-line claim before calling fn_task_create; under "defer-suggested" do NOT call fn_task_create and instead acknowledge the prior claim via fn_post_room_message.
    - Reference room message IDs when replying so humans can trace context.
 5. After processing messages, continue with your normal heartbeat duties.
 
@@ -419,7 +428,7 @@ You are not expected to implement large code changes in no-task mode.
 Your job:
 1. Review your context — check messages, memory, and project state.
 2. Do ONE useful action: analyze, create follow-up tasks, delegate work, or update memory.
-3. Use fn_task_create to spawn follow-up work.
+3. Use fn_task_create to spawn follow-up work — but first scan the board/context for an existing open task covering the same work; do not duplicate.
 4. Use fn_list_agents and fn_delegate_task to coordinate with other agents.
 5. Use fn_get_agent_config and fn_update_agent_config to read/tune direct-report agents for better routing outcomes.
 6. Call fn_heartbeat_done when finished with an optional summary of what was accomplished.
@@ -477,9 +486,9 @@ When you are woken by an incoming message (source includes "wake-on-message"), y
    - If the message requires a response and fn_send_message is available, use fn_send_message to reply.
    - When replying, include 'reply_to_message_id' with the original message ID from fn_read_messages output.
    - If the message is informational, acknowledge it and respond via fn_send_message when appropriate.
-   - If the message requests work, create a follow-up task with fn_task_create.
+   - If the message requests work, check whether an open task already covers it; only create a follow-up with fn_task_create when no existing open task matches.
    - If the request has a clear owner and fn_delegate_task is available, delegate it directly.
-3. If a Pending Room Messages section is present, review it too and use fn_post_room_message only when the room content is relevant to your role or identity; if Room Ambiguity Notices are present, follow their resolve/clarify branch instructions exactly.
+3. If a Pending Room Messages section is present, review it too and use fn_post_room_message only when the room content is relevant to your role or identity; if Room Ambiguity Notices are present, follow their resolve/clarify branch instructions exactly. If a Room Coordination Notices section is present, follow its claim/defer branch exactly: under "claim" post a one-line claim before calling fn_task_create; under "defer-suggested" do NOT call fn_task_create and instead acknowledge the prior claim via fn_post_room_message.
 4. After processing messages, continue with your ambient work.
 
 Example flow:
@@ -511,7 +520,11 @@ export const HEARTBEAT_PROCEDURE_STRICT = `## Heartbeat Procedure (run every tic
    reply_to_message_id when answering. If Pending Room Messages are present,
    review them in the prompt and use fn_post_room_message only when relevant.
    When Room Ambiguity Notices appear, follow the resolve/clarify branch and do
-   not create tasks under clarification notices.
+   not create tasks under clarification notices. If a Room Coordination Notices
+   section is present, follow its claim/defer branch exactly: under "claim" post
+   a one-line claim before calling fn_task_create; under "defer-suggested" do
+   NOT call fn_task_create and instead acknowledge the prior claim via
+   fn_post_room_message.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.
@@ -611,7 +624,11 @@ export const HEARTBEAT_NO_TASK_PROCEDURE_STRICT = `## Heartbeat Procedure (run e
    reply_to_message_id when answering. If Pending Room Messages are present,
    review them in the prompt and use fn_post_room_message only when relevant.
    When Room Ambiguity Notices appear, follow the resolve/clarify branch and do
-   not create tasks under clarification notices.
+   not create tasks under clarification notices. If a Room Coordination Notices
+   section is present, follow its claim/defer branch exactly: under "claim" post
+   a one-line claim before calling fn_task_create; under "defer-suggested" do
+   NOT call fn_task_create and instead acknowledge the prior claim via
+   fn_post_room_message.
 3. **Wake delta** — read the Wake Delta block above. The wake reason is the
    highest-priority change for this heartbeat. If you were woken by a comment
    or a message, acknowledge it before doing anything else.
@@ -812,6 +829,8 @@ export class HeartbeatMonitor {
   private agentStartLocks: Map<string, Promise<unknown>> = new Map();
   private pollInterval: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private cachedHeartbeatMultiplier = 1;
+  private cachedHeartbeatMultiplierAt = 0;
 
   /** Tasks created per agent during heartbeat runs (keyed by agentId) */
   private runCreatedTasks: Map<string, Array<{ id: string; description: string }>> = new Map();
@@ -939,6 +958,86 @@ export class HeartbeatMonitor {
         heartbeatLog.log(
           `[room-ambiguity] agent=${agent.id} run=${runId} room=${entry.room.id} messageId=${message.id} branch=${branch} candidates=${candidates.length}`,
         );
+      }
+    }
+
+    return lines;
+  }
+
+  private async getRoomCoordinationNoticesSection(
+    agent: Agent,
+    runId: string,
+    entries: Array<{ room: ChatRoom; messages: ChatRoomMessage[] }>,
+    audit: ReturnType<typeof createRunAuditor>,
+  ): Promise<string[]> {
+    if (!this.chatStore || entries.length === 0) {
+      return [];
+    }
+
+    const lines: string[] = [];
+
+    for (const entry of entries) {
+      for (const message of entry.messages) {
+        try {
+          const detection = detectTaskFilingIntent(message.content);
+          if (!detection.isTaskFilingIntent) {
+            continue;
+          }
+
+          const members = this.chatStore.listRoomMembers(entry.room.id);
+          if (countActiveAgentMembers(members) < 2) {
+            continue;
+          }
+
+          const roomTimeline = this.chatStore.getRoomMessages(entry.room.id, { limit: 100 });
+          const messageIndex = roomTimeline.findIndex((roomMessage) => roomMessage.id === message.id);
+          if (messageIndex < 0) {
+            continue;
+          }
+          // messageIndex === 0 means no prior messages; coordination correctly defaults to claim.
+          const recentMessages = messageIndex === 0
+            ? []
+            : roomTimeline.slice(Math.max(0, messageIndex - 15), messageIndex);
+
+          const decision = decideRoomCoordination({
+            detection,
+            members,
+            recentMessages,
+            pendingSenderAgentId: message.senderAgentId ?? agent.id,
+          });
+          if (!decision) {
+            continue;
+          }
+
+          if (lines.length === 0) {
+            lines.push("", "Room Coordination Notices:");
+          }
+
+          lines.push(
+            `- [room: ${entry.room.name} (${entry.room.id})] [message: ${message.id}] [branch: ${decision.branch}]`,
+            ...renderRoomCoordinationPromptBlock(decision, message).map((line) => `  - ${line}`),
+          );
+
+          await audit.database({
+            type: "room:coordination:branch",
+            target: message.id,
+            metadata: {
+              roomId: entry.room.id,
+              agentId: agent.id,
+              branch: decision.branch,
+              memberCount: decision.memberCount,
+              intentCue: detection.cues[0] ?? null,
+              priorClaimMessageId: decision.priorClaimMessageId ?? null,
+              priorTaskId: decision.priorTaskId ?? null,
+            },
+          });
+
+          heartbeatLog.log(
+            `[room-coordination] agent=${agent.id} run=${runId} room=${entry.room.id} messageId=${message.id} branch=${decision.branch} members=${decision.memberCount}`,
+          );
+        } catch (err) {
+          heartbeatLog.warn(`Room coordination notice failed for ${message.id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }
 
@@ -1098,6 +1197,8 @@ export class HeartbeatMonitor {
     if (this.messageStore) {
       this.messageStore.setMessageToAgentHook(this.handleMessageToAgent.bind(this));
     }
+    // Warm heartbeat multiplier cache for sync health paths before reconcile.
+    void this.warmHeartbeatMultiplierCache();
     // Reconcile any agents stuck in `state="running"` with no active run.
     // Past versions of governance-skip paths (budget/global-pause) called
     // completeRun with skipStateTransition=true after startRun had already
@@ -2441,6 +2542,8 @@ export class HeartbeatMonitor {
           defaultModelId: heartbeatSessionModels.defaultModelId,
           fallbackProvider: heartbeatSessionModels.fallbackProvider,
           fallbackModelId: heartbeatSessionModels.fallbackModelId,
+          runAuditor: audit,
+          settings: heartbeatModelSettings,
           onText: (delta) => {
             outputLength += delta.length;
             appendStdoutExcerpt(delta);
@@ -2477,6 +2580,12 @@ export class HeartbeatMonitor {
             pendingRoomMessages.truncatedCount,
           );
           const roomAmbiguityNoticesLines = await this.getRoomAmbiguityNoticesSection(
+            agent,
+            run.id,
+            pendingRoomMessages.entries,
+            audit,
+          );
+          const roomCoordinationNoticesLines = await this.getRoomCoordinationNoticesSection(
             agent,
             run.id,
             pendingRoomMessages.entries,
@@ -2668,6 +2777,7 @@ export class HeartbeatMonitor {
               ...pendingMessagesLines,
               ...pendingRoomMessagesLines,
               ...roomAmbiguityNoticesLines,
+              ...roomCoordinationNoticesLines,
               "",
               "Your soul, instructions, and memory are already loaded in the system prompt.",
               "Focus on work that benefits the project without requiring a specific task context.",
@@ -2756,6 +2866,7 @@ export class HeartbeatMonitor {
               ...pendingMessagesLines,
               ...pendingRoomMessagesLines,
               ...roomAmbiguityNoticesLines,
+              ...roomCoordinationNoticesLines,
               ...(reportsHealthSection ? ["", reportsHealthSection] : []),
               "",
               "Run the Heartbeat Procedure above. Call fn_heartbeat_done when finished.",
@@ -3114,10 +3225,14 @@ export class HeartbeatMonitor {
   ): ToolDefinition[] {
     const tools: ToolDefinition[] = [];
 
-    // Wrap createTaskCreateTool with tracking and agent-link logging
+    // Wrap createTaskCreateTool with tracking and agent-link logging.
+    // Stamp the parent task ID so sibling tasks spawned from the same parent
+    // can be deduped even if the AI rewrites their titles during triage.
     const baseCreateTool = createTaskCreateTool(taskStore, {
       sourceType: "agent_heartbeat",
       sourceAgentId: agentId,
+      sourceRunId: runContext?.runId,
+      sourceParentTaskId: taskId,
     }, { rootDir: this.rootDir });
     const trackedCreateTool: ToolDefinition = {
       ...baseCreateTool,
@@ -3235,7 +3350,24 @@ export class HeartbeatMonitor {
       heartbeatLog.warn(`getAgentConfig(${agentId}) agent lookup failed: ${agentLookupErr instanceof Error ? agentLookupErr.message : String(agentLookupErr)} — using monitor defaults`);
     }
 
+    // Sync health checks (isAgentHealthy / orphan reconcile / reports-health)
+    // are best-effort and use the most recent async-loaded multiplier cache.
+    const multiplier = this.cachedHeartbeatMultiplierAt > 0 ? this.cachedHeartbeatMultiplier : 1;
+    result.pollIntervalMs = Math.max(1000, Math.round(result.pollIntervalMs * multiplier));
+    result.heartbeatTimeoutMs = Math.max(5000, Math.round(result.heartbeatTimeoutMs * multiplier));
+
     return result;
+  }
+
+  private async warmHeartbeatMultiplierCache(): Promise<void> {
+    if (!this.taskStore) return;
+    try {
+      const settings = await getHeartbeatMemorySettings(this.taskStore);
+      this.cachedHeartbeatMultiplier = resolveHeartbeatMultiplier(settings?.heartbeatMultiplier);
+      this.cachedHeartbeatMultiplierAt = Date.now();
+    } catch {
+      // Keep existing cache value on warm failures.
+    }
   }
 
   private async getAgentConfig(agentId: string): Promise<ResolvedHeartbeatConfig> {
@@ -3247,13 +3379,12 @@ export class HeartbeatMonitor {
 
     try {
       const settings = await getHeartbeatMemorySettings(this.taskStore);
-      const rawMultiplier = settings?.heartbeatMultiplier;
-      const multiplier =
-        typeof rawMultiplier === "number" && Number.isFinite(rawMultiplier) && rawMultiplier > 0
-          ? rawMultiplier
-          : 1;
+      const multiplier = resolveHeartbeatMultiplier(settings?.heartbeatMultiplier);
+      this.cachedHeartbeatMultiplier = multiplier;
+      this.cachedHeartbeatMultiplierAt = Date.now();
 
       result.pollIntervalMs = Math.max(1000, Math.round(result.pollIntervalMs * multiplier));
+      result.heartbeatTimeoutMs = Math.max(5000, Math.round(result.heartbeatTimeoutMs * multiplier));
     } catch (settingsErr) {
       heartbeatLog.warn(`getAgentConfig(${agentId}) settings lookup failed: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)} — using base interval`);
     }
@@ -3739,10 +3870,7 @@ export class HeartbeatTriggerScheduler {
   }
 
   private static resolveHeartbeatMultiplier(rawMultiplier: unknown): number {
-    if (typeof rawMultiplier !== "number" || !Number.isFinite(rawMultiplier) || rawMultiplier <= 0) {
-      return 1;
-    }
-    return rawMultiplier;
+    return resolveHeartbeatMultiplier(rawMultiplier);
   }
 
   /**

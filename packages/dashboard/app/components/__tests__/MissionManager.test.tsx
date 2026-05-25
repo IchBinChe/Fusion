@@ -716,7 +716,7 @@ function mockViewport(mode: "mobile" | "desktop" | "tablet") {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => {
-      const isMobileQuery = query === "(max-width: 768px)";
+      const isMobileQuery = query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)";
       const isTabletQuery = query === "(min-width: 769px) and (max-width: 1024px)";
       return {
         matches: mode === "mobile" ? isMobileQuery : mode === "tablet" ? isTabletQuery : false,

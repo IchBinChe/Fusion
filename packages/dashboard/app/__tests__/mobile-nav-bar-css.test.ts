@@ -11,7 +11,7 @@ function extractRuleBlock(css: string, selector: string): string {
 
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match;
 
   while ((match = regex.exec(content)) !== null) {
@@ -40,14 +40,14 @@ describe("mobile-nav-bar.css", () => {
   it("tab bar has fixed position", () => {
     const block = extractRuleBlock(cssContent, ".mobile-nav-bar");
     expect(block).toContain("position: fixed");
-    expect(block).toContain("bottom: 0");
+    expect(block).toContain("bottom: var(--icb-bottom-offset, 0px)");
   });
 
   it("tab bar display toggles in mobile media query", () => {
     const block = extractRuleBlock(cssContent, ".mobile-nav-bar");
     expect(block).toContain("display: none");
     expect(cssContent).toContain("@media (max-width: 768px)");
-    expect(cssContent).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.mobile-nav-bar\s*\{[\s\S]*?display:\s*flex[;\s]/);
+    expect(cssContent).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.mobile-nav-bar\s*\{[\s\S]*?display:\s*flex[;\s]/);
   });
 
   it("tab touch targets are at least 36px", () => {
@@ -60,14 +60,14 @@ describe("mobile-nav-bar.css", () => {
     // Nav bar stays at bottom: 0 (no longer shifts up)
     // ExecutorStatusBar is positioned above via its own bottom offset
     expect(mobileMediaBlock).toContain(".mobile-nav-bar--with-footer");
-    expect(mobileMediaBlock).toContain("bottom: 0");
+    expect(mobileMediaBlock).toContain("bottom: var(--icb-bottom-offset, 0px)");
   });
 
   it("executor status bar has bottom offset above nav bar on mobile", () => {
     // ExecutorStatusBar mobile override positions it above the mobile nav bar
     // and includes safe-area + standalone token spacing in scoped rule.
     expect(mobileMediaBlock).toMatch(
-      /\.executor-status-bar\s*\{[^}]*bottom:\s*calc\(var\(--mobile-nav-height\)\s*\+\s*env\(safe-area-inset-bottom,\s*0px\)\s*\+\s*var\(--standalone-bottom-gap\)\)/,
+      /\.executor-status-bar\s*\{[^}]*bottom:[^}]*var\(--mobile-nav-height\)/,
     );
   });
 

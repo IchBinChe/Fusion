@@ -496,6 +496,119 @@ describe("Scheduler", () => {
       expect(store.on).toHaveBeenCalledWith("task:moved", expect.any(Function));
     });
 
+    it("FN-5496: task:deleted immediately unblocks dependents in same tick", async () => {
+      const deleted = createMockTask({ id: "FN-DEL", column: "todo" });
+      const dependent = createMockTask({ id: "FN-DEP", column: "todo", blockedBy: "FN-DEL", dependencies: ["FN-DEL"] });
+      const tasks = [dependent];
+      const listTasks = vi.fn(async (options?: { column?: string; includeArchived?: boolean }) => {
+        if (options?.column === "todo") return tasks.filter((task) => task.column === "todo");
+        if (options?.column === "in-progress") return tasks.filter((task) => task.column === "in-progress");
+        return tasks;
+      });
+
+      const store = createMockStore({
+        listTasks,
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, globalPause: false, enginePaused: false }),
+      });
+
+      new Scheduler(store);
+      const deletedHandler = (store.on as any).mock.calls.find((call: any) => call[0] === "task:deleted")?.[1];
+      deletedHandler(deleted);
+      await flushAsyncWork();
+
+      expect(store.updateTask).toHaveBeenCalledWith("FN-DEP", { blockedBy: null, status: null });
+      expect(store.logEntry).toHaveBeenCalledWith("FN-DEP", "Auto-unblocked (FN-5496): blocker FN-DEL was soft-deleted");
+    });
+
+    it("FN-5496: task:deleted clears blockedBy but preserves status for in-progress dependents", async () => {
+      const deleted = createMockTask({ id: "FN-DEL", column: "todo" });
+      const dependent = createMockTask({
+        id: "FN-DEP",
+        column: "in-progress",
+        blockedBy: "FN-DEL",
+        status: "running",
+        dependencies: ["FN-DEL"],
+      });
+      const tasks = [dependent];
+      const listTasks = vi.fn(async (options?: { column?: string; includeArchived?: boolean }) => {
+        if (options?.column === "todo") return tasks.filter((task) => task.column === "todo");
+        if (options?.column === "in-progress") return tasks.filter((task) => task.column === "in-progress");
+        return tasks;
+      });
+
+      const store = createMockStore({
+        listTasks,
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, globalPause: false, enginePaused: false }),
+      });
+
+      new Scheduler(store);
+      const deletedHandler = (store.on as any).mock.calls.find((call: any) => call[0] === "task:deleted")?.[1];
+      deletedHandler(deleted);
+      await flushAsyncWork();
+
+      expect(store.updateTask).toHaveBeenCalledWith("FN-DEP", { blockedBy: null });
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-DEP", expect.objectContaining({ status: null }));
+      expect(store.logEntry).toHaveBeenCalledWith("FN-DEP", "Auto-unblocked (FN-5496): blocker FN-DEL was soft-deleted");
+    });
+
+    it("FN-5496: task:deleted repoints blockedBy when another dependency remains unresolved", async () => {
+      const deleted = createMockTask({ id: "FN-DEL", column: "todo" });
+      const live = createMockTask({ id: "FN-LIVE", column: "in-progress" });
+      const dependent = createMockTask({
+        id: "FN-DEP",
+        column: "todo",
+        status: "queued",
+        blockedBy: "FN-DEL",
+        dependencies: ["FN-DEL", "FN-LIVE"],
+      });
+      const tasks = [dependent, live];
+      const listTasks = vi.fn(async (options?: { column?: string; includeArchived?: boolean }) => {
+        if (options?.column === "todo") return tasks.filter((task) => task.column === "todo");
+        if (options?.column === "in-progress") return tasks.filter((task) => task.column === "in-progress");
+        return tasks;
+      });
+
+      const store = createMockStore({
+        listTasks,
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, globalPause: false, enginePaused: false }),
+      });
+
+      new Scheduler(store);
+      const deletedHandler = (store.on as any).mock.calls.find((call: any) => call[0] === "task:deleted")?.[1];
+      deletedHandler(deleted);
+      await flushAsyncWork();
+
+      expect(store.updateTask).toHaveBeenCalledWith("FN-DEP", { blockedBy: "FN-LIVE", status: "queued" });
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-DEP",
+        "Auto-reblocked (FN-5496): unresolved dependency FN-LIVE remains after blocker FN-DEL was soft-deleted",
+      );
+    });
+
+    it("FN-5496: task:deleted reconciliation is skipped when engine is paused", async () => {
+      const deleted = createMockTask({ id: "FN-DEL", column: "todo" });
+      const dependent = createMockTask({ id: "FN-DEP", column: "todo", blockedBy: "FN-DEL", dependencies: ["FN-DEL"] });
+      const tasks = [dependent];
+      const listTasks = vi.fn(async (options?: { column?: string; includeArchived?: boolean }) => {
+        if (options?.column === "todo") return tasks.filter((task) => task.column === "todo");
+        if (options?.column === "in-progress") return tasks.filter((task) => task.column === "in-progress");
+        return tasks;
+      });
+
+      const store = createMockStore({
+        listTasks,
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, globalPause: false, enginePaused: true }),
+      });
+
+      new Scheduler(store);
+      const deletedHandler = (store.on as any).mock.calls.find((call: any) => call[0] === "task:deleted")?.[1];
+      deletedHandler(deleted);
+      await flushAsyncWork();
+
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.logEntry).not.toHaveBeenCalled();
+    });
+
     it("triggers scheduling immediately when task:moved to done event fires", async () => {
       // Mock filesystem validation so schedule() can proceed
       vi.mocked(existsSync).mockReturnValue(true);

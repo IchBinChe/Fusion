@@ -2111,6 +2111,27 @@ describe("Mission API", () => {
       expect(res.body.error).toContain("missionTitle");
     });
 
+    it("accepts long missionTitle values on interview start", async () => {
+      const interviewSpy = vi
+        .spyOn(missionInterviewModule, "createMissionInterviewSession")
+        .mockResolvedValueOnce({
+          sessionId: "session-long-title",
+          interview: { missionDraft: { title: "x".repeat(5000) } },
+          state: "active",
+        } as any);
+
+      const { app } = buildApp();
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions/interview/start",
+        JSON.stringify({ missionTitle: "x".repeat(5000) }),
+        { "content-type": "application/json" }
+      );
+      expect(res.status).not.toBe(400);
+      expect(interviewSpy).toHaveBeenCalled();
+    });
+
     it("should return 400 when sessionId is missing on interview respond", async () => {
       const { app } = buildApp();
       const res = await request(

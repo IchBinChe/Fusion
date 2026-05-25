@@ -968,9 +968,9 @@ describe("WorkflowResultsTab", () => {
       expect(baseCss).toMatch(/\.phase-badge\s*\{[^}]*font-size:\s*calc\(var\(--space-sm\) \+ var\(--space-xs\) \* 0\.75\);/);
       expect(baseCss).toMatch(/\.workflow-result-output-header\s*\{[^}]*flex-wrap:\s*wrap;/);
       expect(baseCss).toMatch(/\.workflow-result-output-preview\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere;/);
-      expect(allCss).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-result-output-preview\s*\{[^}]*flex-basis:\s*100%;[^}]*order:\s*3;/);
+      expect(allCss).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-result-output-preview\s*\{[^}]*flex-basis:\s*100%;[^}]*order:\s*3;/);
       expect(baseCss).toMatch(/\.workflow-result-mode-toggle\s*\{[^}]*margin-left:\s*auto;[^}]*flex-shrink:\s*0;/);
-      expect(allCss).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-result-mode-toggle\s*\{[^}]*margin-left:\s*0;[^}]*min-width:\s*calc\(var\(--space-lg\) \* 2 \+ var\(--space-xs\)\);[^}]*min-height:\s*calc\(var\(--space-lg\) \* 2 \+ var\(--space-xs\)\);/);
+      expect(allCss).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-result-mode-toggle\s*\{[^}]*margin-left:\s*0;[^}]*min-width:\s*calc\(var\(--space-lg\) \* 2 \+ var\(--space-xs\)\);[^}]*min-height:\s*calc\(var\(--space-lg\) \* 2 \+ var\(--space-xs\)\);/);
     });
 
 
@@ -987,32 +987,32 @@ describe("WorkflowResultsTab", () => {
     it("allows workflow modal controls to wrap on mobile so the close button stays visible", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-controls\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/);
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-configured-header \.workflow-results-edit-toggle\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*center;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-output-modal-controls\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-configured-header \.workflow-results-edit-toggle\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*center;/);
     });
 
     it("applies fullscreen modal dimensions on mobile", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*border-radius:\s*0;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-output-modal\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*border-radius:\s*0;/);
     });
 
     it("removes mobile modal overlay inset padding", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-overlay\s*\{[^}]*padding:\s*0;/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-output-modal-overlay\s*\{[^}]*padding:\s*0;/);
     });
 
     it("includes safe-area top padding for expanded output modal header on mobile", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-header\s*\{[^}]*padding-top:\s*max\([^;]*env\(safe-area-inset-top/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-output-modal-header\s*\{[^}]*padding-top:\s*max\([^;]*env\(safe-area-inset-top/);
     });
 
     it("includes safe-area bottom padding for expanded output modal body on mobile", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/@media \(max-width: 768px\)\s*\{[\s\S]*?\.workflow-output-modal-body\s*\{[^}]*padding-bottom:\s*calc\([^;]*env\(safe-area-inset-bottom/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-output-modal-body\s*\{[^}]*padding-bottom:\s*calc\([^;]*env\(safe-area-inset-bottom/);
     });
   });
 

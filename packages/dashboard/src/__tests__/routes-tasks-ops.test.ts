@@ -153,7 +153,7 @@ vi.mock("@fusion/engine", async () => {
   });
 });
 
-import { AgentStore, Database, RoutineStore, TaskStore as CoreTaskStore, isGhAvailable, isGhAuthenticated } from "@fusion/core";
+import { AgentStore, Database, RoutineStore, TaskStore as CoreTaskStore, buildManualRetryResetPatch, isGhAvailable, isGhAuthenticated } from "@fusion/core";
 import { createFnAgent } from "@fusion/engine";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
@@ -341,9 +341,7 @@ describe("POST /tasks/:id/retry", () => {
       branch: null,
       baseBranch: null,
       baseCommitSha: null,
-      stuckKillCount: 0,
-      recoveryRetryCount: null,
-      nextRecoveryAt: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
@@ -379,9 +377,7 @@ describe("POST /tasks/:id/retry", () => {
       branch: null,
       baseBranch: null,
       baseCommitSha: null,
-      stuckKillCount: 0,
-      recoveryRetryCount: null,
-      nextRecoveryAt: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
@@ -405,9 +401,7 @@ describe("POST /tasks/:id/retry", () => {
       branch: null,
       baseBranch: null,
       baseCommitSha: null,
-      stuckKillCount: 0,
-      recoveryRetryCount: null,
-      nextRecoveryAt: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
     expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (stuck kill budget reset)");
@@ -434,7 +428,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
+      ...buildManualRetryResetPatch(),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -465,7 +459,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
+      ...buildManualRetryResetPatch(),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -500,8 +494,8 @@ describe("POST /tasks/:id/retry", () => {
     expect(updateCall).not.toHaveProperty("branch");
     expect(updateCall).not.toHaveProperty("baseBranch");
     expect(updateCall).not.toHaveProperty("baseCommitSha");
-    expect(updateCall).not.toHaveProperty("recoveryRetryCount");
-    expect(updateCall).not.toHaveProperty("nextRecoveryAt");
+    expect(updateCall.recoveryRetryCount).toBe(0);
+    expect(updateCall.nextRecoveryAt).toBeNull();
   });
 
   it("retries execution-failed in-review task by moving to todo with progress preserved", async () => {
@@ -528,7 +522,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
+      ...buildManualRetryResetPatch(),
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -561,8 +555,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      mergeRetries: 0,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -592,8 +585,7 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
-      stuckKillCount: 0,
-      mergeRetries: 0,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
     });
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -672,9 +664,7 @@ describe("POST /tasks/:id/retry", () => {
         branch: null,
         baseBranch: null,
         baseCommitSha: null,
-        stuckKillCount: 0,
-        recoveryRetryCount: null,
-        nextRecoveryAt: null,
+        ...buildManualRetryResetPatch({ resetMergeRetries: true }),
       });
       expect(store.moveTask).not.toHaveBeenCalled();
       expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
@@ -1088,7 +1078,7 @@ describe("POST /tasks/:id/reset", () => {
       checkoutLeaseRenewedAt: null,
       checkoutLeaseEpoch: null,
       executionStartedAt: null,
-      taskDoneRetryCount: null,
+      taskDoneRetryCount: 0,
       worktreeSessionRetryCount: null,
       sessionFile: null,
     };
@@ -1168,6 +1158,7 @@ describe("DELETE /tasks/:id", () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("KB-001");
     expect(store.deleteTask).toHaveBeenCalledWith("KB-001", expect.objectContaining({
+      allowResurrection: false,
       removeDependencyReferences: false,
       removeLineageReferences: false,
       githubIssueAction: undefined,
@@ -1230,6 +1221,20 @@ describe("DELETE /tasks/:id", () => {
         agentId: "system",
         runId: expect.stringMatching(/^synthetic-dashboard-delete-KB-001-/),
       }),
+    }));
+  });
+
+  it("passes allowResurrection when explicitly requested", async () => {
+    const deletedTask = { ...FAKE_TASK_DETAIL, id: "KB-001" };
+    (store.deleteTask as ReturnType<typeof vi.fn>).mockResolvedValue(deletedTask);
+
+    const res = await REQUEST(buildApp(), "DELETE", "/api/tasks/KB-001?allowResurrection=true");
+
+    expect(res.status).toBe(200);
+    expect(store.deleteTask).toHaveBeenCalledWith("KB-001", expect.objectContaining({
+      allowResurrection: true,
+      removeDependencyReferences: false,
+      removeLineageReferences: false,
     }));
   });
 
@@ -1925,6 +1930,75 @@ describe("PATCH /tasks/:id", () => {
       dependencies: ["FN-002"],
     });
     expect(res.body.dependencies).toEqual(["FN-002"]);
+  });
+
+  it("clears overlapBlockedBy when null is provided", async () => {
+    const updatedTask = { ...FAKE_TASK_DETAIL, overlapBlockedBy: undefined };
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({ overlapBlockedBy: null }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      overlapBlockedBy: null,
+    });
+  });
+
+  it("clears status when null is provided", async () => {
+    const updatedTask = { ...FAKE_TASK_DETAIL, status: undefined };
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({ status: null }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: null,
+    });
+  });
+
+  it("accepts overlapBlockedBy clear and status clear together", async () => {
+    const updatedTask = { ...FAKE_TASK_DETAIL, overlapBlockedBy: undefined, status: undefined };
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "PATCH",
+      "/api/tasks/KB-001",
+      JSON.stringify({ overlapBlockedBy: null, status: null }),
+      {
+        "Content-Type": "application/json",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      overlapBlockedBy: null,
+      status: null,
+    });
+  });
+
+  it("rejects non-null status values", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({ status: "queued" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("status may only be cleared via this endpoint (must be null)");
+    expect(store.updateTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-string non-null overlapBlockedBy values", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({ overlapBlockedBy: 123 }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("overlapBlockedBy must be a string or null");
+    expect(store.updateTask).not.toHaveBeenCalled();
   });
 
   it("forwards priority to store.updateTask without changing task column", async () => {

@@ -165,7 +165,7 @@ describe("CustomModelDropdown", () => {
     vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(667);
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-      matches: query === "(max-width: 640px)" || query === "(max-width: 768px)",
+      matches: query === "(max-width: 640px)" || query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
       media: query,
       onchange: null,
       addListener: vi.fn(),
@@ -708,7 +708,7 @@ describe("CustomModelDropdown", () => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
       vi.spyOn(window, "innerHeight", "get").mockReturnValue(812);
       vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)",
+        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
         media: query,
         onchange: null,
         addListener: vi.fn(),
@@ -781,7 +781,7 @@ describe("CustomModelDropdown", () => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
       vi.spyOn(window, "innerHeight", "get").mockReturnValue(667);
       vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)",
+        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
         media: query,
         onchange: null,
         addListener: vi.fn(),
@@ -862,7 +862,7 @@ describe("CustomModelDropdown", () => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(320);
       vi.spyOn(window, "innerHeight", "get").mockReturnValue(568);
       vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)",
+        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
         media: query,
         onchange: null,
         addListener: vi.fn(),
@@ -924,7 +924,7 @@ describe("CustomModelDropdown", () => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
       vi.spyOn(window, "innerHeight", "get").mockReturnValue(667);
       vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)",
+        matches: query === "(max-width: 640px)" || query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
         media: query,
         onchange: null,
         addListener: vi.fn(),

@@ -163,7 +163,7 @@ describe("AgentMentionPopup", () => {
     const css = await loadAllAppCss();
 
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*768px\)\s*\{\s*\.agent-mention-popup\s*\{[^}]*\}\s*\.agent-mention-popup--below,\s*\.agent-mention-popup--above\s*\{[^}]*bottom:\s*calc\(100%\s*\+\s*var\(--space-xs\)\);[^}]*top:\s*auto;[^}]*\}/,
+      /@media[^{]*\(max-width:\s*768px\)[^{]*\{\s*\.agent-mention-popup\s*\{[^}]*\}\s*\.agent-mention-popup--below,\s*\.agent-mention-popup--above\s*\{[^}]*bottom:\s*calc\(100%\s*\+\s*var\(--space-xs\)\);[^}]*top:\s*auto;[^}]*\}/,
     );
   });
 

@@ -14,6 +14,7 @@ import {
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import { getScopedItem, setScopedItem, removeScopedItem } from "../utils/projectStorage";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 import type { Agent, ChatInFlightGenerationState, ChatMessage } from "@fusion/core";
 
 const ACTIVE_SESSION_STORAGE_KEY = "kb-chat-active-session";
@@ -323,6 +324,13 @@ export function useChat(
 
   // Detect project changes and invalidate SSE context
   if (previousProjectIdRef.current !== projectId) {
+    recordResumeEvent({
+      view: "useChat",
+      trigger: "project-context-change",
+      projectId,
+      replayAttempted: false,
+      detail: { previousProjectId: previousProjectIdRef.current ?? null },
+    });
     previousProjectIdRef.current = projectId;
     projectContextVersionRef.current++;
   }
@@ -555,6 +563,14 @@ export function useChat(
       },
     });
 
+    recordResumeEvent({
+      view: "useChat",
+      trigger: "sse-open",
+      projectId,
+      replayAttempted: typeof inFlightGeneration?.replayFromEventId === "number",
+      replayFromEventId: inFlightGeneration?.replayFromEventId ?? null,
+      lastEventId: inFlightGeneration?.replayFromEventId ?? null,
+    });
     const stream = attachChatStream(sessionId, handlers, projectId, {
       ...(typeof inFlightGeneration?.replayFromEventId === "number"
         ? { lastEventId: inFlightGeneration.replayFromEventId }

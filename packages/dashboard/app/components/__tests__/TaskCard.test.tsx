@@ -1,6 +1,9 @@
+import React from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { TaskCard, formatElapsedDurationDone, __test_areTaskCardPropsEqual } from "../TaskCard";
+import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
+import { useOverlayDismiss } from "../../hooks/useOverlayDismiss";
 import type { ConfirmOptions } from "../../hooks/useConfirm";
 import type { Task } from "@fusion/core";
 
@@ -2977,7 +2980,7 @@ describe("TaskCard", () => {
     expect(baseCss).toMatch(/\.card-github-badge\s*\{[^}]*font-family:\s*var\(--font-mono\);[^}]*\}/);
 
     const fullCss = loadAllAppCss();
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-github-badge\s*\{[^}]*font-size:\s*0\.625rem;[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-github-badge\s*\{[^}]*font-size:\s*0\.625rem;[^}]*\}/);
   });
 
   it("FN-4525 defines shared card-chip height tokens and applies them to badges and chips", () => {
@@ -2991,8 +2994,8 @@ describe("TaskCard", () => {
   it("FN-4525 applies shared mobile card-chip height token to badges and chips", () => {
     const fullCss = loadAllAppCss();
 
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-github-badge\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-time-indicator\s*,\s*\.card-github-tracking-chip\s*,\s*\.card-retry-badge\s*,\s*\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-github-badge\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-time-indicator\s*,\s*\.card-github-tracking-chip\s*,\s*\.card-retry-badge\s*,\s*\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
   });
 
   it("keeps Create PR action on shared chip height tokens", () => {
@@ -3000,7 +3003,7 @@ describe("TaskCard", () => {
     const fullCss = loadAllAppCss();
 
     expect(baseCss).toMatch(/\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height\);[^}]*\}/);
-    expect(fullCss).toMatch(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
+    expect(fullCss).toMatch(/@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-create-pr-action\s*\{[^}]*height:\s*var\(--card-chip-height-mobile\);[^}]*\}/);
   });
 
   it("FN-4511 keeps GitHub badge and timer chip geometry in parity", () => {
@@ -3976,6 +3979,126 @@ describe("TaskCard mission badge", () => {
       expect(badge?.textContent).toContain("Auth Fix");
       expect(badge?.textContent).not.toContain("...");
     });
+  });
+});
+
+describe("TaskCard Android tap regression", () => {
+  function AndroidTapHarness({
+    task,
+    onOpenDetail,
+    onOpenDetailWithTab,
+    onClose,
+  }: {
+    task: Task;
+    onOpenDetail: (task: Task) => void;
+    onOpenDetailWithTab: (task: Task, tab: "changes") => void;
+    onClose: () => void;
+  }) {
+    const [isOpen, setIsOpen] = React.useState(false);
+    const nav = useNavigationHistory({ enabled: true });
+    const overlayDismiss = useOverlayDismiss(() => {
+      onClose();
+      setIsOpen(false);
+    });
+
+    return (
+      <NavigationHistoryProvider value={nav}>
+        <TaskCard
+          task={task}
+          onOpenDetail={(nextTask) => {
+            onOpenDetail(nextTask as Task);
+            setIsOpen(true);
+            nav.pushNav({
+              type: "modal",
+              close: () => {
+                onClose();
+                setIsOpen(false);
+              },
+            });
+          }}
+          onOpenDetailWithTab={onOpenDetailWithTab}
+          addToast={noop}
+        />
+        {isOpen && (
+          <div className="modal-overlay" data-testid="android-modal-overlay" {...overlayDismiss}>
+            <div className="modal-content">detail</div>
+          </div>
+        )}
+      </NavigationHistoryProvider>
+    );
+  }
+
+  it("keeps modal open after Android compatibility mouse sequence and supports popstate close", () => {
+    const onOpenDetail = vi.fn();
+    const onOpenDetailWithTab = vi.fn();
+    const onClose = vi.fn();
+    const pushStateSpy = vi.spyOn(window.history, "pushState");
+
+    render(
+      <AndroidTapHarness
+        task={makeTask({ column: "todo", status: undefined, mergeDetails: { landedFiles: ["a.ts"] } } as any)}
+        onOpenDetail={onOpenDetail}
+        onOpenDetailWithTab={onOpenDetailWithTab}
+        onClose={onClose}
+      />,
+    );
+
+    const card = document.querySelector(".card") as HTMLElement;
+    fireEvent.touchStart(card, {
+      touches: [{ clientX: 20, clientY: 20 }],
+      changedTouches: [{ clientX: 20, clientY: 20 }],
+    });
+    fireEvent.touchEnd(card, {
+      touches: [],
+      changedTouches: [{ clientX: 20, clientY: 20 }],
+    });
+
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+
+    const overlay = screen.getByTestId("android-modal-overlay");
+    fireEvent.mouseDown(overlay);
+    fireEvent.mouseUp(overlay);
+    expect(onClose).toHaveBeenCalledTimes(0);
+
+    window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps files-changed chip touch path opening changes tab once", () => {
+    const onOpenDetail = vi.fn();
+    const onOpenDetailWithTab = vi.fn();
+    const onClose = vi.fn();
+    const task = makeTask({
+      column: "done",
+      status: undefined,
+      mergeDetails: { landedFiles: ["a.ts", "b.ts"] },
+    } as any);
+
+    render(
+      <AndroidTapHarness
+        task={task}
+        onOpenDetail={onOpenDetail}
+        onOpenDetailWithTab={onOpenDetailWithTab as any}
+        onClose={onClose}
+      />,
+    );
+
+    const filesChip = screen.getByRole("button", { name: "2 files changed" });
+    fireEvent.touchStart(filesChip, {
+      touches: [{ clientX: 12, clientY: 12 }],
+      changedTouches: [{ clientX: 12, clientY: 12 }],
+    });
+    fireEvent.touchEnd(filesChip, {
+      touches: [],
+      changedTouches: [{ clientX: 12, clientY: 12 }],
+    });
+    fireEvent.click(filesChip);
+
+    expect(onOpenDetailWithTab).toHaveBeenCalledTimes(1);
+    expect(onOpenDetailWithTab).toHaveBeenCalledWith(task, "changes");
+    expect(onOpenDetail).toHaveBeenCalledTimes(0);
+    expect(onClose).toHaveBeenCalledTimes(0);
   });
 });
 

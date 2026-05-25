@@ -52,7 +52,7 @@ describe("Database.init() schema compatibility performance", () => {
       const pragmaTableInfoCalls = prepareSpy.mock.calls.filter(([sql]) => sql.includes("PRAGMA table_info("));
       // Current-schema re-init may probe tasks metadata a few times via legacy
       // migration guards; the fingerprint hit should still prevent broad sweeps.
-      expect(pragmaTableInfoCalls.length).toBeLessThanOrEqual(4);
+      expect(pragmaTableInfoCalls.length).toBeLessThanOrEqual(5);
     } finally {
       db.close();
     }

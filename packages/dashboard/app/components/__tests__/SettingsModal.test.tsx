@@ -396,6 +396,46 @@ describe("SettingsModal", () => {
     expect(payload.mergeIntegrationWorktree).toBe("cwd-main");
   });
 
+  it("does NOT render the warning banner when the integration worktree is reuse-task-worktree (default)", async () => {
+    renderModal({ initialSection: "merge" });
+    await waitForSettingsModalReady();
+
+    expect(screen.queryByTestId("merge-integration-worktree-warning")).toBeNull();
+  });
+
+  it("renders the warning banner when the legacy cwd-main mode is selected", async () => {
+    renderModal({ initialSection: "merge" });
+    await waitForSettingsModalReady();
+
+    await userEvent.selectOptions(screen.getByLabelText("Integration worktree"), "cwd-main");
+
+    const warning = screen.getByTestId("merge-integration-worktree-warning");
+    expect(warning).toBeInTheDocument();
+    expect(warning).toHaveAttribute("role", "alert");
+    expect(warning).toHaveTextContent("Legacy");
+    expect(warning).toHaveTextContent("FN-5348");
+  });
+
+  it("removes the warning banner when switching back to reuse-task-worktree", async () => {
+    mockFetchSettings.mockResolvedValueOnce({
+      ...defaultSettings,
+      mergeIntegrationWorktree: "cwd-main",
+    });
+    mockFetchSettingsByScope.mockResolvedValueOnce({
+      global: { ...defaultSettings, mergeIntegrationWorktree: "cwd-main" },
+      project: {},
+    });
+
+    renderModal({ initialSection: "merge" });
+    await waitForSettingsModalReady();
+
+    expect(screen.getByTestId("merge-integration-worktree-warning")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Integration worktree"), "reuse-task-worktree");
+
+    expect(screen.queryByTestId("merge-integration-worktree-warning")).toBeNull();
+  });
+
   it("persists the legacy sibling branch rename escape hatch in worktree settings", async () => {
     renderModal();
     await waitForSettingsModalReady();
@@ -921,7 +961,7 @@ describe("SettingsModal", () => {
       Object.defineProperty(window, "matchMedia", {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
-          matches: query === "(max-width: 768px)",
+          matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
           media: query,
           onchange: null,
           addEventListener: vi.fn(),
@@ -1032,9 +1072,9 @@ describe("SettingsModal", () => {
       const fetchLimitInput = screen.getByLabelText("Room compaction fetch limit") as HTMLInputElement;
       const summaryMaxInput = screen.getByLabelText("Room summary max characters") as HTMLInputElement;
 
-      expect(recentInput.placeholder).toBe("12");
-      expect(fetchLimitInput.placeholder).toBe("80");
-      expect(summaryMaxInput.placeholder).toBe("1500");
+      expect(recentInput.placeholder).toBe("25");
+      expect(fetchLimitInput.placeholder).toBe("200");
+      expect(summaryMaxInput.placeholder).toBe("3000");
 
       await userEvent.type(recentInput, "7");
       await userEvent.type(fetchLimitInput, "60");
@@ -1890,7 +1930,7 @@ describe("SettingsModal", () => {
       Object.defineProperty(window, "matchMedia", {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
-          matches: query === "(max-width: 768px)" || query === "(pointer: coarse)",
+          matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)" || query === "(pointer: coarse)",
           media: query,
           onchange: null,
           addEventListener: vi.fn(),
@@ -2097,6 +2137,60 @@ describe("SettingsModal", () => {
         expect(mockSaveApiKey).toHaveBeenCalledWith("openai", "sk-test-key");
         expect(scrollToSpy).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
       });
+    });
+
+    it("shows opencode-go refresh success message after API key save", async () => {
+      mockFetchAuthStatus.mockResolvedValue({
+        providers: [{ id: "opencode-go", name: "Opencode (Go)", authenticated: false, type: "api_key" }],
+      });
+      mockSaveApiKey.mockResolvedValueOnce({ success: true, modelsRefreshed: 4 });
+
+      const { container } = renderModal();
+      await waitForSettingsModalReady();
+      const settingsContent = container.querySelector(".settings-content") as HTMLDivElement;
+      Object.defineProperty(settingsContent, "scrollTo", { value: vi.fn(), writable: true });
+
+      const card = screen.getByTestId("auth-provider-icon-opencode-go").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
+      await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+      expect(await within(card).findByText("Refreshed 4 opencode-go models.")).toBeInTheDocument();
+    });
+
+    it("shows opencode-go no-models guidance message", async () => {
+      mockFetchAuthStatus.mockResolvedValue({
+        providers: [{ id: "opencode-go", name: "Opencode (Go)", authenticated: false, type: "api_key" }],
+      });
+      mockSaveApiKey.mockResolvedValueOnce({ success: true, modelsRefreshed: 0, refreshReason: "no-models-from-cli" });
+
+      const { container } = renderModal();
+      await waitForSettingsModalReady();
+      const settingsContent = container.querySelector(".settings-content") as HTMLDivElement;
+      Object.defineProperty(settingsContent, "scrollTo", { value: vi.fn(), writable: true });
+
+      const card = screen.getByTestId("auth-provider-icon-opencode-go").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
+      await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+      expect(await within(card).findByText(/returned no models/i)).toBeInTheDocument();
+    });
+
+    it("shows opencode-go refresh error message", async () => {
+      mockFetchAuthStatus.mockResolvedValue({
+        providers: [{ id: "opencode-go", name: "Opencode (Go)", authenticated: false, type: "api_key" }],
+      });
+      mockSaveApiKey.mockResolvedValueOnce({ success: true, refreshError: "spawn opencode ENOENT" });
+
+      const { container } = renderModal();
+      await waitForSettingsModalReady();
+      const settingsContent = container.querySelector(".settings-content") as HTMLDivElement;
+      Object.defineProperty(settingsContent, "scrollTo", { value: vi.fn(), writable: true });
+
+      const card = screen.getByTestId("auth-provider-icon-opencode-go").closest(".auth-provider-card") as HTMLElement;
+      await userEvent.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
+      await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+
+      expect(await within(card).findByText(/model refresh failed: spawn opencode ENOENT/i)).toBeInTheDocument();
     });
   });
 

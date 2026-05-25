@@ -44,6 +44,9 @@ The process supervisor logs when it registers a supervised child, starts teardow
 - `surface-stale-paused-reviews`
   - Log prefix: `Stale paused review surfaced [stale-paused-review]: paused ...`
   - Purpose: paused in-review backlog-health detector gated by `stalePausedReviewThresholdMs`.
+- FN-5335 backward-move annotations
+  - Log prefix shape: `[<stage-name>] <taskId>: triple-proof not satisfied — no action (operator-decides)`
+  - Representative stage names: `no-progress-no-task-done`, `partial-progress-no-task-done`, `stale-incomplete-review`, `ghost-review`, `missing-worktree-review`, `stuck-merge-deadlock`, `finalize-no-op-review`, `reclaim-pr-conflict`, `reclaim-self-owned-branch-conflict`, `auto-rebound-paused-scope-decay`.
 
 ## No-progress churn stuck-task escalation (`[executor]`, `[stuck-detector]`, `[self-healing]`)
 
@@ -54,6 +57,22 @@ Time-based stuck/stalled/stale surfaces now floor activity timestamps using `set
 - Self-healing diagnostic: `<taskId> no-progress churn detected (ignoredStepUpdates=N, stuckKillStreak=M) — marking failed`.
 - Audit event: `task:stuck-no-progress-churn-terminalized` with `{ taskId, ignoredStepUpdateCount, stuckKillStreak, lastReason: "no-progress-churn" }`.
 - Outcome: task is marked `status: "failed"`, moved to `in-review`, and not requeued; operators should decompose/rescope the task instead of waiting for more automatic stuck-kill retries.
+
+## Stale self-owned active-session cleanup diagnostics (`[executor]`)
+
+FN-5346 adds a same-task stale-binding reconcile marker before worktree removal:
+
+- `[FN-5346] <taskId>: dropped stale self-owned activeSessionRegistry entry before removeWorktree at <worktreePath>`
+- Follow-up task log entry: `Cleared stale self-owned active-session entry before remove`
+
+## Runtime stop diagnostics (`[runtime-stop]`, `[executor]`)
+
+Engine stop now aborts in-flight executor AI sessions before the runtime drain wait.
+
+- Executor summary log: `[executor] abortAllInFlight: aborted N task surface(s) — engine stop`
+- Runtime warning when in-flight work still exists after configured post-abort drain: `[runtime-stop] post-abort drain timeout reached with N tasks still in-flight`
+
+Use these together to distinguish expected immediate session teardown from genuinely stuck cleanup surfaces that outlive the configured `runtimeStopDrainMs` window.
 
 ## Reports health stale-classifier diagnostics (`[reports-health]`)
 
@@ -68,10 +87,34 @@ Direct-report stale decisions in `HeartbeatMonitor.buildReportsHealthSection()` 
 - `heartbeatAgeMs` is the report's current heartbeat age at classification time
 - Healthy reports do not emit this diagnostic; only stale decisions do
 
-## Broad-scope triage intake (`[triage]`)
+## Resume instrumentation (FN-5389, Phase 1)
 
-- Trigger shape: `TriageProcessor.finalizeApprovedTask()` scores the prompt/description against `packages/engine/src/triage-broad-scope-heuristics.ts` and flags advisory decomposition risk when the score reaches `>= 3`.
-- Diagnostic: `[triage] <taskId>: broad-scope flag at triage — score=<n>, reasons=<csv>`.
-- Fail-soft diagnostic: `[triage] <taskId>: broad-scope heuristic failed open: <message>` when the helper throws; the task still proceeds to `todo`.
-- Audit event: `task:broad-scope-flagged-at-triage` with `{ score, reasons, signals, thresholds, version }`.
-- Task log side effect: `Broad-scope triage flag` advising operators to decompose via `fn_task_create` or set `breakIntoSubtasks=true` before execution.
+Dashboard Phase 1 resume instrumentation adds observation-only client/server traces for refetch/reconnect attribution. It does not change visibility/pageshow/SSE behavior; FN-5392 consumes this data for fixes.
+
+- Client event shape (`ResumeEvent`): `{ ts, view, trigger, projectId?, gapMs?, replayAttempted, replayFromEventId?, lastEventId?, sseChannel?, reason?, detail? }`.
+- Trigger taxonomy: `visibility`, `pageshow`, `sse-error`, `sse-reconnect`, `sse-open`, `remount`, `route-active`, `route-inactive`, `project-context-change`.
+- Sources:
+  - `sse-bus` (`pageshow`, visible `visibilitychange`, `openChannel`, `forceReconnect`, EventSource `error`)
+  - Hooks: `useTasks` (`visibility`, `sse-reconnect`), `useChatRooms` (`sse-reconnect`), `useChat` (`sse-open`, `project-context-change`)
+  - Components: `Board` and `ChatView` mount/unmount route markers (`remount` / `route-active` / `route-inactive`)
+- Access paths:
+  - Client ring (500): `window.__fusionDebug.resumeInstrumentation.get()` / `.clear()`
+  - Server ring (5000, in-memory): `GET /api/diagnostics/resume-events?limit=&since=&view=` returns `{ events, droppedSinceLastRead }`
+- Client batching: POST `/api/diagnostics/resume-events` in idle batches (`<=25` per POST).
+- Disable knob: `window.__fusionDebug.resumeInstrumentation.setEnabled(false)`.
+
+FN-5415 extends this coverage across remaining board/data visibility hooks: `useNodes`, `useMeshState`, `useProjects`, and `useManagedDockerNodes`. Each now emits `trigger: "visibility"` with `reason: "debounced-refresh"` when refresh is taken and `reason: "debounce-skipped"` (including `detail.timeSinceLastRefreshMs`) when suppressed by debounce. This completes board/data-hook resume-correlation coverage needed for FN-5392 Phase 2 remediation analysis.
+
+### Phase 3 coverage (FN-5416)
+
+FN-5416 extends resume-correlation coverage to stream-focused hooks and their primary route shells:
+
+- Hooks
+  - `usePrChecksStream`: `remount`, `visibility`
+  - `useDevServerLogs`: `project-context-change`, `sse-open`, `sse-reconnect`
+  - `useResearch`: `sse-open`, `sse-reconnect`
+  - `useBackgroundSessions`: `sse-open`, `sse-reconnect`
+  - `useAgentLogs`: `project-context-change`, `sse-open`, `sse-reconnect` on `/api/tasks/:id/logs/stream`
+- Route shells
+  - `DevServerView`: `remount` / `route-active` / `route-inactive`
+  - `ResearchView`: `remount` / `route-active` / `route-inactive`

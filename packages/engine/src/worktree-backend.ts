@@ -1,13 +1,19 @@
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Settings } from "@fusion/core";
-import { activeSessionRegistry } from "./active-session-registry.js";
+import {
+  activeSessionRegistry,
+  reconcileSelfOwnedActiveSessionForRemoval,
+  type LiveBindingProbe,
+  type ProcessActiveProbe,
+} from "./active-session-registry.js";
 import type { RunAuditor } from "./run-audit.js";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { inspectBranchConflict } from "./branch-conflicts.js";
+import { resolveIntegrationBranch } from "./integration-branch.js";
 import { formatError } from "./logger.js";
 import { installTaskWorktreeIdentityGuard } from "./worktree-hooks.js";
 import { pruneWorktreeAdminEntries } from "./worktree-prune.js";
@@ -189,12 +195,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
           taskAttributionTrailerName: this.deps.settings?.taskAttributionTrailerNames?.[0],
         });
       } catch (error) {
-        await execAsync(`rm -rf ${quoteShellArg(worktreePath)}`, {
-          cwd: input.rootDir,
-          encoding: "utf-8",
-          timeout: REMOVE_TIMEOUT_MS,
-          maxBuffer: MAX_BUFFER,
-        }).catch(() => undefined);
+        await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
         await pruneWorktreeAdminEntries({
           rootDir: input.rootDir,
           auditor: this.deps.audit,
@@ -378,6 +379,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
           conflictingWorktreePath: input.worktreePath,
           requestingTaskId: input.taskId,
           startPoint: input.startPoint,
+          integrationRef: await resolveIntegrationBranch(input.rootDir, undefined),
         });
       } catch (inspectError) {
         this.deps.logger?.warn?.(
@@ -554,12 +556,7 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
         taskId: input.taskId,
       });
     } catch (error) {
-      await execAsync(`rm -rf ${quoteShellArg(resolvedPath)}`, {
-        cwd: input.rootDir,
-        encoding: "utf-8",
-        timeout: REMOVE_TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
-      }).catch(() => undefined);
+      await rm(resolvedPath, { recursive: true, force: true }).catch(() => undefined);
       await pruneWorktreeAdminEntries({
         rootDir: input.rootDir,
         auditor: this.deps.audit,
@@ -643,7 +640,7 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
 
   async sync(input: WorktreeSyncInput): Promise<{ skipped: boolean }> {
     try {
-      const trunk = input.trunk ?? "main";
+      const trunk = input.trunk ?? await resolveIntegrationBranch(input.rootDir, undefined);
       await execAsync(`git fetch origin ${quoteShellArg(trunk)}`, {
         cwd: input.worktreePath,
         encoding: "utf-8",
@@ -776,6 +773,10 @@ export async function removeWorktree(input: {
   audit?: RunAuditor;
   force?: boolean;
   timeout?: number;
+  expectedOwnerTaskId?: string;
+  liveOwnerProbe?: LiveBindingProbe;
+  processActiveProbe?: ProcessActiveProbe;
+  reconcileMinIdleMs?: number;
 }): Promise<void> {
   const logger = {
     log: (_message: string): void => {},
@@ -784,6 +785,26 @@ export async function removeWorktree(input: {
 
   if (input.force === true && !ALLOWED_FORCE_REASONS.has(input.reason)) {
     throw new InvalidForceUsageError(input.reason);
+  }
+
+  if (input.expectedOwnerTaskId && input.liveOwnerProbe) {
+    const reconciled = reconcileSelfOwnedActiveSessionForRemoval(
+      activeSessionRegistry,
+      input.worktreePath,
+      input.expectedOwnerTaskId,
+      input.liveOwnerProbe,
+      {
+        processActiveProbe: input.processActiveProbe,
+        minIdleMs: input.reconcileMinIdleMs,
+      },
+    );
+    if (reconciled.action === "reconciled") {
+      await input.audit?.git({
+        type: "worktree:active-session-reconciled",
+        target: input.worktreePath,
+        metadata: { taskId: input.expectedOwnerTaskId, source: "removeWorktree-defensive" },
+      });
+    }
   }
 
   const active = activeSessionRegistry.lookupByPath(input.worktreePath);

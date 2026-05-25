@@ -12,14 +12,17 @@ import type { SkillSelectionContext } from "./skill-resolver.js";
 import type { PluginRunner } from "./plugin-runner.js";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import {
+  isTestModeActive,
   resolveExecutionSettingsModel,
   resolveTaskExecutionModel,
   resolveTaskPlanningModel,
+  TEST_MODE_RESOLVED,
   type Settings,
 } from "@fusion/core";
 import { resolveRuntime, buildRuntimeResolutionContext, isMockProviderId, type SessionPurpose } from "./runtime-resolution.js";
 import { createLogger } from "./logger.js";
 import { promptWithFallback, describeModel } from "./pi.js";
+import type { RunAuditor } from "./run-audit.js";
 import { MockAgentRuntime } from "./providers/mock-provider.js";
 
 /** Logger for agent session helpers */
@@ -46,6 +49,18 @@ export interface ResolvedSessionOptions extends AgentRuntimeOptions {
   pluginRunner?: PluginRunner;
   /** Optional runtime hint from task/agent configuration */
   runtimeHint?: string;
+  /**
+   * Optional run-audit emitter; when provided, a `session:runtime-resolved`
+   * database event is recorded at resolution time. No-ops when omitted to
+   * preserve backward compatibility for callers that have not yet been wired
+   * through.
+   */
+  runAuditor?: RunAuditor;
+  /**
+   * Optional settings used only to capture `testModeActive` in
+   * `session:runtime-resolved` metadata.
+   */
+  settings?: Settings;
   /**
    * `beforeSpawnSession` and `taskEnv` are inherited from
    * {@link AgentRuntimeOptions}. Both are forwarded verbatim to
@@ -122,6 +137,13 @@ export function resolveExecutorSessionModel(
   settings: Partial<Settings> | undefined,
   assignedAgentRuntimeConfig?: Record<string, unknown>,
 ): { provider: string | undefined; modelId: string | undefined } {
+  if (isTestModeActive(settings)) {
+    return {
+      provider: TEST_MODE_RESOLVED.provider,
+      modelId: TEST_MODE_RESOLVED.modelId,
+    };
+  }
+
   const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
   if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
     return assignedRuntimeModel;
@@ -147,6 +169,13 @@ export function resolvePlanningSessionModel(
   settings: Partial<Settings> | undefined,
   assignedAgentRuntimeConfig?: Record<string, unknown>,
 ): { provider: string | undefined; modelId: string | undefined } {
+  if (isTestModeActive(settings)) {
+    return {
+      provider: TEST_MODE_RESOLVED.provider,
+      modelId: TEST_MODE_RESOLVED.modelId,
+    };
+  }
+
   const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
   if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
     return assignedRuntimeModel;
@@ -175,6 +204,15 @@ export function resolveHeartbeatSessionModels(
   fallbackProvider: string | undefined;
   fallbackModelId: string | undefined;
 } {
+  if (isTestModeActive(settings)) {
+    return {
+      defaultProvider: TEST_MODE_RESOLVED.provider,
+      defaultModelId: TEST_MODE_RESOLVED.modelId,
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    };
+  }
+
   const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
   const executionSettingsModel = resolveExecutionSettingsModel(settings);
 
@@ -197,6 +235,13 @@ export function resolveMergerSessionModel(
   settings: Partial<Settings> | undefined,
   assignedAgentRuntimeConfig?: Record<string, unknown>,
 ): { provider: string | undefined; modelId: string | undefined } {
+  if (isTestModeActive(settings)) {
+    return {
+      provider: TEST_MODE_RESOLVED.provider,
+      modelId: TEST_MODE_RESOLVED.modelId,
+    };
+  }
+
   const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
   if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
     return assignedRuntimeModel;
@@ -229,7 +274,7 @@ export function resolveMergerSessionModel(
 export async function createResolvedAgentSession(
   options: ResolvedSessionOptions,
 ): Promise<ResolvedSessionResult> {
-  const { sessionPurpose, pluginRunner, runtimeHint, ...runtimeOptionsRaw } = options;
+  const { sessionPurpose, pluginRunner, runtimeHint, runAuditor, settings, ...runtimeOptionsRaw } = options;
 
   const skillNamesFromSelection = extractSkillNamesFromSelection(runtimeOptionsRaw.skillSelection);
   const mergedSkillNames = runtimeOptionsRaw.skills && runtimeOptionsRaw.skills.length > 0
@@ -263,6 +308,25 @@ export async function createResolvedAgentSession(
   sessionLog.log(
     `[${sessionPurpose}] Using runtime "${resolved.runtimeId}" (configured=${resolved.wasConfigured})`,
   );
+
+  try {
+    await runAuditor?.database({
+      type: "session:runtime-resolved",
+      target: resolved.runtimeId,
+      metadata: {
+        sessionPurpose,
+        runtimeId: resolved.runtimeId,
+        wasConfigured: resolved.wasConfigured,
+        provider: runtimeOptions.defaultProvider ?? null,
+        modelId: runtimeOptions.defaultModelId ?? null,
+        mockProviderActive: isMockProviderId(runtimeOptions.defaultProvider),
+        testModeActive: settings ? isTestModeActive(settings) : false,
+        ...(runtimeHint ? { runtimeHint } : {}),
+      },
+    });
+  } catch (err) {
+    sessionLog.warn(`[${sessionPurpose}] failed to record session:runtime-resolved audit: ${String(err)}`);
+  }
 
   // Forward `beforeSpawnSession` to the runtime so it fires at the true
   // latest sync point (just before LLM session instantiation) rather than

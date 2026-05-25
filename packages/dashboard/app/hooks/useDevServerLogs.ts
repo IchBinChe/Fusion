@@ -5,6 +5,7 @@ import {
   type DevServerLogHistoryEntry,
 } from "../api";
 import { subscribeSse } from "../sse-bus";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 export interface DevServerLogEntry {
   id: number;
@@ -106,6 +107,13 @@ export function useDevServerLogs(projectId: string | undefined, enabled: boolean
     previousProjectIdRef.current = projectId;
     previousEnabledRef.current = enabled;
     projectContextVersionRef.current++;
+    recordResumeEvent({
+      view: "useDevServerLogs",
+      trigger: "project-context-change",
+      projectId,
+      replayAttempted: false,
+      reason: "context-version-bumped",
+    });
     cancelledRef.current = true;
     lastSeenEventIdRef.current = 0;
     nextSyntheticIdRef.current = 1;
@@ -268,6 +276,15 @@ export function useDevServerLogs(projectId: string | undefined, enabled: boolean
           },
         },
         onReconnect: () => {
+          recordResumeEvent({
+            view: "useDevServerLogs",
+            trigger: "sse-reconnect",
+            projectId,
+            replayAttempted: true,
+            replayFromEventId: lastSeenEventIdRef.current ?? null,
+            sseChannel: streamUrl,
+            reason: "history-replay",
+          });
           if (cancelledRef.current || projectContextVersionRef.current !== contextVersionAtStart) {
             return;
           }
@@ -298,6 +315,13 @@ export function useDevServerLogs(projectId: string | undefined, enabled: boolean
             // Keep stream alive and fail silently.
           });
         },
+      });
+      recordResumeEvent({
+        view: "useDevServerLogs",
+        trigger: "sse-open",
+        projectId,
+        replayAttempted: false,
+        sseChannel: streamUrl,
       });
     }
 

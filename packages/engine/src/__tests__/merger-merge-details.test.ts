@@ -148,6 +148,7 @@ import {
   type ConflictCategory,
 } from "../merger.js";
 import { mergerLog } from "../logger.js";
+import { __resetIntegrationBranchCacheForTests } from "../integration-branch.js";
 import { createFnAgent } from "../pi.js";
 import { execSync, exec } from "node:child_process";
 import * as core from "@fusion/core";
@@ -383,6 +384,38 @@ describe("aiMergeTask — includeTaskIdInCommit setting", () => {
   });
 });
 
+
+describe("aiMergeTask — integration branch resolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetIntegrationBranchCacheForTests();
+    mockedExistsSync.mockReturnValue(true);
+    setupHappyPathExecSync();
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      },
+    } as any);
+  });
+
+  it("threads settings.baseBranch into merge target branch", async () => {
+    const store = createMockStore(
+      { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
+      [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
+    );
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      baseBranch: "trunk",
+    });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    const commands = mockedExecSync.mock.calls.map(([cmd]) => String(cmd));
+    expect(commands.some((cmd) => cmd.includes("checkout \"trunk\""))).toBe(true);
+  });
+});
 
 describe("aiMergeTask — model settings threading", () => {
   beforeEach(() => {
@@ -937,7 +970,15 @@ describe("aiMergeTask — merge details collection", () => {
     });
 
     const result = await aiMergeTask(store, "/tmp/root", "FN-3469");
-    expect(result.merged).toBe(false);
+    expect(result.merged).toBe(true);
+    expect((store.emit as ReturnType<typeof vi.fn>).mock.calls).toContainEqual([
+      "task:merged",
+      expect.objectContaining({
+        merged: true,
+        mergeConfirmed: true,
+        commitSha: "a47b1e5d78d626f8b480f1e90d3d64be2625ff6a",
+      }),
+    ]);
 
     const mergeDetailsCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(
       (call: any[]) => call[1]?.mergeDetails !== undefined,
@@ -1066,5 +1107,4 @@ describe("aiMergeTask — merge details collection", () => {
     expect(mergeDetails.deletions).toBeUndefined();
   });
 });
-
 

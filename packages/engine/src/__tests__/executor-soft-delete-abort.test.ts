@@ -66,7 +66,7 @@ describe("TaskExecutor soft-delete aborts", () => {
     });
 
     emit("task:deleted", makeTask("FN-TEST-1"));
-    await Promise.resolve();
+    await (executor as any).pendingTaskDisposals.get("FN-TEST-1");
 
     expect(abort).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe("TaskExecutor soft-delete aborts", () => {
     });
 
     emit("task:deleted", makeTask("FN-TEST-2"));
-    await Promise.resolve();
+    await (executor as any).pendingTaskDisposals.get("FN-TEST-2");
 
     expect(abortAllSessionBash).toHaveBeenCalledTimes(1);
     expect(terminateAllSessions).toHaveBeenCalledTimes(1);
@@ -104,7 +104,7 @@ describe("TaskExecutor soft-delete aborts", () => {
     (executor as any).activeWorkflowStepSessions.set("FN-TEST-3", { abort, dispose });
 
     emit("task:deleted", makeTask("FN-TEST-3"));
-    await Promise.resolve();
+    await (executor as any).pendingTaskDisposals.get("FN-TEST-3");
 
     expect(abort).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);

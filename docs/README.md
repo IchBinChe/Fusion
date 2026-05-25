@@ -61,6 +61,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Diagnostics](./diagnostics.md) | Engine diagnostic logging subsystems, structured log keys, and key diagnostic points catalog |
 | [Sandbox Backends](./sandbox.md) | Pluggable sandbox backends for executor command isolation (bubblewrap, spawn-based) |
 | [Secrets](./secrets.md) | Encrypted secrets storage, per-secret access policies, scopes, and agent tool wiring |
+| [Testing](./testing.md) | Full testing lanes, worker fanout guidance, test taxonomy, and file organization |
 | [Mobile](../MOBILE.md) | Capacitor/PWA mobile development setup and workflow |
 
 ### Plugins
@@ -107,6 +108,9 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Secrets Sync Auth Parity Review (FN-4886)](./reviews/fn-4886-secrets-sync-auth-parity.md) | Review of node secrets sync API authentication parity and security boundaries |
 | [Test Speed Audit (FN-5048)](./test-speed-audit-FN-5048.md) | Measured baseline test performance, offender list, and optimization priorities |
 | [Soft-Delete Verification Matrix](./soft-delete-verification-matrix.md) | Authoritative checklist for the FN-5105 → FN-5143 soft-delete stream: scenario × layer coverage |
+| [Self-Healing Backward Move Audit](./self-healing-backward-move-audit.md) | Audit of self-healing backward-move safety checks and edge-case validation |
+
+| [Lost-Work Tasks Incident (2026-05-23)](./incidents/2026-05-23-lost-work-tasks.md) | Incident catalog of 9 lost-work tasks from no-op finalize and reuse-handoff bugs |
 
 ## External Resources
 

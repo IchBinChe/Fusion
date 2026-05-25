@@ -61,7 +61,7 @@ describe("reliability interaction: foreign-only contamination recovery", () => {
       baseCommitSha: baseSha,
       baseBranch: "main",
       executionStartBranch: "fusion/fn-y",
-    } as any, { repoDir, taskStore: store, runAudit });
+    } as any, { repoDir, taskStore: store, runAudit, integrationBranch: "main" });
 
     expect(result.recovered).toBe(true);
     expect(["reanchor", "branch-discard"]).toContain(result.subtype);
@@ -90,7 +90,7 @@ describe("reliability interaction: foreign-only contamination recovery", () => {
       baseCommitSha: baseSha,
       baseBranch: "main",
       executionStartBranch: "fusion/fn-y",
-    } as any, { repoDir, taskStore: store, runAudit });
+    } as any, { repoDir, taskStore: store, runAudit, integrationBranch: "main" });
 
     expect(result.recovered).toBe(false);
     expect(result.reason).toBe("active-session");

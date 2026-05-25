@@ -23,6 +23,7 @@ import {
   Copy,
   Check,
   TriangleAlert,
+  ArrowUpToLine,
 } from "lucide-react";
 import { useChat, type ChatMessageInfo, type FailureInfo, type ToolCallInfo } from "../hooks/useChat";
 import { RoomMessageDeliveredButReplyFailedError, useChatRooms } from "../hooks/useChatRooms";
@@ -41,10 +42,11 @@ import { useModelsCache } from "../hooks/useModelsCache";
 import { useDiscoveredSkillsCache } from "../hooks/useDiscoveredSkillsCache";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
-import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
+import { useMobileScrollLock, isIOS } from "../hooks/useMobileScrollLock";
 import { matchesAgentMentionFilter } from "./mentionMatching";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
+import { recordResumeEvent } from "../utils/resumeInstrumentation";
 
 export interface ChatViewProps {
   projectId?: string;
@@ -55,6 +57,7 @@ export interface ChatViewProps {
 // Keep a generous cap so pasted multi-paragraph text stays visible while
 // still preventing the composer from overtaking the message pane on short viewports.
 const CHAT_INPUT_MAX_HEIGHT_PX = 640;
+let chatViewWasPreviouslyInactive = false;
 
 export function clampChatInputHeight(scrollHeight: number): number {
   // Floor matches QuickChat (clampQuickChatInputHeight) and the CSS min-height,
@@ -711,6 +714,7 @@ interface ChatMessageItemProps {
   mentionAgentsByName: Map<string, Agent>;
   roomContext: RoomContext | null;
   copyAction?: ReactNode;
+  onScrollToTop?: (messageId: string) => void;
 }
 
 // Renders a single chat message bubble. Memoized so the streaming bubble's
@@ -728,6 +732,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   mentionAgentsByName,
   roomContext,
   copyAction,
+  onScrollToTop,
 }: ChatMessageItemProps) {
   const isAssistantMessage = message.role === "assistant";
   const failureInfo = isAssistantMessage ? message.failureInfo : undefined;
@@ -862,6 +867,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     <div
       className={`chat-message chat-message--${message.role}${failureInfo ? " chat-message--failure" : ""}`}
       data-testid={`chat-message-${message.id}`}
+      data-message-id={message.id}
     >
       {showAssistantIdentity && (
         <div className="chat-message-avatar">
@@ -873,7 +879,22 @@ const ChatMessageItem = memo(function ChatMessageItem({
       {isAssistantMessage
         ? assistantBody
         : <div className="chat-message-content">{renderedUserContent}</div>}
-      {!failureInfo && copyAction}
+      {isAssistantMessage && !failureInfo && (copyAction || onScrollToTop) && (
+        <div className="chat-message-actions">
+          {copyAction}
+          {onScrollToTop && (
+            <button
+              type="button"
+              className="btn-icon chat-message-scroll-to-top-action"
+              aria-label="Scroll message to top"
+              data-testid={`chat-message-scroll-to-top-${message.id}`}
+              onClick={() => onScrollToTop(message.id)}
+            >
+              <ArrowUpToLine size={14} />
+            </button>
+          )}
+        </div>
+      )}
       {renderToolCalls(message.toolCalls)}
       {message.thinkingOutput && (
         <details className="chat-message-thinking">
@@ -888,6 +909,26 @@ const ChatMessageItem = memo(function ChatMessageItem({
 });
 
 export function ChatView({ projectId, addToast, experimentalFeatures }: ChatViewProps) {
+  useEffect(() => {
+    recordResumeEvent({
+      view: "ChatView",
+      trigger: chatViewWasPreviouslyInactive ? "route-active" : "remount",
+      projectId,
+      replayAttempted: false,
+    });
+    chatViewWasPreviouslyInactive = false;
+
+    return () => {
+      chatViewWasPreviouslyInactive = true;
+      recordResumeEvent({
+        view: "ChatView",
+        trigger: "route-inactive",
+        projectId,
+        replayAttempted: false,
+      });
+    };
+  }, [projectId]);
+
   const {
     activeSession,
     sessionsLoading,
@@ -995,8 +1036,18 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const isUserScrollingRef = useRef(false);
   const lastAnchoredThreadStateRef = useRef<{ threadId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const previousChatScopeRef = useRef<"direct" | "rooms" | null>(null);
-  const visibilityReanchorTimeoutRef = useRef<number | null>(null);
   const directThreadDeferredAnchorTimeoutRef = useRef<number | null>(null);
+  const lastMessageCountRef = useRef(0);
+  const lastThreadIdRef = useRef<string | null>(null);
+  const scrollRestoreSnapshotRef = useRef<{
+    threadId: string;
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+    anchorMessageId: string | null;
+    anchorOffset: number;
+    wasPinnedBefore: boolean;
+  } | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
@@ -1182,6 +1233,37 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     };
   }, []);
 
+  const getActiveThreadId = useCallback(() => {
+    return roomThreadActive ? (rooms.activeRoom?.id ?? null) : (activeSession?.id ?? null);
+  }, [roomThreadActive, rooms.activeRoom?.id, activeSession?.id]);
+
+  const getMessageElement = useCallback((container: HTMLElement, messageId: string) => {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return container.querySelector<HTMLElement>(`.chat-message[data-message-id="${CSS.escape(messageId)}"]`);
+    }
+    return container.querySelector<HTMLElement>(`.chat-message[data-message-id="${messageId.replace(/"/g, "\\\"")}"]`);
+  }, []);
+
+  const captureScrollSnapshot = useCallback(() => {
+    const messagesContainer = messagesContainerRef.current;
+    const threadId = getActiveThreadId();
+    if (!messagesContainer || !threadId) return;
+
+    const anchorMessage = messagesContainer.querySelector<HTMLElement>(".chat-message[data-message-id]");
+    const anchorMessageId = anchorMessage?.getAttribute("data-message-id") ?? null;
+    const anchorOffset = anchorMessage ? anchorMessage.offsetTop - messagesContainer.scrollTop : 0;
+
+    scrollRestoreSnapshotRef.current = {
+      threadId,
+      scrollTop: messagesContainer.scrollTop,
+      scrollHeight: messagesContainer.scrollHeight,
+      clientHeight: messagesContainer.clientHeight,
+      anchorMessageId,
+      anchorOffset,
+      wasPinnedBefore: !isUserScrollingRef.current,
+    };
+  }, [getActiveThreadId]);
+
   const updateScrollState = useCallback(() => {
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
@@ -1190,7 +1272,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const atBottom = messagesContainer.scrollTop + messagesContainer.clientHeight >= messagesContainer.scrollHeight - threshold;
     setIsUserScrolling(!atBottom);
     isUserScrollingRef.current = !atBottom;
-  }, []);
+    captureScrollSnapshot();
+  }, [captureScrollSnapshot]);
 
   const anchorToBottom = useCallback((container: HTMLElement) => {
     if (!container.isConnected) return;
@@ -1224,11 +1307,61 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     writeBottom();
   }, []);
 
-  const scrollToBottom = useCallback(() => {
+  const activeThreadMessages = roomThreadActive ? rooms.messages : messages;
+
+  useLayoutEffect(() => {
+    const messagesContainer = messagesContainerRef.current;
+    const threadId = getActiveThreadId();
+    const snapshot = scrollRestoreSnapshotRef.current;
+    if (!messagesContainer || !threadId || !snapshot || snapshot.threadId !== threadId || snapshot.wasPinnedBefore) {
+      return;
+    }
+
+    let restoredScrollTop = snapshot.scrollTop;
+    if (snapshot.anchorMessageId) {
+      const anchorElement = getMessageElement(messagesContainer, snapshot.anchorMessageId);
+      if (anchorElement) {
+        restoredScrollTop = anchorElement.offsetTop - snapshot.anchorOffset;
+      } else {
+        restoredScrollTop = snapshot.scrollTop + (messagesContainer.scrollHeight - snapshot.scrollHeight);
+      }
+    } else {
+      restoredScrollTop = snapshot.scrollTop + (messagesContainer.scrollHeight - snapshot.scrollHeight);
+    }
+
+    messagesContainer.scrollTop = Math.max(0, restoredScrollTop);
+    isUserScrollingRef.current = true;
+    setIsUserScrolling(true);
+    scrollRestoreSnapshotRef.current = null;
+  }, [activeThreadMessages, getActiveThreadId, getMessageElement]);
+
+  const logScrollDebug = useCallback((cause: string) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (process.env.NODE_ENV === "production" || !(window as unknown as { FN_5380_DEBUG?: boolean }).FN_5380_DEBUG) {
+      return;
+    }
+    const container = messagesContainerRef.current;
+    const threshold = 50;
+    const atBottom = container
+      ? container.scrollTop + container.clientHeight >= container.scrollHeight - threshold
+      : true;
+    console.debug("[chat-scroll]", {
+      cause,
+      wasPinnedBefore: !isUserScrollingRef.current,
+      atBottomNow: atBottom,
+      messageCount: activeThreadMessages.length,
+      roomThreadActive,
+    });
+  }, [activeThreadMessages.length, roomThreadActive]);
+
+  const scrollToBottom = useCallback((cause: string) => {
+    logScrollDebug(cause);
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
     anchorToBottom(messagesContainer);
-  }, [anchorToBottom]);
+  }, [anchorToBottom, logScrollDebug]);
 
   useLayoutEffect(() => {
     if (directThreadDeferredAnchorTimeoutRef.current !== null) {
@@ -1263,6 +1396,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       return;
     }
 
+    logScrollDebug(isThreadChanged ? "thread-change" : finishedLoading ? "finished-loading" : firstMessagesArrived ? "first-messages" : "mount");
     anchorToBottom(messagesContainer);
     if (!roomThreadActive) {
       directThreadDeferredAnchorTimeoutRef.current = window.setTimeout(() => {
@@ -1296,16 +1430,40 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     anchorToBottom,
   ]);
 
-  const activeThreadMessages = roomThreadActive ? rooms.messages : messages;
-
-  // Scroll thread container to bottom on new messages or streaming when user is near live tail.
-  // Avoid Element.scrollIntoView() here because on mobile Safari it can
-  // scroll the page viewport instead of only the chat thread.
+  // Scroll thread container to bottom during streaming only when already pinned.
   useEffect(() => {
-    if (!isUserScrollingRef.current) {
-      scrollToBottom();
+    if (!isStreaming || isUserScrollingRef.current) {
+      return;
     }
-  }, [activeThreadMessages, streamingText, streamingThinking, isStreaming, scrollToBottom]);
+    scrollToBottom("streaming");
+  }, [isStreaming, streamingText, streamingThinking, scrollToBottom]);
+
+  // Snap to latest on new messages only when the user was pinned before growth.
+  useEffect(() => {
+    const threadId = getActiveThreadId();
+    if (!threadId) {
+      lastMessageCountRef.current = 0;
+      lastThreadIdRef.current = null;
+      return;
+    }
+
+    if (lastThreadIdRef.current !== threadId) {
+      lastThreadIdRef.current = threadId;
+      lastMessageCountRef.current = activeThreadMessages.length;
+      return;
+    }
+
+    const previousCount = lastMessageCountRef.current;
+    const nextCount = activeThreadMessages.length;
+    const didGrow = nextCount > previousCount;
+    const wasPinnedBefore = !isUserScrollingRef.current;
+
+    lastMessageCountRef.current = nextCount;
+
+    if (didGrow && wasPinnedBefore) {
+      scrollToBottom("new-message");
+    }
+  }, [activeThreadMessages, getActiveThreadId, scrollToBottom]);
 
   useEffect(() => {
     if (keyboardOverlap <= 0) {
@@ -1317,7 +1475,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       return;
     }
 
-    scrollToBottom();
+    scrollToBottom("keyboard");
   }, [keyboardOverlap, scrollToBottom]);
 
   // Lock body scroll on mobile while the keyboard is up so iOS can't shift
@@ -1463,52 +1621,25 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       return;
     }
 
-    const reAnchorToLatest = () => {
-      const messagesContainer = messagesContainerRef.current;
-      if (!messagesContainer) {
-        return;
-      }
-      anchorToBottom(messagesContainer);
-      isUserScrollingRef.current = false;
-      setIsUserScrolling(false);
-
-      if (visibilityReanchorTimeoutRef.current !== null) {
-        window.clearTimeout(visibilityReanchorTimeoutRef.current);
-        visibilityReanchorTimeoutRef.current = null;
-      }
-
-      visibilityReanchorTimeoutRef.current = window.setTimeout(() => {
-        visibilityReanchorTimeoutRef.current = null;
-        if (isUserScrollingRef.current) {
-          return;
-        }
-        const connectedContainer = messagesContainerRef.current;
-        if (!connectedContainer) {
-          return;
-        }
-        anchorToBottom(connectedContainer);
-      }, 250);
+    const captureForRefetch = () => {
+      captureScrollSnapshot();
     };
 
     const onVisibilityChange = () => {
       if (document.visibilityState !== "visible") {
         return;
       }
-      reAnchorToLatest();
+      captureForRefetch();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pageshow", reAnchorToLatest);
+    window.addEventListener("pageshow", captureForRefetch);
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pageshow", reAnchorToLatest);
-      if (visibilityReanchorTimeoutRef.current !== null) {
-        window.clearTimeout(visibilityReanchorTimeoutRef.current);
-        visibilityReanchorTimeoutRef.current = null;
-      }
+      window.removeEventListener("pageshow", captureForRefetch);
     };
-  }, [isMobile, activeSession, roomThreadActive, anchorToBottom]);
+  }, [isMobile, activeSession, roomThreadActive, captureScrollSnapshot]);
 
   useEffect(() => {
     if (roomThreadActive) {
@@ -2387,6 +2518,18 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     </button>
   ), [copyFeedbackByMessageId, handleCopyResponse]);
 
+  const handleScrollMessageToTop = useCallback((messageId: string) => {
+    const containerEl = messagesContainerRef.current;
+    if (!containerEl) return;
+    const selector = `[data-testid="chat-message-${messageId}"]`;
+    const targetEl = containerEl.querySelector<HTMLElement>(selector);
+    if (!targetEl) return;
+
+    const top = targetEl.getBoundingClientRect().top - containerEl.getBoundingClientRect().top + containerEl.scrollTop;
+    const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    containerEl.scrollTo({ top, behavior: prefersReducedMotion ? "auto" : "smooth" });
+  }, []);
+
   return (
     <div className="chat-view">
       {/* Sidebar */}
@@ -2804,6 +2947,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                         activeSessionId={rooms.activeRoom?.id ?? null}
                         mentionAgentsByName={mentionAgentsByName}
                         roomContext={roomContext}
+                        onScrollToTop={handleScrollMessageToTop}
                       />
                     );
                   })
@@ -2815,7 +2959,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   type="button"
                   className="btn btn-sm chat-jump-to-latest"
                   data-testid="chat-jump-to-latest"
-                  onClick={scrollToBottom}
+                  onClick={() => scrollToBottom("fab-click")}
                 >
                   <ChevronDown size={14} />
                   Latest
@@ -2844,6 +2988,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     onTouchStart={(event) => {
                       if (typeof window === "undefined") return;
                       if (window.innerWidth > 768) return;
+                      // iOS-only: preventDefault + programmatic focus avoids
+                      // iOS's visual-viewport scroll on re-focus. On Android,
+                      // preventDefault here blocks the soft keyboard from
+                      // opening at all (programmatic focus() does not raise
+                      // the keyboard on Android), so the input "focuses" but
+                      // the keyboard never appears.
+                      if (!isIOS()) return;
                       if (document.activeElement === event.currentTarget) return;
                       event.preventDefault();
                       event.currentTarget.focus({ preventScroll: true });
@@ -2988,6 +3139,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   mentionAgentsByName={mentionAgentsByName}
                   roomContext={null}
                   copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
+                  onScrollToTop={handleScrollMessageToTop}
                 />
               ))}
               <div className="chat-message chat-message--assistant chat-message--streaming">
@@ -3042,6 +3194,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   mentionAgentsByName={mentionAgentsByName}
                   roomContext={null}
                   copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
+                  onScrollToTop={handleScrollMessageToTop}
                 />
               ))}
             </>
@@ -3053,7 +3206,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             type="button"
             className="btn btn-sm chat-jump-to-latest"
             data-testid="chat-jump-to-latest"
-            onClick={scrollToBottom}
+            onClick={() => scrollToBottom("fab-click")}
           >
             <ChevronDown size={14} />
             Latest
@@ -3167,6 +3320,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   onTouchStart={(event) => {
                     if (typeof window === "undefined") return;
                     if (window.innerWidth > 768) return;
+                    // iOS-only: see comment on the other chat-input touchstart
+                    // handler above. On Android, preventDefault blocks the
+                    // soft keyboard from opening.
+                    if (!isIOS()) return;
                     if (document.activeElement === event.currentTarget) return;
                     event.preventDefault();
                     event.currentTarget.focus({ preventScroll: true });

@@ -3,6 +3,13 @@ import type { Task, WorkflowStepResult } from "./types.js";
 export interface MergeTargetResolution {
   branch: string;
   source: "task-base-branch" | "task-branch-context" | "project-default" | "legacy-main";
+  /**
+   * When the resolver rejects a candidate (e.g. baseBranch points at a sibling
+   * `fusion/fn-*` branch), this records the rejected value and the reason. The
+   * merger uses this to emit an audit event so the steering bug is observable
+   * in the run-audit timeline rather than failing silently.
+   */
+  rejected?: { branch: string; source: "task-base-branch" | "task-branch-context"; reason: "fusion-sibling-branch" };
 }
 
 export interface MergeTargetResolverOptions {
@@ -10,30 +17,52 @@ export interface MergeTargetResolverOptions {
   legacyFallbackBranch?: string;
 }
 
+/**
+ * Sibling task branches (`fusion/fn-<id>`) MUST NOT be used as merge targets.
+ * They are start-point/rebase anchors, not destinations: landing a squash onto
+ * a sibling branch strands the commit on a feature ref instead of advancing
+ * the project integration branch (root cause of FN-5233/FN-5530 lost-on-main).
+ */
+const FUSION_SIBLING_BRANCH_RE = /^fusion\/fn-/i;
+
+function isFusionSiblingBranch(branch: string): boolean {
+  return FUSION_SIBLING_BRANCH_RE.test(branch);
+}
+
 export function resolveTaskMergeTarget(
   task: Pick<Task, "baseBranch" | "branchContext">,
   options: MergeTargetResolverOptions = {},
 ): MergeTargetResolution {
+  let rejected: MergeTargetResolution["rejected"];
+
   const configuredBase = task.baseBranch?.trim();
   if (configuredBase) {
-    return { branch: configuredBase, source: "task-base-branch" };
+    if (isFusionSiblingBranch(configuredBase)) {
+      rejected = { branch: configuredBase, source: "task-base-branch", reason: "fusion-sibling-branch" };
+    } else {
+      return { branch: configuredBase, source: "task-base-branch" };
+    }
   }
 
   const inheritedBase = task.branchContext?.inheritedBaseBranch?.trim();
   if (inheritedBase) {
-    return { branch: inheritedBase, source: "task-branch-context" };
+    if (isFusionSiblingBranch(inheritedBase)) {
+      rejected = rejected ?? { branch: inheritedBase, source: "task-branch-context", reason: "fusion-sibling-branch" };
+    } else {
+      return { branch: inheritedBase, source: "task-branch-context", rejected };
+    }
   }
 
   const projectDefault = options.projectDefaultBranch?.trim();
   if (projectDefault) {
-    return { branch: projectDefault, source: "project-default" };
+    return { branch: projectDefault, source: "project-default", rejected };
   }
 
   const legacyFallback = options.legacyFallbackBranch?.trim() || "main";
-  return { branch: legacyFallback, source: "legacy-main" };
+  return { branch: legacyFallback, source: "legacy-main", rejected };
 }
 
-const BLOCKING_TASK_STATUSES = new Set([
+export const HARD_BLOCKING_TASK_STATUSES = new Set([
   "failed",
   // ── User-attention / awaiting-handoff states ─────────────────────────
   "awaiting-inspection",
@@ -51,12 +80,20 @@ const BLOCKING_TASK_STATUSES = new Set([
   "needs-replan",            // scheduler/executor/triage signaled re-plan
   // ── Mission-level validation in flight ───────────────────────────────
   "mission-validation",
-  // ── Scheduler-side transient state ───────────────────────────────────
-  "queued",                  // scheduler placed the task in line; not finalized
   // ── Abnormal termination — defensive guard ───────────────────────────
   // Task was killed by the stuck detector. If it surfaces in in-review,
   // it needs investigation, not auto-merge.
   "stuck-killed",
+]);
+
+export const SCHEDULER_TRANSIENT_STATUSES = new Set([
+  // scheduler placed the task in line; not finalized
+  "queued",
+]);
+
+export const BLOCKING_TASK_STATUSES = new Set([
+  ...HARD_BLOCKING_TASK_STATUSES,
+  ...SCHEDULER_TRANSIENT_STATUSES,
 ]);
 
 const NON_TERMINAL_STEP_STATUSES = new Set([
@@ -74,6 +111,7 @@ const NON_TERMINAL_WORKFLOW_STATUSES = new Set<WorkflowStepResult["status"]>([
  */
 export function getTaskMergeBlocker(
   task: Pick<Task, "column" | "paused" | "status" | "error" | "steps" | "workflowStepResults">,
+  options: { manual?: boolean } = {},
 ): string | undefined {
   if (task.column !== "in-review") {
     return `task is in '${task.column}', must be in 'in-review'`;
@@ -83,7 +121,8 @@ export function getTaskMergeBlocker(
     return "task is paused";
   }
 
-  if (task.status && BLOCKING_TASK_STATUSES.has(task.status)) {
+  const blockingStatuses = options.manual === true ? HARD_BLOCKING_TASK_STATUSES : BLOCKING_TASK_STATUSES;
+  if (task.status && blockingStatuses.has(task.status)) {
     return task.error
       ? `task is marked '${task.status}': ${task.error}`
       : `task is marked '${task.status}'`;

@@ -122,6 +122,7 @@ vi.mock("../worktree-pool.js", async (importOriginal) => {
 });
 vi.mock("../worktree-hooks.js", () => ({
   installTaskWorktreeIdentityGuard: vi.fn().mockResolvedValue(undefined),
+  IDENTITY_GUARD_BYPASS_ENV: "FUSION_MERGER_BYPASS_IDENTITY_GUARD",
 }));
 
 vi.mock("../worktree-stale-lock.js", async () => {

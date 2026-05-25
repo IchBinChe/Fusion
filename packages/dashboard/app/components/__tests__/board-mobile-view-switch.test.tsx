@@ -63,7 +63,7 @@ function mockMobileViewport() {
   ensureMatchMedia();
   Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
   return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-    matches: query === "(max-width: 768px)",
+    matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)",
     media: query,
     onchange: null,
     addListener: vi.fn(),

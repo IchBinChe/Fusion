@@ -103,7 +103,8 @@ function makeUnprovenDoneTask(taskId: string): Task {
   } as Task;
 }
 
-describe("FN-4811 follow-up: integrity warning dedup persists across restarts", () => {
+// FN-5518 (FN-4807 pattern): the file header already documents this is real-git wallclock under parallel CI load (FN-4839); lift the per-test deadline above Vitest's 5s default rather than weakening or removing the real-git regression backstop.
+describe("FN-4811 follow-up: integrity warning dedup persists across restarts", { timeout: 30_000 }, () => {
   it("emits the unproven warning once, persists it on mergeDetails.integrityWarning", async () => {
     const dir = mkdtempSync(join(tmpdir(), "fn-4811-dedup-first-"));
     try {

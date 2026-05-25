@@ -5,6 +5,7 @@ import {
   TaskStore,
   COLUMNS,
   COLUMN_LABELS,
+  buildManualRetryResetPatch,
   validateNodeOverrideChange,
   type Task,
   type InsightCategory,
@@ -999,7 +1000,11 @@ export default function kbExtension(pi: ExtensionAPI) {
           hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
 
         if (isExecutionFailureInReview) {
-          await store.updateTask(params.id, { status: null, error: null, stuckKillCount: 0 });
+          await store.updateTask(params.id, {
+            status: null,
+            error: null,
+            ...buildManualRetryResetPatch(),
+          });
           await store.logEntry(params.id, "Retry requested via Fusion extension (execution failure in-review → todo, preserving progress)");
           await store.moveTask(params.id, "todo", { preserveProgress: true });
           return {
@@ -1008,7 +1013,11 @@ export default function kbExtension(pi: ExtensionAPI) {
           };
         }
 
-        await store.updateTask(params.id, { status: null, error: null, stuckKillCount: 0, mergeRetries: 0 });
+        await store.updateTask(params.id, {
+          status: null,
+          error: null,
+          ...buildManualRetryResetPatch({ resetMergeRetries: true }),
+        });
         await store.logEntry(params.id, "Retry requested via Fusion extension (in-review merge retry, mergeRetries reset)");
         return {
           content: [{ type: "text", text: `Retried ${params.id} → in-review (merge retry state cleared)` }],
@@ -1017,7 +1026,11 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
 
       // Clear failure state and move to todo for other columns
-      await store.updateTask(params.id, { status: null, error: null });
+      await store.updateTask(params.id, {
+        status: null,
+        error: null,
+        ...buildManualRetryResetPatch({ resetMergeRetries: true }),
+      });
       
       // Move to todo column
       await store.moveTask(params.id, 'todo');
@@ -1164,22 +1177,24 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Delete Task",
     description:
       "Soft-delete a task from active Fusion board views. " +
-      "The task row and artifacts are preserved, and the task ID remains reserved for potential operator recovery.",
+      "The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation.",
     promptSnippet: "Soft-delete a Fusion task",
     promptGuidelines: [
       "Use for cleaning up test tasks or tasks created in error when you want the task hidden from active board views",
       "This tool performs a soft delete: task data is preserved and the ID stays reserved",
-      "Tasks cannot be undeleted through the current pi/CLI tool surface",
+      "Use allowResurrection:true when operators want the deleted task ID to be intentionally reusable on future createTask calls",
       "Use fn_task_archive for completed work you want to keep referenceable in the board",
       "True hard removal is handled by archive cleanup paths (archiveTaskAndCleanup / cleanupArchivedTasks), not fn_task_delete",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Task ID to delete (e.g. FN-001)" }),
+      allowResurrection: Type.Optional(Type.Boolean({ description: "When true, mark this tombstone as explicitly reusable for future recreation." })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
       const task = await store.deleteTask(params.id, {
+        allowResurrection: params.allowResurrection === true,
         auditContext: {
           agentId: "pi-extension",
           runId: `synthetic-pi-delete-${params.id}-${Date.now()}`,

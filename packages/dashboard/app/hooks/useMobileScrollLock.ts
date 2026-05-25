@@ -9,6 +9,27 @@ function isMobileDevice(): boolean {
 }
 
 /**
+ * The scroll lock is an iOS-specific workaround: iOS Safari shifts the layout
+ * viewport on input focus (visualViewport.offsetTop > 0) which pushes the
+ * dashboard off-screen, so we pin body via position:fixed to make it
+ * unscrollable. Android Chrome does NOT need this — and applying the same
+ * fix there is actively harmful: mutating body styles while the soft keyboard
+ * is opening causes Chrome to treat it as a focus-target relayout and
+ * dismisses the keyboard immediately. So we gate the lock to iOS only.
+ *
+ * With `interactive-widget=resizes-content` set on the viewport meta, Android
+ * Chrome shrinks the layout viewport with the keyboard, so no drift
+ * compensation is needed there.
+ */
+export function isIOS(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  // iPad on iPadOS 13+ reports as MacIntel + touch — handle that too.
+  return /iPad|iPhone|iPod/.test(ua)
+    || (ua.includes("Macintosh") && navigator.maxTouchPoints > 1);
+}
+
+/**
  * Reference-counted body scroll lock for fullscreen mobile overlays.
  *
  * Uses the `position: fixed; top: -scrollY` pattern (the same approach used
@@ -111,7 +132,7 @@ export function _resetLockState(): void {
  */
 export function useMobileScrollLock(enabled: boolean): void {
   useEffect(() => {
-    if (!enabled || !isMobileDevice()) return;
+    if (!enabled || !isMobileDevice() || !isIOS()) return;
     applyLock();
     return () => {
       releaseLock();

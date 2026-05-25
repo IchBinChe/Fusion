@@ -25,13 +25,13 @@ describe("board tablet overflow regression (FN-5281)", () => {
   const css = loadAllAppCss();
   const baseCss = loadAllAppCssBaseOnly();
   const tabletCss = extractMediaBlocks(css, /@media\s*\(\s*min-width:\s*769px\s*\)\s*and\s*\(\s*max-width:\s*1024px\s*\)\s*\{/g);
-  const mobileCss = extractMediaBlocks(css, /@media\s*\([^)]*max-width:\s*768px[^)]*\)\s*\{/g);
+  const mobileCss = extractMediaBlocks(css, /@media\s*\([^)]*max-width:\s*768px[^)]*\)[^{]*\{/g);
 
   it("defines a tablet .board rule that fits all columns without horizontal board panning", () => {
     const boardBlock = tabletCss.match(/\.board\s*\{[^}]*\}/)?.[0] ?? "";
 
-    expect(boardBlock).toContain("grid-template-columns: repeat(6, minmax(0, 1fr));");
-    expect(boardBlock).toContain("overflow-x: hidden;");
+    expect(boardBlock).toContain("grid-template-columns: repeat(6, minmax(260px, 1fr));");
+    expect(boardBlock).toContain("overflow-x: auto;");
     expect(boardBlock).not.toContain("scroll-snap-type:");
   });
 

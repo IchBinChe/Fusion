@@ -586,6 +586,13 @@ vi.mock("../../hooks/useViewportMode", () => ({
   getViewportMode: () => "desktop",
 }));
 
+// Mock isIOS so FN-3290 keyboard-open behavior is testable in jsdom
+vi.mock("../../hooks/useMobileScrollLock", () => ({
+  useMobileScrollLock: vi.fn(),
+  isIOS: () => true,
+  _resetLockState: vi.fn(),
+}));
+
 import { App, didEnterAwaitingApproval } from "../../App";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "../../auth";
 import { fetchAuthStatus, fetchSettings, fetchGlobalSettings, fetchTaskDetail, fetchUnreadCount, updateSettings, runScript, fetchScripts, fetchModels, fetchPluginDashboardViews } from "../../api";

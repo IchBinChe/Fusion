@@ -31,7 +31,7 @@ function mockViewport(width: number) {
   ensureMatchMedia();
   Object.defineProperty(window, "innerWidth", { value: width, configurable: true });
   return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-    matches: query === "(max-width: 768px)" ? width <= 768 : false,
+    matches: query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)" ? width <= 768 : false,
     media: query,
     onchange: null,
     addListener: vi.fn(),
@@ -44,7 +44,7 @@ function mockViewport(width: number) {
 
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match;
 
   while ((match = regex.exec(content)) !== null) {

@@ -129,7 +129,10 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect(task.mergeDetails?.mergeConfirmed).toBe(true);
     expect(existsSync(worktreePath)).toBe(false);
     expect(git(repo, "git worktree list")).not.toContain(worktreePath);
-    expect((store as any).recordRunAuditEvent).toHaveBeenCalledTimes(3);
+    // FN-5256: reconcileTaskWorktreeMetadata now normalizes via realpath, so the
+    // (formerly false-stale) macOS realpath mismatch no longer triggers an extra
+    // worktree-metadata-cleared audit event for this in-review task.
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledTimes(2);
     expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         domain: "database",

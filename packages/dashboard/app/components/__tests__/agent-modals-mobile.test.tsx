@@ -396,7 +396,7 @@ describe("agent modal mobile CSS structure", () => {
   describe("AgentErrorDetailsModal", () => {
     it("mobile rules let modal fill the fullscreen container without double viewport clipping", () => {
       const styles = readStyles();
-      const modalRuleMatch = styles.match(/@media\s*\(max-width:\s*768px\)\s*\{\s*\.agent-error-modal\s*\{[^}]+\}/);
+      const modalRuleMatch = styles.match(/@media[^{]*\(max-width:\s*768px\)[^{]*\{\s*\.agent-error-modal\s*\{[^}]+\}/);
       expect(modalRuleMatch).toBeTruthy();
       const modalRule = modalRuleMatch![0];
 

@@ -17,7 +17,7 @@ const css = loadAllAppCss();
 /** Extract all content inside @media (max-width: 768px) blocks. */
 function extractMobileMediaBlocks(content: string): string {
   const blocks: string[] = [];
-  const regex = /@media\s*\(\s*max-width:\s*768px\s*\)\s*\{/g;
+  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
   let match;
 
   while ((match = regex.exec(content)) !== null) {
@@ -120,9 +120,9 @@ describe("footer-safe project workspace layout", () => {
       );
     });
 
-    it("is anchored to bottom: 0", () => {
+    it("is anchored to bottom via ICB offset token", () => {
       expect(css).toMatch(
-        /\.executor-status-bar\s*\{[^}]*bottom:\s*0/,
+        /\.executor-status-bar\s*\{[^}]*bottom:\s*var\(--icb-bottom-offset/,
       );
     });
 
@@ -135,7 +135,7 @@ describe("footer-safe project workspace layout", () => {
     it("on mobile, positions above the mobile nav bar using nav-height contract", () => {
       const mobileCss = extractMobileMediaBlocks(css);
       expect(mobileCss).toMatch(
-        /\.executor-status-bar\s*\{[^}]*bottom:\s*calc\(var\(--mobile-nav-height\)/,
+        /\.executor-status-bar\s*\{[^}]*bottom:[^}]*var\(--mobile-nav-height\)/,
       );
     });
 

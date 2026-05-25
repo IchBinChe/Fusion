@@ -194,6 +194,7 @@ vi.mock("../../executor.js", async () => {
       self.handleLoopDetected = vi.fn().mockResolvedValue(false);
       self.markStuckAborted = vi.fn();
       self.abortAllSessionBash = vi.fn().mockResolvedValue(undefined);
+      self.abortAllInFlight = vi.fn().mockResolvedValue(undefined);
       self.isEphemeralDeletionPending = vi.fn().mockReturnValue(false);
       self.disposeEphemeralTimers = vi.fn();
       self.activeWorktrees = new Map();
@@ -451,6 +452,93 @@ describe("InProcessRuntime", () => {
       
       expect(statusChanges).toContain("stopping");
       expect(statusChanges).toContain("stopped");
+    }, 30000);
+
+    it("calls abortAllInFlight after bash abort and before drain checks", async () => {
+      await runtime.start();
+      const executor = (runtime as any).executor;
+      const callOrder: string[] = [];
+      executor.abortAllSessionBash.mockImplementation(() => {
+        callOrder.push("bash");
+      });
+      executor.abortAllInFlight.mockImplementation(async () => {
+        callOrder.push("inFlight");
+      });
+      const metricsSpy = vi.spyOn(runtime, "getMetrics").mockImplementation(() => {
+        callOrder.push("metrics");
+        return { inFlightTasks: 0, activeAgents: 0, lastActivityAt: new Date().toISOString() };
+      });
+
+      await runtime.stop();
+
+      expect(executor.abortAllInFlight).toHaveBeenCalledTimes(1);
+      expect(executor.abortAllInFlight).toHaveBeenCalledWith("engine stop");
+      expect(callOrder.indexOf("bash")).toBeLessThan(callOrder.indexOf("inFlight"));
+      expect(callOrder.indexOf("inFlight")).toBeLessThan(callOrder.indexOf("metrics"));
+      metricsSpy.mockRestore();
+    }, 30000);
+
+    it("honors runtimeStopDrainMs=0 and default 2000ms poll interval", async () => {
+      await runtime.start();
+      const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      const executor = (runtime as any).executor;
+
+      mockTaskStoreSettings.runtimeStopDrainMs = 0;
+      executor.activeWorktrees.set("FN-1", { taskId: "FN-1" });
+      await runtime.stop();
+      expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 500);
+
+      delete mockTaskStoreSettings.runtimeStopDrainMs;
+      runtime = new InProcessRuntime(buildTestConfig(testDir), mockCentralCore);
+      await runtime.start();
+      const executor2 = (runtime as any).executor;
+      let metricCalls = 0;
+      executor2.activeWorktrees.set("FN-2", { taskId: "FN-2" });
+      const metricsSpy = vi.spyOn(runtime, "getMetrics").mockImplementation(() => {
+        metricCalls += 1;
+        if (metricCalls >= 2) {
+          executor2.activeWorktrees.clear();
+        }
+        return {
+          inFlightTasks: metricCalls === 1 ? 1 : 0,
+          activeAgents: 0,
+          lastActivityAt: new Date().toISOString(),
+        };
+      });
+
+      await runtime.stop();
+      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 500);
+      metricsSpy.mockRestore();
+      timeoutSpy.mockRestore();
+    }, 30000);
+
+    it("logs post-abort drain timeout when in-flight tasks remain", async () => {
+      mockTaskStoreSettings.runtimeStopDrainMs = 50;
+      await runtime.start();
+      const warnSpy = vi.spyOn(runtimeLog, "warn").mockImplementation(() => undefined as any);
+      const executor = (runtime as any).executor;
+      executor.activeWorktrees.set("FN-stuck", { taskId: "FN-stuck" });
+      vi.spyOn(runtime, "getMetrics").mockImplementation(() => ({
+        inFlightTasks: 1,
+        activeAgents: 0,
+        lastActivityAt: new Date().toISOString(),
+      }));
+
+      await runtime.stop();
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("post-abort drain timeout"));
+    }, 30000);
+
+    it("continues stopping when abortAllInFlight throws", async () => {
+      await runtime.start();
+      const executor = (runtime as any).executor;
+      executor.abortAllInFlight.mockRejectedValueOnce(new Error("boom"));
+      const warnSpy = vi.spyOn(runtimeLog, "warn").mockImplementation(() => undefined as any);
+
+      await expect(runtime.stop()).resolves.toBeUndefined();
+
+      expect(runtime.getStatus()).toBe("stopped");
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to abort in-flight executor AI sessions"));
     }, 30000);
   });
 

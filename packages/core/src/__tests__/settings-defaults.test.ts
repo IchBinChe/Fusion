@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROJECT_SETTINGS } from "../settings-schema.js";
 import {
+  __resetLegacyCwdMainWarningForTests,
   normalizeMergeIntegrationWorktreeMode,
 } from "../types.js";
 import {
@@ -10,6 +11,11 @@ import {
 } from "../worktrunk-settings.js";
 
 describe("settings defaults invariants", () => {
+  afterEach(() => {
+    __resetLegacyCwdMainWarningForTests();
+    vi.restoreAllMocks();
+  });
+
   it("keeps worktrunk default off in global and project defaults", () => {
     expect(DEFAULT_GLOBAL_SETTINGS.worktrunk.enabled).toBe(false);
     expect(DEFAULT_PROJECT_SETTINGS.worktrunk.enabled).toBe(false);
@@ -82,7 +88,20 @@ describe("settings defaults invariants", () => {
 
     it("preserves both supported values through normalization", () => {
       expect(normalizeMergeIntegrationWorktreeMode("reuse-task-worktree")).toBe("reuse-task-worktree");
-      expect(normalizeMergeIntegrationWorktreeMode("cwd-main")).toBe("cwd-main");
+      expect(normalizeMergeIntegrationWorktreeMode("cwd-integration-branch")).toBe("cwd-integration-branch");
+      expect(normalizeMergeIntegrationWorktreeMode("cwd-main")).toBe("cwd-integration-branch");
+    });
+
+    it("warns once per process for legacy cwd-main mode", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      expect(normalizeMergeIntegrationWorktreeMode("cwd-main")).toBe("cwd-integration-branch");
+      expect(normalizeMergeIntegrationWorktreeMode("cwd-main")).toBe("cwd-integration-branch");
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[merger] settings.mergeIntegrationWorktree=cwd-main is legacy; normalized to cwd-integration-branch",
+      );
     });
 
     it("resolves legacy missing values to the new default", () => {

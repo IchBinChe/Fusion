@@ -22,6 +22,7 @@ export interface RecoverForeignOnlyContaminationDeps {
   repoDir: string;
   taskStore: TaskStore;
   runAudit: RunAuditor;
+  integrationBranch: string;
 }
 
 export interface RecoverForeignOnlyContaminationResult {
@@ -36,7 +37,7 @@ export async function recoverForeignOnlyContamination(
 ): Promise<RecoverForeignOnlyContaminationResult> {
   if (!task.branch || !task.worktree) return { recovered: false, reason: "missing-branch-or-worktree" };
 
-  const baseSha = task.baseCommitSha ?? task.baseBranch ?? task.executionStartBranch ?? "main";
+  const baseSha = task.baseCommitSha ?? task.baseBranch ?? task.executionStartBranch ?? deps.integrationBranch;
   if (!baseSha) {
     await deps.runAudit.database({
       type: "task:auto-recover-foreign-only-contamination-skipped",

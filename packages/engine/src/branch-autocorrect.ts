@@ -40,6 +40,12 @@ async function runGit(command: string, worktreePath: string): Promise<{ ok: true
 /**
  * FN-4474: Recover wrong-branch invariant failures by renaming/checking out
  * the expected branch without throwing terminal executor errors.
+ *
+ * FN-5456 invariant: this function MUST NOT create a branch from arbitrary
+ * HEAD. It may only rename an existing branch or switch to an already-existing
+ * expected ref; if neither applies it returns `failed` so upstream recovery
+ * (which knows the proper base SHA) can re-anchor via `prepareForTask` /
+ * `reanchorBranchToBase`.
  */
 export async function attemptBranchAutocorrect({
   worktreePath,
@@ -76,13 +82,31 @@ export async function attemptBranchAutocorrect({
   }
 
   if (isFreshBranch) {
-    const rename = await runGit(`git branch -m ${observedArg} ${expectedArg}`, worktreePath);
+    // `-M` (force) lets us recover from case-only renames on case-insensitive
+    // filesystems (macOS, default Windows) where `-m` rejects `foo` → `Foo`.
+    const rename = await runGit(`git branch -M ${observedArg} ${expectedArg}`, worktreePath);
     if (rename.ok) {
       return { status: "renamed" };
     }
   }
 
-  const checkout = await runGit(`git checkout -B ${expectedArg}`, worktreePath);
+  // FN-5456: must NOT use `git checkout -B` with no start point — that would
+  // create (or reset) the expected branch at whatever HEAD currently is,
+  // capturing the previous occupant's tip (the "branch: Created from HEAD"
+  // contamination pattern). Restrict the verify to refs/heads/ so a stray tag
+  // or remote ref with the same name cannot satisfy the check and lead the
+  // subsequent `git checkout` to a detached HEAD on the wrong object.
+  const expectedRefArg = quoteShellArg(`refs/heads/${expected}`);
+  const verifyExpected = await runGit(
+    `git show-ref --verify --quiet ${expectedRefArg}`,
+    worktreePath,
+  );
+  if (!verifyExpected.ok) {
+    return { status: "failed", reason: `expected branch ${expected} does not exist` };
+  }
+  // `--` disambiguates against a same-named tracked path; we already proved
+  // the ref exists, so this can only resolve as the branch.
+  const checkout = await runGit(`git checkout ${expectedArg} --`, worktreePath);
   if (checkout.ok) {
     return { status: "checked-out" };
   }

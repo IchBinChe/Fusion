@@ -28,7 +28,7 @@ function escapeRegExp(value: string): string {
 
 function expectMobileRule(css: string, selector: string, declaration: string): void {
   const pattern = new RegExp(
-    `@media\\s*\\(max-width:\\s*768px\\)\\s*\\{[\\s\\S]*?${escapeRegExp(selector)}\\s*\\{[\\s\\S]*?${escapeRegExp(declaration)}`,
+    `@media[^{]*\\(max-width:\\s*768px\\)[^{]*\\{[\\s\\S]*?${escapeRegExp(selector)}\\s*\\{[\\s\\S]*?${escapeRegExp(declaration)}`,
   );
   expect(pattern.test(css)).toBe(true);
 }

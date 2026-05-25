@@ -10,6 +10,10 @@ function git(dir: string, cmd: string): string {
   return execSync(cmd, { cwd: dir, stdio: "pipe" }).toString().trim();
 }
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 const created = new Set<string>();
 afterEach(() => {
   for (const dir of created) rmSync(dir, { recursive: true, force: true });
@@ -17,7 +21,7 @@ afterEach(() => {
 });
 
 function mkRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "fusion-test-merge-already-on-main-"));
+  const dir = mkdtempSync(join(testTempParent(), "fusion-test-merge-already-on-main-"));
   created.add(dir);
   git(dir, "git init -b main");
   git(dir, 'git config user.email "test@example.com"');

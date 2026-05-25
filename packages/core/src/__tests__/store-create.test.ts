@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import * as projectMemory from "../project-memory.js";
 import { AgentStore } from "../agent-store.js";
 import { CentralDatabase } from "../central-db.js";
-import { TaskStore, TaskHasDependentsError } from "../store.js";
+import { DependencyCycleError, TaskStore, TaskHasDependentsError } from "../store.js";
 import { setTaskCreatedHook } from "../task-creation-hooks.js";
 import { buildResearchDocumentKey, type Task } from "../types.js";
 import { createTaskStoreTestHarness, makeTmpDir } from "./store-test-helpers.js";
@@ -34,6 +34,27 @@ describe("TaskStore", () => {
   const deleteTaskDir = (taskId: string) => harness.deleteTaskDir(taskId);
   const createSourceIssueFixture = () => harness.createSourceIssueFixture();
   const insertLogEntryWithTimestamp = (...args: any[]) => (harness as any).insertLogEntryWithTimestamp(...args);
+
+  describe("FN-5413 null description coercion", () => {
+    it.each([
+      ["undefined", undefined],
+      ["null", null],
+    ])("coerces %s description to empty string on persist", async (_label, description) => {
+      const created = await store.createTask({
+        description: "Initial description",
+      });
+
+      const task = await store.getTask(created.id);
+      (task as Task & { description?: string | null }).description = description;
+
+      expect(() => {
+        (store as unknown as { upsertTaskWithFtsRecovery: (task: Task) => void }).upsertTaskWithFtsRecovery(task);
+      }).not.toThrow();
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.description).toBe("");
+    });
+  });
 
   describe("breakIntoSubtasks task creation flag", () => {
     it("persists breakIntoSubtasks=true when explicitly requested", async () => {
@@ -821,12 +842,21 @@ describe("TaskStore", () => {
         store.createTaskWithReservedId({ description: "duplicate" }, { taskId: "FN-9003" }),
       ).rejects.toThrow("Task ID already exists: FN-9003");
 
-      await expect(
-        store.createTaskWithReservedId(
+      let error: unknown;
+      try {
+        await store.createTaskWithReservedId(
           { description: "self dep", dependencies: ["FN-9004"] },
           { taskId: "FN-9004" },
-        ),
-      ).rejects.toThrow("Task FN-9004 cannot depend on itself");
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(DependencyCycleError);
+      expect(error).toMatchObject({
+        taskId: "FN-9004",
+        cyclePath: ["FN-9004", "FN-9004"],
+      });
     });
 
     it("applyReplicatedTaskCreate does not auto-apply default workflow steps", async () => {

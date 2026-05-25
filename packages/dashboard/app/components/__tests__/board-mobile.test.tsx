@@ -51,7 +51,7 @@ function getMainMobileSection(css: string): string {
   // owns its own @media (max-width: 768px) block) instead of one monolith
   // section in styles.css. Concatenate every <=768px media block in the
   // bundle so these assertions remain location-agnostic.
-  const re = /@media\s*\([^)]*max-width:\s*768px[^)]*\)\s*\{/g;
+  const re = /@media\s*\([^)]*max-width:\s*768px[^)]*\)[^{]*\{/g;
   const blocks: string[] = [];
 
   for (const match of css.matchAll(re)) {
@@ -70,6 +70,25 @@ function getMainMobileSection(css: string): string {
   expect(blocks.length).toBeGreaterThan(0);
   return blocks.join("\n");
 }
+
+describe("getMainMobileSection — compound media queries", () => {
+  it("matches simple and compound 768px blocks but excludes other breakpoints", () => {
+    const syntheticCss = `
+      @media (max-width: 768px)
+      { .a { color: red; } }
+      @media (max-width: 768px), (max-height: 480px)
+      { .b { color: blue; } }
+      @media (max-width: 640px)
+      { .c { color: green; } }
+    `;
+
+    const section = getMainMobileSection(syntheticCss);
+
+    expect(section).toContain(".a { color: red;");
+    expect(section).toContain(".b { color: blue;");
+    expect(section).not.toContain(".c { color: green;");
+  });
+});
 
 function expectRuleToContain(section: string, selectorFragment: string, declaration: string): void {
   const pattern = /([^{}]+)\{([\s\S]*?)\}/g;

@@ -152,6 +152,7 @@ interface TaskRow {
   sliceId: string | null;
   scopeOverride: number | null;
   scopeOverrideReason: string | null;
+  scopeAutoWiden: string | null;
   assignedAgentId: string | null;
   pausedByAgentId: string | null;
   assigneeUserId: string | null;
@@ -172,6 +173,7 @@ interface TaskRow {
   checkoutLeaseRenewedAt: string | null;
   checkoutLeaseEpoch: number | null;
   deletedAt: string | null;
+  allowResurrection: number | null;
 }
 
 /** Database row shape for the task_documents table. */
@@ -620,6 +622,20 @@ export class TaskDeletedError extends Error {
   }
 }
 
+export class TombstonedTaskResurrectionError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly deletedAt: string,
+    public readonly allowResurrection: boolean,
+  ) {
+    super(
+      `Task ${taskId} is soft-deleted (deletedAt=${deletedAt}) and cannot be recreated without forceResurrect: true. `
+      + `Operator unlock: allowResurrection=${allowResurrection}`,
+    );
+    this.name = "TombstonedTaskResurrectionError";
+  }
+}
+
 export class TaskHasLineageChildrenError extends Error {
   readonly taskId: string;
   readonly childIds: string[];
@@ -837,10 +853,84 @@ export function detectSelfDefeatingDependency(
   };
 }
 
+export class DependencyCycleError extends Error {
+  readonly code = "DEPENDENCY_CYCLE" as const;
+
+  constructor(
+    readonly taskId: string,
+    readonly cyclePath: readonly string[],
+  ) {
+    super(`Dependency cycle detected for ${taskId}: ${cyclePath.join(" → ")}`);
+    this.name = "DependencyCycleError";
+  }
+}
+
+export function detectDependencyCycle(
+  candidateTaskId: string,
+  candidateDependencies: readonly string[],
+  lookupDependencies: (taskId: string) => readonly string[] | undefined,
+): string[] | null {
+  const visited = new Set<string>();
+
+  for (const dep of candidateDependencies) {
+    if (dep === candidateTaskId) {
+      return [candidateTaskId, candidateTaskId];
+    }
+
+    const initialDeps = lookupDependencies(dep);
+    if (!initialDeps) continue;
+
+    const stack: Array<{ taskId: string; deps: readonly string[]; index: number }> = [
+      { taskId: dep, deps: initialDeps, index: 0 },
+    ];
+    const path = [candidateTaskId, dep];
+
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]!;
+      if (top.index >= top.deps.length) {
+        stack.pop();
+        path.pop();
+        continue;
+      }
+
+      const next = top.deps[top.index++]!;
+      if (next === candidateTaskId) {
+        return [...path, candidateTaskId];
+      }
+
+      if (visited.has(next)) {
+        continue;
+      }
+
+      const nextDeps = lookupDependencies(next);
+      if (!nextDeps) {
+        visited.add(next);
+        continue;
+      }
+
+      visited.add(next);
+      stack.push({ taskId: next, deps: nextDeps, index: 0 });
+      path.push(next);
+    }
+  }
+
+  return null;
+}
+
 export class MergeQueueTaskNotFoundError extends Error {
   constructor(public readonly taskId: string) {
     super(`Cannot enqueue merge queue entry for missing task ${taskId}`);
     this.name = "MergeQueueTaskNotFoundError";
+  }
+}
+
+export class MergeQueueInvalidColumnError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly column: Column,
+  ) {
+    super(`Cannot enqueue merge queue entry for task ${taskId} in column ${column}; only in-review is allowed`);
+    this.name = "MergeQueueInvalidColumnError";
   }
 }
 
@@ -1280,6 +1370,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       baseCommitSha: row.baseCommitSha || undefined,
       scopeOverride: row.scopeOverride ? true : undefined,
       scopeOverrideReason: row.scopeOverrideReason || undefined,
+      scopeAutoWiden: fromJson<string[]>(row.scopeAutoWiden) ?? [],
       modelPresetId: row.modelPresetId || undefined,
       modelProvider: row.modelProvider || undefined,
       modelId: row.modelId || undefined,
@@ -1423,6 +1514,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       checkoutLeaseRenewedAt: row.checkoutLeaseRenewedAt || undefined,
       checkoutLeaseEpoch: row.checkoutLeaseEpoch ?? undefined,
       deletedAt: row.deletedAt ?? undefined,
+      allowResurrection: row.allowResurrection ? true : undefined,
     };
   }
 
@@ -1662,9 +1754,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "dependencies", "steps", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
       "attachments", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
-      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
+      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
       "sourceType", "sourceAgentId", "sourceRunId", "sourceSessionId", "sourceMessageId", "sourceParentTaskId", "sourceMetadata",
-      "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch", "deletedAt",
+      "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch", "deletedAt", "allowResurrection",
       // `log` is fetched in slim mode so the server can aggregate
       // `timedExecutionMs` from `[timing] … in <N>ms` entries before
       // returning. The log itself is stripped from the response —
@@ -1711,9 +1803,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "dependencies", "steps", "attachments", "steeringComments",
       "comments", "review", "reviewState", "workflowStepResults", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
-      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
+      "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
       "sourceType", "sourceAgentId", "sourceRunId", "sourceSessionId", "sourceMessageId", "sourceParentTaskId", "sourceMetadata",
-      "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch", "deletedAt",
+      "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch", "deletedAt", "allowResurrection",
     ];
 
     const limitedLog = `
@@ -1743,7 +1835,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.id,
       task.lineageId ?? generateTaskLineageId(),
       task.title ?? null,
-      task.description,
+      task.description ?? "",
       normalizeTaskPriority(task.priority),
       task.column,
       task.status ?? null,
@@ -1829,6 +1921,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.sliceId ?? null,
       task.scopeOverride ? 1 : null,
       task.scopeOverrideReason ?? null,
+      toJson(task.scopeAutoWiden || []),
       task.assignedAgentId ?? null,
       task.pausedByAgentId ?? null,
       task.assigneeUserId ?? null,
@@ -1849,6 +1942,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.checkoutLeaseRenewedAt ?? null,
       task.checkoutLeaseEpoch ?? 0,
       task.deletedAt ?? null,
+      task.allowResurrection ? 1 : 0,
     ];
   }
 
@@ -1871,7 +1965,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         dependencies, steps, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
-        mergeDetails, breakIntoSubtasks, noCommitsExpected, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt
+        mergeDetails, breakIntoSubtasks, noCommitsExpected, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
       ) VALUES (${placeholders})
     `).run(...values);
     this.db.bumpLastModified();
@@ -1898,7 +1992,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         dependencies, steps, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
-        mergeDetails, breakIntoSubtasks, noCommitsExpected, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt
+        mergeDetails, breakIntoSubtasks, noCommitsExpected, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
       ) VALUES (${placeholders})
       ON CONFLICT(id) DO UPDATE SET
         lineageId = excluded.lineageId,
@@ -1989,6 +2083,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         sliceId = excluded.sliceId,
         scopeOverride = excluded.scopeOverride,
         scopeOverrideReason = excluded.scopeOverrideReason,
+        scopeAutoWiden = excluded.scopeAutoWiden,
         assignedAgentId = excluded.assignedAgentId,
         pausedByAgentId = excluded.pausedByAgentId,
         assigneeUserId = excluded.assigneeUserId,
@@ -2008,7 +2103,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         checkoutRunId = excluded.checkoutRunId,
         checkoutLeaseRenewedAt = excluded.checkoutLeaseRenewedAt,
         checkoutLeaseEpoch = excluded.checkoutLeaseEpoch,
-        deletedAt = excluded.deletedAt
+        deletedAt = excluded.deletedAt,
+        allowResurrection = excluded.allowResurrection
     `).run(...this.getTaskPersistValues(task));
     this.db.bumpLastModified();
   }
@@ -2131,6 +2227,38 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (this.taskIdExistsAnywhere(id)) {
       throw new Error(`Task ID already exists: ${id}`);
     }
+  }
+
+  private maybeResolveTombstonedTaskId(
+    id: string,
+    input: Pick<TaskCreateInput, "forceResurrect">,
+    operation: "createTask" | "duplicateTask" | "refineTask",
+  ): void {
+    const existing = this.readTaskFromDb(id, { includeDeleted: true });
+    if (!existing?.deletedAt) return;
+
+    const allowResurrection = existing.allowResurrection === true;
+    if (input.forceResurrect === true || allowResurrection) {
+      this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+      this.db.bumpLastModified();
+      return;
+    }
+
+    storeLog.warn(`[tombstone-resurrection-blocked] ${id} deletedAt=${existing.deletedAt}`);
+    this.insertRunAuditEventRow({
+      taskId: id,
+      domain: "database",
+      mutationType: "task:resurrection-blocked",
+      target: id,
+      metadata: {
+        id,
+        deletedAt: existing.deletedAt,
+        allowResurrection,
+        operation,
+      },
+    });
+
+    throw new TombstonedTaskResurrectionError(id, existing.deletedAt, allowResurrection);
   }
 
   private isTaskArchived(id: string): boolean {
@@ -3213,6 +3341,51 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return resolved.length > 0 ? resolved : undefined;
   }
 
+  private async buildActiveTaskDependencyLookup(overrides?: Map<string, readonly string[]>): Promise<Map<string, readonly string[]>> {
+    const tasks = await this.listTasks({ includeArchived: false });
+    const lookup = new Map<string, readonly string[]>();
+    for (const task of tasks) {
+      lookup.set(task.id, task.dependencies ?? []);
+    }
+    if (overrides) {
+      for (const [taskId, deps] of overrides.entries()) {
+        lookup.set(taskId, deps);
+      }
+    }
+    return lookup;
+  }
+
+  private recordDependencyCycleRejectedAudit(
+    taskId: string,
+    cyclePath: readonly string[],
+    source: "createTask" | "createTaskWithReservedId" | "updateTask" | "replication",
+  ): void {
+    this.insertRunAuditEventRow({
+      taskId,
+      domain: "database",
+      mutationType: source === "replication" ? "task:dependency-cycle-rejected-replication" : "task:dependency-cycle-rejected",
+      target: taskId,
+      metadata: { taskId, cyclePath, source },
+    });
+  }
+
+  private async assertNoDependencyCycle(
+    taskId: string,
+    dependencies: readonly string[],
+    source: "createTask" | "createTaskWithReservedId" | "updateTask" | "replication",
+    overrides?: Map<string, readonly string[]>,
+  ): Promise<void> {
+    if (dependencies.length === 0 && !overrides) return;
+    const lookup = await this.buildActiveTaskDependencyLookup(overrides);
+    const cyclePath = detectDependencyCycle(taskId, dependencies, (candidateId) => lookup.get(candidateId));
+    if (!cyclePath) return;
+    this.recordDependencyCycleRejectedAudit(taskId, cyclePath, source);
+    if (source === "replication") {
+      storeLog.warn("Skipping replicated task create due to dependency cycle", { taskId, cyclePath });
+      return;
+    }
+    throw new DependencyCycleError(taskId, cyclePath);
+  }
   async createTask(
     input: TaskCreateInput,
     options?: {
@@ -3299,9 +3472,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const task = await this.createTaskWithDistributedReservation(input, {
       createTaskWithId: async (taskId) => {
-        if (input.dependencies?.includes(taskId)) {
-          throw new Error(`Task ${taskId} cannot depend on itself`);
-        }
+        await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
         return this._createTaskInternal(
           input,
           title,
@@ -3401,10 +3572,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       throw new Error("taskId is required");
     }
 
-    if (input.dependencies?.includes(id)) {
-      throw new Error(`Task ${id} cannot depend on itself`);
-    }
+    await this.assertNoDependencyCycle(id, input.dependencies ?? [], "createTaskWithReservedId");
 
+    this.maybeResolveTombstonedTaskId(id, input, "createTask");
     this.assertTaskIdAvailable(id);
 
     const title = input.title?.trim() || undefined;
@@ -3454,6 +3624,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         return { task: existingDetail, applied: false };
       }
       throw replicationCollisionError(payload.taskId);
+    }
+
+    if (payload.input.dependencies?.includes(payload.taskId)) {
+      this.recordDependencyCycleRejectedAudit(payload.taskId, [payload.taskId, payload.taskId], "replication");
+      storeLog.warn("Skipping replicated task create due to self dependency", { taskId: payload.taskId });
+      return { task: payload.input as Task, applied: false };
+    }
+
+    const lookup = await this.buildActiveTaskDependencyLookup(new Map([[payload.taskId, payload.input.dependencies ?? []]]));
+    const replicationCycle = detectDependencyCycle(payload.taskId, payload.input.dependencies ?? [], (candidateId) => lookup.get(candidateId));
+    if (replicationCycle) {
+      this.recordDependencyCycleRejectedAudit(payload.taskId, replicationCycle, "replication");
+      storeLog.warn("Skipping replicated task create due to dependency cycle", { taskId: payload.taskId, cyclePath: replicationCycle });
+      return { task: payload.input as Task, applied: false };
     }
 
     const task = await this.createTaskWithReservedId(payload.input, {
@@ -3545,6 +3729,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       storeLog.log(`[title-id-drift] normalized title for ${id}: removed=[${removed.join(",")}]`);
     }
 
+    this.maybeResolveTombstonedTaskId(id, input, "createTask");
     this.assertTaskIdAvailable(id);
 
     const dir = this.taskDir(id);
@@ -3581,38 +3766,123 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private async _maybeAutoArchiveSameAgentDuplicate(task: Task, input: TaskCreateInput): Promise<void> {
     const sourceAgentId = task.sourceAgentId ?? null;
-    if (!sourceAgentId) return;
+    const sourceParentTaskId = task.sourceParentTaskId ?? null;
+    // Need at least one provenance handle to scope the dedup check.
+    if (!sourceAgentId && !sourceParentTaskId) return;
 
     try {
       const nowMs = Date.now();
       const recent = (await this.listTasks({ slim: true, includeArchived: false })).filter((candidate) => {
         if (candidate.id === task.id) return false;
-        if (candidate.sourceAgentId !== sourceAgentId) return false;
         const createdMs = Date.parse(candidate.createdAt);
         if (Number.isNaN(createdMs)) return false;
-        return createdMs >= nowMs - 24 * 60 * 60 * 1000;
+        if (createdMs < nowMs - 24 * 60 * 60 * 1000) return false;
+        const agentMatch = sourceAgentId != null && candidate.sourceAgentId === sourceAgentId;
+        const parentMatch = sourceParentTaskId != null && candidate.sourceParentTaskId === sourceParentTaskId;
+        return agentMatch || parentMatch;
       });
 
+      const settings = await this.getSettings();
+      const stickyWindowDays = Math.max(0, settings.tombstoneStickyWindowDays ?? 7);
+      let tombstonedCandidates: Array<{
+        id: string;
+        title: string | null;
+        description: string;
+        column: Column;
+        createdAt: string;
+        sourceAgentId: string | null;
+        deletedAt: string;
+        allowResurrection: number | null;
+      }> = [];
+
+      if (stickyWindowDays > 0) {
+        try {
+          const cutoffIso = new Date(nowMs - stickyWindowDays * 24 * 60 * 60 * 1000).toISOString();
+          tombstonedCandidates = this.db.prepare(`
+            SELECT id, title, description, "column", createdAt, sourceAgentId, deletedAt, allowResurrection
+              FROM tasks
+             WHERE deletedAt IS NOT NULL
+               AND deletedAt >= ?
+               AND sourceAgentId = ?
+               AND id != ?
+          `).all(cutoffIso, sourceAgentId, task.id) as typeof tombstonedCandidates;
+        } catch (error) {
+          storeLog.warn(`FN-5233 tombstone candidate widening failed open for ${task.id}: ${getErrorMessage(error)}`);
+        }
+      }
+
       const matches = findSameAgentDuplicates(
-        { title: input.title ?? task.title, description: input.description },
-        recent.map((candidate) => ({
-          id: candidate.id,
-          title: candidate.title ?? "",
-          description: candidate.description,
-          column: candidate.column,
-          createdAt: Date.parse(candidate.createdAt),
-          sourceAgentId: candidate.sourceAgentId ?? null,
-        })),
-        { nowMs },
+        {
+          title: input.title ?? task.title,
+          description: input.description,
+          sourceParentTaskId,
+        },
+        [
+          ...recent.map((candidate) => ({
+            id: candidate.id,
+            title: candidate.title ?? "",
+            description: candidate.description,
+            column: candidate.column,
+            createdAt: Date.parse(candidate.createdAt),
+            sourceAgentId: candidate.sourceAgentId ?? null,
+            sourceParentTaskId: candidate.sourceParentTaskId ?? null,
+            tombstoned: false,
+          })),
+          ...tombstonedCandidates.map((candidate) => ({
+            id: candidate.id,
+            title: candidate.title ?? "",
+            description: candidate.description,
+            column: "todo" as Column,
+            createdAt: Date.parse(candidate.createdAt),
+            sourceAgentId: candidate.sourceAgentId,
+            sourceParentTaskId: null,
+            tombstoned: true,
+            deletedAt: candidate.deletedAt,
+            allowResurrection: candidate.allowResurrection === 1,
+          })),
+        ],
+        { nowMs, sourceAgentId },
       );
 
       if (matches.length === 0) return;
 
-      const siblingTaskIds = matches.map((match) => match.id);
-      const scores = Object.fromEntries(matches.map((match) => [match.id, match.score]));
+      const tombstonedMatch = matches.find((match) => match.tombstoned && match.allowResurrection !== true);
+      if (tombstonedMatch?.deletedAt) {
+        this.insertRunAuditEventRow({
+          taskId: task.id,
+          domain: "database",
+          mutationType: "intake:resurrection-blocked",
+          target: task.id,
+          metadata: {
+            matchedTaskId: tombstonedMatch.id,
+            score: tombstonedMatch.score,
+            tombstoneDeletedAt: tombstonedMatch.deletedAt,
+            stickyWindowDays,
+          },
+        });
+        if (this.isWatching) this.taskCache.delete(task.id);
+        this.deleteTaskById(task.id);
+        const { rm } = await import("node:fs/promises");
+        const taskDir = this.taskDir(task.id);
+        if (existsSync(taskDir)) {
+          await rm(taskDir, { recursive: true, force: true });
+        }
+        throw new TombstonedTaskResurrectionError(
+          tombstonedMatch.id,
+          tombstonedMatch.deletedAt,
+          tombstonedMatch.allowResurrection === true,
+        );
+      }
+
+      const siblingTaskIds = matches.filter((match) => !match.tombstoned).map((match) => match.id);
+      if (siblingTaskIds.length === 0) return;
+      const scores = Object.fromEntries(matches.filter((match) => !match.tombstoned).map((match) => [match.id, match.score]));
       await archiveAsSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
       task.column = "archived";
     } catch (error) {
+      if (error instanceof TombstonedTaskResurrectionError) {
+        throw error;
+      }
       storeLog.warn(`FN-4892 same-agent duplicate intake failed open for ${task.id}: ${getErrorMessage(error)}`);
     }
   }
@@ -3664,6 +3934,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           baseBranch: sourceTask.baseBranch,
         };
 
+        this.maybeResolveTombstonedTaskId(newId, {}, "duplicateTask");
         this.assertTaskIdAvailable(newId);
 
         const newDir = this.taskDir(newId);
@@ -3740,6 +4011,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           attachments: sourceTask.attachments ? [...sourceTask.attachments] : undefined,
         };
 
+        this.maybeResolveTombstonedTaskId(newId, {}, "refineTask");
         this.assertTaskIdAvailable(newId);
 
         const newDir = this.taskDir(newId);
@@ -4008,6 +4280,37 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     return sorted.slice(offset, offset + Math.max(0, limit));
+  }
+
+  async listTasksForGithubTrackingReconcile(): Promise<Task[]> {
+    const reconcileScanLimit = 200;
+    const selectClause = this.getTaskSelectClause(true);
+
+    // FN-5577: GitHub tracking reconciliation must inspect soft-deleted rows,
+    // so this query intentionally bypasses ACTIVE_TASKS_WHERE.
+    const deletedRows = this.db.prepare(
+      `SELECT ${selectClause} FROM tasks WHERE "deletedAt" IS NOT NULL AND "githubTracking" IS NOT NULL ORDER BY updatedAt ASC LIMIT ?`,
+    ).all(reconcileScanLimit) as unknown as TaskRow[];
+
+    const deletedTasks = deletedRows.map((row) => {
+      const task = this.rowToTask(row);
+      task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
+      task.log = [];
+      return task;
+    });
+
+    let archivedTasks: Task[] = [];
+    try {
+      archivedTasks = this.archiveDb
+        .list()
+        .map((entry) => this.archiveEntryToTask(entry, true))
+        .filter((task) => Boolean(task.githubTracking))
+        .slice(0, reconcileScanLimit);
+    } catch {
+      archivedTasks = [];
+    }
+
+    return [...deletedTasks, ...archivedTasks].slice(0, reconcileScanLimit);
   }
 
   async listStrandedRefinements(options?: {
@@ -4785,6 +5088,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (toColumn === "in-review") {
       task.recoveryRetryCount = undefined;
       task.nextRecoveryAt = undefined;
+      // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
+      // `overlapBlockedBy` are stamped while the task waits in `todo`. If
+      // they survive the transition into `in-review` they permanently block
+      // the merge gate (see getTaskMergeBlocker's BLOCKING_TASK_STATUSES).
+      if (task.status === "queued") {
+        task.status = undefined;
+      }
+      task.blockedBy = undefined;
+      task.overlapBlockedBy = undefined;
     }
 
     if (
@@ -4842,6 +5154,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           moveSource,
         },
       });
+      this.dequeueMergeQueueOnColumnExit(id, fromColumn, toColumn, movedAt);
 
       if (toColumn === "in-review" && !internal.fromHandoff && options?.allowDirectInReviewMove !== true) {
         this.insertRunAuditEventRow({
@@ -4936,13 +5249,17 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
-      // Validate that task doesn't depend on itself
-      if (updates.dependencies?.includes(id)) {
-        throw new Error(`Task ${id} cannot depend on itself`);
+      if (updates.dependencies !== undefined) {
+        await this.assertNoDependencyCycle(
+          id,
+          updates.dependencies,
+          "updateTask",
+          new Map([[id, updates.dependencies]]),
+        );
       }
 
       const dir = this.taskDir(id);
@@ -5147,6 +5464,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.scopeOverrideReason = undefined;
       } else if (updates.scopeOverrideReason !== undefined) {
         task.scopeOverrideReason = updates.scopeOverrideReason;
+      }
+      if (updates.scopeAutoWiden === null) {
+        task.scopeAutoWiden = undefined;
+      } else if (updates.scopeAutoWiden !== undefined) {
+        task.scopeAutoWiden = [...updates.scopeAutoWiden];
       }
       if (updates.nodeId === null) {
         task.nodeId = undefined;
@@ -5991,20 +6313,25 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   enqueueMergeQueue(taskId: string, opts: MergeQueueEnqueueOptions = {}): MergeQueueEntry {
-    return this.db.transactionImmediate(() => {
+    let invalidColumn: Column | null = null;
+    const entry = this.db.transactionImmediate(() => {
       const existing = this.db.prepare("SELECT * FROM mergeQueue WHERE taskId = ?").get(taskId) as MergeQueueRow | undefined;
-      const taskRow = this.db.prepare("SELECT priority FROM tasks WHERE id = ?").get(taskId) as { priority: string | null } | undefined;
+      const taskRow = this.db.prepare("SELECT priority, column FROM tasks WHERE id = ?").get(taskId) as { priority: string | null; column: Column } | undefined;
       if (!taskRow) {
         throw new MergeQueueTaskNotFoundError(taskId);
+      }
+      if (taskRow.column !== "in-review") {
+        invalidColumn = taskRow.column;
+        return null;
       }
 
       const now = opts.now ?? new Date().toISOString();
       const priority = opts.priority ?? normalizeTaskPriority(taskRow.priority);
 
-      let entry: MergeQueueEntry;
+      let nextEntry: MergeQueueEntry;
       let alreadyEnqueued = true;
       if (existing) {
-        entry = this.rowToMergeQueueEntry(existing);
+        nextEntry = this.rowToMergeQueueEntry(existing);
       } else {
         this.db.prepare(`
           INSERT INTO mergeQueue (taskId, enqueuedAt, priority, attemptCount)
@@ -6015,7 +6342,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         if (!inserted) {
           throw new Error(`Failed to read merge queue entry for ${taskId} after enqueue`);
         }
-        entry = this.rowToMergeQueueEntry(inserted);
+        nextEntry = this.rowToMergeQueueEntry(inserted);
         alreadyEnqueued = false;
       }
 
@@ -6026,13 +6353,111 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         target: taskId,
         metadata: {
           taskId,
-          priority: entry.priority,
-          enqueuedAt: entry.enqueuedAt,
+          priority: nextEntry.priority,
+          enqueuedAt: nextEntry.enqueuedAt,
           alreadyEnqueued,
         },
       });
 
-      return entry;
+      return nextEntry;
+    });
+
+    if (invalidColumn) {
+      this.db.transactionImmediate(() => {
+        this.insertRunAuditEventRow({
+          taskId,
+          domain: "database",
+          mutationType: "mergeQueue:enqueue-rejected",
+          target: taskId,
+          metadata: {
+            taskId,
+            column: invalidColumn,
+            reason: "not-in-review",
+          },
+        });
+      });
+      throw new MergeQueueInvalidColumnError(taskId, invalidColumn);
+    }
+
+    if (!entry) {
+      throw new Error(`Failed to enqueue merge queue entry for ${taskId}`);
+    }
+    return entry;
+  }
+
+  private cleanupStaleMergeQueueRows(now: string): void {
+    const staleRows = this.db.prepare(`
+      SELECT mq.taskId, mq.leasedBy, mq.leaseExpiresAt, t.column
+        FROM mergeQueue mq
+        LEFT JOIN tasks t ON t.id = mq.taskId
+       WHERE t.id IS NULL OR t.column != 'in-review'
+    `).all() as Array<{ taskId: string; leasedBy: string | null; leaseExpiresAt: string | null; column: Column | null }>;
+
+    for (const staleRow of staleRows) {
+      this.db.prepare("DELETE FROM mergeQueue WHERE taskId = ?").run(staleRow.taskId);
+      this.insertRunAuditEventRow({
+        taskId: staleRow.taskId,
+        domain: "database",
+        mutationType: "mergeQueue:auto-cleanup-stale-row",
+        target: staleRow.taskId,
+        metadata: {
+          taskId: staleRow.taskId,
+          column: staleRow.column,
+          leasedBy: staleRow.leasedBy,
+          leaseExpiresAt: staleRow.leaseExpiresAt,
+          cleanedAt: now,
+          reason: "not-in-review",
+        },
+      });
+    }
+  }
+
+  private dequeueMergeQueueOnColumnExit(taskId: string, previousColumn: Column, nextColumn: Column, now: string): void {
+    if (previousColumn !== "in-review" || nextColumn === "in-review") {
+      return;
+    }
+
+    const queueRow = this.db.prepare("SELECT leasedBy, leaseExpiresAt FROM mergeQueue WHERE taskId = ?").get(taskId) as {
+      leasedBy: string | null;
+      leaseExpiresAt: string | null;
+    } | undefined;
+    if (!queueRow) {
+      return;
+    }
+
+    const leaseIsExpired = queueRow.leaseExpiresAt != null && queueRow.leaseExpiresAt <= now;
+    if (!queueRow.leasedBy || leaseIsExpired) {
+      this.db.prepare("DELETE FROM mergeQueue WHERE taskId = ?").run(taskId);
+      this.insertRunAuditEventRow({
+        taskId,
+        domain: "database",
+        mutationType: "mergeQueue:auto-cleanup-stale-row",
+        target: taskId,
+        metadata: {
+          taskId,
+          previousColumn,
+          nextColumn,
+          leasedBy: queueRow.leasedBy,
+          leaseExpiresAt: queueRow.leaseExpiresAt,
+          cleanedAt: now,
+          reason: "column-exit",
+        },
+      });
+      return;
+    }
+
+    this.insertRunAuditEventRow({
+      taskId,
+      domain: "database",
+      mutationType: "mergeQueue:stale-lease-on-column-exit",
+      target: taskId,
+      metadata: {
+        taskId,
+        previousColumn,
+        nextColumn,
+        leasedBy: queueRow.leasedBy,
+        leaseExpiresAt: queueRow.leaseExpiresAt,
+      },
     });
   }
 
@@ -6044,67 +6469,81 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return this.db.transactionImmediate(() => {
       const now = opts.now ?? new Date().toISOString();
       const leaseExpiresAt = new Date(Date.parse(now) + opts.leaseDurationMs).toISOString();
+      this.cleanupStaleMergeQueueRows(now);
 
-      // Target the specific task if provided; return null immediately when unavailable
-      // rather than falling back to the queue head, so callers that pass targetTaskId
-      // can distinguish "target not available" from "no tasks available".
       let leased: MergeQueueRow | undefined;
       if (opts.targetTaskId) {
         leased = this.db.prepare(`
           UPDATE mergeQueue
              SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ?
            WHERE taskId = ?
+             AND EXISTS (
+               SELECT 1
+                 FROM tasks t
+                WHERE t.id = mergeQueue.taskId
+                  AND t.column = 'in-review'
+             )
              AND (leasedBy IS NULL OR leaseExpiresAt <= ?)
            RETURNING *
         `).get(workerId, now, leaseExpiresAt, opts.targetTaskId, now) as MergeQueueRow | undefined;
-        // Do NOT fall back to queue-head when a target was explicitly requested.
-        // Callers (e.g. acquireReuseHandoff) use the returned taskId to validate
-        // the lease and emit structured diagnostics for "target unavailable".
+
+        if (!leased) {
+          const queueHead = this.db.prepare(`
+            SELECT mq.taskId, mq.leasedBy, t.column
+              FROM mergeQueue mq
+              LEFT JOIN tasks t ON t.id = mq.taskId
+             ORDER BY CASE mq.priority
+                        WHEN 'urgent' THEN 0
+                        WHEN 'high'   THEN 1
+                        WHEN 'normal' THEN 2
+                        WHEN 'low'    THEN 3
+                        ELSE 4
+                      END ASC,
+                      mq.enqueuedAt ASC
+             LIMIT 1
+          `).get() as { taskId: string; leasedBy: string | null; column: string | null } | undefined;
+
+          this.insertRunAuditEventRow({
+            taskId: opts.targetTaskId,
+            domain: "database",
+            mutationType: "mergeQueue:lease-target-unavailable",
+            target: opts.targetTaskId,
+            metadata: {
+              targetTaskId: opts.targetTaskId,
+              workerId,
+              queueHeadTaskId: queueHead?.taskId ?? null,
+              queueHeadLeasedBy: queueHead?.leasedBy ?? null,
+              queueHeadColumn: queueHead?.column ?? null,
+            },
+          });
+          return null;
+        }
       } else {
-        // Backward-compatible queue-head selection for callers that don't target a task.
         leased = this.db.prepare(`
           UPDATE mergeQueue
              SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ?
            WHERE taskId = (
-             SELECT taskId FROM mergeQueue
-              WHERE leasedBy IS NULL OR leaseExpiresAt <= ?
-              ORDER BY CASE priority
+             SELECT mq.taskId
+               FROM mergeQueue mq
+               JOIN tasks t ON t.id = mq.taskId
+              WHERE t.column = 'in-review'
+                AND (mq.leasedBy IS NULL OR mq.leaseExpiresAt <= ?)
+              ORDER BY CASE mq.priority
                          WHEN 'urgent' THEN 0
                          WHEN 'high'   THEN 1
                          WHEN 'normal' THEN 2
                          WHEN 'low'    THEN 3
                          ELSE 4
                        END ASC,
-                       enqueuedAt ASC
+                       mq.enqueuedAt ASC
               LIMIT 1
            )
            RETURNING *
         `).get(workerId, now, leaseExpiresAt, now) as MergeQueueRow | undefined;
-      }
 
-      if (!leased) {
-        leased = this.db.prepare(`
-          UPDATE mergeQueue
-             SET leasedBy = ?, leasedAt = ?, leaseExpiresAt = ?
-           WHERE taskId = (
-             SELECT taskId FROM mergeQueue
-              WHERE leasedBy IS NULL OR leaseExpiresAt <= ?
-              ORDER BY CASE priority
-                         WHEN 'urgent' THEN 0
-                         WHEN 'high'   THEN 1
-                         WHEN 'normal' THEN 2
-                         WHEN 'low'    THEN 3
-                         ELSE 4
-                       END ASC,
-                       enqueuedAt ASC
-              LIMIT 1
-           )
-           RETURNING *
-        `).get(workerId, now, leaseExpiresAt, now) as MergeQueueRow | undefined;
-      }
-
-      if (!leased) {
-        return null;
+        if (!leased) {
+          return null;
+        }
       }
 
       const entry = this.rowToMergeQueueEntry(leased);
@@ -6234,6 +6673,24 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return rows.map((row) => this.rowToMergeQueueEntry(row));
   }
 
+  peekMergeQueueHead(): { taskId: string; leasedBy: string | null; column: Column | null } | null {
+    const row = this.db.prepare(`
+      SELECT mq.taskId, mq.leasedBy, t.column
+        FROM mergeQueue mq
+        LEFT JOIN tasks t ON t.id = mq.taskId
+       ORDER BY CASE mq.priority
+                  WHEN 'urgent' THEN 0
+                  WHEN 'high'   THEN 1
+                  WHEN 'normal' THEN 2
+                  WHEN 'low'    THEN 3
+                  ELSE 4
+                END ASC,
+                mq.enqueuedAt ASC
+       LIMIT 1
+    `).get() as { taskId: string; leasedBy: string | null; column: Column | null } | undefined;
+    return row ?? null;
+  }
+
   // ── End Run Audit APIs ───────────────────────────────────────────────
 
   /**
@@ -6324,6 +6781,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     options?: {
       removeDependencyReferences?: boolean;
       removeLineageReferences?: boolean;
+      allowResurrection?: boolean;
       githubIssueAction?: GithubIssueAction;
       auditContext?: { agentId: string; runId: string; sessionId?: string };
     },
@@ -6366,12 +6824,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       let rewrittenDependents: Task[] = [];
+      let rewrittenBlockedByResidueDependents: Task[] = [];
       let rewrittenLineageChildren: Task[] = [];
       this.db.transaction(() => {
         rewrittenDependents = this.rewriteDependentsForRemoval(id, dependentIds);
+        rewrittenBlockedByResidueDependents = this.rewriteBlockedByResidueDependentsForRemoval(id, new Set(dependentIds));
         rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
         const deletedAt = new Date().toISOString();
-        this.db.prepare("UPDATE tasks SET \"column\" = 'archived', deletedAt = ?, updatedAt = ? WHERE id = ?").run(deletedAt, deletedAt, id);
+        const allowResurrection = options?.allowResurrection === true ? 1 : 0;
+        this.db.prepare("UPDATE tasks SET \"column\" = 'archived', deletedAt = ?, allowResurrection = ?, updatedAt = ? WHERE id = ?").run(deletedAt, allowResurrection, deletedAt, id);
         this.recordRunAuditEvent({
           domain: "database",
           mutationType: "task:deleted",
@@ -6385,6 +6846,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             githubIssueAction: options?.githubIssueAction ?? "auto",
             removeDependencyReferences: !!options?.removeDependencyReferences,
             removeLineageReferences: !!options?.removeLineageReferences,
+            allowResurrection: options?.allowResurrection === true,
             sessionId: options?.auditContext?.sessionId,
           },
         });
@@ -6411,6 +6873,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (this.isWatching) this.taskCache.delete(id);
 
       for (const dependentTask of rewrittenDependents) {
+        this.emit("task:updated", dependentTask);
+      }
+      for (const dependentTask of rewrittenBlockedByResidueDependents) {
         this.emit("task:updated", dependentTask);
       }
       for (const lineageChild of rewrittenLineageChildren) {
@@ -6441,21 +6906,77 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (!dependentTask) continue;
 
       const nextDependencies = dependentTask.dependencies.filter((dependencyId) => dependencyId !== taskId);
-      if (nextDependencies.length === dependentTask.dependencies.length) {
+      const clearsBlockedBy = dependentTask.blockedBy === taskId;
+      if (nextDependencies.length === dependentTask.dependencies.length && !clearsBlockedBy) {
         continue;
       }
 
-      const updatedDependent = {
+      const updatedLog = clearsBlockedBy
+        ? [
+          ...(dependentTask.log ?? []),
+          {
+            timestamp: new Date().toISOString(),
+            action: `Auto-unblocked: blocker ${taskId} was soft-deleted`,
+          },
+        ]
+        : dependentTask.log;
+      const updatedDependent: Task = {
         ...dependentTask,
         dependencies: nextDependencies,
+        blockedBy: clearsBlockedBy ? undefined : dependentTask.blockedBy,
+        status: clearsBlockedBy ? undefined : dependentTask.status,
+        log: updatedLog,
         updatedAt: new Date().toISOString(),
       };
 
-      this.db.prepare("UPDATE tasks SET dependencies = ?, updatedAt = ? WHERE id = ?").run(
+      this.db.prepare("UPDATE tasks SET dependencies = ?, blockedBy = ?, status = ?, log = ?, updatedAt = ? WHERE id = ?").run(
         toJson(updatedDependent.dependencies),
+        updatedDependent.blockedBy ?? null,
+        updatedDependent.status ?? null,
+        toJson(updatedDependent.log ?? []),
         updatedDependent.updatedAt,
         updatedDependent.id,
       );
+      if (this.isWatching) {
+        this.taskCache.set(updatedDependent.id, updatedDependent);
+      }
+      rewrittenDependents.push(updatedDependent);
+    }
+
+    return rewrittenDependents;
+  }
+
+  private rewriteBlockedByResidueDependentsForRemoval(taskId: string, excludedDependentIds: Set<string>): Task[] {
+    const rewrittenDependents: Task[] = [];
+    const candidates = this.db
+      .prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE} AND blockedBy = ?`)
+      .all(taskId) as Array<{ id: string }>;
+
+    for (const candidate of candidates) {
+      if (excludedDependentIds.has(candidate.id)) continue;
+      const dependentTask = this.readTaskFromDb(candidate.id);
+      if (!dependentTask || dependentTask.blockedBy !== taskId) continue;
+
+      const updatedDependent: Task = {
+        ...dependentTask,
+        blockedBy: undefined,
+        status: undefined,
+        log: [
+          ...(dependentTask.log ?? []),
+          {
+            timestamp: new Date().toISOString(),
+            action: `Auto-unblocked: blocker ${taskId} was soft-deleted`,
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db.prepare("UPDATE tasks SET blockedBy = NULL, status = NULL, log = ?, updatedAt = ? WHERE id = ?").run(
+        toJson(updatedDependent.log ?? []),
+        updatedDependent.updatedAt,
+        updatedDependent.id,
+      );
+
       if (this.isWatching) {
         this.taskCache.set(updatedDependent.id, updatedDependent);
       }
@@ -6797,9 +7318,27 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       };
 
       const settings = await this.getSettings();
-      const projectDefaultBranch = typeof settings.baseBranch === "string" ? settings.baseBranch : undefined;
+      const normalizedIntegrationBranch =
+        typeof settings.integrationBranch === "string" ? settings.integrationBranch.trim() : "";
+      const normalizedBaseBranch = typeof settings.baseBranch === "string" ? settings.baseBranch.trim() : "";
+      let projectDefaultBranch =
+        normalizedIntegrationBranch.length > 0
+          ? normalizedIntegrationBranch
+          : normalizedBaseBranch.length > 0
+            ? normalizedBaseBranch
+            : "";
+      if (!projectDefaultBranch) {
+        const originHead = await this.runGitCommand("git symbolic-ref --short refs/remotes/origin/HEAD", 5_000);
+        if (originHead.exitCode === 0) {
+          projectDefaultBranch = originHead.stdout
+            .trim()
+            .replace(/^refs\/heads\//, "")
+            .replace(/^refs\/remotes\/origin\//, "")
+            .replace(/^origin\//, "");
+        }
+      }
       const mergeTarget = resolveTaskMergeTarget(task, {
-        projectDefaultBranch,
+        projectDefaultBranch: projectDefaultBranch || undefined,
       });
 
       // 1. Check the branch exists
@@ -9421,6 +9960,10 @@ ${stepsSection}`;
     return this.tasksDir;
   }
 
+  getTaskDir(id: string): string {
+    return this.taskDir(id);
+  }
+
   /** Expose the shared Database instance for co-located stores (e.g. AiSessionStore). */
   getDatabase(): Database {
     return this.db;
@@ -9463,6 +10006,18 @@ ${stepsSection}`;
       lastCheckedAt: this.db.integrityCheckLastRunAt ? new Date(this.db.integrityCheckLastRunAt) : null,
       isRunning: this.db.integrityCheckPending,
     };
+  }
+
+  /**
+   * Force-run an integrity check synchronously and return the refreshed health
+   * snapshot. Used by `POST /api/health/refresh` so users can clear a stale
+   * corruption banner after they've repaired the database in place
+   * (e.g. via `REINDEX` or `fn db --vacuum`) without having to restart the
+   * engine to re-arm the once-at-boot background check.
+   */
+  refreshDatabaseHealth(): ReturnType<TaskStore["getDatabaseHealth"]> {
+    this.db.refreshIntegrityCheck();
+    return this.getDatabaseHealth();
   }
 
   getDistributedTaskIdAllocator(): DistributedTaskIdAllocator {

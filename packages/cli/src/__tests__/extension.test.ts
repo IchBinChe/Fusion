@@ -27,7 +27,7 @@ vi.mock("../commands/task.js", () => ({
 }));
 
 import kbExtension from "../extension.js";
-import { TaskStore, AgentStore, RESEARCH_RUN_STATUSES } from "@fusion/core";
+import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { runTaskPlan } from "../commands/task.js";
 
@@ -2331,6 +2331,20 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
   });
 
   describe("fn_task_retry", () => {
+    const nonZeroRetryCounters = Object.fromEntries(
+      MANUAL_RETRY_RESET_COUNTER_KEYS.map((key, index) => [key, index + 1]),
+    );
+
+    const expectRetryCountersReset = (task: Awaited<ReturnType<TaskStore["getTask"]>>) => {
+      expect(task).toBeTruthy();
+      if (!task) return;
+      for (const key of MANUAL_RETRY_RESET_COUNTER_KEYS) {
+        expect(task[key] ?? 0).toBe(0);
+      }
+      expect(task.nextRecoveryAt ?? null).toBeNull();
+      expect(task.retrySummary?.total ?? 0).toBe(0);
+    };
+
     it("moves execution-failed in-review task (incomplete steps) to todo preserving progress", async () => {
       const store = new TaskStore(tmpDir);
       await store.init();
@@ -2349,7 +2363,13 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       });
       await store.moveTask(task.id, "in-progress");
       await store.moveTask(task.id, "in-review");
-      await store.updateTask(task.id, { status: "failed", error: "429 rate limited" });
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "429 rate limited",
+        mergeRetries: 9,
+        nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        ...nonZeroRetryCounters,
+      });
 
       const retryTool = api.tools.get("fn_task_retry")!;
       const result = await retryTool.execute("retry-exec", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
@@ -2362,6 +2382,8 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
       expect(updated?.steps[1].status).toBe("in-progress");
+      expectRetryCountersReset(updated);
+      expect(updated?.mergeRetries).toBe(9);
     });
 
     it("moves zero-step execution-failed in-review task to todo and clears failure state", async () => {
@@ -2410,7 +2432,13 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       });
       await store.moveTask(task.id, "in-progress");
       await store.moveTask(task.id, "in-review");
-      await store.updateTask(task.id, { status: "failed", error: "merge conflict", mergeRetries: 3 });
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "merge conflict",
+        mergeRetries: 3,
+        nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        ...nonZeroRetryCounters,
+      });
 
       const retryTool = api.tools.get("fn_task_retry")!;
       const result = await retryTool.execute("retry-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
@@ -2422,6 +2450,7 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.column).toBe("in-review");
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
+      expectRetryCountersReset(updated);
       expect(updated?.mergeRetries).toBe(0);
     });
 
@@ -2438,7 +2467,14 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       await store.updateTask(task.id, { steps: [] });
       await store.moveTask(task.id, "in-progress");
       await store.moveTask(task.id, "in-review");
-      await store.updateTask(task.id, { status: "failed", error: "merge conflict", mergeRetries: 2, steps: [] });
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "merge conflict",
+        mergeRetries: 2,
+        steps: [],
+        nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        ...nonZeroRetryCounters,
+      });
 
       const retryTool = api.tools.get("fn_task_retry")!;
       const result = await retryTool.execute("retry-zero-step-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
@@ -2451,6 +2487,39 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
       expect(updated?.steps).toEqual([]);
+      expectRetryCountersReset(updated);
+      expect(updated?.mergeRetries).toBe(0);
+    });
+
+    it("moves non-review failed task to todo and resets all retry counters", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "failed in-progress task",
+        description: "test",
+        column: "todo",
+      });
+      await store.moveTask(task.id, "in-progress");
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "verification failed",
+        mergeRetries: 8,
+        nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        ...nonZeroRetryCounters,
+      });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-generic", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("todo");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("todo");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expectRetryCountersReset(updated);
       expect(updated?.mergeRetries).toBe(0);
     });
   });

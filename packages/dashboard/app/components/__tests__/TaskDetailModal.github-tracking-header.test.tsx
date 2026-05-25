@@ -37,7 +37,7 @@ describe("FN-4224 GitHub tracking header layout", () => {
       /\.detail-github-tracking-section\s+\.detail-source-summary\s*\{[^}]*flex:\s*1 1 auto;[^}]*flex-wrap:\s*nowrap;[^}]*min-width:\s*0;/,
     );
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.detail-github-tracking-section\s+\.detail-source-header\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*min-width:\s*0;[^}]*\}[\s\S]*?\.detail-github-tracking-section\s+\.detail-source-summary\s*\{[^}]*flex:\s*1 1 auto;[^}]*flex-wrap:\s*nowrap;[^}]*min-width:\s*0;[^}]*\}/,
+      /@media[^{]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.detail-github-tracking-section\s+\.detail-source-header\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*min-width:\s*0;[^}]*\}[\s\S]*?\.detail-github-tracking-section\s+\.detail-source-summary\s*\{[^}]*flex:\s*1 1 auto;[^}]*flex-wrap:\s*nowrap;[^}]*min-width:\s*0;[^}]*\}/,
     );
   });
 });

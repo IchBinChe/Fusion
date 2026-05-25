@@ -33,7 +33,18 @@ export {
   SquashAuditError,
   type MergerOptions,
   type AutostashOrphanRecord,
+  stashUnrelatedRootDirChanges,
+  dropAutostashHandle,
+  restoreUnrelatedRootDirChanges,
+  tryFastForwardFromOrigin,
+  getConflictedFiles,
+  type AutostashHandle,
 } from "./merger.js";
+export {
+  resolveIntegrationBranch,
+  resolveIntegrationBranchSync,
+  __resetIntegrationBranchCacheForTests,
+} from "./integration-branch.js";
 export {
   resolveMergeIntegrationRoot,
   resolveIntegrationRemote,
@@ -43,6 +54,25 @@ export {
   type HandoffResult,
   type MergeIntegrationRootResolution,
 } from "./merger-integration-worktree.js";
+export {
+  smartPull,
+  type SmartPullInput,
+  type SmartPullResult,
+  type SmartPullMode,
+  type SmartPullAuditEvent,
+  type SmartPullAuditEmitter,
+} from "./smart-pull.js";
+export {
+  syncWorktreeToHead,
+  type SyncWorktreeInput,
+  type SyncWorktreeResult,
+  type SyncMode,
+  type WorktreeSyncAuditEvent,
+  type WorktreeSyncAuditEmitter,
+} from "./worktree-ref-sync.js";
+export {
+  generateSyntheticRunId,
+} from "./run-audit.js";
 export {
   auditSquashMerge,
   formatSquashAuditReport,

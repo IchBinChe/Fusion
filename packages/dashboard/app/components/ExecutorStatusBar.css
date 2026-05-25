@@ -6,9 +6,11 @@
  */
 .executor-status-bar {
   position: fixed;
-  bottom: 0;
+  /* See MobileNavBar.css — ICB compensation for Android Chrome's inflated
+     initial containing block. Defaults to 0px on healthy browsers. */
+  bottom: var(--icb-bottom-offset, 0px);
   left: 0;
-  right: 0;
+  right: var(--icb-right-offset, 0px);
   z-index: 50;
   display: flex;
   align-items: center;
@@ -289,7 +291,11 @@
     font-size: 11px;
     height: calc(var(--space-lg) * 2 + var(--space-xs));
     overflow: hidden;
-    bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+    /* Must match the mobile nav bar's effective height. MobileNavBar floors
+       the bottom inset to 12px (Android Chrome under-reports the inset while
+       its address bar is collapsing), so we have to use the same floor here
+       or the footer ends up drawn inside the nav's padding area. */
+    bottom: calc(var(--icb-bottom-offset, 0px) + var(--mobile-nav-height) + max(env(safe-area-inset-bottom, 0px), 12px) + var(--standalone-bottom-gap));
   }
 
   .executor-status-bar__segment {

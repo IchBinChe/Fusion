@@ -1,3 +1,4 @@
+// port-4040-allowlist: this file embeds the "never kill port 4040" rule in the executor prompt.
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -5,7 +6,7 @@ import { promisify } from "node:util";
 const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings } from "@fusion/core";
 import { RetryStormError, serializeRetryStormError } from "@fusion/core";
 import {
@@ -46,7 +47,11 @@ import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
 import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { attemptBranchAutocorrect } from "./branch-autocorrect.js";
 import { ActiveSessionWorktreeRemovalError } from "./worktree-backend.js";
-import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
+import {
+  activeSessionRegistry,
+  executingTaskLock,
+  reconcileSelfOwnedActiveSessionForRemoval,
+} from "./active-session-registry.js";
 import {
   StaleWorktreeIndexLockError,
   classifyStaleLock,
@@ -66,8 +71,14 @@ import {
   isBranchConflictError,
   reanchorBranchToBase,
   inspectBranchConflict,
+  reportBranchAttribution,
 } from "./branch-conflicts.js";
+import {
+  classifyOrphanOurAdvance,
+  rehomeOrphanOntoIntegration,
+} from "./merger-orphan-rehome.js";
 import { BranchAttributionError, filterFilesToOwnTaskCommits } from "./branch-attribution.js";
+import { resolveIntegrationBranch } from "./integration-branch.js";
 import { AgentLogger } from "./agent-logger.js";
 import { createLogger, executorLog, reviewerLog, formatError } from "./logger.js";
 import { TokenCapDetector } from "./token-cap-detector.js";
@@ -205,6 +216,77 @@ type TaskDoneRefusalResult =
     reason: string;
   };
 
+type PendingReviewBlockResult =
+  | {
+    blocked: true;
+    reason:
+      | "code-review-revise-outstanding"
+      | "review-request-without-verdict"
+      | "code-review-rethink-or-unavailable-outstanding"
+      | "code-review-unavailable-blocking";
+    stepIndex: number;
+  }
+  | { blocked: false };
+
+function detectPendingReviewBlock(
+  task: Task,
+  codeReviewVerdicts: Map<number, ReviewVerdict>,
+): PendingReviewBlockResult {
+  const inProgressStepIndices: number[] = [];
+  for (let stepIndex = 0; stepIndex < task.steps.length; stepIndex++) {
+    if (task.steps[stepIndex]?.status === "in-progress") {
+      inProgressStepIndices.push(stepIndex);
+    }
+  }
+
+  if (inProgressStepIndices.length === 0) {
+    return { blocked: false };
+  }
+
+  const recentActions = (task.log ?? [])
+    .slice(-30)
+    .map((entry) => entry.action?.trim())
+    .filter((action): action is string => Boolean(action));
+
+  for (const stepIndex of inProgressStepIndices) {
+    if (codeReviewVerdicts.get(stepIndex) === "REVISE") {
+      return { blocked: true, reason: "code-review-revise-outstanding", stepIndex };
+    }
+
+    const stepDisplay = stepIndex + 1;
+    const codeRequest = `code review requested for Step ${stepDisplay}`;
+    const planRequest = `plan review requested for Step ${stepDisplay}`;
+    const codeVerdictPrefix = `code review Step ${stepDisplay}:`;
+    const planVerdictPrefix = `plan review Step ${stepDisplay}:`;
+
+    for (let i = recentActions.length - 1; i >= 0; i--) {
+      const action = recentActions[i];
+      if (!action) {
+        continue;
+      }
+
+      if (action.startsWith(codeRequest) || action.startsWith(planRequest)) {
+        return { blocked: true, reason: "review-request-without-verdict", stepIndex };
+      }
+
+      if (action.startsWith(`${codeVerdictPrefix} RETHINK`)) {
+        return { blocked: true, reason: "code-review-rethink-or-unavailable-outstanding", stepIndex };
+      }
+
+      if (action.startsWith(`${codeVerdictPrefix} UNAVAILABLE`)
+        && action.includes("blocking until reviewer returns a usable verdict")) {
+        return { blocked: true, reason: "code-review-unavailable-blocking", stepIndex };
+      }
+
+      if (action.startsWith(codeVerdictPrefix) || action.startsWith(planVerdictPrefix)) {
+        break;
+      }
+    }
+  }
+
+  return { blocked: false };
+}
+
 function formatTaskDoneRefusal(refusalClass: TaskDoneRefusalClass, reason: string): string {
   return `fn_task_done refused (${refusalClass}): ${reason}. ${TASK_DONE_REFUSAL_SUFFIX}`;
 }
@@ -233,7 +315,15 @@ export function evaluateTaskDoneRefusal(
   }
 
   const summary = params.summary?.trim();
-  if (summary) {
+  // Preflight escape hatch: when the agent's preflight finds PROMPT.md is out
+  // of sync with HEAD (work already done on the base), it marks remaining
+  // steps `skipped` and calls fn_task_done with a `PREMISE STALE:` summary.
+  // Skip the summary-text refusals (dissent + scoped-incomplete) for this
+  // sentinel so a natural premise-stale explanation like "...the work is
+  // already done on HEAD" cannot deadlock the executor. The pending-review
+  // and bulk-step-completion guards above/below still apply.
+  const isPremiseStale = !!summary && /^premise stale:/i.test(summary);
+  if (summary && !isPremiseStale) {
     const dissentMatch = DISSENT_PATTERNS.find((pattern) => pattern.test(summary));
     if (dissentMatch) {
       const matchText = summary.match(dissentMatch)?.[0] ?? dissentMatch.source;
@@ -505,6 +595,7 @@ async function runConfiguredCommand(
   timeoutMs: number,
   extraEnv?: NodeJS.ProcessEnv,
   auditor?: RunAuditor,
+  signal?: AbortSignal,
 ): Promise<RunCommandResult> {
   const backend = getConfiguredCommandSandboxBackend(auditor);
   const result = await backend.run(command, {
@@ -513,6 +604,7 @@ async function runConfiguredCommand(
     maxBuffer: 10 * 1024 * 1024,
     encoding: "utf-8",
     ...(extraEnv !== undefined && { env: extraEnv }),
+    ...(signal !== undefined && { signal }),
   });
 
   return {
@@ -532,8 +624,9 @@ export async function __runConfiguredCommandForTests(
   timeoutMs: number,
   extraEnv?: NodeJS.ProcessEnv,
   auditor?: RunAuditor,
+  signal?: AbortSignal,
 ): Promise<RunCommandResult> {
-  return runConfiguredCommand(command, cwd, timeoutMs, extraEnv, auditor);
+  return runConfiguredCommand(command, cwd, timeoutMs, extraEnv, auditor, signal);
 }
 
 // ── Tool parameter schemas (module-level for reuse in ToolDefinition generics) ──
@@ -711,6 +804,16 @@ You have tools to report progress. The board updates in real-time.
 - Before starting a step: \`fn_task_update(step=N, status="in-progress")\`
 - After completing a step: \`fn_task_update(step=N, status="done")\`
 - If skipping a step: \`fn_task_update(step=N, status="skipped")\`
+
+**Preflight escape hatch — stale premise.**
+PROMPT.md is captured at task-creation time; HEAD may have moved on since then. During Preflight (Step 0), reproduce the failure or symptom described in the PROMPT. If reproduction shows the work is **already done or the premise no longer matches HEAD** — for example, the test that PROMPT claims is failing already passes on the current base, or the file PROMPT says to change already contains the described change — do NOT march through the remaining steps producing empty commits. Instead:
+
+1. Call \`fn_task_log\` with a clear premise-stale finding: what PROMPT.md claimed vs. what HEAD actually shows (include the exact reproduction command + its result).
+2. Mark Step 0 done: \`fn_task_update(step=0, status="done")\`.
+3. Mark every remaining step skipped with a one-line reason: \`fn_task_update(step=N, status="skipped")\`.
+4. Call \`fn_task_done\` with a summary that begins \`PREMISE STALE:\` followed by the concrete reason (e.g. \`PREMISE STALE: targeted reproduction passes unchanged on HEAD; PROMPT claimed MOBILE_MEDIA_QUERY had been expanded but useViewportMode.ts:9 still exports the legacy value\`).
+
+This path exists specifically to prevent the executor from looping when PROMPT.md is out of sync with HEAD. Use it only after running the actual reproduction — do not invoke it to dodge real work.
 
 **Logging important actions:** \`fn_task_log(message="what happened")\`
 
@@ -930,6 +1033,11 @@ export class TaskExecutor {
    *  Prevents the task:moved handler from dispatching execute() before the
    *  bounce finishes its own dispatch. */
   private workflowRerunPending = new Set<string>();
+  /** FN-5256: in-flight session-disposal promises keyed by taskId. The
+   *  task:moved (away from in-progress) and task:deleted listeners populate
+   *  this so a fast re-dispatch (task:moved → in-progress) awaits the prior
+   *  session being fully reaped before creating/acquiring a new worktree. */
+  private pendingTaskDisposals = new Map<string, Promise<void>>();
   /** Active agent sessions per task, used to terminate on pause and inject steering. */
   private activeSessions = new Map<string, {
     session: AgentSession;
@@ -944,6 +1052,8 @@ export class TaskExecutor {
   private activeStepExecutors = new Map<string, StepSessionExecutor>();
   /** Active pre-merge workflow step sessions per task. */
   private activeWorkflowStepSessions = new Map<string, AgentSession>();
+  /** Active configured-command abort controllers keyed by task. */
+  private activeConfiguredCommandControllers = new Map<string, Set<AbortController>>();
   private readonlyWorkflowStepAuditDone = false;
   /**
    * Reviewer subagent sessions per task. Reviewers (`reviewer.ts`) create their
@@ -1024,6 +1134,27 @@ export class TaskExecutor {
     if (resolvedWorktreePath) {
       activeSessionRegistry.unregisterPath(resolvedWorktreePath);
     }
+  }
+
+  private registerConfiguredCommandController(taskId: string, controller: AbortController): void {
+    const controllers = this.activeConfiguredCommandControllers.get(taskId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.activeConfiguredCommandControllers.set(taskId, controllers);
+  }
+
+  private unregisterConfiguredCommandController(taskId: string, controller: AbortController): void {
+    const controllers = this.activeConfiguredCommandControllers.get(taskId);
+    if (!controllers) return;
+    controllers.delete(controller);
+    if (controllers.size === 0) {
+      this.activeConfiguredCommandControllers.delete(taskId);
+    }
+  }
+
+  private createConfiguredCommandAbortError(taskId: string, command: string): Error {
+    const error = new Error(`Configured command aborted for ${taskId}: ${command}`);
+    error.name = "AbortError";
+    return error;
   }
 
   private getAutoRecoveryDispatcher(audit: RunAuditor): AutoRecoveryDispatcher {
@@ -1170,6 +1301,18 @@ export class TaskExecutor {
       return true;
     }
 
+    if ((latestTask && latestTask.column !== "in-progress") || this.userCanceledTaskIds.has(taskId)) {
+      this.clearCompletedTaskWatchdog(taskId);
+      executorLog.log(`${taskId}: completion handoff deferred — task no longer active (${context})`);
+      await this.store.logEntry(
+        taskId,
+        `Completion handoff deferred — task no longer active (${context})`,
+        undefined,
+        this.getRunContextFor(taskId),
+      ).catch(() => undefined);
+      return true;
+    }
+
     return this.shouldDeferCompletionForGlobalPause(taskId, context);
   }
 
@@ -1192,6 +1335,14 @@ export class TaskExecutor {
       undefined,
       this.getRunContextFor(taskId),
     ).catch(() => undefined);
+    // FN-5256: synchronously reap any spawned shells BEFORE moving the task so
+    // a fast re-dispatch (task:moved → in-progress) doesn't race a live shell.
+    // The task:moved (away) listener also tracks an awaited disposal as a
+    // backstop, but doing it here keeps `parkTaskAfterWorkflowStepPause`'s
+    // contract straightforward for its callers.
+    await this.awaitAbortInFlightTaskWork(taskId, "pause-before-park").catch((err) => {
+      executorLog.warn(`${taskId}: awaitAbortInFlightTaskWork failed in pause-before-park: ${err}`);
+    });
     if (latestTask.column === "in-progress") {
       await this.store.moveTask(taskId, "todo", { preserveResumeState: true });
     }
@@ -1441,7 +1592,32 @@ export class TaskExecutor {
     this.activeSubagentSessions.delete(taskId);
   }
 
-  private abortInFlightTaskWork(taskId: string, reason: string, options: { userCanceled?: boolean } = {}): void {
+  /**
+   * FN-5256: register an in-flight disposal so a subsequent dispatch (task:moved
+   * → in-progress) can await it before acquiring/creating a worktree. Swallows
+   * errors so a failed disposal doesn't poison the map; surfaces them via the
+   * executor log instead.
+   */
+  private trackTaskDisposal(taskId: string, disposal: Promise<void>): void {
+    const wrapped = disposal
+      .catch((err) => {
+        executorLog.warn(`${taskId}: tracked disposal failed: ${err}`);
+      })
+      .finally(() => {
+        if (this.pendingTaskDisposals.get(taskId) === wrapped) {
+          this.pendingTaskDisposals.delete(taskId);
+        }
+      });
+    this.pendingTaskDisposals.set(taskId, wrapped);
+  }
+
+  /**
+   * FN-5256: synchronously await session disposal so callers (e.g. pause-before-park)
+   * can rely on the worktree-bound shells being reaped before they return. Mirrors
+   * `abortInFlightTaskWork`, but awaits the async `abort()` / `terminateAllSessions()`
+   * calls instead of fire-and-forget.
+   */
+  async awaitAbortInFlightTaskWork(taskId: string, reason: string, options: { userCanceled?: boolean } = {}): Promise<void> {
     let hadActiveSurface = false;
 
     if (options.userCanceled) {
@@ -1452,23 +1628,56 @@ export class TaskExecutor {
     this.clearWorkflowRerunWatchdog(taskId);
     this.clearCompletedTaskWatchdog(taskId);
 
-    if (this.activeSessions.has(taskId)) {
+    // FN-5256: claim each surface synchronously BEFORE awaiting any async
+    // abort. Without this, two concurrent disposal calls for the same task
+    // (e.g., task:moved-away followed immediately by task:deleted) both pass
+    // the `has(taskId)` guards and double-call abort/dispose.
+    const claimedSession = this.activeSessions.get(taskId);
+    if (claimedSession) {
       hadActiveSurface = true;
-      const { session } = this.activeSessions.get(taskId)!;
+      this.deleteActiveSession(taskId);
+    }
+    const claimedStepExecutor = this.activeStepExecutors.get(taskId);
+    if (claimedStepExecutor) {
+      hadActiveSurface = true;
+      this.deleteActiveStepExecutor(taskId);
+    }
+    const claimedWorkflowSession = this.activeWorkflowStepSessions.get(taskId);
+    if (claimedWorkflowSession) {
+      hadActiveSurface = true;
+      this.deleteActiveWorkflowStepSession(taskId);
+    }
+    const claimedConfiguredCommands = this.activeConfiguredCommandControllers.get(taskId);
+    if (claimedConfiguredCommands && claimedConfiguredCommands.size > 0) {
+      hadActiveSurface = true;
+      this.activeConfiguredCommandControllers.delete(taskId);
+      for (const controller of claimedConfiguredCommands) {
+        controller.abort();
+      }
+    }
+    const claimedSubagents = this.activeSubagentSessions.has(taskId);
+    if (claimedSubagents) {
+      hadActiveSurface = true;
+      this.disposeSubagentsForTask(taskId, reason);
+    }
+
+    if (claimedSession) {
+      const { session } = claimedSession;
       const sessionWithAbort = session as AgentSession & { abort?: () => Promise<void> };
       if (typeof sessionWithAbort.abort === "function") {
-        void sessionWithAbort.abort().catch((err) => {
+        await sessionWithAbort.abort().catch((err) => {
           executorLog.warn(`Failed to abort agent session for ${taskId}: ${err}`);
         });
       }
-      session.dispose();
-      this.deleteActiveSession(taskId);
+      try {
+        session.dispose();
+      } catch (err) {
+        executorLog.warn(`Failed to dispose agent session for ${taskId}: ${err}`);
+      }
     }
 
-    if (this.activeStepExecutors.has(taskId)) {
-      hadActiveSurface = true;
-      const stepExecutor = this.activeStepExecutors.get(taskId)!;
-      const stepExecutorWithAbort = stepExecutor as StepSessionExecutor & { abortAllSessionBash?: () => void };
+    if (claimedStepExecutor) {
+      const stepExecutorWithAbort = claimedStepExecutor as StepSessionExecutor & { abortAllSessionBash?: () => void };
       if (typeof stepExecutorWithAbort.abortAllSessionBash === "function") {
         try {
           stepExecutorWithAbort.abortAllSessionBash();
@@ -1476,28 +1685,23 @@ export class TaskExecutor {
           executorLog.warn(`Failed to abort step-session bash for ${taskId}: ${err}`);
         }
       }
-      stepExecutor.terminateAllSessions().catch((err) =>
+      await claimedStepExecutor.terminateAllSessions().catch((err) =>
         executorLog.error(`Failed to terminate step sessions for ${taskId}:`, err),
       );
-      this.deleteActiveStepExecutor(taskId);
     }
 
-    if (this.activeWorkflowStepSessions.has(taskId)) {
-      hadActiveSurface = true;
-      const workflowSession = this.activeWorkflowStepSessions.get(taskId)!;
-      const sessionWithAbort = workflowSession as AgentSession & { abort?: () => Promise<void> };
+    if (claimedWorkflowSession) {
+      const sessionWithAbort = claimedWorkflowSession as AgentSession & { abort?: () => Promise<void> };
       if (typeof sessionWithAbort.abort === "function") {
-        void sessionWithAbort.abort().catch((err) => {
+        await sessionWithAbort.abort().catch((err) => {
           executorLog.warn(`Failed to abort workflow step session for ${taskId}: ${err}`);
         });
       }
-      workflowSession.dispose();
-      this.deleteActiveWorkflowStepSession(taskId);
-    }
-
-    if (this.activeSubagentSessions.has(taskId)) {
-      hadActiveSurface = true;
-      this.disposeSubagentsForTask(taskId, reason);
+      try {
+        claimedWorkflowSession.dispose();
+      } catch (err) {
+        executorLog.warn(`Failed to dispose workflow step session for ${taskId}: ${err}`);
+      }
     }
 
     this.loopRecoveryState.delete(taskId);
@@ -1505,8 +1709,46 @@ export class TaskExecutor {
     this.stuckAborted.delete(taskId);
 
     if (hadActiveSurface) {
-      executorLog.log(`${taskId}: aborting in-flight work — ${reason}`);
+      executorLog.log(`${taskId}: awaited abort of in-flight work — ${reason}`);
     }
+  }
+
+  async abortAllInFlight(reason: string): Promise<void> {
+    const taskIds = new Set<string>([
+      ...this.activeSessions.keys(),
+      ...this.activeStepExecutors.keys(),
+      ...this.activeWorkflowStepSessions.keys(),
+      ...this.activeConfiguredCommandControllers.keys(),
+      ...this.activeSubagentSessions.keys(),
+    ]);
+
+    for (const taskId of taskIds) {
+      try {
+        await this.awaitAbortInFlightTaskWork(taskId, reason);
+      } catch (err) {
+        executorLog.warn(`abortAllInFlight: failed to abort task ${taskId} — ${reason}: ${err}`);
+      }
+    }
+
+    for (const [agentId, session] of this.childSessions) {
+      try {
+        const sessionWithAbort = session as AgentSession & { abort?: () => Promise<void> };
+        if (typeof sessionWithAbort.abort === "function") {
+          await sessionWithAbort.abort();
+        }
+      } catch (err) {
+        executorLog.warn(`abortAllInFlight: failed to abort child session ${agentId} — ${reason}: ${err}`);
+      }
+
+      try {
+        session.dispose();
+      } catch (err) {
+        executorLog.warn(`abortAllInFlight: failed to dispose child session ${agentId} — ${reason}: ${err}`);
+      }
+    }
+    this.childSessions.clear();
+
+    executorLog.log(`abortAllInFlight: aborted ${taskIds.size} task surface(s) — ${reason}`);
   }
 
   abortAllSessionBash(): void {
@@ -1563,20 +1805,36 @@ export class TaskExecutor {
         this.clearWorkflowRerunWatchdog(task.id);
         executorLog.log(`[event:task:moved] Initiating execute() for ${task.id}`);
         void (async () => {
+          // FN-5256: if the prior session is still being torn down (because the
+          // task was just moved away from in-progress), wait for the worktree-
+          // bound shells to reap before we acquire/create a new worktree. Without
+          // this, a fast bounce (in-progress → todo → in-progress) races the
+          // executor's own conflict cleanup against a still-live shell.
+          const pending = this.pendingTaskDisposals.get(task.id);
+          if (pending) {
+            executorLog.log(`[event:task:moved] Awaiting pending disposal for ${task.id} before dispatch`);
+            await pending;
+          }
           const taskForExecution = await this.resetMergeStateIfNeeded(task, from);
           await this.execute(taskForExecution);
         })().catch((err) =>
           executorLog.error(`Failed to start ${task.id}:`, err),
         );
       } else if (from === "in-progress") {
-        this.abortInFlightTaskWork(task.id, `parent moved from in-progress to ${to}`, {
-          userCanceled: source === "user" && to === "todo",
-        });
+        this.trackTaskDisposal(
+          task.id,
+          this.awaitAbortInFlightTaskWork(task.id, `parent moved from in-progress to ${to}`, {
+            userCanceled: source === "user" && to === "todo",
+          }),
+        );
       }
     });
 
     store.on("task:deleted", (task) => {
-      this.abortInFlightTaskWork(task.id, "task soft-deleted", { userCanceled: true });
+      this.trackTaskDisposal(
+        task.id,
+        this.awaitAbortInFlightTaskWork(task.id, "task soft-deleted", { userCanceled: true }),
+      );
     });
 
     // When a task is paused while executing, terminate the agent session.
@@ -1591,50 +1849,20 @@ export class TaskExecutor {
     // 5. Each injection is logged to the task for user visibility
     store.on("task:updated", async (task) => {
       try {
-        // Handle pause - terminate the agent session or step sessions
-        if (task.paused && this.activeSessions.has(task.id)) {
-          executorLog.log(`Pausing ${task.id} — terminating agent session`);
-          this.pausedAborted.add(task.id);
-          this.options.stuckTaskDetector?.untrackTask(task.id);
-          const { session } = this.activeSessions.get(task.id)!;
-          session.dispose();
-          // Also clean up in-memory state to prevent leaks if the task is later unpaused
-          this.loopRecoveryState.delete(task.id);
-          this.spawnedAgents.delete(task.id);
-          this.stuckAborted.delete(task.id);
-          this.disposeSubagentsForTask(task.id, "task paused");
-          return;
-        }
-        if (task.paused && this.activeStepExecutors.has(task.id)) {
-          executorLog.log(`Pausing ${task.id} — terminating step sessions`);
-          this.pausedAborted.add(task.id);
-          this.options.stuckTaskDetector?.untrackTask(task.id);
-          const stepExecutor = this.activeStepExecutors.get(task.id)!;
-          await stepExecutor.terminateAllSessions();
-          // Also clean up in-memory state to prevent leaks if the task is later unpaused
-          this.loopRecoveryState.delete(task.id);
-          this.spawnedAgents.delete(task.id);
-          this.stuckAborted.delete(task.id);
-          this.disposeSubagentsForTask(task.id, "task paused");
-          return;
-        }
-        if (task.paused && this.activeWorkflowStepSessions.has(task.id)) {
-          executorLog.log(`Pausing ${task.id} — terminating workflow step session`);
-          this.pausedAborted.add(task.id);
-          this.options.stuckTaskDetector?.untrackTask(task.id);
-          const workflowSession = this.activeWorkflowStepSessions.get(task.id)!;
-          const sessionWithAbort = workflowSession as AgentSession & { abort?: () => Promise<void> };
-          if (typeof sessionWithAbort.abort === "function") {
-            await sessionWithAbort.abort().catch((err) =>
-              executorLog.warn(`Failed to abort workflow step session for pause ${task.id}: ${err}`),
-            );
-          }
-          workflowSession.dispose();
-          this.deleteActiveWorkflowStepSession(task.id);
-          this.loopRecoveryState.delete(task.id);
-          this.spawnedAgents.delete(task.id);
-          this.stuckAborted.delete(task.id);
-          this.disposeSubagentsForTask(task.id, "task paused");
+        // FN-5256: handle pause by synchronously reaping every active session
+        // surface in one shot. Awaiting the abort ensures spawned shells are
+        // disposed before any re-dispatch can race the worktree.
+        if (
+          task.paused
+          && (
+            this.activeSessions.has(task.id)
+            || this.activeStepExecutors.has(task.id)
+            || this.activeWorkflowStepSessions.has(task.id)
+            || this.activeConfiguredCommandControllers.has(task.id)
+          )
+        ) {
+          executorLog.log(`Pausing ${task.id} — awaiting in-flight session disposal`);
+          await this.awaitAbortInFlightTaskWork(task.id, "task paused");
           return;
         }
 
@@ -1803,6 +2031,18 @@ export class TaskExecutor {
     // When globalPause transitions from false → true, terminate all active agent sessions.
     store.on("settings:updated", ({ settings, previous }) => {
       if (settings.globalPause && !previous.globalPause) {
+        for (const [taskId, controllers] of this.activeConfiguredCommandControllers) {
+          executorLog.log(`Global pause — aborting configured command(s) for ${taskId}`);
+          this.pausedAborted.add(taskId);
+          this.options.stuckTaskDetector?.untrackTask(taskId);
+          for (const controller of controllers) {
+            controller.abort();
+          }
+          this.activeConfiguredCommandControllers.delete(taskId);
+          this.loopRecoveryState.delete(taskId);
+          this.spawnedAgents.delete(taskId);
+          this.stuckAborted.delete(taskId);
+        }
         // Dispose every reviewer subagent across every task. The per-task loops
         // below handle main + step sessions; reviewers live in their own map
         // and would otherwise outlive the global pause.
@@ -2903,21 +3143,42 @@ export class TaskExecutor {
       }
 
       const hadAssignedWorktree = Boolean(task.worktree);
-      const acquisition = await acquireTaskWorktree({
-        task,
-        rootDir: this.rootDir,
-        store: this.store,
-        settings,
-        pool: this.options.pool,
-        logger: executorLog,
-        audit,
-        runContext: this.getRunContextFor(task.id),
-        runInitCommand: true,
-        createWorktree: this.createWorktree.bind(this),
-        runConfiguredCommand,
-        taskEnv,
-        secretsStore: this.options.secretsStore,
-      });
+      const taskCommandAbortController = new AbortController();
+      this.registerConfiguredCommandController(task.id, taskCommandAbortController);
+      const acquisition = await (async () => {
+        try {
+          return await acquireTaskWorktree({
+            task,
+            rootDir: this.rootDir,
+            store: this.store,
+            settings,
+            pool: this.options.pool,
+            logger: executorLog,
+            audit,
+            runContext: this.getRunContextFor(task.id),
+            runInitCommand: true,
+            createWorktree: this.createWorktree.bind(this),
+            runConfiguredCommand: (command, cwd, timeoutMs, env) =>
+              runConfiguredCommand(
+                command,
+                cwd,
+                timeoutMs,
+                env,
+                audit,
+                taskCommandAbortController.signal,
+              ).then((result) => {
+                if (taskCommandAbortController.signal.aborted) {
+                  throw this.createConfiguredCommandAbortError(task.id, command);
+                }
+                return result;
+              }),
+            taskEnv,
+            secretsStore: this.options.secretsStore,
+          });
+        } finally {
+          this.unregisterConfiguredCommandController(task.id, taskCommandAbortController);
+        }
+      })();
       worktreePath = acquisition.worktreePath;
 
       if (acquisition.reclaimed) {
@@ -2939,18 +3200,35 @@ export class TaskExecutor {
         const scriptCommand = settings.scripts?.[settings.setupScript];
         if (scriptCommand) {
           const setupStartedAt = Date.now();
+          const setupAbortController = new AbortController();
+          this.registerConfiguredCommandController(task.id, setupAbortController);
           try {
-            const setupResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, taskEnv, audit);
+            const setupResult = await runConfiguredCommand(
+              scriptCommand,
+              worktreePath,
+              120_000,
+              taskEnv,
+              audit,
+              setupAbortController.signal,
+            );
+            if (setupAbortController.signal.aborted) {
+              throw this.createConfiguredCommandAbortError(task.id, scriptCommand);
+            }
             if (setupResult.spawnError || setupResult.timedOut || setupResult.exitCode !== 0) {
               throw new Error(configuredCommandErrorMessage(setupResult));
             }
             await this.store.logEntry(task.id, `[timing] Setup script '${settings.setupScript}' completed in ${Date.now() - setupStartedAt}ms`, scriptCommand, this.getRunContextFor(task.id));
           } catch (err: unknown) {
+            if (err instanceof Error && err.name === "AbortError") {
+              throw err;
+            }
             const execError = err instanceof Error ? err : new Error(String(err));
             const message = "stderr" in execError && typeof (execError as Record<string, unknown>).stderr === "string"
               ? String((execError as Record<string, unknown>).stderr)
               : execError.message;
             await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' failed: ${message}`, undefined, this.getRunContextFor(task.id));
+          } finally {
+            this.unregisterConfiguredCommandController(task.id, setupAbortController);
           }
         } else {
           await this.store.logEntry(task.id, `Setup script '${settings.setupScript}' not found in scripts map — skipping`, undefined, this.getRunContextFor(task.id));
@@ -3267,6 +3545,40 @@ export class TaskExecutor {
               await audit.filesystem({ type: "file:capture-modified", target: task.id, metadata: { files: modifiedFiles } });
             }
 
+            // Post-session branch attribution audit: walk base..branch and surface
+            // any commit that's foreign (different FN-id), unattributed (no subject
+            // tag AND no Fusion-Task-Id trailer), or own-but-untrailed (signals the
+            // commit-msg hook didn't fire — typically a worktree without identity
+            // guards or a plumbing-driven commit). Logged loudly so contamination
+            // gets caught within minutes of happening rather than days later at
+            // merge time (FN-5233 was this pattern).
+            try {
+              const attributionBase = await this.resolveContaminationBaseRef(worktreePath);
+              if (attributionBase && updatedTask.branch) {
+                const attribution = await reportBranchAttribution(this.rootDir, updatedTask.branch, attributionBase, task.id);
+                const hasAnomaly = attribution.foreign.length > 0 || attribution.unattributed.length > 0 || attribution.ownUntrailed.length > 0;
+                if (hasAnomaly) {
+                  const summary = `branch-attribution anomalies on ${updatedTask.branch}: foreign=${attribution.foreign.length}, unattributed=${attribution.unattributed.length}, ownUntrailed=${attribution.ownUntrailed.length}, ownTrailed=${attribution.ownTrailed}`;
+                  executorLog.warn(`${task.id}: ${summary}`);
+                  await this.store.logEntry(task.id, `[branch-attribution] ${summary}`, undefined, this.getRunContextFor(task.id));
+                  await audit.git({
+                    type: "branch:attribution-anomaly",
+                    target: updatedTask.branch,
+                    metadata: {
+                      taskId: task.id,
+                      baseSha: attributionBase,
+                      ownTrailed: attribution.ownTrailed,
+                      foreign: attribution.foreign,
+                      unattributed: attribution.unattributed,
+                      ownUntrailed: attribution.ownUntrailed,
+                    },
+                  });
+                }
+              }
+            } catch (attributionErr: unknown) {
+              executorLog.warn(`${task.id}: post-session branch-attribution audit failed: ${attributionErr instanceof Error ? attributionErr.message : String(attributionErr)}`);
+            }
+
             this.scheduleCompletedTaskWatchdog(task.id, "step-session completion");
             if (await this.shouldDeferCompletionForGlobalPause(task.id, "before workflow steps after step-session completion")) {
               return;
@@ -3478,6 +3790,8 @@ export class TaskExecutor {
                     taskId: task.id,
                     audit,
                     reason: RemovalReason.ExecutorTransientRetry,
+                    expectedOwnerTaskId: task.id,
+                    liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                   });
                 } catch (wtErr: unknown) {
                   const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
@@ -3565,6 +3879,8 @@ export class TaskExecutor {
                       settings,
                       taskId: task.id,
                       reason: RemovalReason.ExecutorStuckKilled,
+                      expectedOwnerTaskId: task.id,
+                      liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                     });
                   } catch (wtErr: unknown) {
                     const msg = wtErr instanceof Error ? wtErr.message : String(wtErr);
@@ -3788,6 +4104,8 @@ export class TaskExecutor {
             fallbackProvider: executorFallbackProvider,
             fallbackModelId: executorFallbackModelId,
             defaultThinkingLevel: executorThinkingLevel,
+            runAuditor: audit,
+            settings,
             sessionManager,
             taskEnv,
             // Skill selection: use assigned agent skills if available, otherwise role fallback
@@ -3865,8 +4183,7 @@ export class TaskExecutor {
         executorLog.log(`${task.id}: session registered (model=${describeModel(session)}, stuckDetector=${!!stuckDetector})`);
 
         // Invoke plugin onAgentRunStart hook (fire-and-forget)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        void (this.options.pluginRunner as any)?.invokeHook("onAgentRunStart", task.id);
+        void this.options.pluginRunner?.invokeHookSafe("onAgentRunStart", task.id);
 
         try {
           // Record activity on prompt start (heartbeat for stuck detection)
@@ -4106,6 +4423,7 @@ export class TaskExecutor {
             let taskDoneSessionRetries = 0;
             let retryAbortedDueToReclaim = false;
             let refusalHandled = false;
+            let pendingReviewParked = false;
             while (!taskDone && taskDoneSessionRetries < MAX_TASK_DONE_SESSION_RETRIES) {
               const liveTask = await this.store.getTask(task.id);
               const hasExplicitWorktreeBinding = typeof liveTask.worktree === "string" || liveTask.worktree === null;
@@ -4122,6 +4440,31 @@ export class TaskExecutor {
                 this.tokenUsageBaselines.delete(task.id);
                 session.dispose();
                 retryAbortedDueToReclaim = true;
+                break;
+              }
+
+              const pendingReviewBlock = detectPendingReviewBlock(liveTask, codeReviewVerdicts);
+              if (pendingReviewBlock.blocked) {
+                executorLog.log(
+                  `[executor] ${task.id}: fn_task_done not called but task is blocked on pending review (${pendingReviewBlock.reason}) — skipping retry session`,
+                );
+                await this.store.logEntry(
+                  task.id,
+                  `Agent finished without calling fn_task_done but Step ${pendingReviewBlock.stepIndex + 1} is blocked on pending review (${pendingReviewBlock.reason}) — skipping retry session`,
+                  undefined,
+                  this.getRunContextFor(task.id),
+                );
+                this.deleteActiveSession(task.id);
+                this.tokenUsageBaselines.delete(task.id);
+                session.dispose();
+                await this.persistTokenUsage(task.id);
+                await this.store.updateTask(task.id, {
+                  status: "failed",
+                  error: "executor-exit-while-review-pending",
+                });
+                await this.handoffTaskToReview(task, "executor-exit-while-review-pending");
+                this.options.onError?.(task, new Error("executor-exit-while-review-pending"));
+                pendingReviewParked = true;
                 break;
               }
 
@@ -4178,6 +4521,8 @@ export class TaskExecutor {
                   fallbackProvider: executorFallbackProvider,
                   fallbackModelId: executorFallbackModelId,
                   defaultThinkingLevel: executorThinkingLevel,
+                  runAuditor: audit,
+                  settings,
                   sessionManager: SessionManager.create(worktreePath),
                   taskEnv,
                   // Skill selection: use assigned agent skills if available, otherwise role fallback
@@ -4354,6 +4699,8 @@ export class TaskExecutor {
               executorLog.log(silentMessage);
             } else if (refusalHandled) {
               return;
+            } else if (pendingReviewParked) {
+              return;
             } else {
               // FN-4806: Genuine "agent finished without calling fn_task_done after N retries"
               // exhaustion. Not a reclaim/self-heal — the agent had a fair chance and failed to
@@ -4412,8 +4759,7 @@ export class TaskExecutor {
             });
           }
           // Invoke plugin onAgentRunEnd hook (fire-and-forget)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          void (this.options.pluginRunner as any)?.invokeHook("onAgentRunEnd", task.id);
+          void this.options.pluginRunner?.invokeHookSafe("onAgentRunEnd", task.id);
         }
       };
 
@@ -4490,6 +4836,8 @@ export class TaskExecutor {
                 taskId: task.id,
                 audit,
                 reason: RemovalReason.ExecutorDispose,
+                expectedOwnerTaskId: task.id,
+                liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
               });
               executorLog.log(`Removed old worktree for paused task: ${worktreePath}`);
             } catch (cleanupErr: unknown) {
@@ -4641,7 +4989,7 @@ export class TaskExecutor {
             });
 
             const misrouted: Array<{ commit: (typeof classified.unique)[number]; foreignTaskId: string; paths: string[] }> = [];
-            const genuinelyUnique: typeof classified.unique = [];
+            const preOrphanUnique: typeof classified.unique = [];
             for (const commit of classified.unique) {
               const misroutedResult = await classifyMisroutedForeignCommit({
                 repoDir: this.rootDir,
@@ -4653,16 +5001,79 @@ export class TaskExecutor {
               if (misroutedResult.misrouted && misroutedResult.foreignTaskId) {
                 misrouted.push({ commit, foreignTaskId: misroutedResult.foreignTaskId, paths: misroutedResult.paths ?? [] });
               } else {
+                preOrphanUnique.push(commit);
+              }
+            }
+
+            // Orphan-our-advance: a "unique" foreign commit attributed to a
+            // task that's already `done` is a stranded merge from the pre-FF
+            // ref-advance bug. FF-rehomeable orphans are advanced onto the
+            // integration branch and then dropped from this task's branch
+            // alongside already-upstream commits. Non-FF orphans (diverged
+            // from current integration tip) are logged with a cherry-pick
+            // hint and left as `genuinelyUnique` for human adjudication.
+            const rehomedOrphans: typeof classified.unique = [];
+            const genuinelyUnique: typeof classified.unique = [];
+            const integrationBranchForOrphan = task.mergeDetails?.mergeTargetBranch
+              ?? task.baseBranch
+              ?? "main";
+            for (const commit of preOrphanUnique) {
+              const orphanBody = await execAsync(`git log -1 --format=%b ${commit.sha}`, { cwd: this.rootDir, encoding: "utf-8" })
+                .then((r) => r.stdout)
+                .catch(() => "");
+              const orphanClass = await classifyOrphanOurAdvance({
+                repoDir: this.rootDir,
+                taskStore: this.store,
+                integrationBranch: integrationBranchForOrphan,
+                currentTaskId: task.id,
+                commitSha: commit.sha,
+                commitSubject: commit.subject,
+                commitBody: orphanBody,
+              });
+              if (!orphanClass.orphan) {
+                genuinelyUnique.push(commit);
+                continue;
+              }
+              const rehome = await rehomeOrphanOntoIntegration({
+                rootDir: this.rootDir,
+                projectRootDir: this.rootDir,
+                integrationBranch: integrationBranchForOrphan,
+                orphanSha: commit.sha,
+                taskId: task.id,
+                audit,
+              }).catch((rehomeError: unknown): { rehomed: false; reason: string } => ({
+                rehomed: false,
+                reason: rehomeError instanceof Error ? rehomeError.message : String(rehomeError),
+              }));
+              if (rehome.rehomed) {
+                rehomedOrphans.push(commit);
+                await this.store.logEntry(
+                  task.id,
+                  `[recovery] rehomed orphan-our-advance commit ${commit.sha.slice(0, 12)} (source ${orphanClass.sourceTaskId}) onto ${integrationBranchForOrphan} via fast-forward; dropping from branch`,
+                  undefined,
+                  this.getRunContextFor(task.id),
+                );
+              } else {
+                const hint = "cherryPickHint" in rehome && rehome.cherryPickHint
+                  ? ` — manual rehome: \`${rehome.cherryPickHint}\``
+                  : "";
+                await this.store.logEntry(
+                  task.id,
+                  `[recovery] orphan-our-advance commit ${commit.sha.slice(0, 12)} (source ${orphanClass.sourceTaskId}) refused auto-rehome: ${rehome.reason}${hint}`,
+                  undefined,
+                  this.getRunContextFor(task.id),
+                );
                 genuinelyUnique.push(commit);
               }
             }
 
             const alreadyShas = classified.alreadyUpstream.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             const misroutedShas = misrouted.map(({ commit }) => commit.sha.slice(0, 12)).join(", ") || "none";
+            const rehomedShas = rehomedOrphans.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             const uniqueShas = genuinelyUnique.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             await this.store.logEntry(
               task.id,
-              `[recovery] contamination classification: already-upstream=[${alreadyShas}] misrouted=[${misroutedShas}] unique=[${uniqueShas}]`,
+              `[recovery] contamination classification: already-upstream=[${alreadyShas}] misrouted=[${misroutedShas}] rehomed-orphan=[${rehomedShas}] unique=[${uniqueShas}]`,
               undefined,
               this.getRunContextFor(task.id),
             );
@@ -4685,6 +5096,7 @@ export class TaskExecutor {
                 shasToDrop: [
                   ...classified.alreadyUpstream.map((commit) => commit.sha),
                   ...misrouted.map(({ commit }) => commit.sha),
+                  ...rehomedOrphans.map((commit) => commit.sha),
                 ],
               });
 
@@ -4896,6 +5308,8 @@ export class TaskExecutor {
                   taskId: task.id,
                   audit,
                   reason: RemovalReason.ExecutorTransientRetry,
+                  expectedOwnerTaskId: task.id,
+                  liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                 });
                 executorLog.log(`Removed old worktree for transient retry: ${worktreePath}`);
               } catch (cleanupErr: unknown) {
@@ -5025,6 +5439,8 @@ export class TaskExecutor {
                   taskId: task.id,
                   audit,
                   reason: RemovalReason.ExecutorStuckKilled,
+                  expectedOwnerTaskId: task.id,
+                  liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
                 });
                 executorLog.log(`Removed old worktree for stuck-killed retry: ${worktreePath}`);
               } catch (cleanupErr: unknown) {
@@ -6159,9 +6575,8 @@ export class TaskExecutor {
     // Remove worktree
     try {
       const settings = await this.store.getSettings();
-      await removeWorktree({
+      await this.removeOwnWorktreeWithReconcile({
         worktreePath,
-        rootDir: this.rootDir,
         settings,
         taskId,
         reason: RemovalReason.ExecutorDispose,
@@ -6571,6 +6986,8 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         defaultProvider: executorProvider,
         defaultModelId: executorModelId,
         defaultThinkingLevel: settings.defaultThinkingLevel,
+        runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
+        settings,
         taskEnv: extraEnv,
         ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       });
@@ -7408,18 +7825,33 @@ ${failureFeedback}
     executorLog.log(`${task.id}: workflow step '${workflowStep.name}' executing script '${scriptName}': ${scriptCommand}`);
     await this.store.logEntry(task.id, `Workflow step '${workflowStep.name}' executing script '${scriptName}': ${scriptCommand}`);
 
+    const scriptAbortController = new AbortController();
+    this.registerConfiguredCommandController(task.id, scriptAbortController);
     try {
-      const scriptResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, extraEnv, createRunAuditor(this.store, {
-        runId: this.getRunContextFor(task.id)?.runId ?? generateSyntheticRunId("exec-script", task.id),
-        agentId: this.getRunContextFor(task.id)?.agentId ?? (task.assignedAgentId ?? "executor"),
-        taskId: task.id,
-        phase: "execute",
-      }));
+      const scriptResult = await runConfiguredCommand(
+        scriptCommand,
+        worktreePath,
+        120_000,
+        extraEnv,
+        createRunAuditor(this.store, {
+          runId: this.getRunContextFor(task.id)?.runId ?? generateSyntheticRunId("exec-script", task.id),
+          agentId: this.getRunContextFor(task.id)?.agentId ?? (task.assignedAgentId ?? "executor"),
+          taskId: task.id,
+          phase: "execute",
+        }),
+        scriptAbortController.signal,
+      );
+      if (scriptAbortController.signal.aborted) {
+        throw this.createConfiguredCommandAbortError(task.id, scriptCommand);
+      }
       if (scriptResult.spawnError || scriptResult.timedOut || scriptResult.exitCode !== 0) {
         return { success: false, error: configuredCommandErrorMessage(scriptResult) };
       }
       return { success: true, output: `Script '${scriptName}' completed successfully` };
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw err;
+      }
       const execError = err instanceof Error ? err : new Error(String(err));
       const stderr = "stderr" in execError && typeof execError.stderr === "string" ? execError.stderr.trim() : "";
       const stdout = "stdout" in execError && typeof execError.stdout === "string" ? execError.stdout.trim() : "";
@@ -7431,6 +7863,8 @@ ${failureFeedback}
       if (!parts.length) parts.push(execError.message || "Unknown error");
       const errorOutput = parts.join("\n");
       return { success: false, error: errorOutput };
+    } finally {
+      this.unregisterConfiguredCommandController(task.id, scriptAbortController);
     }
   }
 
@@ -7660,6 +8094,8 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         fallbackProvider: settings.fallbackProvider,
         fallbackModelId: settings.fallbackModelId,
         defaultThinkingLevel: settings.defaultThinkingLevel,
+        runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
+        settings,
         taskEnv,
         // Skill selection: use assigned agent skills if available, otherwise role fallback
         ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
@@ -7959,6 +8395,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       return "sticky";
     }
 
+    const integrationRef = task.mergeDetails?.mergeTargetBranch ?? task.baseBranch ?? task.executionStartBranch ?? await resolveIntegrationBranch(this.rootDir, undefined);
     const inspection = await inspectBranchConflict({
       repoDir: this.rootDir,
       branchName: error.branchName,
@@ -7966,6 +8403,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       requestingTaskId: task.id,
       ownerTaskId: task.id,
       startPoint: error.startPoint,
+      integrationRef,
     });
 
     if (inspection.kind === "stale-resolved") {
@@ -8520,6 +8958,8 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           reason: RemovalReason.PoolPrune,
           taskId: task.id,
           audit,
+          expectedOwnerTaskId: task.id,
+          liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
         });
       } catch (removeErr) {
         executorLog.warn(`${task.id}: failed to remove unusable session-start worktree ${staleWorktreePath}: ${formatError(removeErr)}`);
@@ -8701,7 +9141,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         });
       } catch (error) {
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch {
           executorLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${path}`);
         }
@@ -8718,7 +9158,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           `Removing existing directory (not a registered worktree): ${path}`,
         );
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch (e: unknown) {
           const eMessage = e instanceof Error ? e.message : String(e);
           throw new Error(`Failed to remove existing directory ${path}: ${eMessage}`);
@@ -8740,7 +9180,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         // Remove any partial directory left behind so the invariant holds:
         // "if .worktrees/<slug> exists on disk, it is a fully registered git worktree."
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch {
           // best-effort cleanup; log but don't mask the original error
           executorLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${path}`);
@@ -8756,7 +9196,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         // Remove any partial directory left behind so the invariant holds:
         // "if .worktrees/<slug> exists on disk, it is a fully registered git worktree."
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch {
           // best-effort cleanup; log but don't mask the original error
           executorLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${path}`);
@@ -8957,6 +9397,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         requestingTaskId: taskId,
         ownerTaskId: taskId,
         startPoint,
+        integrationRef: await resolveIntegrationBranch(this.rootDir, settings),
       });
 
       if (inspection.kind === "stale" || inspection.kind === "stale-resolved" || inspection.kind === "tip-already-merged") {
@@ -9164,19 +9605,108 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     return false;
   }
 
+  private async reconcileSelfOwnedBeforeRemove(worktreePath: string, taskId: string): Promise<void> {
+    const outcome = reconcileSelfOwnedActiveSessionForRemoval(
+      activeSessionRegistry,
+      worktreePath,
+      taskId,
+      (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+      {
+        processActiveProbe: (probeTaskId) => executingTaskLock.has(probeTaskId),
+      },
+    );
+    if (outcome.action === "reconciled") {
+      executorLog.warn(
+        `[FN-5346] ${taskId}: dropped stale self-owned activeSessionRegistry entry before removeWorktree at ${worktreePath}`,
+      );
+      await this.store.logEntry(taskId, "Cleared stale self-owned active-session entry before remove", worktreePath);
+    } else if (outcome.action === "process-active-refuses") {
+      executorLog.warn(
+        `[FN-5256] refused stale-self-owned reconcile for ${taskId}: process-active=true at ${worktreePath}`,
+      );
+      await this.store.logEntry(
+        taskId,
+        "Refused stale self-owned reconcile — task still actively executing",
+        worktreePath,
+      ).catch(() => undefined);
+    } else if (outcome.action === "too-recent-refuses") {
+      executorLog.warn(
+        `[FN-5256] refused stale-self-owned reconcile for ${taskId}: age=${outcome.ageMs}ms (<${outcome.minIdleMs}ms) at ${worktreePath}`,
+      );
+      await this.store.logEntry(
+        taskId,
+        `Refused stale self-owned reconcile — registration too recent (${outcome.ageMs}ms < ${outcome.minIdleMs}ms)`,
+        worktreePath,
+      ).catch(() => undefined);
+    }
+  }
+
+  private async removeOwnWorktreeWithReconcile(input: {
+    worktreePath: string;
+    settings: Settings;
+    taskId: string;
+    reason: RemovalReason;
+    audit?: Parameters<typeof removeWorktree>[0]["audit"];
+  }): Promise<void> {
+    await this.reconcileSelfOwnedBeforeRemove(input.worktreePath, input.taskId);
+    const removeArgs = {
+      worktreePath: input.worktreePath,
+      rootDir: this.rootDir,
+      settings: input.settings,
+      taskId: input.taskId,
+      reason: input.reason,
+      audit: input.audit,
+      expectedOwnerTaskId: input.taskId,
+      liveOwnerProbe: (path: string, ownerTaskId: string) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+      // FN-5256: route the worktree-backend defensive reconcile through the
+      // hardened gates (process-active + min-idle window).
+      processActiveProbe: (probeTaskId: string) => executingTaskLock.has(probeTaskId),
+    } as const;
+    try {
+      await removeWorktree(removeArgs);
+    } catch (error: unknown) {
+      if (
+        error instanceof ActiveSessionWorktreeRemovalError
+        && error.details.taskId === input.taskId
+        && !this.hasActiveWorktreeBinding(input.taskId, input.worktreePath)
+      ) {
+        // FN-5256: route the post-throw reconcile through the hardened path so
+        // process-active and too-recent signals also gate this leg.
+        const outcome = reconcileSelfOwnedActiveSessionForRemoval(
+          activeSessionRegistry,
+          input.worktreePath,
+          input.taskId,
+          (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+          {
+            processActiveProbe: (probeTaskId) => executingTaskLock.has(probeTaskId),
+          },
+        );
+        if (outcome.action === "reconciled") {
+          await this.store.logEntry(
+            input.taskId,
+            "Reconciled stale self-owned active-session registration (post-throw)",
+            input.worktreePath,
+          );
+          await removeWorktree(removeArgs);
+          return;
+        }
+        if (outcome.action === "process-active-refuses" || outcome.action === "too-recent-refuses") {
+          executorLog.warn(
+            `[FN-5256] post-throw reconcile refused for ${input.taskId} at ${input.worktreePath}: action=${outcome.action}`,
+          );
+          // Refused — surface the original error so the caller can decide.
+        }
+      }
+      throw error;
+    }
+  }
+
   private async cleanupConflictingWorktree(
     worktreePath: string,
     branch: string,
     taskId: string,
   ): Promise<boolean> {
-    const activeSessionRecord = activeSessionRegistry.lookupByPath(worktreePath);
-    if (activeSessionRecord?.taskId === taskId && !this.hasActiveWorktreeBinding(taskId, worktreePath)) {
-      executorLog.warn(
-        `[FN-4976] ${taskId}: clearing stale self-owned activeSessionRegistry entry before cleanup for ${worktreePath}`,
-      );
-      activeSessionRegistry.unregisterPath(worktreePath);
-      await this.store.logEntry(taskId, "Cleared stale self-owned activeSessionRegistry entry", worktreePath);
-    }
+    await this.reconcileSelfOwnedBeforeRemove(worktreePath, taskId);
 
     // FN-4811: Hard liveness gate — refuse to remove a worktree that is currently bound to
     // an active executor/merger session, regardless of git-level conflict classification.
@@ -9205,33 +9735,12 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
 
       // Remove the worktree
       const settings = await this.store.getSettings();
-      const removeArgs = {
+      await this.removeOwnWorktreeWithReconcile({
         worktreePath,
-        rootDir: this.rootDir,
         settings,
         taskId,
         reason: RemovalReason.ExecutorDispose,
-      } as const;
-      try {
-        await removeWorktree(removeArgs);
-      } catch (error: unknown) {
-        if (
-          error instanceof ActiveSessionWorktreeRemovalError
-          && error.details.taskId === taskId
-          && !this.hasActiveWorktreeBinding(taskId, worktreePath)
-        ) {
-          const reconcileResult = activeSessionRegistry.reconcileStaleSelfOwned(worktreePath, taskId);
-          if (reconcileResult.reconciled) {
-            await this.store.logEntry(taskId, "Reconciled stale self-owned active-session registration", worktreePath);
-            executorLog.log(
-              `[executor] reconciled stale self-owned active-session entry taskId=${taskId} worktreePath=${worktreePath} reason=${reconcileResult.reason}`,
-            );
-          }
-          await removeWorktree(removeArgs);
-        } else {
-          throw error;
-        }
-      }
+      });
       await this.store.logEntry(taskId, `Removed conflicting worktree`, worktreePath);
 
       // Delete the branch if it exists
@@ -9446,9 +9955,8 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
 
     try {
       const settings = await this.store.getSettings();
-      await removeWorktree({
+      await this.removeOwnWorktreeWithReconcile({
         worktreePath,
-        rootDir: this.rootDir,
         settings,
         taskId,
         reason: RemovalReason.ExecutorDispose,
@@ -10039,6 +10547,8 @@ Child agent: ${agent.id} (${name})`;
             defaultModelId: childExecutorModelId,
             fallbackProvider: settings.fallbackProvider,
             fallbackModelId: settings.fallbackModelId,
+            runAuditor: createRunAuditor(this.store, this.getRunContextFor(taskId)),
+            settings,
             taskEnv,
             // Skill selection: use assigned agent skills if available, otherwise role fallback
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
@@ -10139,9 +10649,11 @@ export function buildExecutionPrompt(
   const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath);
   const reviewLevel = parseReviewLevelFromPrompt(prompt);
 
-  // Build author arg for git commits based on settings
+  // Build co-author trailer arg for git commits based on settings. The user's
+  // configured git identity remains the primary author; Fusion is appended as
+  // a `Co-authored-by` trailer for shared credit (recognized by GitHub).
   const authorArg = settings?.commitAuthorEnabled !== false
-    ? ` --author="${settings?.commitAuthorName || "Fusion"} <${settings?.commitAuthorEmail || "noreply@runfusion.ai"}>"`
+    ? ` -m "Co-authored-by: ${settings?.commitAuthorName || "Fusion"} <${settings?.commitAuthorEmail || "noreply@runfusion.ai"}>"`
     : "";
 
   const sourceIssueRef = buildSourceIssueRef(task.sourceIssue);

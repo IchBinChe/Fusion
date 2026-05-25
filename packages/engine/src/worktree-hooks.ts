@@ -6,6 +6,13 @@ import { promisify } from "node:util";
 const execAsync = promisify(exec);
 
 export const DEFAULT_ALLOWED_BRANCH_PATTERNS = ["^fusion/step-\\d+-[a-z0-9-]+$"] as const;
+
+/**
+ * Env-var marker the merger sets around its own `git commit` calls to bypass
+ * the identity-guard hook on detached HEAD. Kept in sync with the literal in
+ * `buildIdentityGuardHook` below; the hook gates strictly to the value "1".
+ */
+export const IDENTITY_GUARD_BYPASS_ENV = "FUSION_MERGER_BYPASS_IDENTITY_GUARD";
 const COMMIT_MSG_HOOK_MARKER = "# fusion-managed-commit-msg-hook";
 const PREPARE_COMMIT_MSG_HOOK_MARKER = "# fusion-managed-prepare-commit-msg-hook";
 
@@ -34,6 +41,21 @@ set -eu
 TASK_FILE=$(git rev-parse --git-path fusion-task-id)
 
 if [ ! -f "$TASK_FILE" ]; then
+  exit 0
+fi
+
+# Merger bypass: the merger commits on a detached HEAD during
+# reuse-task-worktree squash and verification-fix ceremonies. Gated to the
+# exact value "1" so a leaked/empty var cannot accidentally bypass agent
+# commits. Placed after the TASK_FILE check (non-fusion worktrees stay
+# no-op) and before EXPECTED_BRANCH (detached HEAD never reaches refusal).
+if [ "\${${IDENTITY_GUARD_BYPASS_ENV}:-}" = "1" ]; then
+  if HEAD_BRANCH_DIAG=$(git symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    :
+  else
+    HEAD_BRANCH_DIAG="detached"
+  fi
+  printf '%s\n' "fusion: identity-guard bypass honored for merger commit on $HEAD_BRANCH_DIAG" >&2
   exit 0
 fi
 
@@ -209,8 +231,8 @@ git interpret-trailers \
 `;
 }
 
-async function writeFileAtomic(targetPath: string, content: string, mode?: number): Promise<void> {
-  await execAsync(`mkdir -p ${JSON.stringify(dirname(targetPath))}`);
+export async function writeFileAtomic(targetPath: string, content: string, mode?: number): Promise<void> {
+  await fs.mkdir(dirname(targetPath), { recursive: true });
   const tmpPath = `${targetPath}.tmp`;
   const current = await fs.readFile(targetPath, "utf-8").catch(() => null);
   if (current === content) return;

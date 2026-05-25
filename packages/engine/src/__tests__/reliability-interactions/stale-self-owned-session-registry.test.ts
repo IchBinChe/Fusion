@@ -25,6 +25,8 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     const store = createMockStore();
     store.listTasks.mockResolvedValue([]);
     activeSessionRegistry.registerPath(PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
+    // FN-5256: backdate so the new min-idle window doesn't refuse the reconcile.
+    (activeSessionRegistry.lookupByPath(PATH) as any).registeredAt = 0;
 
     const executor = new TaskExecutor(store, ROOT);
     const removeSpy = vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
@@ -35,7 +37,7 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     expect(activeSessionRegistry.lookupByPath(PATH)).toBeNull();
     expect(store.logEntry).toHaveBeenCalledWith(
       TASK_ID,
-      "Cleared stale self-owned activeSessionRegistry entry",
+      "Cleared stale self-owned active-session entry before remove",
       PATH,
     );
   });
@@ -53,7 +55,7 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     expect(activeSessionRegistry.lookupByPath(PATH)?.taskId).toBe("FN-OTHER");
     const messages = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
     expect(messages.some((m: string) => m.includes("Refused to remove conflicting worktree"))).toBe(true);
-    expect(messages.some((m: string) => m.includes("Cleared stale self-owned activeSessionRegistry entry"))).toBe(false);
+    expect(messages.some((m: string) => m.includes("Cleared stale self-owned active-session entry before remove"))).toBe(false);
   });
 
   it("FN-4976 leaves behavior unchanged when no stale entry exists", async () => {
@@ -70,6 +72,6 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
     expect(result).toBe(true);
     expect(unregisterSpy).not.toHaveBeenCalledWith(PATH);
     const messages = store.logEntry.mock.calls.map((call: any[]) => String(call[1] ?? ""));
-    expect(messages.some((m: string) => m.includes("Cleared stale self-owned activeSessionRegistry entry"))).toBe(false);
+    expect(messages.some((m: string) => m.includes("Cleared stale self-owned active-session entry before remove"))).toBe(false);
   });
 });

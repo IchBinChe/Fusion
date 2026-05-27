@@ -3733,6 +3733,9 @@ export class Database {
       running: false,
     };
 
+    // PRAGMA integrity_check walks every page of the database file and
+    // blocks the event loop for several seconds per DB. Delay it well past
+    // cold start so the dashboard is interactive before the check lands.
     shared.timer = setTimeout(() => {
       shared.timer = null;
       shared.running = true;
@@ -3761,7 +3764,7 @@ export class Database {
       }
 
       Database.sharedIntegrityChecks.delete(this.dbPath);
-    }, 3000);
+    }, 60_000);
 
     Database.sharedIntegrityChecks.set(this.dbPath, shared);
   }

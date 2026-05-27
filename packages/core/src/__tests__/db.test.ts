@@ -433,7 +433,7 @@ describe("Database", () => {
         expect(freshDb.integrityCheckPending).toBe(true);
         expect(integritySpy).not.toHaveBeenCalled();
 
-        vi.advanceTimersByTime(3000);
+        vi.advanceTimersByTime(60_000);
 
         expect(integritySpy).toHaveBeenCalledTimes(1);
         expect(freshDb.integrityCheckPending).toBe(false);
@@ -458,7 +458,7 @@ describe("Database", () => {
         expect(freshDb.integrityCheckPending).toBe(true);
 
         freshDb.init();
-        vi.advanceTimersByTime(3000);
+        vi.advanceTimersByTime(60_000);
 
         expect(integritySpy).toHaveBeenCalledTimes(1);
       } finally {
@@ -484,7 +484,7 @@ describe("Database", () => {
         expect(dbA.integrityCheckPending).toBe(true);
         expect(dbB.integrityCheckPending).toBe(true);
 
-        vi.advanceTimersByTime(3000);
+        vi.advanceTimersByTime(60_000);
 
         expect(integritySpy).toHaveBeenCalledTimes(1);
         expect(dbA.integrityCheckPending).toBe(false);
@@ -519,7 +519,7 @@ describe("Database", () => {
         dbA.init();
         dbB.init();
 
-        vi.advanceTimersByTime(3000);
+        vi.advanceTimersByTime(60_000);
 
         expect(integritySpy).toHaveBeenCalledTimes(1);
         expect(dbA.integrityCheckPending).toBe(false);

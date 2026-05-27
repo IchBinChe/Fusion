@@ -25,6 +25,7 @@
 
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
+import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
@@ -64,6 +65,7 @@ import { DependencyBlockedTodoReporter } from "./dependency-blocked-todo-reporte
 const log = createLogger("self-healing");
 const worktreeMetadataReconcileLog = createLogger("worktree-metadata-reconcile");
 const execAsync = promisify(exec);
+const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
 const DONE_TASK_INTEGRITY_SWEEP_LIMIT = 50;
 const BOARD_STALL_NOTIFICATION_COOLDOWN_MS = 60 * 60_000;
 const DB_CORRUPTION_NOTIFICATION_COOLDOWN_MS = 60 * 60 * 1000;
@@ -828,6 +830,7 @@ export class SelfHealingManager {
         const stepErrMessage = stepErr instanceof Error ? stepErr.message : String(stepErr);
         log.error(`Startup recovery step "${step.name}" failed: ${stepErrMessage} — continuing with remaining steps`);
       }
+      await yieldEventLoop();
     }
   }
 
@@ -1416,6 +1419,7 @@ export class SelfHealingManager {
         } catch (stepErr) {
           log.error(`Maintenance batch 1 step "${fn.name}" failed: ${stepErr instanceof Error ? stepErr.message : String(stepErr)}`);
         }
+        await yieldEventLoop();
       }
 
       const recoverySettings = await this.store.getSettings();
@@ -1489,6 +1493,7 @@ export class SelfHealingManager {
           } catch (stepErr) {
             log.error(`Maintenance batch 2 step "${fn.name}" failed: ${stepErr instanceof Error ? stepErr.message : String(stepErr)}`);
           }
+          await yieldEventLoop();
         }
       }
 
@@ -1503,6 +1508,7 @@ export class SelfHealingManager {
         } catch (stepErr) {
           log.error(`Maintenance batch 3 step "${fn.name}" failed: ${stepErr instanceof Error ? stepErr.message : String(stepErr)}`);
         }
+        await yieldEventLoop();
       }
 
       const elapsedMs = Date.now() - startMs;

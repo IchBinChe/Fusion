@@ -2180,6 +2180,31 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     });
   }
 
+  // ── Event-loop lag tracer (debug aid) ──
+  // Polls every 50ms and logs whenever the loop was blocked by >150ms since
+  // the previous tick. Pinpoints which synchronous operation is hogging the
+  // event loop during startup. Disabled unless FUSION_TRACE_EL_LAG is set
+  // to a file path (writes to that file with raw timestamps so log output
+  // doesn't pollute the analysis).
+  if (process.env.FUSION_TRACE_EL_LAG) {
+    const lagPath = process.env.FUSION_TRACE_EL_LAG;
+    const fs = await import("node:fs");
+    const lagStream = fs.createWriteStream(lagPath, { flags: "w" });
+    const LAG_THRESHOLD_MS = 150;
+    const POLL_MS = 50;
+    const traceStart = performance.now();
+    let last = traceStart;
+    setInterval(() => {
+      const now = performance.now();
+      const delta = now - last - POLL_MS;
+      last = now;
+      if (delta > LAG_THRESHOLD_MS) {
+        const tSinceStart = Math.round(now - traceStart);
+        lagStream.write(`t+${tSinceStart}ms: blocked ${Math.round(delta)}ms\n`);
+      }
+    }, POLL_MS).unref();
+  }
+
   const server = app.listen(selectedPort, selectedHost);
 
   server.on("error", (err: NodeJS.ErrnoException) => {

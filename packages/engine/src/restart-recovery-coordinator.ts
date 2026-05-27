@@ -1,8 +1,10 @@
 import type { Task, TaskStore } from "@fusion/core";
 import type { TaskExecutor } from "./executor.js";
 import { createLogger } from "./logger.js";
+import { setImmediate as setImmediateCb } from "node:timers";
 
 const log = createLogger("restart-recovery");
+const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
 
 export function hasStepProgress(task: Task): boolean {
   const steps = Array.isArray(task.steps) ? task.steps : [];
@@ -102,6 +104,7 @@ export class RestartRecoveryCoordinator {
       if (!this.mustSafeRetry(task)) continue;
       await this.safeRequeue(task);
       requeued++;
+      await yieldEventLoop();
     }
 
     if (requeued > 0) {

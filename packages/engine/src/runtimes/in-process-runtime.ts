@@ -44,6 +44,9 @@ import { EphemeralWorkerManager } from "../ephemeral-worker-manager.js";
 import { validateProjectNodeMapping } from "../node-dispatch-validation.js";
 import { attachAgentLinkSync } from "../task-agent-sync.js";
 import { createRunAuditor, generateSyntheticRunId } from "../run-audit.js";
+import { setImmediate as setImmediateCb } from "node:timers";
+
+const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
 
 /**
  * InProcessRuntime runs a project within the main process.
@@ -187,6 +190,8 @@ export class InProcessRuntime
       // Initialize MessageStore early so TaskExecutor receives send_message capability.
       this.messageStore = new MessageStoreClass(this.taskStore.getDatabase());
 
+      await yieldEventLoop();
+
       // 2. Initialize Plugin system (PluginStore + PluginLoader + PluginRunner)
       this.pluginStore = new PluginStoreClass(this.config.workingDirectory);
       await this.pluginStore.init();
@@ -204,6 +209,8 @@ export class InProcessRuntime
       });
       await this.pluginRunner.init();
       runtimeLog.log(`PluginRunner initialized`);
+
+      await yieldEventLoop();
 
       // 3. Initialize WorktreePool
 
@@ -249,6 +256,8 @@ export class InProcessRuntime
         );
       }
 
+      await yieldEventLoop();
+
       // 4. Initialize global semaphore — use shared one from ProjectManager if provided,
       // otherwise create a local one from CentralCore (single-project mode).
       if (this.config.globalSemaphore) {
@@ -269,6 +278,8 @@ export class InProcessRuntime
         }
       }
 
+      await yieldEventLoop();
+
       // 5a. Initialize AgentStore (required for scheduler assignment, reflection service, and heartbeat monitoring)
       let agentStoreForReflection: import("@fusion/core").AgentStore | undefined;
       try {
@@ -280,6 +291,8 @@ export class InProcessRuntime
         runtimeLog.warn(`AgentStore initialization failed (reflection service will be unavailable):`, agentErr instanceof Error ? agentErr.message : agentErr);
       }
       this.agentStore = agentStoreForReflection;
+
+      await yieldEventLoop();
 
       // 5. Initialize Scheduler
       const missionStore = this.taskStore.getMissionStore();
@@ -357,6 +370,8 @@ export class InProcessRuntime
         snapshotManager: autoClaimSnapshotManager,
 
       });
+
+      await yieldEventLoop();
 
       // 5b. Initialize TaskExecutor
       this.stuckTaskDetector = new StuckTaskDetector(this.taskStore, {
@@ -497,6 +512,8 @@ export class InProcessRuntime
         })();
       });
 
+      await yieldEventLoop();
+
       // 6. Initialize HeartbeatMonitor (reuses AgentStore from step 5a)
       if (this.heartbeatMonitor) {
         // Already started — nothing to do
@@ -589,7 +606,9 @@ export class InProcessRuntime
         }
         if (this.workerManager) {
           this.workerManager.attachStateChangeListener();
-          await this.workerManager.reconcileOrphaned();
+          void this.workerManager.reconcileOrphaned().catch((err) => {
+            runtimeLog.warn(`Deferred workerManager.reconcileOrphaned failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
         }
 
         // Register existing non-ephemeral, heartbeat-enabled agents in tickable states.
@@ -682,6 +701,8 @@ export class InProcessRuntime
         runtimeLog.warn("RoutineScheduler initialization skipped:", routineErr instanceof Error ? routineErr.message : routineErr);
       }
 
+      await yieldEventLoop();
+
       // 7. Initialize SelfHealingManager
       this.chatStore ??= new ChatStore(this.taskStore.getFusionDir(), this.taskStore.getDatabase());
       this.selfHealingManager = new SelfHealingManager(this.taskStore, {
@@ -744,8 +765,14 @@ export class InProcessRuntime
         );
       } else {
         this.startupRecoveryDeferred = false;
-
-        await this.resumeStartupRecoverySequence();
+        // Defer recovery sequence so the runtime start() returns quickly.
+        // The sequence runs git operations and may resume orphaned tasks,
+        // both of which can block the event loop for several seconds.
+        // Running it in the background lets the HTTP server become
+        // responsive sooner while still performing the recovery work.
+        void this.resumeStartupRecoverySequence().catch((err) => {
+          runtimeLog.error("Deferred startup recovery sequence failed:", err);
+        });
       }
 
       // 11. Start scheduler and triage processor

@@ -1,6 +1,7 @@
 // port-4040-allowlist: this file embeds the "never kill port 4040" rule in the executor prompt.
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
+import { setImmediate as setImmediateCb } from "node:timers";
 
 // Internal git plumbing intentionally bypasses sandbox backends.
 const execAsync = promisify(exec);
@@ -167,6 +168,34 @@ export {
   taskCreateParams,
   taskLogParams,
 } from "./agent-tools.js";
+
+const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
+
+/**
+ * How long to wait after engine startup before spawning AI agent sessions for
+ * orphaned in-progress tasks. The work itself (worktree setup, pi-coding-agent
+ * session creation, child process spawn) is heavy and saturates the event
+ * loop, which makes the dashboard unresponsive during cold start when there
+ * are orphaned tasks from a prior run. Pushing this work past the initial
+ * load window keeps the UI snappy; the tasks still resume — just after the
+ * user has had time to see the board.
+ *
+ * Override via FUSION_RESUME_ORPHAN_DELAY_MS. Defaults to 0 under Vitest so
+ * existing tests that expect immediate resumption keep passing without
+ * needing per-test plumbing.
+ *
+ * Read lazily so an env-var change between module load and resumeOrphaned()
+ * call (e.g. set in a test setup file) is observed.
+ */
+function getResumeOrphanDelayMs(): number {
+  const raw = process.env.FUSION_RESUME_ORPHAN_DELAY_MS;
+  if (raw !== undefined) {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  if (process.env.VITEST || process.env.NODE_ENV === "test") return 0;
+  return 30_000;
+}
 
 const tokenCacheMetricsLog = createLogger("token-cache-metrics");
 
@@ -2893,7 +2922,22 @@ export class TaskExecutor {
     if (inProgress.length === 0) return;
 
     executorLog.log(`Found ${inProgress.length} orphaned in-progress task(s)`);
+    const resumeDelayMs = getResumeOrphanDelayMs();
+    if (resumeDelayMs > 0) {
+      executorLog.log(
+        `Deferring orphan task resumption for ${resumeDelayMs}ms to keep dashboard responsive during cold start`,
+      );
+    }
+    // When the delay is zero (default in tests and when explicitly disabled),
+    // skip the setTimeout indirection so the spawn happens on the current
+    // microtask — matching the legacy behavior callers may rely on.
+    const scheduleResume = resumeDelayMs > 0
+      ? (fn: () => void) => { setTimeout(fn, resumeDelayMs); }
+      : (fn: () => void) => { fn(); };
+    let yieldNext = false;
     for (const task of inProgress) {
+      if (yieldNext) await yieldEventLoop();
+      yieldNext = true;
       // Fast-path: if the task already completed its work (all steps done),
       // move it directly to in-review instead of re-executing from scratch.
       if (this.isTaskWorkComplete(task) && !task.mergeDetails) {
@@ -2903,13 +2947,15 @@ export class TaskExecutor {
         }
         executorLog.log(`${task.id} is already complete — fast-pathing to in-review`);
         this.recoveringCompleted.add(task.id);
-        void this.recoverCompletedTask(task)
-          .catch((err) =>
-            executorLog.error(`Failed to recover completed orphan ${task.id}:`, err),
-          )
-          .finally(() => {
-            this.recoveringCompleted.delete(task.id);
-          });
+        scheduleResume(() => {
+          void this.recoverCompletedTask(task)
+            .catch((err) =>
+              executorLog.error(`Failed to recover completed orphan ${task.id}:`, err),
+            )
+            .finally(() => {
+              this.recoveringCompleted.delete(task.id);
+            });
+        });
         continue;
       }
 
@@ -2926,9 +2972,11 @@ export class TaskExecutor {
       } catch (err) {
         executorLog.error(`Failed to write resume log for ${task.id}:`, err);
       }
-      this.execute(task).catch((err) =>
-        executorLog.error(`Failed to resume ${task.id}:`, err),
-      );
+      scheduleResume(() => {
+        this.execute(task).catch((err) =>
+          executorLog.error(`Failed to resume ${task.id}:`, err),
+        );
+      });
     }
   }
 

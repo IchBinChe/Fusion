@@ -56,19 +56,52 @@ function normalizeRunGhOptions(opts: string | RunGhOptions | undefined): RunGhOp
   return opts ?? {};
 }
 
+// Both isGhAvailable() and isGhAuthenticated() are deterministic for the
+// lifetime of a process (the gh binary doesn't get uninstalled, and the
+// auth state doesn't change without explicit user action) but they each
+// shell out via execFileSync — `gh auth status` in particular performs a
+// network roundtrip to GitHub. At startup the GitHubTrackingReconciler
+// scans up to 200 done tasks and calls hasGhAuth() per-task, producing
+// hundreds of synchronous spawns that pin the event loop for ~60s and
+// make the dashboard unresponsive during cold start.
+//
+// Cache the result with a short TTL so callers still notice if the user
+// runs `gh auth login` mid-session, but a tight loop of N callers in the
+// same second pays for at most one spawn.
+const GH_CHECK_TTL_MS = 60_000;
+
+let cachedAvailable: { value: boolean; at: number } | undefined;
+let cachedAuthenticated: { value: boolean; at: number } | undefined;
+
+/**
+ * Reset the in-memory cache. Call after operations that legitimately change
+ * gh auth state (login/logout) so the next check observes the new state
+ * without waiting for the TTL.
+ */
+export function resetGhAvailabilityCache(): void {
+  cachedAvailable = undefined;
+  cachedAuthenticated = undefined;
+}
+
 /**
  * Check if the `gh` CLI is installed and available.
  */
 export function isGhAvailable(): boolean {
+  if (cachedAvailable && Date.now() - cachedAvailable.at < GH_CHECK_TTL_MS) {
+    return cachedAvailable.value;
+  }
+  let value = false;
   try {
     execFileSync("gh", ["--version"], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
     });
-    return true;
+    value = true;
   } catch {
-    return false;
+    value = false;
   }
+  cachedAvailable = { value, at: Date.now() };
+  return value;
 }
 
 /**
@@ -76,16 +109,22 @@ export function isGhAvailable(): boolean {
  * Returns true if authenticated, false if not.
  */
 export function isGhAuthenticated(): boolean {
+  if (cachedAuthenticated && Date.now() - cachedAuthenticated.at < GH_CHECK_TTL_MS) {
+    return cachedAuthenticated.value;
+  }
+  let value = false;
   try {
     const result = execFileSync("gh", ["auth", "status"], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
     });
     // gh auth status returns 0 and outputs "Logged in" if authenticated
-    return result.includes("Logged in") || result.includes("Authenticated");
+    value = result.includes("Logged in") || result.includes("Authenticated");
   } catch {
-    return false;
+    value = false;
   }
+  cachedAuthenticated = { value, at: Date.now() };
+  return value;
 }
 
 /**

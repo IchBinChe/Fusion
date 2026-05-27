@@ -331,9 +331,10 @@ export type {
   TaskAgeStalenessThresholds,
 } from "./task-age-staleness.js";
 export {
-  isGhAvailable, 
-  isGhAuthenticated, 
-  runGh, 
+  isGhAvailable,
+  isGhAuthenticated,
+  resetGhAvailabilityCache,
+  runGh,
   runGhAsync, 
   runGhJson, 
   runGhJsonAsync, 

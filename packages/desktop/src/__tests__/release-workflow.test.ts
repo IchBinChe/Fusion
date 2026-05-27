@@ -21,16 +21,19 @@ describe("desktop release workflow wiring", () => {
       expect(workflow).toContain("runs-on: windows-latest");
       expect(workflow).toMatch(/pnpm --filter @fusion\/desktop dist:win|electron-builder --win/);
       expect(workflow).toContain("name: fusion-desktop-windows");
+      expect(workflow).toContain("packages/desktop/dist-electron/latest.yml");
 
       expect(workflow).toContain("build-desktop-macos:");
       expect(workflow).toContain("runs-on: macos-latest");
       expect(workflow).toMatch(/pnpm --filter @fusion\/desktop dist:mac|electron-builder --mac/);
       expect(workflow).toContain("name: fusion-desktop-macos");
+      expect(workflow).toContain("packages/desktop/dist-electron/latest-mac.yml");
 
       expect(workflow).toContain("build-desktop-linux:");
       expect(workflow).toContain("runs-on: ubuntu-latest");
       expect(workflow).toMatch(/pnpm --filter @fusion\/desktop dist:linux|electron-builder --linux/);
       expect(workflow).toContain("name: fusion-desktop-linux");
+      expect(workflow).toContain("packages/desktop/dist-electron/latest-linux.yml");
     }
   });
 
@@ -49,6 +52,7 @@ describe("desktop release workflow wiring", () => {
     expect(release).toContain('-name "*.AppImage"');
     expect(release).toContain('-name "*.deb"');
     expect(release).toContain('-name "*.tar.gz"');
+    expect(release).toContain('-name "latest*.yml"');
   });
 
   it("wires test-release collect job to wait for all desktop build jobs", async () => {
@@ -57,6 +61,7 @@ describe("desktop release workflow wiring", () => {
     expect(testRelease).toContain(
       "needs: [build-binaries, build-desktop-windows, build-desktop-macos, build-desktop-linux]",
     );
+    expect(testRelease).toContain('-name "latest*.yml"');
   });
 });
 

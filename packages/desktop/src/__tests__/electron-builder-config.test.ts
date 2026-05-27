@@ -41,6 +41,9 @@ describe("electron-builder desktop config", () => {
     expect(builderConfig).toMatch(/artifactName:\s*"\$\{productName\}-\$\{version\}-\$\{os\}-\$\{arch\}\.\$\{ext\}"/m);
     expect(builderConfig).toMatch(/appId:\s*com\.gsxdsm\.fusion\.desktop/m);
     expect(builderConfig).toMatch(/productName:\s*Fusion/m);
+    expect(builderConfig).toMatch(/publish:\s*[\s\S]*?provider:\s*github/m);
+    expect(builderConfig).toMatch(/publish:\s*[\s\S]*?owner:\s*gsxdsm/m);
+    expect(builderConfig).toMatch(/publish:\s*[\s\S]*?repo:\s*fusion/m);
   });
 
   it("locks windows signing policy without baked certificate paths", async () => {

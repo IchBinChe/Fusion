@@ -161,6 +161,7 @@ jobs:
             packages/desktop/dist-electron/Fusion-*-win-*.exe
             packages/desktop/dist-electron/Fusion-*-win-*.exe.sha256
             packages/desktop/dist-electron/Fusion-*-win-*.exe.blockmap
+            packages/desktop/dist-electron/latest.yml
 
   # ── Build macOS desktop artifacts ────────────────────────────────────
   # macOS Developer ID signing/notarization is intentionally deferred;
@@ -221,6 +222,7 @@ jobs:
             packages/desktop/dist-electron/Fusion-*-mac-*.zip
             packages/desktop/dist-electron/Fusion-*-mac-*.zip.sha256
             packages/desktop/dist-electron/Fusion-*-mac-*.blockmap
+            packages/desktop/dist-electron/latest-mac.yml
 
   # ── Build Linux desktop artifacts ────────────────────────────────────
   build-desktop-linux:
@@ -294,6 +296,7 @@ jobs:
             packages/desktop/dist-electron/Fusion-*-linux-*.tar.gz
             packages/desktop/dist-electron/Fusion-*-linux-*.tar.gz.sha256
             packages/desktop/dist-electron/Fusion-*-linux-*.tar.gz.asc
+            packages/desktop/dist-electron/latest-linux.yml
 
   # ── Create GitHub Release ─────────────────────────────────────────────
   github-release:
@@ -312,7 +315,7 @@ jobs:
       - name: Collect release files
         run: |
           mkdir release-files
-          find artifacts -type f \( -name "fn-*" -o -name "*.sha256" -o -name "*.asc" -o -name "*.exe" -o -name "*.exe.sha256" -o -name "*.blockmap" -o -name "*.dmg" -o -name "*.dmg.sha256" -o -name "*.zip" -o -name "*.zip.sha256" -o -name "*.AppImage" -o -name "*.AppImage.sha256" -o -name "*.deb" -o -name "*.deb.sha256" -o -name "*.tar.gz" -o -name "*.tar.gz.sha256" \) -exec cp {} release-files/ \;
+          find artifacts -type f \( -name "fn-*" -o -name "*.sha256" -o -name "*.asc" -o -name "*.exe" -o -name "*.exe.sha256" -o -name "*.blockmap" -o -name "*.dmg" -o -name "*.dmg.sha256" -o -name "*.zip" -o -name "*.zip.sha256" -o -name "*.AppImage" -o -name "*.AppImage.sha256" -o -name "*.deb" -o -name "*.deb.sha256" -o -name "*.tar.gz" -o -name "*.tar.gz.sha256" -o -name "latest*.yml" \) -exec cp {} release-files/ \;
           ls -la release-files/
 
       - name: Create GitHub Release

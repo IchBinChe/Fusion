@@ -259,7 +259,8 @@ The desktop shell installs a native menu with standard shortcuts.
   - `triggerUpdateCheck(mainWindow?)` performs on-demand checks (manual menu/IPC trigger) and returns `checking`/`unavailable`/`error` status.
   - `startUpdateCheckInterval(mainWindow, intervalMs?)` schedules periodic background checks (default every 4 hours) and returns a disposer for quit cleanup.
   - Events forwarded to renderer include `update-available`, `update-downloaded`, `update-not-available`, and `update-error`.
-  - Failures are logged and treated as non-fatal (important for unsigned/local dev builds).
+  - Auto-update feed metadata is published as GitHub Release assets by `.github/workflows/release.yml` (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`) and is what updater checks resolve against.
+  - Failures are logged and treated as non-fatal (important for unsigned/local dev builds, which typically surface `update-not-available` or the guarded error path).
 - **Window state persistence**
   - `loadWindowState()` reads `window-state.json` from `app.getPath("userData")`.
   - `saveWindowState(mainWindow)` writes bounds/maximized state atomically (`.tmp` + rename).
@@ -353,6 +354,7 @@ Desktop packaging is configured in `electron-builder.yml`.
 - Targets: macOS (`dmg`, `zip`), Windows (`nsis`, `portable`), Linux (`AppImage`, `deb`, `tar.gz`)
 - Windows artifacts: `Fusion-<version>-win-x64.exe` and `Fusion-<version>-win-arm64.exe` (both NSIS + portable variants) in `packages/desktop/dist-electron/`
 - Binary GitHub Release workflow (`.github/workflows/release.yml`) now attaches desktop artifacts for all supported platforms:
+  - Electron-updater feed files are also published per platform: `latest.yml` (Windows), `latest-mac.yml` (macOS), and `latest-linux.yml` (Linux). `setupAutoUpdater` / `triggerUpdateCheck` resolve these feeds from the GitHub Release channel.
   - Windows: x64 + arm64 outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
   - macOS: `Fusion-<version>-mac-arm64.dmg`, `Fusion-<version>-mac-x64.dmg`, matching `.zip` variants, `.sha256` sidecars, and `.blockmap` files.
   - Linux: `Fusion-<version>-linux-x64.AppImage` with `.sha256`, plus best-effort `.deb` and `.tar.gz` outputs (and sidecars) when available on the runner image.

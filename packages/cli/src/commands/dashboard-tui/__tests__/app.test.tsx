@@ -661,6 +661,50 @@ describe("LogsPanel indicator", () => {
   });
 });
 
+describe("SystemPanel token visibility", () => {
+  it("keeps full auth token visible in narrow terminals", async () => {
+    const controller = newController();
+    const authToken = "fn_abcdef0123456789abcdef0123456789";
+    controller.setSystemInfo({ ...makeSystemInfo(), authEnabled: true, authToken });
+
+    const rendered = render(renderDashboardAppNode(controller));
+    setTerminalSize(rendered, 60, 24);
+    rendered.rerender(renderDashboardAppNode(controller));
+
+    await waitForFrameContains(rendered.lastFrame, authToken);
+    rendered.unmount();
+  });
+
+  it("shows URL and full token in wide terminals", async () => {
+    const controller = newController();
+    const authToken = "fn_abcdef0123456789abcdef0123456789";
+    controller.setSystemInfo({ ...makeSystemInfo(), authEnabled: true, authToken });
+
+    const rendered = render(renderDashboardAppNode(controller));
+    setTerminalSize(rendered, 160, 28);
+    rendered.rerender(renderDashboardAppNode(controller));
+
+    await waitForFrameContains(rendered.lastFrame, "http://localhost:4040");
+    await waitForFrameContains(rendered.lastFrame, authToken);
+    rendered.unmount();
+  });
+
+  it("hides token row and keeps no-token hint when auth token is absent", async () => {
+    const controller = newController();
+    controller.setSystemInfo({ ...makeSystemInfo(), authEnabled: false, authToken: undefined });
+
+    const rendered = render(renderDashboardAppNode(controller));
+    setTerminalSize(rendered, 120, 24);
+    rendered.rerender(renderDashboardAppNode(controller));
+
+    await waitForFrameContains(rendered.lastFrame, "[Enter]");
+    const frame = rendered.lastFrame() ?? "";
+    expect(frame).not.toContain("Token");
+    expect(frame).toContain("open URL · drag to select");
+    rendered.unmount();
+  });
+});
+
 describe("StatusModeGrid layout stability", () => {
   it("keeps System and Logs panel anchors stable as log content length changes", async () => {
     const controller = newController();

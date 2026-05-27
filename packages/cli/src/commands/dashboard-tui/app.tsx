@@ -366,7 +366,7 @@ function SystemPanel({ state, isFocused }: { state: DashboardState; isFocused: b
             <Text dimColor wrap="truncate-end">
               <Text color="cyanBright">[Enter]</Text> open URL
               {info.authToken ? (
-                <Text> · <Text color="cyanBright">[c]</Text> copy token · drag to select</Text>
+                <Text> · <Text color="cyanBright">[c]</Text> copy token · select token text to copy manually</Text>
               ) : (
                 <Text> · drag to select</Text>
               )}
@@ -851,16 +851,14 @@ function StatusModeGrid({
   const rows = stdout?.rows ?? 24;
   const cols = stdout?.columns ?? 80;
   // Middle area = rows - header(1) - statusbar(1) = rows-2 (no top spacer).
-  // System fixed at 4 rows. Bottom row scales with available space.
-  // Logs fills what remains.
+  // Bottom row scales with available space; Logs fills what remains.
   const middleHeight = Math.max(1, rows - 2);
-  // System panel is normally 4 rows (border 2 + 2 content rows so chips wrap to
-  // a second line). When auth is on, the Token chip is long enough that it
-  // routinely wraps to a third row; bump to 5 so it isn't clipped.
-  // Add one extra row when the System panel is focused so the inline
-  // [Enter]/[c]/[M] hint isn't clipped against Logs.
   const systemFocused = focused === "system";
-  const SYSTEM_HEIGHT = (state.systemInfo?.authToken ? 5 : 4) + (systemFocused ? 1 : 0);
+  // Match the same intrinsic sizing logic used by single-pane mode so URL/token
+  // wrapping at narrow widths cannot clip in the grid layout.
+  const systemContentRows = estimateSystemContentRows(state.systemInfo, cols, systemFocused);
+  // Grid Panel chrome: border (2) + title row (1).
+  const SYSTEM_HEIGHT = systemContentRows + 3 + (systemFocused ? 1 : 0);
   const bottomShare = Math.min(10, Math.max(6, Math.floor(middleHeight * 0.35)));
   const logsShare = Math.max(1, middleHeight - SYSTEM_HEIGHT - bottomShare);
   // LogsPanel chrome: border 2 + title 1 + filter 1 = 4.
@@ -882,9 +880,9 @@ function StatusModeGrid({
           same terminal row as the header overlay (covered by it), same
           tradeoff as StatusModeSingle. */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {/* System: full width, pinned to 4 rows tall (border 2 + 2 content
-            rows so the chips always have room to wrap to a second line if
-            needed). flexShrink=0 so it never shrinks below this height. */}
+        {/* System: full width, dynamically sized from intrinsic content rows
+            so wrapped URL/token lines remain visible. flexShrink=0 so it never
+            shrinks below this computed height. */}
         <Box height={SYSTEM_HEIGHT} flexShrink={0} overflow="hidden">
           <SystemPanel state={state} isFocused={focused === "system"} />
         </Box>

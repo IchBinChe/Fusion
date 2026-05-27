@@ -328,11 +328,12 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(workflow.on.push).toBeUndefined();
   });
 
-  it("has build-binaries job with 4-target matrix", () => {
+  it("has build-binaries job with 5-target matrix", () => {
     const matrix = workflow.jobs["build-binaries"].strategy.matrix.include;
-    expect(matrix).toHaveLength(4);
+    expect(matrix).toHaveLength(5);
     const targets = matrix.map((m: any) => m.target);
     expect(targets).toContain("bun-linux-x64");
+    expect(targets).toContain("bun-linux-arm64");
     expect(targets).toContain("bun-darwin-arm64");
     expect(targets).toContain("bun-darwin-x64");
     expect(targets).toContain("bun-windows-x64");
@@ -343,9 +344,16 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     const osMap: Record<string, string> = {};
     matrix.forEach((m: any) => { osMap[m.target] = m.os; });
     expect(osMap["bun-linux-x64"]).toBe("ubuntu-latest");
+    expect(osMap["bun-linux-arm64"]).toBe("ubuntu-24.04-arm");
     expect(osMap["bun-darwin-arm64"]).toBe("macos-latest");
     expect(osMap["bun-darwin-x64"]).toBe("macos-13");
     expect(osMap["bun-windows-x64"]).toBe("windows-latest");
+  });
+
+  it("maps bun-linux-arm64 to fn-linux-arm64 binary name", () => {
+    const matrix = workflow.jobs["build-binaries"].strategy.matrix.include;
+    const arm64Entry = matrix.find((m: any) => m.target === "bun-linux-arm64");
+    expect(arm64Entry?.binary).toBe("fn-linux-arm64");
   });
 
   it("uses softprops/action-gh-release", () => {
@@ -418,14 +426,21 @@ describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
     expect(workflow.on).toHaveProperty("workflow_dispatch");
   });
 
-  it("has 4-target build matrix", () => {
+  it("has 5-target build matrix", () => {
     const matrix = workflow.jobs["build-binaries"].strategy.matrix.include;
-    expect(matrix).toHaveLength(4);
+    expect(matrix).toHaveLength(5);
     const targets = matrix.map((m: any) => m.target);
     expect(targets).toContain("bun-linux-x64");
+    expect(targets).toContain("bun-linux-arm64");
     expect(targets).toContain("bun-darwin-arm64");
     expect(targets).toContain("bun-darwin-x64");
     expect(targets).toContain("bun-windows-x64");
+  });
+
+  it("maps bun-linux-arm64 to fn-linux-arm64 binary name", () => {
+    const matrix = workflow.jobs["build-binaries"].strategy.matrix.include;
+    const arm64Entry = matrix.find((m: any) => m.target === "bun-linux-arm64");
+    expect(arm64Entry?.binary).toBe("fn-linux-arm64");
   });
 
   it("includes smoke tests with --help", () => {

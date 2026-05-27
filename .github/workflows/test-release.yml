@@ -20,6 +20,9 @@ jobs:
           - os: ubuntu-latest
             target: bun-linux-x64
             binary: fn-linux-x64
+          - os: ubuntu-24.04-arm
+            target: bun-linux-arm64
+            binary: fn-linux-arm64
           - os: macos-latest
             target: bun-darwin-arm64
             binary: fn-darwin-arm64

@@ -36,6 +36,10 @@ function getCandidatePluginDirs(pluginId: string): string[] {
   const cliPackageRoot = resolve(moduleDir, "..", "..");
 
   return [
+    // Bundled/global runtime: moduleDir is typically <cli>/dist, and plugins are
+    // staged under <cli>/dist/plugins/<id>.
+    join(moduleDir, "plugins", pluginId),
+    // Source/dev fallbacks.
     join(cliPackageRoot, "dist", "plugins", pluginId),
     join(cliPackageRoot, "plugins", pluginId),
     join(cliPackageRoot, "..", "..", "plugins", pluginId),

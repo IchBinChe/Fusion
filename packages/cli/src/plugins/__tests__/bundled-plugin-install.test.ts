@@ -233,6 +233,77 @@ describe("resolvePluginEntryPath", () => {
 });
 
 describe("ensureBundledDependencyGraphPluginInstalled", () => {
+  it("installs paperclip runtime from bundled dist/plugins layout (global install regression)", async () => {
+    const PAPERCLIP_PLUGIN_ID = "fusion-plugin-paperclip-runtime";
+    const globalDistPluginRoot = `/opt/homebrew/lib/node_modules/@runfusion/fusion/dist/plugins/${PAPERCLIP_PLUGIN_ID}`;
+
+    mockExistsSync.mockImplementation((p: string) => {
+      if (typeof p !== "string") return false;
+      if (p.includes("/@runfusion/dist/plugins/")) return false;
+      return p === `${globalDistPluginRoot}/manifest.json` || p === `${globalDistPluginRoot}/bundled.js`;
+    });
+    mockReadFile.mockResolvedValue(JSON.stringify(makeManifest({ id: PAPERCLIP_PLUGIN_ID, name: "Paperclip Runtime" })));
+    mockValidatePluginManifest.mockReturnValue({ valid: true, errors: [] });
+
+    vi.resetModules();
+    vi.doMock("node:url", () => ({
+      fileURLToPath: vi.fn(() => "/opt/homebrew/lib/node_modules/@runfusion/fusion/dist/bin.js"),
+    }));
+    vi.doMock("node:fs", () => ({
+      existsSync: mockExistsSync,
+      statSync: mockStatSync,
+    }));
+    vi.doMock("node:fs/promises", () => ({
+      readFile: mockReadFile,
+      stat: mockFsStat,
+      copyFile: mockCopyFile,
+    }));
+    vi.doMock("@fusion/core", () => ({
+      validatePluginManifest: mockValidatePluginManifest,
+    }));
+
+    const store = makePluginStore();
+    const loader = makePluginLoader();
+    const { ensureBundledPluginInstalled: ensureFromBundledBuild } = await import("../bundled-plugin-install.js");
+
+    const result = await ensureFromBundledBuild(
+      store as unknown as import("@fusion/core").PluginStore,
+      loader as unknown as import("@fusion/core").PluginLoader,
+      PAPERCLIP_PLUGIN_ID,
+    );
+
+    expect(result).toBe("installed");
+    const registerCall = store.registerPlugin.mock.calls[0]?.[0] as { path: string };
+    expect(registerCall.path.endsWith(`/fusion-plugin-paperclip-runtime/bundled.js`)).toBe(true);
+  });
+
+  it("falls back to dev dist/plugins candidate when bundled-runtime candidate is absent", async () => {
+    const PAPERCLIP_PLUGIN_ID = "fusion-plugin-paperclip-runtime";
+    mockExistsSync.mockImplementation((p: string) => {
+      if (typeof p !== "string") return false;
+      if (p.includes("/src/plugins/plugins/")) return false;
+      return (
+        p.includes(`/dist/plugins/${PAPERCLIP_PLUGIN_ID}/manifest.json`)
+        || p.includes(`/dist/plugins/${PAPERCLIP_PLUGIN_ID}/src/index.ts`)
+      );
+    });
+    mockReadFile.mockResolvedValue(JSON.stringify(makeManifest({ id: PAPERCLIP_PLUGIN_ID, name: "Paperclip Runtime" })));
+    mockValidatePluginManifest.mockReturnValue({ valid: true, errors: [] });
+
+    const store = makePluginStore();
+    const loader = makePluginLoader();
+
+    const result = await ensureBundledPluginInstalled(
+      store as unknown as import("@fusion/core").PluginStore,
+      loader as unknown as import("@fusion/core").PluginLoader,
+      PAPERCLIP_PLUGIN_ID,
+    );
+
+    expect(result).toBe("installed");
+    const registerCall = store.registerPlugin.mock.calls[0]?.[0] as { path: string };
+    expect(registerCall.path).toContain(`/dist/plugins/${PAPERCLIP_PLUGIN_ID}/src/index.ts`);
+  });
+
   it("includes roadmap plugin in bundled plugin ids", () => {
     expect(BUNDLED_PLUGIN_IDS).toContain(ROADMAP_PLUGIN_ID);
   });

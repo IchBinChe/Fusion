@@ -1,5 +1,21 @@
 # @fusion/dashboard
 
+## 0.35.0
+
+### Patch Changes
+
+- Updated dependencies [1992049]
+  - @fusion/engine@0.35.0
+  - @fusion-plugin-examples/cli-printing-press@0.1.12
+  - @fusion-plugin-examples/dependency-graph@0.1.26
+  - @fusion-plugin-examples/roadmap@0.1.14
+  - @fusion/core@0.35.0
+  - @fusion-plugin-examples/cursor-runtime@0.1.14
+  - @fusion-plugin-examples/droid-runtime@0.1.21
+  - @fusion-plugin-examples/hermes-runtime@0.2.45
+  - @fusion-plugin-examples/openclaw-runtime@0.2.45
+  - @fusion-plugin-examples/paperclip-runtime@0.2.45
+
 ## 0.34.0
 
 ### Patch Changes

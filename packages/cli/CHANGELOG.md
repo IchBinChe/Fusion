@@ -1,5 +1,20 @@
 # @runfusion/fusion
 
+## 0.35.0
+
+### Minor Changes
+
+- d767e2e: Add `openai-responses` as a supported custom provider `apiType` across CLI, engine, dashboard API validation, and dashboard forms.
+
+  Custom providers configured with this apiType now route through pi-ai's built-in `openai-responses` transport while probe-model discovery continues to use the OpenAI-compatible `/v1/models` path.
+
+### Patch Changes
+
+- da34bd0: Dashboard now shows a top-level "Re-login required" banner when a stored OAuth provider credential (Codex, Claude, etc.) has expired, and the engine logs the expired set on startup and once every 24 hours.
+- d76b6f9: TUI System panel now reliably shows the full auth token at all terminal widths so it can be selected and copied manually when the `[c]` shortcut is unavailable.
+- d767e2e: Fixed custom provider registration so provider keys are derived from the configured provider name (with deterministic collision suffixing) instead of internal UUID ids, ensuring model selector and logs show stable human-readable keys. Also fixed the OpenAI-compatible custom-provider registration path by validating end-to-end openai-completions round-trip behavior with a regression test.
+- 8a0fbf0: Fix the Bun-compiled `fn` executable so `--help` no longer crashes with a missing `react-devtools-core` module. The build now defines `process.env.DEV` as `false` during compile, allowing Ink's DEV-only devtools import path to be removed from the bundled binary.
+
 ## 0.34.0
 
 ### Minor Changes

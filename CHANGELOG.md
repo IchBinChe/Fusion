@@ -2,6 +2,74 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.35.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- Updated dependencies [1992049]
+  - @fusion/engine@0.35.0
+  - @fusion-plugin-examples/cli-printing-press@0.1.12
+  - @fusion-plugin-examples/dependency-graph@0.1.26
+  - @fusion-plugin-examples/roadmap@0.1.14
+  - @fusion/core@0.35.0
+  - @fusion-plugin-examples/cursor-runtime@0.1.14
+  - @fusion-plugin-examples/droid-runtime@0.1.21
+  - @fusion-plugin-examples/hermes-runtime@0.2.45
+  - @fusion-plugin-examples/openclaw-runtime@0.2.45
+  - @fusion-plugin-examples/paperclip-runtime@0.2.45
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/dashboard@0.35.0
+- @fusion/core@0.35.0
+
+### @fusion/engine
+
+#### Minor Changes
+
+- 1992049: Add opt-in RTK command rewriting for Pi bash tools via `FUSION_RTK_REWRITE`.
+
+#### Patch Changes
+
+- @fusion/core@0.35.0
+- @fusion/pi-claude-cli@0.35.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.35.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- d767e2e: Add `openai-responses` as a supported custom provider `apiType` across CLI, engine, dashboard API validation, and dashboard forms.
+
+  Custom providers configured with this apiType now route through pi-ai's built-in `openai-responses` transport while probe-model discovery continues to use the OpenAI-compatible `/v1/models` path.
+
+#### Patch Changes
+
+- da34bd0: Dashboard now shows a top-level "Re-login required" banner when a stored OAuth provider credential (Codex, Claude, etc.) has expired, and the engine logs the expired set on startup and once every 24 hours.
+- d76b6f9: TUI System panel now reliably shows the full auth token at all terminal widths so it can be selected and copied manually when the `[c]` shortcut is unavailable.
+- d767e2e: Fixed custom provider registration so provider keys are derived from the configured provider name (with deterministic collision suffixing) instead of internal UUID ids, ensuring model selector and logs show stable human-readable keys. Also fixed the OpenAI-compatible custom-provider registration path by validating end-to-end openai-completions round-trip behavior with a regression test.
+- 8a0fbf0: Fix the Bun-compiled `fn` executable so `--help` no longer crashes with a missing `react-devtools-core` module. The build now defines `process.env.DEV` as `false` during compile, allowing Ink's DEV-only devtools import path to be removed from the bundled binary.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [da34bd0]
+- Updated dependencies [d76b6f9]
+- Updated dependencies [d767e2e]
+- Updated dependencies [d767e2e]
+- Updated dependencies [8a0fbf0]
+  - @runfusion/fusion@0.35.0
+
 ## 0.34.0
 
 ### @fusion/core
@@ -7111,6 +7179,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.21
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.21
 
 ## 0.11.20
 

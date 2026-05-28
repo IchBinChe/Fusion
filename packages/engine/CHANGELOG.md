@@ -1,5 +1,16 @@
 # @fusion/engine
 
+## 0.35.0
+
+### Minor Changes
+
+- 1992049: Add opt-in RTK command rewriting for Pi bash tools via `FUSION_RTK_REWRITE`.
+
+### Patch Changes
+
+- @fusion/core@0.35.0
+- @fusion/pi-claude-cli@0.35.0
+
 ## 0.34.0
 
 ### Minor Changes

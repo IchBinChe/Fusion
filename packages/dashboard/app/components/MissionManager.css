@@ -866,6 +866,19 @@
   flex-shrink: 0;
 }
 
+.mission-list__item-run-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--space-xs) / 2);
+}
+
+.mission-list__item-run-help {
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
+  color: var(--text-muted);
+  max-width: calc(var(--space-3xl) * 5);
+}
+
 .mission-list__item-summary {
   display: flex;
   flex-wrap: wrap;
@@ -1031,17 +1044,50 @@
 /* ── Detail-level action bar (edit / delete the mission itself) ── */
 .mission-detail__actions {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding-top: var(--space-xs);
+}
+
+.mission-detail__run-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--space-xs) / 2);
+}
+
+.mission-detail__run-help {
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
+  color: var(--text-muted);
+}
+
+.mission-detail__management-actions {
+  display: inline-flex;
   align-items: center;
   gap: var(--space-sm);
+}
+
+.mission-detail__run-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
   padding-top: var(--space-xs);
+}
+
+.mission-detail__run-settings-title {
+  margin: 0;
+  font-size: calc(var(--space-sm) + var(--space-xs));
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 /* ── Autopilot section ── */
 .mission-detail__autopilot {
   display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
   padding: var(--space-xs) 0;
 }
 
@@ -1053,6 +1099,11 @@
 
 .mission-detail__autopilot-icon {
   color: var(--color-warning);
+}
+
+.mission-detail__autopilot-description {
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
+  color: var(--text-muted);
 }
 
 .mission-detail__autopilot-activity {
@@ -2440,6 +2491,11 @@
   /* Detail header actions stack on mobile */
   .mission-detail__actions {
     flex-wrap: wrap;
+  }
+
+  .mission-detail__run-help,
+  .mission-list__item-run-help {
+    max-width: 100%;
   }
 
   /* Milestone headers wrap actions below title row */

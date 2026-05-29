@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within, cleanup } from "@testing-library/react";
 import { MissionManager } from "../MissionManager";
 import { loadAllAppCssBaseOnly } from "../../test/cssFixture";
 
@@ -3588,6 +3588,57 @@ describe("MissionManager", () => {
       });
     }
 
+    it("renders labeled run controls and calls matching mission status endpoints", async () => {
+      const runControlMissions = [
+        { ...autopilotMockMissions[0], id: "M-RUN-ACTIVE", title: "Run Active", status: "active" },
+        { ...autopilotMockMissions[1], id: "M-RUN-PLANNING", title: "Run Planning", status: "planning" },
+        { ...autopilotMockMissions[1], id: "M-RUN-BLOCKED", title: "Run Blocked", status: "blocked" },
+      ];
+
+      const fetchMock = vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+        if (url.includes("/health")) {
+          const missionId = extractMissionId(url) ?? "M-RUN-PLANNING";
+          return Promise.resolve(mockApiResponse(getMockMissionHealth(missionId)));
+        }
+
+        if (url.includes("/start") || url.includes("/stop") || url.includes("/resume")) {
+          return Promise.resolve(mockApiResponse({ ok: true }));
+        }
+
+        if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+          const mission = runControlMissions.find((item) => url.includes(item.id)) ?? runControlMissions[0];
+          return Promise.resolve(mockApiResponse({ ...mission, milestones: [] }));
+        }
+
+        return Promise.resolve(mockApiResponse(runControlMissions));
+      });
+
+      globalThis.fetch = fetchMock;
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Run Active")).toBeDefined();
+      });
+
+      const startButtons = screen.getAllByRole("button", { name: "Start mission" });
+      const stopButtons = screen.getAllByRole("button", { name: "Stop mission" });
+      const resumeButtons = screen.getAllByRole("button", { name: "Resume mission" });
+
+      expect(startButtons.length).toBeGreaterThan(0);
+      expect(stopButtons.length).toBeGreaterThan(0);
+      expect(resumeButtons.length).toBeGreaterThan(0);
+
+      fireEvent.click(startButtons[0]);
+      fireEvent.click(stopButtons[0]);
+      fireEvent.click(resumeButtons[0]);
+
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/missions/M-RUN-PLANNING/start"))).toBe(true);
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/missions/M-RUN-ACTIVE/stop"))).toBe(true);
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/missions/M-RUN-BLOCKED/resume"))).toBe(true);
+      });
+    });
+
     it("shows autopilot icon for missions with autopilotEnabled in list view", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(mockApiResponse(autopilotMockMissions));
       render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
@@ -3610,6 +3661,60 @@ describe("MissionManager", () => {
       // There should be only one autopilot icon (for Autopilot Mission)
       const autopilotIcons = screen.queryAllByTitle("Autopilot enabled");
       expect(autopilotIcons).toHaveLength(1);
+    });
+
+    it("shows autopilot toggle, helper copy, and humanized state labels", async () => {
+      const stateCases: Array<{ state: "inactive" | "watching" | "activating" | "completing"; label: string }> = [
+        { state: "inactive", label: "Off" },
+        { state: "watching", label: "Watching" },
+        { state: "activating", label: "Activating slice" },
+        { state: "completing", label: "Completing" },
+      ];
+
+      for (const stateCase of stateCases) {
+        const fetchMock = vi.fn().mockImplementation((url: string) => {
+          if (url.includes("/health")) {
+            const missionId = extractMissionId(url) ?? "M-AUTO1";
+            return Promise.resolve(mockApiResponse(getMockMissionHealth(missionId)));
+          }
+
+          if (url.includes("/autopilot")) {
+            return Promise.resolve(mockApiResponse({
+              enabled: true,
+              state: stateCase.state,
+              watched: stateCase.state !== "inactive",
+              lastActivityAt: "2026-01-01T12:00:00.000Z",
+              nextScheduledCheck: "2026-01-01T12:05:00.000Z",
+            }));
+          }
+
+          if (url.includes("/api/missions/M-AUTO1") && !url.includes("/milestones") && !url.includes("/status")) {
+            return Promise.resolve(mockApiResponse({
+              ...autopilotMockDetail,
+              autopilotState: stateCase.state,
+            }));
+          }
+
+          return Promise.resolve(mockApiResponse([{ ...autopilotMockMissions[0], autopilotState: stateCase.state }]));
+        });
+
+        globalThis.fetch = fetchMock;
+        render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+        await waitFor(() => {
+          expect(screen.getByText("Autopilot Mission")).toBeDefined();
+        });
+        fireEvent.click(screen.getByText("Autopilot Mission"));
+
+        await waitFor(() => {
+          expect(screen.getByLabelText("Autopilot")).toBeDefined();
+          expect(screen.getByText("When on, Fusion automatically activates the next slice and plans its features as work completes.")).toBeDefined();
+          expect(screen.getByTestId("autopilot-state-badge").textContent).toContain(stateCase.label);
+        });
+
+        expect(screen.queryByText(stateCase.state)).toBeNull();
+        cleanup();
+      }
     });
 
     it("shows autopilot toggle and status badge in detail view", async () => {

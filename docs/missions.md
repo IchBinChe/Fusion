@@ -213,7 +213,7 @@ If validation cannot run (unexpected loop state, duplicate trigger, blocked vali
 - `autopilotEnabled=false`, `autoAdvance=true` → next pending slice is activated (legacy compat)
 - `autopilotEnabled=false`, `autoAdvance=false` → manual activation required
 
-**Dashboard UI:** The Mission Manager shows `autopilotEnabled` as the primary control. When enabling autopilot on an already-active mission, the system automatically checks whether recovery is needed (no active slice or completed active slice) and progresses accordingly.
+**Dashboard UI:** The Mission Manager groups mission run settings together: explicit **Start mission / Stop mission / Resume mission** actions control mission run-state, while the **Autopilot** toggle controls automatic slice advancement and feature planning. The autopilot badge uses human-readable states (`Off`, `Watching`, `Activating slice`, `Completing`). When enabling autopilot on an already-active mission, the system automatically checks whether recovery is needed (no active slice or completed active slice) and progresses accordingly.
 
 ## Autopilot API Endpoints
 

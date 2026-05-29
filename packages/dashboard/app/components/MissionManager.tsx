@@ -162,6 +162,13 @@ const autopilotStateColors: Record<AutopilotState, { bg: string; text: string }>
   completing: { bg: "var(--autopilot-completing-bg)", text: "var(--autopilot-completing-text)" },
 };
 
+const autopilotStateLabels: Record<AutopilotState, string> = {
+  inactive: "Off",
+  watching: "Watching",
+  activating: "Activating slice",
+  completing: "Completing",
+};
+
 /** Assertion status colors */
 const assertionStatusColors: Record<MissionAssertionStatus, { bg: string; text: string }> = {
   pending: { bg: "var(--assertion-pending-bg)", text: "var(--assertion-pending-text)" },
@@ -208,6 +215,26 @@ function getInterviewActionLabel(status: AiSessionSummary["status"]): string {
     default:
       return "Resume interview";
   }
+}
+
+function getMissionRunHelperText(status: MissionStatus): string | null {
+  switch (status) {
+    case "planning":
+      return "Starting activates the first slice so work can begin.";
+    case "active":
+      return "Stopping pauses linked tasks and marks the mission blocked.";
+    case "blocked":
+      return "Resuming re-activates the mission and continues execution.";
+    default:
+      return null;
+  }
+}
+
+function getAutopilotStateLabel(state: string): string {
+  if (state in autopilotStateLabels) {
+    return autopilotStateLabels[state as AutopilotState];
+  }
+  return state ? state.replace(/_/g, " ") : "Unknown";
 }
 
 /** Get the plan state for a milestone (derived from interviewState) */
@@ -2407,91 +2434,107 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   </span>
                 </div>
 
-                {/* ── Autopilot section ── */}
-                <div className="mission-detail__autopilot">
-                  <div className="mission-detail__autopilot-toggle">
-                    <label className="mission-toggle" data-testid="mission-autopilot-toggle">
-                      <input
-                        type="checkbox"
-                        checked={selectedMission.autopilotEnabled ?? false}
-                        onChange={(e) => handleToggleAutopilot(selectedMission.id, e.target.checked)}
-                        aria-label="Autopilot"
-                      />
-                      <span className="mission-toggle__track" aria-hidden="true">
-                        <span className="mission-toggle__thumb" />
+                <section className="mission-detail__run-settings" aria-label="Mission run settings">
+                  <h4 className="mission-detail__run-settings-title">Mission run settings</h4>
+                  {/* ── Autopilot section ── */}
+                  <div className="mission-detail__autopilot">
+                    <div className="mission-detail__autopilot-toggle">
+                      <label className="mission-toggle" data-testid="mission-autopilot-toggle">
+                        <input
+                          type="checkbox"
+                          checked={selectedMission.autopilotEnabled ?? false}
+                          onChange={(e) => handleToggleAutopilot(selectedMission.id, e.target.checked)}
+                          aria-label="Autopilot"
+                        />
+                        <span className="mission-toggle__track" aria-hidden="true">
+                          <span className="mission-toggle__thumb" />
+                        </span>
+                        <span className="mission-toggle__label">
+                          <Zap size={14} className="mission-detail__autopilot-icon" />
+                          Autopilot
+                        </span>
+                      </label>
+                      <span
+                        className="mission-status-badge mission-status-badge--sm"
+                        style={{
+                          backgroundColor: (autopilotStateColors[autopilotState] || autopilotStateColors.inactive).bg,
+                          color: (autopilotStateColors[autopilotState] || autopilotStateColors.inactive).text,
+                        }}
+                        data-testid="autopilot-state-badge"
+                      >
+                        {autopilotPulseActive && <span className="mission-detail__autopilot-pulse" />}
+                        {getAutopilotStateLabel(autopilotState)}
                       </span>
-                      <span className="mission-toggle__label">
-                        <Zap size={14} className="mission-detail__autopilot-icon" />
-                        Autopilot
-                      </span>
-                    </label>
-                    <span
-                      className="mission-status-badge mission-status-badge--sm"
-                      style={{
-                        backgroundColor: (autopilotStateColors[autopilotState] || autopilotStateColors.inactive).bg,
-                        color: (autopilotStateColors[autopilotState] || autopilotStateColors.inactive).text,
-                      }}
-                      data-testid="autopilot-state-badge"
-                    >
-                      {autopilotPulseActive && <span className="mission-detail__autopilot-pulse" />}
-                      {autopilotState}
+                    </div>
+                    <span className="mission-detail__autopilot-description">
+                      When on, Fusion automatically activates the next slice and plans its features as work completes.
                     </span>
+                    {autopilotActivitySummary && (
+                      <span className="mission-detail__autopilot-activity mission-relative-time">
+                        {autopilotActivitySummary}
+                      </span>
+                    )}
                   </div>
-                  {autopilotActivitySummary && (
-                    <span className="mission-detail__autopilot-activity mission-relative-time">
-                      {autopilotActivitySummary}
-                    </span>
-                  )}
-                </div>
 
-                <div className="mission-detail__actions">
-                  {selectedMission.status === "active" && (
-                    <button
-                      className="mission-icon-btn mission-icon-btn--danger"
-                      onClick={() => handleStopMission(selectedMission.id)}
-                      title="Stop mission"
-                      aria-label="Stop mission"
-                    >
-                      <Square size={14} />
-                    </button>
-                  )}
-                  {selectedMission.status === "blocked" && (
-                    <button
-                      className="mission-icon-btn mission-icon-btn--success"
-                      onClick={() => handleResumeMission(selectedMission.id)}
-                      title="Resume mission"
-                      aria-label="Resume mission"
-                    >
-                      <Play size={14} />
-                    </button>
-                  )}
-                  {selectedMission.status === "planning" && (
-                    <button
-                      className="mission-icon-btn mission-icon-btn--success"
-                      onClick={() => handleStartMission(selectedMission.id)}
-                      title="Start mission"
-                      aria-label="Start mission"
-                    >
-                      <Play size={14} />
-                    </button>
-                  )}
-                  <button
-                    className="mission-icon-btn"
-                    onClick={() => handleEditMission(selectedMission)}
-                    title="Edit mission"
-                    aria-label="Edit mission"
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    className="mission-icon-btn mission-icon-btn--danger"
-                    onClick={() => setDeleteConfirmId({ type: "mission", id: selectedMission.id })}
-                    title="Delete mission"
-                    aria-label="Delete mission"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                  <div className="mission-detail__actions">
+                    <div className="mission-detail__run-controls">
+                    {selectedMission.status === "active" && (
+                      <button
+                        className="mission-btn mission-btn--danger"
+                        onClick={() => handleStopMission(selectedMission.id)}
+                        title="Stop mission"
+                        aria-label="Stop mission"
+                      >
+                        <Square size={14} />
+                        <span>Stop mission</span>
+                      </button>
+                    )}
+                    {selectedMission.status === "blocked" && (
+                      <button
+                        className="mission-btn mission-btn--primary"
+                        onClick={() => handleResumeMission(selectedMission.id)}
+                        title="Resume mission"
+                        aria-label="Resume mission"
+                      >
+                        <Play size={14} />
+                        <span>Resume mission</span>
+                      </button>
+                    )}
+                    {selectedMission.status === "planning" && (
+                      <button
+                        className="mission-btn mission-btn--primary"
+                        onClick={() => handleStartMission(selectedMission.id)}
+                        title="Start mission"
+                        aria-label="Start mission"
+                      >
+                        <Play size={14} />
+                        <span>Start mission</span>
+                      </button>
+                    )}
+                    {getMissionRunHelperText(selectedMission.status) && (
+                      <span className="mission-detail__run-help">{getMissionRunHelperText(selectedMission.status)}</span>
+                    )}
+                  </div>
+                    <div className="mission-detail__management-actions">
+                      <button
+                        className="mission-icon-btn"
+                        onClick={() => handleEditMission(selectedMission)}
+                        title="Edit mission"
+                        aria-label="Edit mission"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        className="mission-icon-btn mission-icon-btn--danger"
+                        onClick={() => setDeleteConfirmId({ type: "mission", id: selectedMission.id })}
+                        title="Delete mission"
+                        aria-label="Delete mission"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </section>
               </div>
 
               {/* Inline edit mission form (detail view) */}
@@ -4087,37 +4130,49 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           )}
         </div>
         <div className="mission-list__item-actions" onClick={(e) => e.stopPropagation()}>
-          {m.status === "active" && (
-            <button
-              className="mission-icon-btn mission-icon-btn--danger"
-              onClick={() => handleStopMission(m.id)}
-              title="Stop mission"
-            >
-              <Square size={14} />
-            </button>
-          )}
-          {m.status === "blocked" && (
-            <button
-              className="mission-icon-btn mission-icon-btn--success"
-              onClick={() => handleResumeMission(m.id)}
-              title="Resume mission"
-            >
-              <Play size={14} />
-            </button>
-          )}
-          {m.status === "planning" && (
-            <button
-              className="mission-icon-btn mission-icon-btn--success"
-              onClick={() => handleStartMission(m.id)}
-              title="Start mission"
-            >
-              <Play size={14} />
-            </button>
-          )}
+          <div className="mission-list__item-run-controls">
+            {m.status === "active" && (
+              <button
+                className="mission-btn mission-btn--danger mission-btn--sm"
+                onClick={() => handleStopMission(m.id)}
+                title="Stop mission"
+                aria-label="Stop mission"
+              >
+                <Square size={14} />
+                <span>Stop mission</span>
+              </button>
+            )}
+            {m.status === "blocked" && (
+              <button
+                className="mission-btn mission-btn--primary mission-btn--sm"
+                onClick={() => handleResumeMission(m.id)}
+                title="Resume mission"
+                aria-label="Resume mission"
+              >
+                <Play size={14} />
+                <span>Resume mission</span>
+              </button>
+            )}
+            {m.status === "planning" && (
+              <button
+                className="mission-btn mission-btn--primary mission-btn--sm"
+                onClick={() => handleStartMission(m.id)}
+                title="Start mission"
+                aria-label="Start mission"
+              >
+                <Play size={14} />
+                <span>Start mission</span>
+              </button>
+            )}
+            {getMissionRunHelperText(m.status) && (
+              <span className="mission-list__item-run-help">{getMissionRunHelperText(m.status)}</span>
+            )}
+          </div>
           <button
             className="mission-icon-btn"
             onClick={() => handleEditMission(mission)}
             title="Edit mission"
+            aria-label="Edit mission"
           >
             <Pencil size={14} />
           </button>
@@ -4125,6 +4180,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             className="mission-icon-btn mission-icon-btn--danger"
             onClick={() => setDeleteConfirmId({ type: "mission", id: m.id })}
             title="Delete mission"
+            aria-label="Delete mission"
           >
             <Trash2 size={14} />
           </button>

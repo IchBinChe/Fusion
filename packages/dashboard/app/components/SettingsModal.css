@@ -357,7 +357,8 @@
 
   .backup-list li code {
     white-space: normal;
-    word-break: break-all;
+    overflow-wrap: anywhere;
+    word-break: normal;
   }
 }
 
@@ -1805,7 +1806,7 @@
 
   .settings-content .form-group small {
     overflow-wrap: break-word;
-    word-break: break-all;
+    word-break: normal;
   }
 
   .settings-content input,

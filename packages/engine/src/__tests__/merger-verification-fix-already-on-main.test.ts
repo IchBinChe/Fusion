@@ -70,6 +70,7 @@ describe("commitOrAmendMergeWithFixes already-on-main recovery", () => {
       undefined,
       null,
       null,
+      null,
       new Set(),
     );
 

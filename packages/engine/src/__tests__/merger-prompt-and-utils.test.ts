@@ -918,6 +918,7 @@ describe("commitOrAmendMergeWithFixes", () => {
       undefined,
       null,
       null,
+      null,
       new Set(),
     );
 
@@ -964,6 +965,7 @@ describe("commitOrAmendMergeWithFixes", () => {
       undefined,
       null,
       null,
+      null,
       new Set(),
       store,
     );
@@ -1002,6 +1004,7 @@ describe("commitOrAmendMergeWithFixes", () => {
       undefined,
       DEFAULT_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set(),

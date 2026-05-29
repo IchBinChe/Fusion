@@ -358,6 +358,7 @@ describe("diff-volume gate merger integration", () => {
       undefined,
       null,
       null,
+      null,
       new Set<string>(),
       createMockStore(),
     )).rejects.toBeInstanceOf(DiffVolumeRegressionError);
@@ -396,6 +397,7 @@ describe("diff-volume gate merger integration", () => {
       { ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const, commitAuthorEnabled: false },
       undefined,
+      null,
       null,
       null,
       new Set<string>(["README.md"]),

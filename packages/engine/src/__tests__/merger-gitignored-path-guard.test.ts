@@ -104,10 +104,46 @@ describe("commitOrAmendMergeWithFixes gitignored guard", () => {
       undefined,
       null,
       null,
+      null,
       new Set(),
     );
 
     expect(result).toEqual({ ok: false, reason: "fix-produced-no-content" });
     expect(git(dir, "git diff --cached --name-only").trim()).toBe("");
+  });
+
+  it("preserves aiBody in finalize commit message", async () => {
+    const dir = mkRepo();
+    const preAttemptHeadSha = git(dir, "git rev-parse HEAD");
+
+    git(dir, "git checkout -b feat/body");
+    writeFileSync(join(dir, "feature.txt"), "hello\n");
+    git(dir, "git add feature.txt");
+    git(dir, 'git commit -m "feat: add feature file"');
+    git(dir, "git checkout main");
+    git(dir, "git merge --squash feat/body");
+
+    const result = await commitOrAmendMergeWithFixes(
+      dir,
+      "FN-4309",
+      "feat/body",
+      "- feat: add feature file",
+      true,
+      preAttemptHeadSha,
+      "",
+      "1 file changed",
+      { ...DEFAULT_SETTINGS, mergeIntegrationWorktree: "cwd-main" as const, commitAuthorEnabled: false },
+      undefined,
+      "Narrative line.",
+      "- kept bullet one\n- kept bullet two",
+      "preserve body",
+      new Set(),
+    );
+
+    expect(result).toEqual({ ok: true, reason: "committed" });
+    const fullMessage = git(dir, "git log -1 --pretty=%B");
+    expect(fullMessage).toContain("Narrative line.");
+    expect(fullMessage).toContain("- kept bullet one");
+    expect(fullMessage).toContain("- kept bullet two");
   });
 });

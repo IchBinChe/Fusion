@@ -48,6 +48,7 @@ function runFinalize(dir: string, taskId: string, branch: string, preAttemptHead
     undefined,
     null,
     null,
+    null,
     new Set<string>(),
   );
 }

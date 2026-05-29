@@ -480,6 +480,7 @@ describe("file-scope invariant wiring", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       new Set(),
       store as never,
     )).resolves.toMatchObject({ ok: true, reason: "committed" });

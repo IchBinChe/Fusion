@@ -81,6 +81,7 @@ describe("commitOrAmendMergeWithFixes no-op finalize", () => {
       undefined,
       null,
       null,
+      null,
       new Set<string>(),
     );
 
@@ -107,6 +108,7 @@ describe("commitOrAmendMergeWithFixes no-op finalize", () => {
       undefined,
       STUB_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set<string>(),

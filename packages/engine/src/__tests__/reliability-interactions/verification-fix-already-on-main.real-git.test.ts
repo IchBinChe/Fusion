@@ -60,6 +60,13 @@ describe("verification-fix already-on-main reliability interactions (real git)",
         true,
         preAttemptHeadSha,
         "",
+        undefined,
+        undefined,
+        undefined,
+        null,
+        null,
+        null,
+        new Set<string>(),
       );
       expect(finalized.ok && finalized.reason === "branch-already-merged-on-main").toBe(true);
       if (finalized.ok && finalized.reason === "branch-already-merged-on-main") {

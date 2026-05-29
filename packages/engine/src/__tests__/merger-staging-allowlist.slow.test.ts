@@ -235,6 +235,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       null,
       null,
+      null,
       new Set<string>(), // empty fixModifiedFiles
     );
 
@@ -278,6 +279,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       null,
       null,
+      null,
       new Set(["README.md"]), // fix agent touched this
     );
 
@@ -314,6 +316,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       STUB_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set(["feature-c.ts"]), // fix agent touched the same file the squash staged
@@ -355,6 +358,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       null,
       null,
+      null,
       new Set(["new-fixture.ts"]), // fix agent created this file
     );
 
@@ -388,6 +392,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       STUB_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set<string>(), // empty — the WIP file is not fix-agent-produced
@@ -440,6 +445,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       STUB_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set(["README.md"]), // only the agent's file is in the allowlist
@@ -500,6 +506,7 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
       undefined,
       STUB_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set<string>(), // fix touched no tracked files
@@ -627,6 +634,7 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
       undefined,
       null,
       null,
+      null,
       new Set([spacedPath]), // fix agent touched this tracked file
     );
 
@@ -669,6 +677,7 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
       undefined,
       STUB_SETTINGS,
       undefined,
+      null,
       null,
       null,
       new Set<string>(), // empty allowlist

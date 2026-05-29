@@ -3981,6 +3981,8 @@ async function buildDeterministicMergeMessage(params: {
   };
 }
 
+export { buildDeterministicMergeMessage as __testOnlyBuildDeterministicMergeMessage };
+
 /**
  * Stage current changes and either:
  *   (a) create a fresh squash commit when HEAD has not advanced past
@@ -4142,6 +4144,7 @@ export async function commitOrAmendMergeWithFixes(
   settings?: Settings,
   signal?: AbortSignal,
   aiSummary?: string | null,
+  aiBody?: string | null,
   aiSubject?: string | null,
   fixModifiedFiles: ReadonlySet<string> = new Set(),
   store?: TaskStore,
@@ -4505,7 +4508,7 @@ export async function commitOrAmendMergeWithFixes(
       diffStat: messageDiffStat,
       includeTaskId,
       aiSummary,
-      aiBody: undefined,
+      aiBody,
       aiSubject,
     });
     let lineageId: string | undefined;
@@ -9262,6 +9265,7 @@ export async function aiMergeTask(
                 settings,
                 options.signal,
                 aiMergeSummary,
+                aiMergeBody,
                 aiMergeSubject,
                 verificationFixModifiedFiles,
                 store,
@@ -9410,6 +9414,7 @@ export async function aiMergeTask(
               settings,
               options.signal,
               aiMergeSummary,
+              aiMergeBody,
               aiMergeSubject,
               buildFixModifiedFiles,
               store,
@@ -10649,6 +10654,7 @@ export async function executeMergeAttempt(
               diffStat,
               includeTaskId,
               aiSummary: safeBody,
+              aiBody: aiBody?.trim().length ? aiBody : safeBody,
               aiSubject,
             });
             await enforceSquashFileScopeInvariant({
@@ -10894,6 +10900,7 @@ export async function executeMergeAttempt(
         diffStat: actualContext.diffStat || diffStat,
         includeTaskId,
         aiSummary,
+        aiBody,
         aiSubject,
       });
       const trailerArg = buildTaskTrailerArgs(taskId);

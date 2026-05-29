@@ -134,6 +134,13 @@ describe("post-finalize verification failure reliability interactions (real git)
         true,
         preAttemptHeadSha,
         "",
+        undefined,
+        undefined,
+        undefined,
+        null,
+        null,
+        null,
+        new Set<string>(),
       );
       expect(finalized.ok && finalized.reason === "branch-already-merged-on-main").toBe(true);
 

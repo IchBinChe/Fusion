@@ -2,6 +2,234 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.36.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.36.0
+- @fusion/engine@0.36.0
+- @fusion-plugin-examples/cli-printing-press@0.1.13
+- @fusion-plugin-examples/dependency-graph@0.1.27
+- @fusion-plugin-examples/roadmap@0.1.15
+- @fusion-plugin-examples/cursor-runtime@0.1.15
+- @fusion-plugin-examples/droid-runtime@0.1.22
+- @fusion-plugin-examples/hermes-runtime@0.2.46
+- @fusion-plugin-examples/openclaw-runtime@0.2.46
+- @fusion-plugin-examples/paperclip-runtime@0.2.46
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.36.0
+- @fusion/dashboard@0.36.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.36.0
+- @fusion/pi-claude-cli@0.36.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.36.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 2a35358: Add Goals REST API (`/api/goals`) with list/create/update/archive/unarchive endpoints.
+  Creating a 6th active goal or unarchiving when already at 5 active now returns HTTP 409 with `ACTIVE_GOAL_LIMIT_EXCEEDED` details.
+- 009d569: Add `fn goals` CLI subcommand (`list` / `create` / `archive`) and pi extension tools (`fn_goal_list`, `fn_goal_create`, `fn_goal_archive`) for Slice 1 of the Goals primitive. Author-facing only — no agent anchoring yet.
+
+#### Patch Changes
+
+- f258a75: Fix ntfy JSON publish notifications to encode `priority` as the integer scale expected by ntfy so unicode mailbox/room notifications deliver successfully.
+- 2c4683a: Widen task detail modal on tablet viewports to use more of the 769px–1024px viewport.
+- e84673c: Close source-imported GitHub issues when their linked Fusion task is deleted, with parity to tracking-issue delete handling. Dashboard delete confirmation now prompts for `close`, `delete`, or `leave` on source-imported issues and forwards `githubIssueAction` through task deletion flows. For API callers that omit `githubIssueAction` (or send `auto`) on source-imported issue deletes, Fusion now defaults to `close`.
+- 200dda9: Suppress a misleading transient failure state when a worktree-local `.fusion/tasks/<id>/task.json` read briefly returns ENOENT during executor session startup. Fusion now treats this as recoverable, routes through existing auto-recovery, and avoids persisting `status: "failed"`/`error` so the red task-card error banner and failed notification are not shown for self-healed runs.
+- 6b27ab5: fix(FN-5627): default auto-prerebase to fire when branch is >=1 commit behind integration
+
+  `decideAutoPrerebase()` previously defaulted `prerebaseDivergenceThreshold` to `0`, which meant the threshold path **never fired** unless the user explicitly set a positive value. Only hot-file matches could trigger prerebase.
+
+  The result: tasks whose branch was started against an older main tip (because other tasks landed concurrently) would skip prerebase, build their squash commit against the stale base, and then fail at the `git update-ref` step because the squash commit didn't descend from current main. The merger correctly detected this as a non-fast-forward advance and threw `IntegrationBranchConcurrentAdvanceError` — with both "expected" and "observed" SHAs set to the current main tip (because `observedCurrentSha` was captured from the pre-update rev-parse). This produced the misleading "expected X, observed X" same-SHA error signature that stranded FN-5632 stuck at `mergeRetries=3`.
+
+  New default: `prerebaseDivergenceThreshold = 1`. Any branch behind by at least 1 commit auto-rebases before squash. Users who want the legacy never-fire behavior can explicitly set `prerebaseDivergenceThreshold = 0`. Threshold comparison also changed from `>` to `>=` so an explicit threshold of N rebases at N+ commits behind instead of N+1+.
+
+  The self-healing classifier comment for `spurious-concurrent-advance-same-sha` is updated to reflect that the signature can come from either the pre-FN-5627 misclassification OR the legitimate post-FN-5627 non-fast-forward path; the auto-recovery sweep is unchanged because both cases self-heal cleanly once prerebase fires on the retry.
+
+  Tests:
+
+  - Default threshold (undefined) fires at 1 commit behind
+  - Explicit threshold = 0 stays as opt-out (never fire on commit-count)
+  - Default threshold doesn't fire when branch is up-to-date (commitsBehind=0)
+
+- b2d547e: fix(FN-5627): close TOCTOU window between merger optimistic `mergeConfirmed: true` write and integration ref advance, add reachability gate on auto-merge fast-path
+
+  The merger previously persisted `mergeConfirmed: true` + `commitSha` to the task row as soon as the local squash commit was built, **before** running `git update-ref refs/heads/<integration>` to actually advance the integration branch. If the ref-advance then failed for any reason (lock contention, hook rejection, packed-refs race, or a misclassified non-CAS error via the `merger-ref-update-advance.ts` string heuristic), the task row was poisoned: the auto-merge scheduler's `mergeConfirmed` fast-path would silently promote the never-landed work to `done` on the next tick, including emitting `task:merged` and closing the GitHub tracking issue.
+
+  This affected at least 9 tasks across 2026-05-27/28 (FN-5596, FN-5597, FN-5599, FN-5612, FN-5613, FN-5614, FN-5616, FN-5623, FN-5625) — the merger silently dropped real work and marked the tasks complete.
+
+  The fix has three layers:
+
+  1. **merger.ts** — In `reuseTaskWorktreeMerge` mode, persist `mergeConfirmed: false` initially. Promote to `true` only after `advanceIntegrationBranchRef` returns `advanced: true`. Other merge paths (legacy in-place merge, verified no-op fast-paths, owned-commit recovery) are unchanged because they advance the ref before this point.
+
+  2. **project-engine.ts** — Defense-in-depth reachability gate on the auto-merge "merge already confirmed" fast-path. Before `moveTask(taskId, "done")`, verify `git merge-base --is-ancestor <commitSha> <integrationBranch>` succeeds. On failure, clear `mergeConfirmed`, mark task `status: "failed"`, leave in `in-review`, and emit `merger:fast-path-blocked-foreign-commit` run-audit event. Legitimate no-op merges (no `commitSha`) bypass the gate.
+
+  3. **merger-ref-update-advance.ts** — Replace the fragile string heuristic that classified update-ref failures as `concurrent-advance` (matching `"is at"` / `"expected"` / `"cannot lock ref"` in error text) with structured detection. After update-ref fails, re-read the ref: if observed equals expected, classify as `ref-update-refused` (no actual race occurred). Eliminates the misleading "expected X observed X" same-SHA log signature seen on FN-5625.
+
+- 694970b: fix(FN-5627): always rebase behind branches before squash regardless of user-configured prerebase threshold
+
+  After the FN-5627 default-threshold fix landed (threshold=1 default), tasks were still getting stuck at `mergeRetries=3` with `Integration branch main advanced concurrently (expected X, observed X)` errors because user projects with explicit `prerebaseDivergenceThreshold` values higher than the branch's commits-behind count still skipped prerebase entirely.
+
+  Example: a project with `prerebaseDivergenceThreshold: 50` for low-noise PR experience would skip prerebase on a task branched 4 commits behind main. The squash commit then doesn't descend from current main, and `git update-ref` correctly refuses the non-fast-forward advance — producing the misleading same-SHA error signature that stranded FN-5626, FN-5628, FN-5633.
+
+  Root distinction missed in the earlier fix: the user-configurable `prerebaseDivergenceThreshold` controls the _user-visible severity reporting_ ("this branch is N commits behind"), while engine correctness requires a _safety invariant_ ("any branch behind main MUST be rebased before squash, or update-ref will fail"). These are independent concerns.
+
+  New behavior:
+
+  - After the hot-file and threshold checks, `decideAutoPrerebase()` now returns `fire: true` with `reason: "safety-fallback-any-divergence"` whenever `commitsBehind > 0`.
+  - The threshold-based path still wins when tripped (so user-visible audit `reason` reflects the configured policy when applicable).
+  - Full opt-out remains `prerebaseAutoEnabled: false` — that case skips the safety fallback too, and the user accepts that behind-branch merges will fail.
+  - `prerebaseDivergenceThreshold: 0` is no longer a complete opt-out from the commit-count gate — it only suppresses the threshold-based reason label. Safety fallback still fires.
+
+  Tests:
+
+  - New `safety-fallback-any-divergence` reason added to `AutoPrerebaseDecision.reason` union.
+  - 4 commits behind with threshold=50 → fires via safety fallback (was: skipped).
+  - `prerebaseAutoEnabled=false` → no fire (full opt-out preserved).
+  - Configured threshold tripping still wins the `reason` label.
+  - Branch fully up-to-date (commitsBehind=0) → no-divergence (unchanged).
+
+- 5768d5e: feat(FN-5627): self-heal transient merge failures stuck at mergeRetries=3
+
+  After the FN-5627 merger fix landed, two in-review tasks (FN-5628, FN-5632) remained stuck at `mergeRetries=3` with `status='failed'` due to transient merge errors that the merger correctly identified but had no auto-recovery for:
+
+  - `lease-handoff-failed: target-not-queued` — FN-5353 class race where the merge queue lease acquisition saw the task drop out of the queue between enqueue and handoff (typically due to a self-healing sweep cleaning stale `mergeQueue` rows mid-flight).
+  - Legacy same-SHA spurious concurrent-advance errors persisted before FN-5627's `merger-ref-update-advance.ts` classifier fix landed.
+
+  These tasks had no path forward except manual intervention. The `AUTO_MERGE_COOLDOWN_MS` cooldown reset takes hours and gives up too easily.
+
+  This change adds `SelfHealingManager.recoverTransientMergeFailures()`, wired into both startup recovery and the periodic Batch 2 maintenance loop. For each in-review task with `mergeRetries >= MAX_AUTO_MERGE_RETRIES`, `status='failed'`, and an `error` matching `classifyTransientMergeError()`:
+
+  1. Reset `mergeRetries=0`, clear `status`/`error`.
+  2. Increment `mergeDetails.transientRecoveryCount` (new field on `MergeDetails`).
+  3. Re-enqueue via `requeueForAutoMerge`.
+  4. Emit `merger:transient-failure-auto-recovered` run-audit event.
+
+  Bounded by `MAX_TRANSIENT_MERGE_RECOVERIES = 2` to avoid infinite loops on genuinely stuck tasks. Once exhausted, the task stays parked as failed and emits `merger:transient-failure-budget-exhausted` once with a `[transient-recovery-budget-exhausted]` marker on `error` for repeat-suppression.
+
+  Non-transient failure classes (verification, build, real conflicts, etc.) are not eligible — only the pattern-matched transient classes auto-recover. No-op when `autoMerge=false`, no `requeueForAutoMerge` callback wired, or pause is active.
+
+  Tests:
+
+  - Lease-handoff transient recovery path
+  - Same-SHA spurious-advance recovery (legacy pre-FN-5627)
+  - Genuine concurrent-advance (different SHAs) NOT recovered
+  - Non-transient failures (verification errors) NOT recovered
+  - Budget exhaustion behavior
+  - autoMerge=false no-op
+
+- e75c4da: fix(FN-5627): suppress ntfy notifications for transient merge failures the engine auto-recovers
+
+  Even with the FN-5627 merger TOCTOU fix + transient-failure self-healing sweep + safety-fallback auto-prerebase landed, the merger can still hit transient failure classes (lease handoff races, brief same-SHA non-FF advances) for tasks whose branches are particularly out-of-sync. The self-healing sweep auto-recovers them within bounded budget — but each individual failure cycle was firing a ntfy alarm before the recovery cleared the failed state, producing user-facing alarm spam for tasks that were never actually stuck.
+
+  Two layers of fix:
+
+  1. `NotificationService.handleTaskUpdated` now classifies `task.error` via the new shared `classifyTransientMergeError` helper before scheduling the deferred failure notification. Transient classes (`lease-handoff-target-not-queued`, `spurious-concurrent-advance-same-sha`) get logged as suppressed and never schedule a ntfy timer.
+
+  2. Defense-in-depth: `fireDeferredFailureNotification` re-classifies the error at dispatch time, so a failure scheduled before the suppression landed on a newer cycle still suppresses if the error matches a transient class.
+
+  The classifier itself moved from `self-healing.ts` to a new logger-free `transient-merge-error-classifier.ts` module so consumers in `NotificationService` don't pull `createLogger` through the import chain and break test mocks of `../logger.js`. `self-healing.ts` re-exports the symbol for backward compatibility.
+
+  Log prefix for the recovery actions also changed from `[FN-5627] Auto-recovering...` to `Auto-recovered:` so that `NotificationService.maybeSuppressTransientFailedNotification`'s existing `/^Auto-recovered:/` log-prefix check cancels any already-scheduled failure notification when the sweep runs mid-grace-window.
+
+  Tests:
+
+  - 3 new notification-service tests covering transient suppression for both error classes plus a control case ensuring genuine non-transient failures still notify.
+  - Existing transient-recovery tests in self-healing.test.ts continue to pass against the relocated classifier.
+
+- b2dce7d: FN-5631 re-lands FN-5616 to add an opt-in `githubCloseSourceIssueOnDone` setting that closes source-imported GitHub issues when linked tasks are completed, including startup reconciliation for previously missed closes.
+- 1153b09: feat(FN-5637): update `fn init` to add `fusion.db`, `fusion.db-wal`, and `fusion.db-shm` to project `.gitignore` alongside `.fusion` and `.pi` so stray runtime SQLite files are not committed.
+- 5b5da2c: Fix bundled runtime plugin auto-install in globally installed CLI builds. Save/Save & Test for Paperclip, Hermes, OpenClaw, Cursor, and Droid runtime providers no longer fails with `unavailable in this build` when bundled plugins are present under `dist/plugins/<id>`.
+- b96b0bc: Fix `fn update` npm EEXIST bin-link collisions by retrying once with `--force` and showing manual recovery guidance when the retry fails.
+- 2a35358: Add a new project-level `goals` table to the core schema and fresh database DDL.
+  Bump `SCHEMA_VERSION` from 91 to 92 with an idempotent migration that creates `goals` and `idxGoalsStatus`.
+- 29ac58f: feat(FN-5633): standalone AI merge path (clean-room merge + AI reviewer)
+
+  Adds a self-contained AI merge path (`merger.mode: "ai"`, the new default) that the engine dispatches to instead of the legacy `aiMergeTask` pipeline. It does not share the legacy scaffolding (prerebase / conflict-strategy ladder / post-merge audit / transient self-heal), which was buggy and error-prone.
+
+  How it works:
+
+  - **Clean room**: a throwaway detached worktree is created at the target branch's current tip, so the user's real checkout is never the merge surface — dirty files cannot be clobbered and the landing is a fast-forward by construction.
+  - **AI merge**: an AI agent merges the task branch into the clean room and produces one squash commit, resolving conflicts in favor of the task's intent.
+  - **AI reviewer with retries**: a fresh read-only reviewer audits the squash (completeness / collateral / conflict-soundness) and classifies any veto blocking vs advisory. It drives up to `merger.maxReviewPasses` corrective re-merges. After the budget, advisory concerns land with a logged warning; an unfixable BLOCKING (correctness) concern hard-fails (`AiMergeBlockedError`) rather than ship wrong code. Verdict parsing fails safe to blocking.
+  - **Per-task target branch**: each task merges into its own target branch (or the default integration branch). The local checkout is only synced when it is on that target.
+  - **Local checkout sync**: when the checkout is on the target branch, the ref + working tree advance together via `git merge --ff-only` (dirty state read accurately before the move); dirty edits are stashed, fast-forwarded, and restored — and if the restore conflicts the AI merger reconciles them (the original edits are also kept in a stash as a backup). A checkout on a different branch is advanced via `update-ref` and left untouched. Un-stashable dirty state advances the ref and leaves the working tree with a warning. Concurrent advances trigger a bounded rebuild on the new tip.
+  - **Status + logs**: progress (merging / reviewing / corrective passes / landing / blocked / landed) is written to the task status pill and the task log stream.
+
+  Settings: `merger.mode` (`ai` default / `deterministic` legacy), `merger.reviewerModel`, `merger.maxReviewPasses` (default 3), surfaced in Settings → Merge. When AI merge is on, the legacy merge-mechanics settings (integration worktree, conflict strategy, overlap guard, post-merge audit, direct-commit routing) are hidden since they do not apply.
+
+  Commit message: the AI agent writes the squash commit subject as a concise summary of the actual changes (not just the task title), and every landed squash carries the board-association trailers — `Fusion-Task-Id: <taskId>` plus the canonical lineage trailer when the task has a `lineageId` — guaranteed via an idempotent amend even if the agent omits them, so the board associates the commit with the task.
+
+  Verification: the merge agent is instructed to run the project's tests, type-check, and lint after resolving the merge and to fix any NEW failure the merge introduced (without being on the hook for pre-existing breakage) before committing.
+
+  Editable prompt: the AI merge agent's base persona is the editable "merger" role prompt (Settings → Prompts); the non-negotiable clean-room / verification / commit-trailer rules are always appended so a custom prompt can't drop them.
+
+  Reviewer model: the reviewer agent uses the project's reviewer/validator model lane (`resolveValidatorSettingsModel`: project validator → global validator → project default), not a merge-specific setting.
+
+  No-branch guard: a missing task branch is a benign no-op only when the task was never executed or was already merged (branch cleaned up on re-process); if the task was executed (`baseCommitSha` recorded) and was never merged, the merge fails loudly rather than silently marking the task done.
+
+  The legacy `aiMergeTask` pipeline is retained unchanged and used when `merger.mode: "deterministic"`.
+
+  Tests: `merger-ai.test.ts` covers the verdict parser, clean merge, blocking hard-fail (no advance), advisory land, empty no-op, per-task target branch isolation, missing-target-branch error, and `landSquash` (clean ff, other-branch update-ref, dirty stash-restore, AI-resolved restore conflict). Engine merge-orchestration tests that assert the legacy path are pinned to `merger.mode: "deterministic"`.
+
+- cec191e: Migrate Fusion's pi dependencies from `@mariozechner/pi-coding-agent` / `@mariozechner/pi-ai` to the new `@earendil-works/*` scope and bump to `^0.77.0`.
+
+  This follows the upstream project move to `https://github.com/earendil-works/pi` and updates transitive dependency resolution to the maintained package namespace.
+
+- aa7eccb: When `useAiMergeCommitSummary` is enabled, AI-authored merge commits now include a richer body: the short narrative headline plus an AI-generated bullet summary of changed modules/files, followed by a `Files changed` diff stat block.
+
+  `mergeDetails.mergeCommitMessage` remains the short headline summary so dashboard UI consumers keep their existing concise display behavior.
+
+- d78fbcc: Fix GitHub PR modal/review fetches that call `gh api` through `runGhJsonAsync`.
+
+  `runGhJson` and `runGhJsonAsync` now skip auto-appending `--json` for the `gh api` subcommand (which already returns JSON and rejects that flag), preventing runtime `unknown flag: --json` errors when loading PR comments/reviews.
+
+- 2df891f: ci: re-enable auto-trigger of binary release workflow on `v*` tags so GitHub Releases include CLI and desktop binaries
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [f258a75]
+- Updated dependencies [2c4683a]
+- Updated dependencies [e84673c]
+- Updated dependencies [2a35358]
+- Updated dependencies [009d569]
+- Updated dependencies [200dda9]
+- Updated dependencies [6b27ab5]
+- Updated dependencies [b2d547e]
+- Updated dependencies [694970b]
+- Updated dependencies [5768d5e]
+- Updated dependencies [e75c4da]
+- Updated dependencies [b2dce7d]
+- Updated dependencies [1153b09]
+- Updated dependencies [5b5da2c]
+- Updated dependencies [b96b0bc]
+- Updated dependencies [2a35358]
+- Updated dependencies [29ac58f]
+- Updated dependencies [cec191e]
+- Updated dependencies [aa7eccb]
+- Updated dependencies [d78fbcc]
+- Updated dependencies [2df891f]
+  - @runfusion/fusion@0.36.0
+
 ## 0.35.0
 
 ### @fusion/dashboard
@@ -7179,6 +7407,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.22
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.22
 
 ## 0.11.21
 

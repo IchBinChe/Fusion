@@ -3293,6 +3293,22 @@ describe("MissionStore", () => {
     });
   });
 
+  it("persists mission autoMerge true/false/undefined", () => {
+    const enabled = store.createMission({ title: "Enabled", autoMerge: true });
+    const disabled = store.createMission({ title: "Disabled", autoMerge: false });
+    const unset = store.createMission({ title: "Unset" });
+
+    expect(store.getMission(enabled.id)?.autoMerge).toBe(true);
+    expect(store.getMission(disabled.id)?.autoMerge).toBe(false);
+    expect(store.getMission(unset.id)?.autoMerge).toBeUndefined();
+
+    store.updateMission(enabled.id, { autoMerge: false });
+    store.updateMission(disabled.id, { autoMerge: true });
+
+    expect(store.getMission(enabled.id)?.autoMerge).toBe(false);
+    expect(store.getMission(disabled.id)?.autoMerge).toBe(true);
+  });
+
   it("exports and applies mission hierarchy snapshots", () => {
     const mission = store.createMission({ title: "Snapshot Mission" });
     const milestone = store.addMilestone(mission.id, { title: "MS" });

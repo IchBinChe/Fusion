@@ -1648,6 +1648,51 @@ export interface TaskBranchContext {
   inheritedBaseBranch?: string;
 }
 
+export type BranchGroupPrState = "none" | "open" | "merged" | "closed";
+
+export type BranchGroupStatus = "open" | "finalized" | "abandoned";
+
+export interface BranchGroup {
+  id: string;
+  sourceType: TaskBranchGroupSource;
+  sourceId: string;
+  branchName: string;
+  worktreePath?: string;
+  autoMerge: boolean;
+  prState: BranchGroupPrState;
+  prUrl?: string;
+  prNumber?: number;
+  status: BranchGroupStatus;
+  createdAt: number;
+  updatedAt: number;
+  closedAt?: number;
+}
+
+export interface BranchGroupCreateInput {
+  sourceType: TaskBranchGroupSource;
+  sourceId: string;
+  branchName: string;
+  worktreePath?: string;
+  autoMerge?: boolean;
+  prState?: BranchGroupPrState;
+  prUrl?: string;
+  prNumber?: number;
+  status?: BranchGroupStatus;
+  closedAt?: number;
+}
+
+export interface BranchGroupUpdate {
+  sourceId?: string;
+  branchName?: string;
+  worktreePath?: string | null;
+  autoMerge?: boolean;
+  prState?: BranchGroupPrState;
+  prUrl?: string | null;
+  prNumber?: number | null;
+  status?: BranchGroupStatus;
+  closedAt?: number | null;
+}
+
 export interface Task {
   id: string;
   /** Immutable lineage identity used for durable commit/task attribution. */
@@ -1723,6 +1768,11 @@ export interface Task {
   branch?: string;
   /** Optional planning/mission branch-group metadata carried across related tasks. */
   branchContext?: TaskBranchContext;
+  /**
+   * Optional per-task auto-merge override.
+   * Undefined means no task-level override is set.
+   */
+  autoMerge?: boolean;
   /** Internal execution-only provenance for dependency-start handoff.
    *  When set, the scheduler asked executor to start from an upstream dependency
    *  branch. This is transient execution state and should be cleared after use. */
@@ -2033,6 +2083,8 @@ export interface TaskCreateInput {
   branch?: string;
   /** Optional planning/mission branch-group metadata carried across related tasks. */
   branchContext?: TaskBranchContext;
+  /** Optional per-task auto-merge override. Undefined means no task-level override. */
+  autoMerge?: boolean;
   /** Durable source provenance for the originating external issue. */
   sourceIssue?: TaskSourceIssue;
   /** Optional persisted aggregate token usage snapshot for task creation/import paths. */
@@ -3885,6 +3937,8 @@ export interface ArchivedTaskEntry {
   branch?: string;
   /** Optional planning/mission branch-group metadata carried across related tasks. */
   branchContext?: TaskBranchContext;
+  /** Optional per-task auto-merge override. Undefined means no task-level override. */
+  autoMerge?: boolean;
   /** Base commit SHA for the task's worktree */
   baseCommitSha?: string;
   /** List of files modified by this task */
@@ -5009,6 +5063,11 @@ export interface PlanningSession {
   history: Array<{ question: PlanningQuestion; response: unknown }>;
   currentQuestion?: PlanningQuestion;
   summary?: PlanningSummary;
+  /**
+   * Optional per-session auto-merge override for tasks planned in this session.
+   * Not separately persisted; durable form is a branch_groups row keyed by session id.
+   */
+  autoMerge?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

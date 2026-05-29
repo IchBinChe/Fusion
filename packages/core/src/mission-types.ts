@@ -132,6 +132,8 @@ export interface Mission {
    * enabled and watching.
    */
   autoAdvance?: boolean;
+  /** Optional mission-level auto-merge override for linked task branches. */
+  autoMerge?: boolean;
   /** When true, enable autopilot monitoring system for this mission */
   autopilotEnabled?: boolean;
   /** Current autopilot runtime state */
@@ -373,6 +375,8 @@ export interface MissionCreateInput {
   description?: string;
   /** Optional integration base branch for tasks created from this mission */
   baseBranch?: string;
+  /** Optional mission-level auto-merge override for linked task branches. */
+  autoMerge?: boolean;
 }
 
 /** Input for creating a new Milestone */

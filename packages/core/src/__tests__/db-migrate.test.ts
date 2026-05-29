@@ -832,6 +832,46 @@ describe("schema migration", () => {
     db.close();
   });
 
+  it("adds branch_groups table and autoMerge columns when migrating from schema version 93", () => {
+    const db = new Database(fusionDir);
+    db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '93')");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        "column" TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS missions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        interviewState TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    `);
+
+    db.init();
+
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name)).toContain("branch_groups");
+
+    const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+    expect(taskColumns.map((column) => column.name)).toContain("autoMerge");
+
+    const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
+    expect(missionColumns.map((column) => column.name)).toContain("autoMerge");
+
+    expect(db.getSchemaVersion()).toBe(94);
+    db.close();
+  });
+
   it("v76 backfill preserves explicit gateMode and defaults the rest to advisory (FN-4497)", () => {
     const db = new Database(fusionDir);
     db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
@@ -83,6 +83,7 @@ interface TaskRow {
   baseBranch: string | null;
   executionStartBranch: string | null;
   branch: string | null;
+  autoMerge: number | null;
   baseCommitSha: string | null;
   modelPresetId: string | null;
   modelProvider: string | null;
@@ -215,6 +216,22 @@ function withTaskBranchContextInSourceMetadata(
       ...(branchContext.inheritedBaseBranch ? { inheritedBaseBranch: branchContext.inheritedBaseBranch } : {}),
     },
   };
+}
+
+interface BranchGroupRow {
+  id: string;
+  sourceType: "mission" | "planning";
+  sourceId: string;
+  branchName: string;
+  worktreePath: string | null;
+  autoMerge: number;
+  prState: "none" | "open" | "merged" | "closed";
+  prUrl: string | null;
+  prNumber: number | null;
+  status: "open" | "finalized" | "abandoned";
+  createdAt: number;
+  updatedAt: number;
+  closedAt: number | null;
 }
 
 interface TaskCommitAssociationRow {
@@ -1384,6 +1401,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       baseBranch: row.baseBranch || undefined,
       executionStartBranch: row.executionStartBranch || undefined,
       branch: row.branch || undefined,
+      autoMerge: row.autoMerge === null ? undefined : Boolean(row.autoMerge),
       baseCommitSha: row.baseCommitSha || undefined,
       scopeOverride: row.scopeOverride ? true : undefined,
       scopeOverrideReason: row.scopeOverrideReason || undefined,
@@ -1537,6 +1555,30 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     };
   }
 
+  private rowToBranchGroup(row: BranchGroupRow): BranchGroup {
+    return {
+      id: row.id,
+      sourceType: row.sourceType,
+      sourceId: row.sourceId,
+      branchName: row.branchName,
+      worktreePath: row.worktreePath ?? undefined,
+      autoMerge: Boolean(row.autoMerge),
+      prState: row.prState,
+      prUrl: row.prUrl ?? undefined,
+      prNumber: row.prNumber ?? undefined,
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      closedAt: row.closedAt ?? undefined,
+    };
+  }
+
+  private generateBranchGroupId(): string {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `BG-${timestamp}-${random}`;
+  }
+
   private archiveEntryToTask(entry: ArchivedTaskEntry, slim = false): Task {
     return {
       id: entry.id,
@@ -1576,6 +1618,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       planningModelId: entry.planningModelId,
       breakIntoSubtasks: entry.breakIntoSubtasks,
       noCommitsExpected: entry.noCommitsExpected,
+      branchContext: entry.branchContext,
+      autoMerge: entry.autoMerge,
       modifiedFiles: slim ? undefined : entry.modifiedFiles,
       missionId: entry.missionId,
       sliceId: entry.sliceId,
@@ -1711,6 +1755,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       noCommitsExpected: task.noCommitsExpected,
       baseBranch: task.baseBranch,
       branch: task.branch,
+      branchContext: task.branchContext,
+      autoMerge: task.autoMerge,
       baseCommitSha: task.baseCommitSha,
       mergeRetries: task.mergeRetries,
       error: task.error,
@@ -1876,7 +1922,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1925,7 +1971,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
     const columns = [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -1982,6 +2028,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.userPaused ? 1 : 0,
       task.baseBranch ?? null,
       task.branch ?? null,
+      task.autoMerge === undefined ? null : (task.autoMerge ? 1 : 0),
       task.executionStartBranch ?? null,
       task.baseCommitSha ?? null,
       task.modelPresetId ?? null,
@@ -2091,7 +2138,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, autoMerge, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, completionHandoffLimboRecoveryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, mergeTransientRetryCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
@@ -2118,7 +2165,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, autoMerge, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, completionHandoffLimboRecoveryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, mergeTransientRetryCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
@@ -2146,6 +2193,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         userPaused = excluded.userPaused,
         baseBranch = excluded.baseBranch,
         branch = excluded.branch,
+        autoMerge = excluded.autoMerge,
         executionStartBranch = excluded.executionStartBranch,
         baseCommitSha = excluded.baseCommitSha,
         modelPresetId = excluded.modelPresetId,
@@ -3825,6 +3873,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       sourceParentTaskId: input.source?.sourceParentTaskId,
       sourceMetadata: withTaskBranchContextInSourceMetadata(input.source?.sourceMetadata, input.branchContext),
       branchContext: input.branchContext,
+      autoMerge: input.autoMerge,
       column: input.column || "triage",
       dependencies: input.dependencies || [],
       breakIntoSubtasks: input.breakIntoSubtasks === true ? true : undefined,
@@ -4214,6 +4263,113 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       return { ...task, prompt };
+    });
+  }
+
+  createBranchGroup(input: BranchGroupCreateInput): BranchGroup {
+    const now = Date.now();
+    const id = this.generateBranchGroupId();
+    this.db.prepare(`
+      INSERT INTO branch_groups (id, sourceType, sourceId, branchName, worktreePath, autoMerge, prState, prUrl, prNumber, status, createdAt, updatedAt, closedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.sourceType,
+      input.sourceId,
+      input.branchName,
+      input.worktreePath ?? null,
+      input.autoMerge ? 1 : 0,
+      input.prState ?? "none",
+      input.prUrl ?? null,
+      input.prNumber ?? null,
+      input.status ?? "open",
+      now,
+      now,
+      input.closedAt ?? null,
+    );
+    this.db.bumpLastModified();
+    return this.getBranchGroup(id)!;
+  }
+
+  getBranchGroup(id: string): BranchGroup | null {
+    const row = this.db.prepare(`SELECT * FROM branch_groups WHERE id = ?`).get(id) as BranchGroupRow | undefined;
+    return row ? this.rowToBranchGroup(row) : null;
+  }
+
+  getBranchGroupBySource(sourceType: BranchGroup["sourceType"], sourceId: string): BranchGroup | null {
+    const row = this.db.prepare(`SELECT * FROM branch_groups WHERE sourceType = ? AND sourceId = ?`).get(sourceType, sourceId) as BranchGroupRow | undefined;
+    return row ? this.rowToBranchGroup(row) : null;
+  }
+
+  listBranchGroups(options?: { status?: BranchGroup["status"] }): BranchGroup[] {
+    const rows = options?.status
+      ? this.db.prepare(`SELECT * FROM branch_groups WHERE status = ? ORDER BY createdAt ASC`).all(options.status)
+      : this.db.prepare(`SELECT * FROM branch_groups ORDER BY createdAt ASC`).all();
+    return (rows as BranchGroupRow[]).map((row) => this.rowToBranchGroup(row));
+  }
+
+  updateBranchGroup(id: string, patch: BranchGroupUpdate): BranchGroup {
+    const current = this.getBranchGroup(id);
+    if (!current) {
+      throw new Error(`Branch group ${id} not found`);
+    }
+    const nextStatus = patch.status ?? current.status;
+    const now = Date.now();
+    const nextClosedAt = patch.closedAt === null
+      ? null
+      : patch.closedAt ?? (nextStatus !== "open" && current.status === "open" ? now : current.closedAt ?? null);
+
+    this.db.prepare(`
+      UPDATE branch_groups
+      SET sourceId = ?, branchName = ?, worktreePath = ?, autoMerge = ?, prState = ?, prUrl = ?, prNumber = ?, status = ?, updatedAt = ?, closedAt = ?
+      WHERE id = ?
+    `).run(
+      patch.sourceId ?? current.sourceId,
+      patch.branchName ?? current.branchName,
+      patch.worktreePath === null ? null : (patch.worktreePath ?? current.worktreePath ?? null),
+      patch.autoMerge === undefined ? (current.autoMerge ? 1 : 0) : (patch.autoMerge ? 1 : 0),
+      patch.prState ?? current.prState,
+      patch.prUrl === null ? null : (patch.prUrl ?? current.prUrl ?? null),
+      patch.prNumber === null ? null : (patch.prNumber ?? current.prNumber ?? null),
+      nextStatus,
+      now,
+      nextClosedAt,
+      id,
+    );
+    this.db.bumpLastModified();
+    return this.getBranchGroup(id)!;
+  }
+
+  async setTaskBranchGroup(taskId: string, branchGroupId: string | null): Promise<void> {
+    await this.withTaskLock(taskId, async () => {
+      const dir = this.taskDir(taskId);
+      const task = await this.readTaskJson(dir);
+      let branchContext: Task["branchContext"];
+
+      if (branchGroupId) {
+        const group = this.getBranchGroup(branchGroupId);
+        if (!group) {
+          throw new Error(`Branch group ${branchGroupId} not found`);
+        }
+        branchContext = {
+          groupId: group.id,
+          source: group.sourceType,
+          assignmentMode: "shared",
+        };
+      }
+
+      task.branchContext = branchContext;
+      task.sourceMetadata = withTaskBranchContextInSourceMetadata(task.sourceMetadata, branchContext);
+      if (!branchContext && task.sourceMetadata) {
+        const nextSourceMetadata = { ...task.sourceMetadata };
+        delete nextSourceMetadata[TASK_BRANCH_CONTEXT_METADATA_KEY];
+        task.sourceMetadata = Object.keys(nextSourceMetadata).length > 0 ? nextSourceMetadata : undefined;
+      }
+      task.updatedAt = new Date().toISOString();
+
+      await this.atomicWriteTaskJson(dir, task);
+      if (this.isWatching) this.taskCache.set(taskId, { ...task });
+      this.emit("task:updated", task);
     });
   }
 
@@ -5678,6 +5834,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.branch = undefined;
       } else if (updates.branch !== undefined) {
         task.branch = updates.branch;
+      }
+      if (updates.autoMerge === null) {
+        task.autoMerge = undefined;
+      } else if (updates.autoMerge !== undefined) {
+        task.autoMerge = updates.autoMerge;
       }
       if (updates.executionStartBranch === null) {
         task.executionStartBranch = undefined;

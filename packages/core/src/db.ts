@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 95;
+const SCHEMA_VERSION = 96;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -230,6 +230,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   pausedReason TEXT,
   baseBranch TEXT,
   branch TEXT,
+  autoMerge INTEGER,
   executionStartBranch TEXT,
   baseCommitSha TEXT,
   modelPresetId TEXT,
@@ -759,9 +760,28 @@ CREATE TABLE IF NOT EXISTS missions (
   interviewState TEXT NOT NULL,
   baseBranch TEXT,
   autoAdvance INTEGER DEFAULT 0,
+  autoMerge INTEGER,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS branch_groups (
+  id TEXT PRIMARY KEY,
+  sourceType TEXT NOT NULL CHECK (sourceType IN ('mission','planning')),
+  sourceId TEXT NOT NULL,
+  branchName TEXT NOT NULL UNIQUE,
+  worktreePath TEXT,
+  autoMerge INTEGER NOT NULL DEFAULT 0,
+  prState TEXT NOT NULL DEFAULT 'none' CHECK (prState IN ('none','open','merged','closed')),
+  prUrl TEXT,
+  prNumber INTEGER,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','finalized','abandoned')),
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  closedAt INTEGER
+);
+CREATE INDEX IF NOT EXISTS idxBranchGroupsSource ON branch_groups(sourceType, sourceId);
+CREATE INDEX IF NOT EXISTS idxBranchGroupsBranchName ON branch_groups(branchName);
 
 -- Goals table (strategic intent across mission timelines)
 CREATE TABLE IF NOT EXISTS goals (
@@ -3659,9 +3679,35 @@ export class Database {
       });
     }
 
-    if (version < 95) {
-      this.applyMigration(95, () => {
+    if (version < 96) {
+      this.applyMigration(96, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS branch_groups (
+            id TEXT PRIMARY KEY,
+            sourceType TEXT NOT NULL CHECK (sourceType IN ('mission','planning')),
+            sourceId TEXT NOT NULL,
+            branchName TEXT NOT NULL UNIQUE,
+            worktreePath TEXT,
+            autoMerge INTEGER NOT NULL DEFAULT 0,
+            prState TEXT NOT NULL DEFAULT 'none' CHECK (prState IN ('none','open','merged','closed')),
+            prUrl TEXT,
+            prNumber INTEGER,
+            status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','finalized','abandoned')),
+            createdAt INTEGER NOT NULL,
+            updatedAt INTEGER NOT NULL,
+            closedAt INTEGER
+          )
+        `);
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idxBranchGroupsSource
+            ON branch_groups(sourceType, sourceId)
+        `);
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idxBranchGroupsBranchName
+            ON branch_groups(branchName)
+        `);
         this.addColumnIfMissing("tasks", "autoMerge", "INTEGER");
+        this.addColumnIfMissing("missions", "autoMerge", "INTEGER");
       });
     }
 

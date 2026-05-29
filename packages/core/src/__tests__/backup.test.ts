@@ -15,6 +15,7 @@ import {
 } from "../backup.js";
 import { Database } from "../db.js";
 import { RoutineStore } from "../routine-store.js";
+import { TaskStore } from "../store.js";
 import type { ProjectSettings } from "../types.js";
 
 describe("BackupManager", () => {
@@ -391,6 +392,37 @@ describe("BackupManager", () => {
       expect(readFileSync(join(fusionDir, "fusion-central.db"), "utf-8")).toBe("dummy central database content");
       const backups = await readdir(join(tempDir, ".fusion/backups"));
       expect(backups.some((name) => name.startsWith("fusion-central-pre-restore-"))).toBe(true);
+    });
+
+    it("preserves branch groups + mission/task autoMerge across backup restore", async () => {
+      const rootDir = tempDir;
+      const globalDir = join(tempDir, ".fusion-global");
+      await rm(join(fusionDir, "fusion.db"), { force: true });
+      const store = new TaskStore(rootDir, globalDir);
+      await store.init();
+
+      const mission = store.getMissionStore().createMission({ title: "Backup Mission", autoMerge: true });
+      const task = await store.createTask({ description: "Backup task", autoMerge: true });
+      const group = store.createBranchGroup({ sourceType: "mission", sourceId: mission.id, branchName: "fn/backup-shared" });
+      await store.setTaskBranchGroup(task.id, group.id);
+      store.close();
+
+      const backup = await backupManager.createBackup();
+      await writeFile(join(fusionDir, "fusion.db"), "corrupted");
+      await backupManager.restoreBackup(backup.filename, { createPreRestoreBackup: false });
+
+      const restoredStore = new TaskStore(rootDir, globalDir);
+      await restoredStore.init();
+      const restoredMission = restoredStore.getMissionStore().getMission(mission.id);
+      const restoredTask = await restoredStore.getTask(task.id);
+      const restoredGroup = restoredStore.getBranchGroup(group.id);
+
+      expect(restoredMission?.autoMerge).toBe(true);
+      expect(restoredTask.autoMerge).toBe(true);
+      expect(restoredTask.branchContext?.groupId).toBe(group.id);
+      expect(restoredGroup?.sourceId).toBe(mission.id);
+
+      restoredStore.close();
     });
   });
 });

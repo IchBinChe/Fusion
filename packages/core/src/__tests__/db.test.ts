@@ -338,6 +338,22 @@ describe("Database", () => {
       const columnNames = columns.map((column) => column.name);
       expect(columnNames).toContain("tokenUsageCacheWriteTokens");
     });
+
+    it("creates branch_groups table, indexes, and autoMerge columns", () => {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+      expect(tables.map((row) => row.name)).toContain("branch_groups");
+
+      const branchIndexes = db.prepare("PRAGMA index_list('branch_groups')").all() as Array<{ name: string }>;
+      const indexNames = branchIndexes.map((row) => row.name);
+      expect(indexNames).toContain("idxBranchGroupsSource");
+      expect(indexNames).toContain("idxBranchGroupsBranchName");
+
+      const taskColumns = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+      expect(taskColumns.map((column) => column.name)).toContain("autoMerge");
+
+      const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
+      expect(missionColumns.map((column) => column.name)).toContain("autoMerge");
+    });
     it("seeds lastModified", () => {
       const ts = db.getLastModified();
       expect(ts).toBeGreaterThan(0);

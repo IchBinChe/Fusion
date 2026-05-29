@@ -168,6 +168,7 @@ interface MissionRow {
   status: string;
   interviewState: string;
   baseBranch: string | null;
+  autoMerge: number | null;
   autoAdvance: number;
   autopilotEnabled: number;
   autopilotState: string;
@@ -340,6 +341,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       status: row.status as MissionStatus,
       interviewState: row.interviewState as InterviewState,
       baseBranch: row.baseBranch || undefined,
+      autoMerge: row.autoMerge === null ? undefined : Boolean(row.autoMerge),
       autoAdvance: Boolean(row.autoAdvance),
       autopilotEnabled: Boolean(row.autopilotEnabled),
       autopilotState: (row.autopilotState as AutopilotState) || "inactive",
@@ -530,6 +532,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       status: "planning",
       interviewState: "not_started",
       baseBranch: input.baseBranch,
+      autoMerge: input.autoMerge,
       autoAdvance: false,
       autopilotEnabled: input.autopilotEnabled ?? false,
       autopilotState: "inactive",
@@ -538,8 +541,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     };
 
     this.db.prepare(`
-      INSERT INTO missions (id, title, description, status, interviewState, baseBranch, autoAdvance, autopilotEnabled, autopilotState, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO missions (id, title, description, status, interviewState, baseBranch, autoMerge, autoAdvance, autopilotEnabled, autopilotState, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       mission.id,
       mission.title,
@@ -547,6 +550,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       mission.status,
       mission.interviewState,
       mission.baseBranch ?? null,
+      mission.autoMerge === undefined ? null : (mission.autoMerge ? 1 : 0),
       mission.autoAdvance ? 1 : 0,
       mission.autopilotEnabled ? 1 : 0,
       mission.autopilotState ?? "inactive",
@@ -1099,6 +1103,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         status = ?,
         interviewState = ?,
         baseBranch = ?,
+        autoMerge = ?,
         autoAdvance = ?,
         autopilotEnabled = ?,
         autopilotState = ?,
@@ -1111,6 +1116,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       updated.status,
       updated.interviewState,
       updated.baseBranch ?? null,
+      updated.autoMerge === undefined ? null : (updated.autoMerge ? 1 : 0),
       updated.autoAdvance ? 1 : 0,
       updated.autopilotEnabled ? 1 : 0,
       updated.autopilotState ?? "inactive",
@@ -3418,13 +3424,14 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     let applied = 0;
 
     for (const mission of snapshot.payload.missions) {
-      this.db.prepare(`INSERT INTO missions (id, title, description, status, interviewState, autoAdvance, autopilotEnabled, autopilotState, lastAutopilotActivityAt, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      this.db.prepare(`INSERT INTO missions (id, title, description, status, interviewState, autoMerge, autoAdvance, autopilotEnabled, autopilotState, lastAutopilotActivityAt, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title, description=excluded.description, status=excluded.status, interviewState=excluded.interviewState,
-          autoAdvance=excluded.autoAdvance, autopilotEnabled=excluded.autopilotEnabled, autopilotState=excluded.autopilotState,
+          autoMerge=excluded.autoMerge, autoAdvance=excluded.autoAdvance, autopilotEnabled=excluded.autopilotEnabled, autopilotState=excluded.autopilotState,
           lastAutopilotActivityAt=excluded.lastAutopilotActivityAt, updatedAt=excluded.updatedAt`).run(
-        mission.id, mission.title, mission.description ?? null, mission.status, mission.interviewState, mission.autoAdvance ? 1 : 0,
+        mission.id, mission.title, mission.description ?? null, mission.status, mission.interviewState,
+        mission.autoMerge === undefined ? null : (mission.autoMerge ? 1 : 0), mission.autoAdvance ? 1 : 0,
         mission.autopilotEnabled ? 1 : 0, mission.autopilotState, mission.lastAutopilotActivityAt ?? null, mission.createdAt, mission.updatedAt,
       );
       applied++;

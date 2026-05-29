@@ -4536,12 +4536,12 @@ export class TaskExecutor {
                 this.tokenUsageBaselines.delete(task.id);
                 session.dispose();
                 await this.persistTokenUsage(task.id);
-                await this.store.updateTask(task.id, {
-                  status: "failed",
-                  error: "executor-exit-while-review-pending",
-                });
+                // A pending-review block is not an execution failure. The executor
+                // cannot continue until the reviewer decision is resolved, so park
+                // the task in review without setting status=failed; otherwise the
+                // merge/review queue deadlocks on a task that is both in-review and
+                // failed.
                 await this.handoffTaskToReview(task, "executor-exit-while-review-pending");
-                this.options.onError?.(task, new Error("executor-exit-while-review-pending"));
                 pendingReviewParked = true;
                 break;
               }

@@ -241,7 +241,7 @@ describe("Workflow Steps Execution", () => {
       await executor.execute(baseTask as any);
 
       expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-5436-A", {
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-5436-A", {
         status: "failed",
         error: "executor-exit-while-review-pending",
       });
@@ -253,7 +253,7 @@ describe("Workflow Steps Execution", () => {
         undefined,
         expect.objectContaining({ agentId: "executor" }),
       );
-      expect(onError).toHaveBeenCalledWith(
+      expect(onError).not.toHaveBeenCalledWith(
         expect.objectContaining({ id: "FN-5436-A" }),
         expect.objectContaining({ message: "executor-exit-while-review-pending" }),
       );
@@ -291,7 +291,7 @@ describe("Workflow Steps Execution", () => {
       await executor.execute(baseTask as any);
 
       expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-5436-B", {
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-5436-B", {
         status: "failed",
         error: "executor-exit-while-review-pending",
       });

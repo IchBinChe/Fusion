@@ -85,7 +85,7 @@ describe("reliability interactions: FN-5436 executor pending-review skip", () =>
     const executor = new TaskExecutor(store as any, "/repo");
     await executor.execute(task);
 
-    expect(store.updateTask).toHaveBeenCalledWith("FN-5436-RI-C", {
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-5436-RI-C", {
       status: "failed",
       error: "executor-exit-while-review-pending",
     });

@@ -166,10 +166,12 @@ State machine:
 
 Typical flow:
 
-1. Mission is watched
+1. Mission is watched (missions created/updated with `autopilotEnabled: true` are watched immediately)
 2. Task completion updates feature status
 3. If a slice is complete, autopilot activates next pending slice
 4. When milestones are all complete, mission transitions to complete
+
+If validation cannot run (unexpected loop state, duplicate trigger, blocked validation, or validator error), Fusion logs a mission `warning`/`error` event with structured metadata so the stuck state is visible in mission events.
 
 ## `autopilotEnabled` vs `autoAdvance`
 

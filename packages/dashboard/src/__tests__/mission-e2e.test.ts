@@ -736,6 +736,23 @@ describe("Mission API", () => {
       expect(res.body.autoAdvance).toBe(true);
       expect(missionStore.updateMission).toHaveBeenCalledWith(res.body.id, { autoAdvance: true });
     });
+
+    it("watches mission immediately when created with autopilotEnabled true", async () => {
+      const missionAutopilot = createMockMissionAutopilot();
+      const { app } = buildApp({ missionAutopilot });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/missions",
+        JSON.stringify({ title: "Mission", autopilotEnabled: true }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(201);
+      expect(missionAutopilot.watchMission).toHaveBeenCalledTimes(1);
+      expect(missionAutopilot.watchMission).toHaveBeenCalledWith(res.body.id);
+    });
   });
 
   describe("GET /api/missions", () => {
@@ -954,6 +971,24 @@ describe("Mission API", () => {
         status: "active",
         autoAdvance: true,
       });
+    });
+
+    it("watches mission when PATCH enables autopilot", async () => {
+      const missionAutopilot = createMockMissionAutopilot();
+      const { app, missionStore } = buildApp({ missionAutopilot });
+      const mission = missionStore.createMission({ title: "Test Mission" });
+
+      const res = await request(
+        app,
+        "PATCH",
+        `/api/missions/${mission.id}`,
+        JSON.stringify({ autopilotEnabled: true }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(missionAutopilot.watchMission).toHaveBeenCalledTimes(1);
+      expect(missionAutopilot.watchMission).toHaveBeenCalledWith(mission.id);
     });
 
     it("should update mission baseBranch", async () => {

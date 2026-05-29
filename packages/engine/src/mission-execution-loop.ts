@@ -173,7 +173,10 @@ export class MissionExecutionLoop extends EventEmitter {
                   await this.missionStore.transitionLoopState(feature.id, "implementing");
                   // If the feature has a linked task that's already done, re-trigger validation
                   if (feature.taskId) {
-                    await this.processTaskOutcome(feature.taskId);
+                    const linkedTask = await this.taskStore.getTask(feature.taskId).catch(() => null);
+                    if (linkedTask && (linkedTask.column === "done" || linkedTask.column === "archived")) {
+                      await this.processTaskOutcome(feature.taskId);
+                    }
                   }
                   recoveredCount++;
                 } catch (err) {
@@ -187,7 +190,10 @@ export class MissionExecutionLoop extends EventEmitter {
                 // If the fix task is complete, call processTaskOutcome to continue the cycle
                 if (feature.taskId) {
                   try {
-                    await this.processTaskOutcome(feature.taskId);
+                    const linkedTask = await this.taskStore.getTask(feature.taskId).catch(() => null);
+                    if (linkedTask && (linkedTask.column === "done" || linkedTask.column === "archived")) {
+                      await this.processTaskOutcome(feature.taskId);
+                    }
                     recoveredCount++;
                   } catch (err) {
                     loopLog.error(`Recovery failed for needs_fix feature ${feature.id}:`, err);
@@ -237,11 +243,18 @@ export class MissionExecutionLoop extends EventEmitter {
       // Only validate features in "implementing" state
       if (feature.loopState !== "implementing") {
         loopLog.log(`Feature ${feature.id} loopState is "${feature.loopState}"; skipping validation`);
+        this.logFeatureWarningEvent(feature.id, "validation_skipped_loop_state", `Validation skipped: feature ${feature.id} is in loopState "${feature.loopState}" (expected "implementing").`, {
+          taskId,
+          loopState: feature.loopState,
+        });
         return;
       }
 
       if (this.activeValidations.has(feature.id)) {
         loopLog.log(`Feature ${feature.id} already has an active validation; skipping duplicate trigger`);
+        this.logFeatureWarningEvent(feature.id, "validation_deduplicated", `Validation already running for feature ${feature.id}; duplicate trigger ignored.`, {
+          taskId,
+        });
         return;
       }
 
@@ -866,6 +879,10 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
         this.missionStore.completeValidatorRun(runId, "blocked", blockedReason);
       }
       loopLog.log(`Feature ${featureId} blocked: ${blockedReason}`);
+      this.logFeatureErrorEvent(featureId, "validation_blocked", `Validation blocked for feature ${featureId}: ${blockedReason ?? "no reason provided"}`, {
+        runId,
+        blockedReason: blockedReason ?? null,
+      });
 
       // Notify autopilot if configured
       if (this.missionAutopilot?.notifyValidationComplete) {
@@ -891,6 +908,10 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
         this.missionStore.completeValidatorRun(runId, "error", error);
       }
       loopLog.error(`Feature ${featureId} validation error: ${error}`);
+      this.logFeatureErrorEvent(featureId, "validation_error", `Validation error for feature ${featureId}: ${error}`, {
+        runId,
+        error,
+      });
 
       // Notify autopilot if configured
       if (this.missionAutopilot?.notifyValidationComplete) {
@@ -900,6 +921,51 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
       this.emit("validation:error", { featureId, runId, error });
     } catch (err) {
       loopLog.error(`Error handling validation error for ${featureId}:`, err);
+    }
+  }
+
+  private logFeatureWarningEvent(
+    featureId: string,
+    code: string,
+    description: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    this.logFeatureMissionEvent(featureId, "warning", code, description, metadata);
+  }
+
+  private logFeatureErrorEvent(
+    featureId: string,
+    code: string,
+    description: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    this.logFeatureMissionEvent(featureId, "error", code, description, metadata);
+  }
+
+  private logFeatureMissionEvent(
+    featureId: string,
+    eventType: "warning" | "error",
+    code: string,
+    description: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    const feature = this.missionStore.getFeature(featureId);
+    if (!feature) return;
+    const slice = this.missionStore.getSlice(feature.sliceId);
+    if (!slice) return;
+    const milestone = this.missionStore.getMilestone(slice.milestoneId);
+    if (!milestone) return;
+
+    try {
+      this.missionStore.logMissionEvent?.(milestone.missionId, eventType, description, {
+        code,
+        featureId,
+        sliceId: slice.id,
+        milestoneId: milestone.id,
+        ...metadata,
+      });
+    } catch (err) {
+      loopLog.warn(`Failed to log mission ${eventType} event for feature ${featureId}:`, err);
     }
   }
 }

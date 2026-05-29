@@ -13,7 +13,7 @@ function makeHarness({
   withAssertions?: boolean;
   initialFeatureStatus?: string;
   initialTaskColumn?: string;
-  runValidationImpl?: () => Promise<{ status: "pass"; assertions: []; summary: string }>;
+  runValidationImpl?: () => Promise<{ status: "pass" | "error"; assertions: []; summary: string }>;
 } = {}) {
   const mission = {
     id: "M-001",
@@ -229,6 +229,28 @@ describe("mission autopilot end-to-end wiring", () => {
     await Promise.all([first, second]);
 
     expect(h.missionStore.startValidatorRun).toHaveBeenCalledTimes(1);
+    h.scheduler.stop();
+  });
+
+  it("emits mission error event when validator returns error", async () => {
+    const h = makeHarness({
+      withAssertions: true,
+      runValidationImpl: async () => ({ status: "error", assertions: [], summary: "runtime unavailable" }),
+    });
+
+    await h.emitTaskMoved("done");
+
+    expect(h.missionStore.completeValidatorRun).toHaveBeenCalledWith("VR-001", "error", "runtime unavailable");
+    expect(h.missionStore.logMissionEvent).toHaveBeenCalledWith(
+      "M-001",
+      "error",
+      expect.stringContaining("Validation error"),
+      expect.objectContaining({
+        code: "validation_error",
+        featureId: "F-001",
+        error: "runtime unavailable",
+      }),
+    );
     h.scheduler.stop();
   });
 });

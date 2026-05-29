@@ -155,6 +155,7 @@ function createMockMissionStore() {
         milestones: [createMockMilestone({ missionId: id })],
       };
     }),
+    logMissionEvent: vi.fn(),
 
     // Feature methods
     getFeature: vi.fn((id: string) => features.get(id)),
@@ -449,6 +450,17 @@ describe("MissionExecutionLoop", () => {
       await loop.processTaskOutcome("FN-001");
 
       expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
+      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
+        expect.any(String),
+        "warning",
+        expect.stringContaining("Validation skipped"),
+        expect.objectContaining({
+          code: "validation_skipped_loop_state",
+          featureId: "F-001",
+          taskId: "FN-001",
+          loopState: "idle",
+        }),
+      );
     });
 
     it("should auto-pass if feature has no linked assertions", async () => {
@@ -543,6 +555,16 @@ describe("MissionExecutionLoop", () => {
       await loop.processTaskOutcome("FN-001");
 
       expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
+      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
+        expect.any(String),
+        "warning",
+        expect.stringContaining("duplicate trigger"),
+        expect.objectContaining({
+          code: "validation_deduplicated",
+          featureId: "F-001",
+          taskId: "FN-001",
+        }),
+      );
     });
 
     it("calls startValidatorRun without a board task ID", async () => {
@@ -1169,6 +1191,16 @@ describe("MissionExecutionLoop", () => {
           error: "Invalid status in validation response",
         }),
       );
+      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
+        expect.any(String),
+        "error",
+        expect.stringContaining("Validation error"),
+        expect.objectContaining({
+          code: "validation_error",
+          featureId: "F-001",
+          error: "Invalid status in validation response",
+        }),
+      );
       expectNoValidationBoardTaskMutation(taskStore);
     });
   });
@@ -1339,6 +1371,7 @@ describe("MissionExecutionLoop", () => {
         rootDir: "/tmp",
       });
       const processTaskOutcomeSpy = vi.spyOn(loop, "processTaskOutcome");
+      taskStore._setTask({ id: "FN-VALIDATING", column: "done" });
       loop.start();
 
       await loop.recoverActiveMissions();
@@ -1385,6 +1418,7 @@ describe("MissionExecutionLoop", () => {
         rootDir: "/tmp",
       });
       const processTaskOutcomeSpy = vi.spyOn(loop, "processTaskOutcome");
+      taskStore._setTask({ id: "FN-NEEDS-FIX", column: "done" });
       loop.start();
 
       await loop.recoverActiveMissions();
@@ -1436,6 +1470,53 @@ describe("MissionExecutionLoop", () => {
 
       // transitionLoopState should be called to move from validating back to implementing
       expect(missionStore.transitionLoopState).toHaveBeenCalledWith("F-VALIDATING", "implementing");
+    });
+
+    it("should not call processTaskOutcome when validating feature task is still in-progress", async () => {
+      const feature = createMockFeature({
+        id: "F-VALIDATING-IN-PROGRESS",
+        sliceId: "SL-001",
+        loopState: "validating",
+        taskId: "FN-IN-PROGRESS",
+      });
+      missionStore._setFeature(feature);
+
+      missionStore.getMissionWithHierarchy = vi.fn().mockReturnValue({
+        id: "M-TEST1",
+        title: "Test Mission",
+        status: "active",
+        interviewState: "not_started",
+        autoAdvance: true,
+        autopilotEnabled: true,
+        autopilotState: "inactive",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        milestones: [
+          {
+            ...createMockMilestone(),
+            slices: [
+              {
+                ...createMockSlice(),
+                features: [feature],
+              },
+            ],
+          },
+        ],
+      });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const processTaskOutcomeSpy = vi.spyOn(loop, "processTaskOutcome");
+      taskStore._setTask({ id: "FN-IN-PROGRESS", column: "in-progress" });
+      loop.start();
+
+      await loop.recoverActiveMissions();
+
+      expect(processTaskOutcomeSpy).not.toHaveBeenCalled();
+      expect(missionStore.transitionLoopState).toHaveBeenCalledWith("F-VALIDATING-IN-PROGRESS", "implementing");
     });
 
     it("should not call processTaskOutcome for needs_fix features without taskId", async () => {

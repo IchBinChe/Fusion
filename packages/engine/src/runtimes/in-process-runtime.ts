@@ -311,9 +311,19 @@ export class InProcessRuntime
                   notifyValidationComplete: async (featureId: string) => {
                     // Pass the feature's linked taskId to handleTaskCompletion, not the featureId
                     const feature = missionStore.getFeature(featureId);
-                    if (feature?.taskId) {
-                      await missionAutopilot.handleTaskCompletion(feature.taskId);
+                    if (!feature?.taskId) {
+                      return;
                     }
+                    const slice = missionStore.getSlice(feature.sliceId);
+                    const milestone = slice ? missionStore.getMilestone(slice.milestoneId) : undefined;
+                    const missionId = milestone?.missionId;
+                    if (missionId) {
+                      const mission = missionStore.getMission(missionId);
+                      if (mission?.autopilotEnabled && !missionAutopilot.isWatching(missionId)) {
+                        missionAutopilot.watchMission(missionId);
+                      }
+                    }
+                    await missionAutopilot.handleTaskCompletion(feature.taskId);
                   },
                 }
               : undefined,

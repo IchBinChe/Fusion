@@ -322,6 +322,9 @@ export function createMissionRouter(
 
       if (Object.keys(updates).length > 0) {
         const updatedMission = missionStore.updateMission(mission.id, updates);
+        if (missionAutopilot && updatedMission.autopilotEnabled) {
+          missionAutopilot.watchMission(updatedMission.id);
+        }
         res.status(201).json(updatedMission);
         return;
       }
@@ -923,7 +926,11 @@ export function createMissionRouter(
       }
 
       try {
+        const existingMission = missionStore.getMission(missionId);
         const mission = missionStore.updateMission(missionId, updates);
+        if (missionAutopilot && updates.autopilotEnabled === true && existingMission?.autopilotEnabled !== true) {
+          missionAutopilot.watchMission(missionId);
+        }
         res.json(mission);
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);

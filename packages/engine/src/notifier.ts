@@ -142,6 +142,20 @@ function truncateNtfyMessage(message: string): string {
   return best;
 }
 
+function ntfyPriorityToInt(priority: NtfyNotificationPriority): number {
+  switch (priority) {
+    case "low":
+      return 2;
+    case "high":
+      return 4;
+    case "urgent":
+      return 5;
+    case "default":
+    default:
+      return 3;
+  }
+}
+
 export function resolveNtfyEvents(events?: NtfyNotificationEvent[]): NtfyNotificationEvent[] {
   return events ? [...events] : [...DEFAULT_NTFY_EVENTS];
 }
@@ -211,11 +225,11 @@ export async function sendNtfyNotificationWithResult({
     const latin1Safe = isLatin1Safe(truncatedTitle) && isLatin1Safe(truncatedMessage);
 
     const headers: Record<string, string> = {
-      Priority: priority,
       "Content-Type": latin1Safe ? "text/plain" : "application/json",
     };
 
     if (latin1Safe) {
+      headers.Priority = priority;
       headers.Title = truncatedTitle;
       if (clickUrl) {
         headers.Click = clickUrl;
@@ -235,7 +249,7 @@ export async function sendNtfyNotificationWithResult({
           topic,
           title: truncatedTitle,
           message: truncatedMessage,
-          priority,
+          priority: ntfyPriorityToInt(priority),
           ...(clickUrl ? { click: clickUrl } : {}),
         }),
       signal,

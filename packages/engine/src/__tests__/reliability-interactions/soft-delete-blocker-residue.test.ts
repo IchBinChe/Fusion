@@ -110,7 +110,9 @@ describe("reliability interactions: FN-5566 / FN-5446 soft-delete blocker residu
     await fx.selfHealing.clearStaleBlockedBy();
     const depAfter = await fx.store.getTask(dep.id);
     expect(depAfter.blockedBy ?? null).toBeNull();
-    expect(depAfter.log.some((entry) => entry.action.includes("soft-deleted at"))).toBe(true);
+    expect(
+      depAfter.log.some((entry) => entry.action.includes("soft-deleted") || entry.action.includes("reason=soft-deleted-blocker")),
+    ).toBe(true);
   });
 
   it("FN-5147 composition: live in-review tasks remain untouched when autoMerge=false", async () => {

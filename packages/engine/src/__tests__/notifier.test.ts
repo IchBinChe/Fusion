@@ -11,6 +11,7 @@ import {
   sendNtfyNotificationWithResult,
 } from "../notifier.js";
 import { NotificationService } from "../notification/notification-service.js";
+import { NtfyNotificationProvider } from "../notification/ntfy-provider.js";
 
 // Mock the logger
 vi.mock("../logger.js", () => ({
@@ -154,20 +155,85 @@ describe("sendNtfyNotificationWithResult", () => {
         signal,
         headers: expect.objectContaining({
           "Content-Type": "application/json",
-          Priority: "default",
           Authorization: "Bearer secret-token",
         }),
       }),
     );
 
     const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(request.headers as HeadersInit);
+    expect(headers.has("Priority")).toBe(false);
     expect(JSON.parse(String(request.body))).toEqual({
       topic: "test-topic",
       title: "Triage Bot → Executor Bot",
       message: "Triage Bot → you: preview text",
-      priority: "default",
+      priority: 3,
       click: "https://fusion.example.com/?task=FN-1",
     });
+  });
+
+  it("maps JSON publish priority names to integer values", async () => {
+    const cases = [
+      { priority: "low", expected: 2 },
+      { priority: "default", expected: 3 },
+      { priority: "high", expected: 4 },
+      { priority: "urgent", expected: 5 },
+    ] as const;
+
+    for (const testCase of cases) {
+      await sendNtfyNotificationWithResult({
+        ntfyBaseUrl: "https://ntfy.sh",
+        topic: "json-priority-topic",
+        title: "Sender → Receiver",
+        message: "Unicode path exercises JSON publish",
+        priority: testCase.priority,
+      });
+
+      const request = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+      const payload = JSON.parse(String(request.body)) as { priority: number };
+      expect(payload.priority).toBe(testCase.expected);
+    }
+  });
+
+  it("keeps string Priority header for latin1-safe publishes", async () => {
+    await sendNtfyNotificationWithResult({
+      ntfyBaseUrl: "https://ntfy.sh",
+      topic: "header-priority-topic",
+      title: "ASCII title",
+      message: "ASCII message",
+      priority: "high",
+    });
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(request.headers as HeadersInit);
+    expect(headers.get("Priority")).toBe("high");
+  });
+
+  it("sends message inbox notifications with integer JSON priority via provider", async () => {
+    const provider = new NtfyNotificationProvider();
+    await provider.initialize({
+      topic: "provider-topic",
+      ntfyBaseUrl: "https://ntfy.sh",
+      events: ["message:agent-to-user"],
+    });
+
+    const result = await provider.sendNotification("message:agent-to-user", {
+      event: "message:agent-to-user",
+      taskId: "FN-1",
+      metadata: {
+        fromName: "Triage Bot",
+        toName: "you",
+        preview: "Hello from queue",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const payload = JSON.parse(String(request.body)) as { priority: number; message: string };
+    expect(payload.priority).toBe(4);
+    expect(payload.message).toContain("→");
+
+    await provider.shutdown();
   });
 
   it("keeps the legacy text/plain header path for pure ASCII titles", async () => {

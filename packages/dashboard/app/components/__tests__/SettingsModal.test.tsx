@@ -368,6 +368,12 @@ describe("SettingsModal", () => {
   });
 
   it("shows direct merge commit routing only for direct merges", async () => {
+    mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
+    mockFetchSettings.mockResolvedValueOnce({ ...defaultSettings, merger: { mode: "legacy" } });
+    mockFetchSettingsByScope.mockResolvedValueOnce({
+      global: { ...defaultSettings, merger: { mode: "legacy" } },
+      project: {},
+    });
     renderModal();
     await waitForSettingsModalReady();
 
@@ -379,11 +385,16 @@ describe("SettingsModal", () => {
   });
 
   it("defaults the integration worktree select to reuse-task-worktree when the server omits it", async () => {
+    mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
     mockFetchSettings.mockResolvedValueOnce({
       ...defaultSettings,
+      merger: { mode: "legacy" },
       mergeIntegrationWorktree: undefined,
     });
-    mockFetchSettingsByScope.mockResolvedValueOnce({ global: defaultSettings, project: {} });
+    mockFetchSettingsByScope.mockResolvedValueOnce({
+      global: { ...defaultSettings, merger: { mode: "legacy" } },
+      project: {},
+    });
 
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
@@ -392,6 +403,12 @@ describe("SettingsModal", () => {
   });
 
   it("persists cwd-main through the save payload", async () => {
+    mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
+    mockFetchSettings.mockResolvedValueOnce({ ...defaultSettings, merger: { mode: "legacy" } });
+    mockFetchSettingsByScope.mockResolvedValueOnce({
+      global: { ...defaultSettings, merger: { mode: "legacy" } },
+      project: {},
+    });
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
@@ -407,6 +424,12 @@ describe("SettingsModal", () => {
   });
 
   it("does NOT render the warning banner when the integration worktree is reuse-task-worktree (default)", async () => {
+    mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
+    mockFetchSettings.mockResolvedValueOnce({ ...defaultSettings, merger: { mode: "legacy" } });
+    mockFetchSettingsByScope.mockResolvedValueOnce({
+      global: { ...defaultSettings, merger: { mode: "legacy" } },
+      project: {},
+    });
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
@@ -414,6 +437,12 @@ describe("SettingsModal", () => {
   });
 
   it("renders the warning banner when the legacy cwd-main mode is selected", async () => {
+    mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
+    mockFetchSettings.mockResolvedValueOnce({ ...defaultSettings, merger: { mode: "legacy" } });
+    mockFetchSettingsByScope.mockResolvedValueOnce({
+      global: { ...defaultSettings, merger: { mode: "legacy" } },
+      project: {},
+    });
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
@@ -427,12 +456,14 @@ describe("SettingsModal", () => {
   });
 
   it("removes the warning banner when switching back to reuse-task-worktree", async () => {
+    mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
     mockFetchSettings.mockResolvedValueOnce({
       ...defaultSettings,
+      merger: { mode: "legacy" },
       mergeIntegrationWorktree: "cwd-main",
     });
     mockFetchSettingsByScope.mockResolvedValueOnce({
-      global: { ...defaultSettings, mergeIntegrationWorktree: "cwd-main" },
+      global: { ...defaultSettings, merger: { mode: "legacy" }, mergeIntegrationWorktree: "cwd-main" },
       project: {},
     });
 

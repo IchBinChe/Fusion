@@ -1923,24 +1923,31 @@ input[type="range"]:focus-visible {
 
 /* === PR Section === */
 .pr-section-icon {
-  vertical-align: middle;
-  margin-right: var(--space-sm);
+  display: inline-flex;
 }
 
 .pr-hint--muted {
   opacity: 0.8;
-  font-size: 13px;
+  font-size: 0.8125rem;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
 }
 
 .pr-hint--subtle {
   margin-top: var(--space-sm);
   opacity: 0.7;
-  font-size: 12px;
+  font-size: 0.75rem;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
 }
 
-.pr-card--status {
-  border: 1px solid var(--border);
+.pr-card {
+  border: var(--btn-border-width) solid var(--border);
   border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-sm);
   padding: var(--space-md);
 }
 
@@ -1948,17 +1955,18 @@ input[type="range"]:focus-visible {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .pr-status-icon {
-  font-size: 16px;
+  align-items: center;
+  display: inline-flex;
 }
 
 .pr-status-badge {
-  padding: 2px var(--space-sm);
-  border-radius: var(--radius-lg);
-  font-size: 12px;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
   font-weight: 500;
   text-transform: capitalize;
 }
@@ -2073,8 +2081,8 @@ input[type="range"]:focus-visible {
 }
 
 .pr-number {
-  font-size: 14px;
-  opacity: 0.8;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 .pr-spacer {
@@ -2086,48 +2094,57 @@ input[type="range"]:focus-visible {
 }
 
 .pr-title {
+  color: var(--text);
+  font-size: 0.9375rem;
   font-weight: 500;
-  margin-bottom: var(--space-sm);
 }
 
 .pr-meta {
-  font-size: 12px;
-  opacity: 0.7;
-  margin-bottom: var(--space-sm);
-}
-
-.pr-meta-arrow {
-  margin: 0 var(--space-sm);
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.75rem;
+  gap: var(--space-xs);
 }
 
 .pr-hint--info {
-  margin-bottom: var(--space-sm);
-  font-size: 12px;
+  font-size: 0.8125rem;
 }
 
 .pr-footer {
-  display: flex;
   align-items: center;
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-md);
+  justify-content: space-between;
 }
 
 .pr-comments {
-  display: flex;
   align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.75rem;
   gap: var(--space-xs);
 }
 
 .pr-link {
-  display: flex;
   align-items: center;
+  color: var(--color-info);
+  display: flex;
+  font-size: 0.75rem;
+  font-weight: 500;
   gap: var(--space-xs);
-  color: var(--todo);
   text-decoration: none;
-  font-size: 12px;
 }
 
 .pr-link:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .pr-card {
+    padding: var(--space-sm);
+  }
 }
 
 /* === Merge Details Card === */

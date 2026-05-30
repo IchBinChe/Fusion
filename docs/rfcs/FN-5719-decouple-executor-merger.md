@@ -150,4 +150,8 @@ Per CEO directive, implementation must be coordinated with **agent-4ec1ff85** be
 1. Dedicated persisted merge-request record/table (not task-row JSON): **APPROVED**.
 2. Phase-1 explicit persisted `completion_handoff_accepted` marker keyed to `taskId`: **APPROVED**.
 
+**FN-5756 Ratification Addendum (explicit, 2026-05-30):**
+1. Q1 dual-run dependency signal: **APPROVED** to treat dependency as satisfied when **either** (`dep.column === "in-review"`) **or** a persisted `completion_handoff_accepted` marker is present; require audit diff logging whenever old/new signals disagree during dual-run.
+2. Q4 merge back-pressure default scope: **APPROVED** as **branch-group aware by default** (instead of global), with global throttles retained only as safety caps.
+
 Follow-on task filed: **FN-5723** (unblocked by this ratification).

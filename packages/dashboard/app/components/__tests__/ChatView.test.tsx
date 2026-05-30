@@ -3234,6 +3234,94 @@ describe("FN-5380 scroll preservation", () => {
   });
 });
 
+describe("FN-5720 room re-entry anchoring", () => {
+  const makeMessages = (count: number, sessionId = "session-001") =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `msg-${index + 1}`,
+      sessionId,
+      role: index % 2 === 0 ? "assistant" : "user",
+      content: `Message ${index + 1}`,
+      createdAt: `2026-04-08T00:00:${String(index).padStart(2, "0")}.000Z`,
+    } satisfies ChatMessageInfo));
+
+  const attachScrollGeometry = (container: HTMLDivElement, initialTop: number, height = 2000) => {
+    let scrollTopValue = initialTop;
+    Object.defineProperty(container, "scrollHeight", { configurable: true, get: () => height });
+    Object.defineProperty(container, "clientHeight", { configurable: true, get: () => 300 });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    return () => scrollTopValue;
+  };
+
+  const makeRoomMessages = (roomId: string, count: number) =>
+    makeMessages(count, roomId).map((message) => ({
+      id: message.id,
+      roomId,
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt,
+      senderAgentId: null,
+      thinkingOutput: null,
+      metadata: null,
+      mentions: [],
+    }));
+
+  it("anchors to bottom when re-entering Rooms scope", async () => {
+    const room = createRoomFixture("ops");
+    const roomMessages = makeRoomMessages(room.id, 12);
+
+    setupMockChat({
+      activeSession: activeSessionFixture,
+      sessions: [activeSessionFixture],
+      filteredSessions: [activeSessionFixture],
+      messages: [{ id: "dm-1", sessionId: activeSessionFixture.id, role: "assistant", content: "Direct", createdAt: "2026-04-08T00:00:00.000Z" }],
+    });
+    setupMockRooms({ rooms: [room], activeRoom: room, messages: roomMessages, messagesLoading: false });
+    localStorage.setItem("fusion:chat-scope", "rooms");
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const container = document.querySelector(".chat-messages") as HTMLDivElement;
+    const readScrollTop = attachScrollGeometry(container, 420);
+
+    container.scrollTop = 420;
+    fireEvent.scroll(container);
+
+    await userEvent.click(screen.getByTestId("chat-sidebar-scope-direct"));
+    await userEvent.click(screen.getByTestId("chat-sidebar-scope-rooms"));
+
+    await waitFor(() => {
+      expect(readScrollTop()).toBe(2000);
+    });
+  });
+
+  it("preserves scrolled-up room position on message refetch", async () => {
+    const room = createRoomFixture("ops");
+    const roomMessages = makeRoomMessages(room.id, 10);
+
+    setupMockChat({ sessions: [], filteredSessions: [] });
+    setupMockRooms({ rooms: [room], activeRoom: room, messages: roomMessages, messagesLoading: false });
+
+    const view = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const container = document.querySelector(".chat-messages") as HTMLDivElement;
+    const readScrollTop = attachScrollGeometry(container, 380);
+    fireEvent.scroll(container);
+
+    setupMockRooms({ rooms: [room], activeRoom: room, messages: [...roomMessages], messagesLoading: false });
+    view.rerender(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    await waitFor(() => {
+      expect(readScrollTop()).toBe(380);
+    });
+  });
+});
+
 describe("resizable sidebar", () => {
   beforeEach(() => {
     localStorage.clear();

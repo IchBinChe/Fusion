@@ -1623,11 +1623,19 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const previousScope = previousChatScopeRef.current;
     previousChatScopeRef.current = chatScope;
 
-    if (chatScope !== "direct") {
+    if (chatScope === "rooms" && !rooms.activeRoom) {
+      lastAnchoredThreadStateRef.current = null;
       return;
     }
 
-    if (previousScope !== null && previousScope !== "rooms") {
+    const enteredDirect =
+      chatScope === "direct" &&
+      (previousScope === null || previousScope === "rooms");
+    const enteredRooms =
+      chatScope === "rooms" &&
+      (previousScope === null || previousScope === "direct");
+
+    if (!enteredDirect && !enteredRooms) {
       return;
     }
 
@@ -1639,7 +1647,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     anchorToBottom(messagesContainer);
     isUserScrollingRef.current = false;
     setIsUserScrolling(false);
-  }, [chatScope, anchorToBottom]);
+  }, [chatScope, rooms.activeRoom, anchorToBottom]);
 
   useEffect(() => {
     if (!activeSession && !roomThreadActive) {

@@ -36,6 +36,7 @@ const EVENT_TYPE_LABELS: Record<ActivityEventType, string> = {
   "task:merge-worktree-reacquired": "Merge Worktree Reacquired",
   "task:auto-archived-deterministic-duplicate": "Task Auto-Archived (Deterministic Duplicate)",
   "task:auto-archived-near-duplicate": "Task Auto-Archived (Near-Duplicate)",
+  "task:near-duplicate-flagged": "Near-Duplicate Flagged",
   "settings:updated": "Settings Updated",
   "project:isolation-transition": "Project Isolation Transition",
 };
@@ -52,6 +53,7 @@ const EVENT_TYPE_ICONS: Record<ActivityEventType, React.ReactNode> = {
   "task:auto-archived-duplicate": <Trash2 size={14} className="activity-icon deleted" />,
   "task:auto-archived-deterministic-duplicate": <Trash2 size={14} className="activity-icon deleted" />,
   "task:auto-archived-near-duplicate": <Trash2 size={14} className="activity-icon deleted" />,
+  "task:near-duplicate-flagged": <AlertCircle size={14} className="activity-icon updated" />,
   "task:merge-worktree-reacquired": <RefreshCw size={14} className="activity-icon updated" />,
   "settings:updated": <Settings size={14} className="activity-icon settings" />,
   "project:isolation-transition": <Folder size={14} className="activity-icon settings" />,

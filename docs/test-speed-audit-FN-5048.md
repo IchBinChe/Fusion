@@ -31,7 +31,7 @@
 | 3 | `src/__tests__/db.test.ts` | 5.64s | Database (~68%) | keep | Keep (real SQLite backstop). |
 | 4 | `src/__tests__/test-project.test.ts` | 5.13s | test-project fixture (100%) | rewrite | Evaluate fixture-heavy setup duplication, trim low-value cases. |
 | 5 | `src/__tests__/plugin-loader.test.ts` | 3.48s | PluginLoader (100%) | keep | Keep. |
-| 6 | `src/__tests__/store-watcher.test.ts` | 2.77s | TaskStore (100%) | rewrite | Replace slow polling waits with fake timers. |
+| 6 | `src/__tests__/store-watcher.test.ts` | 1.80s | TaskStore (100%) | rewrite | Replaced slow watch polling waits with FN-2707 fake-timer recipe. |
 | 7 | `src/__tests__/run-audit.test.ts` | 2.60s | Run Audit (100%) | keep | Keep. |
 | 8 | `src/__tests__/store-comments.test.ts` | 2.58s | TaskStore (100%) | keep | Keep. |
 | 9 | `src/__tests__/plugin-store.test.ts` | 2.48s | PluginStore (100%) | keep | Keep. |
@@ -99,7 +99,7 @@
   - `@fusion/dashboard`: **335.40s** (`vitest run` failed with broad pre-existing suite issues unrelated to FN-5048 edits)
 
 ### Targeted outcome checks for FN-5048 edits
-- `packages/core/src/__tests__/store-watcher.test.ts` (`rewrite`): reverted to per-test harness (`createTaskStoreTestHarness`) after measuring shared-harness regression for watcher-focused assertions; core suite total improved vs baseline.
+- `packages/core/src/__tests__/store-watcher.test.ts` (`rewrite`): retained per-test harness and fake-timerized watch-active polling tests (`vi.useFakeTimers` before `watch`, `advanceTimersByTimeAsync` driving cycles); sampled isolated file runtime now ~1.8s total with watch-active cases no longer incurring 1–3s interval waits.
 - `packages/cli/src/__tests__/bin.test.ts` (`rewrite`/`trim`): redundant route permutations consolidated with `it.each`; CLI suite passes.
 - `AGENTS.md` standing rule added and cross-linked from this audit to prevent reintroduction of slow-test patterns.
 

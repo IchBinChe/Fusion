@@ -52,6 +52,9 @@ describe("TaskStore", () => {
       }
     }, 120_000);
     it("cache is updated when polling is active even without fs.watch", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "clearImmediate"],
+      });
       await harness.store().watch();
 
       try {
@@ -66,6 +69,7 @@ describe("TaskStore", () => {
         expect(movedEvents[0].to).toBe("todo");
       } finally {
         harness.store().stopWatching();
+        vi.useRealTimers();
       }
     }, 30_000);
 
@@ -117,6 +121,9 @@ describe("TaskStore", () => {
     });
 
     it("logs watcher failures and keeps polling operational", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "clearImmediate"],
+      });
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       try {
@@ -139,20 +146,30 @@ describe("TaskStore", () => {
           expect(fallbackCall).toBeDefined();
         }
 
+        await vi.advanceTimersByTimeAsync(1);
+        await harness.store().createTask({ description: "watcher polling fallback" });
+        await vi.advanceTimersByTimeAsync(1000);
         await expect(storeAny.checkForChanges()).resolves.toBeUndefined();
       } finally {
+        harness.store().stopWatching();
         warnSpy.mockRestore();
+        vi.useRealTimers();
       }
     });
 
     it("does not emit timing warning when polling is fast (<100ms)", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "clearImmediate"],
+      });
       await harness.store().watch();
 
       const storeAny = harness.store() as any;
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       try {
+        await vi.advanceTimersByTimeAsync(1);
         await harness.store().createTask({ description: "fast poll test" });
+        await vi.advanceTimersByTimeAsync(1000);
         await storeAny.checkForChanges();
 
         const timingWarningEmitted = warnSpy.mock.calls.some(
@@ -163,7 +180,9 @@ describe("TaskStore", () => {
         );
         expect(timingWarningEmitted).toBe(false);
       } finally {
+        harness.store().stopWatching();
         warnSpy.mockRestore();
+        vi.useRealTimers();
       }
     });
   });

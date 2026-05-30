@@ -18,6 +18,7 @@ import {
   TASK_PRIORITIES,
   VALID_TRANSITIONS,
   computeContentFingerprint,
+  isColumn,
   isTaskPriority,
   REPO_OVERRIDE_RE,
   resolveTitleSummarizerSettingsModel,
@@ -748,13 +749,17 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const offset = typeof req.query.offset === "string" ? Number.parseInt(req.query.offset, 10) : undefined;
       const q = typeof req.query.q === "string" ? req.query.q.trim() : undefined;
       const includeArchived = req.query.includeArchived === "1" || req.query.includeArchived === "true";
+      const columnParam = typeof req.query.column === "string" ? req.query.column.trim() : undefined;
+      const column = columnParam ? (isColumn(columnParam) ? columnParam : undefined) : undefined;
 
       if (limit !== undefined && (!Number.isFinite(limit) || limit < 0)) {
         throw badRequest("limit must be a non-negative integer");
       }
-
       if (offset !== undefined && (!Number.isFinite(offset) || offset < 0)) {
         throw badRequest("offset must be a non-negative integer");
+      }
+      if (columnParam && !column) {
+        throw badRequest(`column must be one of: ${COLUMNS.join(", ")}`);
       }
 
       let tasks;
@@ -764,7 +769,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         // Board-view list: omit the heavy agent log payload and exclude
         // archived tasks unless explicitly requested. Full task detail still loads via
         // GET /api/tasks/:id. Without this, every dashboard load shipped tens of MB of agent logs.
-        tasks = await scopedStore.listTasks({ limit, offset, slim: true, includeArchived });
+        const listOptions = { limit, offset, slim: true, includeArchived, ...(column ? { column } : {}) };
+        tasks = await scopedStore.listTasks(listOptions);
       }
       res.json(tasks);
     } catch (err: unknown) {

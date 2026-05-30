@@ -226,7 +226,9 @@ Research actions persist detailed output in task documents (and optional attachm
 
 Fusion task columns:
 
-1. **planning** — idea intake; AI writes a full plan
+Fusion task columns use persisted enum values as the API/filter contract. Callers use enum values such as `triage`, `todo`, `in-progress`, `in-review`, `done`, and `archived`; UI labels are presentation only. In particular, `triage` is displayed as **Planning**, but `Planning` is not a valid persisted column value. Dashboard task-list API requests such as `GET /api/tasks?column=triage` return only rows whose persisted `task.column` is exactly `triage`, and invalid column values are rejected.
+
+1. **triage** (displayed as **Planning**) — idea intake; AI writes a full plan
 2. **todo** — ready for scheduling
 3. **in-progress** — executor active in isolated worktree
 4. **in-review** — implementation complete; awaiting finalization

@@ -329,6 +329,42 @@ describe("GET /tasks", () => {
     expect(store.listTasks).toHaveBeenCalledWith({ limit: 10, offset: 5, slim: true, includeArchived: false });
   });
 
+  it.each(["triage", "todo", "in-progress"] as const)(
+    "passes column=%s through to the store and returns only matching rows",
+    async (column) => {
+      const tasks = [
+        { ...FAKE_TASK_DETAIL, id: "FN-TRIAGE", column: "triage" as const },
+        { ...FAKE_TASK_DETAIL, id: "FN-TODO", column: "todo" as const },
+        { ...FAKE_TASK_DETAIL, id: "FN-INPROGRESS", column: "in-progress" as const },
+        { ...FAKE_TASK_DETAIL, id: "FN-DONE", column: "done" as const },
+      ];
+      (store.listTasks as ReturnType<typeof vi.fn>).mockImplementationOnce(async (opts?: { column?: string }) => (
+        opts?.column ? tasks.filter((task) => task.column === opts.column) : tasks
+      ));
+
+      const res = await GET(buildApp(), `/api/tasks?column=${column}&limit=20`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body.every((task: { column: string }) => task.column === column)).toBe(true);
+      expect(store.listTasks).toHaveBeenCalledWith({
+        limit: 20,
+        offset: undefined,
+        slim: true,
+        includeArchived: false,
+        column,
+      });
+    },
+  );
+
+  it("returns 400 for invalid column filters", async () => {
+    const res = await GET(buildApp(), "/api/tasks?column=Planning");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("column");
+    expect(store.listTasks).not.toHaveBeenCalled();
+  });
+
   it("returns tasks for search query", async () => {
     (store.searchTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce([FAKE_TASK_DETAIL]);
 

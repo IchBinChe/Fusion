@@ -4638,7 +4638,8 @@ describe("MissionManager", () => {
   });
 
   describe("milestone assertions empty-state", () => {
-    const emptyAssertionsCopy = "No contract assertions defined yet. Feature acceptance criteria are informational until assertions are added.";
+    const emptyAssertionsWithFeaturesCopy = "No contract assertions are linked yet. Feature acceptance criteria are present below and remain informational until assertions are linked.";
+    const emptyAssertionsNoFeaturesCopy = "No feature acceptance criteria or contract assertions defined yet.";
 
     it("keeps empty-state nudge when assertions and feature acceptance criteria are both missing", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
@@ -4656,7 +4657,7 @@ describe("MissionManager", () => {
       fireEvent.click(await screen.findByText("Build Auth System"));
       await waitForDetailLoaded();
 
-      expect(screen.getAllByText(emptyAssertionsCopy)).toHaveLength(1);
+      expect(screen.getAllByText(emptyAssertionsNoFeaturesCopy)).toHaveLength(1);
     });
 
     it("shows feature acceptance rollup when milestone acceptance criteria already exists (flip from prior suppression assertion)", async () => {
@@ -4715,15 +4716,16 @@ describe("MissionManager", () => {
       fireEvent.click(await screen.findByText("Build Auth System"));
       await waitForDetailLoaded();
 
-      expect(screen.queryByText(emptyAssertionsCopy)).not.toBeInTheDocument();
+      expect(screen.queryByText(emptyAssertionsNoFeaturesCopy)).not.toBeInTheDocument();
+      expect(screen.getByText(emptyAssertionsWithFeaturesCopy)).toBeInTheDocument();
       const rollup = screen.getByTestId("milestone-feature-acceptance-rollup");
-      expect(within(rollup).getByText("Feature acceptance criteria (informational)")).toBeInTheDocument();
+      expect(within(rollup).getByText("Feature acceptance criteria (informational source)")).toBeInTheDocument();
       expect(within(rollup).getByTestId("milestone-feature-acceptance-informational-indicator")).toHaveTextContent("Not enforced by autopilot");
       expect(within(rollup).getByText("Session handling")).toBeInTheDocument();
       expect(within(rollup).getByText("Session refresh succeeds without logout", { exact: false })).toBeInTheDocument();
       expect(within(rollup).getByText("Token storage")).toBeInTheDocument();
       expect(within(rollup).getByText("Tokens remain encrypted at rest", { exact: false })).toBeInTheDocument();
-      expect(screen.getByTestId("milestone-missing-structured-assertions-badge")).toHaveTextContent("Prose criteria found; add contract assertions");
+      expect(screen.getByTestId("milestone-zero-assertion-guard")).toHaveTextContent("Feature criteria present but no enforced contract assertions linked");
     });
 
     it("keeps structured assertions precedence and hides rollup when assertions exist", async () => {
@@ -4738,8 +4740,80 @@ describe("MissionManager", () => {
       await waitForDetailLoaded();
 
       expect(screen.getByText("Auth works")).toBeInTheDocument();
+      expect(screen.getByText("Contract assertions (validator-enforced when linked)")).toBeInTheDocument();
       expect(screen.getByTestId("milestone-assertions-enforced-indicator")).toHaveTextContent("Enforced by autopilot");
       expect(screen.queryByTestId("milestone-feature-acceptance-rollup")).not.toBeInTheDocument();
+    });
+
+    it("shows per-row informational and enforced indicators", async () => {
+      const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].acceptanceCriteria = "";
+      const assertion = {
+        id: "CA-ENF-1",
+        milestoneId: "MS-001",
+        title: "Auth works",
+        assertion: "Users can log in",
+        status: "pending",
+        orderIndex: 0,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/missions/health")) return Promise.resolve(mockApiResponse(mockMissionHealthById));
+        if (url.includes("/events")) return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url, mockMissionEvents)));
+        if (url.includes("/health")) return Promise.resolve(mockApiResponse(getMockMissionHealth(extractMissionId(url) ?? "M-001")));
+        if (url.includes("/autopilot")) return Promise.resolve(mockApiResponse(mockAutopilotStatus));
+        if (url.includes("/milestones/MS-001/assertions/CA-ENF-1/features")) {
+          return Promise.resolve(mockApiResponse([{ id: "F-001", title: "User model" }]));
+        }
+        if (url.includes("/milestones/MS-001/assertions")) return Promise.resolve(mockApiResponse([assertion]));
+        const validationResponse = getValidationApiMock(url, mockMilestoneValidationTelemetryWithRounds);
+        if (validationResponse !== null) return Promise.resolve(mockApiResponse(validationResponse));
+        if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+          return Promise.resolve(mockApiResponse(missionDetail));
+        }
+        return Promise.resolve(mockApiResponse(mockMissions));
+      });
+
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+
+      expect(await screen.findByTestId("mission-assertion-enforcement-CA-ENF-1")).toHaveTextContent("Enforced gate");
+
+      const noAssertionMission = JSON.parse(JSON.stringify(missionDetail)) as typeof missionDetail;
+      noAssertionMission.milestones[0].slices[0].features[0].id = "F-INFO-1";
+      noAssertionMission.milestones[0].slices[0].features[0].title = "Feature Informational";
+      globalThis.fetch = createDetailFetchMockForMissionDetail(noAssertionMission);
+      cleanup();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+      expect(await screen.findByTestId("mission-feature-acceptance-enforcement-F-INFO-1")).toHaveTextContent("Informational");
+    });
+
+    it("shows zero-assertion guard only when milestone has feature acceptance criteria and no assertions", async () => {
+      const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].acceptanceCriteria = "";
+
+      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail);
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+      expect(screen.getByTestId("milestone-zero-assertion-guard")).toBeInTheDocument();
+
+      cleanup();
+      globalThis.fetch = createDetailFetchMockForMissionDetail(
+        missionDetail,
+        mockMilestoneValidationTelemetryWithRounds,
+        mockMilestoneValidationTelemetryWithRounds.validationContract.assertions,
+      );
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+      expect(screen.queryByTestId("milestone-zero-assertion-guard")).not.toBeInTheDocument();
     });
   });
 

@@ -1801,6 +1801,28 @@
   margin-bottom: var(--space-sm);
 }
 
+.mission-assertion__enforcement {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: calc(var(--space-xs) * 0.5) var(--space-sm);
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface) 85%, var(--bg));
+  flex-shrink: 0;
+}
+
+.mission-assertion__enforcement--enforced {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 40%, var(--border));
+}
+
+.mission-assertion__enforcement--informational {
+  color: var(--text-muted);
+}
+
 .mission-assertion__linked-count {
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   color: var(--text-dim);

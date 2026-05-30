@@ -865,6 +865,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const [missionHealthById, setMissionHealthById] = useState<Map<string, MissionHealth>>(new Map());
 
   const [activeTab, setActiveTab] = useState<"structure" | "activity">("structure");
+  const milestoneAssertionGapSignatureRef = useRef<Map<string, string>>(new Map());
   const [missionEvents, setMissionEvents] = useState<MissionEvent[]>([]);
   const missionEventsRef = useRef<MissionEvent[]>([]);
   const missionsRef = useRef<MissionWithSummary[]>([]);
@@ -880,6 +881,31 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const [expandedEventMetadata, setExpandedEventMetadata] = useState<Set<string>>(new Set());
 
   const activityEventsContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!selectedMission) return;
+
+    const nextSignatures = new Map<string, string>();
+    for (const milestone of selectedMission.milestones) {
+      const featuresWithAcceptanceCriteria = milestone.slices
+        .flatMap((slice) => slice.features)
+        .filter((feature) => (feature.acceptanceCriteria ?? "").trim().length > 0);
+      const assertionCount = assertionsByMilestone.get(milestone.id)?.length ?? 0;
+      const hasZeroAssertionGuard = featuresWithAcceptanceCriteria.length > 0 && assertionCount === 0;
+      const signature = `${hasZeroAssertionGuard}:${featuresWithAcceptanceCriteria.length}:${assertionCount}`;
+      const previousSignature = milestoneAssertionGapSignatureRef.current.get(milestone.id);
+      if (hasZeroAssertionGuard && previousSignature !== signature) {
+        console.warn("[MissionManager] milestone_zero_assertion_guard", {
+          milestoneId: milestone.id,
+          featureAcceptanceCriteriaCount: featuresWithAcceptanceCriteria.length,
+          assertionCount,
+        });
+      }
+      nextSignatures.set(milestone.id, signature);
+    }
+
+    milestoneAssertionGapSignatureRef.current = nextSignatures;
+  }, [assertionsByMilestone, selectedMission]);
   const activityEventsEndRef = useRef<HTMLDivElement>(null);
 
   // Keep latest state available to long-lived SSE handlers without reconnect churn.
@@ -2676,6 +2702,10 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   const featuresWithAcceptanceCriteria = milestone.slices
                     .flatMap((slice) => slice.features)
                     .filter((feature) => (feature.acceptanceCriteria ?? "").trim().length > 0);
+                  const milestoneAssertions = Array.isArray(assertionsByMilestone.get(milestone.id))
+                    ? assertionsByMilestone.get(milestone.id)!
+                    : [] as MissionContractAssertion[];
+                  const hasZeroAssertionGuard = featuresWithAcceptanceCriteria.length > 0 && milestoneAssertions.length === 0;
 
                   return (
                   <div key={milestone.id} className="mission-milestone">
@@ -3486,15 +3516,15 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                           {/* Assertions Panel */}
                           <div className="mission-assertions">
                             <div className="mission-assertions__header">
-                              <span className="mission-assertions__title">Contract assertions (autopilot gate)</span>
+                              <span className="mission-assertions__title">Contract assertions (validator-enforced when linked)</span>
                               <span className="mission-assertions__mode-tag" data-testid="milestone-assertions-enforced-indicator">
                                 <span className="status-dot status-dot--running" />
                                 Enforced by autopilot
                               </span>
-                              {milestoneRollup?.hasProseButNoAssertions && (
-                                <span className="mission-assertions__mode-tag mission-assertions__mode-tag--warning" data-testid="milestone-missing-structured-assertions-badge">
+                              {hasZeroAssertionGuard && (
+                                <span className="mission-assertions__mode-tag mission-assertions__mode-tag--warning" data-testid="milestone-zero-assertion-guard">
                                   <span className="status-dot status-dot--pending" />
-                                  Prose criteria found; add contract assertions
+                                  Feature criteria present but no enforced contract assertions linked
                                 </span>
                               )}
                               {milestoneRollup && (
@@ -3574,7 +3604,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
                             {/* Assertions list */}
                             <div className="mission-assertions__list">
-                              {(Array.isArray(assertionsByMilestone.get(milestone.id)) ? assertionsByMilestone.get(milestone.id)! : [] as MissionContractAssertion[]).map((assertion) => (
+                              {milestoneAssertions.map((assertion) => (
                                 <div
                                   key={assertion.id}
                                   className="mission-assertion"
@@ -3630,11 +3660,23 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                         {(() => {
                                           const linked = linkedFeaturesByAssertion.get(assertion.id);
                                           const count = linked?.length ?? 0;
-                                          return count > 0 ? (
-                                            <span className="mission-assertion__linked-count" title={`${count} linked feature${count !== 1 ? "s" : ""}`}>
-                                              ({count} linked)
-                                            </span>
-                                          ) : null;
+                                          const isEnforced = count > 0;
+                                          return (
+                                            <>
+                                              <span
+                                                className={`mission-assertion__enforcement ${isEnforced ? "mission-assertion__enforcement--enforced" : "mission-assertion__enforcement--informational"}`}
+                                                data-testid={`mission-assertion-enforcement-${assertion.id}`}
+                                              >
+                                                <span className={`status-dot ${isEnforced ? "status-dot--running" : "status-dot--pending"}`} />
+                                                {isEnforced ? "Enforced gate" : "Informational"}
+                                              </span>
+                                              {count > 0 ? (
+                                                <span className="mission-assertion__linked-count" title={`${count} linked feature${count !== 1 ? "s" : ""}`}>
+                                                  ({count} linked)
+                                                </span>
+                                              ) : null}
+                                            </>
+                                          );
                                         })()}
                                         <button
                                           className="mission-icon-btn"
@@ -3740,38 +3782,51 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                   )}
                                 </div>
                               ))}
-                              {(!assertionsByMilestone.get(milestone.id) || assertionsByMilestone.get(milestone.id)?.length === 0)
+                              {(milestoneAssertions.length === 0)
                                 && !isCreatingAssertion
                                 && (
                                   featuresWithAcceptanceCriteria.length > 0 ? (
-                                    // Product contract (2026-05-15 #product): completion criteria canonically
-                                    // live on MissionFeature.acceptanceCriteria; MissionContractAssertion rows
-                                    // are an additive milestone-level structure. Missing assertions do not
-                                    // mean missing criteria when child features already carry acceptance text,
-                                    // even when milestone.acceptanceCriteria is also populated (FN-4613/FN-4652).
-                                    // If FN-4578/4579/4580 (or successors) change the model, update this.
-                                    <div className="mission-assertions__list" data-testid="milestone-feature-acceptance-rollup">
-                                      <div className="mission-assertions__rollup-header">
-                                        <span className="mission-assertions__title">Feature acceptance criteria (informational)</span>
-                                        <span className="mission-assertions__mode-tag mission-assertions__mode-tag--informational" data-testid="milestone-feature-acceptance-informational-indicator">
-                                          <span className="status-dot status-dot--pending" />
-                                          Not enforced by autopilot
-                                        </span>
+                                    // Product contract source of truth: docs/missions-completion-contract.md (FN-5718).
+                                    // MissionFeature.acceptanceCriteria is informational authored intent; linked
+                                    // MissionContractAssertion rows are the validator-enforced completion gate.
+                                    // When criteria prose exists but assertions are absent, keep criteria visible
+                                    // and warn that the surface is informational until assertions are linked.
+                                    <>
+                                      <div className="mission-manager__empty mission-assertions__empty">
+                                        <span>No contract assertions are linked yet. Feature acceptance criteria are present below and remain informational until assertions are linked.</span>
                                       </div>
-                                      {featuresWithAcceptanceCriteria.map((feature) => (
-                                        <div key={feature.id} className="mission-assertion">
-                                          <span className="mission-assertion__title">{feature.title}</span>
-                                          <div className="mission-assertion__text">
-                                            <strong>Acceptance:</strong>
-                                            {renderMarkdownText(feature.acceptanceCriteria ?? "")}
-                                          </div>
+                                      <div className="mission-assertions__list" data-testid="milestone-feature-acceptance-rollup">
+                                        <div className="mission-assertions__rollup-header">
+                                          <span className="mission-assertions__title">Feature acceptance criteria (informational source)</span>
+                                          <span className="mission-assertions__mode-tag mission-assertions__mode-tag--informational" data-testid="milestone-feature-acceptance-informational-indicator">
+                                            <span className="status-dot status-dot--pending" />
+                                            Not enforced by autopilot
+                                          </span>
                                         </div>
-                                      ))}
-                                    </div>
+                                        {featuresWithAcceptanceCriteria.map((feature) => (
+                                          <div key={feature.id} className="mission-assertion">
+                                            <div className="mission-assertion__header">
+                                              <span className="mission-assertion__title">{feature.title}</span>
+                                              <span
+                                                className="mission-assertion__enforcement mission-assertion__enforcement--informational"
+                                                data-testid={`mission-feature-acceptance-enforcement-${feature.id}`}
+                                              >
+                                                <span className="status-dot status-dot--pending" />
+                                                Informational
+                                              </span>
+                                            </div>
+                                            <div className="mission-assertion__text">
+                                              <strong>Acceptance:</strong>
+                                              {renderMarkdownText(feature.acceptanceCriteria ?? "")}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </>
                                   ) : (
                                     !milestone.acceptanceCriteria?.trim() ? (
                                       <div className="mission-manager__empty mission-assertions__empty">
-                                        <span>No contract assertions defined yet. Feature acceptance criteria are informational until assertions are added.</span>
+                                        <span>No feature acceptance criteria or contract assertions defined yet.</span>
                                       </div>
                                     ) : null
                                   )

@@ -1,9 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PrCreateModal } from "../PrCreateModal";
 import type { PrInfo } from "@fusion/core";
-import { loadAllAppCss } from "../../test/cssFixture";
 
 const mocks = vi.hoisted(() => ({
   generatePrMetadata: vi.fn(),
@@ -61,18 +60,6 @@ async function renderModalLoaded(overrides?: Partial<ComponentProps<typeof PrCre
 }
 
 describe("PrCreateModal", () => {
-  let styleEl: HTMLStyleElement;
-
-  beforeAll(() => {
-    styleEl = document.createElement("style");
-    styleEl.textContent = loadAllAppCss();
-    document.head.appendChild(styleEl);
-  });
-
-  afterAll(() => {
-    styleEl.remove();
-  });
-
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();

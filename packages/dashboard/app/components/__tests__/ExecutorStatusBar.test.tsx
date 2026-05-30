@@ -506,9 +506,11 @@ describe("ExecutorStatusBar", () => {
       expect(screen.getByRole("status")).toHaveClass("executor-status-bar--keyboard-open");
     });
 
-    it("does not apply keyboard-open class when keyboardOpen is false", () => {
+    it("does not apply keyboard-open class and remains rendered when keyboardOpen is false", () => {
       render(<ExecutorStatusBar tasks={emptyTasks} keyboardOpen={false} />);
-      expect(screen.getByRole("status")).not.toHaveClass("executor-status-bar--keyboard-open");
+      const status = screen.getByRole("status");
+      expect(status).toBeInTheDocument();
+      expect(status).not.toHaveClass("executor-status-bar--keyboard-open");
     });
   });
 

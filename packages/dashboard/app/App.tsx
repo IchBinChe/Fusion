@@ -59,6 +59,7 @@ import { useFavorites } from "./hooks/useFavorites";
 import { useAuthOnboarding } from "./hooks/useAuthOnboarding";
 import { useMobileKeyboard } from "./hooks/useMobileKeyboard";
 import { isIOS, useMobileScrollLock } from "./hooks/useMobileScrollLock";
+import { computeMobileBarKeyboardFlags } from "./utils/mobileBarKeyboardFlags";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { useViewState, type TaskView } from "./hooks/useViewState";
@@ -472,13 +473,19 @@ function AppInner() {
   // as the focus target moving and dismisses the keyboard immediately.
   // iOS doesn't shrink the layout viewport, so the iOS path keeps the
   // hide-nav-on-keyboard behavior intact.
-  const mobileKeyboardOpen = isMobile && keyboardOpen && !modalManager.anyModalOpen && isIOS();
-  // Nav-bar-only: pin the bar to the page bottom whenever the keyboard is up on
-  // mobile, regardless of modal state or platform. The bar's `bottom` defaults
-  // to `var(--icb-bottom-offset)`, which equals the keyboard height on iOS and
-  // would otherwise float the bar above the keyboard. We want the keyboard to
-  // simply cover the bar instead.
-  const mobileNavKeyboardOpen = isMobile && keyboardOpen;
+  //
+  // FN-5707: keep nav pinning cross-platform, but only apply the footer
+  // keyboard-collapse class on iOS. On Android, collapsing the footer to
+  // `bottom: 0` overlaps it with the nav bar because the layout viewport
+  // already shrinks and the stacked footer position is already correct.
+  const { footerHidden, navKeyboardOpen, footerKeyboardOpen } = computeMobileBarKeyboardFlags({
+    isMobile,
+    keyboardOpen,
+    anyModalOpen: modalManager.anyModalOpen,
+    isIOS: isIOS(),
+  });
+  const mobileKeyboardOpen = footerHidden;
+  const mobileNavKeyboardOpen = navKeyboardOpen;
   // App-level scroll lock for inline editing (TaskCard inline edit, etc.):
   // when the keyboard is up outside of any modal, pin the body so iOS can't
   // shift the document or visualViewport, and so the dashboard snaps back
@@ -1909,7 +1916,7 @@ function AppInner() {
           lastFetchTimeMs={lastFetchTimeMs}
           currentProjectPath={currentProject.path}
           onOpenProjectDirectory={handleOpenProjectDirectory}
-          keyboardOpen={mobileNavKeyboardOpen}
+          keyboardOpen={footerKeyboardOpen}
           hideWhenKeyboardOpen={mobileKeyboardOpen}
         />
       )}

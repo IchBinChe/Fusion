@@ -1244,6 +1244,23 @@ describe("MissionStore", () => {
       expect(taskRow.sliceId).toBe(slice.id);
     });
 
+    it("throws a clear error when linking to a task not on the active board", () => {
+      const mission = store.createMission({ title: "Mission" });
+      const milestone = store.addMilestone(mission.id, { title: "Milestone" });
+      const slice = store.addSlice(milestone.id, { title: "Slice" });
+      const feature = store.addFeature(slice.id, { title: "Linkable" });
+
+      expect(() => store.linkFeatureToTask(feature.id, "FN-ARCHIVED")).toThrow(
+        `Cannot link feature ${feature.id} to task FN-ARCHIVED: task is not on the active board (it may be archived, deleted, or never existed). Only active tasks can be linked to features.`,
+      );
+
+      const unchanged = store.getFeature(feature.id)!;
+      expect(unchanged.taskId).toBeUndefined();
+      expect(unchanged.status).toBe("defined");
+      expect(unchanged.loopState).toBe("idle");
+      expect(unchanged.implementationAttemptCount).toBe(0);
+    });
+
     it("emits feature:linked event", () => {
       createTaskInDb(db, "FN-001");
 

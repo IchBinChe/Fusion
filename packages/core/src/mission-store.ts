@@ -2085,6 +2085,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       throw new Error(`Feature ${featureId} not found`);
     }
 
+    const liveTask = this.db
+      .prepare(`SELECT id FROM tasks WHERE id = ? AND "deletedAt" IS NULL`)
+      .get(taskId) as { id: string } | undefined;
+    if (!liveTask) {
+      throw new Error(
+        `Cannot link feature ${featureId} to task ${taskId}: task is not on the active board (it may be archived, deleted, or never existed). Only active tasks can be linked to features.`,
+      );
+    }
+
     const linkage = this.resolveTaskLinkage(feature.sliceId);
 
     // When first linking (loopState is idle or falsy), transition to implementing

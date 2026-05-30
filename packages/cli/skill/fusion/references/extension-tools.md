@@ -255,7 +255,7 @@ Activate a pending slice for implementation. Sets status to 'active' and enables
 
 ### fn_feature_link_task
 
-Link a feature to a fn task for implementation. Updates the feature status to 'triaged' and associates it with the task.
+Link a feature to a fn task for implementation. Updates the feature status to 'triaged' and associates it with the task. If the target task is not on the active board (for example archived, deleted, or never created), the tool returns a clear validation error indicating that only active tasks can be linked.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

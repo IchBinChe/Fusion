@@ -2976,7 +2976,9 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Link Feature to Task",
     description:
       "Link a feature to a fn task for implementation. " +
-      "Updates the feature status to 'triaged' and associates it with the task.",
+      "Updates the feature status to 'triaged' and associates it with the task. " +
+      "If the target task is not on the active board (for example archived, deleted, or never created), " +
+      "the tool returns a clear validation error indicating that only active tasks can be linked.",
     promptSnippet: "Link a feature to a task",
     promptGuidelines: [
       "Use when a feature is ready for implementation and has a corresponding task",
@@ -3013,18 +3015,27 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
 
-      const updated = missionStore.linkFeatureToTask(params.featureId, params.taskId);
-      await store.updateTask(params.taskId, { sliceId: feature.sliceId });
+      try {
+        const updated = missionStore.linkFeatureToTask(params.featureId, params.taskId);
+        await store.updateTask(params.taskId, { sliceId: feature.sliceId });
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Linked ${updated.id}: "${updated.title}" → ${params.taskId}\nStatus: ${updated.status}`,
-          },
-        ],
-        details: { featureId: updated.id, taskId: params.taskId, title: updated.title, status: updated.status },
-      };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Linked ${updated.id}: "${updated.title}" → ${params.taskId}\nStatus: ${updated.status}`,
+            },
+          ],
+          details: { featureId: updated.id, taskId: params.taskId, title: updated.title, status: updated.status },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: message }],
+          isError: true,
+          details: { error: message },
+        };
+      }
     },
   });
 

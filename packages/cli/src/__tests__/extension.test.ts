@@ -1447,6 +1447,56 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       expect(result.content[0].text).toContain("Task FN-999 not found");
     });
 
+    it("returns clear error when task is archived/non-active", async () => {
+      const missionTool = api.tools.get("fn_mission_create")!;
+      const milestoneTool = api.tools.get("fn_milestone_add")!;
+      const sliceTool = api.tools.get("fn_slice_add")!;
+      const featureTool = api.tools.get("fn_feature_add")!;
+      const linkTool = api.tools.get("fn_feature_link_task")!;
+
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      const archivedTask = await store.createTask({ description: "Archived task" });
+      await store.moveTask(archivedTask.id, "done");
+      await store.archiveTask(archivedTask.id);
+
+      const mission = await missionTool.execute("m1", { title: "Mission" }, undefined, undefined, makeCtx(tmpDir));
+      const milestone = await milestoneTool.execute(
+        "ms1",
+        { missionId: mission.details.missionId, title: "Milestone" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const slice = await sliceTool.execute(
+        "sl1",
+        { milestoneId: milestone.details.milestoneId, title: "Slice" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const feature = await featureTool.execute(
+        "f1",
+        { sliceId: slice.details.sliceId, title: "Feature" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const result = await linkTool.execute(
+        "l0b",
+        { featureId: feature.details.featureId, taskId: archivedTask.id },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("task is not on the active board");
+      expect(result.content[0].text).toContain(`Cannot link feature ${feature.details.featureId} to task ${archivedTask.id}`);
+      expect(result.details.error).toContain("Only active tasks can be linked to features");
+    });
+
     it("links feature to task", async () => {
       const missionTool = api.tools.get("fn_mission_create")!;
       const milestoneTool = api.tools.get("fn_milestone_add")!;

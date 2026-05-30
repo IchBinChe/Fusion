@@ -1,5 +1,13 @@
 # @fusion/desktop
 
+## 0.38.1
+
+### Patch Changes
+
+- Updated dependencies [bad8f52]
+  - @fusion/dashboard@0.38.1
+  - @fusion/core@0.38.1
+
 ## 0.38.0
 
 ### Patch Changes

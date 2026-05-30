@@ -2,6 +2,58 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.38.1
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- bad8f52: Improve the mission manager mobile stacked layout so mission rows reflow cleanly: stacked mission list items switch to a column layout with stretched content, item actions become full-width and wrap instead of cramped inline controls, and run controls span the full width.
+  - @fusion-plugin-examples/cli-printing-press@0.1.16
+  - @fusion-plugin-examples/dependency-graph@0.1.30
+  - @fusion-plugin-examples/roadmap@0.1.18
+  - @fusion/core@0.38.1
+  - @fusion/engine@0.38.1
+  - @fusion-plugin-examples/cursor-runtime@0.1.18
+  - @fusion-plugin-examples/droid-runtime@0.1.25
+  - @fusion-plugin-examples/hermes-runtime@0.2.49
+  - @fusion-plugin-examples/openclaw-runtime@0.2.49
+  - @fusion-plugin-examples/paperclip-runtime@0.2.49
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- Updated dependencies [bad8f52]
+  - @fusion/dashboard@0.38.1
+  - @fusion/core@0.38.1
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.38.1
+- @fusion/pi-claude-cli@0.38.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.38.1
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- bad8f52: Fix the Binary Release workflow so platform binaries publish to GitHub Releases again. The release job now tolerates a single failing build leg instead of being skipped (which previously suppressed all assets), the node_modules cache key includes CPU arch to stop arm64 runners restoring x64 native deps, the macOS CLI signing step is skipped gracefully when Apple certs are absent, and the dependency-graph plugin build uses a cross-platform copy step that no longer breaks the Windows desktop build.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [bad8f52]
+  - @runfusion/fusion@0.38.1
+
 ## 0.38.0
 
 ### @fusion/dashboard
@@ -7572,6 +7624,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.25
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.25
 
 ## 0.11.24
 

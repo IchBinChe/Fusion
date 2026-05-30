@@ -1,5 +1,14 @@
 # @fusion-plugin-examples/dependency-graph
 
+## 0.1.30
+
+### Patch Changes
+
+- Updated dependencies [bad8f52]
+  - @fusion/dashboard@0.38.1
+  - @fusion/core@0.38.1
+  - @fusion/plugin-sdk@0.38.1
+
 ## 0.1.29
 
 ### Patch Changes

@@ -1,5 +1,21 @@
 # @fusion/dashboard
 
+## 0.38.1
+
+### Patch Changes
+
+- bad8f52: Improve the mission manager mobile stacked layout so mission rows reflow cleanly: stacked mission list items switch to a column layout with stretched content, item actions become full-width and wrap instead of cramped inline controls, and run controls span the full width.
+  - @fusion-plugin-examples/cli-printing-press@0.1.16
+  - @fusion-plugin-examples/dependency-graph@0.1.30
+  - @fusion-plugin-examples/roadmap@0.1.18
+  - @fusion/core@0.38.1
+  - @fusion/engine@0.38.1
+  - @fusion-plugin-examples/cursor-runtime@0.1.18
+  - @fusion-plugin-examples/droid-runtime@0.1.25
+  - @fusion-plugin-examples/hermes-runtime@0.2.49
+  - @fusion-plugin-examples/openclaw-runtime@0.2.49
+  - @fusion-plugin-examples/paperclip-runtime@0.2.49
+
 ## 0.38.0
 
 ### Patch Changes

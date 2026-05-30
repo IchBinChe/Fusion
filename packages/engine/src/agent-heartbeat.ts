@@ -2057,12 +2057,16 @@ export class HeartbeatMonitor {
         }
 
         let autoClaimCandidates: AutoClaimCandidate[] = [];
+        let autoClaimSnapshotCandidateCount = 0;
+        let autoClaimRoleFilteredCount = 0;
         const autoClaimEnabled = isAutoClaimRelevantTasksEnabled(agent);
         if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled && this.snapshotManager) {
           try {
             const snapshot = await this.snapshotManager.getSnapshot();
+            autoClaimSnapshotCandidateCount = snapshot.tasks.length;
             const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate));
             const skippedIncompatibleCount = snapshot.tasks.length - roleCompatibleCandidates.length;
+            autoClaimRoleFilteredCount = skippedIncompatibleCount;
             if (skippedIncompatibleCount > 0) {
               heartbeatLog.log(
                 `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — only executor agents may claim implementation work`,
@@ -2717,13 +2721,30 @@ export class HeartbeatMonitor {
             }
 
             const promptCandidateLimit = resolveAutoClaimCandidatesInPromptLimit(agent, heartbeatModelSettings);
+            const autoClaimStatus = autoClaimEnabled
+              ? (promptCandidateLimit === 0
+                ? "disabled (prompt-suppressed)"
+                : (autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0
+                  ? "enabled (no role-compatible candidates; executor role required)"
+                  : "enabled"))
+              : "disabled";
+            const noRoleCompatibleCandidateLines = autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0
+              ? [
+                `- Snapshot found ${autoClaimSnapshotCandidateCount} eligible Todo task(s), but this agent role cannot auto-claim implementation work.`,
+                "- Backlog auto-claim is restricted to executor-role agents; use delegation or create coordination follow-up instead of assuming the board is empty.",
+              ]
+              : [];
             const candidateLines = promptCandidateLimit > 0
               ? [
                 "",
                 "Open Task Candidates (auto-claim scan):",
-                ...autoClaimCandidates
-                  .slice(0, promptCandidateLimit)
-                  .map((candidate) => `- ${candidate.id}: ${candidate.title ?? candidate.descriptionFirstLine}`),
+                ...(
+                  autoClaimCandidates.length > 0
+                    ? autoClaimCandidates
+                      .slice(0, promptCandidateLimit)
+                      .map((candidate) => `- ${candidate.id}: ${candidate.title ?? candidate.descriptionFirstLine}`)
+                    : noRoleCompatibleCandidateLines
+                ),
               ]
               : [];
 
@@ -2741,7 +2762,7 @@ export class HeartbeatMonitor {
               ...(wakeTriggerSourceLine ? [wakeTriggerSourceLine] : []),
               `- pending messages: ${pendingMessages.length}`,
               `- pending room messages: ${pendingRoomMessages.total}`,
-              `- auto-claim relevant tasks: ${autoClaimEnabled ? (promptCandidateLimit === 0 ? "disabled (prompt-suppressed)" : "enabled") : "disabled"}`,
+              `- auto-claim relevant tasks: ${autoClaimStatus}`,
               "",
               "Treat this wake delta as the highest-priority change for this heartbeat.",
               "This is an autonomous heartbeat run (manual or automatic): re-anchor on",

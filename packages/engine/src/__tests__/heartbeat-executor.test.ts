@@ -986,6 +986,42 @@ describe("executeHeartbeat", () => {
       expect(store.claimTaskForAgent).not.toHaveBeenCalled();
     });
 
+    it("explains empty auto-claim prompt candidates when role policy filters eligible todo tasks", async () => {
+      const store = createStoreWithAgentForExec({
+        taskId: undefined,
+        role: "reviewer",
+        soul: "review workflows",
+      });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+      mockTaskStore = createMockTaskStore({
+        listTasks: vi.fn().mockResolvedValue([
+          {
+            id: "FN-CANDIDATE",
+            description: "executor reliability follow-up",
+            title: "Executor reliability",
+            prompt: "",
+            steps: [],
+            column: "todo",
+            dependencies: [],
+            log: [],
+            attachments: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as unknown as TaskDetail,
+        ]),
+      });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(executionPrompt).toContain("auto-claim relevant tasks: enabled (no role-compatible candidates; executor role required)");
+      expect(executionPrompt).toContain("Open Task Candidates (auto-claim scan):");
+      expect(executionPrompt).toContain("Snapshot found 1 eligible Todo task(s), but this agent role cannot auto-claim implementation work.");
+    });
+
     it("reuses one snapshot rebuild across concurrent no-task heartbeats", async () => {
       const listTasks = vi.fn().mockResolvedValue([
         {

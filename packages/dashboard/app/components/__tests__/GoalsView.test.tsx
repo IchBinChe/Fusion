@@ -241,4 +241,46 @@ describe("GoalsView", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to save goal right now. Please try again.");
   });
+
+  it("renders markdown description as formatted HTML", () => {
+    render(
+      <GoalsView
+        initialGoals={[
+          makeGoal({
+            id: "g1",
+            title: "Markdown Goal",
+            description: "**bold**\n\n- first item\n- second item",
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("bold", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByText("first item", { selector: "li" })).toBeInTheDocument();
+    expect(screen.queryByText("**bold**")).not.toBeInTheDocument();
+  });
+
+  it("collapses long descriptions by default and toggles expanded state", () => {
+    const longDescription = `${"Long description content ".repeat(20)}extra`;
+    render(<GoalsView initialGoals={[makeGoal({ id: "g1", title: "One", description: longDescription })]} />);
+
+    const toggle = screen.getByTestId("goal-description-toggle-g1");
+    const description = screen.getByText(/Long description content/i).closest(".goals-card-description");
+
+    expect(toggle).toHaveTextContent("Show more");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(description).toHaveClass("goals-card-description-collapsed");
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveTextContent("Show less");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(description).not.toHaveClass("goals-card-description-collapsed");
+  });
+
+  it("does not render description toggle for short single-line text", () => {
+    render(<GoalsView initialGoals={[makeGoal({ id: "g1", title: "One", description: "Short goal description" })]} />);
+
+    expect(screen.queryByTestId("goal-description-toggle-g1")).not.toBeInTheDocument();
+  });
 });

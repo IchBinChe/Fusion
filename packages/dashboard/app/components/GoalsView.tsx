@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Goal } from "@fusion/core";
 import { Plus } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import "./GoalsView.css";
 
 export interface GoalsViewProps {
@@ -11,6 +13,7 @@ const MAX_ACTIVE_GOALS = 5;
 const WARNING_THRESHOLD = 3;
 
 const CAP_ERROR_MESSAGE = "Cannot activate more than 5 goals. Resolve an active goal before activating another.";
+const GOAL_DESCRIPTION_TOGGLE_LENGTH = 280;
 
 function isCapError(payload: unknown): boolean {
   return Boolean(payload && typeof payload === "object" && "code" in payload && (payload as { code?: unknown }).code === "ACTIVE_GOAL_LIMIT_EXCEEDED");
@@ -32,6 +35,7 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
   const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [expandedGoalDescriptions, setExpandedGoalDescriptions] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (initialGoals !== undefined) {
@@ -185,6 +189,22 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
     } finally {
       setIsSavingEdit(false);
     }
+  }
+
+  function isDescriptionToggleVisible(description: string): boolean {
+    return description.length > GOAL_DESCRIPTION_TOGGLE_LENGTH || description.includes("\n");
+  }
+
+  function toggleGoalDescription(goalId: string) {
+    setExpandedGoalDescriptions((current) => {
+      const next = new Set(current);
+      if (next.has(goalId)) {
+        next.delete(goalId);
+      } else {
+        next.add(goalId);
+      }
+      return next;
+    });
   }
 
   async function updateGoalArchiveStatus(goal: Goal) {
@@ -357,7 +377,31 @@ export function GoalsView({ initialGoals }: GoalsViewProps) {
                 <>
                   <div className="goals-card-main">
                     <h3 className="goals-card-title">{goal.title}</h3>
-                    {goal.description ? <p className="goals-card-description">{goal.description}</p> : null}
+                    {goal.description ? (
+                      (() => {
+                        const showToggle = isDescriptionToggleVisible(goal.description);
+                        const isExpanded = expandedGoalDescriptions.has(goal.id);
+
+                        return (
+                          <>
+                            <div className={`markdown-body goals-card-description ${showToggle && !isExpanded ? "goals-card-description-collapsed" : ""}`.trim()}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{goal.description}</ReactMarkdown>
+                            </div>
+                            {showToggle ? (
+                              <button
+                                type="button"
+                                className="btn goals-card-description-toggle"
+                                aria-expanded={isExpanded}
+                                data-testid={`goal-description-toggle-${goal.id}`}
+                                onClick={() => toggleGoalDescription(goal.id)}
+                              >
+                                {isExpanded ? "Show less" : "Show more"}
+                              </button>
+                            ) : null}
+                          </>
+                        );
+                      })()
+                    ) : null}
                     <p className="goals-card-status">Status: {goal.status}</p>
                   </div>
                   <div className="goals-card-actions">

@@ -112,6 +112,28 @@
   color: var(--text-muted);
 }
 
+.goals-card-description > :first-child {
+  margin-top: 0;
+}
+
+.goals-card-description > :last-child {
+  margin-bottom: 0;
+}
+
+.goals-card-description-collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  max-height: calc(var(--space-md) * 6);
+}
+
+.goals-card-description-toggle {
+  margin-top: var(--space-xs);
+  align-self: flex-start;
+  color: var(--text-muted);
+}
+
 .goals-card-status {
   margin: var(--space-xs) 0 0;
   color: var(--text-muted);
@@ -144,5 +166,10 @@
   .goals-form-actions,
   .goals-card-actions {
     flex-direction: column;
+  }
+
+  .goals-card-description-collapsed {
+    -webkit-line-clamp: 3;
+    max-height: calc(var(--space-md) * 5);
   }
 }

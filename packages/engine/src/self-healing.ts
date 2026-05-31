@@ -276,6 +276,8 @@ export interface SelfHealingOptions {
   getProjectId?: () => string;
   /** Optional callback to reconcile active mission features during maintenance. */
   reconcileAllMissionFeatures?: () => Promise<number>;
+  /** Optional callback to re-run mission validation recovery during maintenance. */
+  recoverActiveMissionValidations?: () => Promise<{ recoveredCount: number }>;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -1470,6 +1472,15 @@ export class SelfHealingManager {
       } else {
         // Batch 2 — Task recovery (operations are independent of each other)
         const batch2Fns: Array<{ name: string; fn: () => Promise<unknown> }> = [
+          {
+            name: "recover-active-mission-validations",
+            fn: async () => {
+              if (!this.options.recoverActiveMissionValidations) {
+                return;
+              }
+              await this.options.recoverActiveMissionValidations();
+            },
+          },
           {
             name: "reconcile-mission-features",
             fn: async () => {

@@ -216,6 +216,40 @@ function createMockMissionStore() {
         updatedAt: new Date().toISOString(),
       };
       validatorRuns.set(id, updated);
+
+      const feature = features.get(run.featureId);
+      if (feature) {
+        if (status === "passed") {
+          features.set(run.featureId, {
+            ...feature,
+            loopState: "passed",
+            lastValidatorStatus: "passed",
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (status === "failed") {
+          features.set(run.featureId, {
+            ...feature,
+            loopState: "needs_fix",
+            lastValidatorStatus: "failed",
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (status === "blocked") {
+          features.set(run.featureId, {
+            ...feature,
+            loopState: "blocked",
+            lastValidatorStatus: "blocked",
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (status === "error") {
+          features.set(run.featureId, {
+            ...feature,
+            loopState: "validating",
+            lastValidatorStatus: "error",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+
       return updated;
     }),
     recordValidatorFailures: vi.fn(() => []),
@@ -238,7 +272,7 @@ function createMockMissionStore() {
       const updatedSource = {
         ...sourceFeature,
         implementationAttemptCount: (sourceFeature.implementationAttemptCount ?? 0) + 1,
-        loopState: "needs_fix" as const,
+        loopState: "implementing" as const,
         updatedAt: new Date().toISOString(),
       };
       features.set(sourceFeatureId, updatedSource);
@@ -679,6 +713,58 @@ describe("MissionExecutionLoop", () => {
         "F-001",
         "task_completion",
       );
+    });
+
+    it("runs linked assertions and marks completion only when validation passes", async () => {
+      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-ASSERT-PASS", status: "in-progress" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(makeAssertions(2));
+      taskStore._setTask({ id: "FN-ASSERT-PASS", title: "Assertion pass", description: "Implementation", log: [] });
+      mockSessionHolder.session.state.messages = [
+        { role: "assistant", content: JSON.stringify({ status: "pass", assertions: [{ assertionId: "CA-1", passed: true }, { assertionId: "CA-2", passed: true }], summary: "all good" }) },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-ASSERT-PASS");
+
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
+      expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(expect.any(String), "passed", expect.any(String));
+      expect(missionStore.getFeature("F-001")?.loopState).toBe("passed");
+      expect(missionStore.getFeature("F-001")?.lastValidatorStatus).toBe("passed");
+      expect(missionStore.updateFeatureStatus).toHaveBeenCalledWith("F-001", "done");
+    });
+
+    it("routes failed assertion validation to fix flow and does not pass feature", async () => {
+      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-ASSERT-FAIL", status: "in-progress" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(makeAssertions(2));
+      taskStore._setTask({ id: "FN-ASSERT-FAIL", title: "Assertion fail", description: "Implementation", log: [] });
+      mockSessionHolder.session.state.messages = [
+        { role: "assistant", content: JSON.stringify({ status: "fail", assertions: [{ assertionId: "CA-1", passed: false, message: "miss" }], summary: "failed" }) },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-ASSERT-FAIL");
+
+      expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(expect.any(String), "failed", expect.any(String));
+      expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
+      expect(missionStore.getFeature("F-001")?.lastValidatorStatus).toBe("failed");
+      expect(missionStore.getFeature("F-001")?.loopState).toBe("implementing");
+      expect(missionStore.getFeature("F-001")?.status).not.toBe("done");
     });
   });
 

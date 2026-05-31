@@ -120,6 +120,41 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
     loop.stop();
   });
 
+  it("recovery trigger for done implementing feature is idempotent across subsequent passes", async () => {
+    const feature = makeFeature({ status: "done", lastValidatorStatus: undefined, loopState: "implementing" });
+    const missionStore = {
+      listMissions: vi.fn(() => [{ id: "M-001", status: "active" }]),
+      getMissionWithHierarchy: vi.fn(() => ({
+        id: "M-001",
+        status: "active",
+        milestones: [{ status: "active", slices: [{ status: "active", features: [feature] }] }],
+      })),
+      listAssertionsForFeature: vi.fn(() => [{ id: "CA-1" }]),
+      getFeature: vi.fn(() => feature),
+      transitionLoopState: vi.fn(),
+    };
+    const taskStore = {
+      getTask: vi.fn(async () => ({ id: "FN-001", column: "done" })),
+    };
+
+    const loop = new MissionExecutionLoop({
+      missionStore: missionStore as any,
+      taskStore: taskStore as any,
+      rootDir: process.cwd(),
+    });
+    const processSpy = vi.spyOn(loop, "processTaskOutcome").mockImplementation(async () => {
+      feature.lastValidatorStatus = "passed";
+      feature.loopState = "passed";
+    });
+    loop.start();
+
+    await loop.recoverActiveMissions();
+    await loop.recoverActiveMissions();
+
+    expect(processSpy).toHaveBeenCalledTimes(1);
+    loop.stop();
+  });
+
   it("is idempotent for already-passed implementing features", async () => {
     const feature = makeFeature({ status: "done", lastValidatorStatus: "passed" });
     const missionStore = {
@@ -151,7 +186,7 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
     loop.stop();
   });
 
-  it("recovery replays implementing done tasks with zero assertions and advances loop state", async () => {
+  it("periodic recovery pass replays implementing done tasks with zero assertions and advances loop state", async () => {
     const feature = makeFeature({ status: "done", lastValidatorStatus: undefined, loopState: "implementing" });
     const currentFeature = { ...feature };
     const missionStore = {
@@ -187,8 +222,9 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
     });
     loop.start();
 
-    await loop.recoverActiveMissions();
-    await loop.recoverActiveMissions();
+    const periodicMaintenancePass = async () => loop.recoverActiveMissions();
+    await periodicMaintenancePass();
+    await periodicMaintenancePass();
 
     expect(missionStore.updateFeature).toHaveBeenCalledTimes(1);
     expect(missionStore.updateFeature).toHaveBeenCalledWith(

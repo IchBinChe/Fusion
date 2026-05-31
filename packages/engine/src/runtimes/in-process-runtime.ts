@@ -732,6 +732,12 @@ export class InProcessRuntime
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
         leaseManager: this.leaseManager,
         hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
+        recoverActiveMissionValidations: async () => {
+          if (!this.missionExecutionLoop) {
+            return { recoveredCount: 0 };
+          }
+          return this.missionExecutionLoop.recoverActiveMissions();
+        },
         reconcileAllMissionFeatures: async () => this.scheduler.reconcileAllMissionFeatures(),
         chatStore: this.chatStore,
         messageStore: this.messageStore,

@@ -57,17 +57,17 @@ Canonical authored source and enforcement path:
 
 ## Zero-Assertion Behavior and FN-5696 Failure Shape
 
-### Zero-assertions runtime behavior (must align with FN-5715)
+### Zero-assertions runtime behavior (canonical FN-5738 path)
 
-When a feature reaches completion trigger points and has **zero linked assertions**, mission execution must take an explicit auto-pass path (not a silent stall):
+When a feature reaches completion trigger points and has **zero linked assertions**, mission execution must take exactly one canonical auto-pass path (not a silent stall and not a competing behavior):
 
-- mark feature as passed/done through the no-assertions path,
-- emit explicit observability/audit evidence for the auto-pass reason,
-- continue normal slice/mission advancement checks.
+- mark feature terminal as `status="done"`, `loopState="passed"`, `lastValidatorStatus="passed"`,
+- emit explicit observability/audit evidence with mission event code `validation_auto_passed_no_assertions`,
+- continue normal slice/mission advancement checks idempotently (no duplicate re-fire on repeated recovery).
 
 ### FN-5696 legacy shape clarification
 
-A feature can show acceptance text while links are missing (legacy pre-repair data). This must be treated as a **linkage/data integrity problem**, not as proof that milestone text alone is enforced. The contract prevents ambiguity by separating:
+A feature can show acceptance text while links are missing (legacy pre-repair data). This must be treated as a **linkage/data integrity problem**, not as proof that milestone text alone is enforced. Assertion authoring/backfill (FN-5696) is outside the execution loop; the loop must not synthesize `mission_feature_assertions` rows. The contract prevents ambiguity by separating:
 
 - authored/informational text surfaces, from
 - linked assertion enforcement surfaces.
@@ -141,7 +141,8 @@ Target surface: `packages/dashboard/app/components/MissionManager.tsx`
      - done mission-linked tasks with linked assertions trigger validation,
      - completion-trigger starts loop if needed,
      - startup recovery replays done-implementing features with unpassed assertions,
-     - zero-linked-assertions path remains explicit auto-pass.
+     - periodic self-heal maintenance replays the same `recoverActiveMissions` path so historically stranded `implementing` features recover without restart,
+     - zero-linked-assertions path remains explicit canonical auto-pass.
 
 3. **UI behavior**
    - Implement the Step-2 label reconciliation and per-row indicator requirements.

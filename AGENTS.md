@@ -163,6 +163,7 @@ When `settings.autoMerge: false`, `in-review` is terminal-until-merged by a huma
 - FN-5738 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` extends mission-loop coverage so zero-assertion auto-pass deterministically advances to `loopState="passed"` and emits `validation_auto_passed_no_assertions` without duplicate recovery re-fire.
 - FN-5741 backstop: `packages/engine/src/__tests__/reliability-interactions/merge-request-shadow-handoff.test.ts` guards Phase-1 write-only-shadow merge-request record + handoff-accepted marker seam (flag OFF = no-op, ON = shadow-only non-authoritative).
 - FN-5754 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-stranded-feature-retriage.test.ts` guards startup/maintenance stranded-feature re-triage for active autopilot slices, including link-first dedupe, non-defined skip safety, non-autopilot no-op, idempotency, and `mission:stranded-feature-triaged` audit shape.
+- FN-5755 backstop: `packages/engine/src/__tests__/reliability-interactions/mission-validation-trigger-gap.test.ts` extends mission validation coverage so bounded periodic maintenance replays `recoverActiveMissions` for stranded `implementing` features and remains idempotent on repeated passes.
 
 ---
 

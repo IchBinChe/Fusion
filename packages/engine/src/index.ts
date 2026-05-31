@@ -57,6 +57,10 @@ export {
   __resetIntegrationBranchCacheForTests,
 } from "./integration-branch.js";
 export {
+  resolveBranchGroupMergeRouting,
+  type BranchGroupMergeRouting,
+} from "./group-merge-coordinator.js";
+export {
   resolveMergeIntegrationRoot,
   resolveIntegrationRemote,
   acquireReuseHandoff,

@@ -1,20 +1,25 @@
-import type { Settings, Task, WorkflowStepResult } from "./types.js";
+import type { BranchGroup, Settings, Task, WorkflowStepResult } from "./types.js";
 
 export interface MergeTargetResolution {
   branch: string;
-  source: "task-base-branch" | "task-branch-context" | "project-default" | "legacy-main";
+  source: "task-base-branch" | "task-branch-context" | "branch-group-integration" | "project-default" | "legacy-main";
   /**
    * When the resolver rejects a candidate (e.g. baseBranch points at a sibling
    * `fusion/fn-*` branch), this records the rejected value and the reason. The
    * merger uses this to emit an audit event so the steering bug is observable
    * in the run-audit timeline rather than failing silently.
    */
-  rejected?: { branch: string; source: "task-base-branch" | "task-branch-context"; reason: "fusion-sibling-branch" };
+  rejected?: {
+    branch: string;
+    source: "task-base-branch" | "task-branch-context" | "branch-group-integration";
+    reason: "fusion-sibling-branch";
+  };
 }
 
 export interface MergeTargetResolverOptions {
   projectDefaultBranch?: string;
   legacyFallbackBranch?: string;
+  branchGroup?: Pick<BranchGroup, "branchName"> | null;
 }
 
 /**
@@ -54,6 +59,21 @@ export function resolveTaskMergeTarget(
       rejected = { branch: configuredBase, source: "task-base-branch", reason: "fusion-sibling-branch" };
     } else {
       return { branch: configuredBase, source: "task-base-branch" };
+    }
+  }
+
+  const branchGroupBranch = task.branchContext?.assignmentMode === "shared"
+    ? options.branchGroup?.branchName?.trim()
+    : undefined;
+  if (branchGroupBranch) {
+    if (isFusionSiblingBranch(branchGroupBranch)) {
+      rejected = rejected ?? {
+        branch: branchGroupBranch,
+        source: "branch-group-integration",
+        reason: "fusion-sibling-branch",
+      };
+    } else {
+      return { branch: branchGroupBranch, source: "branch-group-integration", rejected };
     }
   }
 

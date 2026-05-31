@@ -1,4 +1,4 @@
-import type { ExperimentSession, ExperimentSessionRecord } from "@fusion/core";
+import type { BranchGroup, ExperimentSession, ExperimentSessionRecord, Task } from "@fusion/core";
 import {
   ExperimentFinalizePlanError,
   type FinalizeGroup,
@@ -7,7 +7,7 @@ import {
   getRunRecordById,
 } from "./finalize-types.js";
 
-function slugifyGroupTitle(title: string): string {
+export function slugifyGroupTitle(title: string): string {
   const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -38,6 +38,18 @@ function resolveBaselineCommit(session: ExperimentSession, records: ExperimentSe
   }
   warnings.push("no baseline commit; using merge-base as degenerate baseline");
   return mergeBaseCommit;
+}
+
+function buildBranchName(prefix: string, baseId: string, title: string, groupIndex: number, seenBranchNames: Set<string>): string {
+  const slug = slugifyGroupTitle(title);
+  let candidate = `${prefix}/${baseId.toLowerCase()}/${slug}-${groupIndex}`;
+  let bump = 2;
+  while (seenBranchNames.has(candidate)) {
+    candidate = `${prefix}/${baseId.toLowerCase()}/${slug}-${groupIndex}-${bump}`;
+    bump += 1;
+  }
+  seenBranchNames.add(candidate);
+  return candidate;
 }
 
 export function buildDefaultPlan(opts: {
@@ -78,21 +90,13 @@ export function buildDefaultPlan(opts: {
   let groupIndex = 1;
   for (const [groupKey, group] of grouped.entries()) {
     const runs = group.runs.sort((a, b) => a.seq - b.seq);
-    const slug = slugifyGroupTitle(group.title);
-    let candidate = `experiment/${opts.session.id.toLowerCase()}/${slug}-${groupIndex}`;
-    let bump = 2;
-    while (seenBranchNames.has(candidate)) {
-      candidate = `experiment/${opts.session.id.toLowerCase()}/${slug}-${groupIndex}-${bump}`;
-      bump += 1;
-    }
-    seenBranchNames.add(candidate);
 
     groups.push({
       id: groupKey,
       title: group.title,
       runRecordIds: runs.map((run) => run.id),
       commits: runs.map((run) => run.payload.commit!).filter(Boolean),
-      suggestedBranchName: candidate,
+      suggestedBranchName: buildBranchName("experiment", opts.session.id, group.title, groupIndex, seenBranchNames),
     });
     groupIndex += 1;
   }
@@ -103,6 +107,42 @@ export function buildDefaultPlan(opts: {
     integrationBranch: opts.integrationBranch,
     mergeBaseCommit: opts.mergeBaseCommit,
     groups,
+    orphanedRunRecordIds,
+    warnings,
+  };
+}
+
+export function buildTaskGroupPlan(opts: {
+  branchGroup: BranchGroup;
+  memberTasks: Pick<Task, "id" | "createdAt" | "mergeDetails">[];
+  integrationBranch: string;
+  mergeBaseCommit: string;
+}): FinalizePlan {
+  const warnings: string[] = [];
+  const orphanedRunRecordIds: string[] = [];
+  const sortedMembers = [...opts.memberTasks].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const commits = sortedMembers.flatMap((member) => {
+    const commit = member.mergeDetails?.commitSha?.trim();
+    if (!commit) {
+      orphanedRunRecordIds.push(member.id);
+      warnings.push(`group member ${member.id} has no merge commit and was skipped`);
+      return [];
+    }
+    return [commit];
+  });
+
+  return {
+    sessionId: opts.branchGroup.id,
+    baselineCommit: opts.mergeBaseCommit,
+    integrationBranch: opts.integrationBranch,
+    mergeBaseCommit: opts.mergeBaseCommit,
+    groups: [{
+      id: opts.branchGroup.id,
+      title: opts.branchGroup.sourceId,
+      runRecordIds: sortedMembers.map((member) => member.id),
+      commits,
+      suggestedBranchName: opts.branchGroup.branchName,
+    }],
     orphanedRunRecordIds,
     warnings,
   };

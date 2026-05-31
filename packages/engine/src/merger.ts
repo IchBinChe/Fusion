@@ -128,6 +128,7 @@ import {
 } from "./merger-integration-worktree.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
+import { resolveBranchGroupMergeRouting } from "./group-merge-coordinator.js";
 import { advanceIntegrationBranchRef, IntegrationBranchConcurrentAdvanceError } from "./merger-ref-update-advance.js";
 import { syncWorktreeToHead, type SyncWorktreeResult } from "./worktree-ref-sync.js";
 import { appendAutoWidenedScopeToPrompt, evaluateScopeAutoWiden } from "./merger-scope-auto-widen.js";
@@ -7425,9 +7426,47 @@ export async function aiMergeTask(
   const projectRootDir = rootDir;
   const settings = await store.getSettings();
   const resolvedIntegrationBranch = await resolveIntegrationBranch(projectRootDir, settings);
-  const mergeTarget = resolveTaskMergeTarget(task, {
+  const groupRouting = await resolveBranchGroupMergeRouting({
+    task,
+    store,
+    projectDefaultBranch: resolvedIntegrationBranch,
+    rootDir: projectRootDir,
+  });
+  const mergeTarget = groupRouting?.mergeTarget ?? resolveTaskMergeTarget(task, {
     projectDefaultBranch: resolvedIntegrationBranch,
   });
+  const recordBranchGroupMemberLanding = async () => {
+    if (!groupRouting) {
+      return;
+    }
+
+    try {
+      await Promise.resolve((store as any).recordBranchGroupMemberLanded?.(groupRouting.branchGroup.id, {
+        worktreePath: task.worktree ?? null,
+        status: "open",
+      }));
+    } catch {
+      // best-effort persistence
+    }
+  };
+  if (groupRouting) {
+    try {
+      await (store as any).recordRunAuditEvent?.({
+        domain: "git",
+        mutationType: "merge:branch-group-routed",
+        target: taskId,
+        metadata: {
+          groupId: groupRouting.branchGroup.id,
+          branchName: groupRouting.branchGroup.branchName,
+          mergeTargetBranch: mergeTarget.branch,
+          mergeTargetSource: mergeTarget.source,
+        },
+      });
+    } catch {
+      // best-effort audit
+    }
+  }
+
   if (mergeTarget.rejected) {
     // FN-5233/FN-5530 regression: the task's baseBranch/inheritedBaseBranch
     // pointed at a sibling fusion/fn-* branch. The resolver fell through to
@@ -7453,7 +7492,7 @@ export async function aiMergeTask(
       // best-effort audit; never block the merge on telemetry
     }
   }
-  const integrationBranch = resolvedIntegrationBranch;
+  const integrationBranch = groupRouting ? mergeTarget.branch : resolvedIntegrationBranch;
   let branch = task.branch || canonicalFusionBranchName(taskId);
 
   const mergeRunId = generateSyntheticRunId("merge", taskId);
@@ -8047,6 +8086,7 @@ export async function aiMergeTask(
         mergedAt: mergeDetails.mergedAt,
         mergeTargetBranch: aheadInfo.baseRef,
       };
+      await recordBranchGroupMemberLanding();
       await completeTask(store, taskId, result);
       await releaseReuseHandoffEarly("success");
       return result;
@@ -8124,6 +8164,7 @@ export async function aiMergeTask(
         mergedAt: mergeDetails.mergedAt,
         mergeTargetBranch: classification.baseRef,
       };
+      await recordBranchGroupMemberLanding();
       await completeTask(store, taskId, result);
       await releaseReuseHandoffEarly("success");
       return result;
@@ -8347,6 +8388,7 @@ export async function aiMergeTask(
 
     // Audit trail: record merge completion (FN-1404)
     await audit.database({ type: "task:move", target: taskId, metadata: { to: "done", merged: true } });
+    await recordBranchGroupMemberLanding();
     await completeTask(store, taskId, result);
     return result;
   }
@@ -10308,6 +10350,7 @@ export async function aiMergeTask(
       attemptsMade: result.attemptsMade,
     },
   });
+  await recordBranchGroupMemberLanding();
   await completeTask(store, taskId, result);
   return result;
 

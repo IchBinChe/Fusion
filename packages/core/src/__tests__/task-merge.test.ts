@@ -52,6 +52,25 @@ describe("resolveTaskMergeTarget", () => {
     });
   });
 
+  it("routes shared branch-group members to branch group integration branch", () => {
+    expect(resolveTaskMergeTarget({
+      baseBranch: undefined,
+      branchContext: {
+        groupId: "G-1",
+        source: "planning",
+        assignmentMode: "shared",
+        inheritedBaseBranch: "develop",
+      },
+    }, {
+      branchGroup: {
+        branchName: "fusion/groups/planning-g-1",
+      },
+    })).toEqual({
+      branch: "fusion/groups/planning-g-1",
+      source: "branch-group-integration",
+    });
+  });
+
   it("falls back to inherited branch context", () => {
     expect(resolveTaskMergeTarget({
       baseBranch: undefined,
@@ -78,6 +97,25 @@ describe("resolveTaskMergeTarget", () => {
       },
     })).toEqual({
       branch: "release/2026.10",
+      source: "task-branch-context",
+    });
+  });
+
+  it("keeps per-task-derived grouped members on inherited branch context", () => {
+    expect(resolveTaskMergeTarget({
+      baseBranch: undefined,
+      branchContext: {
+        groupId: "G-2",
+        source: "planning",
+        assignmentMode: "per-task-derived",
+        inheritedBaseBranch: "develop",
+      },
+    }, {
+      branchGroup: {
+        branchName: "fusion/groups/planning-g-2",
+      },
+    })).toEqual({
+      branch: "develop",
       source: "task-branch-context",
     });
   });
@@ -113,6 +151,32 @@ describe("resolveTaskMergeTarget", () => {
     expect(result.rejected).toEqual({
       branch: "fusion/fn-5339",
       source: "task-base-branch",
+      reason: "fusion-sibling-branch",
+    });
+  });
+
+  it("rejects branch-group integration branch when it points at a sibling fusion/fn-* branch", () => {
+    const result = resolveTaskMergeTarget(
+      {
+        baseBranch: undefined,
+        branchContext: {
+          groupId: "G-1",
+          source: "planning",
+          assignmentMode: "shared",
+        },
+      },
+      {
+        branchGroup: {
+          branchName: "fusion/fn-1234",
+        },
+        projectDefaultBranch: "main",
+      },
+    );
+    expect(result.branch).toBe("main");
+    expect(result.source).toBe("project-default");
+    expect(result.rejected).toEqual({
+      branch: "fusion/fn-1234",
+      source: "branch-group-integration",
       reason: "fusion-sibling-branch",
     });
   });

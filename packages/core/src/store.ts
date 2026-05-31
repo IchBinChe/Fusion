@@ -4417,6 +4417,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
   }
 
+  async listTasksByBranchGroup(groupId: string): Promise<Task[]> {
+    const tasks = await this.listTasks({ includeArchived: false, slim: true });
+    return tasks
+      .filter((task) => task.branchContext?.groupId === groupId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  recordBranchGroupMemberLanded(
+    groupId: string,
+    patch: { worktreePath?: string | null; status?: BranchGroup["status"] },
+  ): BranchGroup {
+    return this.updateBranchGroup(groupId, {
+      ...(patch.worktreePath !== undefined ? { worktreePath: patch.worktreePath } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+    });
+  }
+
   async getTaskColumns(ids: string[]): Promise<Map<string, Column>> {
     if (ids.length === 0) {
       return new Map();
@@ -7913,7 +7930,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     _branch: string,
     task: Task,
     commitMessage: string,
-    mergeTarget?: { branch: string; source: "task-base-branch" | "task-branch-context" | "project-default" | "legacy-main" },
+    mergeTarget?: {
+      branch: string;
+      source: "task-base-branch" | "task-branch-context" | "branch-group-integration" | "project-default" | "legacy-main";
+    },
   ): Promise<import("./types.js").MergeDetails> {
     const mergedAt = new Date().toISOString();
     let commitSha: string | undefined;

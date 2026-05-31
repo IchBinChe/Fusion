@@ -1483,7 +1483,7 @@ export interface MergeDetails {
   noOpReason?: string;
   prNumber?: number;
   mergeTargetBranch?: string;
-  mergeTargetSource?: "task-base-branch" | "task-branch-context" | "project-default" | "legacy-main";
+  mergeTargetSource?: "task-base-branch" | "task-branch-context" | "branch-group-integration" | "project-default" | "legacy-main";
   resolutionStrategy?: "ai" | "auto-resolve" | "theirs" | "ours" | "abort" | "orphan-discard-no-op";
   resolutionMethod?: "ai" | "auto" | "mixed" | "theirs" | "ours" | "abort";
   attemptsMade?: 1 | 2 | 3;

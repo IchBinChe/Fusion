@@ -115,6 +115,26 @@ describe("TaskStore branch groups", () => {
     expect(slim.find((entry) => entry.id === task.id)).toBeUndefined();
   });
 
+  it("lists tasks by branch group and records landed member metadata", async () => {
+    const group = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-9", branchName: "fn/grouped" });
+    const taskA = await store.createTask({ description: "group-a" });
+    const taskB = await store.createTask({ description: "group-b" });
+    const taskC = await store.createTask({ description: "group-c" });
+    await store.setTaskBranchGroup(taskA.id, group.id);
+    await store.setTaskBranchGroup(taskC.id, group.id);
+
+    const groupedTasks = await store.listTasksByBranchGroup(group.id);
+    expect(groupedTasks.map((task) => task.id)).toEqual([taskA.id, taskC.id]);
+    expect(groupedTasks.find((task) => task.id === taskB.id)).toBeUndefined();
+
+    const landed = store.recordBranchGroupMemberLanded(group.id, {
+      worktreePath: "/tmp/fusion/grouped",
+      status: "open",
+    });
+    expect(landed.worktreePath).toBe("/tmp/fusion/grouped");
+    expect(landed.status).toBe("open");
+  });
+
   it("preserves autoMerge + branchContext in slim list/search/modifiedSince and archived slim", async () => {
     const task = await store.createTask({ description: "slim check" });
     const group = store.createBranchGroup({ sourceType: "mission", sourceId: "M-2", branchName: "fn/mission" });

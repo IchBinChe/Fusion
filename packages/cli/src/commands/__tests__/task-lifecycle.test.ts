@@ -67,6 +67,7 @@ function makeStore(task: MockTask, settings: Record<string, unknown> = {}) {
     moveTask: vi.fn(async (_id: string, column: string) => ({ ...task, column })),
     logEntry: vi.fn().mockResolvedValue(undefined),
     getActiveMergingTask: vi.fn().mockReturnValue(null),
+    getBranchGroup: vi.fn().mockReturnValue(null),
     _updates: updates,
   });
 }
@@ -90,6 +91,7 @@ function makeStatefulStore(task: MockTask, settings: Record<string, unknown> = {
     }),
     logEntry: vi.fn().mockResolvedValue(undefined),
     getActiveMergingTask: vi.fn().mockReturnValue(null),
+    getBranchGroup: vi.fn().mockReturnValue(null),
     _getState: () => state,
   });
 }
@@ -175,6 +177,17 @@ describe("processPullRequestMergeTask", () => {
     };
     const branch = getTaskBranchName(task.id);
     const store = makeStore(task, { baseBranch: "main" });
+    (store.getBranchGroup as ReturnType<typeof vi.fn>).mockReturnValue({
+      id: "BG-1",
+      sourceType: "planning",
+      sourceId: "planning:abc",
+      branchName: "fusion/groups/planning-abc",
+      autoMerge: false,
+      prState: "none",
+      status: "open",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
     execMock.mockImplementation(() => "");
 
     const github = {
@@ -184,7 +197,7 @@ describe("processPullRequestMergeTask", () => {
         url: "https://github.com/x/y/pull/7",
         status: "open" as const,
         headBranch: branch,
-        baseBranch: "develop",
+        baseBranch: "fusion/groups/planning-abc",
       })),
       getPrMergeStatus: vi.fn(async () => ({
         prInfo: { number: 7, status: "open" as const, url: "https://github.com/x/y/pull/7" },
@@ -205,7 +218,54 @@ describe("processPullRequestMergeTask", () => {
     );
 
     expect(github.createPr).toHaveBeenCalledWith(expect.objectContaining({
-      base: "develop",
+      base: "fusion/groups/planning-abc",
+    }));
+  });
+
+  it("keeps per-task-derived members on the project default PR base", async () => {
+    const task: MockTask = {
+      id: "FN-9002",
+      title: "test",
+      description: "desc",
+      column: "in-review",
+      branchContext: {
+        groupId: "planning:abc",
+        source: "planning",
+        assignmentMode: "per-task-derived",
+      },
+    };
+    const store = makeStore(task, { baseBranch: "main" });
+    execMock.mockImplementation(() => "");
+
+    const github = {
+      findPrForBranch: vi.fn(async () => null),
+      createPr: vi.fn(async () => ({
+        number: 7,
+        url: "https://github.com/x/y/pull/7",
+        status: "open" as const,
+        headBranch: getTaskBranchName(task.id),
+        baseBranch: "main",
+      })),
+      getPrMergeStatus: vi.fn(async () => ({
+        prInfo: { number: 7, status: "open" as const, url: "https://github.com/x/y/pull/7" },
+        reviewDecision: null,
+        checks: [],
+        mergeReady: false,
+        blockingReasons: [],
+      })),
+      mergePr: vi.fn(),
+    };
+
+    await processPullRequestMergeTask(
+      store as never,
+      "/repo",
+      task.id,
+      github as never,
+      () => undefined,
+    );
+
+    expect(github.createPr).toHaveBeenCalledWith(expect.objectContaining({
+      base: "main",
     }));
   });
 

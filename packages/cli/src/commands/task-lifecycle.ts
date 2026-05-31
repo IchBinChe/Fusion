@@ -269,8 +269,12 @@ export async function processPullRequestMergeTask(
   const settings = await store.getSettings();
   const resolvedIntegrationBranch = await resolveIntegrationBranch(cwd, settings);
   const projectDefaultBranch = resolvedIntegrationBranch;
+  const branchGroup = task.branchContext?.assignmentMode === "shared"
+    ? store.getBranchGroup(task.branchContext.groupId)
+    : null;
   const mergeTarget = resolveTaskMergeTarget(task, {
     projectDefaultBranch,
+    branchGroup,
   });
   let prInfo: PrInfo | undefined = task.prInfo;
 

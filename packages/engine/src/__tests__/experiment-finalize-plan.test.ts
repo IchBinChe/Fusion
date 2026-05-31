@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ExperimentSession, ExperimentSessionRecord } from "@fusion/core";
-import { buildDefaultPlan, mergePlanWithUserOverrides } from "../experiment/finalize-plan.js";
+import type { BranchGroup, ExperimentSession, ExperimentSessionRecord } from "@fusion/core";
+import { buildDefaultPlan, buildTaskGroupPlan, mergePlanWithUserOverrides } from "../experiment/finalize-plan.js";
 import { ExperimentFinalizePlanError } from "../experiment/finalize-types.js";
 
 function createSession(overrides: Partial<ExperimentSession> = {}): ExperimentSession {
@@ -137,6 +137,35 @@ describe("experiment finalize plan", () => {
     expect(() => mergePlanWithUserOverrides(plan, { groups: [{ id: plan.groups[0].id, runRecordIds: [] }] })).toThrow(
       ExperimentFinalizePlanError,
     );
+  });
+
+  it("builds a task-group finalize plan keyed to existing branch name", () => {
+    const branchGroup: BranchGroup = {
+      id: "BG-1",
+      sourceType: "mission",
+      sourceId: "SL-1",
+      branchName: "fusion/groups/sl-1",
+      autoMerge: false,
+      prState: "none",
+      status: "open",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const plan = buildTaskGroupPlan({
+      branchGroup,
+      memberTasks: [
+        { id: "FN-2", createdAt: "2026-01-02T00:00:00.000Z", mergeDetails: { commitSha: "c2" } },
+        { id: "FN-1", createdAt: "2026-01-01T00:00:00.000Z", mergeDetails: { commitSha: "c1" } },
+      ],
+      integrationBranch: "main",
+      mergeBaseCommit: "base",
+    });
+
+    expect(plan.groups).toHaveLength(1);
+    expect(plan.groups[0].suggestedBranchName).toBe("fusion/groups/sl-1");
+    expect(plan.groups[0].runRecordIds).toEqual(["FN-1", "FN-2"]);
+    expect(plan.groups[0].commits).toEqual(["c1", "c2"]);
   });
 
   it("falls back baseline commit to baseline run then merge-base", () => {

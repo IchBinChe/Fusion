@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Goal } from "@fusion/core";
-import { emitGoalInjectionDiagnostic, resolveGoalContextForDiagnostics } from "../goal-injection-diagnostics.js";
+import {
+  emitGoalInjectionDiagnostic,
+  resolveAndEmitGoalContext,
+  resolveGoalContextForDiagnostics,
+} from "../goal-injection-diagnostics.js";
 
 function goal(id: string, title: string, createdAt: string): Goal {
   return {
@@ -14,6 +18,98 @@ function goal(id: string, title: string, createdAt: string): Goal {
 }
 
 describe("goal injection diagnostics wiring seam", () => {
+  it("resolveAndEmitGoalContext emits applied diagnostics and audit for planning lane", async () => {
+    const goals = [goal("G-1", "one", "2026-01-01T00:00:00.000Z")];
+    const store = {
+      getGoalStore: () => ({ listGoals: () => goals }),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    const audit = { database: vi.fn().mockResolvedValue(undefined) } as any;
+
+    const resolution = await resolveAndEmitGoalContext({
+      lane: "planning",
+      store,
+      audit,
+      taskId: "FN-1",
+      runContext: { runId: "plan-run", agentId: "agent-1", taskId: "FN-1", phase: "plan" },
+    });
+
+    expect(resolution.classification).toMatchObject({ outcome: "applied", goalCount: 1, goalIds: ["G-1"] });
+    expect(audit.database).toHaveBeenCalledTimes(1);
+    expect(store.recordRunAuditEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolveAndEmitGoalContext emits no-goals semantics when goal store is empty", async () => {
+    const store = {
+      getGoalStore: () => ({ listGoals: () => [] }),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    const audit = { database: vi.fn().mockResolvedValue(undefined) } as any;
+
+    const resolution = await resolveAndEmitGoalContext({
+      lane: "executor",
+      store,
+      audit,
+      taskId: "FN-1",
+      runContext: { runId: "exec-run", agentId: "agent-1", taskId: "FN-1", phase: "execute" },
+    });
+
+    expect(resolution.goalContext).toBe("");
+    expect(resolution.classification).toMatchObject({ outcome: "no-goals", goalCount: 0, goalIds: [] });
+    expect(audit.database.mock.calls[0][0]).toMatchObject({
+      type: "goal:injection-skipped",
+      metadata: { lane: "executor", count: 0, reason: "no-active-goals" },
+    });
+  });
+
+  it("routes heartbeat executor and planning lanes through the same canonical helper", async () => {
+    const lanes = ["heartbeat", "executor", "planning"] as const;
+    for (const lane of lanes) {
+      const store = {
+        getGoalStore: () => ({ listGoals: () => [goal("G-1", "one", "2026-01-01T00:00:00.000Z")] }),
+        logEntry: vi.fn().mockResolvedValue(undefined),
+        recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      const audit = { database: vi.fn().mockResolvedValue(undefined) } as any;
+
+      const resolution = await resolveAndEmitGoalContext({
+        lane,
+        store,
+        audit,
+        taskId: "FN-1",
+        runContext: { runId: `${lane}-run`, agentId: "agent-1", taskId: "FN-1", phase: lane },
+      });
+
+      expect(resolution.classification).toMatchObject({ outcome: "applied", goalCount: 1, goalIds: ["G-1"] });
+      expect(audit.database).toHaveBeenCalledTimes(1);
+      expect(audit.database.mock.calls[0][0].metadata.lane).toBe(lane);
+      expect(store.recordRunAuditEvent).toHaveBeenCalledTimes(1);
+      expect(store.recordRunAuditEvent.mock.calls[0][0].metadata.lane).toBe(lane);
+    }
+  });
+
+  it("resolveAndEmitGoalContext handles missing getGoalStore with disabled classification", async () => {
+    const store = {
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    const audit = { database: vi.fn().mockResolvedValue(undefined) } as any;
+
+    const resolution = await resolveAndEmitGoalContext({
+      lane: "heartbeat",
+      store,
+      audit,
+      taskId: "FN-1",
+      runContext: { runId: "hb-run", agentId: "agent-1", taskId: "FN-1", phase: "heartbeat" },
+    });
+
+    expect(resolution.goalContext).toBe("");
+    expect(resolution.classification).toMatchObject({ outcome: "disabled-or-failed", reason: "store-unavailable" });
+    expect(audit.database).toHaveBeenCalledTimes(1);
+    expect(store.recordRunAuditEvent).toHaveBeenCalledTimes(1);
+  });
   it("emits applied audit metadata for positive injection", async () => {
     const goals = [goal("G-1", "one", "2026-01-01T00:00:00.000Z"), goal("G-2", "two", "2026-01-02T00:00:00.000Z")];
     const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);

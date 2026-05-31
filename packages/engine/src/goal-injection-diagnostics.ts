@@ -1,7 +1,10 @@
 import type { Goal } from "@fusion/core";
 import { buildGoalContextSection, type GoalInjectionResult } from "./goal-context-injector.js";
 import type { TaskStore } from "@fusion/core";
+import type { GoalAnchoringLane } from "./goal-anchoring-audit.js";
+import { emitGoalAnchoringAudit } from "./goal-anchoring-audit.js";
 import type { EngineRunContext } from "./run-audit.js";
+import type { RunAuditor } from "./run-audit.js";
 import { createLogger } from "./logger.js";
 
 const diagnosticsLog = createLogger("goal-injection-diagnostics");
@@ -15,7 +18,7 @@ export type GoalInjectionDisabledReason =
   | "injector-threw";
 
 export interface GoalInjectionDiagnostic {
-  lane: "heartbeat" | "executor";
+  lane: GoalAnchoringLane;
   outcome: GoalInjectionOutcome;
   goalCount: number;
   goalIds: string[];
@@ -84,6 +87,14 @@ export interface GoalContextResolution {
   classification: GoalInjectionClassification;
 }
 
+export interface ResolveAndEmitGoalContextInput {
+  lane: GoalAnchoringLane;
+  store: TaskStore;
+  audit: RunAuditor;
+  taskId?: string;
+  runContext?: EngineRunContext | null;
+}
+
 export interface ResolveGoalContextInput {
   listActiveGoals?: () => Goal[];
   injector?: (activeGoals: Goal[]) => GoalInjectionResult;
@@ -119,6 +130,35 @@ export function resolveGoalContextForDiagnostics(input: ResolveGoalContextInput)
       classification: classifyGoalInjectionFailure("list-failed", listError),
     };
   }
+}
+
+export async function resolveAndEmitGoalContext(input: ResolveAndEmitGoalContextInput): Promise<GoalContextResolution> {
+  const resolution = resolveGoalContextForDiagnostics({
+    listActiveGoals:
+      typeof input.store.getGoalStore === "function"
+        ? () => input.store.getGoalStore().listGoals({ status: "active" })
+        : undefined,
+  });
+
+  await emitGoalAnchoringAudit(input.audit, {
+    lane: input.lane,
+    taskId: input.taskId,
+    goalsInjected: resolution.classification.goalCount,
+    truncated: resolution.classification.truncated,
+    reason: resolution.classification.outcome === "no-goals" ? "no-active-goals" : undefined,
+  });
+
+  await emitGoalInjectionDiagnostic({
+    lane: input.lane,
+    ...resolution.classification,
+    runId: input.runContext?.runId,
+    agentId: input.runContext?.agentId,
+    taskId: input.taskId,
+    store: input.store,
+    runContext: input.runContext,
+  });
+
+  return resolution;
 }
 
 function formatAgentLogLine(input: GoalInjectionDiagnostic): string {

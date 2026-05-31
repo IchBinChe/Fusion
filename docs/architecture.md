@@ -436,7 +436,7 @@ Hybrid evaluator pipeline (FN-3389/FN-3391):
   - `reviewer`
   - `heartbeat`
 - Integration points append the built plugin section to the role-specific system/task prompt only when contributions exist, preserving existing prompts when no plugins contribute.
-- Executor and heartbeat system prompts also inject a shared `goalContext` dynamic layer via `buildGoalContextSection(...)`; when no active goals exist, no goal section is emitted.
+- Executor, heartbeat, and planning (triage) system prompts inject a shared `goalContext` dynamic layer via the canonical `resolveAndEmitGoalContext(...)` seam (which uses `buildGoalContextSection(...)`); when no active goals exist, no goal section is emitted.
 
 ### Agent Permissions
 

@@ -186,11 +186,13 @@ export {
   classifyGoalInjectionFailure,
   classifyGoalInjectionResult,
   emitGoalInjectionDiagnostic,
+  resolveAndEmitGoalContext,
   type GoalInjectionClassification,
   type GoalInjectionDiagnostic,
   type GoalInjectionDiagnosticInput,
   type GoalInjectionDisabledReason,
   type GoalInjectionOutcome,
+  type ResolveAndEmitGoalContextInput,
 } from "./goal-injection-diagnostics.js";
 export {
   emitGoalAnchoringAudit,

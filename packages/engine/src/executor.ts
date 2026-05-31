@@ -100,11 +100,7 @@ import {
   buildPluginPromptSection,
 } from "./agent-instructions.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
-import {
-  emitGoalInjectionDiagnostic,
-  resolveGoalContextForDiagnostics,
-} from "./goal-injection-diagnostics.js";
-import { emitGoalAnchoringAudit } from "./goal-anchoring-audit.js";
+import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import type { AgentReflectionService } from "./agent-reflection.js";
 import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
@@ -4170,32 +4166,14 @@ export class TaskExecutor {
           executorLog.log(`${task.id}: applied plugin prompt contributions for executor-system surface`);
         }
 
-        const executorGoalResolution = resolveGoalContextForDiagnostics({
-          listActiveGoals:
-            typeof this.store.getGoalStore === "function"
-              ? () => this.store.getGoalStore().listGoals({ status: "active" })
-              : undefined,
-        });
-        const executorGoalContext = executorGoalResolution.goalContext;
-        const executorGoalClassification = executorGoalResolution.classification;
-
-        await emitGoalAnchoringAudit(audit, {
+        const executorGoalResolution = await resolveAndEmitGoalContext({
           lane: "executor",
-          taskId: task.id,
-          goalsInjected: executorGoalClassification.goalCount,
-          truncated: executorGoalClassification.truncated,
-          reason: executorGoalClassification.outcome === "no-goals" ? "no-active-goals" : undefined,
-        });
-
-        await emitGoalInjectionDiagnostic({
-          lane: "executor",
-          ...executorGoalClassification,
-          runId: engineRunContext.runId,
-          agentId: engineRunContext.agentId,
-          taskId: task.id,
           store: this.store,
+          audit,
+          taskId: task.id,
           runContext: engineRunContext,
         });
+        const executorGoalContext = executorGoalResolution.goalContext;
 
         const executorLayers = buildPromptLayers({
           basePrompt: getExecutorSystemPrompt(settings),

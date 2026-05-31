@@ -32,11 +32,7 @@ import {
 } from "./agent-instructions.js";
 import { resolveHeartbeatPromptTemplate, resolveHeartbeatScopeDisciplineMode, selectHeartbeatProcedure } from "./heartbeat-procedure-resolver.js";
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
-import {
-  emitGoalInjectionDiagnostic,
-  resolveGoalContextForDiagnostics,
-} from "./goal-injection-diagnostics.js";
-import { emitGoalAnchoringAudit } from "./goal-anchoring-audit.js";
+import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { createLogger, heartbeatLog, formatError } from "./logger.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { createRunAuditor, type EngineRunContext } from "./run-audit.js";
@@ -2387,31 +2383,14 @@ export class HeartbeatMonitor {
           heartbeatLog.log(`applied plugin prompt contributions for heartbeat surface`);
         }
 
-        const heartbeatGoalResolution = resolveGoalContextForDiagnostics({
-          listActiveGoals:
-            typeof taskStore.getGoalStore === "function"
-              ? () => taskStore.getGoalStore().listGoals({ status: "active" })
-              : undefined,
-        });
-        const heartbeatGoalContext = heartbeatGoalResolution.goalContext;
-        const heartbeatGoalClassification = heartbeatGoalResolution.classification;
-
-        await emitGoalAnchoringAudit(audit, {
+        const heartbeatGoalResolution = await resolveAndEmitGoalContext({
           lane: "heartbeat",
-          taskId,
-          goalsInjected: heartbeatGoalClassification.goalCount,
-          truncated: heartbeatGoalClassification.truncated,
-          reason: heartbeatGoalClassification.outcome === "no-goals" ? "no-active-goals" : undefined,
-        });
-
-        await emitGoalInjectionDiagnostic({
-          lane: "heartbeat",
-          ...heartbeatGoalClassification,
-          runId: run.id,
-          agentId,
           store: taskStore,
+          audit,
+          taskId,
           runContext: engineRunContext,
         });
+        const heartbeatGoalContext = heartbeatGoalResolution.goalContext;
 
         const heartbeatLayers = buildPromptLayers({
           basePrompt: baseHeartbeatSystemPrompt,

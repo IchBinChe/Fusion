@@ -81,6 +81,7 @@ import {
 import { runGhostBugPreflight } from "./triage-preflight.js";
 import { archiveAsGhostBug } from "./self-healing.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
+import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 
 export const TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "fn", an AI-orchestrated task board.
 
@@ -1171,9 +1172,28 @@ export class TriageProcessor {
           planLog.log(`${task.id}: applied plugin prompt contributions for triage surface`);
         }
 
+        const triageRunContext = {
+          runId: generateSyntheticRunId("triage", task.id),
+          agentId: assignedAgent?.id ?? "triage",
+          taskId: task.id,
+          taskLineageId: task.lineageId,
+          phase: "plan",
+          source: "triage",
+        } as const;
+
+        const runAuditor = createRunAuditor(this.store, triageRunContext);
+        const triageGoalResolution = await resolveAndEmitGoalContext({
+          lane: "planning",
+          store: this.store,
+          audit: runAuditor,
+          taskId: task.id,
+          runContext: triageRunContext,
+        });
+
         const triageLayers = buildPromptLayers({
           basePrompt: resolveAgentPrompt("triage", settings.agentPrompts)
             || (isFast ? FAST_TRIAGE_SYSTEM_PROMPT : TRIAGE_SYSTEM_PROMPT),
+          goalContext: triageGoalResolution.goalContext,
           agentInstructions: [
             triageIdentitySection,
             triageInstructions,
@@ -1210,14 +1230,6 @@ export class TriageProcessor {
           defaultProvider: planningModel.provider,
           defaultModelId: planningModel.modelId,
         };
-        const runAuditor = createRunAuditor(this.store, {
-          runId: generateSyntheticRunId("triage", task.id),
-          agentId: assignedAgent?.id ?? "triage",
-          taskId: task.id,
-          taskLineageId: task.lineageId,
-          phase: "plan",
-          source: "triage",
-        });
 
         let { session } = await createResolvedAgentSession({
           sessionPurpose: "triage",

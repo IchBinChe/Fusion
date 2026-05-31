@@ -15,7 +15,7 @@ if (new Set(GOAL_AUDIT_TYPES).size !== GOAL_AUDIT_TYPES.length || GOAL_AUDIT_TYP
 }
 
 /** Engine lane that attempted goal anchoring; powers dashboard filtering for cite-rate observability. */
-export type GoalAnchoringLane = "heartbeat" | "executor";
+export type GoalAnchoringLane = "heartbeat" | "executor" | "planning";
 
 /**
  * Structured goal-injection audit payload.

@@ -2,7 +2,7 @@
 
 ## Goal injection diagnostics (`[goal-injection]`)
 
-Executor and heartbeat runs emit one goal-injection diagnostic with outcome `applied`, `no-goals`, or `disabled-or-failed`.
+Executor, heartbeat, and planning runs emit one goal-injection diagnostic with outcome `applied`, `no-goals`, or `disabled-or-failed`.
 
 - Run-audit event: `prompt:goal-injection` (`database` domain, target lane) with metadata `{ lane, outcome, goalCount, goalIds, truncated, reason?, errorClass?, runId?, agentId?, taskId? }`.
 - Task log (executor lane with `taskId`): `[goal-injection] <outcome> count=<n> ids=<json-array> truncated=<bool> ...`.

@@ -8,7 +8,7 @@
 
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Settings } from "@fusion/core";
+import type { Settings, Task } from "@fusion/core";
 
 /** Default maximum age for a specification before it is considered stale (6 hours in ms). */
 const DEFAULT_SPEC_STALENESS_MAX_AGE_MS = 6 * 60 * 60 * 1000;
@@ -49,6 +49,12 @@ export interface EvaluateSpecStalenessOptions {
    * Defaults to `Date.now()` when not provided.
    */
   nowMs?: number;
+  /**
+   * Optional task metadata. When provided, evaluation skips already-started,
+   * parked work so preserved progress is not sent back through triage solely
+   * because the original PROMPT.md mtime exceeded the staleness threshold.
+   */
+  task?: Pick<Task, "id" | "column" | "status" | "currentStep" | "steps" | "pausedReason">;
 }
 
 /**
@@ -83,10 +89,22 @@ export interface EvaluateSpecStalenessOptions {
  * @param options - Evaluation options including settings and PROMPT.md path
  * @returns Spec staleness decision with staleness flag, metrics, and skip indicator
  */
+export function shouldSkipSpecStalenessForPreservedProgress(
+  task: EvaluateSpecStalenessOptions["task"] | undefined,
+): boolean {
+  if (!task || task.column === "triage" || task.status === "needs-replan" || task.status === "planning") {
+    return false;
+  }
+  if ((task.currentStep ?? 0) > 0) {
+    return true;
+  }
+  return !!task.steps?.some((step) => step.status === "done" || step.status === "in-progress");
+}
+
 export async function evaluateSpecStaleness(
   options: EvaluateSpecStalenessOptions,
 ): Promise<SpecStalenessResult> {
-  const { settings, promptPath, nowMs } = options;
+  const { settings, promptPath, nowMs, task } = options;
 
   // Disabled mode: strict no-op — no file access
   if (settings.specStalenessEnabled !== true) {
@@ -96,6 +114,16 @@ export async function evaluateSpecStaleness(
       maxAgeMs: undefined,
       reason: "",
       skipped: false,
+    };
+  }
+
+  if (shouldSkipSpecStalenessForPreservedProgress(task)) {
+    return {
+      isStale: false,
+      ageMs: undefined,
+      maxAgeMs: undefined,
+      reason: "Specification staleness skipped for task with preserved execution progress",
+      skipped: true,
     };
   }
 

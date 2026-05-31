@@ -350,6 +350,59 @@ describe("TaskExecutor bounded recovery retries", () => {
     }));
   });
 
+  it("does not clobber self-healing parked incomplete-task pause metadata during abort cleanup", async () => {
+    const store = createMockStore();
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "todo",
+      status: "queued",
+      paused: true,
+      userPaused: false,
+      pausedReason: undefined,
+      branch: "fusion/fn-001",
+      worktree: null,
+      dependencies: [],
+      steps: [{ name: "Testing & Verification", status: "in-progress" }],
+      currentStep: 6,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    mockedCreateFnAgent.mockRejectedValue(new Error("Aborted"));
+    (executor as any).pausedAborted.add("FN-001");
+
+    await executor.execute({
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      recoveryRetryCount: 1,
+      branch: "fusion/fn-001",
+      dependencies: [],
+      steps: [{ name: "Testing & Verification", status: "in-progress" }],
+      currentStep: 6,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", expect.objectContaining({
+      worktree: undefined,
+      branch: undefined,
+    }));
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Execution abort cleanup skipped — incomplete stuck-loop task is already parked with progress preserved",
+      undefined,
+      expect.anything(),
+    );
+  });
+
   it("does NOT consume retry budget for stuck-task-detector kills", async () => {
     const store = createMockStore();
 

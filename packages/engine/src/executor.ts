@@ -3157,7 +3157,7 @@ export class TaskExecutor {
     if (!isActiveTask) {
       const tasksDir = join(this.store.getFusionDir(), "tasks");
       const promptPath = getPromptPath(tasksDir, task.id);
-      const staleness = await evaluateSpecStaleness({ settings, promptPath });
+      const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
       if (staleness.isStale) {
         executorLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
         // Move to triage first, then set status so the task enters triage with needs-replan
@@ -4917,6 +4917,21 @@ export class TaskExecutor {
           return;
         }
         this.pausedAborted.delete(task.id);
+        const latestTask = await this.store.getTask(task.id);
+        if (
+          latestTask?.column === "todo" &&
+          latestTask.paused === true &&
+          ((latestTask.currentStep ?? 0) > 0 || latestTask.steps?.some((step) => step.status === "done" || step.status === "in-progress"))
+        ) {
+          executorLog.log(`${task.id} paused-abort cleanup skipped — incomplete task is already parked with progress preserved`);
+          await this.store.logEntry(
+            task.id,
+            "Execution abort cleanup skipped — incomplete stuck-loop task is already parked with progress preserved",
+            undefined,
+            this.getRunContextFor(task.id),
+          );
+          return;
+        }
         if (await this.shouldFinalizeCompletedTask(task.id, taskDone)) {
           if (await this.shouldDeferCompletionForGlobalPause(task.id, "paused after completion")) {
             return;

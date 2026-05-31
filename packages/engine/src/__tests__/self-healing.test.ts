@@ -424,6 +424,73 @@ describe("SelfHealingManager", () => {
       );
     });
 
+    it("parks incomplete stuck-loop exhaustion in todo without review handoff", async () => {
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "FN-001",
+        column: "in-progress",
+        stuckKillCount: 6,
+        steps: [
+          { name: "Preflight", status: "done" },
+          { name: "Delivery", status: "in-progress" },
+        ],
+      } as unknown as Task);
+
+      manager.start();
+
+      const result = await manager.checkStuckBudget("FN-001", "loop");
+
+      expect(result).toBe(false);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+        stuckKillCount: 7,
+        paused: true,
+        userPaused: true,
+        pausedReason: "stuck-loop-exhausted-incomplete-steps",
+      }));
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
+      expect(store.updateTask).toHaveBeenLastCalledWith("FN-001", expect.objectContaining({
+        stuckKillCount: 7,
+        paused: true,
+        userPaused: true,
+        pausedReason: "stuck-loop-exhausted-incomplete-steps",
+      }));
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-001",
+        "STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (7/6), last reason=loop. Parked in todo with progress preserved; manual review/resume required before retry.",
+      );
+    });
+
+    it("leaves incomplete stuck-loop exhaustion paused when todo parking fails", async () => {
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "FN-001",
+        column: "in-progress",
+        stuckKillCount: 6,
+        steps: [
+          { name: "Preflight", status: "done" },
+          { name: "Delivery", status: "in-progress" },
+        ],
+      } as unknown as Task);
+      (store.moveTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("database is busy"));
+
+      manager.start();
+
+      const result = await manager.checkStuckBudget("FN-001", "loop");
+
+      expect(result).toBe(false);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+        stuckKillCount: 7,
+        paused: true,
+        userPaused: true,
+        pausedReason: "stuck-loop-exhausted-incomplete-steps",
+      }));
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-001",
+        "STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (7/6), last reason=loop. Failed to move task to todo (database is busy); task remains paused for manual intervention.",
+      );
+    });
+
     it("terminalizes no-progress churn without incrementing stuck kill budget", async () => {
       (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "FN-001",

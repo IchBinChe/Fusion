@@ -6,8 +6,19 @@ import { TaskExecutor } from "../../executor.js";
 import { SelfHealingManager } from "../../self-healing.js";
 import { StuckTaskDetector } from "../../stuck-task-detector.js";
 
-function createStore(task: Task, settings: Record<string, unknown> = {}): TaskStore & EventEmitter {
-  const emitter = new EventEmitter() as TaskStore & EventEmitter;
+type MockTaskStore = TaskStore & EventEmitter & {
+  getSettings: ReturnType<typeof vi.fn>;
+  getTask: ReturnType<typeof vi.fn>;
+  listTasks: ReturnType<typeof vi.fn>;
+  updateTask: ReturnType<typeof vi.fn>;
+  moveTask: ReturnType<typeof vi.fn>;
+  handoffToReview: ReturnType<typeof vi.fn>;
+  logEntry: ReturnType<typeof vi.fn>;
+  recordRunAuditEvent: ReturnType<typeof vi.fn>;
+};
+
+function createStore(task: Task, settings: Record<string, unknown> = {}): MockTaskStore {
+  const emitter = new EventEmitter() as MockTaskStore;
   (emitter as any).getSettings = vi.fn().mockResolvedValue({
     autoMerge: true,
     globalPause: false,
@@ -178,7 +189,7 @@ describe("reliability interactions: non-progress churn", () => {
     manager.stop();
   });
 
-  it("preserves STUCK_LOOP_EXHAUSTED when the churn signal does not fire", async () => {
+  it("parks incomplete STUCK_LOOP_EXHAUSTED tasks in todo when the churn signal does not fire", async () => {
     const task = baseTask({ id: "FN-5168-LOOP", stuckKillCount: 6 });
     const store = createStore(task);
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/repo" });
@@ -198,8 +209,16 @@ describe("reliability interactions: non-progress churn", () => {
 
     await detector.killAndRetry(task.id, 60_000);
 
-    expect(task.error).toBe("STUCK_LOOP_EXHAUSTED: stuck kill budget exhausted (7/6) after last reason=loop.");
-    expect(task.column).toBe("in-review");
+    expect(task.error).toBeNull();
+    expect(task.status).toBeNull();
+    expect(task.column).toBe("todo");
+    expect(task.paused).toBe(true);
+    expect(task.userPaused).toBe(true);
+    expect(task.pausedReason).toBe("stuck-loop-exhausted-incomplete-steps");
+    expect(task.stuckKillCount).toBe(7);
+    expect(task.steps).toEqual([{ name: "Implement", status: "in-progress" }]);
+    expect(task.log?.some((entry) => entry.action.includes("incomplete task exhausted stuck kill budget"))).toBe(true);
+    expect(store.handoffToReview).not.toHaveBeenCalled();
 
     manager.stop();
   });

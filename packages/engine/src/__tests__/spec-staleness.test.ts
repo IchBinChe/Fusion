@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { evaluateSpecStaleness, getPromptPath } from "../spec-staleness.js";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Settings } from "@fusion/core";
+import type { Settings, Task } from "@fusion/core";
 
 vi.mock("node:fs/promises", () => ({
   stat: vi.fn(),
@@ -129,6 +129,33 @@ describe("evaluateSpecStaleness", () => {
       expect(result.reason).toContain(`age=${defaultMaxAgeMs + 1000}ms`);
       expect(result.reason).toContain(`max=${defaultMaxAgeMs}ms`);
       expect(result.reason).toContain("moved to triage for re-planning");
+    });
+
+    it("skips stale-spec rerouting for parked tasks with preserved execution progress", async () => {
+      const now = 100_000_000_000;
+      const mtime = now - defaultMaxAgeMs - 1000;
+      mockStat.mockResolvedValue({ mtimeMs: mtime } as Awaited<ReturnType<typeof stat>>);
+
+      const settings = createMockSettings({ specStalenessEnabled: true });
+      const task = {
+        id: "FN-249",
+        column: "todo",
+        currentStep: 6,
+        paused: true,
+        pausedReason: "stuck-loop-exhausted-incomplete-steps",
+        steps: [
+          { name: "Implement", status: "done" },
+          { name: "Testing & Verification", status: "in-progress" },
+          { name: "Documentation & Delivery", status: "pending" },
+        ],
+      } as Task;
+
+      const result = await evaluateSpecStaleness({ settings, promptPath, nowMs: now, task });
+
+      expect(result.isStale).toBe(false);
+      expect(result.skipped).toBe(true);
+      expect(result.reason).toContain("preserved execution progress");
+      expect(mockStat).not.toHaveBeenCalled();
     });
 
     it("uses custom specStalenessMaxAgeMs when set and valid", async () => {

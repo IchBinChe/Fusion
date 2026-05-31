@@ -1417,7 +1417,7 @@ export class Scheduler {
         // so they receive fresh specification before execution. This guard runs after
         // filesystem validation so missing/unreadable files skip staleness checks entirely.
         const promptPath = getPromptPath(this.store.getTasksDir(), task.id);
-        const staleness = await evaluateSpecStaleness({ settings, promptPath });
+        const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
         if (staleness.isStale) {
           schedulerLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
           await this.store.moveTask(task.id, "triage");

@@ -4,6 +4,30 @@
 
 Workflow steps are reusable quality gates that run around task completion.
 
+## Workflow IR (v1)
+
+Fusion also defines a separate **Workflow Intermediate Representation (IR)** contract in `@fusion/core` for editor↔interpreter graph exchange. This IR is distinct from the post-implementation quality gates documented on this page (`WorkflowStep` templates and execution policies).
+
+Workflow IR v1 is a JSON-safe graph document:
+
+- `schemaVersion`: must be exactly `"1.0.0"` for v1 (`WORKFLOW_IR_SCHEMA_VERSION`)
+- `metadata`: workflow-level JSON metadata (`name` required)
+- `nodes`: node array with built-in kinds (`start`, `prompt`, `script`, `gate`, `end`)
+- `edges`: directed links referencing node ids
+
+Contract behavior:
+
+- Parsing is strict: unsupported/missing versions, invalid node kinds, invalid shapes, and dangling edges are rejected at parse time.
+- Serialization is stable JSON via `serializeWorkflowIr`; round-tripping `parseWorkflowIr(serializeWorkflowIr(ir))` preserves data.
+- `BUILTIN_WORKFLOW_IR_FIXTURE` provides a complete built-in reference flow for parity testing.
+
+Out of scope for v1:
+
+- Plugin-contributed node kinds
+- Layout/position metadata for editors
+- Execution history/runtime traces
+- Migration tooling for future schema versions (future versions should use explicit `schemaVersion` migrations)
+
 ## What They Are
 
 A workflow step is a reusable check (AI prompt or script) that can be enabled on tasks.

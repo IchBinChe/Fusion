@@ -25,6 +25,7 @@ export type GoalInjectionAuditInput = {
   lane: GoalAnchoringLane;
   taskId?: string;
   goalsInjected: number;
+  goalIds?: string[];
   truncated?: boolean;
   reason?: "no-active-goals" | "injector-empty";
 };
@@ -37,6 +38,7 @@ export type GoalRetrievalAuditInput = {
   toolName: "fn_goal_list" | "fn_goal_show";
   resultCount: number;
   goalId?: string;
+  goalIds?: string[];
   notFound?: boolean;
 };
 
@@ -52,6 +54,7 @@ export async function emitGoalAnchoringAudit(auditor: RunAuditor, input: GoalInj
     metadata: {
       lane: input.lane,
       count: input.goalsInjected,
+      goalIds: input.goalIds ?? [],
       ...(typeof input.truncated === "boolean" ? { truncated: input.truncated } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
     },
@@ -80,6 +83,7 @@ export function emitGoalRetrievalAudit(
       metadata: {
         toolName: input.toolName,
         count: input.resultCount,
+        goalIds: input.goalIds ?? [],
         notFound: input.notFound ?? false,
       },
     });

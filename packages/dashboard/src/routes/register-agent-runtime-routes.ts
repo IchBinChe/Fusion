@@ -4,6 +4,7 @@ import type { ApiRoutesContext } from "./types.js";
 type NormalizedAuditEvent = import("../routes.js").NormalizedRunAuditEvent;
 type TimelineEntry = import("../routes.js").TimelineEntry;
 type RunAuditResponse = import("../routes.js").RunAuditResponse;
+type RunCitedGoalsResponse = import("../routes.js").RunCitedGoalsResponse;
 type RunTimelineResponse = import("../routes.js").RunTimelineResponse;
 
 interface AgentRuntimeRouteDeps {
@@ -1506,6 +1507,54 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
         hasMore: filters.limit !== undefined && totalEvents.length > filters.limit,
       };
 
+      res.json(response);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err instanceof Error ? err.message : String(err)).includes("not found")) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      } else {
+        rethrowAsApiError(err);
+      }
+    }
+  });
+
+  /**
+   * GET /api/agents/:id/runs/:runId/cited-goals
+   * Get cited goal IDs aggregated from goal-related run-audit events for a specific run.
+   */
+  router.get("/agents/:id/runs/:runId/cited-goals", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { AgentStore, collectCitedGoalIdsFromAudit } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const runId = req.params.runId;
+      if (!runId || runId.trim().length === 0) {
+        throw badRequest("runId is required");
+      }
+
+      const run = await agentStore.getRunDetail(req.params.id, req.params.runId);
+      if (!run) {
+        throw notFound("Run not found");
+      }
+
+      const goalEvents = scopedStore.getRunAuditEvents({
+        runId: req.params.runId,
+        domain: "database",
+      });
+
+      const { injectedGoalIds, retrievedGoalIds, citedGoalIds } = collectCitedGoalIdsFromAudit(goalEvents);
+      const taskId = run.contextSnapshot?.taskId as string | undefined;
+      const response: RunCitedGoalsResponse = {
+        runId: req.params.runId,
+        taskId,
+        injectedGoalIds,
+        retrievedGoalIds,
+        citedGoalIds,
+      };
       res.json(response);
     } catch (err: unknown) {
       if (err instanceof ApiError) {

@@ -736,6 +736,7 @@ export type {
 export {
   extractGoalCitations,
   buildSnippet,
+  collectCitedGoalIdsFromAudit,
   GOAL_ID_PATTERN,
   GOAL_CITATION_SNIPPET_MAX,
 } from "./goal-citation-extractor.js";

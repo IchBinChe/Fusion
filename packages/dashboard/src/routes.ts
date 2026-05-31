@@ -630,6 +630,17 @@ export interface RunAuditResponse {
 }
 
 /**
+ * Response shape for GET /api/agents/:id/runs/:runId/cited-goals
+ */
+export interface RunCitedGoalsResponse {
+  runId: string;
+  taskId?: string;
+  injectedGoalIds: string[];
+  retrievedGoalIds: string[];
+  citedGoalIds: string[];
+}
+
+/**
  * Response shape for GET /api/agents/:id/runs/:runId/timeline
  */
 export interface RunTimelineResponse {

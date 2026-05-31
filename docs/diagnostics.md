@@ -5,6 +5,10 @@
 Executor, heartbeat, and planning runs emit one goal-injection diagnostic with outcome `applied`, `no-goals`, or `disabled-or-failed`.
 
 - Run-audit event: `prompt:goal-injection` (`database` domain, target lane) with metadata `{ lane, outcome, goalCount, goalIds, truncated, reason?, errorClass?, runId?, agentId?, taskId? }`.
+- Goal anchoring events also persist `metadata.goalIds` (alongside existing count/tool fields):
+  - `goal:injection-applied` / `goal:injection-skipped` → `{ lane, count, goalIds, truncated?, reason? }`
+  - `goal:retrieval-invoked` → `{ toolName, count, goalIds, notFound }`
+- Run cited-goals read path: `GET /api/agents/:id/runs/:runId/cited-goals` returns `{ runId, taskId?, injectedGoalIds, retrievedGoalIds, citedGoalIds }` aggregated from `goal:*` + `prompt:goal-injection` run-audit events.
 - Task log (executor lane with `taskId`): `[goal-injection] <outcome> count=<n> ids=<json-array> truncated=<bool> ...`.
 - Guardrail: diagnostics persist goal IDs/counts only; never prompt text, goal titles, or goal descriptions.
 

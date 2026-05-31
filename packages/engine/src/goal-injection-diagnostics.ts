@@ -144,6 +144,7 @@ export async function resolveAndEmitGoalContext(input: ResolveAndEmitGoalContext
     lane: input.lane,
     taskId: input.taskId,
     goalsInjected: resolution.classification.goalCount,
+    goalIds: resolution.classification.goalIds,
     truncated: resolution.classification.truncated,
     reason: resolution.classification.outcome === "no-goals" ? "no-active-goals" : undefined,
   });

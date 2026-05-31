@@ -2418,6 +2418,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       emitGoalRetrievalAudit(store, fnCtx, {
         toolName: "fn_goal_list",
         resultCount: goals.length,
+        goalIds: goals.map((goal) => goal.id),
       });
 
       const lines: string[] = [];
@@ -2562,6 +2563,7 @@ export default function kbExtension(pi: ExtensionAPI) {
           toolName: "fn_goal_show",
           resultCount: 0,
           goalId: params.id,
+          goalIds: [],
           notFound: true,
         });
         return {
@@ -2584,6 +2586,7 @@ export default function kbExtension(pi: ExtensionAPI) {
         toolName: "fn_goal_show",
         resultCount: 1,
         goalId: params.id,
+        goalIds: [params.id],
       });
 
       return {

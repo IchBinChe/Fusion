@@ -58,8 +58,8 @@ describe("extension goal tools retrieval audit", () => {
       .filter((event) => event.mutationType === GOAL_RETRIEVAL_INVOKED);
 
     expect(goalAuditCalls).toHaveLength(3);
-    expect(goalAuditCalls[0]).toMatchObject({ metadata: expect.objectContaining({ toolName: "fn_goal_list", count: 1 }) });
-    expect(goalAuditCalls[1]).toMatchObject({ target: goalId, metadata: expect.objectContaining({ toolName: "fn_goal_show", count: 1, notFound: false }) });
-    expect(goalAuditCalls[2]).toMatchObject({ target: "G-404", metadata: expect.objectContaining({ toolName: "fn_goal_show", count: 0, notFound: true }) });
+    expect(goalAuditCalls[0]).toMatchObject({ metadata: expect.objectContaining({ toolName: "fn_goal_list", count: 1, goalIds: [goalId] }) });
+    expect(goalAuditCalls[1]).toMatchObject({ target: goalId, metadata: expect.objectContaining({ toolName: "fn_goal_show", count: 1, goalIds: [goalId], notFound: false }) });
+    expect(goalAuditCalls[2]).toMatchObject({ target: "G-404", metadata: expect.objectContaining({ toolName: "fn_goal_show", count: 0, goalIds: [], notFound: true }) });
   });
 });

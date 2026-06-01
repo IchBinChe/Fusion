@@ -1733,8 +1733,8 @@ describe("Workspace File Routes", () => {
       return git(repoDir, ["rev-parse", "HEAD"]);
     }
 
-    async function runWithAdvance(repoDir: string, toSha: string) {
-      const headSha = git(repoDir, ["rev-parse", "HEAD"]);
+    async function runWithAdvance(repoDir: string, toSha: string, options?: { headSha?: string; localIntegrationTipSha?: string }) {
+      const headSha = options?.headSha ?? git(repoDir, ["rev-parse", "HEAD"]);
       const fakeStore = {
         getRunAuditEvents: ({ mutationType }: { mutationType?: string }) => {
           if (mutationType === "merge:integration-ref-advance") {
@@ -1743,7 +1743,7 @@ describe("Workspace File Routes", () => {
           return [];
         },
       } as unknown as TaskStore;
-      return collectRecentMergeAdvances(fakeStore, repoDir, headSha);
+      return collectRecentMergeAdvances(fakeStore, repoDir, headSha, options?.localIntegrationTipSha);
     }
 
     it("marks orphaned SHAs as handled", async () => {
@@ -1802,6 +1802,36 @@ describe("Workspace File Routes", () => {
         const result = await runWithAdvance(repoDir, toSha);
         expect(result?.[0]?.resolution).toBe("reachable");
         expect(result?.[0]?.needsAction).toBe(false);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+
+    it("marks unreachable existing SHA as superseded when head equals integration tip", async () => {
+      const repoDir = initRepo();
+      try {
+        const baseSha = commitFile(repoDir, "a.txt", "base\n", "base");
+        const toSha = commitFile(repoDir, "a.txt", "base\nadvance\n", "advance");
+        execFileSync("git", ["-C", repoDir, "reset", "--hard", baseSha], { stdio: "pipe" });
+        const rewrittenHead = commitFile(repoDir, "a.txt", "base\nrewritten\n", "rewritten");
+        const result = await runWithAdvance(repoDir, toSha, { localIntegrationTipSha: rewrittenHead });
+        expect(result?.[0]?.resolution).toBe("superseded");
+        expect(result?.[0]?.needsAction).toBe(false);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps unreachable existing SHA pending when head is not aligned", async () => {
+      const repoDir = initRepo();
+      try {
+        const baseSha = commitFile(repoDir, "a.txt", "base\n", "base");
+        const toSha = commitFile(repoDir, "a.txt", "base\nadvance\n", "advance");
+        execFileSync("git", ["-C", repoDir, "reset", "--hard", baseSha], { stdio: "pipe" });
+        const rewrittenHead = commitFile(repoDir, "a.txt", "base\nrewritten\n", "rewritten");
+        const result = await runWithAdvance(repoDir, toSha, { localIntegrationTipSha: `${rewrittenHead.slice(0, 39)}0` });
+        expect(result?.[0]?.resolution).toBe("pending");
+        expect(result?.[0]?.needsAction).toBe(true);
       } finally {
         rmSync(repoDir, { recursive: true, force: true });
       }

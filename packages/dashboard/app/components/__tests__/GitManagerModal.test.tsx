@@ -3041,6 +3041,7 @@ describe("GitManagerModal", () => {
 
   describe("recent merge advances panel", () => {
     it("hides sync CTA when advances are handled and head is aligned", async () => {
+      const supersededSha = "e".repeat(40);
       (fetchGitStatus as any).mockResolvedValue({
         branch: "main",
         commit: "abc1234",
@@ -3053,12 +3054,14 @@ describe("GitManagerModal", () => {
         recentMergeAdvances: [
           { taskId: "FN-1", fromSha: null, toSha: "a".repeat(40), advancedAt: new Date().toISOString(), needsAction: false, resolution: "orphaned" },
           { taskId: "FN-2", fromSha: null, toSha: "b".repeat(40), advancedAt: new Date().toISOString(), needsAction: false, resolution: "subsumed" },
+          { taskId: "FN-3", fromSha: null, toSha: supersededSha, advancedAt: new Date().toISOString(), needsAction: false, resolution: "superseded" },
         ],
       });
       render(<GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />);
       await waitFor(() => expect(screen.getByTestId("recent-merge-advances")).toBeInTheDocument());
       expect(screen.getByText(/\(0 need action\)/i)).toBeInTheDocument();
       expect(screen.queryByTestId("sync-working-tree-btn")).not.toBeInTheDocument();
+      expect(screen.getByTestId(`dismiss-advance-${supersededSha}`)).toBeInTheDocument();
     });
 
     it("shows sync CTA when pending advance exists", async () => {
@@ -3080,7 +3083,7 @@ describe("GitManagerModal", () => {
       await userEvent.click(screen.getByTestId("sync-working-tree-btn"));
     });
 
-    it("dismisses orphaned/subsumed entries", async () => {
+    it("dismisses orphaned/subsumed/superseded entries", async () => {
       const toSha = "d".repeat(40);
       (fetchGitStatus as any).mockResolvedValue({
         branch: "main",

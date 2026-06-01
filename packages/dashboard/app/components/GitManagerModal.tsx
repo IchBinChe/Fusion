@@ -1371,12 +1371,12 @@ function StatusPanel({
               </p>
               <ul className="gm-status-advances-help-list">
                 <li><code>clean-sync</code> / <code>synced-with-edits-restored</code> — working tree is in sync; nothing to do.</li>
-                <li><code>reachable</code> / <code>subsumed</code> / <code>orphaned</code> — already handled (including history rewrites where equivalent content already landed or original SHAs disappeared).</li>
+                <li><code>reachable</code> / <code>subsumed</code> / <code>orphaned</code> / <code>superseded</code> — already handled (including history rewrites where equivalent content already landed, original SHAs disappeared, or HEAD is already aligned to the rewritten integration tip).</li>
                 <li><code>pending</code> + <code>off / not run</code> — auto-sync is disabled in Settings; the branch ref moved but your worktree didn&apos;t follow.</li>
                 <li><code>pending</code> + <code>stash-failed</code> / <code>would-conflict</code> / similar — auto-sync tried but couldn&apos;t reconcile (usually local edits collide with the new commit).</li>
               </ul>
               <p>
-                <strong>Fix:</strong> Fusion only shows <em>Sync working tree</em> when at least one advance is genuinely <code>pending</code> and HEAD is not aligned with the integration tip. If entries are already handled (subsumed/orphaned/reachable), no sync action is offered.
+                <strong>Fix:</strong> Fusion only shows <em>Sync working tree</em> when at least one advance is genuinely <code>pending</code> and HEAD is not aligned with the integration tip. If entries are already handled (subsumed/orphaned/reachable/superseded), no sync action is offered.
               </p>
             </div>
           )}
@@ -1398,7 +1398,7 @@ function StatusPanel({
                 <span className="gm-status-sub">
                   {" "}· {new Date(advance.advancedAt).toLocaleTimeString()} · {advance.resolution}
                 </span>
-                {(advance.resolution === "orphaned" || advance.resolution === "subsumed") && (
+                {(advance.resolution === "orphaned" || advance.resolution === "subsumed" || advance.resolution === "superseded") && (
                   <button
                     type="button"
                     className="btn btn-xs"

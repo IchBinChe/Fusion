@@ -443,7 +443,7 @@ export interface ExtendedGitStatus {
     advancedAt: string;
     autoSyncOutcome?: string;
     needsAction: boolean;
-    resolution: "reachable" | "orphaned" | "subsumed" | "pending";
+    resolution: "reachable" | "orphaned" | "subsumed" | "superseded" | "pending";
   }>;
 }
 
@@ -604,6 +604,7 @@ export async function collectRecentMergeAdvances(
   },
   worktreePath: string,
   headSha: string | undefined,
+  localIntegrationTipSha: string | undefined,
 ): Promise<ExtendedGitStatus["recentMergeAdvances"]> {
   if (typeof scopedStore.getRunAuditEvents !== "function") return [];
   const advances = scopedStore.getRunAuditEvents({
@@ -648,7 +649,7 @@ export async function collectRecentMergeAdvances(
     if (!tid) continue;
     const autoSyncOutcome = autoSyncByAdvance.get(pairKey(tid, md.toSha)) ?? autoSyncByTaskFallback.get(tid);
 
-    let resolution: "reachable" | "orphaned" | "subsumed" | "pending" = "pending";
+    let resolution: "reachable" | "orphaned" | "subsumed" | "superseded" | "pending" = "pending";
     let toShaExists = true;
     if (headSha && headSha === md.toSha) {
       resolution = "reachable";
@@ -689,6 +690,13 @@ export async function collectRecentMergeAdvances(
             resolution = "subsumed";
           }
         }
+      }
+
+      // When HEAD is already aligned with the local integration tip, resetting
+      // to that tip cannot make an unreachable advance SHA become reachable.
+      // Treat this as handled (superseded by rewrite), not actionable pending.
+      if (toShaExists && resolution === "pending" && localIntegrationTipSha && headSha === localIntegrationTipSha) {
+        resolution = "superseded";
       }
     }
 
@@ -786,6 +794,7 @@ export async function computeExtendedGitStatus(rootDir: string, scopedStore: Tas
       },
       rootDir,
       headSha,
+      localIntegrationTip ?? undefined,
     ),
   ]);
 

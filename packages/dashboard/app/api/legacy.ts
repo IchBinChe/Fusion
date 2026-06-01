@@ -2708,7 +2708,7 @@ export interface GitStatus {
     advancedAt: string;
     autoSyncOutcome?: string;
     needsAction: boolean;
-    resolution: "reachable" | "orphaned" | "subsumed" | "pending";
+    resolution: "reachable" | "orphaned" | "subsumed" | "superseded" | "pending";
   }>;
 }
 

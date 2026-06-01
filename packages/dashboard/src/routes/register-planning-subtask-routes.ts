@@ -224,8 +224,8 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
             ? settings.defaultBranch
             : "main";
         const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
-        const ensureBranchGroupForSource = (scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] }).ensureBranchGroupForSource;
-        ensureBranchGroupForSource?.("planning", sessionId, {
+        const branchGroupStore = scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] };
+        branchGroupStore.ensureBranchGroupForSource?.("planning", sessionId, {
           branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
           autoMerge: session.autoMerge ?? settingsAutoMerge,
         });
@@ -1279,8 +1279,8 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
             ? settings.defaultBranch
             : "main";
         const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
-        const ensureBranchGroupForSource = (scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] }).ensureBranchGroupForSource;
-        ensureBranchGroupForSource?.("planning", planningSessionId, {
+        const branchGroupStore = scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] };
+        branchGroupStore.ensureBranchGroupForSource?.("planning", planningSessionId, {
           branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
           autoMerge: session.autoMerge ?? settingsAutoMerge,
         });

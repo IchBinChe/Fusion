@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   createMockStore,
@@ -219,6 +220,21 @@ describe("probeIntegrationWorktreeState", () => {
 
     expect(state.userCheckout?.worktreePath).toBe("/tmp/project-root");
     expect(state.userCheckout?.dirty).toBe(false);
+  });
+});
+
+describe("merger fresh reacquire init wiring", () => {
+  it("wires fresh acquireTaskWorktree calls with init command execution", () => {
+    const mergerSource = readFileSync(new URL("../merger.ts", import.meta.url), "utf-8");
+    const freshAcquireBlock = mergerSource.match(/const acquisition = await acquireTaskWorktree\(\{[\s\S]*?\n\s*\}\);/);
+    expect(freshAcquireBlock?.[0]).toContain("runInitCommand: true");
+    expect(freshAcquireBlock?.[0]).toContain("runConfiguredCommand:");
+    expect(freshAcquireBlock?.[0]).toContain("runConfiguredMergeWorktreeCommand");
+  });
+
+  it("keeps direct-reuse shortcut on existing registrations", () => {
+    const mergerSource = readFileSync(new URL("../merger.ts", import.meta.url), "utf-8");
+    expect(mergerSource).toContain("Skip acquireTaskWorktree's");
   });
 });
 

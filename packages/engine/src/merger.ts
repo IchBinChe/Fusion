@@ -7781,7 +7781,9 @@ export async function aiMergeTask(
       logger: mergerLog,
       audit,
       runContext: engineRunContext,
-      runInitCommand: false,
+      runInitCommand: true,
+      runConfiguredCommand: async (command, cwd, timeoutMs, env) =>
+        runConfiguredMergeWorktreeCommand(command, cwd, timeoutMs, env, audit),
       createWorktree: async (branch, path, _taskId, _startPoint, _allowSiblingBranchRename) => {
         await execAsync(`git worktree add -f ${quoteArg(path)} ${quoteArg(branch)}`, {
           cwd: projectRootDir,
@@ -11927,6 +11929,41 @@ async function runPostMergeWorkflowSteps(
 
 function getPostMergeScriptSandboxBackend(auditor?: RunAuditor): SandboxBackend {
   return resolveSandboxBackend({ auditor });
+}
+
+async function runConfiguredMergeWorktreeCommand(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  extraEnv?: NodeJS.ProcessEnv,
+  auditor?: RunAuditor,
+): Promise<{
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number | null;
+  signal?: NodeJS.Signals | null;
+  timedOut?: boolean;
+  bufferExceeded?: boolean;
+  spawnError?: Error;
+}> {
+  const backend = getPostMergeScriptSandboxBackend(auditor);
+  const result = await backend.run(command, {
+    cwd,
+    encoding: "utf-8",
+    timeoutMs,
+    maxBuffer: 10 * 1024 * 1024,
+    ...(extraEnv !== undefined && { env: extraEnv }),
+  });
+
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    timedOut: result.timedOut,
+    bufferExceeded: result.bufferExceeded,
+    spawnError: result.spawnError,
+  };
 }
 
 /** Execute a script-mode post-merge workflow step in the provided execution directory. */

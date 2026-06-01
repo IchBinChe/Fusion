@@ -170,6 +170,7 @@ describe("onboard", () => {
 
     await runOnboard({ input: inputFrom(["y", "3", "y", "y", "n", "y"]) });
     expect(providerAuth.setApiKey).not.toHaveBeenCalled();
+    expect(mockRunInit).not.toHaveBeenCalled();
 
     await runOnboard({ force: true, input: inputFrom(["y", "n", "n", "n", "n"]) });
     expect(globalSettingsState.cliOnboardingCompletedAt).not.toBe("2026-06-01T00:00:00.000Z");

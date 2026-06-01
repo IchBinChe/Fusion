@@ -787,7 +787,7 @@ CREATE TABLE IF NOT EXISTS missions (
 
 CREATE TABLE IF NOT EXISTS branch_groups (
   id TEXT PRIMARY KEY,
-  sourceType TEXT NOT NULL CHECK (sourceType IN ('mission','planning')),
+  sourceType TEXT NOT NULL CHECK (sourceType IN ('mission','planning','new-task')),
   sourceId TEXT NOT NULL,
   branchName TEXT NOT NULL UNIQUE,
   worktreePath TEXT,
@@ -3705,7 +3705,7 @@ export class Database {
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS branch_groups (
             id TEXT PRIMARY KEY,
-            sourceType TEXT NOT NULL CHECK (sourceType IN ('mission','planning')),
+            sourceType TEXT NOT NULL CHECK (sourceType IN ('mission','planning','new-task')),
             sourceId TEXT NOT NULL,
             branchName TEXT NOT NULL UNIQUE,
             worktreePath TEXT,

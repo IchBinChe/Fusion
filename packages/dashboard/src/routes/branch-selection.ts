@@ -24,7 +24,8 @@ export type BranchSelectionMode =
   | "project-default"
   | "auto-new"
   | "existing"
-  | "custom-new";
+  | "custom-new"
+  | "shared-group";
 
 export interface BranchSelectionPayload {
   mode?: unknown;
@@ -47,8 +48,9 @@ export function getBranchSelectionMode(selectionInput: unknown): BranchSelection
     "auto-new",
     "existing",
     "custom-new",
+    "shared-group",
   ].includes(mode)) {
-    throw badRequest("branchSelection.mode must be one of: project-default, auto-new, existing, custom-new");
+    throw badRequest("branchSelection.mode must be one of: project-default, auto-new, existing, custom-new, shared-group");
   }
   return mode as BranchSelectionMode;
 }
@@ -58,6 +60,7 @@ export type PlanningBranchMode = "shared" | "per-task-derived";
 export interface ResolvedBranchSelection {
   branch?: string;
   baseBranch?: string;
+  sharedFeatureBranch?: string;
 }
 
 export interface BranchAssignmentContext {
@@ -106,6 +109,18 @@ export function resolveBranchSelection(
   }
 
   const branchName = normalizeOptionalBranch(selection.branchName, "branchSelection.branchName");
+
+  if (mode === "shared-group") {
+    if (!branchName) {
+      throw badRequest("branchSelection.branchName is required for shared-group mode");
+    }
+    return {
+      branch: undefined,
+      baseBranch,
+      sharedFeatureBranch: branchName,
+    };
+  }
+
   if (!branchName) {
     throw badRequest("branchSelection.branchName is required for existing/custom-new modes");
   }

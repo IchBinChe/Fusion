@@ -1676,7 +1676,7 @@ export interface TaskSource {
   sourceMetadata?: Record<string, unknown>;
 }
 
-export type TaskBranchGroupSource = "planning" | "mission";
+export type TaskBranchGroupSource = "planning" | "mission" | "new-task";
 
 export type TaskBranchAssignmentMode = "shared" | "per-task-derived";
 

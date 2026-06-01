@@ -41,7 +41,7 @@ import * as projectStoreResolver from "../project-store-resolver.js";
 
 // Mock MissionStore factory
 function createMockMissionStore(options?: {
-  ensureBranchGroupForSource?: (sourceType: "planning" | "mission", sourceId: string, init: { branchName: string; autoMerge?: boolean }) => unknown;
+  ensureBranchGroupForSource?: (sourceType: "planning" | "mission" | "new-task", sourceId: string, init: { branchName: string; autoMerge?: boolean }) => unknown;
   settingsAutoMerge?: boolean;
   persistTask?: (task: { id: string; branch?: string; baseBranch?: string }) => void;
 }) {
@@ -716,13 +716,13 @@ function createMockStore(): TaskStore {
   const tasks = new Map<string, { id: string; branch?: string; baseBranch?: string }>();
   const branchGroups = new Map<string, {
     id: string;
-    sourceType: "planning" | "mission";
+    sourceType: "planning" | "mission" | "new-task";
     sourceId: string;
     branchName: string;
     autoMerge: boolean;
   }>();
 
-  const ensureBranchGroupForSource = vi.fn((sourceType: "planning" | "mission", sourceId: string, init: { branchName: string; autoMerge?: boolean }) => {
+  const ensureBranchGroupForSource = vi.fn((sourceType: "planning" | "mission" | "new-task", sourceId: string, init: { branchName: string; autoMerge?: boolean }) => {
     const key = `${sourceType}:${sourceId}`;
     const existing = branchGroups.get(key);
     if (existing) return existing;
@@ -737,7 +737,7 @@ function createMockStore(): TaskStore {
     return created;
   });
 
-  const getBranchGroupBySource = vi.fn((sourceType: "planning" | "mission", sourceId: string) =>
+  const getBranchGroupBySource = vi.fn((sourceType: "planning" | "mission" | "new-task", sourceId: string) =>
     branchGroups.get(`${sourceType}:${sourceId}`) ?? null,
   );
 

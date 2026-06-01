@@ -191,7 +191,7 @@ function parseTaskBranchContextFromSourceMetadata(sourceMetadata: Record<string,
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const candidate = raw as Record<string, unknown>;
   if (typeof candidate.groupId !== "string" || !candidate.groupId.trim()) return undefined;
-  if (candidate.source !== "planning" && candidate.source !== "mission") return undefined;
+  if (candidate.source !== "planning" && candidate.source !== "mission" && candidate.source !== "new-task") return undefined;
   if (candidate.assignmentMode !== "shared" && candidate.assignmentMode !== "per-task-derived") return undefined;
   const inheritedBaseBranch = typeof candidate.inheritedBaseBranch === "string" && candidate.inheritedBaseBranch.trim().length > 0
     ? candidate.inheritedBaseBranch.trim()
@@ -222,7 +222,7 @@ function withTaskBranchContextInSourceMetadata(
 
 interface BranchGroupRow {
   id: string;
-  sourceType: "mission" | "planning";
+  sourceType: "mission" | "planning" | "new-task";
   sourceId: string;
   branchName: string;
   worktreePath: string | null;
@@ -4342,6 +4342,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   getBranchGroupBySource(sourceType: BranchGroup["sourceType"], sourceId: string): BranchGroup | null {
     const row = this.db.prepare(`SELECT * FROM branch_groups WHERE sourceType = ? AND sourceId = ?`).get(sourceType, sourceId) as BranchGroupRow | undefined;
+    return row ? this.rowToBranchGroup(row) : null;
+  }
+
+  getBranchGroupByBranchName(branchName: string): BranchGroup | null {
+    const row = this.db.prepare(`SELECT * FROM branch_groups WHERE branchName = ? AND status = 'open' ORDER BY createdAt DESC LIMIT 1`).get(branchName) as BranchGroupRow | undefined;
     return row ? this.rowToBranchGroup(row) : null;
   }
 

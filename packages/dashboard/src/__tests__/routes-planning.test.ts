@@ -178,7 +178,7 @@ function createMockGlobalSettingsStore() {
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   const branchGroups = new Map<string, {
     id: string;
-    sourceType: "planning" | "mission";
+    sourceType: "planning" | "mission" | "new-task";
     sourceId: string;
     branchName: string;
     autoMerge: boolean;
@@ -223,7 +223,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     updatePrInfo: vi.fn().mockResolvedValue(undefined),
     updateIssueInfo: vi.fn().mockResolvedValue(undefined),
     getRootDir: vi.fn().mockReturnValue("/fake/root"),
-    ensureBranchGroupForSource: vi.fn(function (this: TaskStore, sourceType: "planning" | "mission", sourceId: string, init: { branchName: string; autoMerge?: boolean }) {
+    ensureBranchGroupForSource: vi.fn(function (this: TaskStore, sourceType: "planning" | "mission" | "new-task", sourceId: string, init: { branchName: string; autoMerge?: boolean }) {
       const existing = this.getBranchGroupBySource(sourceType, sourceId);
       if (existing) {
         return existing;
@@ -242,7 +242,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
       branchGroups.set(`${sourceType}:${sourceId}`, created);
       return created;
     }),
-    getBranchGroupBySource: vi.fn((sourceType: "planning" | "mission", sourceId: string) =>
+    getBranchGroupBySource: vi.fn((sourceType: "planning" | "mission" | "new-task", sourceId: string) =>
       branchGroups.get(`${sourceType}:${sourceId}`) ?? null
     ),
     listWorkflowSteps: vi.fn().mockResolvedValue([]),

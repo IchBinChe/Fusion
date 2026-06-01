@@ -56,7 +56,7 @@ export interface PendingImage {
 }
 
 type TaskExecutionModeSelection = "standard" | "fast";
-export type BranchSelectionMode = "project-default" | "auto-new" | "existing" | "custom-new";
+export type BranchSelectionMode = "project-default" | "auto-new" | "existing" | "custom-new" | "shared-group";
 
 export interface TaskFormProps {
   mode: "create" | "edit";
@@ -1029,20 +1029,21 @@ export function TaskForm({
                 <option value="auto-new">Create auto-named branch per task</option>
                 <option value="existing">Use existing branch</option>
                 <option value="custom-new">Create custom new branch</option>
+                <option value="shared-group">Merge into a shared feature branch</option>
               </select>
             </>
           ) : null}
-          {onBranchChange && (!onBranchModeChange || branchMode === "existing" || branchMode === "custom-new") && (
+          {onBranchChange && (!onBranchModeChange || branchMode === "existing" || branchMode === "custom-new" || branchMode === "shared-group") && (
             <>
               <label htmlFor="task-working-branch" className="model-select-label">
-                {onBranchModeChange ? "Branch name" : "Working branch"}
+                {branchMode === "shared-group" ? "Shared feature branch" : (onBranchModeChange ? "Branch name" : "Working branch")}
               </label>
               <input
                 id="task-working-branch"
                 className="input"
                 value={branch || ""}
                 onChange={(e) => onBranchChange(e.target.value)}
-                placeholder="e.g. feature/my-task"
+                placeholder={branchMode === "shared-group" ? "e.g. clionboarding" : "e.g. feature/my-task"}
                 disabled={disabled}
               />
             </>

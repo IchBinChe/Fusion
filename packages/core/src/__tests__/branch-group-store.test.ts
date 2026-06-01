@@ -67,11 +67,37 @@ describe("TaskStore branch groups", () => {
     expect(second.autoMerge).toBe(true);
   });
 
+  it("supports new-task branch group sources and round-trips through lookups", () => {
+    const group = store.ensureBranchGroupForSource("new-task", "shared/onboarding", {
+      branchName: "shared/onboarding",
+    });
+
+    expect(group.sourceType).toBe("new-task");
+    expect(store.getBranchGroupBySource("new-task", "shared/onboarding")?.id).toBe(group.id);
+    expect(store.getBranchGroup(group.id)?.sourceType).toBe("new-task");
+  });
+
   it("enforces unique branchName", () => {
     store.createBranchGroup({ sourceType: "mission", sourceId: "M-1", branchName: "fn/shared" });
     expect(() =>
       store.createBranchGroup({ sourceType: "planning", sourceId: "PS-1", branchName: "fn/shared" })
     ).toThrow();
+  });
+
+  it("finds open branch groups by branch name and ignores closed groups", () => {
+    expect(store.getBranchGroupByBranchName("fn/missing")).toBeNull();
+
+    const planning = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-open", branchName: "fn/open" });
+    expect(store.getBranchGroupByBranchName("fn/open")?.id).toBe(planning.id);
+
+    store.updateBranchGroup(planning.id, { status: "finalized" });
+    expect(store.getBranchGroupByBranchName("fn/open")).toBeNull();
+
+    const mission = store.createBranchGroup({ sourceType: "mission", sourceId: "M-open", branchName: "fn/mission-open" });
+    expect(store.getBranchGroupByBranchName("fn/mission-open")?.id).toBe(mission.id);
+
+    const newTask = store.createBranchGroup({ sourceType: "new-task", sourceId: "NT-open", branchName: "fn/new-task-open" });
+    expect(store.getBranchGroupByBranchName("fn/new-task-open")?.id).toBe(newTask.id);
   });
 
   it("rejects duplicate branch group primary key id", () => {

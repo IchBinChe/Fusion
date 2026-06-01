@@ -183,6 +183,9 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     createTaskWithReservedId: undefined,
     moveTask: vi.fn(),
     updateTask: vi.fn(),
+    getBranchGroupByBranchName: vi.fn(),
+    ensureBranchGroupForSource: vi.fn(),
+    setTaskBranchGroup: vi.fn().mockResolvedValue(undefined),
     deleteTask: vi.fn(),
     mergeTask: vi.fn(),
     archiveTask: vi.fn(),
@@ -973,6 +976,105 @@ describe("POST /tasks", () => {
       branch: "fusion/fn-5671-branch-strategy-dropdown",
     });
     expect(res.body.branch).toBe("fusion/fn-5671-branch-strategy-dropdown");
+  });
+
+  it("persists per-task branch and shared group context for shared-group branchSelection", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-7001",
+      title: "Shared Group Branch Task",
+      description: "Task with shared branch target",
+      column: "triage",
+      branch: undefined,
+    };
+    const ensuredGroup = {
+      id: "BG-001",
+      sourceType: "new-task" as const,
+      sourceId: "feature/shared",
+      branchName: "feature/shared",
+      autoMerge: false,
+      prState: "none" as const,
+      status: "open" as const,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+    (store.getBranchGroupByBranchName as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    (store.ensureBranchGroupForSource as ReturnType<typeof vi.fn>).mockReturnValue(ensuredGroup);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...createdTask,
+      branch: "feature/shared/shared-group-branch-task",
+      branchContext: { groupId: "BG-001", source: "new-task", assignmentMode: "shared" },
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Task with shared branch target",
+        title: "Shared Group Branch Task",
+        branchSelection: {
+          mode: "shared-group",
+          branchName: "feature/shared",
+        },
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.ensureBranchGroupForSource).toHaveBeenCalledWith("new-task", "feature/shared", { branchName: "feature/shared" });
+    expect(store.setTaskBranchGroup).toHaveBeenCalledWith("FN-7001", "BG-001");
+    expect(store.updateTask).toHaveBeenCalledWith("FN-7001", {
+      branch: "feature/shared/shared-group-branch-task",
+    });
+    expect(res.body.branch).toBe("feature/shared/shared-group-branch-task");
+  });
+
+  it("joins existing open branch groups by shared branch name", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-7002",
+      title: "Join Existing Group",
+      description: "Task joins existing group",
+      column: "triage",
+      branch: undefined,
+    };
+    const existingGroup = {
+      id: "BG-existing",
+      sourceType: "planning" as const,
+      sourceId: "PS-1",
+      branchName: "feature/shared",
+      autoMerge: false,
+      prState: "none" as const,
+      status: "open" as const,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+    (store.getBranchGroupByBranchName as ReturnType<typeof vi.fn>).mockReturnValue(existingGroup);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...createdTask,
+      branch: "feature/shared/join-existing-group",
+      branchContext: { groupId: "BG-existing", source: "planning", assignmentMode: "shared" },
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Task joins existing group",
+        title: "Join Existing Group",
+        branchSelection: { mode: "shared-group", branchName: "feature/shared" },
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.ensureBranchGroupForSource).not.toHaveBeenCalled();
+    expect(store.setTaskBranchGroup).toHaveBeenCalledWith("FN-7002", "BG-existing");
+    expect(res.body.branch).not.toBe("feature/shared");
   });
 
   it("returns 400 when create branch payload is not a string", async () => {

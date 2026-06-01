@@ -37,7 +37,7 @@ interface MockTask {
   baseBranch?: string;
   branchContext?: {
     groupId: string;
-    source: "planning" | "mission";
+    source: "planning" | "mission" | "new-task";
     assignmentMode: "shared" | "per-task-derived";
     inheritedBaseBranch?: string;
   };

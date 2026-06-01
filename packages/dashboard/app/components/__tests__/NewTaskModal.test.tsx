@@ -313,6 +313,43 @@ describe("NewTaskModal", () => {
     });
   });
 
+  it("requires branch name for shared-group mode", async () => {
+    const { props } = renderNewTaskModal();
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Task with shared group" } });
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+    fireEvent.change(screen.getByLabelText("Branch strategy"), { target: { value: "shared-group" } });
+
+    expect(screen.getByRole("button", { name: "Create Task" })).toBeDisabled();
+    expect(screen.getByText("Branch name is required for this branch strategy.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+    await waitFor(() => {
+      expect(props.onCreateTask).not.toHaveBeenCalled();
+    });
+  });
+
+  it("submits shared-group branch selection when shared branch exists", async () => {
+    const { props } = renderNewTaskModal();
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Task with shared group" } });
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+    fireEvent.change(screen.getByLabelText("Branch strategy"), { target: { value: "shared-group" } });
+    fireEvent.change(screen.getByLabelText("Shared feature branch"), { target: { value: " feature/shared " } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+    await waitFor(() => {
+      expect(props.onCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branchSelection: {
+            mode: "shared-group",
+            branchName: "feature/shared",
+          },
+        }),
+      );
+    });
+  });
+
   it("still submits when setup warnings are shown", async () => {
     const { fetchAuthStatus } = await import("../../api");
     vi.mocked(fetchAuthStatus).mockResolvedValueOnce({

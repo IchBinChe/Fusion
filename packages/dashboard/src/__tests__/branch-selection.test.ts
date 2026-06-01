@@ -26,6 +26,17 @@ describe("branch-selection", () => {
     );
   });
 
+  it("resolves shared-group with shared feature branch and no working branch", () => {
+    expect(resolveBranchSelection({ mode: "shared-group", branchName: "feature/shared" }, undefined, "main")).toEqual({
+      branch: undefined,
+      baseBranch: undefined,
+      sharedFeatureBranch: "feature/shared",
+    });
+    expect(() => resolveBranchSelection({ mode: "shared-group" }, undefined, undefined)).toThrow(
+      "branchSelection.branchName is required for shared-group mode",
+    );
+  });
+
   it("resolves assignment context", () => {
     expect(resolveBranchAssignmentContext(undefined)).toEqual({ mode: "shared" });
     expect(resolveBranchAssignmentContext({ mode: "per-task-derived" })).toEqual({ mode: "per-task-derived" });
@@ -46,6 +57,7 @@ describe("branch-selection", () => {
   it("reads requested branch mode", () => {
     expect(getBranchSelectionMode(undefined)).toBeUndefined();
     expect(getBranchSelectionMode({ mode: "auto-new" })).toBe("auto-new");
+    expect(getBranchSelectionMode({ mode: "shared-group" })).toBe("shared-group");
   });
 
   it("re-exports entry-point branch assignment helper", () => {

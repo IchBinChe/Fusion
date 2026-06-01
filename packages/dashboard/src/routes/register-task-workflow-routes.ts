@@ -44,7 +44,7 @@ import { planTaskWorktreePath } from "@fusion/engine";
 import type { RunAuditEventInput } from "@fusion/core";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
-import { deriveAutoTaskBranch, getBranchSelectionMode, resolveBranchSelection } from "./branch-selection.js";
+import { deriveAutoTaskBranch, derivePerTaskBranch, getBranchSelectionMode, resolveBranchSelection } from "./branch-selection.js";
 
 const REVIEW_BLOCK_RE = /##\s+(Code|Plan)\s+Review:[\s\S]*?(?=\n##\s+(?:Code|Plan)\s+Review:|$)/gi;
 const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
@@ -952,7 +952,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           : { sourceType: "api" as const };
 
       const requestedBranchMode = getBranchSelectionMode(branchSelection);
-      const { branch: normalizedBranch, baseBranch: normalizedBaseBranch } =
+      const { branch: normalizedBranch, baseBranch: normalizedBaseBranch, sharedFeatureBranch } =
         resolveBranchSelection(branchSelection, branch, baseBranch);
 
       let validatedGithubTracking: { enabled?: boolean; repoOverride?: string } | undefined;
@@ -1246,8 +1246,19 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           })
         : task;
 
+      const taskWithBranchContext = requestedBranchMode === "shared-group" && sharedFeatureBranch
+        ? await (async () => {
+            const group = scopedStore.getBranchGroupByBranchName(sharedFeatureBranch)
+              ?? scopedStore.ensureBranchGroupForSource("new-task", sharedFeatureBranch, { branchName: sharedFeatureBranch });
+            await scopedStore.setTaskBranchGroup(taskWithAutoBranch.id, group.id);
+            const taskSegment = ((taskWithAutoBranch.title ?? "").trim() || taskWithAutoBranch.description).slice(0, 60);
+            const workingBranch = derivePerTaskBranch(sharedFeatureBranch, taskSegment);
+            return scopedStore.updateTask(taskWithAutoBranch.id, { branch: workingBranch });
+          })()
+        : taskWithAutoBranch;
+
       const deterministicReconcile = await reconcileDeterministicDuplicate(scopedStore, {
-        createdTask: taskWithAutoBranch,
+        createdTask: taskWithBranchContext,
         fingerprint: bypassDuplicateCheck === true ? null : contentFingerprint,
         windowMs: 60_000,
         logger: runtimeLogger,
@@ -1261,8 +1272,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           try {
             await scopedStore.recordActivity({
               type: "task:duplicate-warning-overridden",
-              taskId: taskWithAutoBranch.id,
-              taskTitle: taskWithAutoBranch.title,
+              taskId: taskWithBranchContext.id,
+              taskTitle: taskWithBranchContext.title,
               details: `Created despite ${acknowledgedDuplicateIds.length} possible duplicate(s): ${acknowledgedDuplicateIds.join(", ")}`,
               metadata: {
                 acknowledgedDuplicateIds,
@@ -1277,7 +1288,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           }
         }
 
-        res.status(201).json(taskWithAutoBranch);
+        res.status(201).json(taskWithBranchContext);
         return;
       } finally {
         deterministicGuard.releaseLock();

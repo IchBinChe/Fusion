@@ -146,7 +146,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
 
   const githubRepoOverrideTrimmed = githubRepoOverride.trim();
   const githubRepoOverrideInvalid = githubRepoOverrideTrimmed.length > 0 && !REPO_OVERRIDE_RE.test(githubRepoOverrideTrimmed);
-  const isBranchNameRequired = branchMode === "existing" || branchMode === "custom-new";
+  const isBranchNameRequired = branchMode === "existing" || branchMode === "custom-new" || branchMode === "shared-group";
   const hasInvalidBranchSelection = isBranchNameRequired && !branch.trim();
 
   // Track dirty state

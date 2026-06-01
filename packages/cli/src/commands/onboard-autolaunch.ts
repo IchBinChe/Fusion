@@ -11,6 +11,7 @@ export interface AutoLaunchInput {
   projectInitialized: boolean;
   isTTY: boolean;
   env?: NodeJS.ProcessEnv;
+  skipOnboarding?: boolean;
 }
 
 export interface AutoLaunchDecision {
@@ -42,11 +43,11 @@ export function shouldAutoLaunchOnboarding(input: AutoLaunchInput): AutoLaunchDe
     return { launch: false, reason: "non-tty" };
   }
 
-  if (input.args.includes("--skip-onboarding")) {
+  if (input.skipOnboarding || input.args.includes("--skip-onboarding")) {
     return { launch: false, reason: "skip-flag" };
   }
 
-  if (isTruthy(env.FUSION_SKIP_ONBOARDING)) {
+  if (isTruthyEnvFlag(env.FUSION_SKIP_ONBOARDING)) {
     return { launch: false, reason: "skip-env" };
   }
 
@@ -61,13 +62,13 @@ export function shouldAutoLaunchOnboarding(input: AutoLaunchInput): AutoLaunchDe
   return { launch: true, reason: "central-db-missing" };
 }
 
-function isTruthy(value: string | undefined): boolean {
+export function isTruthyEnvFlag(value: string | undefined): boolean {
   if (value === undefined) {
     return false;
   }
 
   const normalized = value.trim().toLowerCase();
-  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "no";
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
 interface RunOnboardOptions {
@@ -79,6 +80,7 @@ type RunOnboard = (options?: RunOnboardOptions) => Promise<void> | void;
 export interface MaybeAutoLaunchDeps {
   command: string;
   args: string[];
+  skipOnboarding?: boolean;
   centralDbPath?: string;
   projectInitialized?: boolean;
   cwd?: string;
@@ -114,6 +116,7 @@ export async function maybeAutoLaunchOnboarding(deps: MaybeAutoLaunchDeps): Prom
     projectInitialized,
     isTTY,
     env,
+    skipOnboarding: deps.skipOnboarding,
   });
 
   if (!decision.launch) {

@@ -419,14 +419,19 @@ Columns: triage, todo, in-progress, in-review, done, archived
 Supported file types: png, jpg, gif, webp, txt, log, json, yaml, yml, toml, csv, xml
 `.trim();
 
-function extractGlobalProjectFlag(argv: string[]): { cleanedArgs: string[]; projectName?: string } {
+export function extractGlobalProjectFlag(argv: string[]): {
+  cleanedArgs: string[];
+  projectName?: string;
+  skipOnboarding: boolean;
+} {
   const command = argv[0];
   if (command === "serve" || command === "daemon") {
-    return { cleanedArgs: [...argv] };
+    return { cleanedArgs: [...argv], skipOnboarding: false };
   }
 
   const cleanedArgs: string[] = [];
   let projectName: string | undefined;
+  let skipOnboarding = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -442,10 +447,14 @@ function extractGlobalProjectFlag(argv: string[]): { cleanedArgs: string[]; proj
       i++;
       continue;
     }
+    if (arg === "--skip-onboarding") {
+      skipOnboarding = true;
+      continue;
+    }
     cleanedArgs.push(arg);
   }
 
-  return { cleanedArgs, projectName };
+  return { cleanedArgs, projectName, skipOnboarding };
 }
 
 function getFlagValue(args: string[], flag: string): string | undefined {
@@ -533,7 +542,7 @@ function readOwnCliVersion(): string | undefined {
 }
 
 async function main() {
-  const { cleanedArgs: args, projectName } = extractGlobalProjectFlag(process.argv.slice(2));
+  const { cleanedArgs: args, projectName, skipOnboarding } = extractGlobalProjectFlag(process.argv.slice(2));
 
   // Print version and exit before any application imports. This is what the
   // dashboard's CLI Binary panel probes via `<bin> --version`; without an
@@ -558,7 +567,7 @@ async function main() {
   const command = args[0];
 
   const { maybeAutoLaunchOnboarding } = await import("./commands/onboard-autolaunch.js");
-  await maybeAutoLaunchOnboarding({ command, args });
+  await maybeAutoLaunchOnboarding({ command, args, skipOnboarding });
 
   const {
     runDashboard,
@@ -1849,4 +1858,6 @@ async function main() {
   }
 }
 
-await main();
+if (process.env.FUSION_CLI_SKIP_MAIN !== "1") {
+  await main();
+}

@@ -135,6 +135,22 @@ describe("NtfyNotificationProvider", () => {
     );
   });
 
+  it("renders task-created with description fallback when title is empty", async () => {
+    await provider.sendNotification("task-created" as any, {
+      taskId: "FN-1",
+      taskTitle: "",
+      taskDescription: "Investigate the notification payload fallback",
+      event: "task-created" as any,
+      metadata: { agentName: "Triage Bot" },
+    });
+
+    expect(mocks.sendNtfyNotificationWithResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('Triage Bot created "FN-1: Investigate the notification payload fallback"'),
+      }),
+    );
+  });
+
   it("builds click URL from config for task message events", async () => {
     await provider.sendNotification("message:agent-to-user" as any, {
       taskId: "FN-1",

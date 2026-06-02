@@ -126,12 +126,22 @@ describe("NotificationService", () => {
       service.registerProvider(provider);
       await service.start();
 
-      store.emit("task:created", task({ id: "FN-201", sourceAgentId: "agent-1", sourceType: "agent_heartbeat" as any }));
+      store.emit(
+        "task:created",
+        task({
+          id: "FN-201",
+          title: "",
+          description: "Investigate the notification payload fallback",
+          sourceAgentId: "agent-1",
+          sourceType: "agent_heartbeat" as any,
+        }),
+      );
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalledWith(
           "task-created",
           expect.objectContaining({
             taskId: "FN-201",
+            taskDescription: "Investigate the notification payload fallback",
             event: "task-created",
             metadata: expect.objectContaining({ sourceAgentId: "agent-1", agentName: "Triage Bot" }),
           }),

@@ -179,6 +179,7 @@ export class NotificationService {
     this.maybeNotify(task.id, "task-created", {
       taskId: task.id,
       taskTitle: task.title,
+      taskDescription: task.description,
       event: "task-created",
       metadata: {
         sourceAgentId,

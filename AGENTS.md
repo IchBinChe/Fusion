@@ -172,6 +172,7 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 - FN-5788 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-promotion-gate.test.ts` guards merger-side promotion-gate telemetry on shared member landings, including pause/settings/group autoMerge reason mapping and no default-branch auto-promotion side effects.
 - FN-5830 backstop: `packages/engine/src/__tests__/reliability-interactions/branch-group-promotion.test.ts` guards branch-group completion-gate + promotion lifecycle so completion detection drives exactly one shared→default promotion, re-calls stay idempotent, and gated paths emit promotion-gated telemetry without promoting.
 - FN-5820 backstop: `packages/engine/src/__tests__/reliability-interactions/shared-branch-group-lifecycle.test.ts` guards the full shared-branch-group lifecycle—concurrent distinct-worktree execution, member→shared-branch accumulation, single shared→main completion-gate promotion with idempotent re-evaluation, gate-disabled integration-without-promotion, and per-task-derived/ungrouped no-regression.
+- FN-5866 backstop: `packages/engine/src/__tests__/reliability-interactions/post-done-continuation-no-wedge.test.ts` guards the post-done non-continuable-session seam so completed executor work stays cleanly in `in-review` while incomplete tasks still fail normally.
 
 ---
 

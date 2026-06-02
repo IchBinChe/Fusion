@@ -7,6 +7,7 @@ import {
   isOperatorActionableAgentError,
   isStaleWorktreeModuleResolutionError,
   isUnsupportedMessageRoleError,
+  isNonContinuableSessionError,
   TRANSIENT_ERROR_PATTERNS,
 } from "../transient-error-detector.js";
 import { isUsageLimitError } from "../usage-limit-detector.js";
@@ -295,6 +296,32 @@ describe("Transient Error Detector", () => {
     it("returns false for unrelated errors", () => {
       expect(isUnsupportedMessageRoleError("socket hang up")).toBe(false);
       expect(isUnsupportedMessageRoleError("invalid api key")).toBe(false);
+    });
+  });
+
+  describe("isNonContinuableSessionError", () => {
+    it("returns true for the reported assistant-role continuation error", () => {
+      expect(isNonContinuableSessionError("Cannot continue from message role: assistant")).toBe(true);
+    });
+
+    it("returns true for quoted and role-variant forms", () => {
+      expect(isNonContinuableSessionError("Cannot continue from message role 'assistant'"))
+        .toBe(true);
+      expect(isNonContinuableSessionError('Cannot continue from message role "assistant"'))
+        .toBe(true);
+      expect(isNonContinuableSessionError("cannot continue from message role=`tool`"))
+        .toBe(true);
+      expect(isNonContinuableSessionError("Cannot continue from message role user."))
+        .toBe(true);
+    });
+
+    it("returns false for unrelated and provider role-validation errors", () => {
+      expect(isNonContinuableSessionError("socket hang up")).toBe(false);
+      expect(
+        isNonContinuableSessionError(
+          "developer is not one of ['system', 'assistant', 'user', 'tool', 'function'] - 'messages.[0].role'",
+        ),
+      ).toBe(false);
     });
   });
 

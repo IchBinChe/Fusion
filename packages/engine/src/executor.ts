@@ -85,7 +85,7 @@ import { AgentLogger } from "./agent-logger.js";
 import { createLogger, executorLog, reviewerLog, formatError } from "./logger.js";
 import { TokenCapDetector } from "./token-cap-detector.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
-import { isTransientError, isSilentTransientError } from "./transient-error-detector.js";
+import { isNonContinuableSessionError, isTransientError, isSilentTransientError } from "./transient-error-detector.js";
 import { withRateLimitRetry } from "./rate-limit-retry.js";
 import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./recovery-policy.js";
 import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js";
@@ -2559,6 +2559,43 @@ export class TaskExecutor {
     }
     if (taskDone) return true;
     return this.isTaskWorkComplete(task);
+  }
+
+  private isTaskAlreadyCompleteForNonContinuableSession(task: Task, taskDone: boolean): boolean {
+    return taskDone || task.column === "in-review" || this.isTaskWorkComplete(task);
+  }
+
+  private async handleNonContinuableSessionError(task: Task, taskDone: boolean, errorMessage: string): Promise<boolean> {
+    if (!isNonContinuableSessionError(errorMessage)) {
+      return false;
+    }
+
+    const liveTask = await this.store.getTask(task.id);
+    if (!liveTask || !this.isTaskAlreadyCompleteForNonContinuableSession(liveTask, taskDone)) {
+      return false;
+    }
+
+    const diagnosticMessage = "Post-done session continuation suppressed — session not continuable (last role assistant); task work already complete, leaving clean in-review";
+    executorLog.warn(`${task.id} ${diagnosticMessage}`);
+    await this.store.logEntry(task.id, diagnosticMessage, errorMessage, this.getRunContextFor(task.id));
+
+    if (liveTask.status === "failed" || liveTask.error) {
+      await this.store.updateTask(task.id, { status: undefined, error: undefined });
+    }
+
+    await this.persistTokenUsage(task.id);
+
+    if (liveTask.column === "in-review") {
+      this.clearCompletedTaskWatchdog(task.id);
+      this.options.onComplete?.(liveTask);
+      return true;
+    }
+
+    const refreshedTask = await this.store.getTask(task.id);
+    await this.handoffTaskToReview(refreshedTask ?? liveTask, "post-done-noncontinuable");
+    this.clearCompletedTaskWatchdog(task.id);
+    this.options.onComplete?.(refreshedTask ?? liveTask);
+    return true;
   }
 
   private async getTaskCompletionBlocker(task: Task): Promise<string | undefined> {
@@ -5406,6 +5443,8 @@ export class TaskExecutor {
             }
             return;
           }
+          return;
+        } else if (await this.handleNonContinuableSessionError(task, taskDone, errorMessage)) {
           return;
         } else if (this.options.usageLimitPauser && isUsageLimitError(errorMessage)) {
           await this.options.usageLimitPauser.onUsageLimitHit("executor", task.id, errorMessage);

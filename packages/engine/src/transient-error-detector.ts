@@ -192,12 +192,20 @@ export function extractMissingModulePath(errorMessage: string): string | null {
 }
 
 const UNSUPPORTED_MESSAGE_ROLE_PATTERN = /\bmessages\.\[\d+\]\.role\b[\s\S]*\bis not one of\b|\bis not one of\b[\s\S]*\bmessages\.\[\d+\]\.role\b/i;
+const NON_CONTINUABLE_SESSION_PATTERN = /cannot continue from message role\s*[:=-]?\s*(?:['"`]?)(assistant|tool|function|system|user)(?:['"`]?)\b/i;
 
 export function isUnsupportedMessageRoleError(errorMessage: string): boolean {
   if (!errorMessage || typeof errorMessage !== "string") {
     return false;
   }
   return UNSUPPORTED_MESSAGE_ROLE_PATTERN.test(errorMessage);
+}
+
+export function isNonContinuableSessionError(errorMessage: string): boolean {
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return false;
+  }
+  return NON_CONTINUABLE_SESSION_PATTERN.test(errorMessage);
 }
 
 const OPERATOR_ACTIONABLE_AGENT_ERROR_PATTERNS: RegExp[] = [

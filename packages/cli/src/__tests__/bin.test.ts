@@ -705,10 +705,14 @@ describe("bin command routing and fallbacks", () => {
     expect(commandMocks.runOnboard).toHaveBeenCalledWith({ force: true });
   });
 
-  it("still invokes onboarding hook when marker would already be set (single-fire prompt behavior is covered in onboard.test.ts)", async () => {
+  it("auto-launch decision keys on central-DB existence, not the completion marker (single-fire is covered in onboard.test.ts)", async () => {
+    writeFileSync(onboardEnv.centralDbPath, "db");
+
     await runBin(["task", "list"]);
 
-    expect(commandMocks.runOnboard).toHaveBeenCalledTimes(1);
+    // shouldAutoLaunchOnboarding does not consult the completion marker; runOnboard covers marker single-fire behavior.
+    expect(commandMocks.runOnboard).not.toHaveBeenCalled();
+    expect(commandMocks.runTaskList).toHaveBeenCalledTimes(1);
   });
 
   it("routes daemon command with all flags", async () => {

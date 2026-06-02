@@ -1829,7 +1829,8 @@ describe("Workspace File Routes", () => {
         const toSha = commitFile(repoDir, "a.txt", "base\nadvance\n", "advance");
         execFileSync("git", ["-C", repoDir, "reset", "--hard", baseSha], { stdio: "pipe" });
         const rewrittenHead = commitFile(repoDir, "a.txt", "base\nrewritten\n", "rewritten");
-        const result = await runWithAdvance(repoDir, toSha, { localIntegrationTipSha: `${rewrittenHead.slice(0, 39)}0` });
+        const nonMatchingTipSha = `${rewrittenHead.slice(0, 39)}${rewrittenHead.endsWith("0") ? "1" : "0"}`;
+        const result = await runWithAdvance(repoDir, toSha, { localIntegrationTipSha: nonMatchingTipSha });
         expect(result?.[0]?.resolution).toBe("pending");
         expect(result?.[0]?.needsAction).toBe(true);
       } finally {

@@ -94,6 +94,13 @@ pnpm verify:workspace
 - Do not add new real-network calls, real polling loops, or mock-the-world shells when a narrower seam exists.
 - Use the testing taxonomy in `docs/testing.md` when deciding trim vs keep.
 
+### Standing Rule: Fix the Invariant, Not the Repro (FN-5893)
+
+- When fixing a bug, the regression test must assert the general invariant across ALL known surfaces — not only the single reported reproduction.
+- Enumerate the surfaces before filing or closing the fix: every provider/bridge for streaming and agent paths, both desktop and mobile breakpoints for UI behavior, and empty/undefined/populated data states.
+- Motivating incidents: streamed-response spacing was fixed three times before the invariant was fully covered (FN-5787, FN-5789, FN-5803), and the auto-merge blank-dashboard fix re-opened after desktop-only coverage missed mobile Android (FN-5751).
+- If a regression test only proves the exact reported case, it is incomplete; extend it until the invariant holds across all known surfaces.
+
 ### Port 4040 is Reserved
 
 Never kill processes on port 4040 and never start test servers on 4040. Use `--port 0` or another free port.

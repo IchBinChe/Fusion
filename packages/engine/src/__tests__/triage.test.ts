@@ -9,9 +9,11 @@ import {
   computeUserCommentFingerprint,
 } from "../triage.js";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile, rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { planLog } from "../logger.js";
 
 const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
@@ -642,6 +644,36 @@ describe("TRIAGE_SYSTEM_PROMPT", () => {
     expect(TRIAGE_SYSTEM_PROMPT).toContain(
       "7-10 focused steps within a coherent scope is fine as one unit",
     );
+  });
+});
+
+describe("FN-5893 invariant regression wording", () => {
+  it("requires invariant-level regression coverage in standard, fast, and core triage prompts", () => {
+    const corePromptSource = readFileSync(
+      fileURLToPath(new URL("../../../core/src/agent-prompts.ts", import.meta.url)),
+      "utf8",
+    );
+
+    for (const prompt of [
+      TRIAGE_SYSTEM_PROMPT,
+      FAST_TRIAGE_SYSTEM_PROMPT,
+      corePromptSource,
+    ]) {
+      expect(prompt).toContain("invariant across all known surfaces");
+      expect(prompt).toContain("provider/bridge");
+      expect(prompt).toContain("desktop + mobile breakpoints");
+      expect(prompt).toContain("empty/undefined/populated data states");
+      expect(prompt).toContain("FN-5787/FN-5789/FN-5803");
+      expect(prompt).toContain("FN-5751");
+    }
+  });
+
+  it("requires implementation-step testing guidance to enumerate invariant surfaces in standard and fast prompts", () => {
+    for (const prompt of [TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+      expect(prompt).toContain(
+        "Run targeted tests for changed files, asserting the invariant across all known surfaces",
+      );
+    }
   });
 });
 

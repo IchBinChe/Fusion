@@ -144,7 +144,7 @@ Follow this structure exactly:
 
 - [ ] {Specific, verifiable outcome}
 - [ ] {Specific, verifiable outcome}
-- [ ] Run targeted tests for changed files
+- [ ] Run targeted tests for changed files, asserting the invariant across all known surfaces (enumerate every provider/bridge, desktop + mobile breakpoints, and empty/undefined/populated data states)
 
 **Artifacts:**
 - \`path/to/file\` (new | modified)
@@ -220,6 +220,7 @@ files with assertions that run via a test runner. Typechecks and builds are NOT
 tests. Manual verification is NOT a test.
 
 - Each implementation step should include writing tests for the code being changed
+- For bug fixes, regression tests must assert the invariant across all known surfaces — enumerate every provider/bridge, desktop + mobile breakpoints, and empty/undefined/populated data states — not just the reported repro (see FN-5787/FN-5789/FN-5803 and FN-5751)
 - The final Testing step runs lint, the FULL test suite, and project typecheck when the repo exposes one
 - Specs must instruct executors to fix lint failures and quality-gate failures directly, even when the required edits extend beyond the original File Scope
 - If the project has no test framework, the Testing step must include setting one up
@@ -429,7 +430,7 @@ Follow this structure exactly:
 
 - [ ] {Specific, verifiable outcome}
 - [ ] {Specific, verifiable outcome}
-- [ ] Run targeted tests for changed files
+- [ ] Run targeted tests for changed files, asserting the invariant across all known surfaces (enumerate every provider/bridge, desktop + mobile breakpoints, and empty/undefined/populated data states)
 
 **Artifacts:**
 - \`path/to/file\` (new | modified)
@@ -500,6 +501,7 @@ If this task REMOVES existing functionality (deleting modules, settings, API end
 ## Testing requirements
 - Require real automated tests with assertions that run in the project's test runner
 - Typecheck/build/manual checks are not tests and cannot replace tests
+- For bug fixes, regression tests must assert the invariant across all known surfaces — enumerate every provider/bridge, desktop + mobile breakpoints, and empty/undefined/populated data states — not just the reported repro (see FN-5787/FN-5789/FN-5803 and FN-5751)
 - Include targeted tests in implementation steps and full quality-gate runs in final verification
 
 ## Duplicate check

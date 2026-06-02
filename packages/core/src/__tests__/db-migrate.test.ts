@@ -715,7 +715,7 @@ describe("schema migration", () => {
 
     const row = db.prepare("SELECT deletedAt FROM tasks WHERE id = 'FN-legacy'").get() as { deletedAt: string | null };
     expect(row.deletedAt).toBeNull();
-    expect(db.getSchemaVersion()).toBe(100);
+    expect(db.getSchemaVersion()).toBe(101);
 
     db.close();
   });
@@ -748,7 +748,7 @@ describe("schema migration", () => {
       { id: "WS-001", mode: "prompt", gateMode: "advisory" },
       { id: "WS-002", mode: "script", gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(100);
+    expect(db.getSchemaVersion()).toBe(101);
 
     db.close();
   });
@@ -798,7 +798,7 @@ describe("schema migration", () => {
       reviewerContextRetryCount: 0,
       reviewerFallbackRetryCount: 0,
     });
-    expect(db.getSchemaVersion()).toBe(100);
+    expect(db.getSchemaVersion()).toBe(101);
 
     db.close();
   });
@@ -827,7 +827,7 @@ describe("schema migration", () => {
 
     const columns = db.prepare("PRAGMA table_info(milestones)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("acceptanceCriteria");
-    expect(db.getSchemaVersion()).toBe(100);
+    expect(db.getSchemaVersion()).toBe(101);
 
     db.close();
   });
@@ -868,7 +868,7 @@ describe("schema migration", () => {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
     expect(missionColumns.map((column) => column.name)).toContain("autoMerge");
 
-    expect(db.getSchemaVersion()).toBe(100);
+    expect(db.getSchemaVersion()).toBe(101);
     db.close();
   });
 
@@ -902,7 +902,44 @@ describe("schema migration", () => {
       { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
       { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(100);
+    expect(db.getSchemaVersion()).toBe(101);
+
+    db.close();
+  });
+
+  it("adds mission_goals table and index when migrating from schema version 100", () => {
+    const db = new Database(fusionDir);
+    db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '100')");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS missions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        interviewState TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    `);
+
+    db.init();
+
+    const columns = db.prepare("PRAGMA table_info(mission_goals)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(["missionId", "goalId", "createdAt"]);
+
+    const indexes = db.prepare("PRAGMA index_list(mission_goals)").all() as Array<{ name: string }>;
+    expect(indexes.some((index) => index.name === "idxMissionGoalsGoalId")).toBe(true);
+    expect(db.getSchemaVersion()).toBe(101);
 
     db.close();
   });

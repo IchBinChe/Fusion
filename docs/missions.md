@@ -23,6 +23,25 @@ Mission: Improve Reliability
         Task: FN-214
 ```
 
+## Mission ↔ Goal persistence
+
+Missions and goals are stored independently, but Fusion now persists an optional many-to-many linkage in the `mission_goals` join table.
+
+- Columns: `missionId`, `goalId`, `createdAt`
+- Primary key: `(missionId, goalId)`
+- Foreign keys: `missionId → missions.id`, `goalId → goals.id`
+- Delete behavior: both foreign keys use `ON DELETE CASCADE`, so removing either parent deletes only the corresponding join rows
+- Reverse lookups are indexed via `idxMissionGoalsGoalId`
+
+`MissionStore` owns the linkage CRUD surface:
+
+- `linkGoal(missionId, goalId)` — idempotently create a link and return `{ missionId, goalId, createdAt }`
+- `unlinkGoal(missionId, goalId)` — remove a link and report whether anything changed
+- `listGoalIdsForMission(missionId)` — list linked goals in deterministic creation order
+- `listMissionIdsForGoal(goalId)` — list linked missions in deterministic creation order
+
+Existing missions are **not** backfilled with goal links as part of this schema change; that decision is deferred to FN-5898.
+
 ## Creating Missions
 
 ### Mission base branch defaults

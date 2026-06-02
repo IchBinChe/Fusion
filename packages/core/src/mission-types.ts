@@ -118,6 +118,12 @@ export type MissionBranchStrategy = {
   branchName?: string;
 };
 
+export interface MissionGoalLink {
+  missionId: string;
+  goalId: string;
+  createdAt: string;
+}
+
 export interface Mission {
   /** Unique identifier (e.g., "M-LZ7DN0-A2B5") */
   id: string;

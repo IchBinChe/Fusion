@@ -41,6 +41,7 @@ import type {
   SlicePlanState,
   MissionContractAssertion,
   FeatureAssertionLink,
+  MissionGoalLink,
   FixFeatureCreatedPayload,
   MilestoneValidationRollup,
   ContractAssertionCreateInput,
@@ -167,6 +168,10 @@ export interface MissionStoreEvents {
   "mission:updated": [Mission];
   /** Emitted when a mission is deleted */
   "mission:deleted": [string];
+  /** Emitted when a goal is linked to a mission */
+  "mission:goal-linked": [MissionGoalLink];
+  /** Emitted when a goal is unlinked from a mission */
+  "mission:goal-unlinked": [MissionGoalLink];
   /** Emitted when a milestone is created */
   "milestone:created": [Milestone];
   /** Emitted when a milestone is updated */
@@ -247,6 +252,13 @@ interface MilestoneRow {
   validationState: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Database row shape for the mission_contract_assertions table. */
+interface MissionGoalRow {
+  missionId: string;
+  goalId: string;
+  createdAt: string;
 }
 
 /** Database row shape for the mission_contract_assertions table. */
@@ -436,6 +448,17 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       validationState: (row.validationState as MilestoneValidationState) || "not_started",
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+    };
+  }
+
+  /**
+   * Convert a database row to a MissionGoalLink object.
+   */
+  private rowToMissionGoalLink(row: MissionGoalRow): MissionGoalLink {
+    return {
+      missionId: row.missionId,
+      goalId: row.goalId,
+      createdAt: row.createdAt,
     };
   }
 
@@ -1231,6 +1254,94 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    */
   updateMissionInterviewState(id: string, state: InterviewState): Mission {
     return this.updateMission(id, { interviewState: state });
+  }
+
+  linkGoal(missionId: string, goalId: string): MissionGoalLink {
+    const result = this.db.transactionImmediate(() => {
+      const missionExists = this.db
+        .prepare("SELECT id FROM missions WHERE id = ?")
+        .get(missionId) as { id: string } | undefined;
+      if (!missionExists) {
+        throw new Error(`Mission ${missionId} not found`);
+      }
+
+      const goalExists = this.db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(goalId) as { id: string } | undefined;
+      if (!goalExists) {
+        throw new Error(`Goal ${goalId} not found`);
+      }
+
+      const existing = this.db
+        .prepare("SELECT missionId, goalId, createdAt FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .get(missionId, goalId) as MissionGoalRow | undefined;
+      if (existing) {
+        return { link: this.rowToMissionGoalLink(existing), changed: false };
+      }
+
+      const createdAt = new Date().toISOString();
+      this.db
+        .prepare("INSERT OR IGNORE INTO mission_goals (missionId, goalId, createdAt) VALUES (?, ?, ?)")
+        .run(missionId, goalId, createdAt);
+
+      const row = this.db
+        .prepare("SELECT missionId, goalId, createdAt FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .get(missionId, goalId) as MissionGoalRow | undefined;
+      if (!row) {
+        throw new Error(`Failed to link mission ${missionId} to goal ${goalId}`);
+      }
+
+      return { link: this.rowToMissionGoalLink(row), changed: true };
+    });
+
+    if (result.changed) {
+      this.db.bumpLastModified();
+      this.emit("mission:goal-linked", result.link);
+    }
+
+    return result.link;
+  }
+
+  unlinkGoal(missionId: string, goalId: string): boolean {
+    const deleted = this.db.transactionImmediate(() => {
+      const row = this.db
+        .prepare("SELECT missionId, goalId, createdAt FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .get(missionId, goalId) as MissionGoalRow | undefined;
+      if (!row) {
+        return undefined;
+      }
+
+      const result = this.db
+        .prepare("DELETE FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .run(missionId, goalId);
+      if (result.changes < 1) {
+        return undefined;
+      }
+
+      return this.rowToMissionGoalLink(row);
+    });
+
+    if (!deleted) {
+      return false;
+    }
+
+    this.db.bumpLastModified();
+    this.emit("mission:goal-unlinked", deleted);
+    return true;
+  }
+
+  listGoalIdsForMission(missionId: string): string[] {
+    const rows = this.db
+      .prepare("SELECT goalId FROM mission_goals WHERE missionId = ? ORDER BY createdAt ASC, goalId ASC")
+      .all(missionId) as Array<{ goalId: string }>;
+    return rows.map((row) => row.goalId);
+  }
+
+  listMissionIdsForGoal(goalId: string): string[] {
+    const rows = this.db
+      .prepare("SELECT missionId FROM mission_goals WHERE goalId = ? ORDER BY createdAt ASC, missionId ASC")
+      .all(goalId) as Array<{ missionId: string }>;
+    return rows.map((row) => row.missionId);
   }
 
   // ── Milestone Operations ───────────────────────────────────────────

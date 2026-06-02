@@ -342,6 +342,7 @@ The `tasks.githubTracking` JSON column stores per-task GitHub tracking state (`e
 | `task_document_revisions` | Immutable revision history for task documents (content snapshots by revision). |
 | `__meta` | Schema version + monotonic `lastModified` change detector, plus one-time bootstrap metadata such as `bootstrappedAt` and `projectIdentity`. |
 | `goals` | Strategic intent records (`title`, optional `description`, `status`, timestamps) that can outlive mission timelines. |
+| `mission_goals` | Many-to-many join between missions and goals with composite PK `(missionId, goalId)`, `createdAt`, and cascade-delete foreign keys to both parents. |
 | `missions` | Mission-level planning hierarchy root. |
 | `milestones` | Milestones under missions, including dependency lists and validation state. |
 | `slices` | Slices under milestones with plan-state/activation metadata. |

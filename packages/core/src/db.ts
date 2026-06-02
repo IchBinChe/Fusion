@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 100;
+const SCHEMA_VERSION = 101;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -813,6 +813,16 @@ CREATE TABLE IF NOT EXISTS goals (
   updatedAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idxGoalsStatus ON goals(status);
+
+CREATE TABLE IF NOT EXISTS mission_goals (
+  missionId TEXT NOT NULL,
+  goalId TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  PRIMARY KEY (missionId, goalId),
+  FOREIGN KEY (missionId) REFERENCES missions(id) ON DELETE CASCADE,
+  FOREIGN KEY (goalId) REFERENCES goals(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idxMissionGoalsGoalId ON mission_goals(goalId);
 
 CREATE TABLE IF NOT EXISTS goal_citations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3983,6 +3993,25 @@ export class Database {
         this.db.exec(`
           CREATE INDEX IF NOT EXISTS idx_completion_handoff_markers_acceptedAt
             ON completion_handoff_markers(acceptedAt)
+        `);
+      });
+    }
+
+    if (version < 101) {
+      this.applyMigration(101, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS mission_goals (
+            missionId TEXT NOT NULL,
+            goalId TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            PRIMARY KEY (missionId, goalId),
+            FOREIGN KEY (missionId) REFERENCES missions(id) ON DELETE CASCADE,
+            FOREIGN KEY (goalId) REFERENCES goals(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idxMissionGoalsGoalId
+            ON mission_goals(goalId)
         `);
       });
     }

@@ -84,7 +84,7 @@
     "@fusion-plugin-examples/paperclip-runtime": "workspace:*",
     "@fusion/core": "workspace:*",
     "@fusion/engine": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^0.77.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
     "@types/multer": "^2.1.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",

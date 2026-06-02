@@ -55,8 +55,8 @@
     "test:pre-release": "pnpm test:slow-cli && pnpm test:build-exe"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.77.0",
-    "@earendil-works/pi-coding-agent": "^0.77.0",
+    "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
     "dockerode": "^4.0.12",
     "express": "^5.1.0",
     "ink": "^6.8.0",

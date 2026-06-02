@@ -39,8 +39,8 @@
   "dependencies": {
     "@fusion/core": "workspace:*",
     "@fusion/pi-claude-cli": "workspace:*",
-    "@earendil-works/pi-ai": "^0.77.0",
-    "@earendil-works/pi-coding-agent": "^0.77.0",
+    "@earendil-works/pi-ai": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.78.0",
     "cron-parser": "^5.5.0",
     "proper-lockfile": "^4.1.2",
     "typebox": "^1.0.0"

@@ -1,3 +1,4 @@
+import type React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MissionInterviewModal } from "../MissionInterviewModal";
@@ -31,9 +32,10 @@ vi.mock("../../api", () => ({
 }));
 
 const mockGetMissionGoal = vi.fn(() => "");
+const mockSaveMissionGoal = vi.fn();
 
 vi.mock("../../hooks/modalPersistence", () => ({
-  saveMissionGoal: vi.fn(),
+  saveMissionGoal: (...args: any[]) => mockSaveMissionGoal(...args),
   getMissionGoal: (...args: any[]) => mockGetMissionGoal(...args),
   clearMissionGoal: vi.fn(),
 }));
@@ -59,6 +61,7 @@ describe("MissionInterviewModal", () => {
     mockStartMissionInterview.mockResolvedValue({ sessionId: "mission-session-1" });
     mockRetryMissionInterviewSession.mockResolvedValue({ success: true, sessionId: "mission-session-1" });
     mockFetchAiSession.mockResolvedValue(null);
+    mockSaveMissionGoal.mockReset();
     mockParseConversationHistory.mockImplementation((raw: string) => {
       if (!raw) return [];
       try {
@@ -81,14 +84,20 @@ describe("MissionInterviewModal", () => {
     mockFetchModels.mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] });
   });
 
-  function renderModal() {
-    return render(
-      <MissionInterviewModal
-        isOpen={true}
-        onClose={vi.fn()}
-        onMissionCreated={vi.fn()}
-      />,
-    );
+  function renderModal(props: Partial<React.ComponentProps<typeof MissionInterviewModal>> = {}) {
+    const onClose = props.onClose ?? vi.fn();
+
+    return {
+      onClose,
+      ...render(
+        <MissionInterviewModal
+          isOpen={true}
+          onClose={onClose}
+          onMissionCreated={vi.fn()}
+          {...props}
+        />,
+      ),
+    };
   }
 
   it("shows lock overlay and allows take-control", async () => {
@@ -334,6 +343,79 @@ describe("MissionInterviewModal", () => {
 
     const textarea = screen.getByLabelText("What do you want to build?");
     expect(textarea).toHaveValue("Previous mission goal");
+  });
+
+  it("closes without cancelling an in-progress interview and renders only one close button", async () => {
+    const { onClose } = renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.(SAMPLE_QUESTION);
+    });
+
+    const closeButtons = screen.getAllByRole("button", { name: "Close" });
+    expect(closeButtons).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Send to background" })).not.toBeInTheDocument();
+
+    fireEvent.click(closeButtons[0]);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockCancelMissionInterview).not.toHaveBeenCalled();
+  });
+
+  it("persists the draft goal and closes from the initial view", () => {
+    const { onClose } = renderModal({ projectId: "proj-1" });
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Draft mission goal" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(mockSaveMissionGoal).toHaveBeenCalledWith("Draft mission goal", "proj-1");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockCancelMissionInterview).not.toHaveBeenCalled();
+  });
+
+  it("closes without cancelling when pressing Escape", async () => {
+    const { onClose } = renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.(SAMPLE_QUESTION);
+    });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockCancelMissionInterview).not.toHaveBeenCalled();
+  });
+
+  it("closes from the backdrop after overlay mousedown", () => {
+    const { onClose } = renderModal();
+    const overlay = screen.getByRole("dialog");
+
+    fireEvent.mouseDown(overlay);
+    fireEvent.click(overlay);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockCancelMissionInterview).not.toHaveBeenCalled();
   });
 
   it("allows typing in textarea without resetting to stale persisted goal", async () => {

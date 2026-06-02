@@ -1409,6 +1409,116 @@ describe("MissionManager", () => {
     });
   });
 
+  it("reloads the mission list when mission:created SSE arrives", async () => {
+    let missionListCallCount = 0;
+    const createdMission = {
+      id: "M-003",
+      title: "Realtime Mission",
+      description: "Appears after SSE refresh",
+      status: "planning",
+      interviewState: "not_started",
+      milestones: [],
+      createdAt: "2026-01-03T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/missions/health")) {
+        return Promise.resolve(mockApiResponse(mockMissionHealthById));
+      }
+      if (url.includes("/events")) {
+        return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url)));
+      }
+      if (url.includes("/health")) {
+        const missionId = extractMissionId(url) ?? "M-001";
+        return Promise.resolve(mockApiResponse(getMockMissionHealth(missionId)));
+      }
+      if (url.includes("/autopilot")) {
+        return Promise.resolve(mockApiResponse(mockAutopilotStatus));
+      }
+      const validationResponse = getValidationApiMock(url);
+      if (validationResponse !== null) {
+        return Promise.resolve(mockApiResponse(validationResponse));
+      }
+      if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+        return Promise.resolve(mockApiResponse(mockMissionDetail));
+      }
+      missionListCallCount += 1;
+      return Promise.resolve(mockApiResponse(missionListCallCount === 1 ? mockMissions : [...mockMissions, createdMission]));
+    });
+    globalThis.fetch = fetchMock;
+    globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      for (const source of MockEventSource.instances) {
+        source.emit("mission:created", createdMission);
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Realtime Mission")).toBeInTheDocument();
+    });
+    expect(missionListCallCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reloads mission interview drafts when ai_session:updated SSE arrives", async () => {
+    globalThis.fetch = createFetchMock();
+    globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
+    mockFetchAiSessions.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "session-draft-1",
+        type: "mission_interview",
+        status: "awaiting_input",
+        title: "Draft mission",
+        projectId: null,
+        lockedByTab: null,
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      },
+    ]);
+    mockFetchMissionInterviewDrafts.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "session-draft-1",
+        title: "Draft mission",
+        status: "awaiting_input",
+        projectId: null,
+        createdAt: "2026-01-03T00:00:00.000Z",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+        hasConversation: true,
+      },
+    ]);
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Draft mission")).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      for (const source of MockEventSource.instances) {
+        source.emit("ai_session:updated", {
+          id: "session-draft-1",
+          type: "mission_interview",
+          status: "awaiting_input",
+          title: "Draft mission",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-03T00:00:00.000Z",
+        });
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Draft mission")).toBeInTheDocument();
+    });
+    expect(mockFetchAiSessions).toHaveBeenCalledTimes(2);
+    expect(mockFetchMissionInterviewDrafts).toHaveBeenCalledTimes(2);
+  });
+
   it("reloads selected mission detail when slice:updated SSE event arrives", async () => {
     const fetchMock = createDetailFetchMock(mockMissionEvents);
     globalThis.fetch = fetchMock;
@@ -1767,6 +1877,57 @@ describe("MissionManager", () => {
     await waitFor(() => {
       expect(screen.queryByText("Plan Mission with AI")).not.toBeInTheDocument();
     });
+  });
+
+  it("opens Plan New Mission as a fresh initial interview instead of resuming the last session", async () => {
+    mockFetchAiSession.mockResolvedValueOnce({
+      id: "session-bg-1",
+      type: "mission_interview",
+      status: "generating",
+      title: "Background mission",
+      inputPayload: JSON.stringify({ missionTitle: "Background mission" }),
+      conversationHistory: "[]",
+      currentQuestion: null,
+      result: null,
+      thinkingOutput: "",
+      error: null,
+      projectId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    globalThis.fetch = createFetchMock();
+
+    render(
+      <MissionManager
+        isOpen={true}
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+        resumeSessionId="session-bg-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+      expect(screen.getByText("Preparing next question...")).toBeInTheDocument();
+    });
+
+    fireEvent.click(document.querySelector(".planning-modal .modal-close") as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Plan Mission with AI")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan New Mission" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+      expect(screen.getByLabelText("What do you want to build?")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Preparing next question...")).not.toBeInTheDocument();
+    expect(screen.queryByText("What is the target scope?")).not.toBeInTheDocument();
+    expect(mockFetchAiSession).toHaveBeenCalledTimes(1);
   });
 
   it("keeps interview-pending rows visible while opened from a resume session", async () => {
@@ -4134,6 +4295,69 @@ describe("MissionManager", () => {
       await waitFor(() => expect(screen.getByLabelText("Delete mission")).toBeDefined());
       fireEvent.click(screen.getByLabelText("Delete mission"));
       await waitFor(() => expect(document.querySelector(".mission-manager__detail-pane .mission-confirm-panel")).toBeTruthy());
+    });
+
+    it("deletes a mission from the sidebar and reloads the list", async () => {
+      let deleted = false;
+      let missionListFetches = 0;
+      const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+
+        if (url.includes("/missions/health")) {
+          return Promise.resolve(mockApiResponse(deleted ? { "M-002": mockMissionHealthById["M-002"] } : mockMissionHealthById));
+        }
+        if (url.includes("/events")) {
+          return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url)));
+        }
+        if (url.includes("/health")) {
+          const missionId = extractMissionId(url) ?? "M-001";
+          return Promise.resolve(mockApiResponse(getMockMissionHealth(missionId)));
+        }
+        if (url.includes("/autopilot")) {
+          return Promise.resolve(mockApiResponse(mockAutopilotStatus));
+        }
+        const validationResponse = getValidationApiMock(url);
+        if (validationResponse !== null) {
+          return Promise.resolve(mockApiResponse(validationResponse));
+        }
+        if (method === "DELETE" && url.includes("/api/missions/M-001")) {
+          deleted = true;
+          return Promise.resolve(mockApiResponse({}));
+        }
+        if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+          return Promise.resolve(mockApiResponse(mockMissionDetail));
+        }
+
+        missionListFetches += 1;
+        return Promise.resolve(mockApiResponse(deleted ? [mockMissions[1]] : mockMissions));
+      });
+      globalThis.fetch = fetchMock;
+      const addToast = vi.fn();
+
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={addToast} projectId="proj-1" />);
+
+      await waitFor(() => expect(screen.getByText("Build Auth System")).toBeInTheDocument());
+
+      const sidebar = screen.getByTestId("mission-sidebar");
+      fireEvent.click(within(sidebar).getAllByLabelText("Delete mission")[0]);
+
+      await waitFor(() => {
+        expect(document.querySelector(".mission-manager__sidebar .mission-confirm-panel")).toBeTruthy();
+      });
+
+      fireEvent.click(within(document.querySelector(".mission-manager__sidebar .mission-confirm-panel") as HTMLElement).getByRole("button", { name: "Delete" }));
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          expect.stringContaining("/api/missions/M-001?projectId=proj-1"),
+          expect.objectContaining({ method: "DELETE" }),
+        );
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("Build Auth System")).not.toBeInTheDocument();
+      });
+      expect(missionListFetches).toBeGreaterThanOrEqual(2);
+      expect(addToast).toHaveBeenCalledWith("Mission deleted", "success");
     });
 
     it("renders sidebar header with Plan New Mission CTA button", async () => {

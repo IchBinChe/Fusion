@@ -713,6 +713,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
   // AI Interview modal
   const [showInterviewModal, setShowInterviewModal] = useState(false);
+  const [interviewLaunchMode, setInterviewLaunchMode] = useState<"new" | "resume">("new");
+  const [interviewModalKey, setInterviewModalKey] = useState(0);
 
   // Pending mission interview sessions (for resume prompt after page reload)
   const [_pendingInterviewSessions, setPendingInterviewSessions] = useState<AiSessionSummary[]>([]);
@@ -741,6 +743,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   // Auto-open interview modal when resuming a session
   useEffect(() => {
     if (isActive && effectiveResumeSessionId) {
+      setInterviewLaunchMode("resume");
       setShowInterviewModal(true);
     }
   }, [isActive, effectiveResumeSessionId]);
@@ -752,46 +755,39 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     }
   }, [resumeSessionId]);
 
+  const loadPendingInterviewSessions = useCallback(async () => {
+    const sessions = await fetchAiSessions(projectId);
+    const pending = sessions.filter((s) => {
+      if (s.type !== "mission_interview" || !missionInterviewListStatuses.has(s.status)) {
+        return false;
+      }
+      if (projectId) {
+        return s.projectId === projectId;
+      }
+      return s.projectId == null;
+    });
+    setPendingInterviewSessions(pending);
+  }, [projectId]);
+
+  const loadMissionInterviewDraftRows = useCallback(async () => {
+    const drafts = await fetchMissionInterviewDrafts(projectId);
+    setMissionInterviewDrafts(drafts);
+  }, [projectId]);
+
+  const refreshMissionSidebar = useCallback(() => {
+    void loadPendingInterviewSessions().catch((err) => {
+      console.warn("[MissionManager] Failed to fetch pending interview sessions:", err);
+    });
+    void loadMissionInterviewDraftRows().catch((err) => {
+      console.warn("[MissionManager] Failed to fetch mission interview drafts:", err);
+    });
+  }, [loadMissionInterviewDraftRows, loadPendingInterviewSessions]);
+
   // Detect pending mission interview sessions for resume prompt
   useEffect(() => {
     if (!isActive) return;
-    let cancelled = false;
-    fetchAiSessions(projectId).then((sessions) => {
-      if (cancelled) return;
-      const pending = sessions.filter((s) => {
-        if (s.type !== "mission_interview" || !missionInterviewListStatuses.has(s.status)) {
-          return false;
-        }
-        if (projectId) {
-          return s.projectId === projectId;
-        }
-        return s.projectId == null;
-      });
-      setPendingInterviewSessions(pending);
-    }).catch((err) => {
-      console.warn("[MissionManager] Failed to fetch pending interview sessions:", err);
-    });
-    return () => { cancelled = true; };
-  }, [isActive, projectId, effectiveResumeSessionId]);
-
-  useEffect(() => {
-    if (!isActive) return;
-    let cancelled = false;
-
-    fetchMissionInterviewDrafts(projectId)
-      .then((drafts) => {
-        if (!cancelled) {
-          setMissionInterviewDrafts(drafts);
-        }
-      })
-      .catch((err) => {
-        console.warn("[MissionManager] Failed to fetch mission interview drafts:", err);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isActive, projectId, effectiveResumeSessionId]);
+    refreshMissionSidebar();
+  }, [effectiveResumeSessionId, isActive, refreshMissionSidebar]);
 
   // Auto-open milestone/slice interview modal when resuming from background session
   useEffect(() => {
@@ -1318,10 +1314,36 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         }
       }
 
+      void loadMissions();
+      refreshMissionSidebar();
+
       // Reload the selected mission detail to reflect updated mission state (autopilot, status, etc.)
       if (selectedMissionRef.current) {
         void loadMissionDetail(selectedMissionRef.current.id);
       }
+    };
+
+    const handleMissionCreated = () => {
+      refreshHealth();
+      void loadMissions();
+      refreshMissionSidebar();
+    };
+
+    const handleMissionDeleted = (rawEvent: Event) => {
+      refreshHealth();
+      const messageEvent = rawEvent as MessageEvent<string>;
+      if (messageEvent.data) {
+        try {
+          const deletedMissionId = JSON.parse(messageEvent.data) as string;
+          if (deletedMissionId && selectedMissionRef.current?.id === deletedMissionId) {
+            setSelectedMission(null);
+          }
+        } catch {
+          // ignore invalid payloads
+        }
+      }
+      void loadMissions();
+      refreshMissionSidebar();
     };
 
     const handleSliceUpdated = (_rawEvent: Event) => {
@@ -1346,6 +1368,28 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       if (selectedMissionRef.current) {
         void loadMissionDetail(selectedMissionRef.current.id);
       }
+    };
+
+    const handleAiSessionUpdated = (rawEvent: Event) => {
+      const messageEvent = rawEvent as MessageEvent<string>;
+      if (!messageEvent.data) {
+        return;
+      }
+      try {
+        const updatedSession = JSON.parse(messageEvent.data) as AiSessionSummary;
+        if (updatedSession.type !== "mission_interview") {
+          return;
+        }
+      } catch {
+        return;
+      }
+      void loadMissions();
+      refreshMissionSidebar();
+    };
+
+    const handleAiSessionDeleted = () => {
+      void loadMissions();
+      refreshMissionSidebar();
     };
 
     // Handler for validator run started - refresh feature loop state and validation runs
@@ -1501,11 +1545,15 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
     return subscribeSse(eventUrl, {
       events: {
+        "mission:created": handleMissionCreated,
         "mission:updated": handleMissionUpdated,
+        "mission:deleted": handleMissionDeleted,
         "slice:updated": handleSliceUpdated,
         "feature:updated": handleFeatureUpdated,
         "milestone:updated": handleMilestoneUpdated,
         "mission:event": handleMissionEvent,
+        "ai_session:updated": handleAiSessionUpdated,
+        "ai_session:deleted": handleAiSessionDeleted,
         "validator-run:started": handleValidatorRunStarted,
         "validator-run:completed": handleValidatorRunCompleted,
         "milestone:validation:updated": handleMilestoneValidationUpdated,
@@ -1516,13 +1564,19 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         "assertion:unlinked": handleAssertionMutation,
         "fix-feature:created": handleFixFeatureCreated,
       },
+      onReconnect: () => {
+        void loadMissions();
+        refreshMissionSidebar();
+      },
     });
   }, [
     isActive,
     isActivityScrolledNearBottom,
     loadMissionDetail,
     loadMissionHealth,
+    loadMissions,
     projectId,
+    refreshMissionSidebar,
     refreshValidationTelemetry,
   ]);
 
@@ -3992,13 +4046,31 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     );
   };
 
-  const handleResumeInterviewSession = (sessionId: string) => {
-    setLocalResumeSessionId(sessionId);
+  const openNewMissionInterview = () => {
+    if (resumeSessionId) {
+      dismissedResumeSessionIdRef.current = resumeSessionId;
+    }
+    setInterviewLaunchMode("new");
+    setLocalResumeSessionId(undefined);
+    setInterviewModalKey((current) => current + 1);
     setShowInterviewModal(true);
   };
 
+  const handleResumeInterviewSession = (sessionId: string) => {
+    setInterviewLaunchMode("resume");
+    setLocalResumeSessionId(sessionId);
+    setInterviewModalKey((current) => current + 1);
+    setShowInterviewModal(true);
+  };
+
+  const shouldRenderSidebarDeleteConfirm =
+    deleteConfirmId != null &&
+    (deleteConfirmId.type === "interview_draft" ||
+      (deleteConfirmId.type === "mission" && selectedMission?.id !== deleteConfirmId.id));
+
   const handleInterviewModalClose = () => {
     dismissedResumeSessionIdRef.current = effectiveResumeSessionId ?? null;
+    setInterviewLaunchMode("new");
     setLocalResumeSessionId(undefined);
     setShowInterviewModal(false);
   };
@@ -4360,7 +4432,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 <div className="mission-list__top-action">
                   <button
                     className="btn btn-sm btn-task-create mission-list__primary-cta"
-                    onClick={() => setShowInterviewModal(true)}
+                    onClick={openNewMissionInterview}
                   >
                     <Sparkles size={14} />
                     Plan New Mission
@@ -4493,7 +4565,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   </p>
                   <button
                     className="btn btn-sm btn-primary mission-manager__empty-cta"
-                    onClick={() => setShowInterviewModal(true)}
+                    onClick={openNewMissionInterview}
                   >
                     <Sparkles size={14} />
                     Plan New Mission
@@ -4505,7 +4577,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 <div className="mission-list__footer">
                   {showBottomPlanButton && (
                     <div className="mission-list__footer-actions">
-                      <button className="mission-add-btn" onClick={() => setShowInterviewModal(true)}>
+                      <button className="mission-add-btn" onClick={openNewMissionInterview}>
                         <Sparkles size={16} />
                         Plan New Mission
                       </button>
@@ -4678,9 +4750,10 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               )}
             </div>
             <div className="mission-manager__sidebar-footer" data-testid="mission-sidebar-footer">
+              {shouldRenderSidebarDeleteConfirm && renderDeleteConfirmPanel()}
               <button
                 className="btn btn-primary mission-manager__sidebar-cta"
-                onClick={() => setShowInterviewModal(true)}
+                onClick={openNewMissionInterview}
                 title="Plan New Mission"
                 aria-label="Plan New Mission"
               >
@@ -4719,7 +4792,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 <span>Select a mission to view details</span>
               </div>
             )}
-            {deleteConfirmId && renderDeleteConfirmPanel()}
+            {deleteConfirmId && !shouldRenderSidebarDeleteConfirm && renderDeleteConfirmPanel()}
             {linkTaskFeatureId && renderLinkTaskPanel()}
           </div>
         </div>
@@ -4729,6 +4802,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
   const interviewModal = (
     <MissionInterviewModal
+      key={interviewModalKey}
       isOpen={showInterviewModal}
       onClose={handleInterviewModalClose}
       onMissionCreated={() => {
@@ -4736,7 +4810,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
         addToast("Mission created from AI interview", "success");
       }}
       projectId={projectId}
-      resumeSessionId={effectiveResumeSessionId}
+      resumeSessionId={interviewLaunchMode === "resume" ? effectiveResumeSessionId : undefined}
     />
   );
 

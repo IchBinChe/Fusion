@@ -5,7 +5,6 @@ import {
   startMissionInterview,
   respondToMissionInterview,
   retryMissionInterviewSession,
-  cancelMissionInterview,
   createMissionFromInterview,
   connectMissionInterviewStream,
   fetchAiSession,
@@ -40,7 +39,6 @@ import {
   Box,
   Plus,
   Trash2,
-  Minimize2,
   RefreshCw,
   Lock,
 } from "lucide-react";
@@ -48,7 +46,6 @@ import { ConversationHistory } from "./ConversationHistory";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { useSessionLock } from "../hooks/useSessionLock";
 import { useAiSessionSync } from "../hooks/useAiSessionSync";
-import { useConfirm } from "../hooks/useConfirm";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { getSessionTabId } from "../utils/getSessionTabId";
 import "./MissionInterviewModal.css";
@@ -116,8 +113,9 @@ export function MissionInterviewModal({
   const [responseHistory, setResponseHistory] = useState<QuestionResponse[]>([]);
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
   const [editedSummary, setEditedSummary] = useState<MissionPlanSummary | null>(null);
-  const [hasProgress, setHasProgress] = useState(false);
+  const [_hasProgress, setHasProgress] = useState(false);
   const hasAutoStartedRef = useRef(false);
+  const overlayMouseDownOnSelfRef = useRef(false);
   const [streamingOutput, setStreamingOutput] = useState("");
   const [showThinking, setShowThinking] = useState(true);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -142,7 +140,6 @@ export function MissionInterviewModal({
     broadcastUnlock,
     broadcastHeartbeat,
   } = useAiSessionSync();
-  const { confirm } = useConfirm();
 
   // Model selection state
   const [modelProvider, setModelProvider] = useState<string | undefined>(undefined);
@@ -518,57 +515,19 @@ export function MissionInterviewModal({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isOpen, view]);
 
-  const handleSendToBackground = useCallback(() => {
-    streamConnectionRef.current?.close();
-    streamConnectionRef.current = null;
-    onClose();
-  }, [onClose]);
-
-  const handleCancel = useCallback(async () => {
-    // Save to localStorage BEFORE any cleanup
-    if (missionGoal) {
+  const handleClose = useCallback(() => {
+    if (missionGoal && view.type === "initial") {
       saveMissionGoal(missionGoal, projectId);
     }
 
-    if (hasProgress) {
-      const shouldClose = await confirm({
-        title: "Close Interview",
-        message: "Are you sure you want to close? Your interview progress will be lost.",
-        danger: true,
-      });
-      if (!shouldClose) {
-        return;
-      }
-    }
-
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
-
-    if (view.type === "question" || view.type === "summary" || view.type === "error") {
-      try {
-        await cancelMissionInterview(view.sessionId, projectId, sessionTabId);
-      } catch {
-        // Ignore errors on cancel
-      }
-    }
-
-    setMissionGoal("");
-    setView({ type: "initial" });
-    setError(null);
-    setResponseHistory([]);
-    setConversationHistory([]);
-    setEditedSummary(null);
-    setStreamingOutput("");
+    overlayMouseDownOnSelfRef.current = false;
     setIsReconnecting(false);
     setIsRetrying(false);
-    setHasProgress(false);
     setIsCreating(false);
-    setModelProvider(undefined);
-    setModelId(undefined);
-    currentSessionIdRef.current = null;
-    setLockSessionId(null);
     onClose();
-  }, [missionGoal, hasProgress, view, onClose, projectId, sessionTabId, confirm]);
+  }, [missionGoal, onClose, projectId, view.type]);
 
   // Escape key handler
   useEffect(() => {
@@ -576,13 +535,13 @@ export function MissionInterviewModal({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        void handleCancel();
+        handleClose();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleCancel]);
+  }, [isOpen, handleClose]);
 
   const handleSubmitResponse = useCallback(
     async (responses: QuestionResponse) => {
@@ -748,9 +707,6 @@ export function MissionInterviewModal({
     return 6;
   };
 
-  const showSendToBackgroundButton =
-    view.type === "loading" || view.type === "question" || view.type === "summary" || view.type === "error";
-
   const activeLockInfo = lockSessionId ? activeTabMap.get(lockSessionId) : null;
   const activeRemoteTab = activeLockInfo && activeLockInfo.tabId !== sessionTabId;
   const activeInAnotherTab = Boolean(activeRemoteTab && !activeLockInfo.stale);
@@ -759,7 +715,20 @@ export function MissionInterviewModal({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && handleCancel()} role="dialog" aria-modal="true">
+    <div
+      className="modal-overlay open"
+      onMouseDown={(e) => {
+        overlayMouseDownOnSelfRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && overlayMouseDownOnSelfRef.current) {
+          handleClose();
+        }
+        overlayMouseDownOnSelfRef.current = false;
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="modal modal-lg planning-modal">
         <div className="modal-header">
           <div className="detail-title-row">
@@ -767,17 +736,7 @@ export function MissionInterviewModal({
             <h3>Plan Mission with AI</h3>
           </div>
           <div className="modal-header-actions">
-            {showSendToBackgroundButton && (
-              <button
-                className="modal-send-to-background"
-                onClick={handleSendToBackground}
-                title="Send to background"
-                aria-label="Send to background"
-              >
-                <Minimize2 size={16} />
-              </button>
-            )}
-            <button className="modal-close" onClick={handleCancel} aria-label="Close">
+            <button className="modal-close" onClick={handleClose} aria-label="Close">
               <X size={20} />
             </button>
           </div>
@@ -960,7 +919,7 @@ export function MissionInterviewModal({
                       {isRetrying ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                       <span className="icon-ml-6">{isRetrying ? "Retrying..." : "Retry"}</span>
                     </button>
-                    <button className="btn" onClick={handleCancel} disabled={isRetrying}>Cancel</button>
+                    <button className="btn" onClick={handleClose} disabled={isRetrying}>Dismiss</button>
                   </div>
                 </div>
               </div>

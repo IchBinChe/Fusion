@@ -404,6 +404,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   chatAutoCleanupDays: 0,
   mailAutoCleanupDays: 0,
   operationalLogRetentionDays: 30,
+  agentLogFileRetentionDays: 0,
   chatRoomRecentVerbatimMessages: 25,
   chatRoomCompactionFetchLimit: 200,
   chatRoomSummaryMaxChars: 3_000,

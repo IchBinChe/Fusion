@@ -1657,6 +1657,18 @@ export class SelfHealingManager {
             log.log(`Maintenance batch 1 step "prune-operational-logs" succeeded — deleted=${deletedTotal}${detail ? ` (${detail})` : ""}`);
           },
         },
+        {
+          name: "prune-agent-log-files",
+          fn: async () => {
+            const days = Number(settings.agentLogFileRetentionDays ?? 0);
+            if (!Number.isFinite(days) || days <= 0) {
+              log.log("Maintenance batch 1 step \"prune-agent-log-files\" skipped — agentLogFileRetentionDays is not enabled");
+              return;
+            }
+            const { prunedFiles, prunedEntries, freedBytes } = this.store.pruneAgentLogFiles(days);
+            log.log(`Maintenance batch 1 step "prune-agent-log-files" succeeded — files=${prunedFiles} entries=${prunedEntries} bytes=${freedBytes}`);
+          },
+        },
         { name: "checkpoint-wal", fn: () => Promise.resolve(this.checkpointWal()) },
         { name: "enforce-worktree-cap", fn: () => this.enforceWorktreeCap() },
       ];

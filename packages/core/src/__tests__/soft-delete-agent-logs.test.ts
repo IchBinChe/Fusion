@@ -1,9 +1,15 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { countAgentLogEntries, getAgentLogFilePath } from "../agent-log-file-store.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
   const harness = createTaskStoreTestHarness();
+
+  const taskDir = (taskId: string) => join(harness.rootDir(), ".fusion", "tasks", taskId);
 
   beforeEach(async () => {
     await harness.beforeEach();
@@ -13,7 +19,7 @@ describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
     await harness.afterEach();
   });
 
-  it("deletes pre-existing persisted agent logs on soft-delete", async () => {
+  it("hides pre-existing persisted agent logs on soft-delete while preserving the file", async () => {
     const store = harness.store();
     const task = await harness.createTestTask();
 
@@ -22,32 +28,27 @@ describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
     await store.appendAgentLog(task.id, "entry-3", "text");
     await store.getAgentLogs(task.id);
 
-    const before = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(before.count).toBe(3);
+    expect(countAgentLogEntries(taskDir(task.id))).toBe(3);
 
     await store.deleteTask(task.id);
 
-    const after = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(after.count).toBe(0);
+    expect(existsSync(getAgentLogFilePath(taskDir(task.id)))).toBe(true);
+    expect(countAgentLogEntries(taskDir(task.id))).toBe(3);
     await expect(store.getAgentLogs(task.id)).resolves.toEqual([]);
     await expect(store.getAgentLogCount(task.id)).resolves.toBe(0);
+    await expect(
+      store.getAgentLogsByTimeRange(task.id, "2000-01-01T00:00:00.000Z", null),
+    ).resolves.toEqual([]);
   });
 
-  it("discards buffered unflushed entries when task is soft-deleted", async () => {
+  it("flushes buffered entries before soft-delete, then hides them while preserving the file", async () => {
     const store = harness.store();
     const task = await harness.createTestTask();
 
     await store.appendAgentLog(task.id, "buffered-only", "text");
     await store.deleteTask(task.id);
 
-    const rows = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(rows.count).toBe(0);
+    expect(countAgentLogEntries(taskDir(task.id))).toBe(1);
     await expect(store.getAgentLogs(task.id)).resolves.toEqual([]);
   });
 
@@ -59,10 +60,7 @@ describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
     await store.getAgentLogs(task.id);
     await store.deleteTask(task.id);
 
-    const firstDeleteCount = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(firstDeleteCount.count).toBe(0);
+    expect(countAgentLogEntries(taskDir(task.id))).toBe(1);
 
     const rowBefore = (store as any).db
       .prepare('SELECT deletedAt, updatedAt, "column" FROM tasks WHERE id = ?')
@@ -76,11 +74,7 @@ describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
     expect(rowAfter.deletedAt).toBe(rowBefore.deletedAt);
     expect(rowAfter.updatedAt).toBe(rowBefore.updatedAt);
     expect(rowAfter.column).toBe("archived");
-
-    const secondDeleteCount = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(task.id) as { count: number };
-    expect(secondDeleteCount.count).toBe(0);
+    expect(countAgentLogEntries(taskDir(task.id))).toBe(1);
   });
 
   it("clears only the soft-deleted parent logs when removing lineage references", async () => {
@@ -93,21 +87,14 @@ describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
     await store.getAgentLogs(parent.id);
     await store.getAgentLogs(child.id);
 
-    const childBefore = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(child.id) as { count: number };
-    expect(childBefore.count).toBe(1);
+    expect(countAgentLogEntries(taskDir(child.id))).toBe(1);
 
     await store.deleteTask(parent.id, { removeLineageReferences: true });
 
-    const parentAfter = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(parent.id) as { count: number };
-    const childAfter = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(child.id) as { count: number };
-    expect(parentAfter.count).toBe(0);
-    expect(childAfter.count).toBe(1);
+    expect(countAgentLogEntries(taskDir(parent.id))).toBe(1);
+    expect(countAgentLogEntries(taskDir(child.id))).toBe(1);
+    await expect(store.getAgentLogs(parent.id)).resolves.toEqual([]);
+    await expect(store.getAgentLogs(child.id)).resolves.toMatchObject([{ text: "child-log" }]);
   });
 
   it("does not affect other tasks' agent logs", async () => {
@@ -122,17 +109,13 @@ describe("TaskStore soft-delete agent log clearing (FN-5143)", () => {
 
     await store.deleteTask(first.id);
 
-    const firstAfter = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(first.id) as { count: number };
-    const secondAfter = (store as any).db
-      .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-      .get(second.id) as { count: number };
-    expect(firstAfter.count).toBe(0);
-    expect(secondAfter.count).toBe(1);
+    expect(countAgentLogEntries(taskDir(first.id))).toBe(1);
+    expect(countAgentLogEntries(taskDir(second.id))).toBe(1);
+    await expect(store.getAgentLogs(first.id)).resolves.toEqual([]);
+    await expect(store.getAgentLogs(second.id)).resolves.toMatchObject([{ text: "second-log" }]);
   });
 
-  it("emits task:deleted only after agent logs are cleared", async () => {
+  it("emits task:deleted only after read APIs hide persisted agent logs", async () => {
     const store = harness.store();
     const task = await harness.createTestTask();
     await store.appendAgentLog(task.id, "event-order", "text");

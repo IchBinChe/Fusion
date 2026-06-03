@@ -39,11 +39,10 @@ function buildParentScript(scenario: Scenario): string {
       killGraceMs: 50,
       maxLifetimeMs: 500,
     });
-    console.log(String(child.pid));
+    await new Promise((resolve) => process.stdout.write(String(child.pid) + "\\n", resolve));
     if (${JSON.stringify(scenario)} === "clean-exit") {
       process.exit(0);
-    }
-    if (${JSON.stringify(scenario)} === "sigterm") {
+    } else if (${JSON.stringify(scenario)} === "sigterm") {
       process.on("SIGTERM", () => process.exit(0));
       setInterval(() => {}, 1_000);
     } else {
@@ -108,7 +107,9 @@ describe("reliability interactions: FN-5189 verification spawn supervision", () 
         // event and deadlock.
         const exited = once(parent, "exit").catch(() => {});
         try {
+          const exited = once(parent, "exit");
           parent.kill("SIGKILL");
+          await exited;
         } catch {
           // ignore cleanup failures
         }
@@ -121,6 +122,8 @@ describe("reliability interactions: FN-5189 verification spawn supervision", () 
   const caseIt = process.platform === "win32" ? it.skip : it;
 
   caseIt.each([
+    // Cover all parent teardown surfaces from FN-5893: normal exit, signal-driven exit,
+    // and crash exit should all reap the supervised keepalive child within the guard window.
     ["clean-exit"],
     ["sigterm"],
     ["uncaught-exception"],

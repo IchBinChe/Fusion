@@ -1224,6 +1224,34 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.globalSettingsStore = new GlobalSettingsStore(resolvedGlobalSettingsDir);
   }
 
+  private emitTaskLifecycleEventSafely(
+    event: "task:created" | "task:updated",
+    args: TaskStoreEvents["task:created"] | TaskStoreEvents["task:updated"],
+  ): boolean {
+    const listeners = super.listeners(event) as Array<(...listenerArgs: typeof args) => unknown>;
+    if (listeners.length === 0) {
+      return false;
+    }
+
+    const [task] = args;
+    const taskId = task && typeof task === "object" && "id" in task ? String(task.id) : "unknown";
+
+    for (const listener of listeners) {
+      try {
+        const result = listener(...args);
+        if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+          void Promise.resolve(result).catch((error) => {
+            storeLog.warn(`[${event}] listener failed for ${taskId}: ${getErrorMessage(error)}`);
+          });
+        }
+      } catch (error) {
+        storeLog.warn(`[${event}] listener failed for ${taskId}: ${getErrorMessage(error)}`);
+      }
+    }
+
+    return true;
+  }
+
   /**
    * Get the SQLite database, initializing it on first access.
    * Also performs auto-migration from legacy file-based storage if needed.
@@ -4001,7 +4029,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     await this._maybeAutoArchiveSameAgentDuplicate(task, input);
 
-    this.emit("task:created", task);
+    this.emitTaskLifecycleEventSafely("task:created", [task]);
     if (options?.invokeTaskCreatedHook !== false) {
       await this.invokeTaskCreatedHook(task);
     }
@@ -5850,7 +5878,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (movedToTriage) {
         this.emit("task:moved", { task, from: "todo" as Column, to: "triage" as Column, source: "engine" });
       }
-      this.emit("task:updated", task);
+      this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
     });
   }
@@ -6521,7 +6549,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (movedToTriage) {
         this.emit("task:moved", { task, from: "todo" as Column, to: "triage" as Column, source: "engine" });
       }
-      this.emit("task:updated", task);
+      this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
     });
   }
@@ -6772,12 +6800,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         if (this.isWatching) {
           this.taskCache.set(id, { ...current });
         }
-        this.emit("task:updated", current);
+        this.emitTaskLifecycleEventSafely("task:updated", [current]);
         return current;
       }
 
       const emittedTask = ({ id, log, updatedAt } as unknown) as Task;
-      this.emit("task:updated", emittedTask);
+      this.emitTaskLifecycleEventSafely("task:updated", [emittedTask]);
       return emittedTask;
     });
   }

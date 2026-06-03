@@ -159,7 +159,24 @@
 
 .wf-editor-actions {
   display: flex;
+  align-items: center;
   gap: var(--space-xs);
+}
+
+.wf-editor-readonly-note {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Neutralize the fieldset wrapper so it only gates interactivity, not layout. */
+.wf-inspector-fields {
+  display: contents;
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
 }
 
 .wf-editor-save {

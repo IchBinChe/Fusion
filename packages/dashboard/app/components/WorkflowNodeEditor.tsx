@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle } from "lucide-react";
 import type { WorkflowDefinition } from "@fusion/core";
-import { getErrorMessage } from "@fusion/core";
+import { getErrorMessage, isBuiltinWorkflowId } from "@fusion/core";
 import {
   fetchWorkflows,
   createWorkflow,
@@ -87,6 +87,7 @@ function InnerEditor({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
+  const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true);
@@ -187,6 +188,7 @@ function InnerEditor({
 
   const handleDeleteWorkflow = useCallback(async () => {
     if (!activeWorkflow) return;
+    if (isBuiltinWorkflowId(activeWorkflow.id)) return; // built-ins are read-only
     if (!window.confirm(`Delete workflow "${activeWorkflow.name}"?`)) return;
     try {
       await deleteWorkflow(activeWorkflow.id, projectId);
@@ -198,8 +200,29 @@ function InnerEditor({
     }
   }, [activeWorkflow, projectId, addToast]);
 
+  const handleDuplicate = useCallback(async () => {
+    if (!activeWorkflow) return;
+    try {
+      const created = await createWorkflow(
+        {
+          name: `${activeWorkflow.name} (copy)`,
+          description: activeWorkflow.description,
+          ir: activeWorkflow.ir,
+          layout: activeWorkflow.layout,
+        },
+        projectId,
+      );
+      setWorkflows((ws) => [...ws, created]);
+      setActiveId(created.id);
+      addToast(`Duplicated to "${created.name}" — editable`, "success");
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to duplicate workflow", "error");
+    }
+  }, [activeWorkflow, projectId, addToast]);
+
   const handleSave = useCallback(async () => {
     if (!activeWorkflow) return;
+    if (isBuiltinWorkflowId(activeWorkflow.id)) return; // built-ins are read-only
     setSaving(true);
     setValidationError(null);
     try {
@@ -294,18 +317,37 @@ function InnerEditor({
                 <div className="wf-editor-toolbar">
                   <div className="wf-editor-palette">
                     {PALETTE.map(({ kind, label, icon: Icon, presetConfig }) => (
-                      <button key={label} className="wf-palette-btn" onClick={() => addNode(kind, label, presetConfig)}>
+                      <button
+                        key={label}
+                        className="wf-palette-btn"
+                        onClick={() => addNode(kind, label, presetConfig)}
+                        disabled={isBuiltin}
+                        title={isBuiltin ? "Built-in workflows are read-only — duplicate to edit" : undefined}
+                      >
                         <Icon size={13} /> {label}
                       </button>
                     ))}
                   </div>
                   <div className="wf-editor-actions">
-                    <button className="wf-editor-delete" onClick={handleDeleteWorkflow}>
-                      <Trash2 size={13} /> Delete
-                    </button>
-                    <button className="wf-editor-save" onClick={handleSave} disabled={saving}>
-                      {saving ? <Loader2 size={13} className="wf-spin" /> : <Save size={13} />} Save
-                    </button>
+                    {isBuiltin ? (
+                      <>
+                        <span className="wf-editor-readonly-note" role="status">
+                          Read-only built-in
+                        </span>
+                        <button className="wf-editor-save" onClick={handleDuplicate}>
+                          <Plus size={13} /> Duplicate to edit
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="wf-editor-delete" onClick={handleDeleteWorkflow}>
+                          <Trash2 size={13} /> Delete
+                        </button>
+                        <button className="wf-editor-save" onClick={handleSave} disabled={saving}>
+                          {saving ? <Loader2 size={13} className="wf-spin" /> : <Save size={13} />} Save
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -343,6 +385,12 @@ function InnerEditor({
           {selectedNode && selectedNode.data.kind !== "start" && selectedNode.data.kind !== "end" && (
             <aside className="wf-editor-inspector">
               <h3>Node</h3>
+              {isBuiltin && (
+                <p className="wf-inspector-note wf-inspector-note--info">
+                  Read-only built-in — duplicate the workflow to edit nodes.
+                </p>
+              )}
+              <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
               <label className="wf-field">
                 <span>Name</span>
                 <input
@@ -549,6 +597,7 @@ function InnerEditor({
                   Steps before this marker run pre-merge; steps after run post-merge.
                 </p>
               )}
+              </fieldset>
             </aside>
           )}
         </div>

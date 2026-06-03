@@ -62,7 +62,7 @@ if (assertions.length === 0) {
 
 The merge diff shows **no trace** of the regression — the reverted logic lives in a region git never flagged. FN-5902 is silently undone and the diff passes review as a clean refactor. The mirror mistake (keeping main's block) drops the extraction and breaks the other call site that motivated it.
 
-The collision class is not hypothetical or rare here: **four parallel branches bootstrapped or substantially extended `CONCEPTS.md` on the same day, each as a full-file write rather than an append** — so every one of them will hit this add/add when merging, until they all land. (session history)
+The collision class is not hypothetical or rare here: **four parallel branches bootstrapped or substantially extended `CONCEPTS.md` on the same day, each as a full-file write rather than an append** — so every one of them will hit this add/add when merging, until they all land.
 
 ## When to Apply
 

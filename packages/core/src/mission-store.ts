@@ -723,9 +723,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       };
     });
 
+    const eventCountRow = this.db
+      .prepare("SELECT COUNT(*) AS count FROM mission_events WHERE missionId = ?")
+      .get(id) as { count?: number | bigint } | undefined;
+    const eventCount = Number(eventCountRow?.count ?? 0);
+
     return {
       ...mission,
       linkedGoals,
+      eventCount,
       milestones: milestonesWithSlices,
     };
   }

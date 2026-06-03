@@ -922,8 +922,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     if (!selectedMission?.id) {
       return eventsTotal;
     }
-    return missions.find((mission) => mission.id === selectedMission.id)?.summary?.eventCount ?? eventsTotal;
-  }, [eventsTotal, missions, selectedMission?.id]);
+
+    const baseCount = selectedMission.eventCount
+      ?? missions.find((mission) => mission.id === selectedMission.id)?.summary?.eventCount;
+
+    if (baseCount == null) {
+      return eventsTotal;
+    }
+
+    return Math.max(baseCount, eventsTotal);
+  }, [eventsTotal, missions, selectedMission?.eventCount, selectedMission?.id]);
 
   const displayedMissionEvents = useMemo(() => [...missionEvents].reverse(), [missionEvents]);
 

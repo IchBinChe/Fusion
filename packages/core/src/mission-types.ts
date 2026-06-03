@@ -461,6 +461,8 @@ export interface SliceWithFeatures extends Slice {
 export interface MissionWithHierarchy extends Mission {
   /** Goals linked to this mission */
   linkedGoals?: Goal[];
+  /** Unfiltered total of all mission lifecycle events, matching `MissionSummary.eventCount` and `getMissionEvents` `total` with no `eventType` filter */
+  eventCount?: number;
   /** Milestones belonging to this mission, each with their slices */
   milestones: Array<MilestoneWithSlices & {
     /** Slices with their features loaded */

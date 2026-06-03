@@ -6980,6 +6980,8 @@ export interface SliceWithFeatures extends Slice {
 
 /** Full mission hierarchy */
 export interface MissionWithHierarchy extends Mission {
+  /** Unfiltered total of all mission lifecycle events, matching MissionSummary.eventCount and getMissionEvents total with no eventType filter */
+  eventCount?: number;
   milestones: MilestoneWithSlices[];
 }
 

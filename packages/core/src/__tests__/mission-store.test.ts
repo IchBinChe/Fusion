@@ -1920,6 +1920,24 @@ describe("MissionStore", () => {
 
       expect(withHierarchy.linkedGoals).toEqual([]);
     });
+
+    it("reports detail eventCount consistently with mission summaries", () => {
+      const mission = store.createMission({ title: "Hierarchy event counts" });
+
+      const emptyHierarchy = store.getMissionWithHierarchy(mission.id)!;
+      const emptySummary = store.getMissionSummary(mission.id);
+      expect(emptyHierarchy.eventCount).toBe(0);
+      expect(emptyHierarchy.eventCount).toBe(emptySummary.eventCount);
+
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
+      store.logMissionEvent(mission.id, "error", "error");
+
+      const populatedHierarchy = store.getMissionWithHierarchy(mission.id)!;
+      const populatedSummary = store.getMissionSummary(mission.id);
+      expect(populatedHierarchy.eventCount).toBe(3);
+      expect(populatedHierarchy.eventCount).toBe(populatedSummary.eventCount);
+    });
   });
 
   // ── Transaction Tests ────────────────────────────────────────────────

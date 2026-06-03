@@ -117,7 +117,7 @@ Fusion surfaces the persisted mission↔goal linkage through REST, CLI, and pi-e
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/missions/:missionId` | Return `MissionWithHierarchy`, including `linkedGoals` as an always-present array of `Goal` objects for the selected mission. |
+| `GET /api/missions/:missionId` | Return `MissionWithHierarchy`, including `linkedGoals` as an always-present array of `Goal` objects for the selected mission and optional `eventCount` as the authoritative unfiltered mission activity total. |
 | `GET /api/missions/:missionId/goals` | List linked goals for a mission. Returns `{ goals }`. |
 | `PUT /api/missions/:missionId/goals` | Replace the full linked-goal set with body `{ goalIds: string[] }`. Duplicate ids are deduplicated before reconciliation. |
 | `POST /api/missions/:missionId/goals/:goalId` | Idempotently link one goal to a mission. |

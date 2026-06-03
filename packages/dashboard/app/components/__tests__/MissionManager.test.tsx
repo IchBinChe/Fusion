@@ -132,6 +132,7 @@ const mockMissionDetail = {
   title: "Build Auth System",
   description: "Complete authentication flow",
   status: "planning",
+  eventCount: 4,
   linkedGoals: [] as Array<{ id: string; title: string; status: "active" | "archived"; createdAt: string; updatedAt: string; description?: string }>,
   milestones: [
     {
@@ -651,6 +652,8 @@ function createDetailFetchMockForMissionDetail(
   missionDetail: typeof mockMissionDetail,
   telemetryOverride: unknown = mockMilestoneValidationTelemetry,
   assertionsResponse: unknown[] = [],
+  missionsResponse = mockMissions,
+  eventsResponse = mockMissionEvents,
 ) {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes("/missions/health")) {
@@ -658,7 +661,7 @@ function createDetailFetchMockForMissionDetail(
     }
 
     if (url.includes("/events")) {
-      return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url, mockMissionEvents)));
+      return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url, eventsResponse)));
     }
 
     if (url.includes("/health")) {
@@ -686,7 +689,7 @@ function createDetailFetchMockForMissionDetail(
       }
     }
 
-    return Promise.resolve(mockApiResponse(mockMissions));
+    return Promise.resolve(mockApiResponse(missionsResponse));
   });
 }
 
@@ -1228,6 +1231,44 @@ describe("MissionManager", () => {
     });
   });
 
+  it("prefers mission detail event count when the list summary is stale before activity events load", async () => {
+    const staleSummaryMissions = mockMissions.map((mission) => mission.id === "M-001"
+      ? {
+        ...mission,
+        summary: {
+          ...mission.summary,
+          eventCount: 0,
+        },
+      }
+      : mission);
+    const missionDetailWithAuthoritativeCount = {
+      ...mockMissionDetail,
+      eventCount: 7,
+    };
+
+    globalThis.fetch = createDetailFetchMockForMissionDetail(
+      missionDetailWithAuthoritativeCount,
+      mockMilestoneValidationTelemetry,
+      [],
+      staleSummaryMissions,
+      [],
+    );
+    globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("Build Auth System"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-tab-activity")).toHaveTextContent("Activity (7)");
+    });
+
+    expect(screen.queryByTestId("mission-activity-events")).toBeNull();
+  });
+
   it("auto-scrolls to the latest mission activity on initial load", async () => {
     globalThis.fetch = createDetailFetchMock(mockMissionEvents);
     globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
@@ -1309,6 +1350,7 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Real-time warning event")).toBeDefined();
+      expect(screen.getByTestId("mission-tab-activity")).toHaveTextContent("Activity (5)");
       expect(scrollIntoViewSpy).toHaveBeenLastCalledWith({ block: "end", behavior: "auto" });
     });
 

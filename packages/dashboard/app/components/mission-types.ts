@@ -270,6 +270,7 @@ export type MissionWithSummary = Mission & { summary?: MissionSummary };
 export interface MissionWithHierarchy extends Mission {
   linkedGoals?: Goal[];
   milestones: Milestone[];
+  eventCount?: number;
 }
 
 /** Mission event categories emitted by mission observability APIs. */

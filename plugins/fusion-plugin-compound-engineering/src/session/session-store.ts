@@ -82,11 +82,18 @@ export const STALE_INTERVAL_MULTIPLE = 3;
 
 const DEFAULT_TURN_INTERVAL_MS = 120000;
 
-/** Parse a JSON column, falling back to `fallback` on corruption rather than throwing. */
-function safeParse<T>(raw: string | null, fallback: T): T {
+/**
+ * Parse a JSON column, falling back to `fallback` when it is missing, fails to
+ * parse (syntax error), OR parses to the wrong shape. Shape validation matters:
+ * a column holding `'null'` or `'{}'` parses fine but would yield a non-array
+ * `conversationHistory` that later crashes `appendHistory`'s spread — so a
+ * semantically-corrupt value is treated exactly like a syntactically-corrupt one.
+ */
+function safeParse<T>(raw: string | null, fallback: T, isValid: (value: unknown) => value is T): T {
   if (!raw) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    const parsed: unknown = JSON.parse(raw);
+    return isValid(parsed) ? parsed : fallback;
   } catch {
     // A corrupted JSON column must not crash reads of an otherwise-valid row
     // (and must not destroy the rest of the session). Degrade to the fallback;
@@ -95,13 +102,31 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
+function isConversationHistory(value: unknown): value is CeConversationTurn[] {
+  return (
+    Array.isArray(value)
+    && value.every((turn) => {
+      if (typeof turn !== "object" || turn === null) return false;
+      const t = turn as Record<string, unknown>;
+      return (t.role === "user" || t.role === "agent") && typeof t.text === "string" && typeof t.at === "string";
+    })
+  );
+}
+
+function isPlanningQuestionOrNull(value: unknown): value is PlanningQuestion | null {
+  if (value === null) return true;
+  if (typeof value !== "object") return false;
+  const q = value as Record<string, unknown>;
+  return typeof q.id === "string" && typeof q.type === "string" && typeof q.question === "string";
+}
+
 function rowToSession(row: CeSessionRow): CeSession {
   return {
     id: row.id,
     stage: row.stage,
     status: row.status,
-    currentQuestion: safeParse<PlanningQuestion | null>(row.currentQuestion, null),
-    conversationHistory: safeParse<CeConversationTurn[]>(row.conversationHistory, []),
+    currentQuestion: safeParse<PlanningQuestion | null>(row.currentQuestion, null, isPlanningQuestionOrNull),
+    conversationHistory: safeParse<CeConversationTurn[]>(row.conversationHistory, [], isConversationHistory),
     projectId: row.projectId,
     artifactPath: row.artifactPath,
     error: row.error,

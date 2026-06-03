@@ -121,6 +121,23 @@ describe("corrupt-JSON resilience + status validation", () => {
     // The rest of the row still surfaces the session's real state.
     expect(read.stage).toBe("brainstorm");
   });
+
+  it("degrades semantically-wrong-but-valid JSON to null / [] (not just syntax errors)", () => {
+    const store = new CeSessionStore(h.db);
+    const s = store.create({ stage: "brainstorm" });
+    // Valid JSON, wrong shape: conversationHistory='null' parses to a non-array;
+    // currentQuestion='{}' parses to an object missing the required question fields.
+    h.db
+      .prepare("UPDATE ce_sessions SET currentQuestion = ?, conversationHistory = ? WHERE id = ?")
+      .run("{}", "null", s.id);
+
+    const read = store.get(s.id)!;
+    expect(read.currentQuestion).toBeNull();
+    expect(read.conversationHistory).toEqual([]);
+    // appendHistory must not throw spreading the recovered (array) history.
+    expect(() => store.appendHistory(s.id, { role: "user", text: "hi", at: "t" })).not.toThrow();
+    expect(store.get(s.id)!.conversationHistory).toHaveLength(1);
+  });
 });
 
 describe("asCeSessionStatus validation", () => {

@@ -361,6 +361,16 @@ export class CeOrchestrator {
     const ceStageId = session.stage;
     const ceArtifactPath = session.artifactPath ?? null;
 
+    // Seed the CE-pipeline STATE record (U8). This is the pipeline's OWN state
+    // machine, distinct from the board task columns it will spawn. The pipeline
+    // is "running" at this stage until a board signal advances it.
+    this.pipelineStore.upsertState({
+      cePipelineId,
+      currentStage: ceStageId,
+      status: "running",
+      lastArtifactPath: ceArtifactPath,
+    });
+
     for (const spec of specs) {
       const description = spec.description.trim();
       if (!description) continue; // createTask rejects blank descriptions.

@@ -4,6 +4,8 @@ import { installBundledCeSkills } from "./skill-installation.js";
 import { ensureCeSchema } from "./schema.js";
 import { createSessionRoutes } from "./routes/session-routes.js";
 import { createArtifactRoutes } from "./routes/artifact-routes.js";
+import { getCePipelineStore } from "./sync/pipeline-store.js";
+import { reconcileCePipelines } from "./sync/reconciler.js";
 
 export { CompoundEngineeringDashboardView } from "./dashboard-view.js";
 export { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
@@ -16,7 +18,16 @@ export {
 export { ensureCeSchema } from "./schema.js";
 export { CeSessionStore, getCeSessionStore } from "./session/session-store.js";
 export { CePipelineStore, getCePipelineStore } from "./sync/pipeline-store.js";
-export type { CePipelineLink, CreateCePipelineLinkInput } from "./sync/pipeline-store.js";
+export type {
+  CePipelineLink,
+  CreateCePipelineLinkInput,
+  CePipelineState,
+  CePipelineStatus,
+  CeSyncQueueEntry,
+  CeSyncReason,
+} from "./sync/pipeline-store.js";
+export { CeReconciler, reconcileCePipelines } from "./sync/reconciler.js";
+export type { ReconcileResult } from "./sync/reconciler.js";
 export {
   CeOrchestrator,
   WORK_STAGE_ID,
@@ -41,6 +52,42 @@ const plugin = definePlugin({
     // Idempotent DDL for the plugin-local CE tables (ce_sessions). Runs against
     // the same DB route handlers reach via ctx.taskStore.getDatabase() (U5).
     onSchemaInit: ensureCeSchema,
+    // INBOUND board→pipeline sync (U8 / FN-5719). The 5s hook budget
+    // (plugin-runner invokeHookSafe) means these MUST be fast: resolve the link,
+    // ENQUEUE a sync signal, and return. Heavy advancement (board reads, outbound
+    // task creation) happens in the reconciler, NOT inline here. A reconcile
+    // drain is fired-and-forgotten (never awaited) so a slow sweep cannot blow
+    // the hook budget; correctness does not depend on it firing because the next
+    // reconcile() sweep re-derives the transition from board truth.
+    onTaskMoved: (task, fromColumn, toColumn, ctx) => {
+      const store = getCePipelineStore(ctx);
+      const link = store.findByTaskId(task.id);
+      if (!link) return; // not a CE-linked task → ignore fast.
+      store.enqueueSync({
+        cePipelineId: link.cePipelineId,
+        taskId: task.id,
+        reason: "task_moved",
+        fromColumn,
+        toColumn,
+      });
+      void Promise.resolve()
+        .then(() => reconcileCePipelines(ctx))
+        .catch((err) => ctx.logger.warn(`CE reconcile (onTaskMoved) failed: ${String(err)}`));
+    },
+    onTaskCompleted: (task, ctx) => {
+      const store = getCePipelineStore(ctx);
+      const link = store.findByTaskId(task.id);
+      if (!link) return;
+      store.enqueueSync({
+        cePipelineId: link.cePipelineId,
+        taskId: task.id,
+        reason: "task_completed",
+        toColumn: "done",
+      });
+      void Promise.resolve()
+        .then(() => reconcileCePipelines(ctx))
+        .catch((err) => ctx.logger.warn(`CE reconcile (onTaskCompleted) failed: ${String(err)}`));
+    },
     // Install the bundled, pinned ce-* SKILL.md files into a plugin-local,
     // discoverable directory on load. The engine ingests
     // PluginSkillContribution only as a name; physical discovery requires the

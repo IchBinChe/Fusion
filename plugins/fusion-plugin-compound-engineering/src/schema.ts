@@ -25,6 +25,20 @@ import type { Database } from "@fusion/core";
  * board-task ownership and CE-pipeline ownership stay separate state machines.
  * U7 keeps it minimal (link records only); U8 extends it with the bidirectional
  * pipeline-state machine.
+ *
+ * `ce_pipeline_state` (U8) is the CE-pipeline's OWN state machine — DISTINCT from
+ * board-task column state (KTD4 / FN-5719: two separate ownership state machines,
+ * never one shared column encoding two concerns). It tracks where the pipeline
+ * itself is: `currentStage` (the CE stage the pipeline has reached) and `status`
+ * (`running` | `advancing` | `awaiting_board` | `completed`). The board owns task
+ * columns; this table owns pipeline progress. They are reconciled — never merged.
+ *
+ * `ce_pipeline_sync_queue` (U8) is the event-enqueue seam (FN-5719). Lifecycle
+ * hooks write a row here FAST (5s hook budget) and return; the reconciler drains
+ * it. A dropped/never-enqueued event is still recovered because the reconciler
+ * ALSO re-derives transitions from board state — the queue is an optimization,
+ * board+state comparison is the convergence guarantee. `processedAt NULL` =
+ * pending; non-null = drained (kept for audit, swept idempotently).
  */
 export function ensureCeSchema(db: Database): void {
   db.exec(`
@@ -68,5 +82,36 @@ export function ensureCeSchema(db: Database): void {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idxCePipelineLinksTask
       ON ce_pipeline_links(taskId);
+
+    CREATE TABLE IF NOT EXISTS ce_pipeline_state (
+      cePipelineId TEXT PRIMARY KEY,
+      currentStage TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN (
+        'running','advancing','awaiting_board','completed'
+      )),
+      lastArtifactPath TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idxCePipelineStateStatus
+      ON ce_pipeline_state(status, updatedAt DESC, cePipelineId);
+
+    CREATE TABLE IF NOT EXISTS ce_pipeline_sync_queue (
+      id TEXT PRIMARY KEY,
+      cePipelineId TEXT NOT NULL,
+      taskId TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      fromColumn TEXT,
+      toColumn TEXT,
+      enqueuedAt TEXT NOT NULL,
+      processedAt TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idxCePipelineSyncQueuePending
+      ON ce_pipeline_sync_queue(processedAt, enqueuedAt, id);
+
+    CREATE INDEX IF NOT EXISTS idxCePipelineSyncQueuePipeline
+      ON ce_pipeline_sync_queue(cePipelineId, enqueuedAt, id);
   `);
 }

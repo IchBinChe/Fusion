@@ -211,7 +211,7 @@ Mailbox view shows inbox/outbox communication threads and unread state.
 - reply rows in the mailbox modal can expand inline to show the replied-to message context for easier thread reading
 - mailbox now includes an **Approvals** tab with pending and history filters (`approved` / `denied` / `completed`), approval detail context, and inline approve/deny actions for pending requests
 - in the **Agents** tab, the agent selector now includes **All agents**, which shows one combined agent-to-agent stream (with sender + recipient labels); selecting a specific agent still shows Inbox/Outbox subtabs
-- mailbox entry points now show pending-approval indicators: Header mailbox toggle dot, Header overflow mailbox badge, Mobile mailbox tab dot, and Mobile More → Mailbox badge
+- mailbox entry points now show unread/pending indicators: the desktop Header mailbox toggle shows a pending-approval dot first or an unread dot when unread mail exists without pending approvals, while Header overflow + Mobile mailbox entry points continue to surface mailbox badges/dots
 - approval lifecycle SSE events (`approval:requested`, `approval:updated`, `approval:decided`) trigger mailbox approvals refresh without manual reload
 - when a task newly enters `awaiting-approval`, the app shows a persistent approval banner above project content with an **Open Mailbox** CTA; dismissals are remembered per approval item until that item advances or a different one arrives
 - Visible message history/threading is driven by explicit `message.metadata.replyTo.messageId` links

@@ -178,14 +178,34 @@ describe("Header", () => {
       expect(screen.getByLabelText("Unread chat response")).toBeInTheDocument();
     });
 
-    it("shows mailbox pending-approval indicator when mailbox is not active", () => {
-      renderHeader({ onChangeView: noop, view: "board", mailboxPendingApprovalCount: 2 });
-      expect(screen.getByLabelText("Pending approvals")).toBeInTheDocument();
+    it("shows mailbox unread indicator when there are unread messages only", () => {
+      renderHeader({ onChangeView: noop, view: "board", mailboxUnreadCount: 3, mailboxPendingApprovalCount: 0 });
+      expect(screen.getByLabelText("3 unread messages")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Pending approvals")).toBeNull();
     });
 
-    it("hides mailbox pending-approval indicator when mailbox view is active", () => {
-      renderHeader({ onChangeView: noop, view: "mailbox", mailboxPendingApprovalCount: 2 });
+    it("shows mailbox pending-approval indicator when mailbox is not active", () => {
+      renderHeader({ onChangeView: noop, view: "board", mailboxPendingApprovalCount: 2, mailboxUnreadCount: 0 });
+      expect(screen.getByLabelText("Pending approvals")).toBeInTheDocument();
+      expect(screen.queryByLabelText(/unread messages/)).toBeNull();
+    });
+
+    it("shows only the pending indicator when mailbox has both pending approvals and unread messages", () => {
+      renderHeader({ onChangeView: noop, view: "board", mailboxPendingApprovalCount: 2, mailboxUnreadCount: 4 });
+      expect(screen.getByLabelText("Pending approvals")).toBeInTheDocument();
+      expect(screen.queryByLabelText("4 unread messages")).toBeNull();
+    });
+
+    it("hides mailbox indicators when counts are zero", () => {
+      renderHeader({ onChangeView: noop, view: "board", mailboxPendingApprovalCount: 0, mailboxUnreadCount: 0 });
       expect(screen.queryByLabelText("Pending approvals")).toBeNull();
+      expect(screen.queryByLabelText(/unread messages/)).toBeNull();
+    });
+
+    it("hides mailbox indicators when mailbox view is active", () => {
+      renderHeader({ onChangeView: noop, view: "mailbox", mailboxPendingApprovalCount: 2, mailboxUnreadCount: 3 });
+      expect(screen.queryByLabelText("Pending approvals")).toBeNull();
+      expect(screen.queryByLabelText(/unread messages/)).toBeNull();
     });
 
     it("hides chat unread indicator when chat view is active", () => {

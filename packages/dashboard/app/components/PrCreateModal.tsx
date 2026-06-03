@@ -421,7 +421,7 @@ export function PrCreateModal({
                 </div>
               ) : null}
               {preflight?.conflictsWithBase ? (
-                <div className="card pr-create-modal__preflight-remediation">
+                <div className="card pr-create-modal__conflict-resolution">
                   <div className="pr-create-modal__conflict-copy">
                     <p className="pr-create-modal__conflict-title">Resolve conflicts with AI</p>
                     <p className="pr-create-modal__conflict-message">Fusion will use AI to resolve conflicts on this branch and push it.</p>

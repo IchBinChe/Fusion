@@ -476,8 +476,10 @@
  * On mobile the token is overridden to 32px to match the shorter footer.
  */
 .project-content {
+  display: flex;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 

@@ -204,6 +204,16 @@ function createMockMissionStore() {
       return updated;
     }),
     listAssertionsForFeature: vi.fn((featureId: string) => assertionsByFeature.get(featureId) ?? []),
+    ensureFeatureAssertionLinked: vi.fn((featureId: string) => {
+      const feature = features.get(featureId);
+      if (!feature) {
+        throw new Error(`Feature ${featureId} not found`);
+      }
+      if ((assertionsByFeature.get(featureId) ?? []).length === 0) {
+        store._addFeatureWithManagedAssertion(feature);
+      }
+      return assertionsByFeature.get(featureId) ?? [];
+    }),
     getAssertionsForFeature: vi.fn((featureId: string) => assertionsByFeature.get(featureId) ?? []),
     getSlice: vi.fn((id: string) => {
       // Return a mock slice with milestoneId for the hierarchy
@@ -764,12 +774,21 @@ describe("MissionExecutionLoop", () => {
       expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(expect.any(String), "passed", "Recovered validation passed");
     });
 
-    it("should auto-pass if feature has no linked assertions", async () => {
-      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001" });
+    it("lazy-ensures a managed assertion and routes zero-assertion features through validation", async () => {
+      const feature = createMockFeature({
+        id: "F-001",
+        loopState: "implementing",
+        taskId: "FN-001",
+        title: "Feature from prose",
+        acceptanceCriteria: "Feature must validate through AI",
+      });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
-      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]);
+      missionStore.listAssertionsForFeature = vi
+        .fn()
+        .mockReturnValueOnce([])
+        .mockImplementation((featureId: string) => (missionStore as any).getAssertionsForFeature(featureId));
 
       loop = new MissionExecutionLoop({
         taskStore: taskStore as any,
@@ -777,41 +796,39 @@ describe("MissionExecutionLoop", () => {
         rootDir: "/tmp",
       });
       const emitSpy = vi.spyOn(loop, "emit");
+      vi.spyOn(loop as any, "runValidation").mockResolvedValue({ status: "pass", summary: "ok" });
       loop.start();
 
       await loop.processTaskOutcome("FN-001");
 
-      // When there are no assertions, we skip starting a validator run
-      expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
-      // But the passed event should be emitted
+      expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledWith("F-001");
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
       expect(emitSpy).toHaveBeenCalledWith(
         "validation:passed",
         expect.objectContaining({ featureId: "F-001" }),
       );
-      expect(missionStore.updateFeature).toHaveBeenCalledWith(
-        "F-001",
-        expect.objectContaining({ loopState: "passed", lastValidatorStatus: "passed" }),
+      const noAssertionEvents = missionStore.logMissionEvent.mock.calls.filter(
+        ([, , , payload]) => payload?.code === "validation_auto_passed_no_assertions",
       );
-      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
-        expect.any(String),
-        "warning",
-        expect.stringContaining("auto-passed"),
-        expect.objectContaining({
-          code: "validation_auto_passed_no_assertions",
-          featureId: "F-001",
-          reason: "No assertions linked",
-          taskId: "FN-001",
-        }),
-      );
+      expect(noAssertionEvents).toHaveLength(0);
       expectNoValidationBoardTaskMutation(taskStore);
     });
 
-    it("emits no-assertions auto-pass event exactly once across re-entry", async () => {
-      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001" });
+    it("does not emit auto-pass evidence across re-entry after lazy assertion ensure", async () => {
+      const feature = createMockFeature({
+        id: "F-001",
+        loopState: "implementing",
+        taskId: "FN-001",
+        title: "Feature from prose",
+        acceptanceCriteria: "Feature must validate through AI",
+      });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
-      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]);
+      missionStore.listAssertionsForFeature = vi
+        .fn()
+        .mockReturnValueOnce([])
+        .mockImplementation((featureId: string) => (missionStore as any).getAssertionsForFeature(featureId));
 
       loop = new MissionExecutionLoop({
         taskStore: taskStore as any,
@@ -823,10 +840,11 @@ describe("MissionExecutionLoop", () => {
       await loop.processTaskOutcome("FN-001");
       await loop.processTaskOutcome("FN-001");
 
+      expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledTimes(1);
       const noAssertionEvents = missionStore.logMissionEvent.mock.calls.filter(
         ([, , , payload]) => payload?.code === "validation_auto_passed_no_assertions",
       );
-      expect(noAssertionEvents).toHaveLength(1);
+      expect(noAssertionEvents).toHaveLength(0);
     });
 
     it("uses validator path for later-added feature with managed assertion", async () => {
@@ -852,6 +870,44 @@ describe("MissionExecutionLoop", () => {
 
       expect(missionStore.listAssertionsForFeature).toHaveBeenCalledWith("F-LATER");
       expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-LATER", "task_completion");
+    });
+
+    it("threads milestone acceptance criteria into validator prompts", () => {
+      const feature = createMockFeature({
+        id: "F-MILESTONE",
+        title: "Feature under milestone",
+        acceptanceCriteria: "Feature criteria",
+      });
+      const milestone = createMockMilestone({
+        id: "MS-MILESTONE",
+        acceptanceCriteria: "Milestone pass bar text",
+      });
+      const assertions = [
+        {
+          id: "CA-1",
+          milestoneId: milestone.id,
+          title: "Managed assertion",
+          assertion: "Feature criteria",
+          status: "pending" as const,
+          orderIndex: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+
+      const prompt = (loop as any).buildValidationPrompt(feature, assertions, milestone);
+      const systemPrompt = (loop as any).buildValidationSystemPrompt(feature, assertions, "Task context", milestone);
+
+      expect(prompt).toContain("Milestone pass bar text");
+      expect(prompt).toContain("must also be satisfied for this feature to pass");
+      expect(systemPrompt).toContain("Milestone pass bar text");
+      expect(systemPrompt).toContain("validator-executed requirements");
     });
 
     it("does NOT create a board task for single-feature validation", async () => {
@@ -1464,7 +1520,7 @@ describe("MissionExecutionLoop", () => {
       });
       missionStore._setFeature(feature);
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
-      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]); // No assertions = auto-pass
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test", log: [] });
 
       const notifySpy = vi.fn();
@@ -1477,12 +1533,13 @@ describe("MissionExecutionLoop", () => {
         },
       });
       const emitSpy = vi.spyOn(loop, "emit");
+      vi.spyOn(loop as any, "runValidation").mockResolvedValue({ status: "pass", summary: "ok" });
       loop.start();
 
       await loop.processTaskOutcome("FN-001");
 
-      // No validator run started (no assertions)
-      expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
+      expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledWith("F-001");
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
 
       // validation:passed event emitted
       expect(emitSpy).toHaveBeenCalledWith(

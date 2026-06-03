@@ -197,7 +197,7 @@ html {
 
 svg.animate-spin,
 svg.spin {
-  transform-box: fill-box;
+  transform-box: view-box;
 }
 
 :root {
@@ -975,11 +975,15 @@ body {
 
 /* === Board === */
 .board {
+  box-sizing: border-box;
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: repeat(6, minmax(300px, 1fr));
   gap: var(--column-gap);
-  padding: var(--board-padding);
   height: 100%;
+  min-height: 0;
+  min-width: 0;
+  padding: var(--board-padding);
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
@@ -3336,7 +3340,6 @@ input[type="range"]:focus-visible {
     padding: var(--space-md);
     padding-bottom: var(--space-md);
     gap: var(--space-md);
-    height: 100%;
     width: 100%;
   }
 

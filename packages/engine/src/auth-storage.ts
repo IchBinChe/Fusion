@@ -16,12 +16,16 @@ import type { OAuthCredentials } from "@earendil-works/pi-ai/oauth";
 
 type StoredCredential = StoredAuthCredential;
 
-function getHomeDir(): string {
+export function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || homedir();
 }
 
 export function getFusionAuthPath(home = getHomeDir()): string {
   return join(home, ".fusion", "agent", "auth.json");
+}
+
+export function getFusionOAuthAlertStatePath(home = getHomeDir()): string {
+  return join(home, ".fusion", "agent", "oauth-alert-state.json");
 }
 
 export function getFusionModelsPath(home = getHomeDir()): string {

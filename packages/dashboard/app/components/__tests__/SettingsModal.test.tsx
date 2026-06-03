@@ -247,7 +247,7 @@ type PersistSettingInput = {
 };
 
 async function expectSettingPersists({ section, label, kind, value, scope, expectedKey }: PersistSettingInput) {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ delay: null });
   renderModal();
   await waitForSettingsModalReady();
   await user.click(screen.getByRole("button", { name: new RegExp(`^${section}$`, "i") }));
@@ -282,7 +282,7 @@ async function expectSettingPersists({ section, label, kind, value, scope, expec
 }
 
 async function assertProjectModelSavePayload(provider: string, modelId: string, expectedKeys: string[]) {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ delay: null });
   renderModal({ initialSection: "project-models" });
   await waitForSettingsModalReady();
 
@@ -469,7 +469,6 @@ describe("SettingsModal", () => {
     mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
     mockFetchSettings.mockResolvedValueOnce({
       ...defaultSettings,
-      merger: { mode: "legacy" },
       mergeIntegrationWorktree: "cwd-main",
       merger: { mode: "deterministic" },
     });
@@ -997,6 +996,14 @@ describe("SettingsModal", () => {
         value: 14,
         scope: "project",
         expectedKey: "chatAutoCleanupDays",
+      },
+      {
+        section: "Project General",
+        label: "Operational log retention",
+        kind: "select",
+        value: 7,
+        scope: "project",
+        expectedKey: "operationalLogRetentionDays",
       },
     ])("persists $expectedKey through the expected settings scope", async (input) => {
       await expectSettingPersists(input);
@@ -4793,6 +4800,13 @@ describe("SettingsModal", () => {
       expect(details).toHaveAttribute("open");
       expect(await screen.findByLabelText("SearXNG URL")).toBeInTheDocument();
       expect(screen.getByText(/Open Authentication Settings/i)).toBeInTheDocument();
+
+      const advancedBody = details?.querySelector(".settings-research-provider-advanced-body");
+      expect(advancedBody).toBeTruthy();
+      expect(advancedBody?.querySelectorAll(".form-group")).toHaveLength(3);
+      expect(screen.getByLabelText("Search Provider")).toHaveClass("input");
+      expect(screen.getByLabelText("SearXNG URL")).toHaveClass("input");
+      expect(screen.getByLabelText("Google Search CX")).toHaveClass("input");
     });
 
     it("keeps default max sources outside advanced details and groups provider controls", async () => {
@@ -4813,6 +4827,54 @@ describe("SettingsModal", () => {
       expect(providerGroup).toContainElement(screen.getByText(/No API key required\./i));
     });
 
+    it("keeps research limits and source controls inside desktop containment grids for both sections", async () => {
+      renderModal();
+      await waitForSettingsModalReady();
+      await openResearchGlobalSection();
+
+      const defaultMaxConcurrent = screen.getByLabelText("Default Max Concurrent Runs");
+      const defaultMaxSources = screen.getByLabelText("Default Max Sources Per Run");
+      const defaultMaxDuration = screen.getByLabelText("Default Max Duration (ms)");
+      const defaultRequestTimeout = screen.getByLabelText("Request Timeout (ms)");
+
+      const globalLimitsGrid = defaultMaxConcurrent.closest(".settings-research-limits-grid");
+      expect(globalLimitsGrid).toBeTruthy();
+      expect(defaultMaxSources.closest(".settings-research-limits-grid")).toBe(globalLimitsGrid);
+      expect(defaultMaxDuration.closest(".settings-research-limits-grid")).toBe(globalLimitsGrid);
+      expect(defaultRequestTimeout.closest(".settings-research-limits-grid")).toBe(globalLimitsGrid);
+      expect(defaultMaxConcurrent).toHaveClass("input");
+      expect(defaultMaxSources).toHaveClass("input");
+      expect(defaultMaxDuration).toHaveClass("input");
+      expect(defaultRequestTimeout).toHaveClass("input");
+
+      const globalSourceGrid = screen.getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid");
+      expect(globalSourceGrid).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(globalSourceGrid);
+
+      await openResearchProjectSection();
+
+      const projectMaxConcurrent = screen.getByLabelText("Max Concurrent Runs");
+      const projectMaxSources = screen.getByLabelText("Max Sources Per Run");
+      const projectMaxDuration = screen.getByLabelText("Max Duration (ms)");
+      const projectRequestTimeout = screen.getByLabelText("Request Timeout (ms)");
+
+      const projectLimitsGrid = projectMaxConcurrent.closest(".settings-research-limits-grid");
+      expect(projectLimitsGrid).toBeTruthy();
+      expect(projectMaxSources.closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+      expect(projectMaxDuration.closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+      expect(projectRequestTimeout.closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+      expect(projectMaxConcurrent).toHaveClass("input");
+      expect(projectMaxSources).toHaveClass("input");
+      expect(projectMaxDuration).toHaveClass("input");
+      expect(projectRequestTimeout).toHaveClass("input");
+
+      const projectSourceGrid = screen.getByRole("checkbox", { name: "Page Fetch" }).closest(".settings-research-source-grid");
+      expect(projectSourceGrid).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+      expect(screen.getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+      expect(screen.getByRole("checkbox", { name: "LLM Synthesis" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+    });
+
     it("groups project limits fields in one grid and keeps validation error visible", async () => {
       renderModal();
       await waitForSettingsModalReady();
@@ -4828,6 +4890,16 @@ describe("SettingsModal", () => {
       expect(maxSources.closest(".settings-research-limits-grid")).toBe(limitsGrid);
       expect(maxDuration.closest(".settings-research-limits-grid")).toBe(limitsGrid);
       expect(requestTimeout.closest(".settings-research-limits-grid")).toBe(limitsGrid);
+      expect(maxConcurrent).toHaveClass("input");
+      expect(maxSources).toHaveClass("input");
+      expect(maxDuration).toHaveClass("input");
+      expect(requestTimeout).toHaveClass("input");
+
+      const sourceGrid = screen.getByRole("checkbox", { name: "Page Fetch" }).closest(".settings-research-source-grid");
+      expect(sourceGrid).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
+      expect(screen.getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
+      expect(screen.getByRole("checkbox", { name: "LLM Synthesis" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
 
       fireEvent.change(maxConcurrent, { target: { value: "0" } });
       await userEvent.click(screen.getByText("Save"));

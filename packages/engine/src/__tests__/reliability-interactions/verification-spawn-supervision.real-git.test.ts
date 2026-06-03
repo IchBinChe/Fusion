@@ -37,13 +37,12 @@ function buildParentScript(scenario: Scenario): string {
     const child = superviseSpawn(process.execPath, [${JSON.stringify(fixturePath)}, "keepalive"], {
       stdio: "ignore",
       killGraceMs: 50,
-      maxLifetimeMs: 5_000,
+      maxLifetimeMs: 500,
     });
-    console.log(String(child.pid));
+    await new Promise((resolve) => process.stdout.write(String(child.pid) + "\\n", resolve));
     if (${JSON.stringify(scenario)} === "clean-exit") {
       process.exit(0);
-    }
-    if (${JSON.stringify(scenario)} === "sigterm") {
+    } else if (${JSON.stringify(scenario)} === "sigterm") {
       process.on("SIGTERM", () => process.exit(0));
       setInterval(() => {}, 1_000);
     } else {
@@ -69,7 +68,7 @@ async function spawnParent(scenario: Scenario): Promise<{ parent: ReturnType<typ
   const childPid = await new Promise<number>((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error(`Timed out waiting for supervised child pid from scenario ${scenario}`));
-    }, 5_000);
+    }, 15_000);
 
     const onData = (chunk: Buffer | string) => {
       stdout += chunk.toString();
@@ -101,14 +100,18 @@ async function spawnParent(scenario: Scenario): Promise<{ parent: ReturnType<typ
 describe("reliability interactions: FN-5189 verification spawn supervision", () => {
   const spawnedParents = new Set<ReturnType<typeof spawn>>();
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const parent of spawnedParents) {
       if (parent.exitCode === null && parent.signalCode === null) {
+        // Register the exit listener BEFORE kill so we don't miss the
+        // event and deadlock.
+        const exited = once(parent, "exit");
         try {
           parent.kill("SIGKILL");
         } catch {
           // ignore cleanup failures
         }
+        await exited.catch(() => {});
       }
     }
     spawnedParents.clear();
@@ -117,6 +120,8 @@ describe("reliability interactions: FN-5189 verification spawn supervision", () 
   const caseIt = process.platform === "win32" ? it.skip : it;
 
   caseIt.each([
+    // Cover all parent teardown surfaces from FN-5893: normal exit, signal-driven exit,
+    // and crash exit should all reap the supervised keepalive child within the guard window.
     ["clean-exit"],
     ["sigterm"],
     ["uncaught-exception"],

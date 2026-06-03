@@ -12,7 +12,7 @@
 
 .confirm-dialog__checkbox {
   display: grid;
-  gap: var(--space-2xs);
+  gap: var(--space-xs);
   margin: 0 var(--space-xl) var(--space-lg);
 }
 

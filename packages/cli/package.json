@@ -12,8 +12,8 @@
     "pi-package"
   ],
   "bin": {
-    "fn": "./dist/bin.js",
-    "fusion": "./dist/bin.js"
+    "fn": "./bin.mjs",
+    "fusion": "./bin.mjs"
   },
   "pi": {
     "extensions": [
@@ -28,6 +28,7 @@
     "access": "public"
   },
   "files": [
+    "bin.mjs",
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",

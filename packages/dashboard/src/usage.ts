@@ -1458,50 +1458,89 @@ async function fetchMinimaxUsage(authStorage?: AuthStorageLike): Promise<Provide
     const data = JSON.parse(res.body);
     usage.status = "ok";
 
-    // Parse model_remains array — group by model family
+    // Each model in model_remains can expose two quota windows: a rolling
+    // interval window and a weekly window. Minimax reports remaining quota two
+    // ways — an authoritative *_remaining_percent field, and count fields that
+    // are frequently 0 for percent-metered models (e.g. the primary "general"
+    // model). Prefer the percent field; fall back to counts only when it's
+    // absent. Keying solely off the count field hides whole model rows.
+    const buildWindow = (
+      label: string,
+      totalCount: number,
+      // Note: Minimax's *_usage_count is actually REMAINING, not used
+      // (known API quirk per https://github.com/MiniMax-AI/MiniMax-M2/issues/99)
+      remainingCount: number,
+      remainingPercent: number | undefined,
+      remainsTime: number | undefined,
+      startTime: number | undefined,
+      endTime: number | undefined,
+    ): UsageWindow | null => {
+      let percentLeft: number;
+      if (typeof remainingPercent === "number" && Number.isFinite(remainingPercent)) {
+        percentLeft = remainingPercent;
+      } else if (totalCount > 0) {
+        const used = Math.max(0, totalCount - remainingCount);
+        percentLeft = 100 - (used / totalCount) * 100;
+      } else {
+        // No quota signal at all — skip (unused model type / window).
+        return null;
+      }
+
+      percentLeft = Math.min(100, Math.max(0, percentLeft));
+      const percentUsed = Math.min(100, Math.max(0, 100 - percentLeft));
+
+      let resetText: string | null = null;
+      let resetMs: number | undefined;
+      let resetAt: string | undefined;
+      if (remainsTime && remainsTime > 0) {
+        resetMs = remainsTime;
+        resetText = `resets in ${formatDuration(remainsTime)}`;
+        resetAt = new Date(Date.now() + remainsTime).toISOString();
+      }
+
+      let windowDurationMs: number | undefined;
+      if (startTime && endTime) {
+        windowDurationMs = endTime - startTime;
+      }
+
+      return {
+        label,
+        percentUsed,
+        percentLeft,
+        resetText,
+        resetMs,
+        resetAt,
+        windowDurationMs,
+      };
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped API response
     const modelRemains: any[] = data?.model_remains || [];
-    if (Array.isArray(modelRemains) && modelRemains.length > 0) {
+    if (Array.isArray(modelRemains)) {
       for (const model of modelRemains) {
         const modelName: string = model.model_name || "Unknown";
-        const total: number = model.current_interval_total_count ?? 0;
-        // Note: Minimax's current_interval_usage_count is actually REMAINING, not used
-        // (known API quirk per https://github.com/MiniMax-AI/MiniMax-M2/issues/99)
-        const remaining: number = model.current_interval_usage_count ?? 0;
-        const used: number = Math.max(0, total - remaining);
 
-        const percentUsed = total > 0 ? (used / total) * 100 : 0;
+        const interval = buildWindow(
+          modelName,
+          model.current_interval_total_count ?? 0,
+          model.current_interval_usage_count ?? 0,
+          model.current_interval_remaining_percent,
+          model.remains_time,
+          model.start_time,
+          model.end_time,
+        );
+        if (interval) usage.windows.push(interval);
 
-        let resetText: string | null = null;
-        let resetMs: number | undefined;
-        let windowDurationMs: number | undefined;
-
-        const remainsTime: number = model.remains_time;
-        let resetAt: string | undefined;
-        if (remainsTime && remainsTime > 0) {
-          resetMs = remainsTime;
-          resetText = `resets in ${formatDuration(remainsTime)}`;
-          resetAt = new Date(Date.now() + remainsTime).toISOString();
-        }
-
-        const startTime: number = model.start_time;
-        const endTime: number = model.end_time;
-        if (startTime && endTime) {
-          windowDurationMs = endTime - startTime;
-        }
-
-        // Only show models that have a quota > 0 (skip unused model types)
-        if (total > 0) {
-          usage.windows.push({
-            label: modelName,
-            percentUsed: Math.min(100, Math.max(0, percentUsed)),
-            percentLeft: Math.min(100, Math.max(0, 100 - percentUsed)),
-            resetText,
-            resetMs,
-            resetAt,
-            windowDurationMs,
-          });
-        }
+        const weekly = buildWindow(
+          `${modelName} (weekly)`,
+          model.current_weekly_total_count ?? 0,
+          model.current_weekly_usage_count ?? 0,
+          model.current_weekly_remaining_percent,
+          model.weekly_remains_time,
+          model.weekly_start_time,
+          model.weekly_end_time,
+        );
+        if (weekly) usage.windows.push(weekly);
       }
     }
   } catch (e: unknown) {

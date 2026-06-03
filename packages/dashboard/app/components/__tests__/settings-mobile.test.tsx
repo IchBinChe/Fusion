@@ -261,6 +261,48 @@ describe("SettingsModal mobile adaptations", () => {
     expect(getByLabelText("Memory File")).toBeTruthy();
   });
 
+  it("keeps research settings controls inside mobile containment wrappers", async () => {
+    vi.mocked(fetchSettings).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: { researchView: true },
+    });
+
+    mockSettingsViewport(true);
+    const user = userEvent.setup();
+    const { getByLabelText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    const picker = getByLabelText("Settings Section");
+    await user.selectOptions(picker, "research-global");
+
+    const details = await within(document.body).findByText(/Advanced — external search providers/i);
+    await user.click(details);
+
+    const advancedPanel = document.querySelector(".settings-research-provider-advanced-body");
+    expect(advancedPanel).toBeTruthy();
+    expect(document.querySelector(".settings-research-provider-advanced-details")).toBeTruthy();
+    expect(document.querySelector(".settings-research-limits-grid")).toBeTruthy();
+    expect(document.querySelector(".settings-research-source-grid")).toBeTruthy();
+
+    await user.selectOptions(picker, "research-project");
+
+    const maxConcurrent = await within(document.body).findByLabelText("Max Concurrent Runs");
+    expect(maxConcurrent).toHaveClass("input");
+    expect(document.querySelectorAll(".settings-research-limit-field").length).toBeGreaterThan(0);
+
+    const projectLimitsGrid = maxConcurrent.closest(".settings-research-limits-grid");
+    expect(projectLimitsGrid).toBeTruthy();
+    expect(within(document.body).getByLabelText("Max Sources Per Run").closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+    expect(within(document.body).getByLabelText("Max Duration (ms)").closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+    expect(within(document.body).getByLabelText("Request Timeout (ms)").closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+
+    const projectSourceGrid = within(document.body).getByRole("checkbox", { name: "Page Fetch" }).closest(".settings-research-source-grid");
+    expect(projectSourceGrid).toBeTruthy();
+    expect(within(document.body).getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+    expect(within(document.body).getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+    expect(within(document.body).getByRole("checkbox", { name: "LLM Synthesis" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+  });
+
   it("renders settings nav items with active class for touch styling", async () => {
     const { container } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
@@ -354,10 +396,16 @@ describe("SettingsModal mobile adaptations", () => {
     // Remote Access header elements must use the same mobile gutter as other remote blocks
     expectMobileRule(css, ".remote-status-bar", "margin: 0 var(--space-lg) var(--space-md);");
     expectMobileRule(css, ".remote-share-block", "margin: 0 var(--space-lg) var(--space-md);");
+    expectMobileRule(css, ".settings-research-provider-advanced-details", "padding-inline-start: 0;");
+    expectMobileRule(css, ".settings-research-source-grid", "grid-template-columns: 1fr;");
+    expectMobileRule(css, ".settings-research-limits-grid", "grid-template-columns: 1fr;");
 
     // Base rules: desktop uses --space-xl horizontal margin for remote header elements
     expectBaseRule(css, ".remote-status-bar", "margin: 0 var(--space-xl) var(--space-md);");
     expectBaseRule(css, ".remote-share-block", "margin: 0 var(--space-xl) var(--space-md);");
+    expectBaseRule(css, ".settings-research-provider-advanced-details", "padding-inline-start: var(--space-md);");
+    expectBaseRule(css, ".settings-research-provider-advanced-body > .form-group", "padding: 0;");
+    expectBaseRule(css, ".settings-research-limits-grid", "min-width: 0;");
 
     // Settings header actions keep compact controls on a shared height contract on desktop; mobile inherits this height (FN-4354 reverted prior mobile inflation).
     expectBaseRule(css, ".settings-header-actions", "--settings-header-action-height: calc(var(--space-md) * 2 + var(--space-xs) / 2);");

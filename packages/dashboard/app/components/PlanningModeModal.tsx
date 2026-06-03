@@ -806,6 +806,15 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             ),
         );
 
+        if (session.status === "error") {
+          setView({
+            type: "error",
+            session: { sessionId, currentQuestion: null, summary: null },
+            errorMessage: session.error || "Session failed",
+          });
+          return;
+        }
+
         if (session.status === "draft") {
           // Draft hasn't been started yet — restore the user's saved text +
           // model selection into the editor, reattach the draft id so a
@@ -869,16 +878,16 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           setView({ type: "loading" });
           if (session.thinkingOutput) setStreamingOutput(session.thinkingOutput);
           connectToPlanningStream(sessionId);
-        } else if (session.status === "error") {
-          setView({
-            type: "error",
-            session: { sessionId, currentQuestion: null, summary: null },
-            errorMessage: session.error || "Session failed",
-          });
         }
-      } catch {
-        setError("Failed to load session");
-        setView({ type: "initial" });
+      } catch (err) {
+        currentSessionIdRef.current = sessionId;
+        setLockSessionId(sessionId);
+        setError(null);
+        setView({
+          type: "error",
+          session: { sessionId, currentQuestion: null, summary: null },
+          errorMessage: getErrorMessage(err) || "Failed to load session",
+        });
       }
     },
     [connectToPlanningStream, projectId],
@@ -2132,7 +2141,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               onRefine={() => {
                 void handleRefineFurther();
               }}
-              isLoading={isCreatingTask || isStartingBreakdown}
+              isCreatingTask={isCreatingTask}
+              isStartingBreakdown={isStartingBreakdown}
             />
           )}
 
@@ -2426,7 +2436,8 @@ interface SummaryViewProps {
   onCreateTask: () => void;
   onBreakIntoTasks: () => void;
   onRefine: () => void;
-  isLoading: boolean;
+  isCreatingTask: boolean;
+  isStartingBreakdown: boolean;
 }
 
 function SummaryView({
@@ -2443,7 +2454,8 @@ function SummaryView({
   onCreateTask,
   onBreakIntoTasks,
   onRefine,
-  isLoading,
+  isCreatingTask,
+  isStartingBreakdown,
 }: SummaryViewProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [renderMarkdown, setRenderMarkdown] = useState(false);
@@ -2459,6 +2471,7 @@ function SummaryView({
   const selectedPriority = normalizeTaskPriority(summary.priority);
   const isBranchNameRequired = branchMode === "existing" || branchMode === "custom-new";
   const hasInvalidBranchSelection = isBranchNameRequired && !branchName.trim();
+  const isLoading = isCreatingTask || isStartingBreakdown;
 
   const handleDependencyToggle = (taskId: string) => {
     const newDeps = selectedDependencies.includes(taskId)
@@ -2648,7 +2661,7 @@ function SummaryView({
         </button>
         <div className="planning-summary-actions-right">
           <button className="btn" onClick={onCreateTask} disabled={isLoading || hasInvalidBranchSelection}>
-            {isLoading ? (
+            {isCreatingTask ? (
               <>
                 <Loader2 size={16} className="spin icon-mr-8" />
                 Creating...
@@ -2666,7 +2679,7 @@ function SummaryView({
             disabled={isLoading}
             title="Break the plan into multiple tasks with dependencies"
           >
-            {isLoading ? (
+            {isStartingBreakdown ? (
               <>
                 <Loader2 size={16} className="spin icon-mr-8" />
                 Breaking down...

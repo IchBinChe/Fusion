@@ -125,7 +125,7 @@ describe("TaskReviewTab", () => {
     expect(await screen.findByText("Failed to load review data.")).toBeInTheDocument();
   });
 
-  it("renders PR decision and status modifiers", async () => {
+  it("renders PR decision, status modifiers, and populated layout hooks", async () => {
     const task = makeTask({
       reviewState: {
         source: "pull-request",
@@ -136,6 +136,8 @@ describe("TaskReviewTab", () => {
             body: "Fix null handling",
             author: { login: "reviewer" },
             createdAt: new Date().toISOString(),
+            path: "src/parser.ts",
+            summary: "Parser guard is missing",
           },
         ],
         addressing: [{ itemId: "ri-1", status: "failed", selectedAt: new Date().toISOString() }],
@@ -143,9 +145,19 @@ describe("TaskReviewTab", () => {
     });
 
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
     await screen.findByText("CHANGES_REQUESTED");
     expect(screen.getByText("failed").className).toContain("task-review-tab__status--failed");
+    expect(container.querySelector(".task-review-tab__header")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__summary-group")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__actions")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__refresh-meta")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__list")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__item-header")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__item-selection")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__item-meta-list")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__body")).not.toBeNull();
   });
 
   it("keeps review body outside the checkbox label and preserves selection on body clicks", async () => {
@@ -369,7 +381,7 @@ describe("TaskReviewTab", () => {
     expect(addToast).toHaveBeenCalledWith("Review refreshed", "success");
   });
 
-  it("renders reviewer-agent entries in direct mode", async () => {
+  it("renders reviewer-agent entries in direct mode with populated layout hooks", async () => {
     const task = makeTask();
     apiMocks.fetchTaskReview.mockResolvedValue({
       reviewState: {
@@ -393,9 +405,11 @@ describe("TaskReviewTab", () => {
       emptyMessage: null,
     });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
     expect(await screen.findByText("code review Step 2: REVISE")).toBeInTheDocument();
     expect(screen.getAllByText("REVISE").length).toBeGreaterThan(0);
+    expect(container.querySelector(".task-review-tab__item-header")).not.toBeNull();
+    expect(container.querySelector(".task-review-tab__item-meta-list")).not.toBeNull();
   });
 
   it("renders all persisted addressing progress states from snapshots", async () => {
@@ -485,14 +499,20 @@ describe("TaskReviewTab", () => {
     expect(screen.getByText(/Error: Patch failed/)).toBeInTheDocument();
   });
 
-  it("keeps mobile actions wrapping contract and removes equal-width flex buttons", async () => {
+  it("keeps mobile actions wrapping contract, stacks header groups, and prevents body overflow regressions", async () => {
     const css = await loadAllAppCss();
     const mobileMediaStart = css.indexOf("@media (max-width: 768px)");
     expect(mobileMediaStart).toBeGreaterThanOrEqual(0);
     const mobileCss = css.slice(mobileMediaStart);
 
-    expect(mobileCss).toMatch(/\.task-review-tab__actions\s*\{[^}]*flex-wrap\s*:\s*wrap\s*;[^}]*\}/);
+    expect(mobileCss).toMatch(/\.task-review-tab__header\s*\{[^}]*flex-direction\s*:\s*column\s*;[^}]*\}/);
+    expect(mobileCss).toMatch(/\.task-review-tab__actions\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*\}/);
+    expect(mobileCss).toMatch(/\.task-review-tab__actions\s+\.btn\s*\{[^}]*width\s*:\s*100%\s*;[^}]*\}/);
+    expect(mobileCss).toMatch(/\.task-review-tab__body\s*\{[^}]*padding\s*:\s*var\(--space-sm\)\s*;[^}]*\}/);
     expect(mobileCss).not.toMatch(/\.task-review-tab__actions\s+\.btn\s*\{[^}]*flex\s*:\s*1\s*;[^}]*\}/);
+
+    expect(css).toMatch(/\.task-review-tab__body\s*\{[^}]*overflow-x\s*:\s*auto\s*;[^}]*overflow-wrap\s*:\s*anywhere\s*;[^}]*\}/);
+    expect(css).toMatch(/\.task-review-tab__item\s*\{[^}]*padding\s*:\s*var\(--card-padding\)\s*;[^}]*\}/);
   });
 
   it("shows create PR action when in-review without prInfo and auth is available", async () => {

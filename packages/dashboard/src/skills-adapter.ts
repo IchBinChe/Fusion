@@ -7,6 +7,8 @@
 
 import { access, readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join, relative, dirname } from "node:path";
+import { superviseSpawn } from "@fusion/core";
+import type { ChildProcess } from "node:child_process";
 
 /**
  * Check if a path exists asynchronously using access().
@@ -133,6 +135,17 @@ export interface UpstreamError {
 /**
  * Skills adapter interface exposed via ServerOptions.
  */
+export interface InstallSkillResultSuccess {
+  success: true;
+}
+
+export interface InstallSkillResultError {
+  error: string;
+  code: "invalid_source" | "spawn_error" | "install_failed" | "install_timeout";
+}
+
+export type InstallSkillResult = InstallSkillResultSuccess | InstallSkillResultError;
+
 export interface SkillsAdapter {
   /**
    * Discover all skills available in the project.
@@ -148,6 +161,11 @@ export interface SkillsAdapter {
     rootDir: string,
     input: { skillId: string; enabled: boolean },
   ): Promise<ToggleSkillResult>;
+
+  /**
+   * Install a skill from skills.sh into the current project.
+   */
+  installSkill(input: { source: string; skill?: string; cwd: string }): Promise<InstallSkillResult>;
 
   /**
    * Fetch the skills.sh catalog with optional authentication.
@@ -191,6 +209,35 @@ export function parseSkillId(skillId: string): { source: string; relativePath: s
 
 function normalizeStoredSkillPath(path: string): string {
   return path.replaceAll("\\", "/").replace(/^skills\//, "");
+}
+
+function isValidInstallSource(source: string): boolean {
+  return /^[^/]+\/[^/]+$/.test(source);
+}
+
+function captureStream(stream: NodeJS.ReadableStream | null | undefined): Promise<string> {
+  if (!stream) {
+    return Promise.resolve("");
+  }
+
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    });
+    stream.once("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    stream.once("close", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+  });
+}
+
+async function waitForSupervisedExit(
+  child: ChildProcess,
+  exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  const spawnError = new Promise<never>((_, reject) => {
+    child.once("error", reject);
+  });
+  return Promise.race([exitPromise, spawnError]);
 }
 
 /**
@@ -255,6 +302,8 @@ export function createSkillsAdapter(options: {
   };
   /** Project settings path helper */
   getSettingsPath: (rootDir: string) => string;
+  /** Optional superviseSpawn seam for tests */
+  superviseSpawn?: typeof superviseSpawn;
 }): SkillsAdapter {
   return {
     async discoverSkills(rootDir: string): Promise<DiscoveredSkill[]> {
@@ -426,6 +475,60 @@ export function createSkillsAdapter(options: {
           settingsPath: "packages[].skills",
           pattern: `${prefix}${skillPath}`,
           targetFile: settingsPath,
+        };
+      }
+    },
+
+    async installSkill(input: { source: string; skill?: string; cwd: string }): Promise<InstallSkillResult> {
+      const source = input.source.trim();
+      if (!isValidInstallSource(source)) {
+        return {
+          error: "Invalid source format. Use owner/repo.",
+          code: "invalid_source",
+        };
+      }
+
+      const npxArgs = ["skills", "add", source];
+      const skill = input.skill?.trim();
+      if (skill) {
+        npxArgs.push("--skill", skill);
+      }
+      npxArgs.push("-y", "-a", "pi");
+
+      const runSpawn = options.superviseSpawn ?? superviseSpawn;
+      const supervised = runSpawn("npx", npxArgs, {
+        cwd: input.cwd,
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        maxLifetimeMs: 60_000,
+      });
+
+      try {
+        const stderrPromise = captureStream(supervised.child.stderr);
+        const stdoutPromise = captureStream(supervised.child.stdout);
+        const exit = await waitForSupervisedExit(supervised.child, supervised.waitExit());
+        const [stderr, stdout] = await Promise.all([stderrPromise, stdoutPromise]);
+
+        if (exit.signal === "SIGKILL") {
+          return {
+            error: "Skill installation timed out.",
+            code: "install_timeout",
+          };
+        }
+
+        if ((exit.code ?? 1) !== 0) {
+          const detail = stderr.trim() || stdout.trim() || "Skill installation failed.";
+          return {
+            error: detail,
+            code: "install_failed",
+          };
+        }
+
+        return { success: true };
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : "Failed to start skill installer.",
+          code: "spawn_error",
         };
       }
     },

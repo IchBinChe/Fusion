@@ -421,6 +421,31 @@ describe("Planning Mode Routes", () => {
       return app;
     }
 
+    async function createCompletedPlanningSession(initialPlan = "Build a user auth system"): Promise<string> {
+      const startRes = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/planning/start",
+        JSON.stringify({ initialPlan }),
+        { "Content-Type": "application/json" }
+      );
+      const sessionId = startRes.body.sessionId;
+
+      await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId, responses: { scope: "medium" } }), { "Content-Type": "application/json" });
+      await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId, responses: { requirements: "Must have login" } }), { "Content-Type": "application/json" });
+      await REQUEST(buildApp(), "POST", "/api/planning/respond", JSON.stringify({ sessionId, responses: { confirm: true } }), { "Content-Type": "application/json" });
+
+      return sessionId;
+    }
+
+    async function connectPlanningStreamUntilComplete(sessionId: string): Promise<void> {
+      const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+      setTimeout(() => {
+        planningStreamManager.broadcast(sessionId, { type: "complete" });
+      }, 0);
+      await streamPromise;
+    }
+
     /** Mock agent for planning session tests */
     function setupPlanningMockAgent() {
       const questionResponses = [
@@ -685,6 +710,7 @@ describe("Planning Mode Routes", () => {
 
         expect(res.status).toBe(201);
         expect(res.body.sessionId).toBeDefined();
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
 
         await vi.waitFor(() => {
           expect(createFnAgentSpy).toHaveBeenCalledWith(
@@ -728,6 +754,7 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
         await vi.waitFor(() => {
           expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -764,6 +791,7 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
         await vi.waitFor(() => {
           expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -800,6 +828,7 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
         await vi.waitFor(() => {
           expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -836,6 +865,7 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
         await vi.waitFor(() => {
           expect(createFnAgentSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -869,6 +899,7 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
         await vi.waitFor(() => {
           // No explicit defaultProvider/defaultModelId means automatic resolution
           expect(createFnAgentSpy).toHaveBeenCalledWith(
@@ -925,6 +956,7 @@ describe("Planning Mode Routes", () => {
         );
 
         expect(res.status).toBe(201);
+        await connectPlanningStreamUntilComplete(res.body.sessionId);
         // Partial project lane should be ignored, falls through to next tier
         await vi.waitFor(() => {
           // Should NOT use the partial provider
@@ -938,6 +970,41 @@ describe("Planning Mode Routes", () => {
     });
 
     describe("GET /planning/:sessionId/stream", () => {
+      function setupStreamingPlanningAgent() {
+        const promptCalls: string[] = [];
+        const messages: Array<{ role: string; content: string }> = [];
+        const createFnAgentSpy = vi.fn(async (options?: { onThinking?: (delta: string) => void }) => ({
+          session: {
+            state: { messages },
+            prompt: vi.fn(async (message: string) => {
+              promptCalls.push(message);
+              await new Promise<void>((resolve) => {
+                setTimeout(() => {
+                  options?.onThinking?.("live first-turn reasoning");
+                  messages.push({ role: "user", content: message });
+                  messages.push({
+                    role: "assistant",
+                    content: JSON.stringify({
+                      type: "question",
+                      data: {
+                        id: "q-live-first-turn",
+                        type: "text",
+                        question: "What should the plan prioritize first?",
+                      },
+                    }),
+                  });
+                  resolve();
+                }, 1);
+              });
+            }),
+            dispose: vi.fn(),
+          },
+        }));
+
+        __setCreateFnAgent(createFnAgentSpy as any);
+        return { createFnAgentSpy, promptCalls };
+      }
+
       it("replays buffered events when Last-Event-ID header is provided", async () => {
         const startRes = await REQUEST(
           buildApp(),
@@ -996,6 +1063,130 @@ describe("Planning Mode Routes", () => {
         expect(streamRes.body).toContain("id: 1\nevent: thinking");
         expect(streamRes.body).toContain("id: 2");
         expect(streamRes.body).toContain("event: complete");
+      });
+
+      it("defers the first streamed turn until SSE connect for new sessions", async () => {
+        vi.useFakeTimers();
+        try {
+          const { promptCalls } = setupStreamingPlanningAgent();
+
+          const startRes = await REQUEST(
+            buildApp(),
+            "POST",
+            "/api/planning/start-streaming",
+            JSON.stringify({ initialPlan: "Stream the first planning turn live" }),
+            { "Content-Type": "application/json" },
+          );
+
+          expect(startRes.status).toBe(201);
+          const sessionId = startRes.body.sessionId as string;
+          expect(promptCalls).toHaveLength(0);
+          expect(
+            planningStreamManager.getBufferedEvents(sessionId, 0).filter((event) => event.event === "thinking"),
+          ).toHaveLength(0);
+
+          const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+          await Promise.resolve();
+
+          await vi.advanceTimersByTimeAsync(1);
+          planningStreamManager.broadcast(sessionId, { type: "complete" });
+
+          const streamRes = await streamPromise;
+          expect(streamRes.status).toBe(200);
+          expect(promptCalls).toHaveLength(1);
+          expect(streamRes.body).toContain("event: thinking");
+          expect(streamRes.body).toContain("live first-turn reasoning");
+          expect(streamRes.body).toContain("event: question");
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("defers the first streamed turn until SSE connect when starting an existing draft session", async () => {
+        vi.useFakeTimers();
+        try {
+          const { promptCalls } = setupStreamingPlanningAgent();
+
+          const draftRes = await REQUEST(
+            buildApp(),
+            "POST",
+            "/api/planning/create-draft",
+            JSON.stringify({ initialPlan: "Draft that will be started later" }),
+            { "Content-Type": "application/json" },
+          );
+
+          expect(draftRes.status).toBe(201);
+          const sessionId = draftRes.body.sessionId as string;
+
+          const startPromise = REQUEST(
+            buildApp(),
+            "POST",
+            "/api/planning/start-streaming",
+            JSON.stringify({
+              initialPlan: "Draft that will be started later",
+              existingSessionId: sessionId,
+            }),
+            { "Content-Type": "application/json" },
+          );
+
+          await vi.advanceTimersByTimeAsync(1);
+          const startRes = await startPromise;
+          expect(startRes.status).toBe(201);
+          expect(promptCalls).toHaveLength(0);
+          expect(
+            planningStreamManager.getBufferedEvents(sessionId, 0).filter((event) => event.event === "thinking"),
+          ).toHaveLength(0);
+
+          const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+          await Promise.resolve();
+
+          await vi.advanceTimersByTimeAsync(1);
+          planningStreamManager.broadcast(sessionId, { type: "complete" });
+
+          const streamRes = await streamPromise;
+          expect(streamRes.status).toBe(200);
+          expect(promptCalls).toHaveLength(1);
+          expect(streamRes.body).toContain("event: thinking");
+          expect(streamRes.body).toContain("live first-turn reasoning");
+          expect(streamRes.body).toContain("event: question");
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("starts the deferred first turn exactly once even with concurrent subscribers", async () => {
+        vi.useFakeTimers();
+        try {
+          const { promptCalls } = setupStreamingPlanningAgent();
+
+          const startRes = await REQUEST(
+            buildApp(),
+            "POST",
+            "/api/planning/start-streaming",
+            JSON.stringify({ initialPlan: "Only start the first turn once" }),
+            { "Content-Type": "application/json" },
+          );
+
+          expect(startRes.status).toBe(201);
+          const sessionId = startRes.body.sessionId as string;
+          expect(promptCalls).toHaveLength(0);
+
+          const firstStreamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+          const secondStreamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+          await Promise.resolve();
+
+          await vi.advanceTimersByTimeAsync(1);
+          planningStreamManager.broadcast(sessionId, { type: "complete" });
+
+          const [firstStreamRes, secondStreamRes] = await Promise.all([firstStreamPromise, secondStreamPromise]);
+          expect(promptCalls).toHaveLength(1);
+          expect(firstStreamRes.status).toBe(200);
+          expect(secondStreamRes.status).toBe(200);
+          expect(firstStreamRes.body).toContain("live first-turn reasoning");
+          expect(secondStreamRes.body).toContain("live first-turn reasoning");
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it("treats invalid Last-Event-ID values as first connect", async () => {
@@ -1776,6 +1967,256 @@ describe("Planning Mode Routes", () => {
           status: "complete",
           result: storedSession?.result,
         });
+      });
+
+      it.each([
+        {
+          sessionSource: "live",
+          useSummaryOverride: false,
+          branchSelection: { mode: "project-default" },
+          expectedBranch: undefined,
+          expectedBaseBranch: undefined,
+        },
+        {
+          sessionSource: "live",
+          useSummaryOverride: true,
+          branchSelection: { mode: "auto-new", baseBranch: "develop" },
+          expectedBranch: undefined,
+          expectedBaseBranch: "develop",
+        },
+        {
+          sessionSource: "persisted",
+          useSummaryOverride: false,
+          branchSelection: { mode: "existing", branchName: "feature/shared-auth", baseBranch: "develop" },
+          expectedBranch: "feature/shared-auth",
+          expectedBaseBranch: "develop",
+        },
+        {
+          sessionSource: "persisted",
+          useSummaryOverride: true,
+          branchSelection: { mode: "custom-new", branchName: "feature/planned-auth", baseBranch: "main" },
+          expectedBranch: "feature/planned-auth",
+          expectedBaseBranch: "main",
+        },
+      ])("returns 201 for $sessionSource create-task sessions across branch selection surfaces (summary override: $useSummaryOverride)", async ({
+        sessionSource,
+        useSummaryOverride,
+        branchSelection,
+        expectedBranch,
+        expectedBaseBranch,
+      }) => {
+        (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+          id: `FN-${sessionSource}-${branchSelection.mode}`,
+          description: "Build auth flow",
+          column: "triage",
+          dependencies: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        });
+        (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+        let app = buildApp();
+        let sessionId: string;
+
+        if (sessionSource === "live") {
+          sessionId = await createCompletedPlanningSession();
+        } else {
+          sessionId = `persisted-${branchSelection.mode}-${useSummaryOverride ? "override" : "default"}`;
+          const persistedSession = {
+            id: sessionId,
+            type: "planning",
+            status: "complete",
+            title: "Build persisted planning",
+            inputPayload: JSON.stringify({ initialPlan: "Build resumable planning sessions" }),
+            conversationHistory: "[]",
+            currentQuestion: null,
+            result: JSON.stringify({
+              title: "Persisted planning output",
+              description: "Persist planning results so users can create tasks later",
+              suggestedSize: "M",
+              priority: "normal",
+              suggestedDependencies: ["FN-100"],
+              keyDeliverables: ["Persist sessions"],
+            }),
+            thinkingOutput: "",
+            error: null,
+            projectId: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            archived: 0,
+          };
+          const mockAiSessionStore = {
+            get: vi.fn((id: string) => (id === sessionId ? persistedSession : null)),
+            listAll: vi.fn(() => []),
+            delete: vi.fn(),
+          };
+          app = express();
+          app.use(express.json());
+          app.use("/api", createApiRoutes(store, { aiSessionStore: mockAiSessionStore as any }));
+        }
+
+        const summary = useSummaryOverride
+          ? {
+              title: "Edited auth task",
+              description: "Edited description from summary view",
+              suggestedSize: "S",
+              suggestedDependencies: ["FN-500"],
+              keyDeliverables: ["Login flow"],
+            }
+          : undefined;
+
+        const res = await REQUEST(
+          app,
+          "POST",
+          "/api/planning/create-task",
+          JSON.stringify({ sessionId, branchSelection, ...(summary ? { summary } : {}) }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(store.createTask).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: useSummaryOverride ? "Edited auth task" : expect.any(String),
+            branch: expectedBranch,
+            baseBranch: expectedBaseBranch,
+          }),
+        );
+      });
+
+      it.each([
+        { label: "size update rejection", configure: () => (store.updateTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("size update failed")) },
+        { label: "log entry rejection", configure: () => (store.logEntry as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("log entry failed")) },
+      ])("still returns 201 when planning create-task post-create side effects fail (%s)", async ({ configure }) => {
+        (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+          id: "FN-250",
+          description: "Build a user auth system",
+          column: "triage",
+          dependencies: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        });
+        (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+        configure();
+
+        const sessionId = await createCompletedPlanningSession();
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-task",
+          JSON.stringify({ sessionId }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+      });
+
+      it("still returns 201 when planning create-task session release throws", async () => {
+        (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+          id: "FN-251",
+          description: "Build a user auth system",
+          column: "triage",
+          dependencies: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        });
+        (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+        const releaseSessionSpy = vi.spyOn(planningModule, "releaseSession").mockImplementation(() => {
+          throw new Error("release exploded");
+        });
+
+        try {
+          const sessionId = await createCompletedPlanningSession();
+          const res = await REQUEST(
+            buildApp(),
+            "POST",
+            "/api/planning/create-task",
+            JSON.stringify({ sessionId }),
+            { "Content-Type": "application/json" }
+          );
+
+          expect(res.status).toBe(201);
+        } finally {
+          releaseSessionSpy.mockRestore();
+        }
+      });
+
+      it("still returns 201 when planning create-tasks post-create updates fail", async () => {
+        (store.createTask as ReturnType<typeof vi.fn>)
+          .mockResolvedValueOnce({
+            id: "FN-260",
+            description: "First",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            id: "FN-261",
+            description: "Second",
+            column: "triage",
+            dependencies: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          });
+        (store.updateTask as ReturnType<typeof vi.fn>)
+          .mockRejectedValueOnce(new Error("size update failed"))
+          .mockResolvedValueOnce({
+            id: "FN-261",
+            description: "Second",
+            column: "triage",
+            dependencies: ["FN-260"],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          });
+        (store.logEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+        const planningSessionId = await createCompletedPlanningSession();
+        const breakdownRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start-breakdown",
+          JSON.stringify({ sessionId: planningSessionId }),
+          { "Content-Type": "application/json" }
+        );
+
+        const generatedSubtasks = breakdownRes.body.subtasks as Array<{
+          id: string;
+          title: string;
+          description: string;
+          suggestedSize: "S" | "M" | "L";
+          dependsOn: string[];
+        }>;
+
+        const res = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/create-tasks",
+          JSON.stringify({
+            planningSessionId,
+            subtasks: [
+              {
+                id: generatedSubtasks[0]!.id,
+                title: "Auth backend",
+                description: "Implement backend",
+                suggestedSize: "L",
+                dependsOn: [],
+              },
+              {
+                id: generatedSubtasks[1]!.id,
+                title: "Auth frontend",
+                description: "Implement frontend",
+                dependsOn: [generatedSubtasks[0]!.id],
+              },
+            ],
+          }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(res.status).toBe(201);
+        expect(res.body.tasks).toHaveLength(2);
       });
 
       it("creates task with explicit summary priority", async () => {
@@ -3492,6 +3933,10 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     );
 
     expect(res.status).toBe(201);
+    const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${res.body.sessionId}/stream`);
+    await Promise.resolve();
+    planningStreamManager.broadcast(res.body.sessionId, { type: "complete" });
+    await streamPromise;
     expect(projectStoreResolver.getOrCreateProjectStore).toHaveBeenCalledWith(projectId);
     expect(scopedStore.getSettings).toHaveBeenCalled();
     expect(scopedStore.getRootDir()).toBe("/scoped/planning/project");
@@ -3541,6 +3986,10 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     );
 
     expect(res.status).toBe(201);
+    const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${res.body.sessionId}/stream`);
+    await Promise.resolve();
+    planningStreamManager.broadcast(res.body.sessionId, { type: "complete" });
+    await streamPromise;
     // Request body override takes precedence over scoped settings
     await vi.waitFor(() => {
       expect(createFnAgentSpy).toHaveBeenCalledWith(
@@ -3582,6 +4031,10 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     );
 
     expect(res.status).toBe(201);
+    const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${res.body.sessionId}/stream`);
+    await Promise.resolve();
+    planningStreamManager.broadcast(res.body.sessionId, { type: "complete" });
+    await streamPromise;
     // Scoped settings planning lane should be used
     await vi.waitFor(() => {
       expect(createFnAgentSpy).toHaveBeenCalledWith(
@@ -3626,6 +4079,10 @@ describe("POST /planning/start-streaming with projectId scoping", () => {
     );
 
     expect(res.status).toBe(201);
+    const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${res.body.sessionId}/stream`);
+    await Promise.resolve();
+    planningStreamManager.broadcast(res.body.sessionId, { type: "complete" });
+    await streamPromise;
     // Default store should be used (getOrCreateProjectStore should not be called)
     expect(projectStoreResolver.getOrCreateProjectStore).not.toHaveBeenCalled();
     await vi.waitFor(() => {

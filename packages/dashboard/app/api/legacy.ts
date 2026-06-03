@@ -6919,6 +6919,8 @@ export interface MissionSummary {
   completedMilestones: number;
   totalFeatures: number;
   completedFeatures: number;
+  linkedGoalCount: number;
+  eventCount: number;
   progressPercent: number;
 }
 
@@ -6978,6 +6980,8 @@ export interface SliceWithFeatures extends Slice {
 
 /** Full mission hierarchy */
 export interface MissionWithHierarchy extends Mission {
+  /** Unfiltered total of all mission lifecycle events, matching MissionSummary.eventCount and getMissionEvents total with no eventType filter */
+  eventCount?: number;
   milestones: MilestoneWithSlices[];
 }
 
@@ -8776,6 +8780,18 @@ export async function toggleExecutionSkill(
   return api<ToggleSkillResult>(withProjectId("/skills/execution", projectId), {
     method: "PATCH",
     body: JSON.stringify({ skillId, enabled }),
+  });
+}
+
+/** Install a catalog skill from skills.sh */
+export async function installSkill(
+  source: string,
+  skill: string | undefined,
+  projectId?: string,
+): Promise<{ success: true }> {
+  return api<{ success: true }>(withProjectId("/skills/install", projectId), {
+    method: "POST",
+    body: JSON.stringify({ source, skill }),
   });
 }
 

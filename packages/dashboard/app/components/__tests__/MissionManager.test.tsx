@@ -92,6 +92,15 @@ const mockMissions = [
     status: "planning",
     interviewState: "not_started",
     milestones: [],
+    summary: {
+      totalMilestones: 1,
+      completedMilestones: 0,
+      totalFeatures: 2,
+      completedFeatures: 0,
+      linkedGoalCount: 0,
+      eventCount: 4,
+      progressPercent: 0,
+    },
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
@@ -109,6 +118,8 @@ const mockMissions = [
       completedMilestones: 1,
       totalFeatures: 5,
       completedFeatures: 3,
+      linkedGoalCount: 1,
+      eventCount: 2,
       progressPercent: 60,
     },
     createdAt: "2026-01-02T00:00:00.000Z",
@@ -121,6 +132,8 @@ const mockMissionDetail = {
   title: "Build Auth System",
   description: "Complete authentication flow",
   status: "planning",
+  eventCount: 4,
+  linkedGoals: [] as Array<{ id: string; title: string; status: "active" | "archived"; createdAt: string; updatedAt: string; description?: string }>,
   milestones: [
     {
       id: "MS-001",
@@ -300,20 +313,12 @@ const mockMilestoneValidationTelemetry = {
 
 const mockMissionEvents = [
   {
-    id: "E-001",
+    id: "E-004",
     missionId: "M-001",
-    eventType: "mission_started",
-    description: "Mission started",
-    metadata: null,
-    timestamp: "2026-01-03T10:00:00.000Z",
-  },
-  {
-    id: "E-002",
-    missionId: "M-001",
-    eventType: "warning",
-    description: "Task queue is delayed",
-    metadata: { queueDepth: 4 },
-    timestamp: "2026-01-03T10:10:00.000Z",
+    eventType: "autopilot_state_changed",
+    description: "Autopilot moved to watching",
+    metadata: { previous: "inactive", next: "watching" },
+    timestamp: "2026-01-03T10:30:00.000Z",
   },
   {
     id: "E-003",
@@ -324,12 +329,20 @@ const mockMissionEvents = [
     timestamp: "2026-01-03T10:20:00.000Z",
   },
   {
-    id: "E-004",
+    id: "E-002",
     missionId: "M-001",
-    eventType: "autopilot_state_changed",
-    description: "Autopilot moved to watching",
-    metadata: { previous: "inactive", next: "watching" },
-    timestamp: "2026-01-03T10:30:00.000Z",
+    eventType: "warning",
+    description: "Task queue is delayed",
+    metadata: { queueDepth: 4 },
+    timestamp: "2026-01-03T10:10:00.000Z",
+  },
+  {
+    id: "E-001",
+    missionId: "M-001",
+    eventType: "mission_started",
+    description: "Mission started",
+    metadata: null,
+    timestamp: "2026-01-03T10:00:00.000Z",
   },
 ];
 
@@ -340,7 +353,7 @@ const mockMissionEventsPaged = Array.from({ length: 65 }, (_, index) => ({
   description: `Mission event ${index + 1}`,
   metadata: { index: index + 1 },
   timestamp: new Date(Date.UTC(2026, 0, 3, 10, index)).toISOString(),
-}));
+})).reverse();
 
 /** Create a mock Response that matches the real api() function's expectations (text + content-type headers) */
 function mockApiResponse(data: unknown) {
@@ -639,6 +652,8 @@ function createDetailFetchMockForMissionDetail(
   missionDetail: typeof mockMissionDetail,
   telemetryOverride: unknown = mockMilestoneValidationTelemetry,
   assertionsResponse: unknown[] = [],
+  missionsResponse = mockMissions,
+  eventsResponse = mockMissionEvents,
 ) {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes("/missions/health")) {
@@ -646,7 +661,7 @@ function createDetailFetchMockForMissionDetail(
     }
 
     if (url.includes("/events")) {
-      return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url, mockMissionEvents)));
+      return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url, eventsResponse)));
     }
 
     if (url.includes("/health")) {
@@ -674,7 +689,7 @@ function createDetailFetchMockForMissionDetail(
       }
     }
 
-    return Promise.resolve(mockApiResponse(mockMissions));
+    return Promise.resolve(mockApiResponse(missionsResponse));
   });
 }
 
@@ -882,6 +897,79 @@ describe("MissionManager", () => {
     });
   });
 
+  it("shows the unlinked indicator only for active missions without linked goals", async () => {
+    const missions = [
+      {
+        id: "M-U1",
+        title: "Needs goal link",
+        description: "Active mission without linked goals",
+        status: "active",
+        interviewState: "not_started",
+        milestones: [],
+        summary: {
+          totalMilestones: 0,
+          completedMilestones: 0,
+          totalFeatures: 0,
+          completedFeatures: 0,
+          linkedGoalCount: 0,
+          progressPercent: 0,
+        },
+        createdAt: "2026-01-03T00:00:00.000Z",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      },
+      {
+        id: "M-U2",
+        title: "Already linked",
+        description: "Active mission with linked goals",
+        status: "active",
+        interviewState: "not_started",
+        milestones: [],
+        summary: {
+          totalMilestones: 0,
+          completedMilestones: 0,
+          totalFeatures: 0,
+          completedFeatures: 0,
+          linkedGoalCount: 2,
+          progressPercent: 0,
+        },
+        createdAt: "2026-01-02T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+      {
+        id: "M-U3",
+        title: "Planning mission",
+        description: "Non-active mission without linked goals",
+        status: "planning",
+        interviewState: "not_started",
+        milestones: [],
+        summary: {
+          totalMilestones: 0,
+          completedMilestones: 0,
+          totalFeatures: 0,
+          completedFeatures: 0,
+          linkedGoalCount: 0,
+          progressPercent: 0,
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    globalThis.fetch = createFetchMockWithHealth(missions as Array<Record<string, unknown>>, {
+      "M-U1": getMockMissionHealth("M-U1"),
+      "M-U2": getMockMissionHealth("M-U2"),
+      "M-U3": getMockMissionHealth("M-U3"),
+    });
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-unlinked-indicator-M-U1")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("mission-unlinked-indicator-M-U2")).toBeNull();
+    expect(screen.queryByTestId("mission-unlinked-indicator-M-U3")).toBeNull();
+  });
+
   it("shows summary stats when mission has summary data", async () => {
     globalThis.fetch = createFetchMock();
     render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
@@ -1083,7 +1171,7 @@ describe("MissionManager", () => {
     expect(screen.queryByText(/"queueDepth": 4/)).toBeNull();
   });
 
-  it("loads more mission activity events", async () => {
+  it("loads more older mission activity events at the top", async () => {
     globalThis.fetch = createDetailFetchMock(mockMissionEventsPaged as unknown as typeof mockMissionEvents);
     render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
@@ -1098,6 +1186,8 @@ describe("MissionManager", () => {
 
     fireEvent.click(screen.getByTestId("mission-tab-activity"));
 
+    const eventsContainer = await screen.findByTestId("mission-activity-events");
+
     await waitFor(() => {
       expect(screen.getByText("Mission event 50")).toBeDefined();
       expect(
@@ -1106,6 +1196,10 @@ describe("MissionManager", () => {
         }),
       ).toBeDefined();
       expect(screen.getByTestId("mission-activity-load-more")).toBeDefined();
+
+      const eventDescriptions = Array.from(eventsContainer.querySelectorAll(".mission-event__description"));
+      expect(eventDescriptions[0]?.textContent).toBe("Mission event 16");
+      expect(eventDescriptions[eventDescriptions.length - 1]?.textContent).toBe("Mission event 65");
     });
 
     fireEvent.click(screen.getByTestId("mission-activity-load-more"));
@@ -1114,10 +1208,68 @@ describe("MissionManager", () => {
       const activityCount = document.querySelector(".mission-detail__activity-count");
       expect(activityCount?.textContent?.trim()).toBe("65 of 65");
       expect(screen.queryByTestId("mission-activity-load-more")).toBeNull();
+
+      const eventDescriptions = Array.from(eventsContainer.querySelectorAll(".mission-event__description"));
+      expect(eventDescriptions[0]?.textContent).toBe("Mission event 1");
+      expect(eventDescriptions[eventDescriptions.length - 1]?.textContent).toBe("Mission event 65");
     }, { timeout: 5000 });
   }, 15000);
 
-  it("auto-scrolls to latest mission activity on initial load", async () => {
+  it("shows the summary event count before activity events load", async () => {
+    globalThis.fetch = createDetailFetchMock(mockMissionEvents);
+    globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("Build Auth System"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-tab-activity")).toHaveTextContent("Activity (4)");
+    });
+  });
+
+  it("prefers mission detail event count when the list summary is stale before activity events load", async () => {
+    const staleSummaryMissions = mockMissions.map((mission) => mission.id === "M-001"
+      ? {
+        ...mission,
+        summary: {
+          ...mission.summary,
+          eventCount: 0,
+        },
+      }
+      : mission);
+    const missionDetailWithAuthoritativeCount = {
+      ...mockMissionDetail,
+      eventCount: 7,
+    };
+
+    globalThis.fetch = createDetailFetchMockForMissionDetail(
+      missionDetailWithAuthoritativeCount,
+      mockMilestoneValidationTelemetry,
+      [],
+      staleSummaryMissions,
+      [],
+    );
+    globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("Build Auth System"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-tab-activity")).toHaveTextContent("Activity (7)");
+    });
+
+    expect(screen.queryByTestId("mission-activity-events")).toBeNull();
+  });
+
+  it("auto-scrolls to the latest mission activity on initial load", async () => {
     globalThis.fetch = createDetailFetchMock(mockMissionEvents);
     globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
 
@@ -1142,13 +1294,28 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Mission started")).toBeDefined();
-      expect(scrollIntoViewSpy).toHaveBeenCalled();
+      expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "end", behavior: "auto" });
     });
+
+    const eventsContainer = await screen.findByTestId("mission-activity-events");
+    const eventDescriptions = Array.from(eventsContainer.querySelectorAll(".mission-event__description"));
+    expect(eventDescriptions.map((node) => node.textContent)).toEqual([
+      "Mission started",
+      "Task queue is delayed",
+      "Feature F-001 completed",
+      "Autopilot moved to watching",
+    ]);
   });
 
-  it("prepends real-time mission events and scrolls to top when near bottom", async () => {
+  it("appends real-time mission events at the bottom and scrolls to latest when near bottom", async () => {
     globalThis.fetch = createDetailFetchMock(mockMissionEvents);
     globalThis.EventSource = MockEventSource as unknown as typeof globalThis.EventSource;
+
+    const scrollIntoViewSpy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoViewSpy,
+    });
 
     render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
@@ -1183,11 +1350,18 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Real-time warning event")).toBeDefined();
-      expect(eventsContainer.scrollTop).toBe(0);
+      expect(screen.getByTestId("mission-tab-activity")).toHaveTextContent("Activity (5)");
+      expect(scrollIntoViewSpy).toHaveBeenLastCalledWith({ block: "end", behavior: "auto" });
     });
 
     const eventDescriptions = Array.from(eventsContainer.querySelectorAll(".mission-event__description"));
-    expect(eventDescriptions[0]?.textContent).toBe("Real-time warning event");
+    expect(eventDescriptions.map((node) => node.textContent)).toEqual([
+      "Mission started",
+      "Task queue is delayed",
+      "Feature F-001 completed",
+      "Autopilot moved to watching",
+      "Real-time warning event",
+    ]);
   });
 
   it("ignores real-time mission events for non-selected missions", async () => {
@@ -1681,6 +1855,50 @@ describe("MissionManager", () => {
       expect(screen.getByTestId("mission-back-btn")).toBeInTheDocument();
       expect(screen.getByText("API Redesign")).toBeDefined();
     });
+  });
+
+  it("renders linked goal chips and invokes navigation handler", async () => {
+    const onNavigateToGoal = vi.fn();
+    const missionDetailWithGoals = {
+      ...mockMissionDetail,
+      linkedGoals: [
+        {
+          id: "G-001",
+          title: "Grow extension ecosystem",
+          status: "active" as const,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+    globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetailWithGoals);
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} onNavigateToGoal={onNavigateToGoal} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Build Auth System"));
+
+    const chip = await screen.findByTestId("mission-linked-goal-chip-G-001");
+    expect(chip).toHaveTextContent("Grow extension ecosystem");
+
+    fireEvent.click(chip);
+    expect(onNavigateToGoal).toHaveBeenCalledWith("G-001");
+  });
+
+  it("renders linked goals empty state without chips", async () => {
+    globalThis.fetch = createDetailFetchMockForMissionDetail(mockMissionDetail);
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Build Auth System"));
+
+    expect(await screen.findByText("No linked goals.")).toBeInTheDocument();
+    expect(screen.queryByTestId(/mission-linked-goal-chip-/)).toBeNull();
   });
 
   it("calls onClose on Escape key press", async () => {
@@ -4964,7 +5182,7 @@ describe("MissionManager", () => {
   });
 
   describe("milestone assertions empty-state", () => {
-    const emptyAssertionsWithFeaturesCopy = "No contract assertions are linked yet. Feature acceptance criteria are present below and remain informational until assertions are linked.";
+    const emptyAssertionsWithFeaturesCopy = "No linked contract assertions are loaded yet. Feature criteria below will still be AI-validated when mission validation runs.";
     const emptyAssertionsNoFeaturesCopy = "No feature acceptance criteria or contract assertions defined yet.";
 
     it("keeps empty-state nudge when assertions and feature acceptance criteria are both missing", async () => {
@@ -5045,13 +5263,47 @@ describe("MissionManager", () => {
       expect(screen.queryByText(emptyAssertionsNoFeaturesCopy)).not.toBeInTheDocument();
       expect(screen.getByText(emptyAssertionsWithFeaturesCopy)).toBeInTheDocument();
       const rollup = screen.getByTestId("milestone-feature-acceptance-rollup");
-      expect(within(rollup).getByText("Feature acceptance criteria (informational source)")).toBeInTheDocument();
-      expect(within(rollup).getByTestId("milestone-feature-acceptance-informational-indicator")).toHaveTextContent("Not enforced by autopilot");
+      expect(within(rollup).getByText("Feature criteria awaiting assertion sync")).toBeInTheDocument();
+      expect(within(rollup).getByTestId("milestone-feature-acceptance-ai-validated-indicator")).toHaveTextContent("AI-validated at runtime");
       expect(within(rollup).getByText("Session handling")).toBeInTheDocument();
       expect(within(rollup).getByText("Session refresh succeeds without logout", { exact: false })).toBeInTheDocument();
       expect(within(rollup).getByText("Token storage")).toBeInTheDocument();
       expect(within(rollup).getByText("Tokens remain encrypted at rest", { exact: false })).toBeInTheDocument();
-      expect(screen.getByTestId("milestone-zero-assertion-guard")).toHaveTextContent("Feature criteria present but no enforced contract assertions linked");
+      expect(screen.queryByTestId("milestone-zero-assertion-guard")).not.toBeInTheDocument();
+      expect(screen.queryByText(/informational/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Not enforced by autopilot/i)).not.toBeInTheDocument();
+    });
+
+    it("shows feature acceptance rollup even when legacy gap telemetry is false", async () => {
+      const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
+      missionDetail.milestones[0].acceptanceCriteria = "";
+      missionDetail.milestones[0].slices[0].features = [
+        {
+          ...missionDetail.milestones[0].slices[0].features[0],
+          id: "F-ROLLUP-FALSE",
+          title: "Runtime validation",
+          acceptanceCriteria: "Validator still checks this feature",
+        },
+      ];
+
+      const telemetryOverride = {
+        ...mockMilestoneValidationTelemetry,
+        rollup: {
+          ...mockMilestoneValidationRollup,
+          hasProseButNoAssertions: false,
+        },
+      };
+
+      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail, telemetryOverride);
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      fireEvent.click(await screen.findByText("Build Auth System"));
+      await waitForDetailLoaded();
+
+      const rollup = screen.getByTestId("milestone-feature-acceptance-rollup");
+      expect(within(rollup).getByText("Feature criteria awaiting assertion sync")).toBeInTheDocument();
+      expect(within(rollup).getByText("Runtime validation")).toBeInTheDocument();
+      expect(within(rollup).getByText("Validator still checks this feature", { exact: false })).toBeInTheDocument();
     });
 
     it("keeps structured assertions precedence and hides rollup when assertions exist", async () => {
@@ -5066,12 +5318,14 @@ describe("MissionManager", () => {
       await waitForDetailLoaded();
 
       expect(screen.getByText("Auth works")).toBeInTheDocument();
-      expect(screen.getByText("Contract assertions (validator-enforced when linked)")).toBeInTheDocument();
-      expect(screen.getByTestId("milestone-assertions-enforced-indicator")).toHaveTextContent("Enforced by autopilot");
+      expect(screen.getByText("Contract assertions (AI-validated)")).toBeInTheDocument();
+      expect(screen.getByTestId("milestone-assertions-enforced-indicator")).toHaveTextContent("AI-validated mission gate");
       expect(screen.queryByTestId("milestone-feature-acceptance-rollup")).not.toBeInTheDocument();
+      expect(screen.queryByText(/informational/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Not enforced by autopilot/i)).not.toBeInTheDocument();
     });
 
-    it("shows per-row informational and enforced indicators", async () => {
+    it("shows validator status without informational enforcement labels", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
       missionDetail.milestones[0].acceptanceCriteria = "";
       const assertion = {
@@ -5107,7 +5361,7 @@ describe("MissionManager", () => {
       await waitForDetailLoaded();
 
       await waitFor(() => {
-        expect(screen.getByTestId("mission-assertion-enforcement-CA-ENF-1")).toHaveTextContent("Enforced gate");
+        expect(screen.queryByTestId("mission-assertion-enforcement-CA-ENF-1")).not.toBeInTheDocument();
       });
 
       const noAssertionMission = JSON.parse(JSON.stringify(missionDetail)) as typeof missionDetail;
@@ -5118,10 +5372,12 @@ describe("MissionManager", () => {
       render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
       fireEvent.click(await screen.findByText("Build Auth System"));
       await waitForDetailLoaded();
-      expect(await screen.findByTestId("mission-feature-acceptance-enforcement-F-INFO-1")).toHaveTextContent("Informational");
+      expect(await screen.findByTestId("mission-feature-acceptance-status-F-INFO-1")).toHaveTextContent("defined");
+      expect(screen.queryByText(/Informational/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Not enforced/i)).not.toBeInTheDocument();
     });
 
-    it("shows zero-assertion guard only when milestone has feature acceptance criteria and no assertions", async () => {
+    it("never renders the zero-assertion guard after lazy assertion ensure contract", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
       missionDetail.milestones[0].acceptanceCriteria = "";
 
@@ -5130,7 +5386,7 @@ describe("MissionManager", () => {
 
       fireEvent.click(await screen.findByText("Build Auth System"));
       await waitForDetailLoaded();
-      expect(screen.getByTestId("milestone-zero-assertion-guard")).toBeInTheDocument();
+      expect(screen.queryByTestId("milestone-zero-assertion-guard")).not.toBeInTheDocument();
 
       cleanup();
       globalThis.fetch = createDetailFetchMockForMissionDetail(

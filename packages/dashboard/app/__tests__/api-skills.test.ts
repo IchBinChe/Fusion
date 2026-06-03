@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   fetchDiscoveredSkills,
   toggleExecutionSkill,
+  installSkill,
   fetchSkillsCatalog,
   type DiscoveredSkill,
   type CatalogFetchResult,
@@ -153,6 +154,51 @@ describe("toggleExecutionSkill", () => {
     await expect(
       toggleExecutionSkill("invalid-skill", true),
     ).rejects.toThrow("Skill not found");
+  });
+});
+
+describe("installSkill", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("posts install requests without projectId", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { success: true }));
+
+    const output = await installSkill("owner/repo", "skill-name");
+
+    expect(output).toEqual({ success: true });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/skills/install",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ source: "owner/repo", skill: "skill-name" }),
+      }),
+    );
+  });
+
+  it("includes projectId in install requests", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, { success: true }));
+
+    await installSkill("owner/repo", undefined, "proj_123");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/skills/install?projectId=proj_123",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ source: "owner/repo", skill: undefined }),
+      }),
+    );
+  });
+
+  it("propagates install errors", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(
+      mockFetchResponse(false, { error: "installer failed", code: "install_failed" }, 502),
+    );
+
+    await expect(installSkill("owner/repo", undefined)).rejects.toThrow("installer failed");
   });
 });
 

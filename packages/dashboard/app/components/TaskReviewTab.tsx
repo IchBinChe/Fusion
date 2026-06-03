@@ -314,8 +314,10 @@ export function TaskReviewTab({
     <div className="task-review-tab">
       <div className="task-review-tab__header">
         <div className="task-review-tab__summary-wrap">
-          <p className="task-review-tab__summary">{summaryText}</p>
-          {decisionLabel ? <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span> : null}
+          <div className="task-review-tab__summary-group">
+            <p className="task-review-tab__summary">{summaryText}</p>
+            {decisionLabel ? <span className={`task-review-tab__decision task-review-tab__decision--${decisionLabel}`}>{decisionLabel}</span> : null}
+          </div>
         </div>
         <div className="task-review-tab__actions">
           <div className="task-review-tab__auto-merge-control">
@@ -373,16 +375,20 @@ export function TaskReviewTab({
               <li key={item.id} className="task-review-tab__item card">
                 <div className="task-review-tab__item-inner">
                   <label htmlFor={checkboxId} className="task-review-tab__direct-item task-review-tab__direct-item--selectable">
-                    <div className="task-review-tab__summary-wrap">
-                      <input id={checkboxId} type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelected(item.id)} />
-                      <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.summary}</span>
+                    <div className="task-review-tab__item-header">
+                      <div className="task-review-tab__item-selection">
+                        <input id={checkboxId} type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelected(item.id)} />
+                        <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.summary}</span>
+                      </div>
                       <span className={`task-review-tab__status task-review-tab__status--${item.status}`}>{item.status}</span>
                     </div>
                   </label>
-                  <div className="task-review-tab__meta">{formatTimestamp(item.createdAt)}</div>
-                  {item.addressing ? (
-                    <div className="task-review-tab__meta">Selected: {formatTimestamp(item.addressing.selectedAt)}{item.addressing.startedAt ? ` · Started: ${formatTimestamp(item.addressing.startedAt)}` : ""}{item.addressing.completedAt ? ` · Completed: ${formatTimestamp(item.addressing.completedAt)}` : ""}{item.addressing.error ? ` · Error: ${item.addressing.error}` : ""}</div>
-                  ) : null}
+                  <div className="task-review-tab__item-meta-list">
+                    <div className="task-review-tab__meta">{formatTimestamp(item.createdAt)}</div>
+                    {item.addressing ? (
+                      <div className="task-review-tab__meta">Selected: {formatTimestamp(item.addressing.selectedAt)}{item.addressing.startedAt ? ` · Started: ${formatTimestamp(item.addressing.startedAt)}` : ""}{item.addressing.completedAt ? ` · Completed: ${formatTimestamp(item.addressing.completedAt)}` : ""}{item.addressing.error ? ` · Error: ${item.addressing.error}` : ""}</div>
+                    ) : null}
+                  </div>
                   {renderMarkdown ? (
                     <div className="task-review-tab__body markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>

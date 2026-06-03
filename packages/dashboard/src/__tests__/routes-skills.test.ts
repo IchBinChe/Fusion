@@ -96,6 +96,7 @@ function createMockSkillsAdapter(overrides?: Partial<SkillsAdapter>): SkillsAdap
         targetFile: `${rootDir}/.fusion/settings.json`,
       };
     }),
+    installSkill: vi.fn().mockResolvedValue({ success: true }),
     fetchCatalog: vi.fn().mockResolvedValue({
       entries: [
         {
@@ -407,6 +408,72 @@ describe("Skills routes", () => {
       expect(res.body).toMatchObject({
         error: expect.stringContaining("Skill not found"),
         code: "skill_not_found",
+      });
+    });
+  });
+
+  describe("POST /api/skills/install", () => {
+    it("installs a skill using the scoped store root dir", async () => {
+      const mockAdapter = createMockSkillsAdapter({
+        installSkill: vi.fn().mockResolvedValue({ success: true }),
+      });
+      const store = new MockStore("/tmp/install-project");
+      const app = createServer(store as any, { skillsAdapter: mockAdapter as SkillsAdapter });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/skills/install",
+        JSON.stringify({ source: "owner/repo", skill: "test-skill" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true });
+      expect(mockAdapter.installSkill).toHaveBeenCalledWith({
+        source: "owner/repo",
+        skill: "test-skill",
+        cwd: "/tmp/install-project",
+      });
+    });
+
+    it("returns 400 for invalid source", async () => {
+      const mockAdapter = createMockSkillsAdapter();
+      const store = new MockStore();
+      const app = createServer(store as any, { skillsAdapter: mockAdapter as SkillsAdapter });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/skills/install",
+        JSON.stringify({ source: "invalid-source" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: "Invalid source format. Use owner/repo.",
+        code: "invalid_source",
+      });
+      expect(mockAdapter.installSkill).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when skills adapter is not configured", async () => {
+      const store = new MockStore();
+      const app = createServer(store as any, {});
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/skills/install",
+        JSON.stringify({ source: "owner/repo" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({
+        error: "Skills adapter not configured",
+        code: "adapter_not_configured",
       });
     });
   });

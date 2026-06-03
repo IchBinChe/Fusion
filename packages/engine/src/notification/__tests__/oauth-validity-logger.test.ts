@@ -1,6 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { OAuthAlertStateStore } from "../oauth-alert-state.js";
 import { OAuthValidityLogger } from "../oauth-validity-logger.js";
 import type { AuthStorageLike } from "../oauth-expiry-monitor.js";
+
+const tempDirs: string[] = [];
+
+function createStatePath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "oauth-validity-logger-"));
+  tempDirs.push(dir);
+  return join(dir, "oauth-alert-state.json");
+}
 
 function createAuthStorage(providers: Array<{ id: string; name: string }>, credentials: Record<string, any>): AuthStorageLike {
   return {
@@ -9,6 +21,13 @@ function createAuthStorage(providers: Array<{ id: string; name: string }>, crede
     get: (providerId: string) => credentials[providerId],
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
 
 describe("OAuthValidityLogger", () => {
   it("logs one line per expired oauth credential on start", async () => {
@@ -26,30 +45,79 @@ describe("OAuthValidityLogger", () => {
       },
     );
 
-    const validityLogger = new OAuthValidityLogger({ authStorage, logger, intervalMs: 1_000, clock: () => now });
+    const validityLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      intervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
+    });
     await validityLogger.start();
 
     expect(logger).toHaveBeenCalledTimes(2);
     validityLogger.stop();
-    vi.useRealTimers();
   });
 
-  it("logs again on interval without dedupe", async () => {
+  it("skips repeated logs within the throttle window", async () => {
     vi.useFakeTimers();
-    const now = Date.now();
     const logger = vi.fn();
+    let now = Date.now();
+    const statePath = createStatePath();
     const authStorage = createAuthStorage(
       [{ id: "openai-codex", name: "OpenAI Codex" }],
       { "openai-codex": { type: "oauth", expires: now - 1_000 } },
     );
 
-    const validityLogger = new OAuthValidityLogger({ authStorage, logger, intervalMs: 1_000, clock: () => now });
-    await validityLogger.start();
-    await vi.advanceTimersByTimeAsync(1_000);
+    const validityLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      intervalMs: 100,
+      minAlertIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
 
-    expect(logger).toHaveBeenCalledTimes(2);
+    await validityLogger.start();
+    now += 500;
+    await validityLogger.check();
+
+    expect(logger).toHaveBeenCalledTimes(1);
     validityLogger.stop();
-    vi.useRealTimers();
+  });
+
+  it("persists the throttle across a restart and logs again after the window elapses", async () => {
+    vi.useFakeTimers();
+    const logger = vi.fn();
+    let now = Date.now();
+    const statePath = createStatePath();
+    const authStorage = createAuthStorage(
+      [{ id: "openai-codex", name: "OpenAI Codex" }],
+      { "openai-codex": { type: "oauth", expires: now - 1_000 } },
+    );
+
+    const firstLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      minAlertIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await firstLogger.check();
+    expect(logger).toHaveBeenCalledTimes(1);
+
+    const restartedLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      minAlertIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await restartedLogger.check();
+    expect(logger).toHaveBeenCalledTimes(1);
+
+    now += 1_001;
+    await restartedLogger.check();
+    expect(logger).toHaveBeenCalledTimes(2);
   });
 
   it("does not log for valid oauth, api key, or missing expires", async () => {
@@ -69,30 +137,42 @@ describe("OAuthValidityLogger", () => {
       },
     );
 
-    const validityLogger = new OAuthValidityLogger({ authStorage, logger, intervalMs: 1_000, clock: () => now });
+    const validityLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      intervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
+    });
     await validityLogger.start();
 
     expect(logger).not.toHaveBeenCalled();
     validityLogger.stop();
-    vi.useRealTimers();
   });
 
   it("stop cancels the interval", async () => {
     vi.useFakeTimers();
-    const now = Date.now();
+    let now = Date.now();
     const logger = vi.fn();
     const authStorage = createAuthStorage(
       [{ id: "openai-codex", name: "OpenAI Codex" }],
       { "openai-codex": { type: "oauth", expires: now - 1_000 } },
     );
 
-    const validityLogger = new OAuthValidityLogger({ authStorage, logger, intervalMs: 1_000, clock: () => now });
+    const validityLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      intervalMs: 1_000,
+      minAlertIntervalMs: 500,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
+    });
     await validityLogger.start();
     validityLogger.stop();
+    now += 5_000;
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(logger).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 
   it("continues iterating when one provider throws", async () => {
@@ -113,7 +193,13 @@ describe("OAuthValidityLogger", () => {
       },
     };
 
-    const validityLogger = new OAuthValidityLogger({ authStorage, logger, intervalMs: 1_000, clock: () => now });
+    const validityLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      intervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
+    });
     await validityLogger.start();
 
     expect(logger).toHaveBeenCalledTimes(1);
@@ -122,7 +208,6 @@ describe("OAuthValidityLogger", () => {
       expect.objectContaining({ providerId: "claude" }),
     );
     validityLogger.stop();
-    vi.useRealTimers();
   });
 
   it("never includes token material in log metadata", async () => {
@@ -141,12 +226,50 @@ describe("OAuthValidityLogger", () => {
       },
     );
 
-    const validityLogger = new OAuthValidityLogger({ authStorage, logger, intervalMs: 1_000, clock: () => now });
+    const validityLogger = new OAuthValidityLogger({
+      authStorage,
+      logger,
+      intervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
+    });
     await validityLogger.start();
 
     const [, meta] = logger.mock.calls[0] ?? [];
     expect(Object.keys(meta ?? {}).sort()).toEqual(["expiresAt", "providerId", "providerName"]);
     validityLogger.stop();
-    vi.useRealTimers();
+  });
+
+  it("covers empty, undefined, and populated provider states", async () => {
+    const logger = vi.fn();
+    const now = Date.now();
+    const cases: AuthStorageLike[] = [
+      {
+        reload: vi.fn(),
+        getOAuthProviders: () => [],
+        get: () => undefined,
+      },
+      {
+        reload: vi.fn(),
+        getOAuthProviders: () => [{ id: "openai-codex", name: "OpenAI Codex" }],
+        get: () => undefined,
+      },
+      createAuthStorage(
+        [{ id: "openai-codex", name: "OpenAI Codex" }],
+        { "openai-codex": { type: "oauth", expires: now - 1 } },
+      ),
+    ];
+
+    for (const [index, authStorage] of cases.entries()) {
+      const validityLogger = new OAuthValidityLogger({
+        authStorage,
+        logger,
+        clock: () => now,
+        alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now + index }),
+      });
+      await validityLogger.check();
+    }
+
+    expect(logger).toHaveBeenCalledTimes(1);
   });
 });

@@ -8,12 +8,14 @@ import type { DiscoveredSkill, CatalogEntry, SkillContent } from "@fusion/dashbo
 vi.mock("../../api", () => ({
   fetchDiscoveredSkills: vi.fn(),
   toggleExecutionSkill: vi.fn(),
+  installSkill: vi.fn(),
   fetchSkillsCatalog: vi.fn(),
   fetchSkillContent: vi.fn(),
 }));
 
 const mockFetchDiscoveredSkills = vi.mocked(apiModule.fetchDiscoveredSkills);
 const mockToggleExecutionSkill = vi.mocked(apiModule.toggleExecutionSkill);
+const mockInstallSkill = vi.mocked(apiModule.installSkill);
 const mockFetchSkillsCatalog = vi.mocked(apiModule.fetchSkillsCatalog);
 const mockFetchSkillContent = vi.mocked(apiModule.fetchSkillContent);
 
@@ -55,6 +57,7 @@ describe("SkillsView", () => {
       slug: "test-skill",
       name: "Test Skill",
       description: "A test skill for testing",
+      repo: "owner/test-repo",
       tags: ["testing", "example"],
       installs: 1234,
       installation: {
@@ -68,12 +71,26 @@ describe("SkillsView", () => {
       slug: "another-skill",
       name: "Another Skill",
       description: "Another example skill",
+      repo: "owner/another-repo",
       tags: ["utility"],
       installs: 5678,
       installation: {
         installed: true,
         matchingSkillIds: ["npm::skills/another-skill"],
         matchingPaths: ["skills/another-skill"],
+      },
+    },
+    {
+      id: "cat-003",
+      slug: "missing-source",
+      name: "Missing Source",
+      description: "Cannot be installed from the catalog card",
+      tags: ["docs"],
+      installs: 10,
+      installation: {
+        installed: false,
+        matchingSkillIds: [],
+        matchingPaths: [],
       },
     },
   ];
@@ -86,6 +103,7 @@ describe("SkillsView", () => {
       pattern: "+test-skill",
       targetFile: "/project/.fusion/settings.json",
     });
+    mockInstallSkill.mockResolvedValue({ success: true });
     mockFetchSkillsCatalog.mockResolvedValue({
       entries: mockCatalogEntries,
       auth: {
@@ -174,6 +192,17 @@ describe("SkillsView", () => {
         expect(screen.getByText(/1,234 installs/)).toBeTruthy();
         expect(screen.getByText(/5,678 installs/)).toBeTruthy();
       });
+    });
+
+    it("renders install buttons only for catalog entries with a source repo", async () => {
+      render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Install Test Skill" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Install Another Skill" })).toBeTruthy();
+      });
+
+      expect(screen.queryByRole("button", { name: "Install Missing Source" })).toBeNull();
     });
 
     it("shows loading state while fetching discovered skills", async () => {
@@ -354,6 +383,49 @@ describe("SkillsView", () => {
       expect(disabledRowAfterToggle?.querySelector(".skills-view-item-info")).toBeTruthy();
       expect(disabledRowAfterToggle?.querySelector(".skills-view-item-toggle")).toBeTruthy();
       expect(disabledRowAfterToggle?.querySelector(".skills-view-toggle-slider")).toBeTruthy();
+    });
+  });
+
+  describe("catalog install", () => {
+    it("installs a catalog skill and refreshes discovered skills", async () => {
+      render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Install Test Skill" })).toBeTruthy();
+      });
+
+      mockFetchDiscoveredSkills.mockClear();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Install Test Skill" }));
+      });
+
+      await waitFor(() => {
+        expect(mockInstallSkill).toHaveBeenCalledWith("owner/test-repo", "test-skill", undefined);
+        expect(mockFetchDiscoveredSkills).toHaveBeenCalledTimes(1);
+        expect(mockAddToast).toHaveBeenCalledWith("Installed Test Skill", "success");
+      });
+    });
+
+    it("shows an error toast when install fails", async () => {
+      mockInstallSkill.mockRejectedValue(new Error("install failed"));
+
+      render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Install Test Skill" })).toBeTruthy();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Install Test Skill" }));
+      });
+
+      await waitFor(() => {
+        expect(mockAddToast).toHaveBeenCalledWith(
+          expect.stringContaining("Failed to install Test Skill: install failed"),
+          "error",
+        );
+      });
     });
   });
 

@@ -73,5 +73,6 @@ describe("dashboard test config guard", () => {
     }
 
     expect(vitestConfig).toContain('"app/__tests__/spinner-animation.css.test.ts"');
+    expect(vitestConfig).toContain('"scripts/__tests__/run-vitest-with-heap.test.ts"');
   });
 });

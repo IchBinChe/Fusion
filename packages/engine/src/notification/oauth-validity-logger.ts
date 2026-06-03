@@ -1,25 +1,33 @@
 import { schedulerLog } from "../logger.js";
 import type { AuthStorageLike } from "./oauth-expiry-monitor.js";
+import { OAuthAlertStateStore } from "./oauth-alert-state.js";
 
-const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const DEFAULT_MIN_ALERT_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 interface OAuthValidityLoggerOptions {
   authStorage: AuthStorageLike;
   intervalMs?: number;
   clock?: () => number;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
+  alertState?: OAuthAlertStateStore;
+  minAlertIntervalMs?: number;
 }
 
 export class OAuthValidityLogger {
   private readonly intervalMs: number;
   private readonly clock: () => number;
   private readonly logger: (msg: string, meta?: Record<string, unknown>) => void;
+  private readonly alertState: OAuthAlertStateStore;
+  private readonly minAlertIntervalMs: number;
   private timer: NodeJS.Timeout | null = null;
 
   constructor(private readonly opts: OAuthValidityLoggerOptions) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
     this.clock = opts.clock ?? Date.now;
     this.logger = opts.logger ?? ((message, meta) => schedulerLog.warn(message, meta));
+    this.alertState = opts.alertState ?? new OAuthAlertStateStore({ clock: this.clock });
+    this.minAlertIntervalMs = opts.minAlertIntervalMs ?? DEFAULT_MIN_ALERT_INTERVAL_MS;
   }
 
   async start(): Promise<void> {
@@ -57,11 +65,17 @@ export class OAuthValidityLogger {
           continue;
         }
 
+        const previousAlertAt = this.alertState.getLastAlertAt(provider.id);
+        if (typeof previousAlertAt === "number" && now - previousAlertAt < this.minAlertIntervalMs) {
+          continue;
+        }
+
         this.logger("oauth credential expired — provider re-login required", {
           providerId: provider.id,
           providerName: provider.name,
           expiresAt: new Date(credential.expires).toISOString(),
         });
+        this.alertState.recordAlert(provider.id, credential.expires, now);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         schedulerLog.warn(`OAuth validity logger failed for provider=${provider.id}: ${message}`);

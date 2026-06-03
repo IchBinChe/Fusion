@@ -55,11 +55,35 @@ describe("SkillsView/runtime-card token guardrails", () => {
     expect(infoBlock).toContain("width: auto");
   });
 
+  it("anchors the hidden toggle input to the toggle label across desktop and mobile", async () => {
+    const css = await loadAllAppCss();
+    const toggleBlock = extractRuleBlock(css, ".skills-view-item-toggle");
+    const inputBlock = extractRuleBlock(css, ".skills-view-item-toggle input");
+    const mobileMediaBlock = extractMobileMediaBlocks(css);
+    const mobileToggleBlock = extractRuleBlock(mobileMediaBlock, ".skills-view-item-toggle");
+
+    expect(toggleBlock).toContain("position: relative");
+    expect(inputBlock).toContain("position: absolute");
+    expect(inputBlock).toContain("clip: rect(0, 0, 0, 0)");
+    expect(mobileToggleBlock).not.toMatch(/position\s*:/);
+  });
+
   it("keeps checked and unchecked toggle geometry token-aligned", async () => {
     const css = await loadAllAppCss();
+    const sliderBlock = extractRuleBlock(css, ".skills-view-toggle-slider");
+    const checkedSliderBlock = extractRuleBlock(
+      css,
+      ".skills-view-item-toggle input:checked + .skills-view-toggle-slider"
+    );
+    const checkedKnobBlock = extractRuleBlock(
+      css,
+      ".skills-view-item-toggle input:checked + .skills-view-toggle-slider::after"
+    );
 
-    expect(css).toContain("width: calc(var(--space-xl) + var(--space-lg))");
-    expect(css).toContain("transform: translateX(calc(var(--space-lg) + (var(--space-xs) / 2)))");
-    expect(css).toContain("background: var(--color-success)");
+    expect(sliderBlock).toContain("width: calc(var(--space-xl) + var(--space-lg))");
+    expect(checkedSliderBlock).toContain("background: var(--color-success)");
+    expect(checkedKnobBlock).toContain(
+      "transform: translateX(calc(var(--space-lg) + (var(--space-xs) / 2)))"
+    );
   });
 });

@@ -2027,13 +2027,81 @@ describe("useChat", () => {
     });
   });
 
-  it("selectSession clears pending queued message state", async () => {
-    const sessionA = makeSession({ id: "session-001", agentId: "agent-001" });
+  it("preserves queued message localStorage entry when navigating away and restores it on return", async () => {
+    const sessionA = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
+
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [sessionA] });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+
+    const { result } = renderHook(() => useChat("proj-123"));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    act(() => {
+      result.current.sendMessage("Queued follow-up");
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+    });
+
+    act(() => {
+      result.current.selectSession("");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession).toBeNull();
+      expect(result.current.pendingMessage).toBe("");
+      expect(result.current.isStreaming).toBe(false);
+    });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-001");
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(result.current.isStreaming).toBe(true);
+    });
+  });
+
+  it("preserves queued messages across session switches and rehydrates them when returning", async () => {
+    const sessionA = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
     const sessionB = makeSession({ id: "session-002", agentId: "agent-002" });
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [sessionA, sessionB] });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
-
-    mockStreamChatResponse.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
 
     const { result } = renderHook(() => useChat("proj-123"));
 
@@ -2043,14 +2111,6 @@ describe("useChat", () => {
 
     act(() => {
       result.current.selectSession("session-001");
-    });
-
-    await waitFor(() => {
-      expect(result.current.activeSession?.id).toBe("session-001");
-    });
-
-    act(() => {
-      result.current.sendMessage("First");
     });
 
     await waitFor(() => {
@@ -2070,9 +2130,41 @@ describe("useChat", () => {
     });
 
     await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-002");
       expect(result.current.pendingMessage).toBe("");
       expect(result.current.isStreaming).toBe(false);
     });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-001");
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(result.current.isStreaming).toBe(true);
+    });
+  });
+
+  it("clearPendingMessage is safe without an active session and leaves localStorage untouched", async () => {
+    const { result } = renderHook(() => useChat("proj-123"));
+
+    await waitFor(() => {
+      expect(mockFetchChatSessions).toHaveBeenCalledWith("proj-123");
+    });
+
+    expect(() => {
+      act(() => {
+        result.current.clearPendingMessage();
+        result.current.selectSession("");
+        result.current.sendMessage("No session yet");
+      });
+    }).not.toThrow();
+
+    expect(localStorage.getItem("fusion:chat-pending:null")).toBeNull();
+    expect(localStorage.getItem("fusion:chat-pending:undefined")).toBeNull();
   });
 
   it("clearPendingMessage clears pending message and removes persisted queue entry", async () => {
@@ -2117,6 +2209,144 @@ describe("useChat", () => {
     });
 
     expect(result.current.pendingMessage).toBe("");
+    expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBeNull();
+  });
+
+  it("createSession removes the prior session's persisted queued message", async () => {
+    const existingSession = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
+    const newSession = makeSession({ id: "session-002", agentId: "agent-001", title: "Fresh" });
+
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [existingSession] });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+    mockCreateChatSession.mockResolvedValueOnce({ session: newSession });
+
+    const { result } = renderHook(() => useChat("proj-123"));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    act(() => {
+      result.current.sendMessage("Queued follow-up");
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+    });
+
+    await act(async () => {
+      await result.current.createSession({ agentId: "agent-001", title: "Fresh" });
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-002");
+    });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBeNull();
+  });
+
+  it("archiveSession removes the archived session's persisted queued message", async () => {
+    const session = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
+
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+
+    const { result } = renderHook(() => useChat("proj-123"));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    act(() => {
+      result.current.sendMessage("Queued follow-up");
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+    });
+
+    await act(async () => {
+      await result.current.archiveSession("session-001");
+    });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBeNull();
+  });
+
+  it("deleteSession removes the deleted session's persisted queued message", async () => {
+    const session = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
+
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+
+    const { result } = renderHook(() => useChat("proj-123"));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    act(() => {
+      result.current.sendMessage("Queued follow-up");
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBe("Queued follow-up");
+    });
+
+    await act(async () => {
+      await result.current.deleteSession("session-001");
+    });
+
     expect(localStorage.getItem(getChatPendingMessageKey("session-001"))).toBeNull();
   });
 

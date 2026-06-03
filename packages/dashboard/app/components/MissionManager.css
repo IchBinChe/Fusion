@@ -371,6 +371,12 @@
   padding: calc(var(--space-xs) / 4) calc(var(--space-sm) - (var(--space-xs) / 4));
 }
 
+.mission-status-badge--unlinked {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
 /* ── Shared Controls ── */
 .mission-icon-btn {
   display: inline-flex;
@@ -1068,6 +1074,45 @@
   gap: var(--space-sm);
 }
 
+.mission-detail__linked-goals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-xs);
+}
+
+.mission-detail__linked-goals-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.mission-detail__linked-goals-title {
+  margin: 0;
+  font-size: calc(var(--space-sm) + var(--space-xs));
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.mission-detail__linked-goals-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.mission-detail__linked-goal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.mission-detail__linked-goals-empty {
+  margin: 0;
+  color: var(--text-muted);
+}
+
 .mission-detail__run-settings {
   display: flex;
   flex-direction: column;
@@ -1731,15 +1776,6 @@
   padding: calc(var(--space-xs) * 0.5) var(--space-sm);
 }
 
-.mission-assertions__mode-tag--warning {
-  color: var(--color-warning);
-  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--border));
-}
-
-.mission-assertions__mode-tag--informational {
-  color: var(--text-muted);
-}
-
 .mission-assertions__rollup-header {
   display: flex;
   align-items: center;
@@ -1799,28 +1835,6 @@
   white-space: pre-wrap;
   line-height: 1.5;
   margin-bottom: var(--space-sm);
-}
-
-.mission-assertion__enforcement {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: calc(var(--space-sm) + var(--space-xs) * 0.5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: calc(var(--space-xs) * 0.5) var(--space-sm);
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--surface) 85%, var(--bg));
-  flex-shrink: 0;
-}
-
-.mission-assertion__enforcement--enforced {
-  color: var(--color-success);
-  border-color: color-mix(in srgb, var(--color-success) 40%, var(--border));
-}
-
-.mission-assertion__enforcement--informational {
-  color: var(--text-muted);
 }
 
 .mission-assertion__linked-count {
@@ -2543,6 +2557,11 @@
   /* Detail header actions stack on mobile */
   .mission-detail__actions {
     flex-wrap: wrap;
+  }
+
+  .mission-detail__linked-goals-header,
+  .mission-detail__linked-goals-list {
+    align-items: stretch;
   }
 
   .mission-detail__run-help,

@@ -1,5 +1,8 @@
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as extractor from "../goal-citation-extractor.js";
+import { getAgentLogFilePath, readAgentLogEntries } from "../agent-log-file-store.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 describe("goal citations store integration", () => {
@@ -29,7 +32,7 @@ describe("goal citations store integration", () => {
       taskId: task.id,
       surface: "agent_log",
     });
-    expect(rows[0]?.sourceRef).toMatch(/^agentLog:/);
+    expect(rows[0]?.sourceRef).toMatch(/^agentLog:[^:]+:\d+$/);
   });
 
   it("does not record citations for near-miss log text", async () => {
@@ -68,6 +71,7 @@ describe("goal citations store integration", () => {
     const rows = store.listGoalCitations({ goalId: "G-BATCH001" });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ surface: "agent_log", agentId: "executor", taskId: task.id });
+    expect(rows[0]?.sourceRef).toMatch(new RegExp(`^agentLog:${task.id}:\\d+$`));
   });
 
   it("deduplicates goal citations per goalId+surface+sourceRef", () => {
@@ -127,7 +131,7 @@ describe("goal citations store integration", () => {
         goalId: "G-WIN",
         agentId: "agent-1",
         surface: "agent_log",
-        sourceRef: "agentLog:1",
+        sourceRef: "agentLog:FN-WIN-1:1",
         snippet: "G-WIN older",
         timestamp: "2026-01-01T00:00:00.000Z",
       },
@@ -135,7 +139,7 @@ describe("goal citations store integration", () => {
         goalId: "G-WIN",
         agentId: "agent-1",
         surface: "agent_log",
-        sourceRef: "agentLog:2",
+        sourceRef: "agentLog:FN-WIN-1:2",
         snippet: "G-WIN newer",
         timestamp: "2026-01-02T00:00:00.000Z",
       },
@@ -143,7 +147,7 @@ describe("goal citations store integration", () => {
         goalId: "G-OTHER",
         agentId: "agent-1",
         surface: "agent_log",
-        sourceRef: "agentLog:3",
+        sourceRef: "agentLog:FN-OTHER-1:1",
         snippet: "other",
         timestamp: "2026-01-02T00:00:00.000Z",
       },
@@ -156,7 +160,31 @@ describe("goal citations store integration", () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.sourceRef).toBe("agentLog:2");
+    expect(rows[0]?.sourceRef).toBe("agentLog:FN-WIN-1:2");
+  });
+
+  it("keeps citation source refs stable and resolvable after re-reading logs from file", async () => {
+    const store = harness.store();
+    const task = await store.createTask({ title: "Task", description: "desc" });
+
+    await store.appendAgentLogBatch([
+      { taskId: task.id, text: "tracking G-STABLE001", type: "text", agent: "executor" },
+      { taskId: task.id, text: "tracking G-STABLE002", type: "text", agent: "executor" },
+    ]);
+
+    const rows = store.listGoalCitations({ taskId: task.id, surface: "agent_log" });
+    expect(rows.map((row) => row.sourceRef)).toEqual([
+      `agentLog:${task.id}:2`,
+      `agentLog:${task.id}:1`,
+    ]);
+
+    const persistedLogs = readAgentLogEntries(join(harness.rootDir(), ".fusion", "tasks", task.id));
+    const bySourceRef = new Map(persistedLogs.map((entry) => [entry.sourceRef, entry]));
+    expect(bySourceRef.get(`agentLog:${task.id}:1`)?.text).toBe("tracking G-STABLE001");
+    expect(bySourceRef.get(`agentLog:${task.id}:2`)?.text).toBe("tracking G-STABLE002");
+    expect(getAgentLogFilePath(join(harness.rootDir(), ".fusion", "tasks", task.id))).toContain(
+      `/tasks/${task.id}/agent-log.jsonl`,
+    );
   });
 
   it("does not throw when citation scan fails during appendAgentLog", async () => {

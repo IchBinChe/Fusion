@@ -1170,9 +1170,14 @@ export function Header({
               aria-pressed={view === "mailbox"}
             >
               <Mail size={16} />
-              {mailboxPendingApprovalCount > 0 && view !== "mailbox" && (
+              {view !== "mailbox" && mailboxPendingApprovalCount > 0 ? (
                 <span className="status-dot status-dot--pending header-chat-unread-dot" aria-label="Pending approvals" />
-              )}
+              ) : view !== "mailbox" && mailboxUnreadCount > 0 ? (
+                <span
+                  className="status-dot status-dot--online header-chat-unread-dot"
+                  aria-label={`${mailboxUnreadCount} unread messages`}
+                />
+              ) : null}
             </button>
             {pluginDashboardViews
               .filter((entry) => entry.view.placement === "primary")

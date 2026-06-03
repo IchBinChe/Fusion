@@ -20,6 +20,7 @@ import type {
   MissionValidatorRun,
   AgentStore,
   Settings,
+  Milestone,
 } from "@fusion/core";
 import {
   TEST_MODE_RESOLVED,
@@ -353,13 +354,12 @@ export class MissionExecutionLoop extends EventEmitter {
         return;
       }
 
-      // Get linked assertions for this feature
-      const assertions = this.missionStore.listAssertionsForFeature(feature.id);
+      // Lazily guarantee a linked assertion before validation so every feature
+      // is evaluated by the validator even when legacy data is missing links.
+      let assertions = this.missionStore.listAssertionsForFeature(feature.id);
       if (assertions.length === 0) {
-        loopLog.log(`Feature ${feature.id} has no linked assertions; marking as passed`);
-        // No assertions = automatically pass
-        await this.handleValidationPass(feature.id, undefined, "No assertions linked");
-        return;
+        loopLog.log(`Feature ${feature.id} has no linked assertions; lazily ensuring store-managed assertion linkage`);
+        assertions = this.missionStore.ensureFeatureAssertionLinked(feature.id);
       }
 
       // Mark feature as being validated
@@ -408,8 +408,10 @@ export class MissionExecutionLoop extends EventEmitter {
   ): Promise<ValidationResult> {
     loopLog.log(`Running validation for feature ${feature.id} with ${assertions.length} assertions`);
 
+    const milestone = this.resolveFeatureMilestone(feature);
+
     // Build the validation prompt
-    const prompt = this.buildValidationPrompt(feature, assertions);
+    const prompt = this.buildValidationPrompt(feature, assertions, milestone);
 
     // Get task context for validation
     const task = feature.taskId ? await this.taskStore.getTask(feature.taskId) : null;
@@ -441,7 +443,7 @@ export class MissionExecutionLoop extends EventEmitter {
         runtimeHint: validationRuntimeHint,
         pluginRunner: this.pluginRunner,
         cwd: this.rootDir,
-        systemPrompt: this.buildValidationSystemPrompt(feature, assertions, taskContext),
+        systemPrompt: this.buildValidationSystemPrompt(feature, assertions, taskContext, milestone),
         tools: "readonly",
         defaultProvider: validationSessionModel.provider,
         defaultModelId: validationSessionModel.modelId,
@@ -796,19 +798,27 @@ export class MissionExecutionLoop extends EventEmitter {
   /**
    * Build the validation prompt sent to the AI agent.
    */
-  private buildValidationPrompt(feature: MissionFeature, assertions: MissionContractAssertion[]): string {
+  private buildValidationPrompt(
+    feature: MissionFeature,
+    assertions: MissionContractAssertion[],
+    milestone?: Milestone,
+  ): string {
     const assertionTexts = assertions
       .map((a, i) => `${i + 1}. **${a.title}**: ${a.assertion}`)
       .join("\n");
+    const milestoneAcceptanceCriteria = milestone?.acceptanceCriteria?.trim();
+    const milestoneContext = milestoneAcceptanceCriteria
+      ? `\nMilestone acceptance criteria (must also be satisfied for this feature to pass):\n${milestoneAcceptanceCriteria}\n`
+      : "";
 
     return `Evaluate the implementation for feature "${feature.title}" against the following contract assertions:
 
-${assertionTexts}
-
+${assertionTexts}${milestoneContext}
 For each assertion:
 - Determine if the implementation satisfies the assertion (pass/fail/blocked)
 - If failed, explain what was expected vs what was actually observed
 - If blocked, explain what external factor prevented validation
+- Also verify that the implementation satisfies any milestone acceptance criteria provided above
 
 Respond with a JSON object in this format:
 {
@@ -833,22 +843,25 @@ Be thorough and objective. If any assertion fails, the overall status should be 
    * Build the system prompt for the validation agent.
    */
   private buildValidationSystemPrompt(
-    feature: MissionFeature,
+    _feature: MissionFeature,
     _assertions: MissionContractAssertion[],
     taskContext: string,
+    milestone?: Milestone,
   ): string {
+    const milestoneAcceptanceCriteria = milestone?.acceptanceCriteria?.trim();
     return `You are a validation agent responsible for evaluating whether an implementation satisfies its contract assertions.
 
 You will receive:
 1. A feature description with its acceptance criteria
 2. Contract assertions to evaluate against
-3. Task context including the implementation details
+3. Task context including the implementation details${milestoneAcceptanceCriteria ? `\n4. Milestone acceptance criteria text that also applies to this feature: ${milestoneAcceptanceCriteria}` : ""}
 
 Your job is to:
 1. Carefully review the implementation as described in the task context
 2. Evaluate each contract assertion objectively
 3. Determine if the implementation fully satisfies each assertion
-4. Return a structured JSON response with your findings
+4. Verify the implementation also satisfies any milestone acceptance criteria provided for the parent milestone
+5. Return a structured JSON response with your findings
 
 Be thorough and precise. A contract assertion represents a commitment made during planning - the implementation must fully satisfy it or it is considered failed.
 
@@ -857,6 +870,7 @@ Evaluation guidance:
 - "fail" means one or more assertions are unmet or only partially satisfied.
 - "blocked" means you cannot evaluate due to missing/insufficient evidence or external constraints.
 - Partial satisfaction must be marked as failed with clear expected vs actual details.
+- Milestone acceptance criteria are validator-executed requirements, not informational context.
 
 Response format: Return ONLY a JSON object (no additional text) with this structure:
 {
@@ -898,6 +912,15 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     return lines.join("\n");
   }
 
+  private resolveFeatureMilestone(feature: MissionFeature): Milestone | undefined {
+    const slice = this.missionStore.getSlice(feature.sliceId);
+    if (!slice) {
+      return undefined;
+    }
+
+    return this.missionStore.getMilestone(slice.milestoneId);
+  }
+
   private completeValidatorRunIfStillRunning(
     runId: string | undefined,
     status: "passed" | "failed" | "blocked" | "error",
@@ -936,33 +959,6 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
       const feature = this.missionStore.getFeature(featureId);
       if (feature && feature.status !== "done") {
         this.missionStore.updateFeatureStatus(featureId, "done");
-      }
-
-      if (!runId && feature) {
-        const alreadyAutoPassed =
-          feature.status === "done" &&
-          feature.loopState === "passed" &&
-          feature.lastValidatorStatus === "passed";
-
-        if (!alreadyAutoPassed) {
-          // Auto-pass path has no validator run, so we must advance loop bookkeeping here.
-          if (feature.loopState !== "passed" || feature.lastValidatorStatus !== "passed") {
-            this.missionStore.updateFeature(featureId, {
-              loopState: "passed",
-              lastValidatorStatus: "passed",
-            });
-          }
-
-          this.logFeatureWarningEvent(
-            featureId,
-            "validation_auto_passed_no_assertions",
-            `Feature ${featureId} auto-passed because no assertions were linked.`,
-            {
-              taskId: feature.taskId,
-              reason: "No assertions linked",
-            },
-          );
-        }
       }
 
       loopLog.log(`Feature ${featureId} passed validation`);

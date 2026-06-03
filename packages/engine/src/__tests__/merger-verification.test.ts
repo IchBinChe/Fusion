@@ -573,7 +573,17 @@ describe("aiMergeTask — build verification", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
   });
 
-  it("syncs dependencies before build verification when install state is missing", async () => {
+  function setupDependencySyncVerificationScenario({
+    taskId = "FN-050",
+    installStatePresent,
+    stagedFiles,
+    settingsOverrides,
+  }: {
+    taskId?: string;
+    installStatePresent: boolean;
+    stagedFiles: string[];
+    settingsOverrides: Partial<typeof DEFAULT_SETTINGS>;
+  }) {
     mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
@@ -583,7 +593,7 @@ describe("aiMergeTask — build verification", () => {
 
     mockedExistsSync.mockImplementation((path: any) => {
       const pathStr = String(path);
-      if (pathStr.includes("node_modules") || pathStr.endsWith(".pnp.cjs")) return false;
+      if (pathStr.includes("node_modules") || pathStr.endsWith(".pnp.cjs")) return installStatePresent;
       return true;
     });
 
@@ -598,9 +608,16 @@ describe("aiMergeTask — build verification", () => {
       if (cmdStr.includes("merge --squash")) return Buffer.from("");
       if (cmdStr.includes("diff --name-only --diff-filter=U")) return "" as any;
       if (cmdStr.includes("git diff --cached --name-only")) {
-        return "package.json\npackages/desktop/package.json" as any;
+        return stagedFiles.join("\n") as any;
       }
-      if (cmdStr.includes("pnpm install --frozen-lockfile")) return "Lockfile is up to date" as any;
+      if (
+        cmdStr.includes("pnpm install --frozen-lockfile") ||
+        cmdStr.includes("pnpm run setup:merge") ||
+        cmdStr.includes("pnpm test") ||
+        cmdStr.includes("pnpm build")
+      ) {
+        return Buffer.from("");
+      }
       if (cmdStr.includes("diff --cached --quiet")) {
         cachedQuietChecks += 1;
         return cachedQuietChecks === 1 ? "1" as any : "0" as any;
@@ -612,13 +629,23 @@ describe("aiMergeTask — build verification", () => {
     });
 
     const store = createMockStore(
-      { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
-      [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
+      { id: taskId, worktree: `/tmp/root/.worktrees/${taskId}` },
+      [{ id: taskId, worktree: `/tmp/root/.worktrees/${taskId}`, column: "in-review" } as Task],
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
-      buildCommand: "pnpm build",
+      ...settingsOverrides,
+    });
+
+    return { store };
+  }
+
+  it("syncs dependencies before build verification when install state is missing", async () => {
+    const { store } = setupDependencySyncVerificationScenario({
+      installStatePresent: false,
+      stagedFiles: ["package.json", "packages/desktop/package.json"],
+      settingsOverrides: { buildCommand: "pnpm build" },
     });
 
     const result = await aiMergeTask(store, "/tmp/root", "FN-050");
@@ -635,56 +662,94 @@ describe("aiMergeTask — build verification", () => {
   });
 
   it("syncs dependencies before test verification when install state is missing", async () => {
-    mockedCreateFnAgent.mockResolvedValue({
-      session: {
-        prompt: vi.fn().mockResolvedValue(undefined),
-        dispose: vi.fn(),
-      },
-    } as any);
-
-    mockedExistsSync.mockImplementation((path: any) => {
-      const pathStr = String(path);
-      if (pathStr.includes("node_modules") || pathStr.endsWith(".pnp.cjs")) return false;
-      return true;
-    });
-
-    let cachedQuietChecks = 0;
-    mockedExecSync.mockImplementation((cmd: any) => {
-      const cmdStr = String(cmd);
-      if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
-      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "mergedcommit123";
-      if (cmdStr.includes("git log")) return "- feat: something" as any;
-      if (cmdStr.includes("merge-base")) return Buffer.from("abc123");
-      if (cmdStr.includes("git diff") && cmdStr.includes("--stat")) return "2 files changed" as any;
-      if (cmdStr.includes("merge --squash")) return Buffer.from("");
-      if (cmdStr.includes("diff --name-only --diff-filter=U")) return "" as any;
-      if (cmdStr.includes("git diff --cached --name-only")) {
-        return "package.json\npackages/desktop/package.json" as any;
-      }
-      if (cmdStr.includes("pnpm install --frozen-lockfile")) return "Lockfile is up to date" as any;
-      if (cmdStr.includes("diff --cached --quiet")) {
-        cachedQuietChecks += 1;
-        return cachedQuietChecks === 1 ? "1" as any : "0" as any;
-      }
-      if (cmdStr.includes("show --shortstat")) return "3 files changed, 10 insertions(+), 2 deletions(-)" as any;
-      if (cmdStr.includes("branch -d") || cmdStr.includes("branch -D")) return Buffer.from("");
-      if (cmdStr.includes("worktree remove")) return Buffer.from("");
-      return Buffer.from("");
-    });
-
-    const store = createMockStore(
-      { id: "FN-051", worktree: "/tmp/root/.worktrees/KB-051" },
-      [{ id: "FN-051", worktree: "/tmp/root/.worktrees/KB-051", column: "in-review" } as Task],
-    );
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
-      ...DEFAULT_SETTINGS,
-      mergeIntegrationWorktree: "cwd-main" as const,
-      testCommand: "pnpm test",
+    const { store } = setupDependencySyncVerificationScenario({
+      taskId: "FN-051",
+      installStatePresent: false,
+      stagedFiles: ["package.json", "packages/desktop/package.json"],
+      settingsOverrides: { testCommand: "pnpm test" },
     });
 
     const result = await aiMergeTask(store, "/tmp/root", "FN-051");
 
     expect(result.merged).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm install --frozen-lockfile")),
+    ).toBe(true);
+  });
+
+  it("runs the configured worktree init command before verification when install state is warm and no dependency files are staged", async () => {
+    const { store } = setupDependencySyncVerificationScenario({
+      installStatePresent: true,
+      stagedFiles: ["packages/engine/src/merger.ts"],
+      settingsOverrides: {
+        testCommand: "pnpm test",
+        worktreeInitCommand: "pnpm run setup:merge",
+      },
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm run setup:merge"))).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm install --frozen-lockfile")),
+    ).toBe(false);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-050",
+      "Syncing dependencies before merge verification: pnpm run setup:merge",
+    );
+  });
+
+  it("runs the configured worktree init command before verification when install state is missing", async () => {
+    const { store } = setupDependencySyncVerificationScenario({
+      installStatePresent: false,
+      stagedFiles: ["package.json"],
+      settingsOverrides: {
+        buildCommand: "pnpm build",
+        worktreeInitCommand: "pnpm run setup:merge",
+      },
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm run setup:merge"))).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm install --frozen-lockfile")),
+    ).toBe(false);
+  });
+
+  it("preserves inferred install behavior when no worktree init command is configured", async () => {
+    expect(shouldSyncDependenciesForMerge(["packages/engine/src/merger.ts"], true, false)).toBe(false);
+
+    const { store } = setupDependencySyncVerificationScenario({
+      installStatePresent: true,
+      stagedFiles: ["packages/engine/src/merger.ts"],
+      settingsOverrides: { testCommand: "pnpm test" },
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm install --frozen-lockfile")),
+    ).toBe(false);
+  });
+
+  it("treats whitespace-only worktree init commands as unset and falls back to inferred install behavior", async () => {
+    const { store } = setupDependencySyncVerificationScenario({
+      installStatePresent: false,
+      stagedFiles: ["package.json"],
+      settingsOverrides: {
+        testCommand: "pnpm test",
+        worktreeInitCommand: "   ",
+      },
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.merged).toBe(true);
+    expect(mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm run setup:merge"))).toBe(false);
     expect(
       mockedExecSync.mock.calls.some((call) => String(call[0]).includes("pnpm install --frozen-lockfile")),
     ).toBe(true);

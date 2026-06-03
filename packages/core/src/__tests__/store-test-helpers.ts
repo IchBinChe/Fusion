@@ -1,7 +1,8 @@
-import { mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync, mkdirSync } from "node:fs";
 import { readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getAgentLogFilePath } from "../agent-log-file-store.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { vi } from "vitest";
 
@@ -214,12 +215,20 @@ export function createTaskStoreTestHarness() {
         [taskId, text, type, timestamp, detail, agent] = args;
       }
 
-      (targetStore as any).db
-        .prepare(`
-      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `)
-        .run(taskId, timestamp, text, type, detail ?? null, agent ?? null);
+      const taskDir = join((targetStore as any).getFusionDir(), "tasks", taskId);
+      mkdirSync(taskDir, { recursive: true });
+      appendFileSync(
+        getAgentLogFilePath(taskDir),
+        `${JSON.stringify({
+          taskId,
+          timestamp,
+          text,
+          type,
+          ...(detail !== undefined && { detail }),
+          ...(agent !== undefined && { agent }),
+        })}\n`,
+        "utf8",
+      );
     },
   };
 }
@@ -437,12 +446,20 @@ export function createSharedTaskStoreTestHarness() {
         [taskId, text, type, timestamp, detail, agent] = args;
       }
 
-      (targetStore as any).db
-        .prepare(`
-      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `)
-        .run(taskId, timestamp, text, type, detail ?? null, agent ?? null);
+      const taskDir = join((targetStore as any).getFusionDir(), "tasks", taskId);
+      mkdirSync(taskDir, { recursive: true });
+      appendFileSync(
+        getAgentLogFilePath(taskDir),
+        `${JSON.stringify({
+          taskId,
+          timestamp,
+          text,
+          type,
+          ...(detail !== undefined && { detail }),
+          ...(agent !== undefined && { agent }),
+        })}\n`,
+        "utf8",
+      );
     },
   };
 }

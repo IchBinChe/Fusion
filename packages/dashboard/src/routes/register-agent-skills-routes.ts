@@ -139,6 +139,57 @@ export function registerAgentSkillsRoutes(ctx: ApiRoutesContext): void {
   });
 
   /**
+   * POST /api/skills/install
+   * Install a catalog skill via the shared skills.sh installer.
+   * Body: { source: string; skill?: string }
+   * Query: projectId (optional) for multi-project context
+   * Response: { success: true }
+   * Error: 400 { error: string; code: "invalid_body"|"invalid_source" }
+   * Error: 502 { error: string; code: "spawn_error"|"install_failed"|"install_timeout" }
+   */
+  router.post("/skills/install", async (req, res) => {
+    try {
+      const scopedStore = await getScopedStore(req);
+      const skillsAdapter = options?.skillsAdapter;
+
+      if (!skillsAdapter) {
+        res.status(404).json({ error: "Skills adapter not configured", code: "adapter_not_configured" });
+        return;
+      }
+
+      const { source, skill } = req.body as { source?: string; skill?: string };
+      if (typeof source !== "string" || !source.trim()) {
+        res.status(400).json({ error: "source is required", code: "invalid_body" });
+        return;
+      }
+
+      const normalizedSource = source.trim();
+      if (!/^[^/]+\/[^/]+$/.test(normalizedSource)) {
+        res.status(400).json({ error: "Invalid source format. Use owner/repo.", code: "invalid_source" });
+        return;
+      }
+
+      const result = await skillsAdapter.installSkill({
+        source: normalizedSource,
+        skill: typeof skill === "string" ? skill : undefined,
+        cwd: scopedStore.getRootDir(),
+      });
+
+      if ("code" in result) {
+        res.status(502).json(result);
+        return;
+      }
+
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err, "Failed to install skill");
+    }
+  });
+
+  /**
    * GET /api/skills/catalog
    * Fetch the skills.sh catalog with optional authentication.
    * Query:

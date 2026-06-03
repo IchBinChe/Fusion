@@ -186,9 +186,10 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
     loop.stop();
   });
 
-  it("periodic recovery pass replays implementing done tasks with zero assertions and advances loop state", async () => {
-    const feature = makeFeature({ status: "done", lastValidatorStatus: undefined, loopState: "implementing" });
+  it("periodic recovery lazily ensures assertions and AI-validates zero-link legacy features", async () => {
+    const feature = makeFeature({ status: "done", lastValidatorStatus: undefined, loopState: "implementing", acceptanceCriteria: "must pass" });
     const currentFeature = { ...feature };
+    const linkedAssertions: Array<{ id: string }> = [];
     const missionStore = {
       listMissions: vi.fn(() => [{ id: "M-001", status: "active" }]),
       getMissionWithHierarchy: vi.fn(() => ({
@@ -203,11 +204,21 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
         Object.assign(currentFeature, patch);
         return { ...currentFeature };
       }),
-      listAssertionsForFeature: vi.fn(() => []),
+      listAssertionsForFeature: vi.fn(() => linkedAssertions),
+      ensureFeatureAssertionLinked: vi.fn(() => {
+        if (linkedAssertions.length === 0) {
+          linkedAssertions.push({ id: "CA-ENSURED" });
+        }
+        return linkedAssertions;
+      }),
+      startValidatorRun: vi.fn(() => ({ id: "VR-001", featureId: "F-001" })),
+      completeValidatorRun: vi.fn(),
       getSlice: vi.fn(() => ({ id: "SL-001", milestoneId: "MS-001", status: "active" })),
       getMilestone: vi.fn(() => ({ id: "MS-001", missionId: "M-001" })),
       logMissionEvent: vi.fn(),
       transitionLoopState: vi.fn(),
+      setFeatureCurrentTaskRunId: vi.fn(),
+      getFailuresForRun: vi.fn(() => []),
     };
     const taskStore = {
       getTask: vi.fn(async () => ({ id: "FN-001", column: "done", status: "done" })),
@@ -220,25 +231,23 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
       taskStore: taskStore as any,
       rootDir: process.cwd(),
     });
+    vi.spyOn(loop as any, "runValidation").mockResolvedValue({ status: "pass", summary: "ok" });
     loop.start();
 
     const periodicMaintenancePass = async () => loop.recoverActiveMissions();
     await periodicMaintenancePass();
     await periodicMaintenancePass();
 
-    expect(missionStore.updateFeature).toHaveBeenCalledTimes(1);
-    expect(missionStore.updateFeature).toHaveBeenCalledWith(
-      "F-001",
-      expect.objectContaining({ loopState: "passed", lastValidatorStatus: "passed" }),
-    );
+    expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledWith("F-001");
+    expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
     const noAssertionEvents = missionStore.logMissionEvent.mock.calls.filter(
       ([, type, , payload]) => type === "warning" && payload?.code === "validation_auto_passed_no_assertions",
     );
-    expect(noAssertionEvents).toHaveLength(1);
+    expect(noAssertionEvents).toHaveLength(0);
     loop.stop();
   });
 
-  it("routes through validator after assertion backfill instead of no-assertion auto-pass", async () => {
+  it("keeps backfill optional because runtime lazy-ensure routes through validator", async () => {
     const feature = makeFeature({ status: "done", acceptanceCriteria: "must pass", loopState: "implementing" });
     const currentFeature = { ...feature };
     const linkedAssertions: Array<{ id: string }> = [];
@@ -258,6 +267,12 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
         return { ...currentFeature };
       }),
       listAssertionsForFeature: vi.fn(() => linkedAssertions),
+      ensureFeatureAssertionLinked: vi.fn(() => {
+        if (linkedAssertions.length === 0) {
+          linkedAssertions.push({ id: "CA-001" });
+        }
+        return linkedAssertions;
+      }),
       startValidatorRun: vi.fn(() => ({ id: "VR-001", featureId: "F-001" })),
       completeValidatorRun: vi.fn(),
       getSlice: vi.fn(() => ({ id: "SL-001", milestoneId: "MS-001", status: "active" })),
@@ -279,27 +294,13 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
 
     await loop.recoverActiveMissions();
 
-    const noAssertionEventsBefore = missionStore.logMissionEvent.mock.calls.filter(
-      ([, type, , payload]) => type === "warning" && payload?.code === "validation_auto_passed_no_assertions",
-    );
-    expect(noAssertionEventsBefore).toHaveLength(1);
-    expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
-
-    linkedAssertions.push({ id: "CA-001" });
-    currentFeature.loopState = "implementing";
-    currentFeature.lastValidatorStatus = undefined;
-
-    await loop.processTaskOutcome("FN-001");
-
+    expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledWith("F-001");
     expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
-    const noAssertionEventsAfter = missionStore.logMissionEvent.mock.calls.filter(
+    const noAssertionEvents = missionStore.logMissionEvent.mock.calls.filter(
       ([, type, , payload]) => type === "warning" && payload?.code === "validation_auto_passed_no_assertions",
     );
-    expect(noAssertionEventsAfter).toHaveLength(1);
-    expect(missionStore.updateFeature).toHaveBeenCalledWith(
-      "F-001",
-      expect.objectContaining({ loopState: "passed", lastValidatorStatus: "passed" }),
-    );
+    expect(noAssertionEvents).toHaveLength(0);
+    expect(missionStore.completeValidatorRun).toHaveBeenCalledWith("VR-001", "passed", "ok");
 
     loop.stop();
   });

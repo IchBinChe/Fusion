@@ -36,14 +36,16 @@ describe("CLI package.json publishing config", () => {
   const pkg = loadPackageJson("cli");
   const prepackScript = loadCliPrepackScript();
 
-  it('has "bin" field with fn pointing to ./dist/bin.js', () => {
+  it('has "bin" field with fn/fusion pointing to committed launcher', () => {
     expect(pkg.bin).toBeDefined();
-    expect(pkg.bin.fn).toBe("./dist/bin.js");
+    expect(pkg.bin.fn).toBe("./bin.mjs");
+    expect(pkg.bin.fusion).toBe("./bin.mjs");
   });
 
-  it('has "files" array with refined globs for dist output', () => {
+  it('has "files" array with committed launcher and refined globs for dist output', () => {
     expect(pkg.files).toBeDefined();
     expect(Array.isArray(pkg.files)).toBe(true);
+    expect(pkg.files).toContain("bin.mjs");
     expect(pkg.files).toContain("dist/**/*.js");
     expect(pkg.files).toContain("dist/**/*.d.ts");
     expect(pkg.files).toContain("dist/**/*.d.ts.map");

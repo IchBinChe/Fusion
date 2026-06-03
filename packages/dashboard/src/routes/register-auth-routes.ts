@@ -189,6 +189,25 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
     return providerId === "github-copilot";
   }
 
+  function selectOauthOption(
+    providerId: string,
+    prompt: { options: Array<{ id: string; label?: string }> },
+  ): string | undefined {
+    if (prompt.options.length === 1) {
+      return prompt.options[0]?.id;
+    }
+
+    const defaultLabeledOption = prompt.options.find((option) => /\(default\)/i.test(option.label ?? ""));
+
+    // FN-5917: returning undefined here caused pi-ai's openai-codex login
+    // flow to throw "Login cancelled" before it could open browser auth.
+    if (providerId === "openai-codex") {
+      return prompt.options.find((option) => option.id === "browser")?.id ?? defaultLabeledOption?.id ?? prompt.options[0]?.id;
+    }
+
+    return defaultLabeledOption?.id ?? prompt.options[0]?.id;
+  }
+
   async function probeDroidCliWithEffectiveBinary(req?: Request) {
     let pluginSettings: Record<string, unknown> | undefined;
     if (req) {
@@ -866,12 +885,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         // to race pasted codes against the localhost callback server.
         onManualCodeInput: async () => await pendingLogin.inputPromise,
         onProgress: () => {}, // no-op for web UI
-        onSelect: async (prompt) => {
-          if (prompt.options.length === 1) {
-            return prompt.options[0]?.id;
-          }
-          return undefined;
-        },
+        onSelect: async (prompt) => selectOauthOption(provider, prompt),
         signal: abortController.signal,
       });
 

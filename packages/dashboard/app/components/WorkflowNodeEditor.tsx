@@ -327,7 +327,12 @@ function InnerEditor({
                 <label className="wf-field">
                   <span>Gate mode</span>
                   <select
-                    value={String(selectedNode.data.config?.gateMode ?? (selectedNode.data.kind === "gate" ? "gate" : "advisory"))}
+                    // Default display must match the compiler's defaults:
+                    // gate and script nodes block by default, prompt is advisory.
+                    value={String(
+                      selectedNode.data.config?.gateMode
+                        ?? (selectedNode.data.kind === "prompt" ? "advisory" : "gate"),
+                    )}
                     onChange={(e) => updateSelectedData({ config: { gateMode: e.target.value } })}
                   >
                     <option value="advisory">Advisory</option>

@@ -97,16 +97,18 @@ export class WorkflowGraphTaskRunner {
     // a mid-run error cannot — re-running legacy would repeat the implementation
     // session — so it terminates as "failed" for the caller to park instead.
     let sideEffectsRan = false;
+    const invoked: string[] = [];
     const seams = this.deps.seams;
     const wrappedSeams: WorkflowLegacySeams = {
-      planning: (t, c) => ((sideEffectsRan = true), seams.planning(t, c)),
-      execute: (t, c) => ((sideEffectsRan = true), seams.execute(t, c)),
-      review: (t, c) => ((sideEffectsRan = true), seams.review(t, c)),
-      merge: (t, c) => ((sideEffectsRan = true), seams.merge(t, c)),
-      schedule: (t, c) => ((sideEffectsRan = true), seams.schedule(t, c)),
+      planning: (t, c) => ((sideEffectsRan = true), invoked.push("planning"), seams.planning(t, c)),
+      execute: (t, c) => ((sideEffectsRan = true), invoked.push("execute"), seams.execute(t, c)),
+      review: (t, c) => ((sideEffectsRan = true), invoked.push("review"), seams.review(t, c)),
+      merge: (t, c) => ((sideEffectsRan = true), invoked.push("merge"), seams.merge(t, c)),
+      schedule: (t, c) => ((sideEffectsRan = true), invoked.push("schedule"), seams.schedule(t, c)),
     };
     const wrappedRunCustomNode: WorkflowCustomNodeRunner = (node, t, c) => {
       sideEffectsRan = true;
+      invoked.push(node.id);
       return this.deps.runCustomNode(node, t, c);
     };
 
@@ -133,9 +135,10 @@ export class WorkflowGraphTaskRunner {
       if (sideEffectsRan) {
         // Too late to fall back — the caller parks the task for human review.
         this.emit("terminal", task.id, `${definition.id}:failed (${reason})`);
-        return { disposition: "failed", outcome: "failure", reason, visitedNodeIds: [] };
+        return { disposition: "failed", outcome: "failure", reason, visitedNodeIds: invoked };
       }
-      return this.fallBack(task.id, reason);
+      this.emit("fallback", task.id, reason);
+      return { disposition: "fell-back", reason, visitedNodeIds: invoked };
     }
   }
 }

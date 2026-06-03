@@ -3260,7 +3260,7 @@ export class TaskExecutor {
       // behavior is expressed as a custom prompt node before the execute seam.
       planning: async () => ({ outcome: "success", value: "pre-specified" }),
       execute: async (seamTask) => {
-        const result = await this.runImplementationPhase(seamTask as Task);
+        const result = await this.runImplementationPhase(seamTask);
         return result.taskDone
           ? { outcome: "success", value: "implemented" }
           : { outcome: "failure", value: "implementation-incomplete" };
@@ -3337,6 +3337,8 @@ export class TaskExecutor {
     const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
     const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
     executorLog.warn(`${task.id}: ${message}`);
+    this.clearCompletedTaskWatchdog(task.id);
+    this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
       await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
       await this.store.updateTask(task.id, { error: message }, this.getRunContextFor(task.id));

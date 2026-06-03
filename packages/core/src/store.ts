@@ -8,6 +8,12 @@ import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSn
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import { parseWorkflowIr, serializeWorkflowIr } from "./workflow-ir.js";
+import type {
+  WorkflowDefinition,
+  WorkflowDefinitionInput,
+  WorkflowDefinitionUpdate,
+  WorkflowNodeLayout,
+} from "./workflow-definition-types.js";
 import { compileWorkflowToSteps } from "./workflow-compiler.js";
 
 /** Tags WorkflowStep rows materialized by compiling a workflow so they can be
@@ -1139,7 +1145,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private lastTaskIdIntegrityLogSignature: string | null = null;
   /** Cached workflow steps — invalidated on create/update/delete */
   private workflowStepsCache: import("./types.js").WorkflowStep[] | null = null;
-  private workflowDefinitionsCache: import("./workflow-definition-types.js").WorkflowDefinition[] | null = null;
+  private workflowDefinitionsCache: WorkflowDefinition[] | null = null;
   /** Plugin-contributed workflow step templates injected by engine runtime. */
   private _pluginWorkflowStepTemplates: Array<{ pluginId: string; template: WorkflowStepTemplate }> = [];
   /** Global settings store (`~/.fusion/settings.json`) */
@@ -10942,7 +10948,7 @@ ${stepsSection}`;
     layout: string;
     createdAt: string;
     updatedAt: string;
-  }): import("./workflow-definition-types.js").WorkflowDefinition {
+  }): WorkflowDefinition {
     return {
       id: row.id,
       name: row.name,
@@ -10956,11 +10962,11 @@ ${stepsSection}`;
 
   private parseWorkflowLayout(
     raw: string,
-  ): Record<string, import("./workflow-definition-types.js").WorkflowNodeLayout> {
+  ): Record<string, WorkflowNodeLayout> {
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as Record<string, import("./workflow-definition-types.js").WorkflowNodeLayout>;
+        return parsed as Record<string, WorkflowNodeLayout>;
       }
     } catch {
       // Corrupt layout JSON falls back to empty (auto-layout) rather than failing the read.
@@ -10970,8 +10976,8 @@ ${stepsSection}`;
 
   /** Create a named workflow definition. The IR is validated via parseWorkflowIr. */
   async createWorkflowDefinition(
-    input: import("./workflow-definition-types.js").WorkflowDefinitionInput,
-  ): Promise<import("./workflow-definition-types.js").WorkflowDefinition> {
+    input: WorkflowDefinitionInput,
+  ): Promise<WorkflowDefinition> {
     return this.withConfigLock(async () => {
       const name = input.name?.trim();
       if (!name) throw new Error("Workflow name is required");
@@ -10980,7 +10986,7 @@ ${stepsSection}`;
       const layout = input.layout ?? {};
       const now = new Date().toISOString();
       const id = this.nextWorkflowDefinitionId();
-      const definition: import("./workflow-definition-types.js").WorkflowDefinition = {
+      const definition: WorkflowDefinition = {
         id,
         name,
         description: input.description ?? "",
@@ -11012,7 +11018,7 @@ ${stepsSection}`;
   }
 
   /** List all workflow definitions, oldest first. Cached until a mutation. */
-  async listWorkflowDefinitions(): Promise<import("./workflow-definition-types.js").WorkflowDefinition[]> {
+  async listWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
     if (this.workflowDefinitionsCache) return this.workflowDefinitionsCache;
     const rows = this.db.prepare("SELECT * FROM workflows ORDER BY createdAt ASC").all() as Array<{
       id: string;
@@ -11030,7 +11036,7 @@ ${stepsSection}`;
   /** Get a single workflow definition by id, or undefined when absent. */
   async getWorkflowDefinition(
     id: string,
-  ): Promise<import("./workflow-definition-types.js").WorkflowDefinition | undefined> {
+  ): Promise<WorkflowDefinition | undefined> {
     const row = this.db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as
       | {
           id: string;
@@ -11048,8 +11054,8 @@ ${stepsSection}`;
   /** Update a workflow definition. The IR (when supplied) is re-validated. */
   async updateWorkflowDefinition(
     id: string,
-    updates: import("./workflow-definition-types.js").WorkflowDefinitionUpdate,
-  ): Promise<import("./workflow-definition-types.js").WorkflowDefinition> {
+    updates: WorkflowDefinitionUpdate,
+  ): Promise<WorkflowDefinition> {
     return this.withConfigLock(async () => {
       const existing = await this.getWorkflowDefinition(id);
       if (!existing) throw new Error(`Workflow '${id}' not found`);
@@ -11057,7 +11063,7 @@ ${stepsSection}`;
       const name = updates.name !== undefined ? updates.name.trim() : existing.name;
       if (!name) throw new Error("Workflow name is required");
       const ir = updates.ir !== undefined ? parseWorkflowIr(updates.ir) : existing.ir;
-      const next: import("./workflow-definition-types.js").WorkflowDefinition = {
+      const next: WorkflowDefinition = {
         ...existing,
         name,
         description: updates.description !== undefined ? updates.description : existing.description,
@@ -11103,7 +11109,7 @@ ${stepsSection}`;
 
   /** The configured project-default workflow id, or undefined when unset. */
   async getDefaultWorkflowId(): Promise<string | undefined> {
-    const settings = await this.getSettings();
+    const settings = await this.getSettingsFast();
     const id = (settings as { defaultWorkflowId?: string }).defaultWorkflowId;
     return id && id.trim() ? id : undefined;
   }

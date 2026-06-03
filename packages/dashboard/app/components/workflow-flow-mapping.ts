@@ -23,11 +23,12 @@ export function irToFlow(def: WorkflowDefinition): {
 } {
   const nodes = def.ir.nodes.map((node, index): FlowNode<WorkflowFlowNodeData> => {
     const pos = def.layout?.[node.id];
+    const kind = editorKind(node);
     return {
       id: node.id,
-      type: editorKind(node),
+      type: kind,
       position: pos ?? { x: 80 + index * 180, y: 120 },
-      data: { kind: editorKind(node), label: nodeLabel(node), config: { ...(node.config ?? {}) } },
+      data: { kind, label: nodeLabel(node), config: { ...(node.config ?? {}) } },
       deletable: node.kind !== "start" && node.kind !== "end",
     };
   });

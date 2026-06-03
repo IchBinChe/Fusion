@@ -399,6 +399,7 @@ CREATE TABLE IF NOT EXISTS workflows (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idxWorkflowsCreatedAt ON workflows(createdAt);
 
 -- Per-task selected workflow. stepIds holds the WorkflowStep ids materialized
 -- by compiling the workflow, so re-selection can clean them up (no orphans).
@@ -4071,7 +4072,8 @@ export class Database {
             layout TEXT NOT NULL DEFAULT '{}',
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL
-          )
+          );
+          CREATE INDEX IF NOT EXISTS idxWorkflowsCreatedAt ON workflows(createdAt);
         `);
       });
     }

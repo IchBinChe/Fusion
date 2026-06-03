@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, RefreshCw, Sparkles, X, XCircle } from "lucide-react";
 import { getErrorMessage, type PrInfo, type StructuredGhError } from "@fusion/core";
 import {
@@ -323,7 +324,7 @@ export function PrCreateModal({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="modal-overlay open" onClick={(event) => event.target === event.currentTarget && onClose()}>
       <div
         ref={modalRef}
@@ -469,6 +470,7 @@ export function PrCreateModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

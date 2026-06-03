@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PrCreateModal } from "../PrCreateModal";
@@ -72,6 +72,57 @@ describe("PrCreateModal", () => {
   it("renders nothing when closed", () => {
     render(<PrCreateModal open={false} taskId="FN-4756" onClose={vi.fn()} onCreated={vi.fn()} addToast={vi.fn()} />);
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("portals out of a container-type containing block", async () => {
+    const { container } = render(
+      <div data-testid="trap" style={{ containerType: "inline-size" }}>
+        <PrCreateModal open taskId="FN-4756" onClose={vi.fn()} onCreated={vi.fn()} addToast={vi.fn()} />
+      </div>,
+    );
+
+    await screen.findByDisplayValue("AI title");
+
+    const trap = within(container).getByTestId("trap");
+    expect(trap.querySelector('[role="dialog"]')).toBeNull();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.parentElement).toHaveClass("modal-overlay", "open");
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+  });
+
+  it("portals independently of an outer modal overlay", async () => {
+    const outerOnClose = vi.fn();
+    const innerOnClose = vi.fn();
+
+    const { container } = render(
+      <div>
+        <div className="modal-overlay open" data-testid="outer-overlay" onClick={outerOnClose}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Outer modal">Outer modal</div>
+        </div>
+        <div data-testid="outer-shell">
+          <PrCreateModal open taskId="FN-4756" onClose={innerOnClose} onCreated={vi.fn()} addToast={vi.fn()} />
+        </div>
+      </div>,
+    );
+
+    await screen.findByDisplayValue("AI title");
+
+    const outerShell = within(container).getByTestId("outer-shell");
+    expect(outerShell.querySelector('[role="dialog"]')).toBeNull();
+
+    const overlays = Array.from(document.body.querySelectorAll(".modal-overlay.open"));
+    expect(overlays).toHaveLength(2);
+
+    const outerOverlay = within(container).getByTestId("outer-overlay");
+    const innerDialog = screen.getByRole("dialog", { name: "Create Pull Request" });
+    expect(outerOverlay.contains(innerDialog)).toBe(false);
+
+    fireEvent.click(outerOverlay);
+    expect(outerOnClose).toHaveBeenCalledTimes(1);
+    expect(innerOnClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Create Pull Request" })).toBeInTheDocument();
   });
 
   it("loads metadata/preflight/options on open and renders key sections", async () => {
@@ -185,9 +236,17 @@ describe("PrCreateModal", () => {
     expect((await screen.findAllByText(/gh auth login/i)).length).toBeGreaterThan(0);
   });
 
+  it("closes on overlay click", async () => {
+    const { onClose } = await renderModalLoaded();
+    const overlay = document.querySelector(".modal-overlay.open");
+    expect(overlay).toBeTruthy();
+    fireEvent.click(overlay as Element);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("closes on escape", async () => {
     const { onClose } = await renderModalLoaded();
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

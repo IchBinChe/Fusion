@@ -1695,7 +1695,8 @@ describe("TaskExecutor worktree recovery", () => {
   it("removes existing directory that is not a registered worktree", async () => {
     const store = createMockStore();
     const fs = await import("node:fs/promises");
-    const staleWorktreePath = "/tmp/test/.worktrees/swift-falcon";
+    const tempRoot = await fs.mkdtemp("/tmp/executor-worktree-");
+    const staleWorktreePath = `${tempRoot}/.worktrees/swift-falcon`;
 
     // Directory exists but is not registered
     mockedExistsSync.mockReturnValue(true);
@@ -1712,7 +1713,7 @@ describe("TaskExecutor worktree recovery", () => {
       return Buffer.from("");
     });
 
-    const executor = new TaskExecutor(store, "/tmp/test");
+    const executor = new TaskExecutor(store, tempRoot);
     await executor.execute(makeTask());
 
     expect(

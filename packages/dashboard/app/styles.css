@@ -197,7 +197,7 @@ html {
 
 svg.animate-spin,
 svg.spin {
-  transform-box: fill-box;
+  transform-box: view-box;
 }
 
 :root {

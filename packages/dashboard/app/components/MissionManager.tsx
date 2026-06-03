@@ -123,6 +123,8 @@ interface MissionManagerProps {
   milestoneSliceResumeSessionId?: string;
   /** Called when milestone/slice resume session fetch fails */
   onMilestoneSliceResumeFetchError?: () => void;
+  /** Navigate to the goals view anchored to a specific goal */
+  onNavigateToGoal?: (goalId: string) => void;
 }
 
 // Status badge colors — use CSS custom-property-compatible tokens
@@ -581,6 +583,7 @@ function normalizeMissionHierarchy(mission: MissionWithHierarchy): MissionWithHi
 
   return {
     ...mission,
+    linkedGoals: Array.isArray(mission.linkedGoals) ? mission.linkedGoals : [],
     milestones: mission.milestones.map((milestone) => {
       if (!Array.isArray(milestone.slices)) {
         throw new Error(`Malformed mission detail response: milestone ${milestone.id} is missing slices`);
@@ -603,7 +606,7 @@ function normalizeMissionHierarchy(mission: MissionWithHierarchy): MissionWithHi
   };
 }
 
-export function MissionManager({ isOpen, isInline = false, onClose, addToast, projectId, onSelectTask, availableTasks = [], resumeSessionId, targetMissionId, milestoneSliceResumeSessionId, onMilestoneSliceResumeFetchError }: MissionManagerProps) {
+export function MissionManager({ isOpen, isInline = false, onClose, addToast, projectId, onSelectTask, availableTasks = [], resumeSessionId, targetMissionId, milestoneSliceResumeSessionId, onMilestoneSliceResumeFetchError, onNavigateToGoal }: MissionManagerProps) {
   const isActive = isInline || isOpen;
   const cacheSuffix = projectId ?? "";
   const missionsCacheKey = `${SWR_CACHE_KEYS.MISSIONS_PREFIX}${cacheSuffix}`;
@@ -897,7 +900,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const [missionHealthById, setMissionHealthById] = useState<Map<string, MissionHealth>>(new Map());
 
   const [activeTab, setActiveTab] = useState<"structure" | "activity">("structure");
-  const milestoneAssertionGapSignatureRef = useRef<Map<string, string>>(new Map());
   const [missionEvents, setMissionEvents] = useState<MissionEvent[]>([]);
   const missionEventsRef = useRef<MissionEvent[]>([]);
   const missionsRef = useRef<MissionWithSummary[]>([]);
@@ -914,31 +916,24 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
   const activityEventsContainerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!selectedMission) return;
+  const activityEventsEndRef = useRef<HTMLDivElement>(null);
 
-    const nextSignatures = new Map<string, string>();
-    for (const milestone of selectedMission.milestones) {
-      const featuresWithAcceptanceCriteria = milestone.slices
-        .flatMap((slice) => slice.features)
-        .filter((feature) => (feature.acceptanceCriteria ?? "").trim().length > 0);
-      const assertionCount = assertionsByMilestone.get(milestone.id)?.length ?? 0;
-      const hasZeroAssertionGuard = featuresWithAcceptanceCriteria.length > 0 && assertionCount === 0;
-      const signature = `${hasZeroAssertionGuard}:${featuresWithAcceptanceCriteria.length}:${assertionCount}`;
-      const previousSignature = milestoneAssertionGapSignatureRef.current.get(milestone.id);
-      if (hasZeroAssertionGuard && previousSignature !== signature) {
-        console.warn("[MissionManager] milestone_zero_assertion_guard", {
-          milestoneId: milestone.id,
-          featureAcceptanceCriteriaCount: featuresWithAcceptanceCriteria.length,
-          assertionCount,
-        });
-      }
-      nextSignatures.set(milestone.id, signature);
+  const activityTabEventCount = useMemo(() => {
+    if (!selectedMission?.id) {
+      return eventsTotal;
     }
 
-    milestoneAssertionGapSignatureRef.current = nextSignatures;
-  }, [assertionsByMilestone, selectedMission]);
-  const activityEventsEndRef = useRef<HTMLDivElement>(null);
+    const baseCount = selectedMission.eventCount
+      ?? missions.find((mission) => mission.id === selectedMission.id)?.summary?.eventCount;
+
+    if (baseCount == null) {
+      return eventsTotal;
+    }
+
+    return Math.max(baseCount, eventsTotal);
+  }, [eventsTotal, missions, selectedMission?.eventCount, selectedMission?.id]);
+
+  const displayedMissionEvents = useMemo(() => [...missionEvents].reverse(), [missionEvents]);
 
   // Keep latest state available to long-lived SSE handlers without reconnect churn.
   missionsRef.current = missions;
@@ -1560,10 +1555,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
         if (shouldAutoScroll) {
           requestAnimationFrame(() => {
-            const container = activityEventsContainerRef.current;
-            if (container) {
-              container.scrollTop = 0;
-            }
+            scrollActivityToLatest();
           });
         }
       } catch {
@@ -1606,6 +1598,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     projectId,
     refreshMissionSidebar,
     refreshValidationTelemetry,
+    scrollActivityToLatest,
   ]);
 
   // Mission handlers
@@ -2528,6 +2521,32 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   </span>
                 </div>
 
+                <section className="mission-detail__linked-goals" aria-label="Linked goals">
+                  <div className="mission-detail__linked-goals-header">
+                    <h4 className="mission-detail__linked-goals-title">Linked Goals</h4>
+                    <span className="mission-detail__meta-info">
+                      {selectedMission.linkedGoals?.length ?? 0} linked
+                    </span>
+                  </div>
+                  {(selectedMission.linkedGoals?.length ?? 0) > 0 ? (
+                    <div className="mission-detail__linked-goals-list">
+                      {(selectedMission.linkedGoals ?? []).map((goal) => (
+                        <button
+                          key={goal.id}
+                          type="button"
+                          className="btn mission-detail__linked-goal-chip"
+                          data-testid={`mission-linked-goal-chip-${goal.id}`}
+                          onClick={() => onNavigateToGoal?.(goal.id)}
+                        >
+                          {goal.title}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mission-detail__linked-goals-empty">No linked goals.</p>
+                  )}
+                </section>
+
                 <section className="mission-detail__run-settings" aria-label="Mission run settings">
                   <h4 className="mission-detail__run-settings-title">Mission run settings</h4>
                   {/* ── Autopilot section ── */}
@@ -2748,7 +2767,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   aria-selected={activeTab === "activity"}
                   data-testid="mission-tab-activity"
                 >
-                  Activity ({eventsTotal})
+                  Activity ({activityTabEventCount})
                 </button>
               </div>
 
@@ -2773,7 +2792,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   const milestoneAssertions = Array.isArray(assertionsByMilestone.get(milestone.id))
                     ? assertionsByMilestone.get(milestone.id)!
                     : [] as MissionContractAssertion[];
-                  const hasZeroAssertionGuard = featuresWithAcceptanceCriteria.length > 0 && milestoneAssertions.length === 0;
 
                   return (
                   <div key={milestone.id} className="mission-milestone">
@@ -3584,17 +3602,11 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                           {/* Assertions Panel */}
                           <div className="mission-assertions">
                             <div className="mission-assertions__header">
-                              <span className="mission-assertions__title">Contract assertions (validator-enforced when linked)</span>
+                              <span className="mission-assertions__title">Contract assertions (AI-validated)</span>
                               <span className="mission-assertions__mode-tag" data-testid="milestone-assertions-enforced-indicator">
                                 <span className="status-dot status-dot--running" />
-                                Enforced by autopilot
+                                AI-validated mission gate
                               </span>
-                              {hasZeroAssertionGuard && (
-                                <span className="mission-assertions__mode-tag mission-assertions__mode-tag--warning" data-testid="milestone-zero-assertion-guard">
-                                  <span className="status-dot status-dot--pending" />
-                                  Feature criteria present but no enforced contract assertions linked
-                                </span>
-                              )}
                               {milestoneRollup && (
                                 <span
                                   className="mission-status-badge mission-status-badge--sm"
@@ -3728,23 +3740,11 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                         {(() => {
                                           const linked = linkedFeaturesByAssertion.get(assertion.id);
                                           const count = linked?.length ?? 0;
-                                          const isEnforced = count > 0;
-                                          return (
-                                            <>
-                                              <span
-                                                className={`mission-assertion__enforcement ${isEnforced ? "mission-assertion__enforcement--enforced" : "mission-assertion__enforcement--informational"}`}
-                                                data-testid={`mission-assertion-enforcement-${assertion.id}`}
-                                              >
-                                                <span className={`status-dot ${isEnforced ? "status-dot--running" : "status-dot--pending"}`} />
-                                                {isEnforced ? "Enforced gate" : "Informational"}
-                                              </span>
-                                              {count > 0 ? (
-                                                <span className="mission-assertion__linked-count" title={`${count} linked feature${count !== 1 ? "s" : ""}`}>
-                                                  ({count} linked)
-                                                </span>
-                                              ) : null}
-                                            </>
-                                          );
+                                          return count > 0 ? (
+                                            <span className="mission-assertion__linked-count" title={`${count} linked feature${count !== 1 ? "s" : ""}`}>
+                                              ({count} linked)
+                                            </span>
+                                          ) : null;
                                         })()}
                                         <button
                                           className="mission-icon-btn"
@@ -3853,22 +3853,19 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                               {(milestoneAssertions.length === 0)
                                 && !isCreatingAssertion
                                 && (
+                                  // Render from feature prose presence directly. Legacy
+                                  // hasProseButNoAssertions telemetry is no longer the gate.
                                   featuresWithAcceptanceCriteria.length > 0 ? (
-                                    // Product contract source of truth: docs/missions-completion-contract.md (FN-5718).
-                                    // MissionFeature.acceptanceCriteria is informational authored intent; linked
-                                    // MissionContractAssertion rows are the validator-enforced completion gate.
-                                    // When criteria prose exists but assertions are absent, keep criteria visible
-                                    // and warn that the surface is informational until assertions are linked.
                                     <>
                                       <div className="mission-manager__empty mission-assertions__empty">
-                                        <span>No contract assertions are linked yet. Feature acceptance criteria are present below and remain informational until assertions are linked.</span>
+                                        <span>No linked contract assertions are loaded yet. Feature criteria below will still be AI-validated when mission validation runs.</span>
                                       </div>
                                       <div className="mission-assertions__list" data-testid="milestone-feature-acceptance-rollup">
                                         <div className="mission-assertions__rollup-header">
-                                          <span className="mission-assertions__title">Feature acceptance criteria (informational source)</span>
-                                          <span className="mission-assertions__mode-tag mission-assertions__mode-tag--informational" data-testid="milestone-feature-acceptance-informational-indicator">
-                                            <span className="status-dot status-dot--pending" />
-                                            Not enforced by autopilot
+                                          <span className="mission-assertions__title">Feature criteria awaiting assertion sync</span>
+                                          <span className="mission-assertions__mode-tag" data-testid="milestone-feature-acceptance-ai-validated-indicator">
+                                            <span className="status-dot status-dot--running" />
+                                            AI-validated at runtime
                                           </span>
                                         </div>
                                         {featuresWithAcceptanceCriteria.map((feature) => (
@@ -3876,11 +3873,14 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                             <div className="mission-assertion__header">
                                               <span className="mission-assertion__title">{feature.title}</span>
                                               <span
-                                                className="mission-assertion__enforcement mission-assertion__enforcement--informational"
-                                                data-testid={`mission-feature-acceptance-enforcement-${feature.id}`}
+                                                className="mission-status-badge mission-status-badge--sm"
+                                                data-testid={`mission-feature-acceptance-status-${feature.id}`}
+                                                style={{
+                                                  backgroundColor: featureStatusColors[feature.status].bg,
+                                                  color: featureStatusColors[feature.status].text,
+                                                }}
                                               >
-                                                <span className="status-dot status-dot--pending" />
-                                                Informational
+                                                {feature.status}
                                               </span>
                                             </div>
                                             <div className="mission-assertion__text">
@@ -4009,7 +4009,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       className="mission-events"
                       data-testid="mission-activity-events"
                     >
-                      {missionEvents.map((event) => {
+                      {displayedMissionEvents.map((event) => {
                         const hasMetadata = Boolean(event.metadata && Object.keys(event.metadata).length > 0);
                         const metadataExpanded = expandedEventMetadata.has(event.id);
 
@@ -4189,6 +4189,10 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     const progressPercent = health?.estimatedCompletionPercent ?? summary?.progressPercent ?? 0;
     const showSummaryBlock = hasContent || totalTasks > 0 || tasksFailed > 0 || Boolean(health?.lastActivityAt);
     const isInterviewStyle = options?.interviewStyle === true;
+    const showUnlinkedIndicator =
+      m.status === "active" &&
+      !isInterviewStyle &&
+      (mission.summary?.linkedGoalCount ?? 0) === 0;
 
     return (
       <div
@@ -4234,6 +4238,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             >
               {m.status}
             </span>
+            {showUnlinkedIndicator && (
+              <span
+                className="mission-status-badge mission-status-badge--sm mission-status-badge--unlinked"
+                title="No goals linked to this mission"
+                aria-label="No goals linked to this mission"
+                data-testid={`mission-unlinked-indicator-${m.id}`}
+              >
+                Unlinked
+              </span>
+            )}
             {isInterviewStyle && (
               <span className="mission-status-badge mission-status-badge--sm mission-interview-status mission-interview-status--awaiting_input">
                 Interview in progress

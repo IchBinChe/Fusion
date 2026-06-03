@@ -660,6 +660,75 @@ describe("PlanningModeModal", () => {
       });
     });
 
+    it("FN-5912 keeps Break into Tasks labeled while Create Single Task is pending", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-spinner-isolation-single-task",
+        description: "Recovered summary for spinner isolation on single-task creation",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement", "Verify"],
+      };
+      const createTaskDeferred = createDeferred<Task>();
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-spinner-isolation-single-task",
+        type: "planning",
+        status: "complete",
+        title: "Resume-spinner-isolation-single-task",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and create a single task" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      mockCreateTaskFromPlanning.mockReturnValueOnce(createTaskDeferred.promise);
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-spinner-isolation-single-task"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Create Single Task" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Single Task" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
+      });
+
+      expect(screen.getByRole("button", { name: "Break into Tasks" })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Breaking down..." })).toBeNull();
+
+      createTaskDeferred.resolve({
+        id: "FN-5912",
+        title: "Created from spinner isolation test",
+        description: "",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      } as Task);
+
+      await waitFor(() => {
+        expect(mockOnClose).toHaveBeenCalled();
+      });
+    });
+
     it("FN-4769 shows inline Breaking down spinner for Break into Tasks while breakdown start is pending", async () => {
       const resumedSummary: PlanningSummary = {
         title: "Resume-spinner-breakdown-start",
@@ -710,6 +779,75 @@ describe("PlanningModeModal", () => {
 
       breakdownDeferred.resolve({
         sessionId: "session-spinner-breakdown-start",
+        subtasks: [
+          {
+            id: "subtask-1",
+            title: "First subtask",
+            description: "First description",
+            suggestedSize: "M",
+            dependsOn: [],
+          },
+        ],
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Create Tasks" })).toBeDefined();
+      });
+    });
+
+    it("FN-5912 keeps Create Single Task labeled while Break into Tasks is pending", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-spinner-isolation-breakdown",
+        description: "Recovered summary for spinner isolation on breakdown start",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement", "Verify"],
+      };
+      const breakdownDeferred = createDeferred<{ sessionId: string; subtasks: any[] }>();
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-spinner-isolation-breakdown",
+        type: "planning",
+        status: "complete",
+        title: "Resume-spinner-isolation-breakdown",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and break down into tasks" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      mockStartPlanningBreakdown.mockReturnValueOnce(breakdownDeferred.promise);
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-spinner-isolation-breakdown"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Break into Tasks" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Break into Tasks" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Breaking down..." })).toBeDisabled();
+      });
+
+      expect(screen.getByRole("button", { name: "Create Single Task" })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Creating..." })).toBeNull();
+
+      breakdownDeferred.resolve({
+        sessionId: "session-spinner-isolation-breakdown",
         subtasks: [
           {
             id: "subtask-1",
@@ -1046,7 +1184,7 @@ describe("PlanningModeModal", () => {
       expect(screen.getByRole("button", { name: "Start Planning" })).toBeDefined();
     });
 
-    it("shows retry panel when resuming an errored session", async () => {
+    it("shows retry panel when resuming an errored session and retries the same session", async () => {
       mockFetchAiSession.mockResolvedValueOnce({
         id: "session-error-1",
         type: "planning",
@@ -1062,6 +1200,7 @@ describe("PlanningModeModal", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
+      mockRetryPlanningSession.mockResolvedValueOnce({ success: true, sessionId: "session-error-1" });
 
       render(
         <PlanningModeModal
@@ -1075,9 +1214,288 @@ describe("PlanningModeModal", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Session interrupted")).toBeDefined();
+        expect(screen.getByRole("alert")).toHaveTextContent("Session interrupted");
+      });
+      expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => {
+        expect(mockRetryPlanningSession).toHaveBeenCalledWith("session-error-1", undefined, expect.any(String));
+      });
+    });
+
+    it("shows retry panel when selecting an errored session from the sidebar", async () => {
+      mockFetchAiSessions.mockResolvedValueOnce([
+        {
+          id: "session-sidebar-error",
+          type: "planning",
+          status: "error",
+          title: "Sidebar errored session",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-02T00:00:00.000Z",
+          archived: false,
+        },
+      ]);
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-sidebar-error",
+        type: "planning",
+        status: "error",
+        title: "Sidebar errored session",
+        inputPayload: JSON.stringify({ initialPlan: "Recover sidebar session" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: null,
+        thinkingOutput: "",
+        error: "Sidebar session interrupted",
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      mockRetryPlanningSession.mockResolvedValueOnce({ success: true, sessionId: "session-sidebar-error" });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Sidebar errored session/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /Sidebar errored session/i }));
+
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("session-sidebar-error");
+        expect(screen.getByRole("alert")).toHaveTextContent("Sidebar session interrupted");
+      });
+      expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => {
+        expect(mockRetryPlanningSession).toHaveBeenCalledWith("session-sidebar-error", undefined, expect.any(String));
+      });
+    });
+
+    it("routes malformed persisted result data from sidebar selection to the recoverable error view", async () => {
+      mockFetchAiSessions.mockResolvedValueOnce([
+        {
+          id: "session-malformed-result",
+          type: "planning",
+          status: "complete",
+          title: "Malformed result session",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-02T00:00:00.000Z",
+          archived: false,
+        },
+      ]);
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-malformed-result",
+        type: "planning",
+        status: "complete",
+        title: "Malformed result session",
+        inputPayload: JSON.stringify({ initialPlan: "Recover malformed result" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: "{",
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Malformed result session/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /Malformed result session/i }));
+
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("session-malformed-result");
+        expect(screen.getByRole("alert")).toBeDefined();
       });
       expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
+    });
+
+    it("re-syncs the selected session to the recoverable error view when the modal reopens", async () => {
+      const reopenedSummary: PlanningSummary = {
+        title: "Reopen then recover",
+        description: "First open shows a valid summary",
+        suggestedSize: "S",
+        suggestedDependencies: [],
+        keyDeliverables: ["Recover"],
+      };
+
+      mockFetchAiSessions.mockResolvedValue([
+        {
+          id: "session-reopen-recover",
+          type: "planning",
+          status: "complete",
+          title: "Reopen recover session",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-02T00:00:00.000Z",
+          archived: false,
+        },
+      ]);
+      mockFetchAiSession
+        .mockResolvedValueOnce({
+          id: "session-reopen-recover",
+          type: "planning",
+          status: "complete",
+          title: "Reopen recover session",
+          inputPayload: JSON.stringify({ initialPlan: "Reopen recover session" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: JSON.stringify(reopenedSummary),
+          thinkingOutput: "",
+          error: null,
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        })
+        .mockResolvedValueOnce({
+          id: "session-reopen-recover",
+          type: "planning",
+          status: "complete",
+          title: "Reopen recover session",
+          inputPayload: JSON.stringify({ initialPlan: "Reopen recover session" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: "{",
+          thinkingOutput: "",
+          error: null,
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-03T00:00:00.000Z",
+        });
+
+      const { rerender } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Reopen recover session/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /Reopen recover session/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Planning Complete!")).toBeDefined();
+      });
+
+      rerender(
+        <PlanningModeModal
+          isOpen={false}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      rerender(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenLastCalledWith("session-reopen-recover");
+        expect(screen.getByRole("alert")).toBeDefined();
+      });
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
+    });
+
+    it("quietly falls back to the initial view when a resumed session no longer exists", async () => {
+      mockFetchAiSession.mockResolvedValueOnce(null);
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-deleted"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Start Planning" })).toBeDefined();
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByText("Failed to load session")).toBeNull();
+    });
+
+    it("quietly falls back to the initial view when a sidebar session no longer exists", async () => {
+      mockFetchAiSessions.mockResolvedValueOnce([
+        {
+          id: "session-sidebar-deleted",
+          type: "planning",
+          status: "complete",
+          title: "Sidebar deleted session",
+          projectId: null,
+          lockedByTab: null,
+          updatedAt: "2026-01-02T00:00:00.000Z",
+          archived: false,
+        },
+      ]);
+      mockFetchAiSession.mockResolvedValueOnce(null);
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Sidebar deleted session/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /Sidebar deleted session/i }));
+
+      await waitFor(() => {
+        expect(mockFetchAiSession).toHaveBeenCalledWith("session-sidebar-deleted");
+        expect(screen.getByRole("button", { name: "Start Planning" })).toBeDefined();
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByText("Failed to load session")).toBeNull();
     });
 
     it("creates a task from a resumed complete session and keeps the completed session in local history", async () => {

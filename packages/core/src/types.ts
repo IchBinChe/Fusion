@@ -3697,10 +3697,16 @@ export interface ProjectSettings {
    *  Allowed values: 0 (off, default) or one of 7 | 14 | 30 | 60 | 90. Uses messages.updatedAt inactivity age. */
   mailAutoCleanupDays?: number;
   /** Number of days to retain append-only operational-log rows (activityLog,
-   *  agentLogEntries, runAuditEvents, agentHeartbeats) before periodic maintenance
-   *  prunes them. These tables are the main driver of unbounded database growth.
+   *  runAuditEvents, agentHeartbeats) before periodic maintenance prunes them.
+   *  Agent logs are now stored in per-task JSONL files — see agentLogFileRetentionDays.
    *  Default: 30. Set 0 to disable pruning. Uses each row's `timestamp` column. */
   operationalLogRetentionDays?: number;
+  /** Number of days to retain per-task agent-log JSONL files for soft-deleted
+   *  and archived tasks. Only affects tasks that are no longer active. Entries
+   *  older than this window are removed from the JSONL file during periodic
+   *  maintenance. Default: 0 (disabled). Set to a positive integer (e.g. 90)
+   *  to enable pruning. */
+  agentLogFileRetentionDays?: number;
   /** Number of most-recent chat-room messages kept verbatim in the responder transcript.
    *  Older messages are compacted into a summary block. Default: 12. */
   chatRoomRecentVerbatimMessages?: number;

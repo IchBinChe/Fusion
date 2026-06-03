@@ -149,7 +149,9 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 101;
+const SCHEMA_VERSION = 102;
+
+export { SCHEMA_VERSION };
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -482,19 +484,6 @@ CREATE TABLE IF NOT EXISTS agentRuns (
 );
 CREATE INDEX IF NOT EXISTS idxAgentRunsAgentIdStartedAt ON agentRuns(agentId, startedAt);
 CREATE INDEX IF NOT EXISTS idxAgentRunsStatus ON agentRuns(status);
-
-CREATE TABLE IF NOT EXISTS agentLogEntries (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  taskId TEXT NOT NULL,
-  timestamp TEXT NOT NULL,
-  text TEXT NOT NULL,
-  type TEXT NOT NULL,
-  detail TEXT,
-  agent TEXT,
-  FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdTimestamp ON agentLogEntries(taskId, timestamp);
-CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdType ON agentLogEntries(taskId, type);
 
 CREATE TABLE IF NOT EXISTS agentTaskSessions (
   agentId TEXT NOT NULL,
@@ -1317,6 +1306,18 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     mentions: "TEXT",
     createdAt: "TEXT NOT NULL",
   },
+  // agentLogEntries is created by migration 40 for legacy DBs and dropped by
+  // migration 102. Included here so the architecture-schema-compat test
+  // recognizes it as a covered migration-only table.
+  agentLogEntries: {
+    id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+    taskId: "TEXT NOT NULL",
+    timestamp: "TEXT NOT NULL",
+    text: "TEXT NOT NULL",
+    type: "TEXT NOT NULL",
+    detail: "TEXT",
+    agent: "TEXT",
+  },
 };
 
 /**
@@ -1814,7 +1815,6 @@ export class Database {
    */
   private static readonly OPERATIONAL_LOG_TABLES = [
     "activityLog",
-    "agentLogEntries",
     "runAuditEvents",
     "agentHeartbeats",
   ] as const;
@@ -4014,6 +4014,27 @@ export class Database {
             ON mission_goals(goalId)
         `);
       });
+    }
+
+    // Migration 102: Drop agentLogEntries after store-level migration has
+    // copied legacy rows into per-task JSONL files. Database.init() runs before
+    // TaskStore.init(), so we must defer the destructive drop until the store
+    // writes the migration guard into __meta and re-runs init().
+    if (version < 102) {
+      const agentLogMigrationComplete = this.getMetaValue("agentLogEntriesToFileMigrationVersion") === "1";
+      const hasLegacyAgentLogTable = this.hasTable("agentLogEntries");
+      const legacyAgentLogTableIsEmpty = hasLegacyAgentLogTable
+        ? ((this.db.prepare("SELECT COUNT(*) as count FROM agentLogEntries").get() as { count: number }).count === 0)
+        : true;
+      const hasLegacyAgentLogCitations =
+        (this.db.prepare(
+          "SELECT 1 FROM goal_citations WHERE surface = 'agent_log' AND sourceRef GLOB 'agentLog:[0-9]*' LIMIT 1",
+        ).get() ?? undefined) !== undefined;
+      if (!hasLegacyAgentLogTable || agentLogMigrationComplete || (legacyAgentLogTableIsEmpty && !hasLegacyAgentLogCitations)) {
+        this.applyMigration(102, () => {
+          this.db.exec(`DROP TABLE IF EXISTS agentLogEntries`);
+        });
+      }
     }
 
   }

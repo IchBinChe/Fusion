@@ -79,8 +79,8 @@
 .merge-advance-notice__push-advanced label {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2xs);
-  margin-top: var(--space-2xs);
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
 }
 
 .merge-advance-notice__push-error {
@@ -88,8 +88,8 @@
 }
 
 .merge-advance-notice__push-error pre {
-  margin: var(--space-2xs) 0;
-  padding: var(--space-2xs);
+  margin: var(--space-xs) 0;
+  padding: var(--space-xs);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-error) 12%, transparent);
   color: var(--color-error);

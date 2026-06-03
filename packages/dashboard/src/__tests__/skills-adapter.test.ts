@@ -3,6 +3,8 @@ import { createSkillsAdapter, extractSkillName, computeSkillId } from "../skills
 import { writeFile, mkdir, access, readFile, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 describe("createSkillsAdapter - fetchCatalog fallback behavior", () => {
   const originalFetch = globalThis.fetch;
@@ -639,6 +641,117 @@ describe("createSkillsAdapter - toggleExecutionSkill persistence", () => {
     } finally {
       await fixture.cleanup();
     }
+  });
+});
+
+describe("createSkillsAdapter - installSkill", () => {
+  it("short-circuits invalid source without spawning", async () => {
+    const superviseSpawnMock = vi.fn();
+    const adapter = createSkillsAdapter({
+      packageManager: { resolve: vi.fn().mockResolvedValue({ skills: [] }) },
+      getSettingsPath: vi.fn().mockReturnValue("/tmp/settings.json"),
+      superviseSpawn: superviseSpawnMock as never,
+    });
+
+    const result = await adapter.installSkill({ source: "invalid", cwd: "/tmp/project" });
+
+    expect(result).toEqual({
+      error: "Invalid source format. Use owner/repo.",
+      code: "invalid_source",
+    });
+    expect(superviseSpawnMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "without a specific skill",
+      input: { source: "owner/repo", cwd: "/tmp/project" },
+      expectedArgs: ["skills", "add", "owner/repo", "-y", "-a", "pi"],
+    },
+    {
+      name: "with a specific skill",
+      input: { source: "owner/repo", skill: "my-skill", cwd: "/tmp/project" },
+      expectedArgs: ["skills", "add", "owner/repo", "--skill", "my-skill", "-y", "-a", "pi"],
+    },
+  ])("spawns npx skills add $name", async ({ input, expectedArgs }) => {
+    const superviseSpawnMock = vi.fn((_command: string, _args: string[]) => {
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+        pid: number;
+      };
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.pid = 4242;
+      process.nextTick(() => {
+        stdout.end();
+        stderr.end();
+      });
+      return {
+        pid: 4242,
+        pgid: null,
+        child,
+        kill: vi.fn(),
+        waitExit: () => Promise.resolve({ code: 0, signal: null }),
+      };
+    });
+    const adapter = createSkillsAdapter({
+      packageManager: { resolve: vi.fn().mockResolvedValue({ skills: [] }) },
+      getSettingsPath: vi.fn().mockReturnValue("/tmp/settings.json"),
+      superviseSpawn: superviseSpawnMock as never,
+    });
+
+    const result = await adapter.installSkill(input);
+
+    expect(result).toEqual({ success: true });
+    expect(superviseSpawnMock).toHaveBeenCalledWith(
+      "npx",
+      expectedArgs,
+      expect.objectContaining({
+        cwd: "/tmp/project",
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        maxLifetimeMs: 60_000,
+      }),
+    );
+  });
+
+  it("returns install_failed when the installer exits non-zero", async () => {
+    const superviseSpawnMock = vi.fn(() => {
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+        pid: number;
+      };
+      child.stdout = stdout;
+      child.stderr = stderr;
+      child.pid = 4242;
+      process.nextTick(() => {
+        stderr.write("install failed\n");
+        stdout.end();
+        stderr.end();
+      });
+      return {
+        pid: 4242,
+        pgid: null,
+        child,
+        kill: vi.fn(),
+        waitExit: () => Promise.resolve({ code: 1, signal: null }),
+      };
+    });
+    const adapter = createSkillsAdapter({
+      packageManager: { resolve: vi.fn().mockResolvedValue({ skills: [] }) },
+      getSettingsPath: vi.fn().mockReturnValue("/tmp/settings.json"),
+      superviseSpawn: superviseSpawnMock as never,
+    });
+
+    const result = await adapter.installSkill({ source: "owner/repo", cwd: "/tmp/project" });
+
+    expect(result).toEqual({ error: "install failed", code: "install_failed" });
   });
 });
 

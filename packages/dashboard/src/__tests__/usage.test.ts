@@ -2607,6 +2607,95 @@ describe("usage", () => {
       expect(speechWindow).toBeDefined();
     });
 
+    it("shows percent-only models and weekly windows from real coding_plan response", async () => {
+      // Mirrors a real coding_plan/remains response: the primary "general"
+      // model meters quota purely via *_remaining_percent (its count fields are
+      // 0), and every model also carries a separate weekly quota window.
+      const now = Date.now();
+      const mockResponse = {
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 91,
+            remains_time: 2_039_915,
+            start_time: now - 3 * 60 * 60 * 1000,
+            end_time: now + 2 * 60 * 60 * 1000,
+            current_weekly_total_count: 0,
+            current_weekly_usage_count: 0,
+            current_weekly_remaining_percent: 100,
+            weekly_remains_time: 380_039_915,
+            weekly_start_time: now - 1 * 60 * 60 * 1000,
+            weekly_end_time: now + 6 * 24 * 60 * 60 * 1000,
+          },
+          {
+            model_name: "video",
+            current_interval_total_count: 3,
+            current_interval_usage_count: 3,
+            current_interval_remaining_percent: 100,
+            remains_time: 34_439_915,
+            start_time: now - 1 * 60 * 60 * 1000,
+            end_time: now + 23 * 60 * 60 * 1000,
+            current_weekly_total_count: 21,
+            current_weekly_usage_count: 21,
+            current_weekly_remaining_percent: 100,
+            weekly_remains_time: 380_039_915,
+            weekly_start_time: now - 1 * 60 * 60 * 1000,
+            weekly_end_time: now + 6 * 24 * 60 * 60 * 1000,
+          },
+        ],
+      };
+
+      mockReadFile.mockImplementation((filePath: string) => {
+        if (filePath.includes(".pi/agent/auth.json")) {
+          return JSON.stringify({
+            minimax: { type: "api_key", key: "test-api-key" },
+          });
+        }
+        return Promise.reject(new Error("File not found"));
+      });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error("Keychain item not found");
+      });
+
+      const mockReq = { on: vi.fn(), write: vi.fn(), end: vi.fn() };
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 200,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from(JSON.stringify(mockResponse)));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const minimax = providers.find((p) => p.name === "Minimax")!;
+
+      expect(minimax.status).toBe("ok");
+      // 2 models × (interval + weekly) = 4 windows
+      expect(minimax.windows).toHaveLength(4);
+
+      // "general" interval row must appear even though its count fields are 0 —
+      // remaining-percent is the source of truth.
+      const generalInterval = minimax.windows.find((w) => w.label === "general")!;
+      expect(generalInterval).toBeDefined();
+      expect(generalInterval.percentLeft).toBeCloseTo(91, 0);
+      expect(generalInterval.percentUsed).toBeCloseTo(9, 0);
+
+      // Weekly window is surfaced as its own indicator.
+      const generalWeekly = minimax.windows.find((w) => w.label === "general (weekly)")!;
+      expect(generalWeekly).toBeDefined();
+      expect(generalWeekly.percentLeft).toBeCloseTo(100, 0);
+
+      expect(minimax.windows.find((w) => w.label === "video")).toBeDefined();
+      expect(minimax.windows.find((w) => w.label === "video (weekly)")).toBeDefined();
+    });
+
     it("skips models with zero quota", async () => {
       const mockResponse = {
         model_remains: [

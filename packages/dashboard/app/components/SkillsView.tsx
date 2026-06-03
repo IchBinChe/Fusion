@@ -4,6 +4,7 @@ import { Wrench, RefreshCw, X, ChevronRight, ChevronDown, AlertCircle, Loader2 }
 import {
   fetchDiscoveredSkills,
   toggleExecutionSkill,
+  installSkill,
   fetchSkillsCatalog,
   fetchSkillContent,
 } from "../api";
@@ -27,6 +28,7 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [catalogEntries, setCatalogEntries] = useState<CatalogEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [installingCatalogEntryId, setInstallingCatalogEntryId] = useState<string | null>(null);
 
   // Skill content viewing state
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
@@ -163,6 +165,25 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
       addToast(`Failed to toggle skill: ${message}`, "error");
     }
   }, [projectId, addToast]);
+
+  const handleInstallCatalogSkill = useCallback(async (entry: CatalogEntry) => {
+    const source = entry.repo?.trim();
+    if (!source || installingCatalogEntryId === entry.id) {
+      return;
+    }
+
+    setInstallingCatalogEntryId(entry.id);
+    try {
+      await installSkill(source, entry.slug || entry.name, projectId);
+      addToast(`Installed ${entry.name}`, "success");
+      await loadDiscoveredSkills();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to install skill";
+      addToast(`Failed to install ${entry.name}: ${message}`, "error");
+    } finally {
+      setInstallingCatalogEntryId((current) => (current === entry.id ? null : current));
+    }
+  }, [addToast, installingCatalogEntryId, loadDiscoveredSkills, projectId]);
 
   const loadSkillContent = useCallback(async (skillId: string) => {
     setIsLoadingContent(true);
@@ -409,28 +430,48 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
             </div>
           ) : (
             <div className="skills-view-grid">
-              {catalogEntries.map((entry) => (
-                <div key={entry.id} className="skills-view-card">
-                  <h4 className="skills-view-card-title">{entry.name}</h4>
-                  {entry.description && (
-                    <p className="skills-view-card-description">{entry.description}</p>
-                  )}
-                  {entry.tags && entry.tags.length > 0 && (
-                    <div className="skills-view-card-tags">
-                      {entry.tags.map((tag) => (
-                        <span key={tag} className="badge badge--sm">
-                          {tag}
-                        </span>
-                      ))}
+              {catalogEntries.map((entry) => {
+                const source = entry.repo?.trim();
+                const canInstall = Boolean(source);
+                const isInstalling = installingCatalogEntryId === entry.id;
+
+                return (
+                  <div key={entry.id} className="skills-view-card">
+                    <div className="skills-view-card-header">
+                      <h4 className="skills-view-card-title">{entry.name}</h4>
+                      {canInstall ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm skills-view-card-install"
+                          onClick={() => void handleInstallCatalogSkill(entry)}
+                          disabled={isInstalling}
+                          aria-label={`Install ${entry.name}`}
+                        >
+                          {isInstalling ? <Loader2 size={14} className="spin" /> : null}
+                          {isInstalling ? "Installing…" : "Install"}
+                        </button>
+                      ) : null}
                     </div>
-                  )}
-                  {entry.installs !== undefined && (
-                    <span className="skills-view-card-installs">
-                      {entry.installs.toLocaleString()} installs
-                    </span>
-                  )}
-                </div>
-              ))}
+                    {entry.description && (
+                      <p className="skills-view-card-description">{entry.description}</p>
+                    )}
+                    {entry.tags && entry.tags.length > 0 && (
+                      <div className="skills-view-card-tags">
+                        {entry.tags.map((tag) => (
+                          <span key={tag} className="badge badge--sm">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {entry.installs !== undefined && (
+                      <span className="skills-view-card-installs">
+                        {entry.installs.toLocaleString()} installs
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

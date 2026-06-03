@@ -211,7 +211,7 @@ Mailbox view shows inbox/outbox communication threads and unread state.
 - reply rows in the mailbox modal can expand inline to show the replied-to message context for easier thread reading
 - mailbox now includes an **Approvals** tab with pending and history filters (`approved` / `denied` / `completed`), approval detail context, and inline approve/deny actions for pending requests
 - in the **Agents** tab, the agent selector now includes **All agents**, which shows one combined agent-to-agent stream (with sender + recipient labels); selecting a specific agent still shows Inbox/Outbox subtabs
-- mailbox entry points now show pending-approval indicators: Header mailbox toggle dot, Header overflow mailbox badge, Mobile mailbox tab dot, and Mobile More → Mailbox badge
+- mailbox entry points now show unread/pending indicators: the desktop Header mailbox toggle shows a pending-approval dot first or an unread dot when unread mail exists without pending approvals, while Header overflow + Mobile mailbox entry points continue to surface mailbox badges/dots
 - approval lifecycle SSE events (`approval:requested`, `approval:updated`, `approval:decided`) trigger mailbox approvals refresh without manual reload
 - when a task newly enters `awaiting-approval`, the app shows a persistent approval banner above project content with an **Open Mailbox** CTA; dismissals are remembered per approval item until that item advances or a different one arrives
 - Visible message history/threading is driven by explicit `message.metadata.replyTo.messageId` links
@@ -756,6 +756,8 @@ For setup prerequisites, security caveats for tokenized URLs/QR links, and troub
 
 ## Skills API
 
+The Skills view now supports the full browse-and-install loop for skills.sh entries: use **Skills Catalog** to search the catalog, click **Install** on any card with a source repository, and the dashboard will run the same installer as the CLI (`npx skills add <owner/repo> -y -a pi`, with `--skill <slug>` when applicable). On success, the view refreshes **Discovered Skills** immediately so the newly installed skill appears without a page reload.
+
 The Skills API provides endpoints for managing execution skills. Skills are toggled via project-scoped settings in `.fusion/settings.json`.
 
 ![Skills view](./screenshots/skills-view.png)
@@ -869,6 +871,49 @@ Toggle a skill's enabled/disabled state.
 - `404 Not Found` — Adapter not configured
   ```json
   { "error": "Skills adapter not configured", "code": "adapter_not_configured" }
+  ```
+
+### POST /api/skills/install
+
+Install a catalog skill into the current project.
+
+**Request Body:**
+```json
+{
+  "source": "owner/repo",
+  "skill": "example-skill"
+}
+```
+
+**Behavior:**
+- Validates `source` in `owner/repo` format before spawning anything
+- Runs `npx skills add <source> -y -a pi`
+- Appends `--skill <skill>` when `skill` is provided
+- Uses the scoped project root as `cwd`, so installed files land in the current project's skill directories
+
+**Response:** `200 OK`
+```json
+{
+  "success": true
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` — missing source
+  ```json
+  { "error": "source is required", "code": "invalid_body" }
+  ```
+- `400 Bad Request` — malformed source
+  ```json
+  { "error": "Invalid source format. Use owner/repo.", "code": "invalid_source" }
+  ```
+- `404 Not Found` — adapter not configured
+  ```json
+  { "error": "Skills adapter not configured", "code": "adapter_not_configured" }
+  ```
+- `502 Bad Gateway` — installer failed/timed out/could not start
+  ```json
+  { "error": "installer failed", "code": "install_failed" }
   ```
 
 ### GET /api/skills/catalog
@@ -1056,6 +1101,8 @@ Don't create parallel button/form variants — add states (`:hover`, `:focus-vis
 Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-width: 1024px`), 640px (compact), 480px (xs). Mobile overrides go in `@media (max-width: 768px)` blocks at the bottom of `styles.css` after base styles.
 
 **Bottom spacing:** `--mobile-nav-height` (44px) + `env(safe-area-inset-bottom, 0px)` + `--standalone-bottom-gap` (0/8px PWA). All bottom-positioned mobile elements compose those. When the soft keyboard opens, the mobile nav bar stays pinned to page bottom cross-platform; the executor footer keyboard-collapse pin is iOS-only. On Android (`interactive-widget=resizes-content`), the footer keeps its stacked position above the nav bar to avoid overlap after keyboard dismiss.
+
+**Footer-safe fill layouts:** View wrappers that reserve footer/mobile-nav space (for example `.project-content`) should be flex containers with `min-height: 0` / `min-width: 0`, and child surfaces like `.board` should use `flex: 1 1 auto` plus the same min-size guards. This keeps the board/columns stretched between the header and fixed bottom bars across desktop, tablet, and mobile while allowing internal scroll regions to own overflow.
 
 **Touch targets:** Standing button-freeze directive supersedes per-button touch-target guidance. For non-button elements, primary controls (nav bar, FAB, tab action rows, modal CTAs, list-row tap targets, form controls) must be ≥36px on mobile. Secondary controls inside a card/list-row where the row itself is the tap target stay compact (24–28px or small chips).
 

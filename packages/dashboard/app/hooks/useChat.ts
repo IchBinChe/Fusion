@@ -487,7 +487,6 @@ export function useChat(
   const resetTransientComposerState = useCallback(() => {
     cancelStreamingFlushesRef.current?.();
     cancelStreamingFlushesRef.current = null;
-    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
     setStreamingText("");
@@ -604,10 +603,6 @@ export function useChat(
       if (id && currentActiveSessionId === id && !sessionOverride) {
         return;
       }
-      if (currentActiveSessionId && currentActiveSessionId !== id) {
-        removePersistedPendingChatMessage(currentActiveSessionId);
-      }
-
       // Close any existing stream
       if (streamRef.current) {
         streamRef.current.close();
@@ -703,6 +698,7 @@ export function useChat(
   // Create a new session
   const createSession = useCallback(
     async (input: { agentId: string; title?: string; modelProvider?: string; modelId?: string }) => {
+      const previousSessionId = activeSessionRef.current?.id;
       const data = await apiCreateChatSession(input, projectId);
 
       if (streamRef.current) {
@@ -726,6 +722,7 @@ export function useChat(
         return [newSession, ...prev];
       });
 
+      removePersistedPendingChatMessage(previousSessionId);
       resetTransientComposerState();
       selectSession(newSession.id, newSession);
 
@@ -737,6 +734,7 @@ export function useChat(
   // Archive a session
   const archiveSession = useCallback(
     async (id: string) => {
+      removePersistedPendingChatMessage(id);
       await updateChatSession(id, { status: "archived" }, projectId);
       // Remove from sessions list
       setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -753,6 +751,7 @@ export function useChat(
   // Delete a session
   const deleteSession = useCallback(
     async (id: string) => {
+      removePersistedPendingChatMessage(id);
       // Close stream if active
       if (activeSession?.id === id && streamRef.current) {
         streamRef.current.close();

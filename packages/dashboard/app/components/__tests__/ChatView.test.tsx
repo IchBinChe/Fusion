@@ -462,14 +462,46 @@ describe("ChatView", () => {
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
     const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+    const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
 
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
 
     await waitFor(() => {
       expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("anthropic/claude-sonnet-4-5");
     });
+    expect(createBtn).toBeEnabled();
 
-    await userEvent.click(within(dialog!).getByText("Create"));
+    await userEvent.click(createBtn);
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        agentId: "__fn_agent__",
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+      });
+    });
+  });
+
+  it("creates session with the default model when Use default is selected in model mode", async () => {
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
+    setupMockChat({ sessions: [], filteredSessions: [], createSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("chat-new-btn"));
+
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+    const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
+
+    await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
+
+    const modelDropdown = await within(dialog!).findByTestId("mock-model-dropdown");
+    await userEvent.selectOptions(modelDropdown, "");
+
+    expect(modelDropdown).toHaveValue("");
+    expect(createBtn).toBeEnabled();
+
+    await userEvent.click(createBtn);
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
@@ -486,7 +518,8 @@ describe("ChatView", () => {
       defaultProvider: null,
       defaultModelId: null,
     });
-    setupMockChat({ sessions: [], filteredSessions: [] });
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
+    setupMockChat({ sessions: [], filteredSessions: [], createSession });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
@@ -497,10 +530,38 @@ describe("ChatView", () => {
 
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
 
-    await waitFor(() => {
-      expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("");
-    });
+    const modelDropdown = await within(dialog!).findByTestId("mock-model-dropdown");
+    await userEvent.selectOptions(modelDropdown, "");
+
+    expect(modelDropdown).toHaveValue("");
     expect(createBtn).toBeDisabled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("creates session with an explicitly selected non-default model in model mode", async () => {
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
+    setupMockChat({ sessions: [], filteredSessions: [], createSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("chat-new-btn"));
+
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+
+    await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
+
+    const modelDropdown = await within(dialog!).findByTestId("mock-model-dropdown");
+    await userEvent.selectOptions(modelDropdown, "openai/gpt-4o");
+
+    await userEvent.click(within(dialog!).getByText("Create"));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        agentId: "__fn_agent__",
+        modelProvider: "openai",
+        modelId: "gpt-4o",
+      });
+    });
   });
 
   it("creates session without model selection omits model fields (agent mode)", async () => {

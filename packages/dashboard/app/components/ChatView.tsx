@@ -585,6 +585,8 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
     }
   }, [favoriteModels, favoriteProviders, refresh]);
 
+  const resolvedModel = selectedModel || defaultModelValue;
+
   const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -595,16 +597,16 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
     }
 
     // model mode
-    if (!selectedModel) return;
-    const slashIdx = selectedModel.indexOf("/");
+    if (!resolvedModel) return;
+    const slashIdx = resolvedModel.indexOf("/");
     if (slashIdx <= 0) return;
-    const modelProvider = selectedModel.slice(0, slashIdx);
-    const modelId = selectedModel.slice(slashIdx + 1);
+    const modelProvider = resolvedModel.slice(0, slashIdx);
+    const modelId = resolvedModel.slice(slashIdx + 1);
     onCreate({ agentId: FN_AGENT_ID, modelProvider, modelId });
   };
 
   const isSubmitDisabled =
-    chatMode === "agent" ? !selectedAgentId : !selectedModel;
+    chatMode === "agent" ? !selectedAgentId : !resolvedModel;
 
   return (
     <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={onClose} role="dialog" aria-modal="true">

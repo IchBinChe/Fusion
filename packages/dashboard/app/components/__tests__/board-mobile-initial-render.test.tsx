@@ -13,8 +13,8 @@ vi.mock("../../hooks/useBlockerFanout", () => ({
 }));
 
 vi.mock("../Column", () => ({
-  Column: React.memo(({ column }: { column: string }) => (
-    <div data-testid={`column-${column}`} />
+  Column: React.memo(({ column, tasks }: { column: string; tasks?: unknown[] }) => (
+    <div data-task-count={tasks?.length ?? 0} data-testid={`column-${column}`} />
   )),
 }));
 
@@ -42,9 +42,9 @@ function mockViewport(width: number) {
   }));
 }
 
-function extractMobileMediaBlocks(content: string): string {
+function extractMediaBlocks(content: string, queryPattern: RegExp): string {
   const blocks: string[] = [];
-  const regex = /@media[^{]*\(max-width: 768px\)[^{]*\{/g;
+  const regex = new RegExp(`@media[^{}]*${queryPattern.source}[^{}]*\\{`, "g");
   let match;
 
   while ((match = regex.exec(content)) !== null) {
@@ -60,6 +60,11 @@ function extractMobileMediaBlocks(content: string): string {
   }
 
   return blocks.join("\n");
+}
+
+function extractRule(content: string, selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return content.match(new RegExp(`${escapedSelector}\\s*\\{[^}]*\\}`))?.[0] ?? "";
 }
 
 const boardProps = {
@@ -194,8 +199,8 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
 
   it("preserves FN-001 mobile board invariants and avoids button-rule mutations in .board mobile block", () => {
     const cssContent = loadAllAppCss();
-    const mobileCss = extractMobileMediaBlocks(cssContent);
-    const boardBlock = mobileCss.match(/\.board\s*\{[^}]*\}/)?.[0] ?? "";
+    const mobileCss = extractMediaBlocks(cssContent, /\(max-width: 768px\)/);
+    const boardBlock = extractRule(mobileCss, ".board");
 
     expect(boardBlock).toContain("scroll-snap-type: x proximity");
     expect(boardBlock).toContain("overflow-anchor: none");
@@ -215,5 +220,69 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     for (const forbiddenSelector of forbiddenBoardSelectors) {
       expect(mobileCss).not.toMatch(forbiddenSelector);
     }
+  });
+
+  it("keeps the board fill-height invariant across base, tablet, and mobile CSS tiers", () => {
+    const cssContent = loadAllAppCss();
+    const baseBoardRule = extractRule(cssContent, ".board");
+    const tabletCss = extractMediaBlocks(cssContent, /\(min-width: 769px\) and \(max-width: 1024px\)/);
+    const mobileCss = extractMediaBlocks(cssContent, /\(max-width: 768px\)/);
+    const tabletBoardRule = extractRule(tabletCss, ".board");
+    const mobileBoardRule = extractRule(mobileCss, ".board");
+    const mobileColumnRule = extractRule(mobileCss, ".board > .column");
+    const projectContentRule = extractRule(cssContent, ".project-content");
+
+    expect(projectContentRule).toContain("display: flex");
+    expect(projectContentRule).toContain("min-height: 0");
+    expect(projectContentRule).toContain("min-width: 0");
+
+    expect(baseBoardRule).toContain("box-sizing: border-box");
+    expect(baseBoardRule).toContain("flex: 1 1 auto");
+    expect(baseBoardRule).toContain("min-height: 0");
+    expect(baseBoardRule).toContain("min-width: 0");
+
+    expect(tabletBoardRule).toContain("grid-template-columns: repeat(6, minmax(260px, 1fr))");
+    expect(tabletBoardRule).toContain("overflow-x: auto");
+
+    expect(mobileBoardRule).toContain("display: flex");
+    expect(mobileBoardRule).toContain("scroll-snap-type: x proximity");
+    expect(mobileBoardRule).toContain("width: 100%");
+    expect(mobileColumnRule).toContain("width: 300px");
+    expect(mobileColumnRule).toContain("min-width: 300px");
+    expect(mobileColumnRule).toContain("flex-shrink: 0");
+  });
+
+  it("renders the board main element and all column children for empty and populated states", () => {
+    const viewportSpy = mockViewport(1280);
+    const { rerender } = render(<Board {...boardProps} />);
+
+    let board = document.querySelector("main.board");
+    expect(board).not.toBeNull();
+
+    let columns = document.querySelectorAll("[data-testid^='column-']");
+    expect(columns).toHaveLength(6);
+    for (const column of columns) {
+      expect(column).toHaveAttribute("data-task-count", "0");
+    }
+
+    rerender(
+      <Board
+        {...boardProps}
+        tasks={[
+          { id: "FN-1", title: "Planning task", column: "triage" },
+          { id: "FN-2", title: "Todo task", column: "todo" },
+        ] as any}
+      />,
+    );
+
+    board = document.querySelector("main.board");
+    expect(board).not.toBeNull();
+
+    columns = document.querySelectorAll("[data-testid^='column-']");
+    expect(columns).toHaveLength(6);
+    expect(document.querySelector("[data-testid='column-triage']")).toHaveAttribute("data-task-count", "1");
+    expect(document.querySelector("[data-testid='column-todo']")).toHaveAttribute("data-task-count", "1");
+
+    viewportSpy.mockRestore();
   });
 });

@@ -111,7 +111,7 @@
   border-radius: var(--radius-sm);
   color: var(--color-error);
   justify-content: center;
-  padding: var(--space-2xs) var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .pr-checks__details-link--failing:hover {

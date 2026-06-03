@@ -1298,9 +1298,35 @@ describe("Crash scenario edge cases", () => {
 
   it("concurrent resumeOrphaned() calls don't double-execute the same task", async () => {
     const store = createMockStore();
-    const task = makeTask("FN-092", "in-progress");
+    const rootDir = "/private/tmp/test";
+    const worktreePath = `${rootDir}/.worktrees/swift-falcon`;
+    const task = makeTask("FN-092", "in-progress", {
+      worktree: worktreePath,
+      branch: "fusion/fn-092",
+    });
     store.listTasks.mockResolvedValue([task]);
-    store.getTask.mockResolvedValue(makeTaskDetail("FN-092", "in-progress"));
+    store.getTask.mockResolvedValue(makeTaskDetail("FN-092", "in-progress", {
+      worktree: worktreePath,
+      branch: "fusion/fn-092",
+    }));
+    mockedExecSync.mockImplementation(((cmd: unknown) => {
+      if (String(cmd) === "git rev-parse --is-inside-work-tree") {
+        return "true\n" as any;
+      }
+      if (String(cmd) === "git worktree list --porcelain") {
+        return [
+          `worktree ${rootDir}`,
+          "HEAD abc123",
+          "branch refs/heads/main",
+          "",
+          `worktree ${worktreePath}`,
+          "HEAD def456",
+          "branch refs/heads/fusion/fn-092",
+          "",
+        ].join("\n") as any;
+      }
+      return Buffer.from("");
+    }) as any);
 
     let resolvePrompt: (() => void) | undefined;
     mockedCreateFnAgent.mockResolvedValue({
@@ -1310,7 +1336,7 @@ describe("Crash scenario edge cases", () => {
       },
     } as any);
 
-    const executor = new TaskExecutor(store, "/tmp/test");
+    const executor = new TaskExecutor(store, rootDir);
 
     // First call starts execution
     const first = executor.resumeOrphaned();

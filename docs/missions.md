@@ -23,9 +23,9 @@ Mission: Improve Reliability
         Task: FN-214
 ```
 
-## Mission ↔ Goal persistence
+## Mission → Goal linkage
 
-Missions and goals are stored independently, but Fusion now persists an optional many-to-many linkage in the `mission_goals` join table.
+Missions and goals are stored independently, with an optional many-to-many linkage persisted in the `mission_goals` join table.
 
 - Columns: `missionId`, `goalId`, `createdAt`
 - Primary key: `(missionId, goalId)`
@@ -33,14 +33,24 @@ Missions and goals are stored independently, but Fusion now persists an optional
 - Delete behavior: both foreign keys use `ON DELETE CASCADE`, so removing either parent deletes only the corresponding join rows
 - Reverse lookups are indexed via `idxMissionGoalsGoalId`
 
-`MissionStore` owns the linkage CRUD surface:
+`MissionStore` owns the persisted linkage CRUD surface:
 
 - `linkGoal(missionId, goalId)` — idempotently create a link and return `{ missionId, goalId, createdAt }`
 - `unlinkGoal(missionId, goalId)` — remove a link and report whether anything changed
 - `listGoalIdsForMission(missionId)` — list linked goals in deterministic creation order
 - `listMissionIdsForGoal(goalId)` — list linked missions in deterministic creation order
 
-Existing missions are **not** backfilled with goal links as part of this schema change; that decision is deferred to FN-5898.
+### No-backfill decision
+
+Existing missions are intentionally **not** auto-linked to any goals. Fusion does not run a migration backfill for pre-existing missions, so a mission with no links should be treated as genuinely unlinked until an operator or agent associates it with one or more goals.
+
+### Manual linkage workflow
+
+Mission ↔ goal links are created and removed deliberately as part of normal planning and operations work. Read surfaces can show current associations, and operator-facing write surfaces can add or remove links when a mission should explicitly support a goal. The workflow is intentionally manual so teams can choose the correct strategic relationship per mission instead of inheriting guessed links from older data.
+
+### Unlinked mission indicator
+
+Mission Manager shows an **Unlinked** indicator on active mission cards when `linkedGoalCount` is zero. This is a read-only attention badge so operators can quickly find active missions that still need an explicit goal association.
 
 ## Creating Missions
 
@@ -107,18 +117,20 @@ Fusion surfaces the persisted mission↔goal linkage through REST, CLI, and pi-e
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /api/missions/:missionId` | Return `MissionWithHierarchy`, including `linkedGoals` as an always-present array of `Goal` objects for the selected mission and optional `eventCount` as the authoritative unfiltered mission activity total. |
 | `GET /api/missions/:missionId/goals` | List linked goals for a mission. Returns `{ goals }`. |
 | `PUT /api/missions/:missionId/goals` | Replace the full linked-goal set with body `{ goalIds: string[] }`. Duplicate ids are deduplicated before reconciliation. |
 | `POST /api/missions/:missionId/goals/:goalId` | Idempotently link one goal to a mission. |
 | `DELETE /api/missions/:missionId/goals/:goalId` | Idempotently unlink one goal from a mission. |
 
-All four endpoints validate mission/goal identifier formats and return `404` for missing mission/goal rows.
+The mission detail payload keeps `linkedGoals` separate from the milestone tree so read paths can surface strategy context without traversing slices/features. All five endpoints validate mission/goal identifier formats and return `404` for missing mission/goal rows.
 
 ### CLI
 
 - `fn mission goals <mission-id>` — list linked goals for a mission.
 - `fn mission link-goal <mission-id> <goal-id>` — idempotently link a goal.
 - `fn mission unlink-goal <mission-id> <goal-id>` — idempotently unlink a goal.
+- Mission detail screens in the dashboard render linked-goal chips in the mission header; selecting a chip opens the Goals view and scrolls/highlights the anchored goal card.
 
 ## Mission Planning Tools (pi extension)
 
@@ -128,7 +140,7 @@ The canonical per-parameter tool reference lives in `packages/cli/skill/fusion/r
 |---|---|
 | `fn_mission_create` | Create a mission with title/description, optional `baseBranch`, and optional auto-advance behavior. |
 | `fn_mission_list` | List missions and their current status. |
-| `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including milestone/feature acceptance criteria and slice verification when present. |
+| `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including a **Linked Goals** section plus milestone/feature acceptance criteria and slice verification when present. |
 | `fn_mission_list_goals` | List the goals linked to a mission. |
 | `fn_mission_link_goal` | Idempotently link a goal to a mission. |
 | `fn_mission_unlink_goal` | Idempotently unlink a goal from a mission. |
@@ -510,7 +522,7 @@ A feature transitions to `blocked` when:
 
 On engine restart, `recoverActiveMissions()` re-enqueues features in `validating` or `needs_fix` states, ensuring no validation work is lost. It also re-triggers `implementing` features whose linked task is already `done`/`archived` and whose assertion validation has not passed yet. When the stale-run reaper has already converted an abandoned validator run into `needs_fix`, `processTaskOutcome()` promotes the feature back through `implementing` and re-validates instead of skipping it. The same recovery path is replayed during periodic self-heal maintenance, so historically stranded `implementing` features can self-heal without requiring an engine restart.
 
-For features with zero linked assertions, the completion path is explicit: the loop marks the feature `done`, advances `loopState` to `passed`, emits `validation:passed` with summary `"No assertions linked"`, and records mission event code `validation_auto_passed_no_assertions`. Contract details (including canonical no-assertions behavior and FN-5696 assertion-authoring separation) are defined in [Mission Completion Gate Contract](./missions-completion-contract.md).
+For features with missing linked assertions, the completion path is now validator-first: the loop lazily restores the store-managed per-feature assertion just before validation, then runs the AI validator instead of auto-passing. Milestone `acceptanceCriteria` is threaded into the validator prompt for every feature in that milestone, so all mission criteria are AI-evaluated. Contract details are defined in [Mission Completion Gate Contract](./missions-completion-contract.md).
 
 ### Autopilot / Scheduler Interplay
 
@@ -541,8 +553,7 @@ These are independent tracking mechanisms — autopilot monitors mission progres
 **MissionEvent audit types:**
 - `slice_activated`, `feature_planned`, `feature_completed`
 - `validation:started`, `validation:passed`, `validation:failed`, `validation:blocked`
-- `validation_auto_passed_no_assertions` (reason: `"No assertions linked"`)
-- `milestone_missing_structured_assertions` (warning when prose criteria exist with zero structured assertions)
+- `milestone_missing_structured_assertions` (legacy-data warning surface; enforcement still lazy-restores managed assertions at runtime)
 - `fix_feature:created`, `feature:blocked`
 
 **Validator run telemetry:**

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import * as projectMemory from "../project-memory.js";
 import { AgentStore } from "../agent-store.js";
+import { getAgentLogFilePath, countAgentLogEntries, readAgentLogEntries } from "../agent-log-file-store.js";
 import { CentralDatabase } from "../central-db.js";
 import { TaskStore, TaskHasDependentsError } from "../store.js";
 import { buildResearchDocumentKey, type Task } from "../types.js";
@@ -32,6 +33,7 @@ describe("TaskStore", () => {
   const deleteTaskDir = (taskId: string) => harness.deleteTaskDir(taskId);
   const createSourceIssueFixture = () => harness.createSourceIssueFixture();
   const insertLogEntryWithTimestamp = (...args: any[]) => (harness as any).insertLogEntryWithTimestamp(...args);
+  const taskDir = (taskId: string) => join(rootDir, ".fusion", "tasks", taskId);
 
   describe("upsertTask regression coverage", () => {
     it("creates tasks successfully on a fresh database schema", async () => {
@@ -111,19 +113,14 @@ describe("TaskStore", () => {
 
 
   describe("agent log persistence", () => {
-    it("appendAgentLog inserts into agentLogEntries and getAgentLogs reads it back", async () => {
+    it("appendAgentLog persists to JSONL and getAgentLogs reads it back", async () => {
       const task = await createTestTask();
 
       await store.appendAgentLog(task.id, "Hello world", "text");
       await store.appendAgentLog(task.id, "Read", "tool");
       (store as any).flushAgentLogBuffer();
 
-      const rows = (store as any).db.prepare(`
-        SELECT taskId, text, type FROM agentLogEntries
-        WHERE taskId = ?
-        ORDER BY timestamp ASC
-      `).all(task.id) as Array<{ taskId: string; text: string; type: string }>;
-      expect(rows).toEqual([
+      expect(readAgentLogEntries(taskDir(task.id))).toMatchObject([
         { taskId: task.id, text: "Hello world", type: "text" },
         { taskId: task.id, text: "Read", type: "tool" },
       ]);
@@ -253,7 +250,7 @@ describe("TaskStore", () => {
       expect(await store.getAgentLogCount(task.id)).toBe(2);
     });
 
-    it("returns the most recent agent log entries from SQLite in chronological order", async () => {
+    it("returns the most recent agent log entries in chronological order", async () => {
       const task = await createTestTask();
 
       for (let i = 0; i < 5; i++) {
@@ -607,17 +604,12 @@ describe("TaskStore", () => {
       await store.appendAgentLog(task.id, "cascade me", "text");
       (store as any).flushAgentLogBuffer();
 
-      const before = (store as any).db.prepare(
-        "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
-      ).get(task.id) as { count: number };
-      expect(before.count).toBe(1);
+      expect(countAgentLogEntries(taskDir(task.id))).toBe(1);
 
       await store.deleteTask(task.id);
 
-      const after = (store as any).db.prepare(
-        "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
-      ).get(task.id) as { count: number };
-      expect(after.count).toBe(0);
+      expect(countAgentLogEntries(taskDir(task.id))).toBe(1);
+      await expect(store.getAgentLogs(task.id)).resolves.toEqual([]);
     });
 
     it("deleteTask clears linked agent task assignments", async () => {
@@ -716,10 +708,7 @@ describe("TaskStore", () => {
         }
 
         // Validate DB persistence without invoking read-path auto-flush helpers.
-        const row = (store as any).db
-          .prepare("SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?")
-          .get(task.id) as { count: number };
-        expect(row.count).toBe(50);
+        expect(countAgentLogEntries(taskDir(task.id))).toBe(50);
       });
 
       it("auto-flushes buffered entries when getAgentLogs is called", async () => {
@@ -744,7 +733,7 @@ describe("TaskStore", () => {
         expect(count).toBe(1);
       });
 
-      it("auto-flushes before deleteTask and soft-delete clears resulting rows", async () => {
+      it("auto-flushes before deleteTask and soft-delete hides resulting file-backed rows", async () => {
         const task = await createTestTask();
 
         await store.appendAgentLog(task.id, "to be cascaded", "text");
@@ -754,10 +743,8 @@ describe("TaskStore", () => {
         expect(flushSpy).toHaveBeenCalled();
         flushSpy.mockRestore();
 
-        const after = (store as any).db.prepare(
-          "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
-        ).get(task.id) as { count: number };
-        expect(after.count).toBe(0);
+        expect(countAgentLogEntries(taskDir(task.id))).toBe(1);
+        await expect(store.getAgentLogs(task.id)).resolves.toEqual([]);
       });
 
       it("flushes remaining entries on close without throwing", async () => {

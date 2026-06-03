@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { MissionStore, deriveMilestoneAcceptanceCriteriaFromFeatures } from "../mission-store.js";
+import { GoalStore } from "../goal-store.js";
 import { Database } from "../db.js";
 import type { MissionFeature } from "../mission-types.js";
 import { mkdtempSync } from "node:fs";
@@ -25,11 +26,19 @@ function createTaskInDb(
   ).run(taskId, description, options?.column ?? "triage", status ?? null, now, now, options?.deletedAt ?? null);
 }
 
+function createGoalInDb(database: Database, goalId: string, title = "Test goal"): void {
+  const now = new Date().toISOString();
+  database.prepare(
+    "INSERT INTO goals (id, title, description, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(goalId, title, null, "active", now, now);
+}
+
 describe("MissionStore", () => {
   let tmpDir: string;
   let fusionDir: string;
   let db: Database;
   let store: MissionStore;
+  let goalStore: GoalStore;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -40,6 +49,7 @@ describe("MissionStore", () => {
     db = new Database(fusionDir, { inMemory: true });
     db.init();
     store = new MissionStore(fusionDir, db);
+    goalStore = new GoalStore(fusionDir, db);
   });
 
   afterEach(async () => {
@@ -235,6 +245,8 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 0,
       });
     });
@@ -298,6 +310,31 @@ describe("MissionStore", () => {
 
       const summary = store.getMissionSummary(mission.id);
       expect(summary.progressPercent).toBe(33);
+    });
+
+    it("getMissionSummary reports linked goal counts", () => {
+      const mission = store.createMission({ title: "Goal-linked mission" });
+      createGoalInDb(db, "G-001", "North Star");
+      createGoalInDb(db, "G-002", "Reliability");
+
+      expect(store.getMissionSummary(mission.id).linkedGoalCount).toBe(0);
+
+      store.linkGoal(mission.id, "G-001");
+      store.linkGoal(mission.id, "G-002");
+
+      expect(store.getMissionSummary(mission.id).linkedGoalCount).toBe(2);
+    });
+
+    it("getMissionSummary reports unfiltered event counts", () => {
+      const mission = store.createMission({ title: "Eventful mission" });
+
+      expect(store.getMissionSummary(mission.id).eventCount).toBe(0);
+
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
+      store.logMissionEvent(mission.id, "error", "error");
+
+      expect(store.getMissionSummary(mission.id).eventCount).toBe(3);
     });
 
     it("findNextPendingSlice skips completed slices in earlier milestones", () => {
@@ -373,6 +410,8 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 0,
       });
 
@@ -383,6 +422,8 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 0,
       });
 
@@ -393,6 +434,8 @@ describe("MissionStore", () => {
         completedMilestones: 1,
         totalFeatures: 2,
         completedFeatures: 1,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 50,
       });
     });
@@ -405,8 +448,13 @@ describe("MissionStore", () => {
       store.updateFeature(f1.id, { status: "done" });
       const f2 = store.addFeature(slice.id, { title: "F2" });
       store.updateFeature(f2.id, { status: "done" });
-      const f3 = store.addFeature(slice.id, { title: "F3" });
-      // f3 not done
+      store.addFeature(slice.id, { title: "F3" });
+      createGoalInDb(db, "G-003", "North Star");
+      createGoalInDb(db, "G-004", "Reliability");
+      store.linkGoal(mission.id, "G-003");
+      store.linkGoal(mission.id, "G-004");
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
 
       const singleSummary = store.getMissionSummary(mission.id);
       const batchedResult = store.listMissionsWithSummaries().find((m) => m.id === mission.id)!;
@@ -415,6 +463,8 @@ describe("MissionStore", () => {
       expect(batchedResult.summary.completedMilestones).toBe(singleSummary.completedMilestones);
       expect(batchedResult.summary.totalFeatures).toBe(singleSummary.totalFeatures);
       expect(batchedResult.summary.completedFeatures).toBe(singleSummary.completedFeatures);
+      expect(batchedResult.summary.linkedGoalCount).toBe(singleSummary.linkedGoalCount);
+      expect(batchedResult.summary.eventCount).toBe(singleSummary.eventCount);
       expect(batchedResult.summary.progressPercent).toBe(singleSummary.progressPercent);
     });
 
@@ -1838,6 +1888,8 @@ describe("MissionStore", () => {
         title: "Hierarchy Test",
         description: "Testing full tree loading",
       });
+      const linkedGoal = goalStore.createGoal({ title: "Ship linked goal visibility" });
+      store.linkGoal(mission.id, linkedGoal.id);
       const m1 = store.addMilestone(mission.id, { title: "Milestone 1" });
       const m2 = store.addMilestone(mission.id, { title: "Milestone 2" });
       const s1 = store.addSlice(m1.id, { title: "Slice 1" });
@@ -1849,6 +1901,7 @@ describe("MissionStore", () => {
 
       expect(withHierarchy.id).toBe(mission.id);
       expect(withHierarchy.title).toBe("Hierarchy Test");
+      expect(withHierarchy.linkedGoals).toEqual([linkedGoal]);
       expect(withHierarchy.milestones).toHaveLength(2);
 
       const m1Data = withHierarchy.milestones.find((m) => m.id === m1.id)!;
@@ -1858,6 +1911,32 @@ describe("MissionStore", () => {
       expect(s1Data.features).toHaveLength(2);
       expect(s1Data.features.find((f: import("../mission-types.js").MissionFeature) => f.id === f1.id)).toBeDefined();
       expect(s1Data.features.find((f: import("../mission-types.js").MissionFeature) => f.id === f2.id)).toBeDefined();
+    });
+
+    it("returns an empty linkedGoals array when no goals are linked", () => {
+      const mission = store.createMission({ title: "Hierarchy without goals" });
+
+      const withHierarchy = store.getMissionWithHierarchy(mission.id)!;
+
+      expect(withHierarchy.linkedGoals).toEqual([]);
+    });
+
+    it("reports detail eventCount consistently with mission summaries", () => {
+      const mission = store.createMission({ title: "Hierarchy event counts" });
+
+      const emptyHierarchy = store.getMissionWithHierarchy(mission.id)!;
+      const emptySummary = store.getMissionSummary(mission.id);
+      expect(emptyHierarchy.eventCount).toBe(0);
+      expect(emptyHierarchy.eventCount).toBe(emptySummary.eventCount);
+
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
+      store.logMissionEvent(mission.id, "error", "error");
+
+      const populatedHierarchy = store.getMissionWithHierarchy(mission.id)!;
+      const populatedSummary = store.getMissionSummary(mission.id);
+      expect(populatedHierarchy.eventCount).toBe(3);
+      expect(populatedHierarchy.eventCount).toBe(populatedSummary.eventCount);
     });
   });
 
@@ -3324,14 +3403,33 @@ describe("MissionStore", () => {
       expect(linked[0].sourceFeatureId).toBe(feature.id);
     });
 
+    it("lazily re-links exactly one managed assertion for legacy acceptance-criteria features", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Feature", acceptanceCriteria: "AC text" });
+      const [managed] = store.listAssertionsForFeature(feature.id);
+      store.unlinkFeatureFromAssertion(feature.id, managed.id);
+      store.deleteContractAssertion(managed.id);
+
+      const first = store.ensureFeatureAssertionLinked(feature.id);
+      const second = store.ensureFeatureAssertionLinked(feature.id);
+
+      expect(first).toHaveLength(1);
+      expect(first[0].assertion).toBe("AC text");
+      expect(second).toHaveLength(1);
+      expect(second[0].id).toBe(first[0].id);
+      expect(store.listAssertionsForFeature(feature.id)).toHaveLength(1);
+    });
+
     it("derives managed assertion text from description or fallback", () => {
       const mission = store.createMission({ title: "M" });
       const milestone = store.addMilestone(mission.id, { title: "MS" });
       const slice = store.addSlice(milestone.id, { title: "SL" });
       const fromDescription = store.addFeature(slice.id, { title: "Desc Feature", description: "Desc text" });
       const fallback = store.addFeature(slice.id, { title: "Fallback Feature" });
-      expect(store.listAssertionsForFeature(fromDescription.id)[0].assertion).toBe("Desc text");
-      expect(store.listAssertionsForFeature(fallback.id)[0].assertion).toBe("Verify implementation of: Fallback Feature");
+      expect(store.ensureFeatureAssertionLinked(fromDescription.id)[0].assertion).toBe("Desc text");
+      expect(store.ensureFeatureAssertionLinked(fallback.id)[0].assertion).toBe("Verify implementation of: Fallback Feature");
     });
 
     it("syncs managed assertion in place on acceptanceCriteria update", () => {
@@ -3496,7 +3594,7 @@ describe("MissionStore", () => {
 
   describe("Loop State & Validator Run Schema (v31)", () => {
     it("schema version is 101 after migration", () => {
-      expect(db.getSchemaVersion()).toBe(101);
+      expect(db.getSchemaVersion()).toBe(102);
     });
 
     it("mission_features table has loop state columns", () => {

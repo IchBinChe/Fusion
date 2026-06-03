@@ -162,22 +162,65 @@ function setProviderOrder(names: string[], projectId: string | undefined): void 
   setScopedItem(PROVIDER_ORDER_KEY, JSON.stringify(names), projectId);
 }
 
+const WINDOW_IDENTITY_DELIMITER = "::";
+
+function getWindowIdentity(windowLabel: string, windowIndex: number): string {
+  return `${windowIndex}${WINDOW_IDENTITY_DELIMITER}${windowLabel}`;
+}
+
+function matchesHiddenWindowEntry(
+  persistedEntry: string,
+  windowLabel: string,
+  windowIndex: number
+): boolean {
+  return (
+    persistedEntry === getWindowIdentity(windowLabel, windowIndex) ||
+    persistedEntry === windowLabel
+  );
+}
+
 function isWindowHidden(
   providerName: string,
   windowLabel: string,
+  windowIndex: number,
   hidden: Record<string, string[]>
 ): boolean {
-  return hidden[providerName]?.includes(windowLabel) ?? false;
+  return (hidden[providerName] ?? []).some((persistedEntry) =>
+    matchesHiddenWindowEntry(persistedEntry, windowLabel, windowIndex)
+  );
 }
 
 function getRenderedHiddenWindowCount(
   providerName: string,
-  windows: UsageWindow[],
+  windows: UsageWindow[] | undefined,
   hidden: Record<string, string[]>
 ): number {
-  return windows.reduce((count, window) => {
-    return count + (isWindowHidden(providerName, window.label, hidden) ? 1 : 0);
+  return (windows ?? []).reduce((count, window, windowIndex) => {
+    return count + (isWindowHidden(providerName, window.label, windowIndex, hidden) ? 1 : 0);
   }, 0);
+}
+
+function getRestorableHiddenWindowCount(
+  providerName: string,
+  windows: UsageWindow[] | undefined,
+  hidden: Record<string, string[]>
+): number {
+  const liveWindows = windows ?? [];
+  const renderedHiddenCount = getRenderedHiddenWindowCount(providerName, liveWindows, hidden);
+  const persistedHiddenEntries = hidden[providerName] ?? [];
+
+  if (persistedHiddenEntries.length === 0) {
+    return renderedHiddenCount;
+  }
+
+  const orphanedHiddenCount = persistedHiddenEntries.reduce((count, persistedEntry) => {
+    const matchesLiveWindow = liveWindows.some((window, windowIndex) =>
+      matchesHiddenWindowEntry(persistedEntry, window.label, windowIndex)
+    );
+    return count + (matchesLiveWindow ? 0 : 1);
+  }, 0);
+
+  return renderedHiddenCount + orphanedHiddenCount;
 }
 
 interface UsageWindowRowProps {
@@ -329,7 +372,7 @@ interface ProviderCardProps {
   provider: ProviderUsage;
   viewMode: 'used' | 'remaining';
   hiddenWindows: Record<string, string[]>;
-  onToggleWindow: (providerName: string, windowLabel: string) => void;
+  onToggleWindow: (providerName: string, windowLabel: string, windowIndex: number) => void;
   onShowAllHidden: (providerName: string) => void;
   isDragging: boolean;
   isDragOver: boolean;
@@ -414,7 +457,8 @@ function ProviderCard({
   onMoveUp,
   onMoveDown,
 }: ProviderCardProps) {
-  const hiddenCount = getRenderedHiddenWindowCount(provider.name, provider.windows, hiddenWindows);
+  const providerWindows = provider.windows ?? [];
+  const hiddenCount = getRestorableHiddenWindowCount(provider.name, providerWindows, hiddenWindows);
   const getStatusBadge = () => {
     switch (provider.status) {
       case "ok":
@@ -506,10 +550,10 @@ function ProviderCard({
         </div>
       )}
 
-      {provider.windows.length > 0 ? (
+      {providerWindows.length > 0 ? (
         <div className="usage-provider-windows">
-          {provider.windows.map((window, index) => {
-            const hidden = isWindowHidden(provider.name, window.label, hiddenWindows);
+          {providerWindows.map((window, index) => {
+            const hidden = isWindowHidden(provider.name, window.label, index, hiddenWindows);
 
             return (
               <UsageWindowRow
@@ -517,7 +561,7 @@ function ProviderCard({
                 window={window}
                 viewMode={viewMode}
                 isHidden={hidden}
-                onToggleHidden={() => onToggleWindow(provider.name, window.label)}
+                onToggleHidden={() => onToggleWindow(provider.name, window.label, index)}
               />
             );
           })}
@@ -674,10 +718,15 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
     setHiddenWindows(hiddenWindows, projectId);
   }, [hiddenWindows, projectId]);
 
-  const handleToggleWindow = useCallback((providerName: string, windowLabel: string) => {
+  const handleToggleWindow = useCallback((providerName: string, windowLabel: string, windowIndex: number) => {
     setHiddenWindowsState((previous) => {
-      if (isWindowHidden(providerName, windowLabel, previous)) {
-        const remaining = (previous[providerName] ?? []).filter((label) => label !== windowLabel);
+      const windowIdentity = getWindowIdentity(windowLabel, windowIndex);
+      const providerHiddenWindows = previous[providerName] ?? [];
+
+      if (isWindowHidden(providerName, windowLabel, windowIndex, previous)) {
+        const remaining = providerHiddenWindows.filter(
+          (persistedEntry) => !matchesHiddenWindowEntry(persistedEntry, windowLabel, windowIndex)
+        );
         if (remaining.length === 0) {
           const { [providerName]: _removed, ...rest } = previous;
           return rest;
@@ -691,7 +740,7 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
 
       return {
         ...previous,
-        [providerName]: [...(previous[providerName] ?? []), windowLabel],
+        [providerName]: [...providerHiddenWindows, windowIdentity],
       };
     });
   }, []);

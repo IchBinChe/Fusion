@@ -530,7 +530,8 @@ export function useQuickChat(
   const resetTransientComposerState = useCallback(() => {
     cancelStreamingFlushesRef.current?.();
     cancelStreamingFlushesRef.current = null;
-    removePersistedPendingChatMessage(activeSessionRef.current?.id);
+    // Intentionally leave persisted queued messages alone here so navigation
+    // and session switching can rehydrate them on return.
     pendingMessageRef.current = "";
     setPendingMessage("");
     queuedPreSessionCompletionRef.current?.resolve();
@@ -697,6 +698,8 @@ export function useQuickChat(
     }
     lastAttachedGenerationRef.current = null;
 
+    // Fresh-session reset is a real dismissal of the old session queue.
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     resetTransientComposerState();
     setMessages([]);
     setActiveSession(null);

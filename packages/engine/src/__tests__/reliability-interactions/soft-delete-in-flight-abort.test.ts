@@ -29,11 +29,14 @@ vi.mock("../../pr-monitor.js", () => ({ PrMonitor: vi.fn().mockImplementation(()
 vi.mock("../../pr-comment-handler.js", () => ({ PrCommentHandler: vi.fn().mockImplementation(() => ({ handleNewComments: vi.fn() })) }));
 vi.mock("../../auth-storage.js", () => ({
   createFusionAuthStorage: vi.fn(() => ({ reload: vi.fn(), getOAuthProviders: vi.fn(() => []), get: vi.fn(() => undefined) })),
+  getFusionOAuthAlertStatePath: vi.fn(() => "/tmp/oauth-alert-state.json"),
 }));
 vi.mock("../../notifier.js", () => ({ NtfyNotifier: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })) }));
 vi.mock("../../notification/index.js", () => ({
   NotificationService: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
+  OAuthAlertStateStore: vi.fn().mockImplementation(() => ({})),
   OAuthExpiryMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
+  OAuthValidityLogger: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
 }));
 vi.mock("../../cron-runner.js", () => ({
   CronRunner: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),

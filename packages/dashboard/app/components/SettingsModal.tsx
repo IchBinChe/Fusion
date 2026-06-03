@@ -2451,6 +2451,28 @@ export function SettingsModal({
               </select>
               <small>Delete inbox/outbox messages older than this many days. Default: Off. 7 days is the suggested setting.</small>
             </div>
+            <div className="form-group">
+              <label htmlFor="operationalLogRetentionDays">Operational log retention</label>
+              <select
+                id="operationalLogRetentionDays"
+                className="select"
+                value={form.operationalLogRetentionDays ?? 30}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, operationalLogRetentionDays: Number(e.target.value) || 0 }))
+                }
+              >
+                <option value={0}>Off</option>
+                <option value={7}>7 days</option>
+                <option value={14}>14 days</option>
+                <option value={30}>30 days</option>
+                <option value={60}>60 days</option>
+                <option value={90}>90 days</option>
+              </select>
+              <small>
+                Lowering this window means Reliability metrics/charts and the Activity feed will not show history older
+                than the selected range. Per-task task detail history is unaffected. Default: 30 days.
+              </small>
+            </div>
             <h4 className="settings-section-heading settings-section-heading--spaced">Chat Rooms</h4>
             <div className="form-group">
               <label htmlFor="chatRoomRecentVerbatimMessages">Recent verbatim room messages</label>
@@ -5615,57 +5637,59 @@ export function SettingsModal({
               </small>
               <details className="settings-option-details settings-research-provider-advanced-details">
                 <summary>Advanced — external search providers</summary>
-                <div className="form-group">
-                  <label htmlFor="research-global-search-provider-advanced">Search Provider</label>
-                  <select
-                    id="research-global-search-provider-advanced"
-                    className="input"
-                    value={externalProvider ? resolvedProvider : "searxng"}
-                    onChange={(event) =>
-                      setSearchProvider(event.target.value as Settings["researchGlobalWebSearchProvider"])
-                    }
-                  >
-                    <option value="searxng">SearXNG</option>
-                    <option value="brave">Brave</option>
-                    <option value="google">Google Custom Search</option>
-                    <option value="tavily">Tavily</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label htmlFor="research-global-searxng-url">SearXNG URL</label>
-                  <input
-                    id="research-global-searxng-url"
-                    className="input"
-                    value={form.researchGlobalSearxngUrl ?? ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        researchGlobalSearxngUrl: event.target.value || undefined,
-                      }))
-                    }
-                    placeholder="https://searx.example.com"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="research-global-google-cx">Google Search CX</label>
-                  <input
-                    id="research-global-google-cx"
-                    className="input"
-                    value={form.researchGlobalGoogleSearchCx ?? ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        researchGlobalGoogleSearchCx: event.target.value || undefined,
-                      }))
-                    }
-                    placeholder="custom-search-engine-id"
-                  />
-                </div>
-                <div className="settings-empty-state settings-research-empty-state" role="note">
-                  Configure Brave, Tavily, and Google API keys in Authentication.
-                  <button type="button" className="btn btn-sm" onClick={() => setActiveSection("authentication")}>
-                    Open Authentication Settings
-                  </button>
+                <div className="settings-research-provider-advanced-body">
+                  <div className="form-group">
+                    <label htmlFor="research-global-search-provider-advanced">Search Provider</label>
+                    <select
+                      id="research-global-search-provider-advanced"
+                      className="input"
+                      value={externalProvider ? resolvedProvider : "searxng"}
+                      onChange={(event) =>
+                        setSearchProvider(event.target.value as Settings["researchGlobalWebSearchProvider"])
+                      }
+                    >
+                      <option value="searxng">SearXNG</option>
+                      <option value="brave">Brave</option>
+                      <option value="google">Google Custom Search</option>
+                      <option value="tavily">Tavily</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="research-global-searxng-url">SearXNG URL</label>
+                    <input
+                      id="research-global-searxng-url"
+                      className="input"
+                      value={form.researchGlobalSearxngUrl ?? ""}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          researchGlobalSearxngUrl: event.target.value || undefined,
+                        }))
+                      }
+                      placeholder="https://searx.example.com"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="research-global-google-cx">Google Search CX</label>
+                    <input
+                      id="research-global-google-cx"
+                      className="input"
+                      value={form.researchGlobalGoogleSearchCx ?? ""}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          researchGlobalGoogleSearchCx: event.target.value || undefined,
+                        }))
+                      }
+                      placeholder="custom-search-engine-id"
+                    />
+                  </div>
+                  <div className="settings-empty-state settings-research-empty-state" role="note">
+                    Configure Brave, Tavily, and Google API keys in Authentication.
+                    <button type="button" className="btn btn-sm" onClick={() => setActiveSection("authentication")}>
+                      Open Authentication Settings
+                    </button>
+                  </div>
                 </div>
               </details>
             </div>
@@ -6104,31 +6128,6 @@ export function SettingsModal({
               {form.autoBackupDir && form.autoBackupDir.includes("..") && (
                 <small className="field-error">Path cannot contain parent directory traversal (..)</small>
               )}
-            </div>
-
-            <h4 className="settings-section-heading settings-section-heading--spaced">Database Maintenance</h4>
-            <div className="form-group">
-              <label htmlFor="operationalLogRetentionDays">Operational log retention</label>
-              <select
-                id="operationalLogRetentionDays"
-                className="select"
-                value={form.operationalLogRetentionDays ?? 0}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, operationalLogRetentionDays: Number(e.target.value) || 0 }))
-                }
-              >
-                <option value={0}>Off</option>
-                <option value={30}>30 days</option>
-                <option value={60}>60 days</option>
-                <option value={90}>90 days</option>
-                <option value={180}>180 days</option>
-                <option value={365}>365 days</option>
-              </select>
-              <small>
-                Prune append-only operational logs (activity log, agent logs, run audit, heartbeats) older than this
-                many days during periodic maintenance. Keeps the database from growing without bound — large databases
-                are slower to checkpoint and more prone to corruption. Default: 30 days.
-              </small>
             </div>
 
             <h4 className="settings-section-heading">Memory Backups</h4>

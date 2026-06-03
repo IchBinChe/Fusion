@@ -7,6 +7,9 @@ export type { WebhookProviderConfig } from "./webhook-provider.js";
 export { NotificationService } from "./notification-service.js";
 export type { NotificationServiceOptions } from "./notification-service.js";
 
+export { OAuthAlertStateStore } from "./oauth-alert-state.js";
+export type { OAuthAlertStateEntry, OAuthAlertStateFs, OAuthAlertStateStoreOptions } from "./oauth-alert-state.js";
+
 export { OAuthExpiryMonitor } from "./oauth-expiry-monitor.js";
 export type { AuthStorageLike as OAuthExpiryAuthStorageLike, OAuthExpiryMonitorOptions } from "./oauth-expiry-monitor.js";
 

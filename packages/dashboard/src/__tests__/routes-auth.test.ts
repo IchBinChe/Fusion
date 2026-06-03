@@ -1499,6 +1499,78 @@ describe("POST /auth/login", () => {
     expect(observedPromptInput).toBe("manual-code");
   });
 
+  it("prefers browser login for openai-codex multi-option prompts", async () => {
+    let selectedOption: string | undefined;
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([{ id: "openai-codex", name: "OpenAI Codex" }]);
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation(async (_provider: string, callbacks: any) => {
+      selectedOption = await callbacks.onSelect({
+        message: "Select OpenAI Codex login method:",
+        options: [
+          { id: "browser", label: "Browser login (default)" },
+          { id: "device_code", label: "Device code login (headless)" },
+        ],
+      });
+      if (!selectedOption) {
+        throw new Error("Login cancelled");
+      }
+      callbacks.onAuth({
+        url: "https://auth.openai.com/oauth/authorize?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+      });
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "openai-codex" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(selectedOption).toBe("browser");
+    expect(res.status).toBe(200);
+    expect(res.body.url).toBe(
+      "https://auth.openai.com/oauth/authorize?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+    );
+  });
+
+  it("keeps returning the only option id for single-option prompts", async () => {
+    let selectedOption: string | undefined;
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([{ id: "openai-codex", name: "OpenAI Codex" }]);
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation(async (_provider: string, callbacks: any) => {
+      selectedOption = await callbacks.onSelect({
+        message: "Only one choice",
+        options: [{ id: "browser", label: "Browser login" }],
+      });
+      callbacks.onAuth({ url: "https://auth.example.com/login" });
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "openai-codex" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(selectedOption).toBe("browser");
+    expect(res.status).toBe(200);
+  });
+
+  it("prefers the default-labelled option for generic multi-option prompts", async () => {
+    let selectedOption: string | undefined;
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([{ id: "anthropic", name: "Anthropic" }]);
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation(async (_provider: string, callbacks: any) => {
+      selectedOption = await callbacks.onSelect({
+        message: "Select login method:",
+        options: [
+          { id: "device_code", label: "Device code login" },
+          { id: "browser", label: "Browser login (DEFAULT)" },
+          { id: "manual", label: "Manual login" },
+        ],
+      });
+      callbacks.onAuth({ url: "https://claude.ai/oauth/authorize?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A3210%2Fauth%2Fcallback" });
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(selectedOption).toBe("browser");
+    expect(res.status).toBe(200);
+  });
+
   it("returns 400 when provider is missing", async () => {
     const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({}), {
       "Content-Type": "application/json",

@@ -15,10 +15,20 @@
 - Archived-task flows (`archiveTask`, archived cleanup/migration) still hard-delete from the active `tasks` table after copying to cold storage (`archive.db`).
 - ID reservation is unchanged: soft-deleted IDs remain reserved. `distributed-task-id` and `task-id-integrity` intentionally scan all task rows (including soft-deleted rows), and must not filter on `deletedAt`.
 
-### Agent log clearing (FN-5143)
+### Agent log storage + soft-delete visibility (FN-5143 / FN-5911)
 
-- `TaskStore.deleteTask` now clears `agentLogEntries` rows for the soft-deleted task in the same transaction that writes `deletedAt`, so downstream `getAgentLogs*` / `getAgentLogCount` calls observe zero logs immediately.
-- This is soft-delete-specific cleanup; archived-task agent log snapshot behavior (`taskToArchiveEntry` / `archiveTask`) is unchanged.
+- Agent logs are no longer stored in SQLite. Each task now appends newline-delimited JSON records to `<rootDir>/.fusion/tasks/{ID}/agent-log.jsonl`.
+- `TaskStore.deleteTask` keeps that JSONL file on disk for forensics, but all live read APIs (`getAgentLogs*`, `getAgentLogCount`) gate on task liveness and return zero entries once `deletedAt` is set.
+- Archived-task snapshot behavior (`taskToArchiveEntry` / `archiveTask`) is unchanged in spirit: archive payloads still embed a capped agent-log snapshot, now sourced from the JSONL file instead of `fusion.db`.
+- Retention is now independent from SQLite operational-log pruning. `settings.agentLogFileRetentionDays` controls age-based pruning of JSONL entries for soft-deleted and archived tasks only. Default: `0` (disabled).
+
+### Activity-log no-op `task:moved` cleanup (FN-5940)
+
+- `TaskStore` now defends the invariant that `activityLog` never records a `task:moved` row when `metadata.from === metadata.to`.
+- Defense is layered: the `task:moved` listener skips same-column transitions, and source emitters skip no-op `archived -> archived` / same-column polling re-emits before subscribers see them.
+- Existing junk rows are removed by a one-time init migration guarded by `__meta.noOpTaskMovedActivityCleanupVersion = "1"`.
+- The cleanup deletes only rows matching `type = 'task:moved'` where `json_extract(metadata, '$.from') = json_extract(metadata, '$.to')`; legitimate distinct-column moves are preserved.
+- The migration does **not** run `VACUUM` automatically. After the delete lands on a large disk-backed DB, run `fn db --vacuum` manually to reclaim the freed space from the SQLite file.
 
 ### Dashboard delete-event handling (FN-5135)
 

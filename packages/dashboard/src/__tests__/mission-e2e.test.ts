@@ -101,6 +101,8 @@ function createMockMissionStore(options?: {
 
       return {
         ...mission,
+        linkedGoals: [],
+        eventCount: (missionEvents.get(id) ?? []).length,
         milestones: missionMilestones.map((m) => ({
           ...m,
           slices: Array.from(slices.values())
@@ -132,6 +134,8 @@ function createMockMissionStore(options?: {
             completedMilestones: 0,
             totalFeatures: 0,
             completedFeatures: 0,
+            linkedGoalCount: 0,
+            eventCount: 0,
             progressPercent: 0,
           },
         }))
@@ -140,10 +144,11 @@ function createMockMissionStore(options?: {
     getMissionSummary: vi.fn((_missionId: string) => ({
       totalMilestones: 0,
       completedMilestones: 0,
-      totalSlices: 0,
-      completedSlices: 0,
       totalFeatures: 0,
       completedFeatures: 0,
+      linkedGoalCount: 0,
+      eventCount: 0,
+      progressPercent: 0,
     })),
 
     getMissionEvents: vi.fn((missionId: string, options?: { limit?: number; offset?: number; eventType?: string }) => {
@@ -1420,6 +1425,10 @@ describe("Mission API", () => {
       expect(res.body.title).toBe("Test Mission");
       expect(res.body).toHaveProperty("milestones");
       expect(Array.isArray(res.body.milestones)).toBe(true);
+      expect(res.body).toHaveProperty("linkedGoals");
+      expect(Array.isArray(res.body.linkedGoals)).toBe(true);
+      expect(res.body.linkedGoals).toEqual([]);
+      expect(res.body.eventCount).toBe(0);
       expect(res.body.milestones).toHaveLength(1);
       expect(res.body.milestones[0]).toHaveProperty("slices");
       expect(Array.isArray(res.body.milestones[0].slices)).toBe(true);

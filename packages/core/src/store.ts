@@ -9,9 +9,10 @@ import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import { resolveWorktrunkSettings, validateWorktrunkSettings } from "./worktrunk-settings.js";
 import { normalizeTaskPriority } from "./task-priority.js";
+import { allowsAutoMergeProcessing } from "./task-merge.js";
 import { canAgentTakeImplementationTaskForExplicitRouting } from "./agent-role-policy.js";
 import { GlobalSettingsStore } from "./global-settings.js";
-import { Database, toJson, toJsonNullable, fromJson } from "./db.js";
+import { Database, SCHEMA_VERSION, toJson, toJsonNullable, fromJson } from "./db.js";
 import { ArchiveDatabase } from "./archive-db.js";
 import { detectLegacyData, migrateFromLegacy } from "./db-migrate.js";
 import { buildSnippet, extractGoalCitations } from "./goal-citation-extractor.js";
@@ -37,6 +38,14 @@ import { getTaskAgeStalenessSignal, type TaskAgeStalenessThresholds } from "./ta
 import { ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
+import {
+  appendAgentLogEntriesSync,
+  countAgentLogEntries,
+  pruneAgentLogFiles as pruneAgentLogFileEntries,
+  readAgentLogEntries,
+  readAgentLogEntriesByTimeRange,
+} from "./agent-log-file-store.js";
+import { truncateAgentLogDetail } from "./agent-log-constants.js";
 import { validateNodeOverrideChange } from "./node-override-guard.js";
 import { sanitizeTitle, summarizeTitle } from "./ai-summarize.js";
 import { extractTaskIdTokens, normalizeTitleForTaskId } from "./task-title-id-drift.js";
@@ -382,10 +391,6 @@ let taskActivityLogEntryLimit = DEFAULT_TASK_ACTIVITY_LOG_ENTRY_LIMIT;
 let taskActivityLogOutcomeLimit = DEFAULT_TASK_ACTIVITY_LOG_OUTCOME_LIMIT;
 const ARCHIVE_AGENT_LOG_SNAPSHOT_LIMIT = 25;
 const ARCHIVE_AGENT_LOG_SNIPPET_LIMIT = 160;
-const AGENT_LOG_TOOL_DETAIL_LIMIT = 4_096;
-const AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE =
-  "\n\n[tool output truncated to keep dashboard log views responsive]";
-const AGENT_LOG_TOOL_TYPES = new Set<AgentLogEntry["type"]>(["tool", "tool_result", "tool_error"]);
 const storeLog = createLogger("task-store");
 const coreLog = createLogger("core");
 
@@ -470,16 +475,6 @@ function truncateTaskLogOutcome(outcome: string | undefined): string | undefined
     return outcome;
   }
   return `${outcome.slice(0, taskActivityLogOutcomeLimit)}\n... outcome truncated to ${taskActivityLogOutcomeLimit} characters ...`;
-}
-
-function truncateAgentLogDetail(
-  detail: string | null | undefined,
-  type: AgentLogEntry["type"],
-): string | undefined {
-  if (detail == null) return undefined;
-  if (!AGENT_LOG_TOOL_TYPES.has(type)) return detail;
-  if (detail.length <= AGENT_LOG_TOOL_DETAIL_LIMIT) return detail;
-  return `${detail.slice(0, AGENT_LOG_TOOL_DETAIL_LIMIT)}${AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE}`;
 }
 
 function compactTaskActivityLog(entries: TaskLogEntry[]): TaskLogEntry[] {
@@ -1189,9 +1184,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     taskId: string;
     timestamp: string;
     text: string;
-    type: string;
+    type: AgentLogEntry["type"];
     detail: string | null;
-    agent: string | null;
+    agent: AgentLogEntry["agent"] | null;
   }> = [];
   /** Timer for flushing the agent log buffer. */
   private agentLogFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1227,6 +1222,34 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ?? (process.env.VITEST === "true" ? join(rootDir, ".fusion-global-settings") : undefined);
     this.globalSettingsDir = resolvedGlobalSettingsDir;
     this.globalSettingsStore = new GlobalSettingsStore(resolvedGlobalSettingsDir);
+  }
+
+  private emitTaskLifecycleEventSafely(
+    event: "task:created" | "task:updated",
+    args: TaskStoreEvents["task:created"] | TaskStoreEvents["task:updated"],
+  ): boolean {
+    const listeners = super.listeners(event) as Array<(...listenerArgs: typeof args) => unknown>;
+    if (listeners.length === 0) {
+      return false;
+    }
+
+    const [task] = args;
+    const taskId = task && typeof task === "object" && "id" in task ? String(task.id) : "unknown";
+
+    for (const listener of listeners) {
+      try {
+        const result = listener(...args);
+        if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+          void Promise.resolve(result).catch((error) => {
+            storeLog.warn(`[${event}] listener failed for ${taskId}: ${getErrorMessage(error)}`);
+          });
+        }
+      } catch (error) {
+        storeLog.warn(`[${event}] listener failed for ${taskId}: ${getErrorMessage(error)}`);
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -1389,6 +1412,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       await migrateFromLegacy(this.fusionDir, this._db);
     }
     await this.migrateActiveArchivedTasksToArchiveDb();
+    await this.migrateAgentLogEntriesToFilesOnce();
+    await this.cleanupNoOpTaskMovedActivityRowsOnce();
+    if (this.db.getSchemaVersion() < SCHEMA_VERSION) {
+      this.db.init();
+    }
     await this.importLegacyAgentLogsOnce();
     this.taskIdStateReconciled = false;
     this.reconcileDistributedTaskIdStateOnOpen();
@@ -2580,6 +2608,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Task moved
     this.on("task:moved", (data) => {
       if (this.suppressActivityLogForPollingEmit) return;
+      if (data.from === data.to) return;
       this.recordActivityFromListener(
         {
           type: "task:moved",
@@ -4002,7 +4031,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     await this._maybeAutoArchiveSameAgentDuplicate(task, input);
 
-    this.emit("task:created", task);
+    this.emitTaskLifecycleEventSafely("task:created", [task]);
     if (options?.invokeTaskCreatedHook !== false) {
       await this.invokeTaskCreatedHook(task);
     }
@@ -4599,7 +4628,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, {
         now,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -4612,7 +4641,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.inReviewStalled = getInReviewStalledSignal(task, {
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -4855,7 +4884,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, {
         now,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -4868,7 +4897,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.inReviewStalled = getInReviewStalledSignal(task, {
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5018,7 +5047,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, {
         now,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5031,7 +5060,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.inReviewStalled = getInReviewStalledSignal(task, {
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5659,7 +5688,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     if (this.isWatching) this.taskCache.set(id, { ...task });
 
-    this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
+    if (fromColumn !== toColumn) {
+      this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
+    }
     return task;
   }
 
@@ -5851,7 +5882,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (movedToTriage) {
         this.emit("task:moved", { task, from: "todo" as Column, to: "triage" as Column, source: "engine" });
       }
-      this.emit("task:updated", task);
+      this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
     });
   }
@@ -6522,7 +6553,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (movedToTriage) {
         this.emit("task:moved", { task, from: "todo" as Column, to: "triage" as Column, source: "engine" });
       }
-      this.emit("task:updated", task);
+      this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
     });
   }
@@ -6773,12 +6804,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         if (this.isWatching) {
           this.taskCache.set(id, { ...current });
         }
-        this.emit("task:updated", current);
+        this.emitTaskLifecycleEventSafely("task:updated", [current]);
         return current;
       }
 
       const emittedTask = ({ id, log, updatedAt } as unknown) as Task;
-      this.emit("task:updated", emittedTask);
+      this.emitTaskLifecycleEventSafely("task:updated", [emittedTask]);
       return emittedTask;
     });
   }
@@ -7663,11 +7694,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           },
         });
         this.clearLinkedAgentTaskIds(id, deletedAt);
-        // FN-5143: clear historical agent logs for the soft-deleted task so
-        // downstream readers (evaluator evidence, self-healing diagnostics,
-        // dashboard log views, register-task-workflow-routes) observe zero logs
-        // immediately after deletedAt is set. Atomic with the deletedAt write.
-        this.db.prepare("DELETE FROM agentLogEntries WHERE taskId = ?").run(id);
+        // FN-5143: agent log reads are gated on deletedAt (see getAgentLogs /
+        // getAgentLogCount / getAgentLogsByTimeRange), so downstream readers
+        // observe zero logs immediately after deletedAt is set. The JSONL file
+        // remains on disk for forensic analysis; only the read API hides it.
         this.db.bumpLastModified();
       });
 
@@ -8608,9 +8638,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             if (archivedSet.has(id)) {
               // Task moved to archive — emit task:moved (matching what
               // archiveTask emits in-process) so other subscribers can react.
-              // Activity-log listeners skip this emit; the originating
+              // Skip already-archived cache entries to avoid no-op emits.
+              // Activity-log listeners skip polling emits; the originating
               // TaskStore instance wrote the row in-process.
-              this.emit("task:moved", { task: cached, from: cached.column, to: "archived" as Column, source: "engine" });
+              if (cached.column !== "archived") {
+                this.emit("task:moved", { task: cached, from: cached.column, to: "archived" as Column, source: "engine" });
+              }
             } else {
               // Polling replicas only mirror the originating delete signal.
               // Do not record run-audit here; the writer already owns that row.
@@ -8841,7 +8874,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Insert an agent log entry into the agentLogEntries SQLite table.
+   * Buffer an agent log entry for file-backed persistence.
    * Also emits an `agent:log` event for live streaming.
    *
    * @param taskId - The task ID (e.g. "KB-001")
@@ -8911,7 +8944,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Flush all buffered agent log entries in a single transaction.
+   * Flush all buffered agent log entries to per-task JSONL files.
    * Called when the buffer is full or on a timer.
    */
   private flushAgentLogBuffer(): void {
@@ -8921,55 +8954,45 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
     if (this.agentLogBuffer.length === 0) return;
 
-    // Snapshot the entries to flush. New entries appended during the
-    // synchronous transaction will appear past batch.length in
-    // this.agentLogBuffer, so we splice only the flushed count.
     const batch = this.agentLogBuffer.slice();
     const flushCount = batch.length;
 
     let validEntries = batch;
-    let flushSucceeded = false;
+    const flushedEntries = new Set<typeof batch[number]>();
     try {
-      this.db.transaction(() => {
-        // Query live task IDs inside the transaction so the check is
-        // atomic with the inserts (prevents TOCTOU FK violations).
-        const liveTaskIds = new Set(
-          (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((r) => r.id),
+      const liveTaskIds = new Set(
+        (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((row) => row.id),
+      );
+      validEntries = batch.filter((entry) => liveTaskIds.has(entry.taskId));
+      const dropped = batch.length - validEntries.length;
+      if (dropped > 0) {
+        console.warn(
+          `[fusion] Dropped ${dropped} buffered agent log entries for deleted tasks (${this.db.path})`,
         );
-        validEntries = batch.filter((e) => liveTaskIds.has(e.taskId));
-        const dropped = batch.length - validEntries.length;
-        if (dropped > 0) {
-          console.warn(
-            `[fusion] Dropped ${dropped} buffered agent log entries for deleted tasks (${this.db.path})`,
-          );
+      }
+
+      if (validEntries.length > 0) {
+        const citationInputs: GoalCitationInput[] = [];
+        const entriesByTask = new Map<string, typeof validEntries>();
+        for (const entry of validEntries) {
+          const taskEntries = entriesByTask.get(entry.taskId);
+          if (taskEntries) {
+            taskEntries.push(entry);
+          } else {
+            entriesByTask.set(entry.taskId, [entry]);
+          }
         }
 
-        if (validEntries.length > 0) {
-          const stmt = this.db.prepare(`
-            INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `);
-          const citationInputs: GoalCitationInput[] = [];
-          for (const entry of validEntries) {
-            const insertResult = stmt.run(
-              entry.taskId,
-              entry.timestamp,
-              entry.text,
-              entry.type,
-              entry.detail,
-              entry.agent,
-            ) as { lastInsertRowid?: number | bigint };
-            const insertedId = insertResult.lastInsertRowid;
-            if (insertedId === undefined || insertedId === null) {
-              continue;
-            }
-            const sourceRef = `agentLog:${String(insertedId)}`;
+        for (const [taskId, taskEntries] of entriesByTask) {
+          const appended = appendAgentLogEntriesSync(this.taskDir(taskId), taskEntries);
+          taskEntries.forEach((entry) => flushedEntries.add(entry));
+          for (const entry of appended) {
             try {
               citationInputs.push(
                 ...this.scanAndRecordCitations(
                   entry.text,
                   "agent_log",
-                  sourceRef,
+                  entry.sourceRef,
                   entry.agent ?? "unknown",
                   entry.taskId,
                   entry.timestamp,
@@ -8979,25 +9002,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
               console.warn("[fusion] Failed to scan goal citations from agent_log:", err);
             }
           }
-          if (citationInputs.length > 0) {
-            try {
-              this.recordGoalCitations(citationInputs);
-            } catch (err) {
-              console.warn("[fusion] Failed to record goal citations from agent_log batch:", err);
-            }
-          }
-          this.db.bumpLastModified();
         }
-      });
-      flushSucceeded = true;
+
+        if (citationInputs.length > 0) {
+          try {
+            this.recordGoalCitations(citationInputs);
+          } catch (err) {
+            console.warn("[fusion] Failed to record goal citations from agent_log batch:", err);
+          }
+        }
+        this.db.bumpLastModified();
+      }
     } finally {
-      // Always drain the original slice from the buffer.
       this.agentLogBuffer.splice(0, flushCount);
-      // On transient failures (busy/IO), requeue valid entries for retry.
-      // Stale rows were already filtered out above.
-      if (!flushSucceeded && validEntries.length > 0) {
-        this.agentLogBuffer.unshift(...validEntries);
-        // Re-arm the flush timer so retried entries don't sit in memory forever.
+      const remainingValidEntries = validEntries.filter((entry) => !flushedEntries.has(entry));
+      if (remainingValidEntries.length > 0) {
+        this.agentLogBuffer.unshift(...remainingValidEntries);
         if (!this.agentLogFlushTimer) {
           this.agentLogFlushTimer = setTimeout(() => {
             try {
@@ -9034,50 +9054,65 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ...entry,
       detail: truncateAgentLogDetail(entry.detail, entry.type),
     }));
-    const stmt = this.db.prepare(`
-      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const liveTaskIds = new Set(
+      (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((row) => row.id),
+    );
+    const validEntries = normalizedEntries.filter((entry) => liveTaskIds.has(entry.taskId));
+    const dropped = normalizedEntries.length - validEntries.length;
+    if (dropped > 0) {
+      console.warn(`[fusion] Dropped ${dropped} batch agent log entries for deleted tasks (${this.db.path})`);
+    }
 
-    this.db.transaction(() => {
-      const citationInputs: GoalCitationInput[] = [];
-      for (const entry of normalizedEntries) {
-        const insertResult = stmt.run(
-          entry.taskId,
+    const citationInputs: GoalCitationInput[] = [];
+    const entriesByTask = new Map<string, typeof validEntries>();
+    for (const entry of validEntries) {
+      const taskEntries = entriesByTask.get(entry.taskId);
+      if (taskEntries) {
+        taskEntries.push(entry);
+      } else {
+        entriesByTask.set(entry.taskId, [entry]);
+      }
+    }
+
+    for (const [taskId, taskEntries] of entriesByTask) {
+      const appended = appendAgentLogEntriesSync(
+        this.taskDir(taskId),
+        taskEntries.map((entry) => ({
           timestamp,
-          entry.text,
-          entry.type,
-          entry.detail ?? null,
-          entry.agent ?? null,
-        ) as { lastInsertRowid?: number | bigint };
-        const insertedId = insertResult.lastInsertRowid;
-        if (insertedId === undefined || insertedId === null) {
-          continue;
-        }
+          taskId: entry.taskId,
+          text: entry.text,
+          type: entry.type,
+          detail: entry.detail ?? null,
+          agent: entry.agent ?? null,
+        })),
+      );
+      for (const entry of appended) {
         try {
           citationInputs.push(
             ...this.scanAndRecordCitations(
               entry.text,
               "agent_log",
-              `agentLog:${String(insertedId)}`,
+              entry.sourceRef,
               entry.agent ?? "unknown",
               entry.taskId,
-              timestamp,
+              entry.timestamp,
             ),
           );
         } catch (err) {
           console.warn("[fusion] Failed to scan goal citations from agent log batch:", err);
         }
       }
-      if (citationInputs.length > 0) {
-        try {
-          this.recordGoalCitations(citationInputs);
-        } catch (err) {
-          console.warn("[fusion] Failed to record goal citations from appendAgentLogBatch:", err);
-        }
+    }
+    if (citationInputs.length > 0) {
+      try {
+        this.recordGoalCitations(citationInputs);
+      } catch (err) {
+        console.warn("[fusion] Failed to record goal citations from appendAgentLogBatch:", err);
       }
+    }
+    if (validEntries.length > 0) {
       this.db.bumpLastModified();
-    });
+    }
 
     for (const entry of normalizedEntries) {
       this.emit("agent:log", {
@@ -9089,37 +9124,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         ...(entry.agent !== undefined && { agent: entry.agent }),
       });
     }
-  }
-
-  private mapAgentLogRow(row: Record<string, unknown>): AgentLogEntry {
-    const type = row.type as AgentLogEntry["type"];
-    const detail = row.detail != null ? String(row.detail) : undefined;
-    return {
-      timestamp: row.timestamp as string,
-      taskId: row.taskId as string,
-      text: row.text as string,
-      type,
-      ...(detail !== undefined && { detail }),
-      ...(row.agent != null && { agent: row.agent as AgentLogEntry["agent"] }),
-    };
-  }
-
-  private getAgentLogSelectClause(): string {
-    const escapedNotice = AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE.replace(/'/g, "''");
-    return `
-      taskId,
-      timestamp,
-      text,
-      type,
-      CASE
-        WHEN type IN ('tool', 'tool_result', 'tool_error')
-          AND detail IS NOT NULL
-          AND LENGTH(detail) > ${AGENT_LOG_TOOL_DETAIL_LIMIT}
-        THEN SUBSTR(detail, 1, ${AGENT_LOG_TOOL_DETAIL_LIMIT}) || '${escapedNotice}'
-        ELSE detail
-      END AS detail,
-      agent
-    `;
   }
 
   async addTaskComment(id: string, text: string, author: string): Promise<Task> {
@@ -10030,7 +10034,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Read historical agent log entries for a task from SQLite.
+   * Read historical agent log entries for a task from JSONL storage.
    * Returns entries in chronological order (oldest first).
    *
    * Tool-oriented detail payloads are clipped server-side to keep historical
@@ -10050,6 +10054,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   ): Promise<AgentLogEntry[]> {
     // Ensure buffered entries are visible before reading.
     this.flushAgentLogBuffer();
+    if (this.readTaskFromDb(taskId, { includeDeleted: true })?.deletedAt) {
+      return [];
+    }
     const limit = options?.limit !== undefined
       ? (Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit)) : 0)
       : undefined;
@@ -10059,47 +10066,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     if (limit === 0) return [];
 
-    const selectClause = this.getAgentLogSelectClause();
-
-    if (limit !== undefined) {
-      const readCount = offset > 0 ? limit + offset : limit;
-      const rows = this.db.prepare(`
-        SELECT ${selectClause} FROM agentLogEntries
-        WHERE taskId = ?
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ?
-      `).all(taskId, readCount) as Array<Record<string, unknown>>;
-      const entries = rows.map((row) => this.mapAgentLogRow(row)).reverse();
-      if (offset > 0) {
-        return entries.slice(0, Math.max(0, entries.length - offset));
-      }
-      return entries;
-    }
-
-    const rows = this.db.prepare(`
-      SELECT ${selectClause} FROM agentLogEntries
-      WHERE taskId = ?
-      ORDER BY timestamp ASC, id ASC
-    `).all(taskId) as Array<Record<string, unknown>>;
-    const entries = rows.map((row) => this.mapAgentLogRow(row));
-    if (offset > 0) {
-      return entries.slice(0, Math.max(0, entries.length - offset));
-    }
-    return entries;
+    return readAgentLogEntries(this.taskDir(taskId), { limit, offset }).map(
+      ({ lineNo: _lineNo, sourceRef: _sourceRef, ...entry }) => entry,
+    );
   }
 
   /**
-   * Count total number of persisted agent log entries for a task in SQLite.
+   * Count total number of persisted agent log entries for a task in JSONL storage.
    *
    * @param taskId - The task ID (e.g. "KB-001")
    * @returns Total number of log entries
    */
   async getAgentLogCount(taskId: string): Promise<number> {
     this.flushAgentLogBuffer();
-    const row = this.db.prepare(
-      "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
-    ).get(taskId) as { count: number } | undefined;
-    return row?.count ?? 0;
+    if (this.readTaskFromDb(taskId, { includeDeleted: true })?.deletedAt) {
+      return 0;
+    }
+    return countAgentLogEntries(this.taskDir(taskId));
   }
 
   /**
@@ -10117,14 +10100,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   ): Promise<AgentLogEntry[]> {
     // Ensure buffered entries are visible before reading.
     this.flushAgentLogBuffer();
+    if (this.readTaskFromDb(taskId, { includeDeleted: true })?.deletedAt) {
+      return [];
+    }
     const end = endIso ?? new Date().toISOString();
-    const selectClause = this.getAgentLogSelectClause();
-    const rows = this.db.prepare(`
-      SELECT ${selectClause} FROM agentLogEntries
-      WHERE taskId = ? AND timestamp >= ? AND timestamp <= ?
-      ORDER BY timestamp ASC, id ASC
-    `).all(taskId, startIso, end) as Array<Record<string, unknown>>;
-    return rows.map((row) => this.mapAgentLogRow(row));
+    return readAgentLogEntriesByTimeRange(this.taskDir(taskId), startIso, end).map(
+      ({ lineNo: _lineNo, sourceRef: _sourceRef, ...entry }) => entry,
+    );
   }
 
   async importLegacyAgentLogs(): Promise<number> {
@@ -10132,18 +10114,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const entries = await readdir(this.tasksDir, { withFileTypes: true });
     let imported = 0;
-    const insertStmt = this.db.prepare(`
-      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const logPath = join(this.tasksDir, entry.name, "agent.log");
+      const taskDir = join(this.tasksDir, entry.name);
+      const logPath = join(taskDir, "agent.log");
       if (!existsSync(logPath)) continue;
 
       try {
         const content = await readFile(logPath, "utf-8");
+        const parsedEntries: Array<{
+          timestamp: string;
+          taskId: string;
+          text: string;
+          type: AgentLogEntry["type"];
+          detail?: string | null;
+          agent?: AgentLogEntry["agent"] | null;
+        }> = [];
         for (const line of content.split("\n")) {
           const trimmed = line.trim();
           if (!trimmed) continue;
@@ -10155,20 +10142,21 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             const type = typeof parsed.type === "string" ? parsed.type : null;
             if (!timestamp || !parsedTaskId || !type) continue;
 
-            const text = typeof parsed.text === "string" ? parsed.text : "";
-            const detail = typeof parsed.detail === "string" ? parsed.detail : null;
-            const agent = typeof parsed.agent === "string" ? parsed.agent : null;
-            const normalizedDetail = truncateAgentLogDetail(
-              detail,
-              type as AgentLogEntry["type"],
-            );
-
-            insertStmt.run(parsedTaskId, timestamp, text, type, normalizedDetail ?? null, agent);
-            imported += 1;
+            parsedEntries.push({
+              timestamp,
+              taskId: parsedTaskId,
+              text: typeof parsed.text === "string" ? parsed.text : "",
+              type: type as AgentLogEntry["type"],
+              detail: typeof parsed.detail === "string" ? parsed.detail : null,
+              agent: typeof parsed.agent === "string" ? (parsed.agent as AgentLogEntry["agent"]) : null,
+            });
           } catch {
             // Skip malformed JSONL lines.
           }
         }
+
+        appendAgentLogEntriesSync(taskDir, parsedEntries);
+        imported += parsedEntries.length;
       } catch (err) {
         storeLog.warn("Skipping unreadable legacy agent.log file during import", {
           phase: "importLegacyAgentLogs:read-file",
@@ -10203,6 +10191,148 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(migrationKey, migrationVersion);
     this.db.bumpLastModified();
+  }
+
+  /**
+   * One-time migration: copy `agentLogEntries` rows from SQLite into per-task
+   * JSONL files, then rewrite goal-citation source-refs from the old
+   * `agentLog:<rowid>` format to the new `agentLog:{taskId}:{lineNo}` format.
+   * Guarded by `__meta` so it runs exactly once.
+   */
+  private async migrateAgentLogEntriesToFilesOnce(): Promise<void> {
+    const migrationKey = "agentLogEntriesToFileMigrationVersion";
+    const migrationVersion = "1";
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(migrationKey) as
+      | { value: string }
+      | undefined;
+
+    if (row?.value === migrationVersion) {
+      return;
+    }
+
+    // Only run if the agentLogEntries table still exists
+    const hasTable =
+      this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agentLogEntries' LIMIT 1").get() !==
+      undefined;
+    if (!hasTable) {
+      // Table already gone (fresh DB or already migrated) — mark done
+      this.db.prepare(`
+        INSERT INTO __meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(migrationKey, migrationVersion);
+      return;
+    }
+
+    interface AgentLogRow {
+      id: number;
+      taskId: string;
+      timestamp: string;
+      text: string;
+      type: string;
+      detail: string | null;
+      agent: string | null;
+    }
+
+    // Read all rows ordered by taskId, id so each task's entries are
+    // written in their original insertion order
+    const rows = this.db
+      .prepare("SELECT id, taskId, timestamp, text, type, detail, agent FROM agentLogEntries ORDER BY taskId, id")
+      .all() as AgentLogRow[];
+
+    if (rows.length > 0) {
+      // Group rows by task
+      const entriesByTask = new Map<string, AgentLogRow[]>();
+      for (const row of rows) {
+        let taskRows = entriesByTask.get(row.taskId);
+        if (!taskRows) {
+          taskRows = [];
+          entriesByTask.set(row.taskId, taskRows);
+        }
+        taskRows.push(row);
+      }
+
+      // Write per-task JSONL files
+      const rowIdToNewRef = new Map<number, string>();
+      for (const [taskId, taskRows] of entriesByTask) {
+        const td = this.taskDir(taskId);
+        const appended = appendAgentLogEntriesSync(
+          td,
+          taskRows.map((r) => ({
+            timestamp: r.timestamp,
+            taskId: r.taskId,
+            text: r.text,
+            type: r.type as AgentLogEntry["type"],
+            detail: r.detail,
+            agent: r.agent as AgentLogEntry["agent"] | null,
+          })),
+        );
+        // Build mapping from old rowid to new sourceRef
+        for (let i = 0; i < taskRows.length; i++) {
+          rowIdToNewRef.set(taskRows[i]!.id, appended[i]!.sourceRef);
+        }
+      }
+
+      // Rewrite goal-citation source-refs that use the old agentLog:<rowid> format
+      const oldFormatRows = this.db
+        .prepare("SELECT id, sourceRef FROM goal_citations WHERE surface = 'agent_log' AND sourceRef GLOB 'agentLog:[0-9]*'")
+        .all() as Array<{ id: number; sourceRef: string }>;
+
+      const updateStmt = this.db.prepare("UPDATE goal_citations SET sourceRef = ? WHERE id = ?");
+      this.db.transaction(() => {
+        for (const citation of oldFormatRows) {
+          const oldRowId = parseInt(citation.sourceRef.replace("agentLog:", ""), 10);
+          const newRef = rowIdToNewRef.get(oldRowId);
+          if (newRef) {
+            updateStmt.run(newRef, citation.id);
+          }
+        }
+      });
+    }
+
+    // Mark migration as done
+    this.db.prepare(`
+      INSERT INTO __meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(migrationKey, migrationVersion);
+    this.db.bumpLastModified();
+  }
+
+  private async cleanupNoOpTaskMovedActivityRowsOnce(): Promise<void> {
+    const migrationKey = "noOpTaskMovedActivityCleanupVersion";
+    const migrationVersion = "1";
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(migrationKey) as
+      | { value: string }
+      | undefined;
+
+    if (row?.value === migrationVersion) {
+      return;
+    }
+
+    const hasTable =
+      this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activityLog' LIMIT 1").get() !==
+      undefined;
+    const markDone = () => {
+      this.db.prepare(`
+        INSERT INTO __meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(migrationKey, migrationVersion);
+    };
+
+    if (!hasTable) {
+      markDone();
+      this.db.bumpLastModified();
+      return;
+    }
+
+    this.db.transactionImmediate(() => {
+      this.db.prepare(`
+        DELETE FROM activityLog
+        WHERE type = 'task:moved'
+          AND json_extract(metadata, '$.from') = json_extract(metadata, '$.to')
+      `).run();
+      markDone();
+      this.db.bumpLastModified();
+    });
   }
 
   // ── Archive Cleanup Methods ─────────────────────────────────────────
@@ -10845,6 +10975,27 @@ ${stepsSection}`;
    */
   pruneOperationalLogs(retentionMs: number): { deletedByTable: Record<string, number>; deletedTotal: number } {
     return this.db.pruneOperationalLogs(retentionMs);
+  }
+
+  /**
+   * Prune per-task JSONL agent log files by removing entries older than the
+   * configured retention window. Only prunes files for soft-deleted or archived
+   * tasks (avoids removing logs for still-active tasks). Returns zeroed counts
+   * when retention is disabled (`<= 0`).
+   */
+  pruneAgentLogFiles(retentionDays: number): { prunedFiles: number; prunedEntries: number; freedBytes: number } {
+    if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+      return { prunedFiles: 0, prunedEntries: 0, freedBytes: 0 };
+    }
+    // Only prune JSONL files for tasks that are no longer active (soft-deleted or archived)
+    const inactiveTaskIds = new Set(
+      (
+        this.db
+          .prepare(`SELECT id FROM tasks WHERE deletedAt IS NOT NULL OR "column" = 'archived'`)
+          .all() as Array<{ id: string }>
+      ).map((row) => row.id),
+    );
+    return pruneAgentLogFileEntries(this.tasksDir, retentionDays, inactiveTaskIds);
   }
 
   getRootDir(): string {

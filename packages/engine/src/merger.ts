@@ -495,14 +495,23 @@ export function hasInstallState(rootDir: string): boolean {
 export function shouldSyncDependenciesForMerge(
   stagedFiles: string[],
   installStatePresent: boolean,
+  hasConfiguredInitCommand = false,
 ): boolean {
+  if (hasConfiguredInitCommand) return true;
   if (!installStatePresent) return true;
   return stagedFiles.some((file) =>
     DEPENDENCY_SYNC_TRIGGER_PATTERNS.some((pattern) => matchGlob(file, pattern)),
   );
 }
 
-function getDependencySyncCommand(rootDir: string): string | null {
+function getConfiguredWorktreeInitCommand(settings?: Settings | null): string | null {
+  const trimmed = settings?.worktreeInitCommand?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getDependencySyncCommand(rootDir: string, settings?: Settings | null): string | null {
+  const configuredCommand = getConfiguredWorktreeInitCommand(settings);
+  if (configuredCommand) return configuredCommand;
   if (existsSync(join(rootDir, "pnpm-lock.yaml"))) return "pnpm install --frozen-lockfile";
   if (existsSync(join(rootDir, "package-lock.json"))) return "npm install";
   if (existsSync(join(rootDir, "yarn.lock"))) return "yarn install --frozen-lockfile";
@@ -550,17 +559,21 @@ async function syncDependenciesForMerge(
   store: TaskStore,
   rootDir: string,
   taskId: string,
+  settings?: Settings | null,
   signal?: AbortSignal,
 ): Promise<void> {
-  const installCommand = getDependencySyncCommand(rootDir);
+  const configuredCommand = getConfiguredWorktreeInitCommand(settings);
+  const installCommand = getDependencySyncCommand(rootDir, settings);
   if (!installCommand) return;
+
+  const shouldUseInstallMarker = configuredCommand === null;
 
   // Skip the install if node_modules is present and the lockfile content
   // matches the hash recorded after the last successful install. Caller's
   // shouldSyncDependenciesForMerge gate already filters most no-ops; this
   // covers the case where package.json (but not the lockfile) is staged, and
   // the case where multiple merge attempts hit the same worktree in a row.
-  const lockHash = computeLockfileHash(rootDir);
+  const lockHash = shouldUseInstallMarker ? computeLockfileHash(rootDir) : null;
   if (lockHash && hasInstallState(rootDir) && readInstallMarker(rootDir) === lockHash) {
     mergerLog.log(`${taskId}: skipping dependency sync (lockfile unchanged since last install)`);
     await store.logEntry(
@@ -10947,8 +10960,15 @@ export async function executeMergeAttempt(
     if (testCommand || buildCommand) {
       throwIfAborted(options.signal, taskId);
       const stagedFiles = await getStagedFiles(rootDir);
-      if (shouldSyncDependenciesForMerge(stagedFiles, hasInstallState(rootDir))) {
-        await syncDependenciesForMerge(store, rootDir, taskId, options.signal);
+      const configuredMergeInitCommand = getConfiguredWorktreeInitCommand(settings as Settings);
+      if (
+        shouldSyncDependenciesForMerge(
+          stagedFiles,
+          hasInstallState(rootDir),
+          configuredMergeInitCommand !== null,
+        )
+      ) {
+        await syncDependenciesForMerge(store, rootDir, taskId, settings as Settings, options.signal);
       }
     }
 

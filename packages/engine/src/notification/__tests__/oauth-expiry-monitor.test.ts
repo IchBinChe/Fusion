@@ -1,5 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { OAuthAlertStateStore } from "../oauth-alert-state.js";
 import { OAuthExpiryMonitor, type AuthStorageLike } from "../oauth-expiry-monitor.js";
+
+const tempDirs: string[] = [];
+
+function createStatePath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "oauth-expiry-monitor-"));
+  tempDirs.push(dir);
+  return join(dir, "oauth-alert-state.json");
+}
 
 function createAuthStorage(initialCredential?: { type?: string; expires?: number }): AuthStorageLike & {
   credential: { type?: string; expires?: number } | undefined;
@@ -17,17 +29,26 @@ function createAuthStorage(initialCredential?: { type?: string; expires?: number
   };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 describe("OAuthExpiryMonitor", () => {
   it("fires once when an OAuth credential is expired", async () => {
     vi.useFakeTimers();
-    const authStorage = createAuthStorage({ type: "oauth", expires: Date.now() - 1_000 });
+    const now = Date.now();
+    const authStorage = createAuthStorage({ type: "oauth", expires: now - 1_000 });
     const dispatch = vi.fn(async () => undefined);
 
     const monitor = new OAuthExpiryMonitor({
       authStorage,
       notificationService: { dispatch } as any,
       intervalMs: 100,
-      clock: () => Date.now(),
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
     });
 
     await monitor.start();
@@ -45,7 +66,6 @@ describe("OAuthExpiryMonitor", () => {
       }),
     );
     monitor.stop();
-    vi.useRealTimers();
   });
 
   it("does not fire for non-expired/non-oauth credentials", async () => {
@@ -67,6 +87,7 @@ describe("OAuthExpiryMonitor", () => {
         notificationService: { dispatch } as any,
         intervalMs: 100,
         clock: () => now,
+        alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
       });
 
       await monitor.start();
@@ -75,7 +96,6 @@ describe("OAuthExpiryMonitor", () => {
     }
 
     expect(dispatch).not.toHaveBeenCalled();
-    vi.useRealTimers();
   });
 
   it("deduplicates dispatches for same provider and expiry", async () => {
@@ -89,6 +109,7 @@ describe("OAuthExpiryMonitor", () => {
       notificationService: { dispatch } as any,
       intervalMs: 100,
       clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
     });
 
     await monitor.start();
@@ -96,12 +117,12 @@ describe("OAuthExpiryMonitor", () => {
 
     expect(dispatch).toHaveBeenCalledTimes(1);
     monitor.stop();
-    vi.useRealTimers();
   });
 
   it("re-fires after credential is replaced with a new expiry that later expires", async () => {
     vi.useFakeTimers();
     let now = Date.now();
+    const statePath = createStatePath();
     const authStorage = createAuthStorage({ type: "oauth", expires: now - 1 });
     const dispatch = vi.fn(async () => undefined);
 
@@ -110,6 +131,7 @@ describe("OAuthExpiryMonitor", () => {
       notificationService: { dispatch } as any,
       intervalMs: 100,
       clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
     });
 
     await monitor.start();
@@ -128,42 +150,126 @@ describe("OAuthExpiryMonitor", () => {
 
     expect(dispatch).toHaveBeenCalledTimes(2);
     monitor.stop();
-    vi.useRealTimers();
   });
 
-  it("throttles changed expiries until min notify interval elapses", async () => {
+  it("throttles changed expiries until min notify interval elapses across restarts", async () => {
     vi.useFakeTimers();
     let now = Date.now();
+    const statePath = createStatePath();
     const authStorage = createAuthStorage({ type: "oauth", expires: now - 1 });
     const dispatch = vi.fn(async () => undefined);
 
-    const monitor = new OAuthExpiryMonitor({
+    const firstMonitor = new OAuthExpiryMonitor({
       authStorage,
       notificationService: { dispatch } as any,
-      intervalMs: 100,
       minNotifyIntervalMs: 1_000,
       clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
     });
 
-    await monitor.start();
-    expect(dispatch).toHaveBeenCalledTimes(1);
-
-    authStorage.credential = { type: "oauth", expires: now + 10_000 };
-    await vi.advanceTimersByTimeAsync(100);
-
-    now += 500;
-    authStorage.credential = { type: "oauth", expires: now - 1 };
-    await vi.advanceTimersByTimeAsync(100);
-
+    await firstMonitor.start();
+    firstMonitor.stop();
     expect(dispatch).toHaveBeenCalledTimes(1);
 
     now += 500;
     authStorage.credential = { type: "oauth", expires: now - 2 };
-    await vi.advanceTimersByTimeAsync(100);
+    const restartedMonitor = new OAuthExpiryMonitor({
+      authStorage,
+      notificationService: { dispatch } as any,
+      minNotifyIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+
+    await restartedMonitor.start();
+    restartedMonitor.stop();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    now += 500;
+    authStorage.credential = { type: "oauth", expires: now - 3 };
+    await restartedMonitor.start();
+    restartedMonitor.stop();
+    expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not persist lastAlertAt when dispatch fails", async () => {
+    let now = Date.now();
+    const statePath = createStatePath();
+    const authStorage = createAuthStorage({ type: "oauth", expires: now - 1 });
+    const dispatch = vi.fn(async () => {
+      throw new Error("boom");
+    });
+
+    const firstMonitor = new OAuthExpiryMonitor({
+      authStorage,
+      notificationService: { dispatch } as any,
+      minNotifyIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await firstMonitor.start();
+    firstMonitor.stop();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    const secondDispatch = vi.fn(async () => undefined);
+    now += 100;
+    const restartedMonitor = new OAuthExpiryMonitor({
+      authStorage,
+      notificationService: { dispatch: secondDispatch } as any,
+      minNotifyIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await restartedMonitor.start();
+    restartedMonitor.stop();
+
+    expect(secondDispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears persisted state when providers disappear", async () => {
+    let now = Date.now();
+    const statePath = createStatePath();
+    const authStorage = createAuthStorage({ type: "oauth", expires: now - 1 });
+    const dispatch = vi.fn(async () => undefined);
+
+    const firstMonitor = new OAuthExpiryMonitor({
+      authStorage,
+      notificationService: { dispatch } as any,
+      minNotifyIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await firstMonitor.start();
+    firstMonitor.stop();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    const noProviderStorage: AuthStorageLike = {
+      reload: vi.fn(),
+      getOAuthProviders: () => [],
+      get: () => undefined,
+    };
+    const clearingMonitor = new OAuthExpiryMonitor({
+      authStorage: noProviderStorage,
+      notificationService: { dispatch } as any,
+      minNotifyIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await clearingMonitor.start();
+    clearingMonitor.stop();
+
+    now += 100;
+    const restartedMonitor = new OAuthExpiryMonitor({
+      authStorage,
+      notificationService: { dispatch } as any,
+      minNotifyIntervalMs: 1_000,
+      clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath, clock: () => now }),
+    });
+    await restartedMonitor.start();
+    restartedMonitor.stop();
 
     expect(dispatch).toHaveBeenCalledTimes(2);
-    monitor.stop();
-    vi.useRealTimers();
   });
 
   it("stop cancels the interval", async () => {
@@ -177,6 +283,7 @@ describe("OAuthExpiryMonitor", () => {
       notificationService: { dispatch } as any,
       intervalMs: 100,
       clock: () => now,
+      alertState: new OAuthAlertStateStore({ statePath: createStatePath(), clock: () => now }),
     });
 
     await monitor.start();
@@ -184,6 +291,5 @@ describe("OAuthExpiryMonitor", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(dispatch).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 });

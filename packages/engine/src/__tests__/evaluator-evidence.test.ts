@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as core from "@fusion/core";
 import { collectTaskEvaluationEvidence } from "../evaluator-evidence.js";
 
@@ -30,6 +33,23 @@ function makeStore(overrides: Partial<core.TaskStore> = {}): core.TaskStore {
 }
 
 describe("collectTaskEvaluationEvidence", () => {
+  let integrationRootDir: string | null = null;
+  let integrationStore: core.TaskStore | null = null;
+
+  beforeEach(() => {
+    integrationRootDir = null;
+    integrationStore = null;
+  });
+
+  afterEach(() => {
+    integrationStore?.close();
+    integrationStore = null;
+    if (integrationRootDir) {
+      rmSync(integrationRootDir, { recursive: true, force: true });
+      integrationRootDir = null;
+    }
+  });
+
   it("collects fixed source groups with bounded excerpts", async () => {
     const store = makeStore({
       getTaskDocuments: vi.fn().mockResolvedValue([{ key: "plan", content: "x".repeat(900), revision: 1, author: "agent", updatedAt: "2026-01-01T00:01:00.000Z" }]),
@@ -121,6 +141,31 @@ describe("collectTaskEvaluationEvidence", () => {
     expect(evidence.taskActivity).toHaveLength(core.EVIDENCE_LIMITS.taskActivity);
     expect(evidence.agentLogs[0]?.excerpt).toContain("entry-5");
     expect(evidence.agentLogs.at(-1)?.excerpt).toContain("entry-29");
+  });
+
+  it("reads file-backed agent logs through the TaskStore evidence seam", async () => {
+    integrationRootDir = mkdtempSync(join(tmpdir(), "fusion-evaluator-evidence-"));
+    const globalDir = join(integrationRootDir, ".fusion-global-settings");
+    integrationStore = new core.TaskStore(integrationRootDir, globalDir, { inMemoryDb: true });
+    await integrationStore.init();
+
+    const task = await integrationStore.createTask({ description: "Collect evaluator evidence from file-backed logs" });
+    await integrationStore.appendAgentLog(task.id, "first line", "text", undefined, "executor");
+    await integrationStore.appendAgentLog(task.id, "tool finished", "tool_result", "ok", "executor");
+
+    const detail = await integrationStore.getTask(task.id);
+    const evidence = await collectTaskEvaluationEvidence({
+      store: integrationStore,
+      task: detail,
+      runId: "ER-file-backed",
+      cwd: integrationRootDir,
+    });
+
+    expect(evidence.agentLogs).toHaveLength(2);
+    expect(evidence.agentLogs.map((entry) => entry.label)).toEqual(["text", "tool_result"]);
+    expect(evidence.agentLogs.map((entry) => entry.excerpt)).toEqual(["first line", "tool finished — ok"]);
+    expect(evidence.agentLogs.map((entry) => entry.agentId)).toEqual(["executor", "executor"]);
+
   });
 
   it("truncates task metadata summary when oversized", async () => {

@@ -8,9 +8,48 @@ import type {
   PluginContext,
 } from "@fusion/core";
 import { resolveDefaultInstallTargetRoot } from "../skill-installation.js";
+import { getCePipelineStore, type CePipelineStore } from "../sync/pipeline-store.js";
 import type { CeSession, CeSessionStore } from "./session-store.js";
 import { getCeSessionStore } from "./session-store.js";
 import { getStage, type CeStageDefinition } from "./stage-registry.js";
+
+/**
+ * The stage id whose `complete` payload carries a derived task list to land on
+ * the board (U7). Its skill is `ce-work` (see the stage registry).
+ */
+export const WORK_STAGE_ID = "work";
+
+/**
+ * The CE marker plugin id recorded on every CE-originated board task and link.
+ * Kept as a constant so U8's sync code reuses the same identity.
+ */
+export const CE_PLUGIN_ID = "fusion-plugin-compound-engineering";
+
+/**
+ * SourceType chosen for CE-originated automated work. The work stage is a step in
+ * the CE pipeline, so `workflow_step` is the closest existing provenance value
+ * (vs. inventing a new SourceType). The CE marker + back-reference convenience
+ * copy ride in `sourceMetadata`; the authoritative link is the pipeline-link row.
+ */
+export const CE_WORK_SOURCE_TYPE = "workflow_step" as const;
+
+/**
+ * COMPLETION-PAYLOAD → TASKS CONTRACT (U7).
+ *
+ * The `work` stage's `complete` event `data` MAY carry a `tasks` array describing
+ * the board tasks to create. Each entry needs at least a `description` (the only
+ * required TaskCreateInput field); `title` and `column` are optional.
+ *
+ *   { artifact?: string, tasks?: Array<{ title?: string, description: string, column?: Column }> }
+ *
+ * A missing/empty `tasks` array is a clean no-op (no board tasks, no link rows).
+ * Entries with a blank description are skipped (createTask would reject them).
+ */
+export interface CeDerivedTaskSpec {
+  title?: string;
+  description: string;
+  column?: string;
+}
 
 /** Default per-turn timeout. A turn that exceeds this is treated as a stall. */
 const DEFAULT_TURN_TIMEOUT_MS = 120000;
@@ -126,6 +165,7 @@ export interface CeStepResult {
 export class CeOrchestrator {
   private readonly ctx: PluginContext;
   private readonly store: CeSessionStore;
+  private readonly pipelineStore: CePipelineStore;
   private readonly factory: CreateInteractiveAiSessionFactory | undefined;
   private readonly projectRoot: string;
   private readonly turnTimeoutMs: number;
@@ -135,6 +175,7 @@ export class CeOrchestrator {
   constructor(deps: OrchestratorDeps) {
     this.ctx = deps.ctx;
     this.store = getCeSessionStore(deps.ctx);
+    this.pipelineStore = getCePipelineStore(deps.ctx);
     this.factory = deps.createInteractiveAiSession ?? deps.ctx.createInteractiveAiSession;
     this.projectRoot = deps.projectRoot ?? deps.ctx.taskStore.getRootDir();
     this.turnTimeoutMs = deps.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
@@ -249,6 +290,12 @@ export class CeOrchestrator {
     if (event.type === "complete" || event.type === "error") {
       this.disposeLive(sessionId);
     }
+    // Work bridge (U7): the work stage's completion payload lands derived tasks
+    // on the board, tagged CE-originated + recorded as pipeline links. Outbound
+    // only — created tasks then run the NORMAL lifecycle with no plugin hooks.
+    if (event.type === "complete" && session.stage === WORK_STAGE_ID) {
+      await this.landWorkTasks(session, event.data);
+    }
     return { session, event };
   }
 
@@ -295,6 +342,73 @@ export class CeOrchestrator {
         return s;
       }
     }
+  }
+
+  /**
+   * Work bridge (U7). Read the derived task list from the work stage's
+   * completion payload, create each as a board task tagged CE-originated, and
+   * record a pipeline-link row resolving task→pipeline/stage/artifact. Zero
+   * derived tasks is a clean no-op (no board tasks, no orphan link rows). The
+   * created tasks then run the normal lifecycle — no hooks attached here (U8).
+   */
+  private async landWorkTasks(session: CeSession, data: unknown): Promise<void> {
+    const specs = this.extractTaskSpecs(data);
+    if (specs.length === 0) return;
+
+    // The session is the CE pipeline run; its id is the stable pipeline id the
+    // link rows (and U8's state machine) address.
+    const cePipelineId = session.id;
+    const ceStageId = session.stage;
+    const ceArtifactPath = session.artifactPath ?? null;
+
+    for (const spec of specs) {
+      const description = spec.description.trim();
+      if (!description) continue; // createTask rejects blank descriptions.
+
+      const task = await this.ctx.taskStore.createTask({
+        title: spec.title,
+        description,
+        column: spec.column as never,
+        source: {
+          sourceType: CE_WORK_SOURCE_TYPE,
+          sourceSessionId: cePipelineId,
+          sourceMetadata: {
+            pluginId: CE_PLUGIN_ID,
+            cePipelineId,
+            ceStageId,
+            ceArtifactPath,
+          },
+        },
+      });
+
+      // Authoritative back-reference (FN-5719): the link row, not task-row JSON.
+      this.pipelineStore.createLink({
+        taskId: task.id,
+        cePipelineId,
+        ceStageId,
+        ceArtifactPath,
+      });
+    }
+  }
+
+  /** Parse the `{ tasks: [...] }` completion-payload contract; tolerant of shape. */
+  private extractTaskSpecs(data: unknown): CeDerivedTaskSpec[] {
+    if (!data || typeof data !== "object") return [];
+    const raw = (data as { tasks?: unknown }).tasks;
+    if (!Array.isArray(raw)) return [];
+    const specs: CeDerivedTaskSpec[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      const description = typeof e.description === "string" ? e.description : "";
+      if (!description.trim()) continue;
+      specs.push({
+        description,
+        title: typeof e.title === "string" ? e.title : undefined,
+        column: typeof e.column === "string" ? e.column : undefined,
+      });
+    }
+    return specs;
   }
 
   /** Persist `interrupted` with progress preserved and emit. */

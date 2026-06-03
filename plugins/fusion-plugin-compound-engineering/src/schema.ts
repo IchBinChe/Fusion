@@ -18,6 +18,13 @@ import type { Database } from "@fusion/core";
  * last produced event). Staleness is judged relative to the session's
  * configured turn interval, NOT by raw last-event age, so a healthy-but-slow
  * agent turn is not misclassified stale (docs/fn-4172-heartbeat-investigation.md).
+ *
+ * `ce_pipeline_links` (U7) is the addressable back-reference table: it links a
+ * board task to the CE pipeline/stage/artifact that produced it. Per FN-5719 the
+ * back-reference lives in this plugin-local table (NOT in task-row JSON) so
+ * board-task ownership and CE-pipeline ownership stay separate state machines.
+ * U7 keeps it minimal (link records only); U8 extends it with the bidirectional
+ * pipeline-state machine.
  */
 export function ensureCeSchema(db: Database): void {
   db.exec(`
@@ -46,5 +53,20 @@ export function ensureCeSchema(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idxCeSessionsProject
       ON ce_sessions(projectId, updatedAt DESC, id);
+
+    CREATE TABLE IF NOT EXISTS ce_pipeline_links (
+      id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      cePipelineId TEXT NOT NULL,
+      ceStageId TEXT NOT NULL,
+      ceArtifactPath TEXT,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idxCePipelineLinksPipeline
+      ON ce_pipeline_links(cePipelineId, createdAt DESC, id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idxCePipelineLinksTask
+      ON ce_pipeline_links(taskId);
   `);
 }

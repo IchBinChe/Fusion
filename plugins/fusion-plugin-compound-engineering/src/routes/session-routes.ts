@@ -1,6 +1,7 @@
 import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/core";
 import { CeOrchestrator } from "../session/orchestrator.js";
 import { getCeSessionStore } from "../session/session-store.js";
+import { getCePipelineStore } from "../sync/pipeline-store.js";
 
 /**
  * Session routes (U5): start / answer / resume / get-session-state.
@@ -128,6 +129,19 @@ export function createSessionRoutes(): PluginRouteDefinition[] {
         const stage = typeof query.stage === "string" ? query.stage : undefined;
         const sessions = getCeSessionStore(ctx).list({ status: status as never, stage });
         return { status: 200, body: { sessions } };
+      },
+    },
+    {
+      // U7 work bridge: observe the board tasks a CE pipeline (session) landed,
+      // via their link records (the addressable back-reference, FN-5719). The
+      // session id IS the pipeline id. Outbound-only in U7; U8 layers state.
+      method: "GET",
+      path: "/sessions/:id/links",
+      description: "List the CE pipeline-link records (work→board) for a session/pipeline.",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const id = (req as RouteRequest).params.id;
+        const links = getCePipelineStore(ctx).listByPipeline(id);
+        return { status: 200, body: { links } };
       },
     },
   ];

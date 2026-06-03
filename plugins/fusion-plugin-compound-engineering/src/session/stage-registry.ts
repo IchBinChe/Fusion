@@ -75,6 +75,18 @@ const STAGE_DEFINITIONS: CeStageDefinition[] = [
     label: "Plan",
     artifactGlob: "docs/plans/**/*.md",
   },
+  {
+    // The work stage (U7). Its `ce-work` skill drives execution and, on
+    // `complete`, carries a derived task list that the orchestrator lands on the
+    // board (tagged CE-originated + recorded as pipeline links). The artifact is
+    // the work log / summary for this stage.
+    stageId: "work",
+    skillId: "ce-work",
+    artifactLocation: "docs/work/",
+    icon: "Hammer",
+    label: "Work",
+    artifactGlob: "docs/work/**/*.md",
+  },
 ];
 
 const REGISTRY = new Map<string, CeStageDefinition>(STAGE_DEFINITIONS.map((s) => [s.stageId, s]));

@@ -15,7 +15,14 @@ export {
 } from "./skill-installation.js";
 export { ensureCeSchema } from "./schema.js";
 export { CeSessionStore, getCeSessionStore } from "./session/session-store.js";
-export { CeOrchestrator } from "./session/orchestrator.js";
+export { CePipelineStore, getCePipelineStore } from "./sync/pipeline-store.js";
+export type { CePipelineLink, CreateCePipelineLinkInput } from "./sync/pipeline-store.js";
+export {
+  CeOrchestrator,
+  WORK_STAGE_ID,
+  CE_PLUGIN_ID,
+  CE_WORK_SOURCE_TYPE,
+} from "./session/orchestrator.js";
 export { getStage, listStages, registerStage } from "./session/stage-registry.js";
 
 const plugin = definePlugin({

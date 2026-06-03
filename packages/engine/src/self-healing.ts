@@ -2320,6 +2320,12 @@ export class SelfHealingManager {
       }
       const inReviewPausedCandidates = (await this.store.listTasks({ column: "in-review", slim: true }))
         .filter((task) => task.paused === true && task.pausedReason === "branch-conflict-unrecoverable");
+      // Per-task auto-merge gating applies to ALL candidate columns, not just
+      // in-review: the FN-5704 regression contract ("short-circuits reclaim
+      // when autoMerge is false") deliberately keeps execution-stage reclaim
+      // and resume-limbo escalation inert in manual-review projects. The
+      // per-task override preserves that for override-less tasks while letting
+      // explicit autoMerge:true tasks recover.
       const candidates = [...todoCandidates, ...inProgressCandidates, ...inReviewPausedCandidates]
         .filter((task) => allowsAutoMergeProcessing(task, settings));
 
@@ -6929,6 +6935,10 @@ export class SelfHealingManager {
           !task.userPaused &&
           !executingIds.has(task.id),
         ),
+        // The paused in-progress contamination branch is gated per-task too:
+        // pre-existing behavior kept this sweep fully inert in manual-review
+        // projects (mirroring the FN-5704 reclaim contract), so override-less
+        // tasks stay untouched while explicit autoMerge:true tasks recover.
         ...inProgress.filter((task) =>
           task.column === "in-progress" &&
           allowsAutoMergeProcessing(task, settings) &&

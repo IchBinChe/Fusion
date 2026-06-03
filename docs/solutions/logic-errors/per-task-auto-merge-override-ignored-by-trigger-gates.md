@@ -101,12 +101,13 @@ When adding a per-entity override to a behavior that's gated on a global setting
 
 - **Grep every gate on the global setting** before declaring the override wired: here `settings.autoMerge` appeared at 1 enqueue gate, 19 sweep guards, and 6 hydration sites — all needed updating. A search for the global key, not just the new override field, surfaces the dead-flag sites.
 - **Prefer additive gating over effective-value resolution for *processing* gates.** Resolution collapses three states (global-on/off × per-task true/false/unset) into one boolean and can starve a needed downstream branch (the manual-required parking path). Gate on "should this be processed at all," resolve the actual behavior later.
+- **Check existing regression contracts before re-scoping a gate.** Review of the fix PR suggested exempting `todo`/`in-progress` candidates (execution-stage repair) from the auto-merge gate — but the repo's FN-5704 regression test ("short-circuits reclaim when autoMerge is false") deliberately keeps execution-stage reclaim inert in manual-review projects. Per-task gating applied uniformly preserves that contract while enabling overrides; exempting execution-stage recovery would be a separate, deliberate behavior change.
 - **Watch slim projections:** per-row predicates require the override column in the SELECT clause, or they silently read `undefined`.
 - **Test matrix must cross global × per-task.** The fix shipped red-first unit tests for the predicate (`packages/core/src/__tests__/task-merge.test.ts`), the gate including the shared-group exemption (`packages/engine/src/__tests__/project-engine.test.ts`), and a self-healing test proving an **override task is processed while an override-less sibling stays skipped** (`packages/engine/src/__tests__/self-healing.test.ts`) — the latter is the canonical shape: two tasks differing only in `autoMerge` under global-OFF, asserting divergent outcomes.
 
 ## Related Issues
 
-- Runfusion/Fusion#1356 — the fix PR (commit `ad468813d`)
+- Runfusion/Fusion#1356 — the fix PR
 - Runfusion/Fusion#1150, Runfusion/Fusion#1152, Runfusion/Fusion#1153 — the per-task auto-merge feature trio (data model + resolver, engine gating, dashboard control); #1152's gating claim is the gap this bug exposed
 - Runfusion/Fusion#753 (FN-5147), Runfusion/Fusion#690 (FN-5052) — prior global `autoMerge:false` stall/lifecycle handling that the sweeps' guards came from
 - AGENTS.md → "`autoMerge: false` callout (FN-5147)" — standing lifecycle rule this fix extends to per-task granularity

@@ -24,8 +24,16 @@ export interface AcpCallbacks {
 export type GateDisposition = "allow" | "block" | "require-approval";
 
 /**
- * Fusion action-gate categories the ACP `toolCall.kind` is classified into
- * (KTD3a). `"exempt"` is implicit (read-only / benign) and always allows.
+ * Fusion action-gate categories — the full policy-rule keyspace, used to read
+ * `permissionPolicy.rules[category]`. `"exempt"` is implicit (read-only / benign)
+ * and always allows.
+ *
+ * Note: ACP's `ToolKind` has no git/task discriminator, so `classifyToolKind`
+ * only ever produces `file_write_delete` / `command_execution` / `network_api`
+ * (+ exempt). `git_write` and `task_agent_mutation` remain part of the category
+ * type because the policy rules are keyed by all categories — git writes in
+ * particular route through `file_write_delete` gating PLUS the path-jail's hard
+ * `.git/**` reject (KTD6a), not a dedicated `git_write` classification.
  */
 export type FusionCategory =
   | "git_write"

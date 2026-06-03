@@ -2,6 +2,12 @@ import { definePlugin } from "@fusion/plugin-sdk";
 import type { FusionPlugin, PluginRuntimeFactory, PluginRuntimeManifestMetadata } from "@fusion/plugin-sdk";
 import { resolveCliSettings } from "./cli-spawn.js";
 import { AcpRuntimeAdapter } from "./runtime-adapter.js";
+import { killAllProcesses } from "./process-manager.js";
+
+// Reap any live agent subprocesses on hard process exit so none are orphaned
+// (KTD4 — the registry SIGKILL is the authoritative no-orphan guarantee). Scoped
+// to tracked agent subprocesses only; never touches other processes/ports.
+process.on("exit", killAllProcesses);
 
 export const ACP_RUNTIME_ID = "acp";
 const ACP_RUNTIME_VERSION = "0.1.0";

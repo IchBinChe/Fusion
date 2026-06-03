@@ -207,7 +207,8 @@ export function createEventBridge(callbacks: AcpCallbacks): EventBridge {
     // them (a partial update may only set status/output).
     if (update.title != null) tracked.title = safeTitle(update.title);
     if (update.kind != null) tracked.kind = update.kind;
-    setTracked(update.toolCallId, tracked);
+    // `id` is already bounded above; setTracked re-keys with the same value.
+    setTracked(id, tracked);
 
     const status = update.status;
     if (status !== "completed" && status !== "failed") {

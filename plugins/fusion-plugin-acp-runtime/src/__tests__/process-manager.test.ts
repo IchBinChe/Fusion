@@ -10,7 +10,6 @@ import {
   forceKill,
   spawnAgent,
   activeProcessCount,
-  createIdleTimer,
 } from "../process-manager.js";
 
 const spawned: ChildProcess[] = [];
@@ -160,24 +159,3 @@ describe("spawnAgent", () => {
   });
 });
 
-describe("createIdleTimer", () => {
-  it("fires onIdle after the interval and reset re-arms", async () => {
-    let fired = 0;
-    const timer = createIdleTimer(30, () => {
-      fired += 1;
-    });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(fired).toBe(1);
-    timer.clear();
-  });
-
-  it("clear prevents firing", async () => {
-    let fired = 0;
-    const timer = createIdleTimer(20, () => {
-      fired += 1;
-    });
-    timer.clear();
-    await new Promise((r) => setTimeout(r, 40));
-    expect(fired).toBe(0);
-  });
-});

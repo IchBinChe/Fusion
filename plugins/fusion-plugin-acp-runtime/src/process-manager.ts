@@ -152,38 +152,3 @@ export function captureStderr(child: ChildProcess): () => string {
   });
   return () => buffer;
 }
-
-// --- inactivity timer (KTD4: high ceiling, engine is the authority) --------
-
-/** Default idle ceiling. The engine's StuckTaskDetector is authoritative. */
-export const DEFAULT_IDLE_CEILING_MS = 30 * 60_000;
-
-export interface IdleTimer {
-  reset(): void;
-  clear(): void;
-}
-
-/**
- * Create an inactivity timer that fires `onIdle` after `ms` of no `reset()`.
- * The default ceiling is intentionally high (KTD4) — this is a backstop, not
- * the primary aborter.
- */
-export function createIdleTimer(ms: number, onIdle: () => void): IdleTimer {
-  let handle: NodeJS.Timeout | undefined;
-  const arm = () => {
-    handle = setTimeout(onIdle, ms);
-    // Don't keep the event loop alive solely for the backstop timer.
-    handle.unref?.();
-  };
-  arm();
-  return {
-    reset() {
-      if (handle) clearTimeout(handle);
-      arm();
-    },
-    clear() {
-      if (handle) clearTimeout(handle);
-      handle = undefined;
-    },
-  };
-}

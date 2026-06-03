@@ -98,11 +98,10 @@ function buildResponse(sel: {
 }
 
 /**
- * Read the per-category disposition from the live policy (exempt → allow).
- *
- * Exported so the fs-capabilities write path (U7) can reuse the exact same
- * per-category gate-reading logic for `file_write_delete` instead of duplicating
- * it (and risking drift from the U5 security floor).
+ * Read the raw per-category disposition from the live policy (exempt → allow),
+ * before the Risk S1 acknowledgement escalation. Callers that gate untrusted
+ * actions should use `effectiveDisposition` (which applies the escalation); this
+ * is the unescalated primitive it builds on.
  */
 export function dispositionFor(
   category: FusionCategory | "exempt",

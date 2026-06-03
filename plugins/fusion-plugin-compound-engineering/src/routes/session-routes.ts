@@ -1,6 +1,6 @@
 import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/core";
 import { CeOrchestrator } from "../session/orchestrator.js";
-import { getCeSessionStore } from "../session/session-store.js";
+import { asCeSessionStatus, getCeSessionStore } from "../session/session-store.js";
 import { getCePipelineStore } from "../sync/pipeline-store.js";
 import { asString } from "./route-helpers.js";
 
@@ -122,9 +122,9 @@ export function createSessionRoutes(): PluginRouteDefinition[] {
       description: "List CE sessions (optionally filtered by status/stage).",
       handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
         const query = (req as RouteRequest).query ?? {};
-        const status = typeof query.status === "string" ? query.status : undefined;
+        const status = asCeSessionStatus(typeof query.status === "string" ? query.status : undefined);
         const stage = typeof query.stage === "string" ? query.stage : undefined;
-        const sessions = getCeSessionStore(ctx).list({ status: status as never, stage });
+        const sessions = getCeSessionStore(ctx).list({ status, stage });
         return { status: 200, body: { sessions } };
       },
     },

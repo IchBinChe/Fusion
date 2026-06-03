@@ -103,3 +103,33 @@ describe("interval-relative staleness (FN-4172 rubric)", () => {
     expect(store.get(stuck.id)!.status).toBe("interrupted");
   });
 });
+
+describe("corrupt-JSON resilience + status validation", () => {
+  it("degrades gracefully when a JSON column is corrupted (no throw)", () => {
+    const store = new CeSessionStore(h.db);
+    const s = store.create({ stage: "brainstorm" });
+    // Corrupt both JSON columns directly in the DB.
+    h.db
+      .prepare("UPDATE ce_sessions SET currentQuestion = ?, conversationHistory = ? WHERE id = ?")
+      .run("{not valid json", "also not json", s.id);
+
+    // Reading the row must not throw; corrupt fields fall back to null / [].
+    const read = store.get(s.id)!;
+    expect(read.id).toBe(s.id);
+    expect(read.currentQuestion).toBeNull();
+    expect(read.conversationHistory).toEqual([]);
+    // The rest of the row still surfaces the session's real state.
+    expect(read.stage).toBe("brainstorm");
+  });
+});
+
+describe("asCeSessionStatus validation", () => {
+  it("accepts valid statuses and rejects anything else", async () => {
+    const { asCeSessionStatus } = await import("../session/session-store.js");
+    expect(asCeSessionStatus("active")).toBe("active");
+    expect(asCeSessionStatus("interrupted")).toBe("interrupted");
+    expect(asCeSessionStatus("bogus")).toBeUndefined();
+    expect(asCeSessionStatus("")).toBeUndefined();
+    expect(asCeSessionStatus(undefined)).toBeUndefined();
+  });
+});

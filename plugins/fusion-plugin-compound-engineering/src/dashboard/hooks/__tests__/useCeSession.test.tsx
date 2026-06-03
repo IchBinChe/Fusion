@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import type { PlanningQuestion } from "@fusion/core";
 import { useCeSession, type CeSessionTransport, type CeSessionSubscribe } from "../useCeSession.js";
@@ -40,6 +40,11 @@ function Harness({ transport }: { transport: CeSessionTransport }) {
 }
 
 describe("useCeSession lifecycle", () => {
+  afterEach(() => {
+    // Ensure faked timers never leak into the next test.
+    vi.useRealTimers();
+  });
+
   it("start → awaiting_input → answer → completed", async () => {
     const transport: CeSessionTransport = {
       start: vi.fn(async () => mkSession({ status: "awaiting_input", currentQuestion: Q })),
@@ -64,6 +69,7 @@ describe("useCeSession lifecycle", () => {
   });
 
   it("threads the start projectId through resume and poll", async () => {
+    vi.useFakeTimers();
     const get = vi.fn(async () => mkSession({ status: "active" }));
     const transport: CeSessionTransport = {
       start: vi.fn(async () => mkSession({ status: "interrupted", currentQuestion: Q })),
@@ -79,14 +85,16 @@ describe("useCeSession lifecycle", () => {
       screen.getByText("resume").click();
     });
     expect(transport.resume).toHaveBeenCalledWith("s1", "p1");
-    // The poll (active status) must also carry the projectId.
+    // The poll (active status) must also carry the projectId. Harness uses a 5ms
+    // interval; advance fake time deterministically past one tick.
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
+      await vi.advanceTimersByTimeAsync(20);
     });
     expect(get).toHaveBeenCalledWith("s1", "p1");
   });
 
   it("polls while active and stops once settled", async () => {
+    vi.useFakeTimers();
     let calls = 0;
     const get = vi.fn(async () => {
       calls += 1;
@@ -104,9 +112,9 @@ describe("useCeSession lifecycle", () => {
     });
     expect(screen.getByTestId("status")).toHaveTextContent("active");
 
-    // Let the poll interval fire and converge to awaiting_input.
+    // Advance fake time so the poll interval fires and converges to awaiting_input.
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 40));
+      await vi.advanceTimersByTimeAsync(40);
     });
     expect(get).toHaveBeenCalled();
     expect(screen.getByTestId("status")).toHaveTextContent("awaiting_input");

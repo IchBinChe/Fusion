@@ -7,13 +7,23 @@ import { ensureCeSchema } from "../schema.js";
  * launching → active → awaiting_input ↔ active → completed | error | interrupted;
  * interrupted/error → active on resume/retry.
  */
-export type CeSessionStatus =
-  | "launching"
-  | "active"
-  | "awaiting_input"
-  | "completed"
-  | "error"
-  | "interrupted";
+export const CE_SESSION_STATUSES = [
+  "launching",
+  "active",
+  "awaiting_input",
+  "completed",
+  "error",
+  "interrupted",
+] as const;
+
+export type CeSessionStatus = (typeof CE_SESSION_STATUSES)[number];
+
+/** Narrow an arbitrary string (e.g. a query param) to a valid status, else undefined. */
+export function asCeSessionStatus(value: string | undefined): CeSessionStatus | undefined {
+  return value && (CE_SESSION_STATUSES as readonly string[]).includes(value)
+    ? (value as CeSessionStatus)
+    : undefined;
+}
 
 /** A single recorded turn in the conversation history (for resume). */
 export interface CeConversationTurn {
@@ -72,13 +82,26 @@ export const STALE_INTERVAL_MULTIPLE = 3;
 
 const DEFAULT_TURN_INTERVAL_MS = 120000;
 
+/** Parse a JSON column, falling back to `fallback` on corruption rather than throwing. */
+function safeParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    // A corrupted JSON column must not crash reads of an otherwise-valid row
+    // (and must not destroy the rest of the session). Degrade to the fallback;
+    // the row's status/error still surface the session's real state.
+    return fallback;
+  }
+}
+
 function rowToSession(row: CeSessionRow): CeSession {
   return {
     id: row.id,
     stage: row.stage,
     status: row.status,
-    currentQuestion: row.currentQuestion ? (JSON.parse(row.currentQuestion) as PlanningQuestion) : null,
-    conversationHistory: JSON.parse(row.conversationHistory) as CeConversationTurn[],
+    currentQuestion: safeParse<PlanningQuestion | null>(row.currentQuestion, null),
+    conversationHistory: safeParse<CeConversationTurn[]>(row.conversationHistory, []),
     projectId: row.projectId,
     artifactPath: row.artifactPath,
     error: row.error,

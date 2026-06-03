@@ -68,7 +68,14 @@ export function makeScriptedSession(script: InteractiveAiSessionEvent[]): Intera
     answer: vi.fn(async () => {
       cursor++;
     }),
-    nextEvent: vi.fn(async () => script[Math.min(cursor, script.length - 1)]),
+    nextEvent: vi.fn(async () => {
+      if (script.length === 0) {
+        // An empty script is a test bug — surface it loudly rather than
+        // silently returning undefined (which masks the mistake downstream).
+        throw new Error("makeScriptedSession: empty script has no events to yield");
+      }
+      return script[Math.min(Math.max(cursor, 0), script.length - 1)];
+    }),
     dispose: vi.fn(),
   };
 }

@@ -3342,6 +3342,42 @@ export class TaskExecutor {
     };
   }
 
+  /**
+   * Pause the graph for user input: park the task paused with status
+   * "awaiting-user-input" and the node's question as pausedReason. On a later
+   * re-run (after the user unpauses), consume the newest steering comment as
+   * the answer. Pre-execute placement is fully supported; post-execute
+   * placement re-walks earlier read-only nodes until CU-U5 checkpoints land.
+   */
+  private async runAwaitInputNode(node: WorkflowIrNode, live: TaskDetail): Promise<WorkflowNodeResult> {
+    const question = typeof node.config?.prompt === "string" && node.config.prompt.trim()
+      ? node.config.prompt.trim()
+      : "This workflow is waiting for your input.";
+    const marker = `workflow-input:${node.id}`;
+
+    const steering = Array.isArray(live.steeringComments) ? live.steeringComments : [];
+    const askedBefore = live.status === "awaiting-user-input" || (live.pausedReason ?? "").startsWith(marker)
+      || steering.length > 0;
+    if (!live.paused && askedBefore && steering.length > 0) {
+      // Input has arrived (user replied and unpaused): consume the latest comment.
+      const latest = steering[steering.length - 1] as { text?: string; comment?: string };
+      const answer = (latest?.text ?? latest?.comment ?? "").toString();
+      await this.store.updateTask(live.id, { status: null }, this.getRunContextFor(live.id));
+      await this.store.logEntry(live.id, `Workflow input received for node '${node.id}'`, undefined, this.getRunContextFor(live.id));
+      return { outcome: "success", value: "input-received", contextPatch: { [`input:${node.id}`]: answer } };
+    }
+
+    await this.store.logEntry(live.id, `Workflow paused for user input: ${question}`, undefined, this.getRunContextFor(live.id));
+    await this.store.updateTask(
+      live.id,
+      { status: "awaiting-user-input", paused: true, pausedReason: `${marker}: ${question}` },
+      this.getRunContextFor(live.id),
+    );
+    // Failure outcome ends the walk; handleGraphFailure leaves paused tasks
+    // untouched, so the task sits awaiting input until the user responds.
+    return { outcome: "failure", value: "awaiting-user-input" };
+  }
+
   /** Run a custom (non-seam) graph node on the proven WorkflowStep machinery. */
   private async runGraphCustomNode(
     node: WorkflowIrNode,
@@ -3350,9 +3386,51 @@ export class TaskExecutor {
   ): Promise<WorkflowNodeResult> {
     const cfg = node.config ?? {};
     const live = await this.store.getTask(nodeTask.id);
+
+    // Await-input nodes never run a session — they pause for the user.
+    if (cfg.awaitInput === true) {
+      return this.runAwaitInputNode(node, live);
+    }
+
     const worktreePath = live.worktree || this.rootDir;
-    const scriptName = typeof cfg.scriptName === "string" && cfg.scriptName.trim() ? cfg.scriptName : undefined;
-    const mode: "prompt" | "script" = node.kind === "script" || (node.kind === "gate" && scriptName) ? "script" : "prompt";
+    const executorKind = typeof cfg.executor === "string" ? cfg.executor : "model";
+    let scriptName = typeof cfg.scriptName === "string" && cfg.scriptName.trim() ? cfg.scriptName : undefined;
+    let prompt = typeof cfg.prompt === "string" ? cfg.prompt : "";
+    let modelProvider = typeof cfg.modelProvider === "string" && cfg.modelProvider.trim() ? cfg.modelProvider : undefined;
+    let modelId = typeof cfg.modelId === "string" && cfg.modelId.trim() ? cfg.modelId : undefined;
+
+    // Executor kinds for prompt nodes:
+    // - "model"  (default): run the prompt on the configured/override model.
+    // - "agent": run as a named agent — adopt its model and persona prompt.
+    // - "skill": invoke a named skill with the prompt as its input.
+    // - "cli":   run a named project script with the prompt passed via env
+    //            (FUSION_NODE_PROMPT). Named scripts only — raw commands are
+    //            never accepted from node config.
+    if (executorKind === "agent" && typeof cfg.agentId === "string" && cfg.agentId.trim()) {
+      try {
+        const agent = await this.options.agentStore?.getAgent(cfg.agentId);
+        if (agent) {
+          const rc = (agent.runtimeConfig ?? {}) as { executorProvider?: string; executorModelId?: string };
+          modelProvider = rc.executorProvider ?? modelProvider;
+          modelId = rc.executorModelId ?? modelId;
+          const persona = (agent as { customInstructions?: string }).customInstructions;
+          if (persona) prompt = `${persona}\n\n${prompt}`;
+        } else {
+          await this.store.logEntry(live.id, `Workflow node '${node.id}': agent '${cfg.agentId}' not found — using default model`, undefined, this.getRunContextFor(live.id));
+        }
+      } catch {
+        // Agent lookup is best-effort; fall back to the default model.
+      }
+    } else if (executorKind === "skill" && typeof cfg.skillName === "string" && cfg.skillName.trim()) {
+      prompt = `Invoke the "${cfg.skillName}" skill with the following input, following the skill's instructions exactly:\n\n${prompt}`;
+    } else if (executorKind === "cli") {
+      // CLI execution routes through script mode with the prompt in the env.
+      if (!scriptName) {
+        return { outcome: "failure", value: "cli-script-missing" };
+      }
+    }
+
+    const mode: "prompt" | "script" = executorKind === "cli" || node.kind === "script" || (node.kind === "gate" && scriptName) ? "script" : "prompt";
     const now = new Date().toISOString();
     const step: WorkflowStep = {
       id: `graph:${node.id}`,
@@ -3361,20 +3439,22 @@ export class TaskExecutor {
       mode,
       phase: "pre-merge",
       gateMode: node.kind === "gate" || cfg.gateMode === "gate" ? "gate" : "advisory",
-      prompt: typeof cfg.prompt === "string" ? cfg.prompt : "",
+      prompt,
       toolMode: cfg.toolMode === "coding" ? "coding" : "readonly",
       scriptName,
       enabled: true,
       createdAt: now,
       updatedAt: now,
-      ...(typeof cfg.modelProvider === "string" && typeof cfg.modelId === "string"
-        ? { modelProvider: cfg.modelProvider, modelId: cfg.modelId }
-        : {}),
+      ...(modelProvider && modelId ? { modelProvider, modelId } : {}),
     };
 
+    // CLI executor passes the node prompt to the named script via env.
+    const nodeEnv: NodeJS.ProcessEnv | undefined =
+      executorKind === "cli" && prompt ? { ...process.env, FUSION_NODE_PROMPT: prompt } : undefined;
+
     const outcome = mode === "script"
-      ? await this.executeScriptWorkflowStep(live, step, worktreePath, settings)
-      : await this.executeWorkflowStep(live, step, worktreePath, settings);
+      ? await this.executeScriptWorkflowStep(live, step, worktreePath, settings, nodeEnv)
+      : await this.executeWorkflowStep(live, step, worktreePath, settings, nodeEnv);
 
     const blocking = step.gateMode === "gate";
     // Script-mode outcomes carry no structured verdict; prompt-mode may.

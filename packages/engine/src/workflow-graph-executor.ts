@@ -170,8 +170,14 @@ export class WorkflowGraphExecutor {
       throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
     }
 
+    // Per-node override: config.maxRetries beats the executor-wide default.
+    const configured = Number(node.config?.maxRetries);
+    const maxAttempts = Number.isFinite(configured) && configured >= 1
+      ? Math.min(10, Math.floor(configured))
+      : this.maxRetriesPerNode;
+
     let lastError: unknown;
-    for (let attempt = 0; attempt < this.maxRetriesPerNode; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         return await handler(node, { task, settings, context });
       } catch (error) {

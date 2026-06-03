@@ -20,6 +20,7 @@ import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import type { ToastType } from "../hooks/useToast";
 import { ThemeSelector } from "./ThemeSelector";
+import { LanguageSelector } from "./LanguageSelector";
 import { useSessionBannersHidden, setSessionBannersHidden } from "../hooks/useSessionBannerPref";
 import "./SettingsModal.css";
 import { CustomModelDropdown } from "./CustomModelDropdown";
@@ -3710,6 +3711,7 @@ export function SettingsModal({
                 onDashboardFontScaleChange?.(scalePct);
               }}
             />
+            <LanguageSelector />
             <div className="form-group">
               <label className="checkbox-label">
                 <input

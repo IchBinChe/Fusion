@@ -26,8 +26,19 @@ import {
 import { spawnAgent, captureStderr, forceKill, unregisterProcess } from "./process-manager.js";
 import { createEventBridge } from "./event-bridge.js";
 import { resolvePermission } from "./control-handler.js";
+import { createFsHandlers } from "./fs-capabilities.js";
 import { boundIdentifier } from "./sanitize.js";
 import type { AcpCallbacks, PermissionGate } from "./types.js";
+
+/** Options enabling the U7 fs client capabilities on the bridging handler. */
+export interface FsHandlerBuildOptions {
+  /** Confinement root — the session cwd / task worktree. */
+  cwd: string;
+  /** Register `readTextFile` (advertised iff true). */
+  allowRead: boolean;
+  /** Register `writeTextFile` (default OFF — KTD6; advertised iff true). */
+  allowWrite: boolean;
+}
 
 /** Default bound for the `initialize` handshake. */
 export const DEFAULT_INITIALIZE_TIMEOUT_MS = 30_000;
@@ -101,8 +112,21 @@ export interface BridgingClientHandler {
 export function createBridgingClientHandler(
   callbacks: AcpCallbacks,
   gate?: PermissionGate,
+  fsOpts?: FsHandlerBuildOptions,
 ): BridgingClientHandler {
   const bridge = createEventBridge(callbacks);
+
+  // U7: build the fs handlers, returning only the enabled ones. They are added
+  // to the handler below ONLY when present, keeping the advertised-capability /
+  // registered-handler invariant consistent (KTD6).
+  const fsHandlers = fsOpts
+    ? createFsHandlers({
+        cwd: fsOpts.cwd,
+        gate,
+        allowRead: fsOpts.allowRead,
+        allowWrite: fsOpts.allowWrite,
+      })
+    : {};
 
   const cancelledResponse: RequestPermissionResponse = {
     outcome: { outcome: "cancelled" },
@@ -149,6 +173,13 @@ export function createBridgingClientHandler(
       });
     },
   };
+
+  // Register fs handlers ONLY when enabled, so the advertised capability and the
+  // present handler stay consistent (KTD6). If a capability is disabled the
+  // method is absent → an agent calling it gets a JSON-RPC method-not-found
+  // error (never a silent success).
+  if (fsHandlers.readTextFile) handler.readTextFile = fsHandlers.readTextFile;
+  if (fsHandlers.writeTextFile) handler.writeTextFile = fsHandlers.writeTextFile;
 
   return { handler, cancelPending };
 }

@@ -57,9 +57,18 @@ export class AcpRuntimeAdapter implements AgentRuntime {
     // its `requestPermission` classifies each call per-category against the live
     // gate (KTD3a) and selects `allow_once` only (S2). `cancelPending` drains
     // in-flight permission requests on teardown so the agent never deadlocks.
+    // fs client capabilities (U7) are gated by settings — reads opt-in, writes
+    // default OFF (KTD6) — and confined to the task cwd by the path jail. The
+    // same toggles drive the advertised `fs` capability in connect() below, so
+    // advertisement and registered handlers stay consistent.
     const { handler: clientHandler, cancelPending } = createBridgingClientHandler(
       callbacks,
       options.actionGateContext,
+      {
+        cwd: options.cwd,
+        allowRead: this.settings.fsRead,
+        allowWrite: this.settings.fsWrite,
+      },
     );
 
     // Spawn + initialize (U2). fs capabilities are advertised only where the

@@ -97,8 +97,14 @@ function buildResponse(sel: {
   return { outcome: { outcome: "cancelled" } };
 }
 
-/** Read the per-category disposition from the live policy (exempt → allow). */
-function dispositionFor(
+/**
+ * Read the per-category disposition from the live policy (exempt → allow).
+ *
+ * Exported so the fs-capabilities write path (U7) can reuse the exact same
+ * per-category gate-reading logic for `file_write_delete` instead of duplicating
+ * it (and risking drift from the U5 security floor).
+ */
+export function dispositionFor(
   category: FusionCategory | "exempt",
   gate: PermissionGate,
 ): GateDisposition {
@@ -131,16 +137,46 @@ async function runApproval(
   category: FusionCategory,
   gate: PermissionGate,
 ): Promise<"allow" | "deny"> {
+  return runApprovalForCategory(gate, {
+    category,
+    toolName: toolCall.title ?? category,
+    dedupeKey: dedupeKeyFor(toolCall, category),
+    args:
+      toolCall.rawInput && typeof toolCall.rawInput === "object"
+        ? (toolCall.rawInput as Record<string, unknown>)
+        : {},
+  });
+}
+
+/**
+ * Run the HITL approval flow for an arbitrary `require-approval` action,
+ * identified by a category + dedupe key (not necessarily an ACP `toolCall`).
+ *
+ * Exported so the fs `writeTextFile` path (U7) routes its `file_write_delete`
+ * gating through the IDENTICAL approval machinery as U5 — register, block on
+ * `pauseForApproval`, re-read the final status, finalize — with the same
+ * default-deny floor when no human channel exists. Never throws, never allows
+ * on failure.
+ */
+export async function runApprovalForCategory(
+  gate: PermissionGate,
+  req: {
+    category: FusionCategory;
+    toolName: string;
+    dedupeKey: string;
+    args?: Record<string, unknown>;
+  },
+): Promise<"allow" | "deny"> {
+  const { category, dedupeKey } = req;
   if (typeof gate.createApprovalRequest !== "function") {
     // No human channel available → default-deny.
     return "deny";
   }
 
-  const dedupeKey = dedupeKeyFor(toolCall, category);
   const decisionPayload = {
     disposition: "require-approval" as const,
     category,
-    toolName: toolCall.title ?? category,
+    toolName: req.toolName,
     approvalDedupeKey: dedupeKey,
   };
 
@@ -158,9 +194,7 @@ async function runApproval(
 
     const created = (await gate.createApprovalRequest(
       decisionPayload,
-      (toolCall.rawInput && typeof toolCall.rawInput === "object"
-        ? (toolCall.rawInput as Record<string, unknown>)
-        : {}),
+      req.args ?? {},
     )) as { id?: string } | undefined;
     const approvalRequestId = typeof created?.id === "string" ? created.id : dedupeKey;
 

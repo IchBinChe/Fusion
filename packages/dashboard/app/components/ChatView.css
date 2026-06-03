@@ -240,6 +240,12 @@
   padding: var(--space-md);
 }
 
+.chat-sidebar-list > .chat-empty-state--padded {
+  flex: 0 0 auto;
+  display: block;
+  text-align: left;
+}
+
 .chat-session-item {
   padding: 10px 12px;
   border-radius: var(--radius-md);
@@ -645,10 +651,10 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--space-lg);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-md);
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   /* Stop iOS rubber-band scroll from propagating to the parent /
@@ -658,6 +664,22 @@
      transform momentarily exposes the body background as a gray
      box partially covering the messages. */
   overscroll-behavior: contain;
+}
+
+.chat-messages > .chat-empty-state {
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl) var(--space-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+  box-sizing: border-box;
 }
 
 .chat-message {

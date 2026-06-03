@@ -3378,6 +3378,59 @@ export class TaskExecutor {
     return { outcome: "failure", value: "awaiting-user-input" };
   }
 
+  /** Pause the task for explicit user approval of a raw CLI command. The user
+   *  approves via the dashboard, which records the command and unpauses; on the
+   *  next run isWorkflowCliCommandApproved returns true and the node executes. */
+  private async pauseForCliApproval(node: WorkflowIrNode, live: TaskDetail, command: string): Promise<WorkflowNodeResult> {
+    const marker = `workflow-cli-approval:${node.id}`;
+    await this.store.logEntry(live.id, `Workflow paused for CLI command approval: ${command}`, undefined, this.getRunContextFor(live.id));
+    await this.store.updateTask(
+      live.id,
+      { status: "awaiting-cli-approval", paused: true, pausedReason: `${marker}: ${command}` },
+      this.getRunContextFor(live.id),
+    );
+    return { outcome: "failure", value: "awaiting-cli-approval" };
+  }
+
+  /** Run an arbitrary (approved) CLI command in the task worktree, supervised. */
+  private async runRawCliCommand(
+    task: TaskDetail,
+    label: string,
+    command: string,
+    worktreePath: string,
+    extraEnv?: NodeJS.ProcessEnv,
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    executorLog.log(`${task.id}: workflow node '${label}' executing approved CLI command: ${command}`);
+    await this.store.logEntry(task.id, `Workflow node '${label}' executing CLI command: ${command}`, undefined, this.getRunContextFor(task.id));
+    const abort = new AbortController();
+    this.registerConfiguredCommandController(task.id, abort);
+    try {
+      const result = await runConfiguredCommand(
+        command,
+        worktreePath,
+        120_000,
+        extraEnv,
+        createRunAuditor(this.store, {
+          runId: this.getRunContextFor(task.id)?.runId ?? generateSyntheticRunId("exec-cli", task.id),
+          agentId: this.getRunContextFor(task.id)?.agentId ?? (task.assignedAgentId ?? "executor"),
+          taskId: task.id,
+          phase: "execute",
+        }),
+        abort.signal,
+      );
+      if (abort.signal.aborted) throw this.createConfiguredCommandAbortError(task.id, command);
+      if (result.spawnError || result.timedOut || result.exitCode !== 0) {
+        return { success: false, error: configuredCommandErrorMessage(result) };
+      }
+      return { success: true, output: `CLI command completed successfully` };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") throw err;
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      this.unregisterConfiguredCommandController(task.id, abort);
+    }
+  }
+
   /** Run a custom (non-seam) graph node on the proven WorkflowStep machinery. */
   private async runGraphCustomNode(
     node: WorkflowIrNode,
@@ -3424,9 +3477,27 @@ export class TaskExecutor {
     } else if (executorKind === "skill" && typeof cfg.skillName === "string" && cfg.skillName.trim()) {
       prompt = `Invoke the "${cfg.skillName}" skill with the following input, following the skill's instructions exactly:\n\n${prompt}`;
     } else if (executorKind === "cli") {
-      // CLI execution routes through script mode with the prompt in the env.
+      const rawCommand = typeof cfg.cliCommand === "string" && cfg.cliCommand.trim() ? cfg.cliCommand.trim() : undefined;
+      if (rawCommand) {
+        // Arbitrary command: gated by trust-on-first-use approval. The exact
+        // command string must have been explicitly approved by the user.
+        if (!(await this.store.isWorkflowCliCommandApproved(rawCommand))) {
+          return this.pauseForCliApproval(node, live, rawCommand);
+        }
+        const env = prompt ? { ...process.env, FUSION_NODE_PROMPT: prompt } : undefined;
+        const out = await this.runRawCliCommand(
+          live,
+          typeof cfg.name === "string" && cfg.name.trim() ? cfg.name : node.id,
+          rawCommand,
+          worktreePath,
+          env,
+        );
+        const blocking = node.kind === "gate" || cfg.gateMode === "gate";
+        return { outcome: out.success || !blocking ? "success" : "failure", value: out.success ? "passed" : "failed" };
+      }
+      // No raw command: fall back to a named script (still required).
       if (!scriptName) {
-        return { outcome: "failure", value: "cli-script-missing" };
+        return { outcome: "failure", value: "cli-command-missing" };
       }
     }
 

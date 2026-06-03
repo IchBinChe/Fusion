@@ -4975,6 +4975,21 @@ export function selectTaskWorkflow(
   );
 }
 
+/** Approve the raw CLI command a task is paused on, and resume it. */
+export function approveTaskWorkflowCli(taskId: string, projectId?: string): Promise<{ approved: string }> {
+  return api<{ approved: string }>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow/approve-cli`, projectId), {
+    method: "POST",
+  });
+}
+
+/** Submit the user's answer to an await-input node and resume the task. */
+export function submitTaskWorkflowInput(taskId: string, text: string, projectId?: string): Promise<{ ok: true }> {
+  return api<{ ok: true }>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow/input`, projectId), {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
 /** Read the project default workflow. */
 export function fetchProjectDefaultWorkflow(projectId?: string): Promise<{ workflowId: string | null }> {
   return api<{ workflowId: string | null }>(withProjectId("/project/default-workflow", projectId));

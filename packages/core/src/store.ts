@@ -11163,6 +11163,28 @@ ${stepsSection}`;
     await this.updateSettings({ defaultWorkflowId: workflowId } as unknown as Partial<Settings>);
   }
 
+  /** Whether a raw workflow CLI command has been approved (trust-on-first-use).
+   *  Comparison is on the exact trimmed command string. */
+  async isWorkflowCliCommandApproved(command: string): Promise<boolean> {
+    const trimmed = command.trim();
+    if (!trimmed) return false;
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedWorkflowCliCommands?: string[] }).approvedWorkflowCliCommands;
+    return Array.isArray(approved) && approved.includes(trimmed);
+  }
+
+  /** Record approval for a raw workflow CLI command. Idempotent. */
+  async approveWorkflowCliCommand(command: string): Promise<void> {
+    const trimmed = command.trim();
+    if (!trimmed) throw new Error("CLI command is required");
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedWorkflowCliCommands?: string[] }).approvedWorkflowCliCommands ?? [];
+    if (approved.includes(trimmed)) return;
+    await this.updateSettings({
+      approvedWorkflowCliCommands: [...approved, trimmed],
+    } as unknown as Partial<Settings>);
+  }
+
   /** Read the workflow currently selected for a task, if any. */
   getTaskWorkflowSelection(taskId: string): { workflowId: string; stepIds: string[] } | undefined {
     const row = this.db

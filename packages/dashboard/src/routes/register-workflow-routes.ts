@@ -161,6 +161,41 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
+  // POST /api/tasks/:taskId/workflow/approve-cli — approve the raw CLI command
+  // the task is currently paused on (trust-on-first-use) and resume the run.
+  router.post("/tasks/:taskId/workflow/approve-cli", async (req, res) => {
+    try {
+      const { store } = await getProjectContext(req);
+      const task = await store.getTask(req.params.taskId);
+      const reason = task.pausedReason ?? "";
+      const match = /^workflow-cli-approval:[^:]+:\s*(.*)$/s.exec(reason);
+      const command = (req.body?.command as string | undefined) ?? (match ? match[1].trim() : "");
+      if (!command) throw badRequest("No pending CLI command to approve for this task");
+      await store.approveWorkflowCliCommand(command);
+      await store.updateTask(req.params.taskId, { status: null, paused: false, pausedReason: null });
+      res.json({ approved: command });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  // POST /api/tasks/:taskId/workflow/input — submit the user's answer to an
+  // await-input node (records a steering comment and resumes the task).
+  router.post("/tasks/:taskId/workflow/input", async (req, res) => {
+    try {
+      const { store } = await getProjectContext(req);
+      const text = (req.body?.text as string | undefined)?.trim();
+      if (!text) throw badRequest("Input text is required");
+      await store.addSteeringComment(req.params.taskId, text);
+      await store.updateTask(req.params.taskId, { status: null, paused: false, pausedReason: null });
+      res.json({ ok: true });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
   // GET /api/project/default-workflow
   router.get("/project/default-workflow", async (req, res) => {
     try {

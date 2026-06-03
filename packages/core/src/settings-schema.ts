@@ -186,6 +186,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   globalPause: false,
   globalPauseReason: undefined,
   defaultWorkflowId: undefined,
+  approvedWorkflowCliCommands: undefined,
   enginePaused: false,
   maxConcurrent: 2,
   maxTriageConcurrent: 2,

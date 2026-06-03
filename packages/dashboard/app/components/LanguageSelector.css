@@ -9,7 +9,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-secondary, #888);
+  color: var(--text-muted, #888);
 }
 
 .language-options {

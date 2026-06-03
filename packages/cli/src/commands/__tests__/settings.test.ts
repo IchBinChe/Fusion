@@ -25,6 +25,7 @@ vi.mock("@fusion/core", () => {
   return {
     GlobalSettingsStore: vi.fn(),
     DEFAULT_SETTINGS,
+    SUPPORTED_LOCALES: ["en", "zh-CN", "zh-TW", "fr", "es"],
     resolveWorktrunkSettings: (globalValue: any, projectValue: any) => ({
       enabled: projectValue?.enabled ?? globalValue?.enabled ?? false,
       ...(projectValue?.binaryPath ?? globalValue?.binaryPath ? { binaryPath: projectValue?.binaryPath ?? globalValue?.binaryPath } : {}),

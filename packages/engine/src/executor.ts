@@ -3503,16 +3503,21 @@ export class TaskExecutor {
       const rawCommand = rawCliCommand;
       if (rawCommand) {
         // Arbitrary command: gated by trust-on-first-use approval unless the
-        // node explicitly opts out (cliSkipApproval). The exact command string
-        // must otherwise have been approved by the user.
+        // node explicitly opts out. Two node flags bypass the pause:
+        //   - cliSkipApproval: CLI-specific "skip first-run approval".
+        //   - autoApprove:     the node's general "Auto-approve requests"
+        //     toggle. The only human-approval pause reachable from a custom
+        //     node is this CLI gate (review-style nodes run as ephemeral
+        //     readonly agents with no permission gate), so honoring it here is
+        //     what makes that toggle actually do something.
+        // The exact command string must otherwise have been approved by the user.
         //
-        // SECURITY: cliSkipApproval is an intentional project-owner-only escape
-        // hatch. It is only reachable by someone who can author/edit a workflow
+        // SECURITY: both flags are intentional project-owner-only escape hatches.
+        // They are only reachable by someone who can author/edit a workflow
         // definition for this project — the same trust boundary that already
-        // lets them add named scripts. It is NOT an untrusted-input surface.
-        // (Aligned with autoApprove, which is likewise gated by workflow
-        // authorship; neither is enforced at the IR-validation layer.)
-        const skipApproval = cfg.cliSkipApproval === true;
+        // lets them add named scripts. They are NOT untrusted-input surfaces,
+        // and neither is enforced at the IR-validation layer.
+        const skipApproval = cfg.cliSkipApproval === true || cfg.autoApprove === true;
         if (!skipApproval && !(await this.store.isWorkflowCliCommandApproved(rawCommand))) {
           return this.pauseForCliApproval(node, live, rawCommand);
         }

@@ -527,6 +527,11 @@ function InnerEditor({
                     />
                     <span>Auto-approve requests</span>
                   </label>
+                  {Boolean(selectedNode.data.config?.autoApprove) && (
+                    <p className="wf-inspector-note">
+                      Runs without pausing for approval — e.g. a CLI command executes on its first run without waiting for your sign-off.
+                    </p>
+                  )}
 
                   <label className="wf-field">
                     <span>Max retries</span>

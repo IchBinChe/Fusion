@@ -191,9 +191,16 @@ export async function runApprovalForCategory(
       }
     }
 
-    // No way to block for a human decision → default-deny BEFORE creating a
-    // request, so we never orphan a perpetually-`pending` record in the store.
-    if (typeof gate.pauseForApproval !== "function") {
+    // Default-deny BEFORE creating a request when the HITL round-trip cannot
+    // complete: without `pauseForApproval` we cannot block for a decision, and
+    // without `findApprovalByDedupeKey` we cannot READ the decision after the
+    // pause — a human approval would be silently discarded (mapStatus(undefined)
+    // → deny). Denying upfront never orphans a pending record and never wastes
+    // a human's approval on an outcome that would be denied anyway.
+    if (
+      typeof gate.pauseForApproval !== "function" ||
+      typeof gate.findApprovalByDedupeKey !== "function"
+    ) {
       return "deny";
     }
 

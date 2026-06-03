@@ -48,6 +48,13 @@ export const PER_CHUNK_CAP_CHARS = 64_000;
  */
 export const TOOL_CALL_MAP_CAP = 1000;
 
+/**
+ * Max plan entries formatted into the plan log line. Entry size is bounded in
+ * formatPlan; this bounds the COUNT so one plan event cannot bypass the
+ * per-turn output budget with thousands of 64KB entries (Risk S5).
+ */
+export const MAX_PLAN_ENTRIES = 100;
+
 /** Tracked metadata for an in-flight tool call, keyed by `toolCallId`. */
 interface TrackedToolCall {
   title?: string | null;
@@ -223,8 +230,20 @@ export function createEventBridge(callbacks: AcpCallbacks): EventBridge {
 
   function handlePlan(entries: PlanEntry[] | undefined): void {
     // FULL REPLACEMENT: drop any prior snapshot, surface the new one once.
+    // Plan output is charged against the same per-turn budget as text/thinking
+    // (Risk S5): entry SIZE is bounded in formatPlan, but entry COUNT is
+    // agent-controlled — without the cap below, one plan event with thousands
+    // of entries bypasses the per-turn ceiling entirely.
+    if (outputCapFlagged) return;
     const list = Array.isArray(entries) ? entries : [];
-    callbacks.onThinking?.(formatPlan(list));
+    const capped = list.slice(0, MAX_PLAN_ENTRIES);
+    let line = formatPlan(capped);
+    if (list.length > capped.length) {
+      line += `\n- … ${list.length - capped.length} more entries truncated`;
+    }
+    line = boundString(line, PER_CHUNK_CAP_CHARS);
+    cumulativeOutputChars += line.length;
+    callbacks.onThinking?.(line);
   }
 
   function handleSessionUpdate(update: SessionUpdate): void {

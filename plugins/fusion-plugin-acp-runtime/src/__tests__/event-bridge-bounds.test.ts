@@ -158,3 +158,47 @@ describe("event bridge bounds: toolCall correlation map (Risk S5)", () => {
     expect(onToolEnd).toHaveBeenCalledWith("Sneaky", false, undefined);
   });
 });
+
+describe("plan output bounds (S5)", () => {
+  it("caps plan entry count and charges the per-turn budget", async () => {
+    const { createEventBridge, MAX_PLAN_ENTRIES, PER_TURN_OUTPUT_CAP_CHARS } = await import(
+      "../event-bridge.js"
+    );
+    const thinking: string[] = [];
+    const bridge = createEventBridge({ onThinking: (t) => thinking.push(t) });
+    const entries = Array.from({ length: MAX_PLAN_ENTRIES + 50 }, (_, i) => ({
+      content: `step ${i}`,
+      priority: "low",
+      status: "pending",
+    }));
+    bridge.handleSessionUpdate({ sessionUpdate: "plan", entries } as never);
+    expect(thinking).toHaveLength(1);
+    // Truncation marker present; not all entries formatted.
+    expect(thinking[0]).toContain("50 more entries truncated");
+    expect(thinking[0].length).toBeLessThan(PER_TURN_OUTPUT_CAP_CHARS);
+  });
+
+  it("suppresses plan output once the per-turn cap has flagged", async () => {
+    const { createEventBridge, PER_CHUNK_CAP_CHARS, PER_TURN_OUTPUT_CAP_CHARS } = await import(
+      "../event-bridge.js"
+    );
+    const thinking: string[] = [];
+    const bridge = createEventBridge({ onThinking: (t) => thinking.push(t) });
+    // Flood text until the per-turn cap flags.
+    const chunk = "x".repeat(PER_CHUNK_CAP_CHARS);
+    const chunksNeeded = Math.ceil(PER_TURN_OUTPUT_CAP_CHARS / PER_CHUNK_CAP_CHARS) + 2;
+    for (let i = 0; i < chunksNeeded; i += 1) {
+      bridge.handleSessionUpdate({
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: chunk },
+      } as never);
+    }
+    const before = thinking.length;
+    bridge.handleSessionUpdate({
+      sessionUpdate: "plan",
+      entries: [{ content: "late plan", priority: "low", status: "pending" }],
+    } as never);
+    // No plan line after the cap flagged.
+    expect(thinking.length).toBe(before);
+  });
+});

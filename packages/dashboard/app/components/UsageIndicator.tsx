@@ -180,6 +180,26 @@ function getRenderedHiddenWindowCount(
   }, 0);
 }
 
+function getRestorableHiddenWindowCount(
+  providerName: string,
+  windows: UsageWindow[],
+  hidden: Record<string, string[]>
+): number {
+  const renderedHiddenCount = getRenderedHiddenWindowCount(providerName, windows, hidden);
+  const persistedHiddenLabels = hidden[providerName] ?? [];
+
+  if (persistedHiddenLabels.length === 0) {
+    return renderedHiddenCount;
+  }
+
+  const liveWindowLabels = new Set(windows.map((window) => window.label));
+  const orphanedHiddenCount = persistedHiddenLabels.reduce((count, label) => {
+    return count + (liveWindowLabels.has(label) ? 0 : 1);
+  }, 0);
+
+  return renderedHiddenCount + orphanedHiddenCount;
+}
+
 interface UsageWindowRowProps {
   window: UsageWindow;
   viewMode: 'used' | 'remaining';
@@ -414,7 +434,7 @@ function ProviderCard({
   onMoveUp,
   onMoveDown,
 }: ProviderCardProps) {
-  const hiddenCount = getRenderedHiddenWindowCount(provider.name, provider.windows, hiddenWindows);
+  const hiddenCount = getRestorableHiddenWindowCount(provider.name, provider.windows, hiddenWindows);
   const getStatusBadge = () => {
     switch (provider.status) {
       case "ok":

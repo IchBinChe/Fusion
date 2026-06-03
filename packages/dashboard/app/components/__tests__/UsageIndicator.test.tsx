@@ -953,6 +953,81 @@ describe("UsageIndicator", () => {
     expect(screen.getByTestId("usage-show-hidden-btn")).toHaveTextContent("Show hidden (1)");
   });
 
+  it("shows restorable hidden count for orphaned persisted labels on mobile/modal surfaces", () => {
+    localStorage.setItem(
+      USAGE_HIDDEN_WINDOWS_KEY,
+      JSON.stringify({ minimax: ["WindowGone"] })
+    );
+
+    mockUseUsageData.mockReturnValue(createUsageDataState({
+      providers: [
+        {
+          name: "minimax",
+          icon: "🧠",
+          status: "ok",
+          windows: [
+            {
+              label: "Live Window",
+              percentUsed: 25,
+              percentLeft: 75,
+              resetText: "resets in 2h",
+              resetMs: 7200000,
+            },
+          ],
+        },
+      ],
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    }));
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={null}
+      />
+    );
+
+    const showHiddenButton = screen.getByTestId("usage-show-hidden-btn");
+    expect(showHiddenButton).toHaveTextContent("Show hidden (1)");
+    expect(document.querySelectorAll(".usage-window--hidden")).toHaveLength(0);
+
+    fireEvent.click(showHiddenButton);
+
+    expect(localStorage.getItem(USAGE_HIDDEN_WINDOWS_KEY)).toBe(JSON.stringify({}));
+    expect(screen.queryByTestId("usage-show-hidden-btn")).not.toBeInTheDocument();
+  });
+
+  it("adds orphaned persisted labels to rendered hidden counts on desktop popover surfaces", () => {
+    localStorage.setItem(
+      USAGE_HIDDEN_WINDOWS_KEY,
+      JSON.stringify({ Anthropic: ["Session (5h)", "WindowGone"] })
+    );
+
+    mockUseUsageData.mockReturnValue(createUsageDataState({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    }));
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={createAnchorRect()}
+      />
+    );
+
+    expect(document.querySelectorAll(".usage-window--hidden")).toHaveLength(1);
+    expect(screen.getByTestId("usage-show-hidden-btn")).toHaveTextContent("Show hidden (2)");
+  });
+
   it("counts currently rendered hidden rows when persisted labels match duplicate live windows", () => {
     localStorage.setItem(
       USAGE_HIDDEN_WINDOWS_KEY,

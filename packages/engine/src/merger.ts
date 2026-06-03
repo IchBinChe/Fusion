@@ -7223,9 +7223,10 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
   log: { warn: (m: string) => void; log: (m: string) => void };
   projectRootDir: string;
   mergeTargetBranch: string;
+  mergeTargetSource: MergeDetails["mergeTargetSource"];
   completeTask: (result: MergeResult) => Promise<void>;
 }): Promise<MergeResult | null> {
-  const { task, taskId, store, audit, log, projectRootDir, mergeTargetBranch } = input;
+  const { task, taskId, store, audit, log, projectRootDir, mergeTargetBranch, mergeTargetSource } = input;
   const branch = resolveTaskWorkingBranch(task);
 
   // 1. Branch exists?
@@ -7287,6 +7288,7 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
     mergedAt,
     prNumber: task.prInfo?.number,
     mergeTargetBranch,
+    mergeTargetSource,
   };
   await store.updateTask(taskId, { mergeDetails, modifiedFiles: [] });
   await store.logEntry(
@@ -7426,6 +7428,7 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
     noOpReason,
     mergedAt,
     mergeTargetBranch,
+    mergeTargetSource,
   };
   await input.completeTask(result);
   return result;
@@ -7687,6 +7690,7 @@ export async function aiMergeTask(
         log: mergerLog,
         projectRootDir,
         mergeTargetBranch: mergeTarget.branch,
+        mergeTargetSource: mergeTarget.source,
         completeTask: (result) => completeTask(store, taskId, result),
       });
       if (earlyResult) return earlyResult;

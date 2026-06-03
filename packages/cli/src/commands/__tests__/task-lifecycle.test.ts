@@ -34,6 +34,7 @@ vi.mock("@fusion/core", async () => {
 import { activeSessionRegistry } from "@fusion/engine";
 import {
   cleanupMergedTaskArtifacts,
+  createGroupPrCallback,
   processPullRequestMergeTask,
   getTaskBranchName,
   syncGroupPrCallback,
@@ -1370,6 +1371,79 @@ describe("syncGroupPrCallback (U6)", () => {
     const github = { getPrStatus: vi.fn(), updatePr: vi.fn() };
     const sync = syncGroupPrCallback(github as never);
     await expect(sync({ group: { ...group, prNumber: undefined } as never, members })).rejects.toThrow(/no persisted prNumber/);
+  });
+});
+
+describe("createGroupPrCallback", () => {
+  beforeEach(() => {
+    execMock.mockReset();
+    execMock.mockImplementation(() => "");
+  });
+
+  const group = {
+    id: "BG-1",
+    sourceType: "planning" as const,
+    sourceId: "P-1",
+    branchName: "fusion/groups/p-1",
+    autoMerge: false,
+    prState: "none" as const,
+    status: "open" as const,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const members = [{ id: "FN-A", title: "Alpha", description: "a", column: "in-review" } as never];
+
+  it("queries only OPEN PRs for the head branch (does not reuse terminal PRs)", async () => {
+    const github = {
+      findPrForBranch: vi.fn(async () => null),
+      createPr: vi.fn(async () => ({
+        number: 99,
+        url: "https://github.com/owner/repo/pull/99",
+        status: "open" as const,
+      })),
+    };
+
+    const callback = createGroupPrCallback(github as never);
+    await callback({
+      cwd: "/repo",
+      group: group as never,
+      members,
+      headBranch: group.branchName,
+      baseBranch: "main",
+    });
+
+    expect(github.findPrForBranch).toHaveBeenCalledWith({ head: group.branchName, state: "open" });
+  });
+
+  it("does not reuse a closed PR from a prior group — creates a fresh one", async () => {
+    // With state:"open", findPrForBranch returns null for a head whose only PR
+    // is closed/merged, so the create path runs instead of resurrecting the
+    // terminal PR (which would poison the newly promoted group's prState).
+    const github = {
+      findPrForBranch: vi.fn(async () => null),
+      createPr: vi.fn(async () => ({
+        number: 123,
+        url: "https://github.com/owner/repo/pull/123",
+        status: "open" as const,
+      })),
+    };
+
+    const callback = createGroupPrCallback(github as never);
+    const result = await callback({
+      cwd: "/repo",
+      group: group as never,
+      members,
+      headBranch: group.branchName,
+      baseBranch: "main",
+    });
+
+    expect(github.findPrForBranch).toHaveBeenCalledWith({ head: group.branchName, state: "open" });
+    expect(github.createPr).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      prNumber: 123,
+      prUrl: "https://github.com/owner/repo/pull/123",
+      prState: "open",
+    });
   });
 });
 

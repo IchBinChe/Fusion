@@ -203,7 +203,7 @@ export function createGroupPrCallback(
   github: Pick<GitHubOperations, "findPrForBranch" | "createPr">,
 ): CreateGroupPrFn {
   return async ({ cwd, group, members, headBranch, baseBranch }) => {
-    const existing = await github.findPrForBranch({ head: headBranch, state: "all" });
+    const existing = await github.findPrForBranch({ head: headBranch, state: "open" });
     if (existing) {
       return { prNumber: existing.number, prUrl: existing.url, prState: toBranchGroupPrState(existing) };
     }

@@ -5,6 +5,7 @@ import { Board } from "../Board";
 import { loadAllAppCss } from "../../test/cssFixture";
 
 vi.mock("../../api", () => ({
+  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
 }));
 

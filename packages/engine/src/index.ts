@@ -26,6 +26,13 @@ export {
   type WorkflowGraphExecutorResult,
 } from "./workflow-graph-executor.js";
 export {
+  runSplitJoin,
+  type WorkflowBranchPersistence,
+  type WorkflowBranchProgress,
+  type WorkflowBranchRunState,
+  type WorkflowBranchSemaphore,
+} from "./workflow-graph-branches.js";
+export {
   createDefaultNodeHandlers,
   createNoopLegacySeams,
   type WorkflowCustomNodeRunner,
@@ -63,6 +70,13 @@ export {
   getConflictedFiles,
   type AutostashHandle,
 } from "./merger.js";
+export {
+  registerMergeTraitHooks,
+  resolveMergePolicy,
+  type ResolvedMergePolicy,
+  type MergeFileScopeMode,
+  type MergeTraitStrategy,
+} from "./merge-trait.js";
 export {
   resolveIntegrationBranch,
   resolveIntegrationBranchSync,
@@ -449,6 +463,17 @@ export { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from ".
 export { TokenCapDetector, type TokenCapCheckResult } from "./token-cap-detector.js";
 export { SelfHealingManager, type SelfHealingOptions, type RebindResult } from "./self-healing.js";
 export { PluginRunner, type PluginRunnerOptions } from "./plugin-runner.js";
+export {
+  registerPluginTraits,
+  degradePluginTraits,
+  unregisterPluginTraits,
+  findLivePluginTraitDependents,
+  pluginTraitToDefinition,
+  pluginTraitRegistryId,
+  evaluatePluginGate,
+  PluginTraitHasDependentsError,
+  type PluginTraitDependent,
+} from "./plugin-trait-adapter.js";
 // Agent runtime abstraction
 export { type AgentRuntime, type AgentRuntimeOptions, type AgentSessionResult } from "./agent-runtime.js";
 export {
@@ -517,6 +542,16 @@ export {
 } from "./remote-access/index.js";
 export { RemoteNodeClient } from "./runtimes/remote-node-client.js";
 export { RemoteNodeRuntime, type RemoteNodeRuntimeConfig } from "./runtimes/remote-node-runtime.js";
+// Hold/release sweep + manual promote (U6/U9). Exported so the dashboard
+// promote endpoint can release a manually-held card via the same authority.
+export {
+  promoteHeldTask,
+  releaseHeldTaskByEvent,
+  runHoldReleaseSweep,
+  type HoldReleaseDeps,
+  type HoldReleaseResult,
+  type SlotReservation,
+} from "./hold-release.js";
 export { StepSessionExecutor } from "./step-session-executor.js";
 export type { StepResult, ParallelWave, StepSessionExecutorOptions } from "./step-session-executor.js";
 // Multi-project runtime types

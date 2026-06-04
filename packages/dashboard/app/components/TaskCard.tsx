@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest } from "lucide-react";
-import type { Task, TaskDetail, Column, PrInfo, IssueInfo, TaskPriority, GithubIssueAction } from "@fusion/core";
+import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
   HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
@@ -33,6 +33,15 @@ import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from ".
 import { MAX_AUTO_MERGE_RETRIES, type BlockerFanoutEntry } from "../hooks/useBlockerFanout";
 import { useRetryWarning } from "../context/RetryWarningContext";
 import { useColumnLabel } from "../i18n/labels";
+
+/** Per-branch progress snapshot (U13). Surfaced as an optional additive field
+ *  on the task payload for the parallel-window badge (U9). */
+interface BranchProgressEntry {
+  branchId: string;
+  nodeId: string;
+  status: string;
+}
+type TaskWithBranchProgress = Task & { branchProgress?: BranchProgressEntry[] };
 
 // ── Mission title caching ───────────────────────────────────────────────────
 
@@ -135,7 +144,9 @@ function isAgentCreatedTask(task: Task): boolean {
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const EDITABLE_COLUMNS: Set<Column> = new Set(["triage", "todo"]);
+// Issue 1403: widened to ColumnId so `.has(task.column)` accepts custom column ids
+// (which are not members and correctly resolve to false).
+const EDITABLE_COLUMNS: Set<ColumnId> = new Set<ColumnId>(["triage", "todo"]);
 
 const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "merging-fix"]);
 const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr", "merging-fix"]);
@@ -149,7 +160,7 @@ const COLUMN_PROGRESS_COLOR_MAP: Record<Column, string> = {
   archived: "var(--text-muted)",
 };
 
-const TIME_INDICATOR_COLUMNS = new Set<Column>([
+const TIME_INDICATOR_COLUMNS = new Set<ColumnId>([
   "in-progress",
   "in-review",
   "done",
@@ -484,6 +495,8 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.title === nextTask.title &&
     previousTask.description === nextTask.description &&
     previousTask.column === nextTask.column &&
+    ((previousTask as TaskWithBranchProgress).branchProgress?.length ?? 0) ===
+      ((nextTask as TaskWithBranchProgress).branchProgress?.length ?? 0) &&
     previousTask.columnMovedAt === nextTask.columnMovedAt &&
     previousTask.timedExecutionMs === nextTask.timedExecutionMs &&
     previousTask.updatedAt === nextTask.updatedAt &&
@@ -1746,6 +1759,24 @@ function TaskCardComponent({
             {t("tasks.stuck", "Stuck")}
           </span>
         )}
+        {/* U13/U9: per-branch progress badges while the card is in a parallel
+            window. Reads an optional additive `branchProgress` field on the task
+            payload (server-persisted by U13); absent → nothing renders. */}
+        {Array.isArray((task as TaskWithBranchProgress).branchProgress) &&
+          (task as TaskWithBranchProgress).branchProgress!.length > 0 && (
+            <span
+              className="card-status-badge card-branch-progress"
+              title={t("tasks.branchProgressTitle", "Parallel branches in progress")}
+              data-testid="branch-progress-badge"
+            >
+              {t("tasks.branchProgress", "{{done}}/{{total}} branches", {
+                done: (task as TaskWithBranchProgress).branchProgress!.filter(
+                  (b) => b.status === "completed",
+                ).length,
+                total: (task as TaskWithBranchProgress).branchProgress!.length,
+              })}
+            </span>
+          )}
         {showStalledReview && stalledReview && (
           <span
             className="card-status-badge card-status-badge--in-review stalled-review"
@@ -1973,7 +2004,9 @@ function TaskCardComponent({
                   className="card-progress-fill"
                   style={{
                     width: `${progressPercent}%`,
-                    backgroundColor: COLUMN_PROGRESS_COLOR_MAP[task.column],
+                    // Issue 1403: custom columns have no legacy progress color → fall back to accent.
+                    backgroundColor:
+                      (COLUMN_PROGRESS_COLOR_MAP as Record<string, string>)[task.column] ?? "var(--accent)",
                   }}
                 />
               </div>

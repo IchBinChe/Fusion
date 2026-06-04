@@ -3,6 +3,11 @@ import { isExperimentalFeatureEnabled } from "@fusion/core";
 
 import { WorkflowGraphExecutor, type WorkflowNodeOutcome } from "./workflow-graph-executor.js";
 import type { WorkflowCustomNodeRunner, WorkflowLegacySeams } from "./workflow-node-handlers.js";
+import type {
+  WorkflowBranchPersistence,
+  WorkflowBranchProgress,
+  WorkflowBranchSemaphore,
+} from "./workflow-graph-branches.js";
 // (Both types are also used as values in the side-effect tracking wrappers below.)
 
 /**
@@ -37,6 +42,13 @@ export interface WorkflowGraphTaskRunnerDeps {
   maxRetriesPerNode?: number;
   /** Optional diagnostics hook (audit/log emission). Never throws into the run. */
   onEvent?: (event: { type: "start" | "terminal" | "fallback"; taskId: string; detail: string }) => void;
+  /** Per-branch run-state persistence + resume (U13). Additive; in-memory without it. */
+  branchPersistence?: WorkflowBranchPersistence;
+  /** Bounds concurrent branch-node execution (U13); omit when the semaphore is
+   *  enforced beneath runCustomNode at the session layer. */
+  branchSemaphore?: WorkflowBranchSemaphore;
+  /** Live per-branch progress for dashboard badges (U9/U13). */
+  onBranchProgress?: (progress: WorkflowBranchProgress) => void;
 }
 
 /**
@@ -47,7 +59,17 @@ export interface WorkflowGraphTaskRunnerDeps {
  * run the legacy pipeline; a task is never stranded by interpreter bugs.
  */
 export class WorkflowGraphTaskRunner {
+  /** Latest per-branch progress, keyed by branchId. Store/dashboard-readable
+   *  (U9 badges). Reset at the start of each run; the card never moves during a
+   *  parallel window (KTD-11) so this is purely presentational state. */
+  private readonly branchProgress = new Map<string, WorkflowBranchProgress>();
+
   public constructor(private readonly deps: WorkflowGraphTaskRunnerDeps) {}
+
+  /** Snapshot of current per-branch progress (branchId, nodeId, status). */
+  public getBranchProgress(): WorkflowBranchProgress[] {
+    return [...this.branchProgress.values()];
+  }
 
   private emit(type: "start" | "terminal" | "fallback", taskId: string, detail: string): void {
     try {
@@ -91,6 +113,7 @@ export class WorkflowGraphTaskRunner {
     }
 
     this.emit("start", task.id, definition.id);
+    this.branchProgress.clear();
 
     // Track whether any node side effects ran. A pre-run interpreter error
     // (bad IR structure, wiring) can safely fall back to the legacy pipeline;
@@ -117,6 +140,17 @@ export class WorkflowGraphTaskRunner {
         seams: wrappedSeams,
         runCustomNode: wrappedRunCustomNode,
         maxRetriesPerNode: this.deps.maxRetriesPerNode,
+        branchPersistence: this.deps.branchPersistence,
+        branchSemaphore: this.deps.branchSemaphore,
+        runId: `${task.id}:${definition.id}`,
+        onBranchProgress: (progress) => {
+          this.branchProgress.set(progress.branchId, progress);
+          try {
+            this.deps.onBranchProgress?.(progress);
+          } catch {
+            // Progress reporting must never affect the run.
+          }
+        },
       });
       const result = await executor.run(task, settings, definition.ir);
       if (!result.executed) {

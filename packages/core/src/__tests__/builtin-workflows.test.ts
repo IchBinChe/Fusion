@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, isBuiltinWorkflowId } from "../builtin-workflows.js";
+import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { compileWorkflowToSteps } from "../workflow-compiler.js";
-import { parseWorkflowIr } from "../workflow-ir.js";
+import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr } from "../workflow-ir.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 describe("built-in workflows", () => {
@@ -13,6 +14,14 @@ describe("built-in workflows", () => {
       expect(() => parseWorkflowIr(wf.ir)).not.toThrow();
       expect(() => compileWorkflowToSteps(wf.ir)).not.toThrow();
     }
+  });
+
+  it("default workflow column ids equal the legacy enum values, in legacy order (KTD-1)", () => {
+    expect(BUILTIN_CODING_WORKFLOW_IR.version).toBe("v2");
+    if (BUILTIN_CODING_WORKFLOW_IR.version !== "v2") throw new Error("expected v2");
+    expect(BUILTIN_CODING_WORKFLOW_IR.columns.map((c) => c.id)).toEqual([
+      ...DEFAULT_WORKFLOW_COLUMN_IDS,
+    ]);
   });
 
   it("includes a coding and a compound-engineering workflow", () => {

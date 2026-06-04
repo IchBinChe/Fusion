@@ -32,6 +32,7 @@ import type {
   PluginInstallation,
   PluginSkillContribution,
   PluginWorkflowStepContribution,
+  PluginTraitContribution,
   PluginPromptContribution,
   PluginPromptContributions,
   PluginSetupManifest,
@@ -1034,6 +1035,21 @@ export class PluginLoader extends EventEmitter<{
       }
     }
     return steps;
+  }
+
+  /**
+   * Get all trait contributions from loaded plugins (U8).
+   */
+  getPluginTraits(): Array<{ pluginId: string; trait: PluginTraitContribution }> {
+    const traits: Array<{ pluginId: string; trait: PluginTraitContribution }> = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      if (plugin.traits) {
+        for (const trait of plugin.traits) {
+          traits.push({ pluginId, trait });
+        }
+      }
+    }
+    return traits;
   }
 
   /**

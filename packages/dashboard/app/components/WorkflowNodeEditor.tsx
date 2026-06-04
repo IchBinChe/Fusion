@@ -14,8 +14,9 @@ import {
   type Node as FlowNode,
   type Edge as FlowEdge,
 } from "@xyflow/react";
-import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle } from "lucide-react";
-import type { WorkflowDefinition } from "@fusion/core";
+import { useTranslation } from "react-i18next";
+import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge } from "lucide-react";
+import type { WorkflowDefinition, WorkflowIrColumn, TraitViolation } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
   fetchWorkflows,
@@ -34,7 +35,20 @@ import type { ToastType } from "../hooks/useToast";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { workflowNodeTypes, type WorkflowFlowNodeData, type WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
-import { irToFlow, flowToIr, emptyWorkflowIr, emptyWorkflowLayout } from "./workflow-flow-mapping";
+import {
+  irToFlow,
+  flowToIr,
+  emptyWorkflowIr,
+  emptyWorkflowLayout,
+  columnsOf,
+  columnsToBandNodes,
+  strictColumnForY,
+  validateColumnsClient,
+  unplacedNodeIds,
+  isColumnBandNode,
+} from "./workflow-flow-mapping";
+import { fetchTraits, type TraitCatalogEntry } from "../api";
+import { WorkflowColumnPanel } from "./WorkflowColumnPanel";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 
 type ExecutorKind = "model" | "agent" | "skill" | "cli";
@@ -76,6 +90,9 @@ const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof
   { kind: "script", label: "Script", icon: Terminal },
   { kind: "gate", label: "Gate", icon: Shield },
   { kind: "merge", label: "Merge boundary", icon: GitMerge },
+  { kind: "hold", label: "Hold", icon: PauseCircle, presetConfig: { release: "manual" } },
+  { kind: "split", label: "Split", icon: Split },
+  { kind: "join", label: "Join", icon: Merge, presetConfig: { mode: "all", onBranchFailure: "collect" } },
 ];
 
 function InnerEditor({
@@ -92,9 +109,38 @@ function InnerEditor({
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode<WorkflowFlowNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const { t } = useTranslation("app");
+  // v2 columns the editor is authoring for the active workflow.
+  const [columns, setColumns] = useState<WorkflowIrColumn[]>([]);
+  const [traitCatalog, setTraitCatalog] = useState<TraitCatalogEntry[]>([]);
 
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
+
+  // Trait catalog (for client-side composition validation; the panel fetches its
+  // own copy for the picker, but the editor needs the flags to validate).
+  useEffect(() => {
+    let cancelled = false;
+    fetchTraits(projectId)
+      .then((catalog) => {
+        if (!cancelled) setTraitCatalog(catalog);
+      })
+      .catch(() => {
+        // Non-fatal: validation degrades to server-side parse on save.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Composition violations (client mirror of validateColumnTraits).
+  const columnViolations: TraitViolation[] = useMemo(
+    () => (columns.length ? validateColumnsClient(columns, traitCatalog) : []),
+    [columns, traitCatalog],
+  );
+  // Step nodes not placed in any column (v2 only).
+  const unplaced = useMemo(() => unplacedNodeIds(nodes, columns), [nodes, columns]);
+  const blockingViolationCount = columnViolations.filter((v) => v.severity === "error").length;
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true);
@@ -118,14 +164,29 @@ function InnerEditor({
     if (!activeWorkflow) {
       setNodes([]);
       setEdges([]);
+      setColumns([]);
       return;
     }
     const flow = irToFlow(activeWorkflow);
     setNodes(flow.nodes);
     setEdges(flow.edges);
+    setColumns(columnsOf(activeWorkflow));
     setSelectedNodeId(null);
     setValidationError(null);
   }, [activeWorkflow, setNodes, setEdges]);
+
+  // Server-reported node error (e.g. seam-in-branch) attributed to a node id.
+  const [serverNodeError, setServerNodeError] = useState<{ nodeId: string; message: string } | null>(null);
+
+  // Keep the swimlane band group nodes in sync with the authored columns
+  // (add/rename/reorder via the column panel). Step nodes are preserved; only
+  // the band nodes are replaced.
+  useEffect(() => {
+    setNodes((ns) => {
+      const stepNodes = ns.filter((n) => !isColumnBandNode(n.id) && n.type !== "group");
+      return [...columnsToBandNodes(columns), ...stepNodes];
+    });
+  }, [columns, setNodes]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -134,6 +195,22 @@ function InnerEditor({
       );
     },
     [setEdges],
+  );
+
+  // Dragging a step node into a column band sets node.column (position-based
+  // hit testing against the ordered bands — see workflow-flow-mapping).
+  const onNodeDragStop = useCallback(
+    (_evt: unknown, node: FlowNode<WorkflowFlowNodeData>) => {
+      if (isColumnBandNode(node.id) || columns.length === 0) return;
+      // strictColumnForY (not the clamping columnForY): a node dragged above or
+      // below all bands keeps no column rather than snapping to the nearest one.
+      const column = strictColumnForY(node.position.y, columns);
+      if (!column) return;
+      setNodes((ns) =>
+        ns.map((n) => (n.id === node.id ? { ...n, data: { ...n.data, column } } : n)),
+      );
+    },
+    [columns, setNodes],
   );
 
   const addNode = useCallback(
@@ -245,27 +322,75 @@ function InnerEditor({
   const handleSave = useCallback(async () => {
     if (!activeWorkflow) return;
     if (isBuiltinWorkflowId(activeWorkflow.id)) return; // built-ins are read-only
+
+    // Block save on client-detected violations before any round-trip:
+    //  - unplaced step nodes (rendered as inline node badges + summary count);
+    //  - trait composition errors (rendered on the offending column band).
+    if (unplaced.length > 0) {
+      const message = t(
+        "workflowColumns.unplacedCount",
+        "{{count}} nodes not placed in a column",
+        { count: unplaced.length },
+      );
+      setValidationError(message);
+      addToast(message, "error");
+      return;
+    }
+    if (blockingViolationCount > 0) {
+      const message = t(
+        "workflowColumns.compositionBlocked",
+        "Resolve trait conflicts on highlighted columns before saving",
+      );
+      setValidationError(message);
+      addToast(message, "error");
+      return;
+    }
+
     setSaving(true);
     setValidationError(null);
+    setServerNodeError(null);
     try {
-      const { ir, layout } = flowToIr(activeWorkflow.name, nodes, edges);
+      const { ir, layout } = flowToIr(activeWorkflow.name, nodes, edges, columns.length ? columns : undefined);
       const updated = await updateWorkflow(activeWorkflow.id, { ir, layout }, projectId);
       setWorkflows((ws) => ws.map((w) => (w.id === updated.id ? updated : w)));
       // Validate by compiling — surfaces non-linear graphs as a banner.
       try {
         await compileWorkflow(updated.id, projectId);
-        addToast("Workflow saved", "success");
+        addToast(t("workflows.saved", "Workflow saved"), "success");
       } catch (compileErr) {
-        setValidationError(getErrorMessage(compileErr) || "Workflow saved but cannot be compiled");
+        setValidationError(
+          getErrorMessage(compileErr) || t("workflows.savedNotCompilable", "Workflow saved but cannot be compiled"),
+        );
       }
     } catch (err) {
-      const message = getErrorMessage(err) || "Failed to save workflow";
+      const message = getErrorMessage(err) || t("workflows.saveFailed", "Failed to save workflow");
+      // parseWorkflowIr (server) names the offending node for structural errors
+      // like seam-in-branch ("seam 'merge' node 'n-…' is forbidden inside …").
+      // Attribute it to that node so the shared error badge renders on it.
+      const nodeMatch = /node '([^']+)'/.exec(message);
+      if (nodeMatch && nodes.some((n) => n.id === nodeMatch[1])) {
+        setServerNodeError({ nodeId: nodeMatch[1], message });
+      }
       setValidationError(message);
       addToast(message, "error");
     } finally {
       setSaving(false);
     }
-  }, [activeWorkflow, nodes, edges, projectId, addToast]);
+  }, [activeWorkflow, nodes, edges, columns, unplaced, blockingViolationCount, projectId, addToast, t]);
+
+  // Stamp the shared error-state badge onto offending nodes: unplaced step
+  // nodes and any node the server flagged (seam-in-branch). One component
+  // (WorkflowNodeErrorBadge) renders both, keyed off data.errorBadge.
+  const nodesForRender = useMemo(() => {
+    const unplacedSet = new Set(unplaced);
+    return nodes.map((n) => {
+      let errorBadge: string | undefined;
+      if (unplacedSet.has(n.id)) errorBadge = t("workflowColumns.nodeUnplaced", "Not placed in a column");
+      if (serverNodeError?.nodeId === n.id) errorBadge = serverNodeError.message;
+      if (errorBadge === n.data.errorBadge) return n;
+      return { ...n, data: { ...n.data, errorBadge } };
+    });
+  }, [nodes, unplaced, serverNodeError, t]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
@@ -344,57 +469,64 @@ function InnerEditor({
           <section className="wf-editor-canvas-wrap">
             {activeWorkflow ? (
               <>
-                <div className="wf-editor-toolbar">
-                  <div className="wf-editor-palette">
-                    {PALETTE.map(({ kind, label, icon: Icon, presetConfig }) => (
-                      <button
-                        key={label}
-                        className="wf-palette-btn"
-                        onClick={() => addNode(kind, label, presetConfig)}
-                        disabled={isBuiltin}
-                        title={isBuiltin ? "Built-in workflows are read-only — duplicate to edit" : undefined}
-                      >
-                        <Icon size={13} /> {label}
+                {isBuiltin ? (
+                  // Read-only built-in: a banner *replaces* the save/edit toolbar
+                  // (not an overlay); the canvas below stays inspectable.
+                  <div className="wf-editor-readonly-banner" role="status" data-testid="wf-readonly-banner">
+                    <span className="wf-editor-readonly-note">
+                      {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                    </span>
+                    <button className="wf-editor-save wf-editor-duplicate-primary" onClick={handleDuplicate}>
+                      <Plus size={13} /> {t("workflows.duplicateToCustomize", "Duplicate to customize")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="wf-editor-toolbar">
+                    <div className="wf-editor-palette">
+                      {PALETTE.map(({ kind, label, icon: Icon, presetConfig }) => (
+                        <button
+                          key={label}
+                          className="wf-palette-btn"
+                          onClick={() => addNode(kind, label, presetConfig)}
+                        >
+                          <Icon size={13} /> {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="wf-editor-actions">
+                      <button className="wf-editor-delete" onClick={handleDeleteWorkflow}>
+                        <Trash2 size={13} /> {t("common.delete", "Delete")}
                       </button>
-                    ))}
+                      <button className="wf-editor-save" onClick={handleSave} disabled={saving}>
+                        {saving ? <Loader2 size={13} className="wf-spin" /> : <Save size={13} />}{" "}
+                        {t("common.save", "Save")}
+                      </button>
+                    </div>
                   </div>
-                  <div className="wf-editor-actions">
-                    {isBuiltin ? (
-                      <>
-                        <span className="wf-editor-readonly-note" role="status">
-                          Read-only built-in
-                        </span>
-                        <button className="wf-editor-save" onClick={handleDuplicate}>
-                          <Plus size={13} /> Duplicate to edit
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="wf-editor-delete" onClick={handleDeleteWorkflow}>
-                          <Trash2 size={13} /> Delete
-                        </button>
-                        <button className="wf-editor-save" onClick={handleSave} disabled={saving}>
-                          {saving ? <Loader2 size={13} className="wf-spin" /> : <Save size={13} />} Save
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
+                )}
 
                 {validationError && (
                   <div className="wf-editor-banner" role="alert">
                     {validationError}
                   </div>
                 )}
+                {unplaced.length > 0 && (
+                  <div className="wf-editor-banner wf-editor-banner--warn" role="alert" data-testid="wf-unplaced-summary">
+                    {t("workflowColumns.unplacedCount", "{{count}} nodes not placed in a column", {
+                      count: unplaced.length,
+                    })}
+                  </div>
+                )}
 
                 <div className="wf-editor-canvas">
                   <ReactFlow
-                    nodes={nodes}
+                    nodes={nodesForRender}
                     edges={edges}
                     nodeTypes={workflowNodeTypes}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
+                    onNodeDragStop={onNodeDragStop}
                     onNodeClick={(_, node) => setSelectedNodeId(node.id)}
                     onPaneClick={() => setSelectedNodeId(null)}
                     fitView
@@ -407,10 +539,21 @@ function InnerEditor({
               </>
             ) : (
               <div className="wf-editor-empty wf-editor-canvas-empty">
-                Select or create a workflow to start editing.
+                {t("workflows.selectOrCreate", "Select or create a workflow to start editing.")}
               </div>
             )}
           </section>
+
+          {activeWorkflow && (
+            <WorkflowColumnPanel
+              columns={columns}
+              onChange={setColumns}
+              violations={columnViolations}
+              readOnly={isBuiltin}
+              projectId={projectId}
+              addToast={addToast}
+            />
+          )}
 
           {selectedNode && selectedNode.data.kind !== "start" && selectedNode.data.kind !== "end" && (
             <aside className="wf-editor-inspector">
@@ -615,9 +758,90 @@ function InnerEditor({
                 </label>
               ) : null}
 
-              {selectedNode.data.kind !== "merge" ? (
+              {selectedNode.data.kind === "hold" ? (
                 <label className="wf-field">
-                  <span>Gate mode</span>
+                  <span>{t("workflowNodes.releaseCondition", "Release condition")}</span>
+                  <select
+                    value={String(selectedNode.data.config?.release ?? "manual")}
+                    onChange={(e) => updateSelectedData({ config: { release: e.target.value } })}
+                  >
+                    <option value="manual">{t("workflowNodes.releaseManual", "Manual promote")}</option>
+                    <option value="timer">{t("workflowNodes.releaseTimer", "Timer")}</option>
+                    <option value="capacity">{t("workflowNodes.releaseCapacity", "Downstream capacity")}</option>
+                    <option value="dependency">{t("workflowNodes.releaseDependency", "Dependency complete")}</option>
+                    <option value="external-event">{t("workflowNodes.releaseExternal", "External event")}</option>
+                  </select>
+                </label>
+              ) : null}
+
+              {selectedNode.data.kind === "join" ? (
+                <>
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.joinMode", "Join mode")}</span>
+                    <select
+                      value={(() => {
+                        const m = selectedNode.data.config?.mode as unknown;
+                        if (m && typeof m === "object" && "quorum" in (m as object)) return "quorum";
+                        return typeof m === "string" ? m : "all";
+                      })()}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "quorum") {
+                          updateSelectedData({ config: { mode: { quorum: 2 } } });
+                        } else {
+                          updateSelectedData({ config: { mode: v } });
+                        }
+                      }}
+                    >
+                      <option value="all">{t("workflowNodes.joinAll", "All branches")}</option>
+                      <option value="any">{t("workflowNodes.joinAny", "Any branch")}</option>
+                      <option value="quorum">{t("workflowNodes.joinQuorum", "Quorum (n)")}</option>
+                    </select>
+                  </label>
+                  {(() => {
+                    const m = selectedNode.data.config?.mode as unknown;
+                    return m && typeof m === "object" && "quorum" in (m as object);
+                  })() && (
+                    <label className="wf-field">
+                      <span>{t("workflowNodes.quorumN", "Quorum count (n)")}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={String((selectedNode.data.config?.mode as { quorum?: number })?.quorum ?? 2)}
+                        onChange={(e) => {
+                          const n = parseInt(e.target.value, 10);
+                          if (!isNaN(n)) updateSelectedData({ config: { mode: { quorum: n } } });
+                        }}
+                      />
+                    </label>
+                  )}
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.failurePolicy", "On branch failure")}</span>
+                    <select
+                      value={String(selectedNode.data.config?.onBranchFailure ?? "collect")}
+                      onChange={(e) => updateSelectedData({ config: { onBranchFailure: e.target.value } })}
+                    >
+                      <option value="collect">{t("workflowNodes.failureCollect", "Collect (wait for all)")}</option>
+                      <option value="fail-fast">{t("workflowNodes.failureFailFast", "Fail-fast (cancel siblings)")}</option>
+                    </select>
+                  </label>
+                </>
+              ) : null}
+
+              {selectedNode.data.kind === "split" ? (
+                <p className="wf-inspector-note wf-inspector-note--info">
+                  {t(
+                    "workflowNodes.splitNote",
+                    "Branches run concurrently from this node. Execute and merge seams are not allowed inside a branch.",
+                  )}
+                </p>
+              ) : null}
+
+              {selectedNode.data.kind === "prompt" ||
+              selectedNode.data.kind === "gate" ||
+              selectedNode.data.kind === "script" ? (
+                <label className="wf-field">
+                  <span>{t("workflowNodes.gateMode", "Gate mode")}</span>
                   <select
                     // Default display must match the compiler's defaults:
                     // gate and script nodes block by default, prompt is advisory.
@@ -627,15 +851,18 @@ function InnerEditor({
                     )}
                     onChange={(e) => updateSelectedData({ config: { gateMode: e.target.value } })}
                   >
-                    <option value="advisory">Advisory</option>
-                    <option value="gate">Gate (blocks)</option>
+                    <option value="advisory">{t("workflowNodes.advisory", "Advisory")}</option>
+                    <option value="gate">{t("workflowNodes.gateBlocks", "Gate (blocks)")}</option>
                   </select>
                 </label>
-              ) : (
+              ) : selectedNode.data.kind === "merge" ? (
                 <p className="wf-inspector-note">
-                  Steps before this marker run pre-merge; steps after run post-merge.
+                  {t(
+                    "workflowNodes.mergeBoundaryNote",
+                    "Steps before this marker run pre-merge; steps after run post-merge.",
+                  )}
                 </p>
-              )}
+              ) : null}
               </fieldset>
             </aside>
           )}

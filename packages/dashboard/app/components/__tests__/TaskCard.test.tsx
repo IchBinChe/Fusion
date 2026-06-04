@@ -493,6 +493,24 @@ describe("TaskCard", () => {
     expect(screen.getByText("FN-001")).toBeDefined();
   });
 
+  it("renders a per-branch progress badge when the task is in a parallel window (U9/U13)", () => {
+    const task = {
+      ...makeTask(),
+      branchProgress: [
+        { branchId: "b1", nodeId: "n1", status: "completed" },
+        { branchId: "b2", nodeId: "n2", status: "running" },
+      ],
+    } as Task;
+    render(<TaskCard task={task} onOpenDetail={noop} addToast={noop} />);
+    const badge = screen.getByTestId("branch-progress-badge");
+    expect(badge.textContent).toContain("1/2");
+  });
+
+  it("does not render a branch-progress badge when there is no parallel window", () => {
+    render(<TaskCard task={makeTask()} onOpenDetail={noop} addToast={noop} />);
+    expect(screen.queryByTestId("branch-progress-badge")).toBeNull();
+  });
+
   it("keeps native card dragging enabled by default", () => {
     const { container } = render(<TaskCard task={makeTask()} onOpenDetail={noop} addToast={noop} />);
     const card = container.querySelector(".card") as HTMLElement;

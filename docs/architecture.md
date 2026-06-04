@@ -1230,6 +1230,23 @@ Detection is visibility-only: no scheduler/self-healing actions are triggered by
 
 Tune sensitivity by adjusting the exported constants in `stalled-review-detector.ts`. Increase thresholds to reduce noise; decrease thresholds only with incident evidence, because lower values can over-flag transient recovery bursts.
 
+---
+
+### Workflow-defined columns & traits (`experimentalFeatures.workflowColumns`)
+
+*Behind the `workflowColumns` flag (accessor: `packages/core/src/workflow-columns-settings.ts`). With the flag off the legacy pipeline above is authoritative and untouched. The flag default-flips only when the graduation report (below) shows zero drift — a field decision, not yet taken.*
+
+**Engine as substrate, workflows as policy.** The flag inverts the architecture: the engine becomes a **capability substrate** (worktree/git/session mechanics, persistence, crash recovery, audit, machine resource ceilings — non-configurable) and **workflows carry the operating logic** as composable column traits. The mechanism/policy line (KTD-4):
+
+- **Substrate (engine-owned, never workflow-configurable):** `AgentSemaphore`, checkout leases, worktree/git/session ops, SQLite + WAL, the crash-recovery machinery, the audit trail, the global max-sessions cap, and the three non-configurable lost-work merge guards (no sibling `fusion/fn-*` target, line-anchored attribution, no `modifiedFiles` clear on a no-op finalize).
+- **Policy (workflow/trait-owned):** transition validity, WIP/capacity, hold/release, drag meaning, retries, merge strategy, squash posture, file-scope enforcement mode.
+
+**Transition authority.** `moveTaskInternal` remains the single transition authority. Flag-on, it swaps the `VALID_TRANSITIONS` lookup for workflow-resolved column-graph validation (`resolveAllowedColumns`/`workflowHasColumn` in `workflow-transitions.ts`) plus sync trait guards run in-lock; rejections are typed `TransitionRejection`s. `VALID_TRANSITIONS` and the closed `Column`/`COLUMNS` helpers in `types.ts` are `@deprecated` while the flag exists — retained as the flag-off authority and the parity oracle, not yet removed.
+
+**Trait model.** A trait is declarative flags + optional lifecycle hooks (`guard`, `gate`, `onEnter`, `onExit`, `releaseCondition`), resolved through one registry (`trait-registry.ts`, built-ins in `builtin-traits.ts`). Sync `guard` and the `complete`/`archived` flags are built-in-only; plugin traits (KTD-7) get async hook points only and route through the prompt-session/script machinery. Composition conflicts are rejected at save both in the editor and server-side (`assertColumnTraitsValid` in `createWorkflowDefinition`/`updateWorkflowDefinition`, surfaced as a 400). Capacity is enforced in-txn (KTD-10), never bypassable — not a guard. Enter/exit effects run post-commit, idempotent, guarded by the `transitionPending` marker; a throwing/missing plugin hook degrades (audit) and never strands the card or wedges the lock.
+
+**Graduation.** The flag default-flip is gated by `computeWorkflowColumnsGraduationReport()` (`workflow-parity.ts`; store method `TaskStore.computeWorkflowColumnsGraduationReport`), aggregating: five-invariant dual-observe parity, default-workflow transition parity vs `VALID_TRANSITIONS` (`checkTransitionParity`), and the U6 dual-accept marker/column disagreement count. `ready` is true only when all gates pass over a non-empty observation window. The report is the gate; it does not flip the flag.
+
 ## 10) Agent System
 
 Fusion has two complementary agent models:

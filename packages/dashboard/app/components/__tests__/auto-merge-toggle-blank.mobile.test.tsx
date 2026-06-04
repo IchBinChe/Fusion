@@ -6,6 +6,7 @@ import { PageErrorBoundary } from "../ErrorBoundary";
 import type { Task } from "@fusion/core";
 
 vi.mock("../../api", () => ({
+  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
 }));
 

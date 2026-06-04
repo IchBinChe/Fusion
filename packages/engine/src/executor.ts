@@ -17,6 +17,7 @@ import {
   type WorkflowRunObservation,
 } from "@fusion/core";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
+import type { WorkflowBranchPersistence, WorkflowBranchRunState } from "./workflow-graph-branches.js";
 import { observeWorkflowParity, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from "./workflow-parity-observer.js";
 import type { WorkflowLegacySeams } from "./workflow-node-handlers.js";
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
@@ -145,6 +146,11 @@ import {
   createTaskLogTool as sharedCreateTaskLogTool,
   createWorkflowListTool as sharedCreateWorkflowListTool,
   createWorkflowSelectTool as sharedCreateWorkflowSelectTool,
+  createTaskPromoteTool as sharedCreateTaskPromoteTool,
+  createWorkflowCreateTool as sharedCreateWorkflowCreateTool,
+  createWorkflowUpdateTool as sharedCreateWorkflowUpdateTool,
+  createWorkflowDeleteTool as sharedCreateWorkflowDeleteTool,
+  createTraitListTool as sharedCreateTraitListTool,
 } from "./agent-tools.js";
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
@@ -3254,6 +3260,12 @@ export class TaskExecutor {
         seams: this.createGraphSeams(settings),
         runCustomNode: (node, nodeTask) => this.runGraphCustomNode(node, nodeTask, settings),
         onEvent: (event) => executorLog.log(`[workflow-graph] ${event.type} ${event.taskId}: ${event.detail}`),
+        // Wire SQLite-backed per-branch persistence in production (#1407): the
+        // executor writes each branch's currentNodeId/status to
+        // workflow_run_branches so fan-out crash-resume and the U9 badges have
+        // real data, and prunes stale runs (#1412). Adapter degrades to no-op
+        // when the store predates these methods (additive guard).
+        branchPersistence: this.buildBranchPersistence(),
       });
       let result: WorkflowGraphTaskRunResult;
       try {
@@ -3278,6 +3290,27 @@ export class TaskExecutor {
     } finally {
       this.graphRouting.delete(task.id);
     }
+  }
+
+  /**
+   * Build the store-backed WorkflowBranchPersistence wired into production
+   * fan-out runs (#1407/#1412). Returns undefined when the store predates the
+   * persistence methods (older embedded DBs) so the runner stays fully
+   * in-memory — purely additive. Each adapter method is itself guarded so a
+   * mixed/partial store never throws into the run.
+   */
+  private buildBranchPersistence(): WorkflowBranchPersistence | undefined {
+    const store = this.store as unknown as {
+      saveWorkflowRunBranch?: (state: WorkflowBranchRunState) => void;
+      loadWorkflowRunBranches?: (taskId: string, runId: string) => WorkflowBranchRunState[];
+      clearWorkflowRunBranches?: (taskId: string, keepRunId: string) => void;
+    };
+    if (typeof store.saveWorkflowRunBranch !== "function") return undefined;
+    return {
+      saveBranchState: (state) => store.saveWorkflowRunBranch?.(state),
+      loadBranchStates: (taskId, runId) => store.loadWorkflowRunBranches?.(taskId, runId) ?? [],
+      clearStaleBranchStates: (taskId, keepRunId) => store.clearWorkflowRunBranches?.(taskId, keepRunId),
+    };
   }
 
   /**
@@ -4790,6 +4823,11 @@ export class TaskExecutor {
         this.createTaskDocumentReadTool(task.id),
         this.createWorkflowListTool(),
         this.createWorkflowSelectTool(task.id),
+        this.createTaskPromoteTool(task.id),
+        this.createWorkflowCreateTool(),
+        this.createWorkflowUpdateTool(),
+        this.createWorkflowDeleteTool(),
+        this.createTraitListTool(),
         ...(isResearchToolSurfaceEnabled(settings)
           ? createResearchTools({
             store: this.store,
@@ -6547,6 +6585,26 @@ export class TaskExecutor {
 
   private createWorkflowSelectTool(taskId: string): ToolDefinition {
     return sharedCreateWorkflowSelectTool(this.store, taskId);
+  }
+
+  private createTaskPromoteTool(taskId: string): ToolDefinition {
+    return sharedCreateTaskPromoteTool(this.store, taskId);
+  }
+
+  private createWorkflowCreateTool(): ToolDefinition {
+    return sharedCreateWorkflowCreateTool(this.store);
+  }
+
+  private createWorkflowUpdateTool(): ToolDefinition {
+    return sharedCreateWorkflowUpdateTool(this.store);
+  }
+
+  private createWorkflowDeleteTool(): ToolDefinition {
+    return sharedCreateWorkflowDeleteTool(this.store);
+  }
+
+  private createTraitListTool(): ToolDefinition {
+    return sharedCreateTraitListTool();
   }
 
   private createTaskAddDepTool(taskId: string): ToolDefinition {

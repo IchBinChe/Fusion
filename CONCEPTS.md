@@ -134,6 +134,31 @@ The user's mid-stage feedback channel: free-text guidance attached to an answer,
 ### Rehydration
 Re-establishing a live agent handle for a paused CE Session by replaying its recorded conversation against the model. Replay is side-effect-suppressed: it reconstructs the agent's context without re-emitting events, re-streaming Live activity, or re-writing artifacts.
 
+## Workflow columns & traits
+
+*Behind the `experimentalFeatures.workflowColumns` flag. With the flag off, the legacy fixed pipeline (the closed column enum + `VALID_TRANSITIONS`) is authoritative and unchanged.*
+
+### Column (workflow-defined)
+A first-class, workflow-defined unit of task state: an id, a display name, and a set of Trait configurations. A Task's board position is its current column, persisted in `tasks."column"`. Column validity is workflow-scoped — the legacy closed enum widens to a string validated against the Task's resolved workflow. The Default workflow's column ids are byte-identical to the legacy enum values, so no task row is ever rewritten.
+
+### Trait
+Composable column configuration: declarative flags (e.g. `complete`, `archived`, `countsTowardWip`) plus optional lifecycle hooks (`guard`, `gate`, `onEnter`, `onExit`, `releaseCondition`). Built-in and plugin-contributed traits register through one registry. Sync `guard` hooks and the `complete`/`archived` flags are built-in-only; plugin traits get async hook points only. A column's effective flags are the merged flags of its traits; conflicting compositions are rejected at save (server-side and in the editor).
+
+### Lane
+A horizontal row on the multi-lane board, one per workflow in use by visible cards. Each lane renders its own workflow's columns. Tasks with no workflow selection appear in the Default workflow's lane; every card appears in exactly one lane. Zero-card lanes are hidden; lanes are collapsible with persisted state.
+
+### Hold node
+A workflow node kind expressing passive dwell — a card rests in its column until a release condition fires: manual promote, timer, downstream capacity available, dependency satisfied, or external event. Hold release is evaluated by a substrate sweep (the generalized scheduler), which reserves worktree + semaphore slots before issuing the release move.
+
+### Split / Join
+Parallel-branch node kinds. A `split` launches its outgoing edges concurrently; a `join` synchronizes them with `mode: all | any | quorum(n)` and `onBranchFailure: fail-fast | collect`. During the parallel window the card stays in the split's column (its board position never forks); on join resolution it advances to the join's column. `execute`/`merge` seam nodes are forbidden inside branches (one worktree/session per task; merge is exclusive). Per-branch run state persists in SQLite so a crashed branch resumes where it died.
+
+### Default workflow
+The built-in workflow (`builtin:coding`) that reproduces the legacy pipeline verbatim: six columns whose ids equal the legacy enum values, with traits matching legacy semantics (`triage`=intake, `todo`=hold+reset-on-entry, `in-progress`=wip+abort-on-exit+timing, `in-review`=merge-blocker+stall-detection+merge, `done`=complete, `archived`=archived). A null workflow selection resolves to it at read time. Non-editable, non-deletable.
+
+### transitionPending
+A persisted crash-safe marker (`tasks.transitionPending`) written in the same transaction as a column change, recording the post-commit hooks (`hooksRemaining`) that still owe idempotent execution. Cleared once they complete. Recovery reads it exclusively from SQLite (the authoritative store); a crash mid-transition re-runs the idempotent hooks. A throwing or missing hook degrades (audit) and clears its entry — it never strands the card or wedges the task lock.
+
 ## Flagged ambiguities
 
 - "Merging" a shared-branch-group Task had been used for both member integration and group promotion — these are distinct steps with independent gating and must not be conflated.

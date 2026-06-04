@@ -9,12 +9,13 @@ import { useColumnLabel } from "../i18n/labels";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, Settings, GlobalSettings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult, GithubIssueAction } from "@fusion/core";
+import type { Task, TaskDetail, TaskAttachment, Column, ColumnId, MergeResult, Settings, GlobalSettings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult, GithubIssueAction } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
   REPO_OVERRIDE_RE,
   TASK_PRIORITIES,
   VALID_TRANSITIONS,
+  isColumn,
   getErrorMessage,
   resolveTaskExecutionModel,
   resolveTaskPlanningModel,
@@ -456,8 +457,10 @@ function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOpt
 
 const DESCRIPTION_TRUNCATE_LENGTH = 200;
 
-const EDITABLE_COLUMNS: Set<Column> = new Set(["triage", "todo"]);
-const GITHUB_TRACKING_EDITABLE_COLUMNS: Set<Column> = new Set(["triage", "todo", "in-progress", "in-review"]);
+// #1403: widened to ColumnId so `.has(task.column)` accepts custom column ids
+// (non-members correctly resolve to false → not editable).
+const EDITABLE_COLUMNS: Set<ColumnId> = new Set<ColumnId>(["triage", "todo"]);
+const GITHUB_TRACKING_EDITABLE_COLUMNS: Set<ColumnId> = new Set<ColumnId>(["triage", "todo", "in-progress", "in-review"]);
 
 export function TaskDetailContent({
   task,
@@ -1971,6 +1974,18 @@ export function TaskDetailContent({
     }
   }, [task.id, projectId, workflowEnabledSteps, onTaskUpdated, addToast]);
 
+  // U5 (R20): a workflow switch re-homed the card to a new column. Refetch the
+  // task and push it up so the board reflects the move before the SSE catch-up.
+  const handleWorkflowReconciled = useCallback(async () => {
+    try {
+      const detail = await fetchTaskDetail(task.id, projectId);
+      setFullDetail(detail);
+      onTaskUpdated?.(detail);
+    } catch {
+      // Best-effort refresh; the SSE stream will catch the board up regardless.
+    }
+  }, [task.id, projectId, onTaskUpdated]);
+
   const loadAgents = useCallback(async () => {
     setAgentsLoading(true);
     try {
@@ -2217,7 +2232,9 @@ export function TaskDetailContent({
     return providers;
   }, [workingTask.modelProvider, workingTask.validatorModelProvider, workingTask.planningModelProvider]);
 
-  const transitions = VALID_TRANSITIONS[task.column] || [];
+  // #1403: legacy transitions only exist for legacy columns; a custom column id
+  // has no VALID_TRANSITIONS row, so the move menu shows no legacy targets.
+  const transitions: Column[] = isColumn(task.column) ? [...VALID_TRANSITIONS[task.column]] : [];
   const inReviewMoveTransitions: Column[] = ["todo", "in-progress"];
   const moveTransitions = task.column === "in-review" ? inReviewMoveTransitions : transitions;
   const primaryMoveTransition = moveTransitions[0];
@@ -2761,6 +2778,7 @@ export function TaskDetailContent({
                   && task.status !== "awaiting-cli-approval"
                 }
                 onWorkflowStepsChange={handleWorkflowStepsChange}
+                onWorkflowReconciled={handleWorkflowReconciled}
                 taskStatus={task.status}
                 taskPausedReason={task.pausedReason}
               />

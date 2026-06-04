@@ -94,6 +94,7 @@ const qualityAppComponentTests = [
   "App",
   "AuthTokenRecoveryDialog",
   "Board",
+  "Board.canDropTask",
   "board-mobile",
   "board-mobile-view-switch",
   "BranchGroupCard",
@@ -121,6 +122,7 @@ const qualityAppComponentTests = [
   "GitHubBadge",
   "GroupTaskModal",
   "InlineCreateCard",
+  "Lane",
   "LoginInstructions",
   "MemoryView",
   "MergeAdvanceNotice",
@@ -174,6 +176,8 @@ const qualityAppComponentTests = [
   "TrackingRepoSelect",
   "WorkflowNodeEditor",
   "WorkflowResultsTab",
+  "WorkflowSelector",
+  "workflow-flow-mapping",
   "WorktrunkInstallApprovalDetails",
 ] as const;
 
@@ -187,7 +191,7 @@ const batchedQualityAppComponentTestsB = batchedQualityAppComponentTests.slice(b
 
 function buildComponentQualityInclude(testNames: readonly string[]): string[] {
   return testNames.length > 0
-    ? [`app/components/__tests__/{${testNames.join(",")}}.test.tsx`]
+    ? [`app/components/__tests__/{${testNames.join(",")}}.test.{ts,tsx}`]
     : [];
 }
 

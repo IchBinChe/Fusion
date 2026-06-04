@@ -16,6 +16,11 @@ import {
   GlobalSettingsStore,
   resolveGlobalDir,
   DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS,
+  isWorkflowColumnsEnabled,
+  resolveColumnFlags,
+  BUILTIN_CODING_WORKFLOW_IR,
+  type WorkflowIrColumn,
+  type TraitFlags,
 } from "@fusion/core";
 import {
   createServer,
@@ -934,6 +939,50 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     }
     projectStores.set(projectPath, projectStore);
     return projectStore;
+  }
+
+  // ── U11: resolve per-task workflow column flags for the TUI (flag-ON only) ──
+  //
+  // The CLI TUI degrades gracefully (R18): cards in workflow columns it can't
+  // express must map by trait flags into its buckets or a read-only "other"
+  // bucket, never silently disappear. The TUI is flag-blind, so when
+  // `workflowColumns` is ON we enrich each slim task with its resolved column's
+  // display name + merged trait flags. Self-contained: derives everything from
+  // already-exposed store methods (workflow selection + definition) + the core
+  // `resolveColumnFlags` export — no dependency on concurrent U9 server work.
+  // Flag-OFF: returns undefineds and the TUI renders exactly as before.
+  type ResolvedColumnInfo = { columnName?: string; columnFlags?: TraitFlags };
+  async function resolveTaskColumnInfo(
+    projectStore: TaskStore,
+    flagOn: boolean,
+    workflowIrCache: Map<string | undefined, WorkflowIrColumn[] | null>,
+    task: { id: string; column: string },
+  ): Promise<ResolvedColumnInfo> {
+    if (!flagOn) return {};
+    try {
+      const selection = projectStore.getTaskWorkflowSelection(task.id);
+      const workflowId = selection?.workflowId;
+      let columns = workflowIrCache.get(workflowId);
+      if (columns === undefined) {
+        // Resolve the governing workflow IR. No selection → built-in default
+        // (KTD-1), matching the store's own resolution order.
+        const def = workflowId
+          ? await projectStore.getWorkflowDefinition(workflowId)
+          : undefined;
+        const ir = def?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+        columns = ir.version === "v2" ? ir.columns : [];
+        workflowIrCache.set(workflowId, columns);
+      }
+      if (!columns) return {};
+      // `task.column` is the IR column id (the store stores the column id).
+      const column = columns.find((c) => c.id === task.column);
+      if (!column) return {};
+      return { columnName: column.name, columnFlags: resolveColumnFlags(column) };
+    } catch {
+      // Degrade silently: an unresolvable workflow must never drop a card, just
+      // fall back to legacy column-id bucketing in the TUI.
+      return {};
+    }
   }
 
   /**
@@ -2378,13 +2427,28 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
           listTasks: async (projectPath: string) => {
             const projectStore = await getProjectStore(projectPath);
             const tasks = await projectStore.listTasks({ slim: true, includeArchived: false });
-            return tasks.map((t) => ({
-              id: t.id,
-              title: t.title,
-              description: t.description ?? "",
-              column: t.column,
-              agentState: (t as { agentState?: string }).agentState,
-            }));
+            // U11 (R18): when the workflow-columns flag is ON, enrich each task
+            // with its resolved column display name + trait flags so the
+            // flag-blind TUI can map non-legacy columns into its buckets (or the
+            // read-only "other" bucket) instead of silently dropping them. The
+            // IR cache keeps this O(workflows) rather than O(tasks) DB reads.
+            const settings = await projectStore.getSettings();
+            const flagOn = isWorkflowColumnsEnabled(settings);
+            const workflowIrCache = new Map<string | undefined, WorkflowIrColumn[] | null>();
+            return Promise.all(
+              tasks.map(async (t) => {
+                const info = await resolveTaskColumnInfo(projectStore, flagOn, workflowIrCache, t);
+                return {
+                  id: t.id,
+                  title: t.title,
+                  description: t.description ?? "",
+                  column: t.column,
+                  agentState: (t as { agentState?: string }).agentState,
+                  ...(info.columnName !== undefined ? { columnName: info.columnName } : {}),
+                  ...(info.columnFlags !== undefined ? { columnFlags: info.columnFlags } : {}),
+                };
+              }),
+            );
           },
           createTask: async (projectPath: string, input: { title: string; description?: string }) => {
             const projectStore = await getProjectStore(projectPath);

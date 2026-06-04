@@ -12,6 +12,8 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
+import { listTraits } from "@fusion/core";
+import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ResearchProviderRegistry } from "./research/provider-registry.js";
@@ -73,6 +75,47 @@ export const workflowSelectParams = Type.Object({
     Type.String({ description: "Task to assign the workflow to. Defaults to the current task." }),
   ),
 });
+
+export const taskPromoteParams = Type.Object({
+  task_id: Type.Optional(
+    Type.String({ description: "Held task to promote. Defaults to the current task." }),
+  ),
+});
+
+export const workflowCreateParams = Type.Object({
+  name: Type.String({ description: "Workflow name (required, non-empty)." }),
+  description: Type.Optional(Type.String({ description: "Optional human-readable description." })),
+  ir: Type.Unknown({
+    description:
+      "Workflow graph (intermediate representation). Validated server-side; a malformed graph is rejected.",
+  }),
+  layout: Type.Optional(
+    Type.Record(Type.String(), Type.Unknown(), {
+      description: "Optional node layout map keyed by node id.",
+    }),
+  ),
+});
+
+export const workflowUpdateParams = Type.Object({
+  workflow_id: Type.String({ description: "The workflow definition ID to update (built-ins cannot be edited)." }),
+  name: Type.Optional(Type.String({ description: "New name." })),
+  description: Type.Optional(Type.String({ description: "New description." })),
+  ir: Type.Optional(Type.Unknown({ description: "Replacement workflow graph (validated server-side)." })),
+  layout: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Replacement node layout map." })),
+  rehome_to: Type.Optional(
+    Type.String({
+      description:
+        "When an IR update removes a column that still holds cards, supply the column id to re-home those occupants into. " +
+        "Required to resolve an OccupiedColumns conflict; the target must exist in the new IR.",
+    }),
+  ),
+});
+
+export const workflowDeleteParams = Type.Object({
+  workflow_id: Type.String({ description: "The workflow definition ID to delete (built-ins cannot be deleted)." }),
+});
+
+export const traitListParams = Type.Object({});
 
 export const reflectOnPerformanceParams = Type.Object({
   focus_area: Type.Optional(
@@ -1006,18 +1049,261 @@ export function createWorkflowSelectTool(store: TaskStore, currentTaskId: string
     execute: async (_id: string, params: Static<typeof workflowSelectParams>) => {
       const taskId = params.task_id?.trim() || currentTaskId;
       try {
-        const enabled = await store.selectTaskWorkflow(taskId, params.workflow_id);
+        const { enabledWorkflowSteps: enabled, reconciliation } =
+          await store.selectTaskWorkflowAndReconcile(taskId, params.workflow_id);
+        const stepSummary = `${enabled.length} step${enabled.length === 1 ? "" : "s"} enabled`;
+        // Surface the reconciliation outcome so the agent observes any re-home:
+        // a preserved card stays put; an unpreserved card moves fromColumn→toColumn.
+        const rehomeNote =
+          reconciliation && !reconciliation.preserved && reconciliation.fromColumn !== reconciliation.toColumn
+            ? ` Re-homed from '${reconciliation.fromColumn}' to '${reconciliation.toColumn}'.`
+            : reconciliation
+              ? ` Card preserved in '${reconciliation.toColumn}'.`
+              : "";
         return {
           content: [{
             type: "text" as const,
-            text: `Selected workflow ${params.workflow_id} for ${taskId} (${enabled.length} step${enabled.length === 1 ? "" : "s"} enabled).`,
+            text: `Selected workflow ${params.workflow_id} for ${taskId} (${stepSummary}).${rehomeNote}`,
           }],
-          details: { taskId, workflowId: params.workflow_id, enabledWorkflowSteps: enabled },
+          details: { taskId, workflowId: params.workflow_id, enabledWorkflowSteps: enabled, reconciliation },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         return {
           content: [{ type: "text" as const, text: `ERROR: Failed to select workflow: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_task_promote` tool that manually releases a held task out of its
+ * hold column — the agent-native equivalent of the dashboard's "promote" action.
+ * Defaults to the current task. Wraps {@link promoteHeldTask}.
+ */
+export function createTaskPromoteTool(store: TaskStore, currentTaskId: string): ToolDefinition {
+  return {
+    name: "fn_task_promote",
+    label: "Promote Held Task",
+    description:
+      "Manually promote a held task out of its hold column, releasing it regardless of the " +
+      "hold's release kind (the explicit operator action a 'manual' hold waits for). Defaults " +
+      "to the current task. Returns the destination column, or a rejection reason when the task " +
+      "is not held or the destination is full.",
+    parameters: taskPromoteParams,
+    execute: async (_id: string, params: Static<typeof taskPromoteParams>) => {
+      const taskId = params.task_id?.trim() || currentTaskId;
+      try {
+        const outcome = await promoteHeldTask(store, taskId);
+        if (outcome.released) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Promoted ${taskId} to column '${outcome.toColumn}'.`,
+            }],
+            details: { taskId, released: true, toColumn: outcome.toColumn },
+          };
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text: `ERROR: Could not promote ${taskId}: ${outcome.rejection ?? "unknown"}.`,
+          }],
+          details: { taskId, released: false, rejection: outcome.rejection },
+          isError: true,
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to promote task: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_workflow_create` tool — a thin wrapper over the store's workflow
+ * definition create. The IR is validated server-side; a malformed graph rejects.
+ */
+export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_workflow_create",
+    label: "Create Workflow",
+    description:
+      "Create a new custom workflow definition from a name and a workflow graph (IR). " +
+      "The IR is validated server-side. Returns the new workflow ID.",
+    parameters: workflowCreateParams,
+    execute: async (_id: string, params: Static<typeof workflowCreateParams>) => {
+      try {
+        const created = await store.createWorkflowDefinition({
+          name: params.name,
+          description: params.description,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ir: params.ir as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          layout: params.layout as any,
+        });
+        return {
+          content: [{ type: "text" as const, text: `Created workflow ${created.id} (${created.name}).` }],
+          details: { workflowId: created.id, name: created.name },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to create workflow: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_workflow_update` tool — a thin wrapper over the store's workflow
+ * definition update. When an IR change removes a still-occupied column, the store
+ * throws an OccupiedColumnsError; we surface it as a structured response carrying
+ * the per-column occupant counts so the agent can retry with `rehome_to`.
+ */
+export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_workflow_update",
+    label: "Update Workflow",
+    description:
+      "Update a custom workflow definition (name/description/ir/layout). Built-ins cannot be edited. " +
+      "If an IR change removes a column that still holds cards, the update is blocked and returns the " +
+      "occupied columns — retry with rehome_to set to a column id that survives in the new IR.",
+    parameters: workflowUpdateParams,
+    execute: async (_id: string, params: Static<typeof workflowUpdateParams>) => {
+      try {
+        const updated = await store.updateWorkflowDefinition(params.workflow_id, {
+          name: params.name,
+          description: params.description,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ir: params.ir as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          layout: params.layout as any,
+          rehomeTo: params.rehome_to,
+        });
+        return {
+          content: [{ type: "text" as const, text: `Updated workflow ${updated.id} (${updated.name}).` }],
+          details: { workflowId: updated.id, name: updated.name },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        // Surface the typed OccupiedColumnsError as a structured, retryable result.
+        if (err?.name === "OccupiedColumnsError") {
+          const occupancies = err.occupancies ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const summary = occupancies.map((o: any) => `${o.columnId} (${o.count})`).join(", ");
+          return {
+            content: [{
+              type: "text" as const,
+              text:
+                `ERROR: Update removes occupied column(s): ${summary}. ` +
+                `Retry with rehome_to set to a surviving column id.`,
+            }],
+            details: { occupiedColumns: occupancies, workflowId: err.workflowId, retryWith: "rehome_to" },
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to update workflow: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_workflow_delete` tool — a thin wrapper over the store's workflow
+ * definition delete. Surfaces built-in protection and not-found errors as
+ * structured responses. (The store auto-re-homes occupants to the default
+ * workflow on delete, so no rehome target is required here.)
+ */
+export function createWorkflowDeleteTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_workflow_delete",
+    label: "Delete Workflow",
+    description:
+      "Delete a custom workflow definition. Built-ins cannot be deleted. Any tasks using it have " +
+      "their selection cleared and are re-homed to the default workflow's entry column.",
+    parameters: workflowDeleteParams,
+    execute: async (_id: string, params: Static<typeof workflowDeleteParams>) => {
+      try {
+        await store.deleteWorkflowDefinition(params.workflow_id);
+        return {
+          content: [{ type: "text" as const, text: `Deleted workflow ${params.workflow_id}.` }],
+          details: { workflowId: params.workflow_id },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        if (err?.name === "OccupiedColumnsError") {
+          const occupancies = err.occupancies ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const summary = occupancies.map((o: any) => `${o.columnId} (${o.count})`).join(", ");
+          return {
+            content: [{
+              type: "text" as const,
+              text: `ERROR: Delete blocked by occupied column(s): ${summary}.`,
+            }],
+            details: { occupiedColumns: occupancies, workflowId: err.workflowId },
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to delete workflow: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_trait_list` tool that returns the trait catalog from
+ * {@link listTraits} — the column-behavior building blocks (id, name, flags)
+ * used when authoring workflow columns.
+ */
+export function createTraitListTool(): ToolDefinition {
+  return {
+    name: "fn_trait_list",
+    label: "List Traits",
+    description:
+      "List the available column traits (the behavior building blocks for workflow columns): " +
+      "id, name, description, and behavior flags. Use when authoring or updating a workflow IR.",
+    parameters: traitListParams,
+    execute: async () => {
+      try {
+        const traits = listTraits();
+        if (traits.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No traits are registered." }],
+            details: { traits: [] },
+          };
+        }
+        const lines = traits.map(
+          (t) => `- ${t.id}: ${t.name}${t.description ? ` — ${t.description}` : ""}`,
+        );
+        return {
+          content: [{ type: "text" as const, text: `Available traits:\n${lines.join("\n")}` }],
+          details: {
+            traits: traits.map((t) => ({ id: t.id, name: t.name, description: t.description, flags: t.flags })),
+          },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to list traits: ${err?.message ?? err}` }],
           details: {},
           isError: true,
         };

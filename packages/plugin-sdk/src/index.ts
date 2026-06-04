@@ -78,6 +78,9 @@ export type {
   PluginLogger,
   PluginSkillContribution,
   PluginWorkflowStepContribution,
+  PluginTraitContribution,
+  PluginTraitHookDescriptor,
+  PluginTraitFlags,
   PluginPromptSurface,
   PluginPromptContribution,
   PluginPromptContributions,
@@ -94,6 +97,12 @@ export type {
 } from "@fusion/core";
 
 import type { FusionPlugin } from "@fusion/core";
+
+// NOTE (U8): trait-contribution VALIDATION lives in @fusion/core
+// (validatePluginTraitContribution) and runs engine-side at registration.
+// It is deliberately NOT re-exported here — plugin-sdk's built artifact must
+// carry no @fusion runtime specifiers (see cli plugin-sdk-export test); only
+// type-level re-exports are allowed from @fusion/core.
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

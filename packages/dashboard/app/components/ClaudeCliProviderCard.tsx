@@ -186,13 +186,13 @@ export function ClaudeCliProviderCard({
         <div className="auth-provider-header">
           <div className="auth-provider-info">
             <ProviderIcon provider="claude-cli" size="sm" />
-            <strong>Anthropic — via Claude CLI</strong>
+            <strong>{t("setup.claudeCli.name", "Anthropic — via Claude CLI")}</strong>
             <ClaudeCliBadge status={status} authenticated={authenticated} />
           </div>
           <div className="auth-provider-cli-actions">{actions}</div>
         </div>
         <details className="auth-provider-cli-details">
-          <summary>Details</summary>
+          <summary>{t("setup.claudeCli.details", "Details")}</summary>
           <div className="auth-provider-cli-details-body">
             {description}
             <ClaudeCliStatusLine status={status} authenticated={authenticated} />
@@ -213,7 +213,7 @@ export function ClaudeCliProviderCard({
       </div>
       <div className="onboarding-provider-card__body">
         <strong className="onboarding-provider-card__name">
-          Anthropic — via Claude CLI
+          {t("setup.claudeCli.name", "Anthropic — via Claude CLI")}
         </strong>
         {description}
         <ClaudeCliStatusLine status={status} authenticated={authenticated} />

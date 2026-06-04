@@ -306,19 +306,19 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
     setSelectedScript(candidate.scriptName);
     setShowCandidates(false);
     setCommandInput(candidate.command);
-    addToast(`Selected ${candidate.scriptName} script.`, "success");
+    addToast(t("devserver.toast.selectedScript", "Selected {{name}} script.", { name: candidate.scriptName }), "success");
   }, [addToast]);
 
   const handleClearSelection = useCallback(() => {
     setSelectedScript(null);
     setShowCandidates(true);
-    addToast("Cleared selected dev server script.", "success");
+    addToast(t("devserver.toast.clearedScript", "Cleared selected dev server script."), "success");
   }, [addToast]);
 
   const handleStart = () => {
     const trimmedCommand = commandInput.trim();
     if (trimmedCommand.length === 0) {
-      addToast("Enter a command before starting the dev server.", "warning");
+      addToast(t("devserver.toast.enterCommand", "Enter a command before starting the dev server."), "warning");
       return;
     }
 
@@ -328,16 +328,16 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
     void runAction(
       "start",
       () => startServer(trimmedCommand, cwd),
-      "Dev server started.",
+      t("devserver.toast.started", "Dev server started."),
     );
   };
 
   const handleStop = () => {
-    void runAction("stop", stopServer, "Dev server stopped.");
+    void runAction("stop", stopServer, t("devserver.toast.stopped", "Dev server stopped."));
   };
 
   const handleRestart = () => {
-    void runAction("restart", restartServer, "Dev server restarted.");
+    void runAction("restart", restartServer, t("devserver.toast.restarted", "Dev server restarted."));
   };
 
   const handleSetPreview = () => {
@@ -347,7 +347,7 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
     void runAction(
       "preview",
       () => setPreviewUrl(nextUrl),
-      nextUrl ? "Preview URL updated." : "Preview URL override cleared.",
+      nextUrl ? t("devserver.toast.previewUpdated", "Preview URL updated.") : t("devserver.toast.previewCleared", "Preview URL override cleared."),
     );
   };
 

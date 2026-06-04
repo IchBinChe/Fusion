@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { Task, TaskComment } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import "./TaskComments.css";
@@ -16,10 +17,10 @@ interface TaskCommentsProps {
   projectId?: string;
 }
 
-function formatCommentTimestamp(comment: TaskComment): string {
+function formatCommentTimestamp(comment: TaskComment, t: TFunction<"app">): string {
   const timestamp = comment.updatedAt || comment.createdAt;
   const label = new Date(timestamp).toLocaleString();
-  return comment.updatedAt ? `${label} (edited)` : label;
+  return comment.updatedAt ? `${label} ${t("comments.editedSuffix", "(edited)")}` : label;
 }
 
 function isAIGuidanceComment(author: string): boolean {
@@ -119,7 +120,7 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
                       <strong>{comment.author}</strong>
                     )}
                     <span className="detail-log-timestamp">
-                      {formatCommentTimestamp(comment)}
+                      {formatCommentTimestamp(comment, t)}
                     </span>
                   </div>
                   {canEdit && !isEditing ? (

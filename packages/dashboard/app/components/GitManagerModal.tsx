@@ -1,6 +1,6 @@
 import "./ScriptsModal.css";
 import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import type { Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
@@ -1355,12 +1355,11 @@ function StatusPanel({
         <div className="gm-status-warning" data-testid="index-stale-warning" role="alert">
           <AlertCircle size={14} />
           <div>
-            <strong>Stale index detected.</strong>{" "}
-            HEAD has advanced (typically because Fusion's merger updated the integration-branch ref)
-            but the index still reflects the previous tip — `git status` will report the new commits
-            inverted as &quot;staged changes.&quot; Enable <code>mergeAdvanceAutoSync</code> in Settings to
-            have the merger reconcile automatically, or run <code>git reset --hard HEAD</code> to
-            snap forward manually.
+            <Trans
+              i18nKey="app:git.staleIndexWarning"
+              defaults="<strong>Stale index detected.</strong> HEAD has advanced (typically because Fusion's merger updated the integration-branch ref) but the index still reflects the previous tip — `git status` will report the new commits inverted as &quot;staged changes.&quot; Enable <mergeCode>mergeAdvanceAutoSync</mergeCode> in Settings to have the merger reconcile automatically, or run <resetCode>git reset --hard HEAD</resetCode> to snap forward manually."
+              components={{ strong: <strong />, mergeCode: <code />, resetCode: <code /> }}
+            />
           </div>
         </div>
       )}
@@ -1400,19 +1399,49 @@ function StatusPanel({
           {advancesHelpOpen && (
             <div className="gm-status-advances-help" data-testid="recent-merge-advances-help">
               <p>
-                Each entry is a Fusion task whose squash commit advanced the
-                integration branch ref (<code>{status.integrationBranch ?? "main"}</code>).
-                The <em>auto-sync outcome</em> says whether your working tree
-                was also fast-forwarded to that new tip.
+                <Trans
+                  i18nKey="app:git.advancesHelpIntro"
+                  defaults="Each entry is a Fusion task whose squash commit advanced the integration branch ref (<branchCode>{{integrationBranch}}</branchCode>). The <em>auto-sync outcome</em> says whether your working tree was also fast-forwarded to that new tip."
+                  values={{ integrationBranch: status.integrationBranch ?? "main" }}
+                  components={{ branchCode: <code />, em: <em /> }}
+                />
               </p>
               <ul className="gm-status-advances-help-list">
-                <li><code>clean-sync</code> / <code>synced-with-edits-restored</code> — working tree is in sync; nothing to do.</li>
-                <li><code>reachable</code> / <code>subsumed</code> / <code>orphaned</code> / <code>superseded</code> — already handled (including history rewrites where equivalent content already landed, original SHAs disappeared, or HEAD is already aligned to the rewritten integration tip).</li>
-                <li><code>pending</code> + <code>off / not run</code> — auto-sync is disabled in Settings; the branch ref moved but your worktree didn&apos;t follow.</li>
-                <li><code>pending</code> + <code>stash-failed</code> / <code>would-conflict</code> / similar — auto-sync tried but couldn&apos;t reconcile (usually local edits collide with the new commit).</li>
+                <li>
+                  <Trans
+                    i18nKey="app:git.advancesHelpItem1"
+                    defaults="<c1>clean-sync</c1> / <c2>synced-with-edits-restored</c2> — working tree is in sync; nothing to do."
+                    components={{ c1: <code />, c2: <code /> }}
+                  />
+                </li>
+                <li>
+                  <Trans
+                    i18nKey="app:git.advancesHelpItem2"
+                    defaults="<c1>reachable</c1> / <c2>subsumed</c2> / <c3>orphaned</c3> / <c4>superseded</c4> — already handled (including history rewrites where equivalent content already landed, original SHAs disappeared, or HEAD is already aligned to the rewritten integration tip)."
+                    components={{ c1: <code />, c2: <code />, c3: <code />, c4: <code /> }}
+                  />
+                </li>
+                <li>
+                  <Trans
+                    i18nKey="app:git.advancesHelpItem3"
+                    defaults="<c1>pending</c1> + <c2>off / not run</c2> — auto-sync is disabled in Settings; the branch ref moved but your worktree didn't follow."
+                    components={{ c1: <code />, c2: <code /> }}
+                  />
+                </li>
+                <li>
+                  <Trans
+                    i18nKey="app:git.advancesHelpItem4"
+                    defaults="<c1>pending</c1> + <c2>stash-failed</c2> / <c3>would-conflict</c3> / similar — auto-sync tried but couldn't reconcile (usually local edits collide with the new commit)."
+                    components={{ c1: <code />, c2: <code />, c3: <code /> }}
+                  />
+                </li>
               </ul>
               <p>
-                <strong>Fix:</strong> Fusion only shows <em>Sync working tree</em> when at least one advance is genuinely <code>pending</code> and HEAD is not aligned with the integration tip. If entries are already handled (subsumed/orphaned/reachable/superseded), no sync action is offered.
+                <Trans
+                  i18nKey="app:git.advancesHelpFix"
+                  defaults="<strong>Fix:</strong> Fusion only shows <em>Sync working tree</em> when at least one advance is genuinely <code>pending</code> and HEAD is not aligned with the integration tip. If entries are already handled (subsumed/orphaned/reachable/superseded), no sync action is offered."
+                  components={{ strong: <strong />, em: <em />, code: <code /> }}
+                />
               </p>
             </div>
           )}
@@ -1995,7 +2024,7 @@ function BranchesPanel({
                         className="btn btn-sm btn-danger"
                         onClick={(e) => { e.stopPropagation(); onDeleteBranch(branch.name); }}
                         disabled={loading}
-                        title={t("git.deleteBranchTitle", "Delete Branch")}
+                        title={t("git.deleteBranch", "Delete")}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -2105,8 +2134,8 @@ function WorktreesPanel({ worktrees }: { worktrees: GitWorktree[] }) {
           >
             <div className="gm-worktree-info">
               <div className="gm-worktree-path-row">
-                {worktree.isMain && <span className="gm-badge main">main</span>}
-                {worktree.isBare && <span className="gm-badge bare">bare</span>}
+                {worktree.isMain && <span className="gm-badge main">{t("git.worktreeBadgeMain", "main")}</span>}
+                {worktree.isBare && <span className="gm-badge bare">{t("git.worktreeBadgeBare", "bare")}</span>}
                 <span className="gm-worktree-path" title={worktree.path}>
                   {getPathBasename(worktree.path) || worktree.path}
                 </span>
@@ -2241,7 +2270,7 @@ function StashesPanel({
                     className="btn btn-sm btn-danger"
                     onClick={() => onDropStash(stash.index)}
                     disabled={stashLoading !== null}
-                    title={t("git.dropStashTitle", "Drop Stash")}
+                    title={t("git.dropStash", "Drop stash")}
                   >
                     {stashLoading === `drop-${stash.index}` ? (
                       <Loader2 size={14} className="spin" />

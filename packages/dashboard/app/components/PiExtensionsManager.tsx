@@ -337,8 +337,8 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
                         <button
                           className="btn-icon touch-target pi-ext-remove-btn"
                           onClick={() => handleRemovePackage(source)}
-                          title="Remove package"
-                          aria-label={`Remove package ${label}`}
+                          title={t("piManager.removePackage", "Remove package")}
+                          aria-label={t("piManager.removePackageLabel", "Remove package {{label}}", { label })}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -349,7 +349,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
                         {(pkg as { extensions?: string[] }).extensions?.length ? (
                           <div className="pi-ext-filter-section">
                             <Puzzle size={12} />
-                            <span className="pi-ext-filter-label">Extensions:</span>
+                            <span className="pi-ext-filter-label">{t("piManager.filterExtensions", "Extensions:")} </span>
                             {(pkg as { extensions: string[] }).extensions!.map((ext, i) => (
                               <span key={i} className="pi-ext-filter-tag">
                                 {ext}
@@ -360,7 +360,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
                         {(pkg as { skills?: string[] }).skills?.length ? (
                           <div className="pi-ext-filter-section">
                             <BookOpen size={12} />
-                            <span className="pi-ext-filter-label">Skills:</span>
+                            <span className="pi-ext-filter-label">{t("piManager.filterSkills", "Skills:")} </span>
                             {(pkg as { skills: string[] }).skills!.map((skill, i) => (
                               <span key={i} className="pi-ext-filter-tag">
                                 {skill}
@@ -371,7 +371,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
                         {(pkg as { prompts?: string[] }).prompts?.length ? (
                           <div className="pi-ext-filter-section">
                             <FileText size={12} />
-                            <span className="pi-ext-filter-label">Prompts:</span>
+                            <span className="pi-ext-filter-label">{t("piManager.filterPrompts", "Prompts:")} </span>
                             {(pkg as { prompts: string[] }).prompts!.map((prompt, i) => (
                               <span key={i} className="pi-ext-filter-tag">
                                 {prompt}
@@ -382,7 +382,7 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
                         {(pkg as { themes?: string[] }).themes?.length ? (
                           <div className="pi-ext-filter-section">
                             <Palette size={12} />
-                            <span className="pi-ext-filter-label">Themes:</span>
+                            <span className="pi-ext-filter-label">{t("piManager.filterThemes", "Themes:")} </span>
                             {(pkg as { themes: string[] }).themes!.map((theme, i) => (
                               <span key={i} className="pi-ext-filter-tag">
                                 {theme}
@@ -406,10 +406,10 @@ export function PiExtensionsManager({ addToast, projectId }: PiExtensionsManager
 
           {/* Top-level resource sections */}
           <div className="pi-ext-top-level">
-            {renderResourceSection("Extensions", Puzzle, "extensions")}
-            {renderResourceSection("Skills", BookOpen, "skills")}
-            {renderResourceSection("Prompts", FileText, "prompts")}
-            {renderResourceSection("Themes", Palette, "themes")}
+            {renderResourceSection(t("piManager.sectionExtensions", "Extensions"), Puzzle, "extensions")}
+            {renderResourceSection(t("piManager.sectionSkills", "Skills"), BookOpen, "skills")}
+            {renderResourceSection(t("piManager.sectionPrompts", "Prompts"), FileText, "prompts")}
+            {renderResourceSection(t("piManager.sectionThemes", "Themes"), Palette, "themes")}
           </div>
         </>
       )}

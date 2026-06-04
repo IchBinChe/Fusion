@@ -708,7 +708,7 @@ export function PaperclipRuntimeCard() {
             </option>
           ))}
         </select>
-        <small>{MODE_OPTIONS.find((o) => o.value === settings.mode)?.help}</small>
+        <small>{t(`paperclip.modeHelp.${settings.mode}`, MODE_OPTIONS.find((o) => o.value === settings.mode)?.help ?? "")}</small>
       </div>
 
       {/* Optional scoping */}

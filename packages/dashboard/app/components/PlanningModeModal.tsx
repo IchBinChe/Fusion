@@ -1,5 +1,6 @@
 import "./PlanningModeModal.css";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -79,12 +80,14 @@ type ViewState =
   | { type: "breakdown"; sessionId: string; originalSubtasks: SubtaskItem[]; subtasks: SubtaskItem[]; dirty: boolean }
   | { type: "loading" };
 
-const EXAMPLE_PLANS = [
-  "Build a user authentication system with login and signup",
-  "Add dark mode support to the dashboard",
-  "Create an API endpoint for exporting tasks as CSV",
-  "Refactor the task card component for better performance",
-];
+function getExamplePlans(t: TFunction<"app">): string[] {
+  return [
+    t("planning.examplePlan1", "Build a user authentication system with login and signup"),
+    t("planning.examplePlan2", "Add dark mode support to the dashboard"),
+    t("planning.examplePlan3", "Create an API endpoint for exporting tasks as CSV"),
+    t("planning.examplePlan4", "Refactor the task card component for better performance"),
+  ];
+}
 
 function normalizeTaskPriority(priority?: TaskPriority): TaskPriority {
   if (priority && (TASK_PRIORITIES as readonly string[]).includes(priority)) {
@@ -1931,7 +1934,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                 <div className="planning-examples">
                   <span className="planning-examples-label">{t("planning.tryAnExample", "Try an example:")}</span>
                   <div className="planning-example-chips">
-                    {EXAMPLE_PLANS.map((plan, i) => (
+                    {getExamplePlans(t).map((plan, i) => (
                       <button
                         key={i}
                         className="planning-example-chip"
@@ -3172,7 +3175,7 @@ function PlanningSessionList({
                   <span className="planning-sidebar-item-meta">
                     <PlanningSessionStatusLabel status={session.status} />
                     <span aria-hidden> · </span>
-                    <span>{formatRelativeTime(session.updatedAt)}</span>
+                    <span>{formatRelativeTime(session.updatedAt, t)}</span>
                   </span>
                 </span>
               </button>
@@ -3276,18 +3279,18 @@ function PlanningSessionStatusLabel({ status }: { status: AiSessionSummary["stat
   }
 }
 
-function formatRelativeTime(iso: string): string {
+function formatRelativeTime(iso: string, t: TFunction<"app">): string {
   const ms = Date.now() - Date.parse(iso);
   if (!Number.isFinite(ms) || ms < 0) return "";
   const sec = Math.floor(ms / 1000);
-  if (sec < 60) return "just now";
+  if (sec < 60) return t("planning.relativeTimeJustNow", "just now");
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return t("planning.relativeTimeMinutes", "{{count}}m ago", { count: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return t("planning.relativeTimeHours", "{{count}}h ago", { count: hr });
   const days = Math.floor(hr / 24);
-  if (days < 7) return `${days}d ago`;
+  if (days < 7) return t("planning.relativeTimeDays", "{{count}}d ago", { count: days });
   const weeks = Math.floor(days / 7);
-  if (weeks < 4) return `${weeks}w ago`;
+  if (weeks < 4) return t("planning.relativeTimeWeeks", "{{count}}w ago", { count: weeks });
   return new Date(iso).toLocaleDateString();
 }

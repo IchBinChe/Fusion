@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { ModelPreset } from "@fusion/core";
 import type { ModelInfo } from "../api";
 import { applyPresetToSelection } from "../utils/modelPresets";
@@ -29,8 +30,8 @@ interface ModelSelectionModalProps {
   onPresetChange?: (presetId: string | undefined) => void;
 }
 
-function getModelBadgeLabel(models: ModelInfo[], value: string): string {
-  if (!value) return "Using default";
+function getModelBadgeLabel(models: ModelInfo[], value: string, t: TFunction<"app">): string {
+  if (!value) return t("modelSelection.usingDefault", "Using default");
   const slashIdx = value.indexOf("/");
   if (slashIdx === -1) return value;
   const provider = value.slice(0, slashIdx);
@@ -213,21 +214,21 @@ export function ModelSelectionModal({
                   <div className="task-detail-section">
                     <div className="inline-create-model-row">
                       <label htmlFor="model-selection-executor" className="inline-create-model-label">
-                        Executor Model
+                        {t("modelSelection.executorModel", "Executor Model")}
                       </label>
                       <span
                         className={`model-badge ${hasExecutorOverride ? "model-badge-custom" : "model-badge-default"}`}
                         data-testid="executor-badge"
                       >
-                        {getModelBadgeLabel(models, executorValue)}
+                        {getModelBadgeLabel(models, executorValue, t)}
                       </span>
                       <CustomModelDropdown
                         id="model-selection-executor"
-                        label="Executor Model"
+                        label={t("modelSelection.executorModel", "Executor Model")}
                         value={executorValue}
                         onChange={handleExecutorChange}
                         models={models}
-                        placeholder="Select executor model…"
+                        placeholder={t("modelSelection.executorPlaceholder", "Select executor model…")}
                         favoriteProviders={favoriteProviders}
                         onToggleFavorite={onToggleFavorite}
                         favoriteModels={favoriteModels}
@@ -239,21 +240,21 @@ export function ModelSelectionModal({
                   <div className="task-detail-section">
                     <div className="inline-create-model-row">
                       <label htmlFor="model-selection-validator" className="inline-create-model-label">
-                        Reviewer Model
+                        {t("modelSelection.reviewerModel", "Reviewer Model")}
                       </label>
                       <span
                         className={`model-badge ${hasValidatorOverride ? "model-badge-custom" : "model-badge-default"}`}
                         data-testid="validator-badge"
                       >
-                        {getModelBadgeLabel(models, validatorValue)}
+                        {getModelBadgeLabel(models, validatorValue, t)}
                       </span>
                       <CustomModelDropdown
                         id="model-selection-validator"
-                        label="Reviewer Model"
+                        label={t("modelSelection.reviewerModel", "Reviewer Model")}
                         value={validatorValue}
                         onChange={handleValidatorChange}
                         models={models}
-                        placeholder="Select reviewer model…"
+                        placeholder={t("modelSelection.reviewerPlaceholder", "Select reviewer model…")}
                         favoriteProviders={favoriteProviders}
                         onToggleFavorite={onToggleFavorite}
                         favoriteModels={favoriteModels}

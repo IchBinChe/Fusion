@@ -1605,7 +1605,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 }}
               >
                 <Link size={12} style={{ verticalAlign: "middle" }} />
-                {dependencies.length > 0 ? `${dependencies.length} deps` : "Deps"}
+                {dependencies.length > 0 ? t("tasks.depsCount", "{{count}} deps", { count: dependencies.length }) : t("tasks.deps", "Deps")}
               </button>
             </div>
             {/* Dependency dropdown rendered via portal for proper viewport positioning */}
@@ -1674,7 +1674,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               onClick={() => fileInputRef.current?.click()}
             >
               <Paperclip size={12} style={{ verticalAlign: "middle" }} />
-              {pendingImages.length > 0 ? `Attach (${pendingImages.length})` : "Attach"}
+              {pendingImages.length > 0 ? t("tasks.attachCount", "Attach ({{count}})", { count: pendingImages.length }) : t("tasks.attach", "Attach")}
             </button>
 
             <button
@@ -1725,7 +1725,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 }}
               >
                 <Server size={12} style={{ verticalAlign: "middle" }} />
-                {` ${selectedNode?.name ?? "Node"}`}
+                {` ${selectedNode?.name ?? t("tasks.node", "Node")}`}
                 {selectedNode && (
                   <span className="quick-entry-node-status">
                     <NodeHealthDot status={selectedNode.status} showLabel />
@@ -1806,7 +1806,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 data-testid="quick-entry-agent-button"
               >
                 <Bot size={12} style={{ verticalAlign: "middle" }} />
-                {selectedAgentLabel ? ` ${selectedAgentLabel}` : " Agent"}
+                {selectedAgentLabel ? ` ${selectedAgentLabel}` : ` ${t("tasks.agent", "Agent")}`}
               </button>
             </div>
             {showAgentPicker && portalRoot && agentPickerPosition && createPortal(

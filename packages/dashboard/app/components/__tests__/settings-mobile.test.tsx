@@ -107,6 +107,7 @@ vi.mock("../../api", () => ({
     qmdInstallCommand: "bun install -g @tobilu/qmd",
   })),
   fetchDashboardHealth: vi.fn(() => Promise.resolve({ status: "ok", version: "1.2.3", uptime: 120 })),
+  fetchGlobalSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
 }));
 
 vi.mock("../../hooks/useMemoryBackendStatus", () => ({

@@ -432,18 +432,18 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
 
   const selectedAgentCount = selectedAgentNames.length;
   const selectedSkillCount = selectedSkillNames.length;
-  const selectedAgentLabel = `${selectedAgentCount} Agent${selectedAgentCount !== 1 ? "s" : ""}`;
-  const selectedSkillLabel = `${selectedSkillCount} Skill${selectedSkillCount !== 1 ? "s" : ""}`;
+  const selectedAgentLabel = t("agents.selectedAgentLabel", "{{count}} Agent{{plural}}", { count: selectedAgentCount, plural: selectedAgentCount !== 1 ? "s" : "" });
+  const selectedSkillLabel = t("agents.selectedSkillLabel", "{{count}} Skill{{plural}}", { count: selectedSkillCount, plural: selectedSkillCount !== 1 ? "s" : "" });
   const importActionLabel = selectedAgentCount > 0 && selectedSkillCount > 0
     ? `${selectedAgentLabel} + ${selectedSkillLabel}`
     : selectedSkillCount > 0
       ? selectedSkillLabel
       : selectedAgentLabel;
   const importLoadingLabel = selectedAgentCount > 0 && selectedSkillCount > 0
-    ? `Importing ${selectedAgentCount} agent${selectedAgentCount !== 1 ? "s" : ""} and ${selectedSkillCount} skill${selectedSkillCount !== 1 ? "s" : ""}...`
+    ? t("agents.importingAgentsAndSkills", "Importing {{agentCount}} agent{{agentPlural}} and {{skillCount}} skill{{skillPlural}}...", { agentCount: selectedAgentCount, agentPlural: selectedAgentCount !== 1 ? "s" : "", skillCount: selectedSkillCount, skillPlural: selectedSkillCount !== 1 ? "s" : "" })
     : selectedSkillCount > 0
-      ? `Importing ${selectedSkillCount} skill${selectedSkillCount !== 1 ? "s" : ""}...`
-      : `Importing ${selectedAgentCount} agent${selectedAgentCount !== 1 ? "s" : ""}...`;
+      ? t("agents.importingSkills", "Importing {{count}} skill{{plural}}...", { count: selectedSkillCount, plural: selectedSkillCount !== 1 ? "s" : "" })
+      : t("agents.importingAgents", "Importing {{count}} agent{{plural}}...", { count: selectedAgentCount, plural: selectedAgentCount !== 1 ? "s" : "" });
 
   const toggleAgentSelection = (name: string) => {
     setSelectedAgentNames((current) => (
@@ -647,7 +647,7 @@ export function AgentImportModal({ isOpen, onClose, onImported, projectId, initi
                   {/* Text area for paste */}
                   <textarea
                     className="agent-import-textarea"
-                    placeholder={"---\nname: CEO\ntitle: Chief Executive Officer\nreportsTo: null\nskills:\n  - review\n---\nAgent instructions go here..."}
+                    placeholder={t("agents.manifestPlaceholder", "---\nname: CEO\ntitle: Chief Executive Officer\nreportsTo: null\nskills:\n  - review\n---\nAgent instructions go here...")}
                     value={manifestContent}
                     onChange={(e) => {
                       setInputMethod("paste");

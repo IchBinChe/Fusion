@@ -145,9 +145,9 @@ export function NodesView({ addToast, onClose }: NodesViewProps) {
         <div className="nodes-view-title">
           <h2>
             <Server size={20} />
-            Nodes
+            {t("nodes.heading", "Nodes")}
           </h2>
-          <span className="nodes-view-count">{nodes.length} registered</span>
+          <span className="nodes-view-count">{t("nodes.registeredCount", "{{count}} registered", { count: nodes.length })}</span>
         </div>
 
         <div className="nodes-view-actions">

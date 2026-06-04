@@ -15,11 +15,6 @@ function shortSha(sha: string | null): string {
   return sha.length > 7 ? sha.slice(0, 7) : sha;
 }
 
-const disabledReasonCopy: Record<string, string> = {
-  "no-remote": "No `origin` remote configured.",
-  "no-upstream": "Branch has no upstream on origin.",
-  "merge-locked": "Push paused — a Fusion merge is in progress.",
-};
 
 export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: MergeAdvanceNoticeProps) {
   const { t } = useTranslation("app");
@@ -81,8 +76,16 @@ export default function MergeAdvanceNotice({ projectId, apiBase = "/api" }: Merg
               {pushState === "pending" ? t("merge.pushing", "Pushing…") : pushLabel}
             </button>
           )}
-          {!pushStatus.canPush && pushStatus.disabledReason && pushStatus.disabledReason in disabledReasonCopy ? (
-            <span className="merge-advance-notice__push-error">{disabledReasonCopy[pushStatus.disabledReason]}</span>
+          {!pushStatus.canPush && pushStatus.disabledReason ? (
+            <span className="merge-advance-notice__push-error">
+              {pushStatus.disabledReason === "no-remote"
+                ? t("merge.disabledNoRemote", "No `origin` remote configured.")
+                : pushStatus.disabledReason === "no-upstream"
+                  ? t("merge.disabledNoUpstream", "Branch has no upstream on origin.")
+                  : pushStatus.disabledReason === "merge-locked"
+                    ? t("merge.disabledMergeLocked", "Push paused — a Fusion merge is in progress.")
+                    : null}
+            </span>
           ) : null}
         </div>
         {typeof pushState === "object" && (pushState.outcome === "rejected-non-ff" || pushState.outcome === "sha-mismatch") ? (

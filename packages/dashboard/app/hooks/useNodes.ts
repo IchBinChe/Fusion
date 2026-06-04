@@ -141,14 +141,14 @@ export function useNodes(): UseNodesResult {
       try {
         await persistNodeProjectPathMappings(node.id, projectMappings);
       } catch (error) {
-        const mappingError = error instanceof Error ? error.message : "Failed to persist project mappings";
+        const mappingError = error instanceof Error ? error.message : t("nodes.errorPersistMappings", "Failed to persist project mappings");
         let cleanupErrorMessage = "";
         try {
           await unregisterNode(node.id);
         } catch (cleanupError) {
           cleanupErrorMessage = cleanupError instanceof Error
             ? cleanupError.message
-            : "Failed to unregister node after mapping failure";
+            : t("nodes.errorUnregisterAfterMappingFailure", "Failed to unregister node after mapping failure");
         }
 
         await refresh();
@@ -162,7 +162,7 @@ export function useNodes(): UseNodesResult {
 
     await refresh();
     return node;
-  }, [refresh]);
+  }, [refresh, t]);
 
   const update = useCallback(async (id: string, updates: NodeUpdateInput): Promise<NodeInfo> => {
     const node = await updateNode(id, updates);

@@ -365,14 +365,14 @@ export function TaskDocumentsTab({
                   />
                   <div className="form-actions">
                     <button className="btn btn-sm" onClick={handleCancelEdit} disabled={saving}>
-                      Cancel
+                      {t("taskDocuments.cancel", "Cancel")}
                     </button>
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => void handleSaveEdit()}
                       disabled={saving || !editContent.trim()}
                     >
-                      {saving ? "Saving…" : "Save"}
+                      {saving ? t("taskDocuments.saving", "Saving…") : t("taskDocuments.save", "Save")}
                     </button>
                   </div>
                 </div>

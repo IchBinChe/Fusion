@@ -216,6 +216,7 @@ function useGitHubStarCount(): number | null {
 type SettingsSection = {
   id: string;
   label: string;
+  labelKey: string;
   scope: "global" | "project" | undefined;
   icon?: typeof Globe;
   isGroupHeader?: boolean;
@@ -251,43 +252,43 @@ function fromCommaSeparatedInput(value: string): string[] {
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   // Account group (scope-less items — independent of settings storage)
-  { id: "__account_header", label: "Account", scope: undefined, isGroupHeader: true },
-  { id: "authentication", label: "Authentication", scope: undefined, icon: Globe },
+  { id: "__account_header", label: "Account", labelKey: "settings.nav.accountHeader", scope: undefined, isGroupHeader: true },
+  { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe },
 
   // Global group (shared across all Fusion projects)
-  { id: "__global_header", label: "Global", scope: undefined, isGroupHeader: true },
-  { id: "global-general", label: "General", scope: "global" },
-  { id: "appearance", label: "Appearance", scope: "global" },
-  { id: "notifications", label: "Notifications", scope: "global" },
-  { id: "node-sync", label: "Node Sync", scope: "global" },
-  { id: "global-models", label: "Models", scope: "global" },
-  { id: "research-global", label: "Research Defaults", scope: "global" },
-  { id: "experimental", label: "Experimental Features", scope: "global" },
-  { id: "remote", label: "Remote Access", scope: "global" },
+  { id: "__global_header", label: "Global", labelKey: "settings.nav.globalHeader", scope: undefined, isGroupHeader: true },
+  { id: "global-general", label: "General", labelKey: "settings.nav.globalGeneral", scope: "global" },
+  { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global" },
+  { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global" },
+  { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global" },
+  { id: "global-models", label: "Models", labelKey: "settings.nav.globalModels", scope: "global" },
+  { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global" },
+  { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global" },
+  { id: "remote", label: "Remote Access", labelKey: "settings.nav.remote", scope: "global" },
 
   // Runtimes group (plugin runtimes with their own settings)
-  { id: "__runtimes_header", label: "Runtimes", scope: undefined, isGroupHeader: true },
-  { id: "hermes-runtime", label: "Hermes", scope: "global" },
-  { id: "openclaw-runtime", label: "OpenClaw", scope: "global" },
-  { id: "paperclip-runtime", label: "Paperclip", scope: "global" },
+  { id: "__runtimes_header", label: "Runtimes", labelKey: "settings.nav.runtimesHeader", scope: undefined, isGroupHeader: true },
+  { id: "hermes-runtime", label: "Hermes", labelKey: "settings.nav.hermesRuntime", scope: "global" },
+  { id: "openclaw-runtime", label: "OpenClaw", labelKey: "settings.nav.openclawRuntime", scope: "global" },
+  { id: "paperclip-runtime", label: "Paperclip", labelKey: "settings.nav.paperclipRuntime", scope: "global" },
 
   // Project group (specific to this project)
-  { id: "__project_header", label: "Project", scope: undefined, isGroupHeader: true },
-  { id: "general", label: "Project General", scope: "project" },
-  { id: "secrets", label: "Secrets", scope: "project" },
-  { id: "project-models", label: "Project Models", scope: "project" },
-  { id: "scheduling", label: "Scheduling", scope: "project" },
-  { id: "scheduled-evals", label: "Scheduled Evals", scope: "project" },
-  { id: "node-routing", label: "Node Routing", scope: "project" },
-  { id: "worktrees", label: "Worktrees", scope: "project" },
-  { id: "commands", label: "Commands", scope: "project" },
-  { id: "merge", label: "Merge", scope: "project" },
-  { id: "agent-permissions", label: "Agent Permissions", scope: "project" },
-  { id: "memory", label: "Memory", scope: "project" },
-  { id: "research-project", label: "Research", scope: "project" },
-  { id: "prompts", label: "Prompts", scope: "project" },
-  { id: "backups", label: "Backups", scope: "project" },
-  { id: "plugins", label: "Plugins", scope: "project" },
+  { id: "__project_header", label: "Project", labelKey: "settings.nav.projectHeader", scope: undefined, isGroupHeader: true },
+  { id: "general", label: "Project General", labelKey: "settings.nav.projectGeneral", scope: "project" },
+  { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project" },
+  { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project" },
+  { id: "scheduling", label: "Scheduling", labelKey: "settings.nav.scheduling", scope: "project" },
+  { id: "scheduled-evals", label: "Scheduled Evals", labelKey: "settings.nav.scheduledEvals", scope: "project" },
+  { id: "node-routing", label: "Node Routing", labelKey: "settings.nav.nodeRouting", scope: "project" },
+  { id: "worktrees", label: "Worktrees", labelKey: "settings.nav.worktrees", scope: "project" },
+  { id: "commands", label: "Commands", labelKey: "settings.nav.commands", scope: "project" },
+  { id: "merge", label: "Merge", labelKey: "settings.nav.merge", scope: "project" },
+  { id: "agent-permissions", label: "Agent Permissions", labelKey: "settings.nav.agentPermissions", scope: "project" },
+  { id: "memory", label: "Memory", labelKey: "settings.nav.memory", scope: "project" },
+  { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project" },
+  { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project" },
+  { id: "backups", label: "Backups", labelKey: "settings.nav.backups", scope: "project" },
+  { id: "plugins", label: "Plugins", labelKey: "settings.nav.plugins", scope: "project" },
 ];
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -7552,7 +7553,7 @@ export function SettingsModal({
                 >
                   {visibleSections.filter((section) => !section.isGroupHeader).map((section) => (
                     <option key={section.id} value={section.id}>
-                      {section.label}
+                      {t(section.labelKey, section.label)}
                     </option>
                   ))}
                 </select>
@@ -7564,7 +7565,7 @@ export function SettingsModal({
                 if (section.isGroupHeader) {
                   return (
                     <div key={section.id} className="settings-group-header">
-                      {section.label}
+                      {t(section.labelKey, section.label)}
                     </div>
                   );
                 }
@@ -7575,18 +7576,18 @@ export function SettingsModal({
                     onClick={() => setActiveSection(section.id)}
                     title={
                       section.scope === "global"
-                        ? "Shared across all projects"
+                        ? t("settings.nav.tooltip.global", "Shared across all projects")
                         : section.scope === "project"
-                          ? "Specific to this project"
+                          ? t("settings.nav.tooltip.project", "Specific to this project")
                           : undefined
                     }
                   >
-                    {section.scope === "global" && <Globe className="settings-scope-icon" aria-label="Global setting" size={16} />}
-                    {section.scope === "project" && <Folder className="settings-scope-icon" aria-label="Project setting" size={16} />}
+                    {section.scope === "global" && <Globe className="settings-scope-icon" aria-label={t("settings.nav.aria.global", "Global setting")} size={16} />}
+                    {section.scope === "project" && <Folder className="settings-scope-icon" aria-label={t("settings.nav.aria.project", "Project setting")} size={16} />}
                     {section.icon && !section.scope && (
-                      <section.icon className="settings-scope-icon" aria-label="Global setting" size={16} />
+                      <section.icon className="settings-scope-icon" aria-label={t("settings.nav.aria.global", "Global setting")} size={16} />
                     )}
-                    {section.label}
+                    {t(section.labelKey, section.label)}
                   </button>
                 );
               })}

@@ -1,5 +1,5 @@
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import "./DbCorruptionBanner.css";
 
@@ -66,7 +66,14 @@ export function DbCorruptionBanner({
 
       <p className="db-corruption-banner__footer">
         <strong className="db-corruption-banner__footer-label">{t("dbBanner.whatToDo", "What to do:")}</strong>{" "}
-        {t("dbBanner.instructions", "Back up the project, try {{cmd}} if the database still opens cleanly, and restore from a known-good backup if corruption persists. See {{link}} for the storage layout and recovery guidance.", { cmd: "fn db --vacuum", link: "docs/storage.md" })}
+        <Trans
+          i18nKey="app:dbBanner.instructions"
+          defaults="Back up the project, try <cmd>fn db --vacuum</cmd> if the database still opens cleanly, and restore from a known-good backup if corruption persists. See <docsLink>docs/storage.md</docsLink> for the storage layout and recovery guidance."
+          components={{
+            cmd: <code />,
+            docsLink: <a href="docs/storage.md" />,
+          }}
+        />
       </p>
       {refreshError ? <p className="db-corruption-banner__error">{refreshError}</p> : null}
     </section>

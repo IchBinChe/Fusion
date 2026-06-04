@@ -202,7 +202,7 @@ function NodeCardInner({
               {managedDockerNode && (
                 <span className="node-card__docker-badge" title={t("nodes.dockerBadge", "Managed Docker node")}>
                   <Box size={12} aria-hidden />
-                  Docker
+                  {t("nodes.dockerLabel", "Docker")}
                 </span>
               )}
               <span

@@ -1,6 +1,6 @@
 import "./UpdateAvailableBanner.css";
 import { X } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 
 interface UpdateAvailableBannerProps {
   latestVersion: string;
@@ -14,7 +14,12 @@ export function UpdateAvailableBanner({ latestVersion, currentVersion, onDismiss
   return (
     <div className="update-available-banner" role="status" aria-live="polite">
       <p className="update-available-banner__text">
-        {t("updateBanner.message", "Update available: v{{latestVersion}} (current: v{{currentVersion}}). Run fn update for an installed CLI, or pull this source checkout.", { latestVersion, currentVersion })}{" "}
+        <Trans
+          i18nKey="app:updateBanner.message"
+          defaults="Update available: v{{latestVersion}} (current: v{{currentVersion}}). Run <code>fn update</code> for an installed CLI, or pull this source checkout."
+          values={{ latestVersion, currentVersion }}
+          components={{ code: <code /> }}
+        />{" "}
         <a
           className="update-available-banner__link"
           href="https://github.com/Runfusion/Fusion/blob/main/CHANGELOG.md"

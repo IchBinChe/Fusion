@@ -122,13 +122,17 @@ export function BackgroundTasksIndicator({
       <button
         className={`background-tasks-indicator__pill${hasAttention ? " background-tasks-indicator__pill--attention" : ""}`}
         onClick={() => setPopoverOpen((prev) => !prev)}
-        title={`${total} background AI task${total !== 1 ? "s" : ""}${needsInput > 0 ? ` (${needsInput} need${needsInput !== 1 ? "" : "s"} input)` : ""}`}
+        title={
+          needsInput > 0
+            ? t("backgroundTasks.pillTitleWithInput", "{{count}} background AI task ({{needsInput}} needs input)", { count: total, needsInput })
+            : t("backgroundTasks.pillTitle", "{{count}} background AI task", { count: total })
+        }
       >
         {generating > 0 && (
           <Loader2 size={12} className="animate-spin" />
         )}
         {needsInput > 0 && generating === 0 && <HelpCircle size={12} />}
-        <span>AI {total}</span>
+        <span>{t("backgroundTasks.pillLabel", "AI {{count}}", { count: total })}</span>
       </button>
 
       {popoverOpen && (

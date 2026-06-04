@@ -290,7 +290,7 @@ export function DevServerLogViewer({
                   <span className="devserver-log-timestamp" data-testid="devserver-log-timestamp">{timestamp}</span>
                 )}
                 {entry.stream === "stderr" && (
-                  <span className="devserver-log-stream-badge" data-testid="devserver-log-stderr-badge">ERR</span>
+                  <span className="devserver-log-stream-badge" data-testid="devserver-log-stderr-badge">{t("devserver.errBadge", "ERR")}</span>
                 )}
                 <span className="devserver-log-text">{linkifyReactChildren(highlightText(plainText, searchQuery.trim()))}</span>
               </div>

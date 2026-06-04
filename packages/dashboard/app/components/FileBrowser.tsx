@@ -161,7 +161,7 @@ function FileContextMenu({ x, y, entry, onAction, onClose }: FileContextMenuProp
         ref={menuRef}
         className="file-browser-context-menu"
         role="menu"
-        aria-label="File operations"
+        aria-label={t("fileBrowser.contextMenuLabel", "File operations")}
         style={{ left: adjustedPos.x, top: adjustedPos.y }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -500,7 +500,7 @@ export function FileBrowser({
       setDialog(INITIAL_DIALOG);
       onRefresh?.();
     } catch (err) {
-      setOperationError(getErrorMessage(err) || "Operation failed");
+      setOperationError(getErrorMessage(err) || t("fileBrowser.operationFailed", "Operation failed"));
     } finally {
       setOperationLoading(false);
     }

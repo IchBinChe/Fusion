@@ -49,36 +49,36 @@ function formatPercent(rate: number): string {
 }
 
 /** Format an ISO timestamp to a relative time string */
-function relativeTime(iso: string): string {
+function relativeTime(iso: string, t: (key: string, defaultValue: string, opts?: Record<string, unknown>) => string): string {
   const now = Date.now();
   const then = new Date(iso).getTime();
   const diffMs = now - then;
 
   if (diffMs < 0) {
     const absDiff = Math.abs(diffMs);
-    if (absDiff < 60_000) return "in a moment";
-    if (absDiff < 3_600_000) return `in ${Math.floor(absDiff / 60_000)}m`;
-    if (absDiff < 86_400_000) return `in ${Math.floor(absDiff / 3_600_000)}h`;
-    return `in ${Math.floor(absDiff / 86_400_000)}d`;
+    if (absDiff < 60_000) return t("agents.time.inAMoment", "in a moment");
+    if (absDiff < 3_600_000) return t("agents.time.inMinutes", "in {{count}}m", { count: Math.floor(absDiff / 60_000) });
+    if (absDiff < 86_400_000) return t("agents.time.inHours", "in {{count}}h", { count: Math.floor(absDiff / 3_600_000) });
+    return t("agents.time.inDays", "in {{count}}d", { count: Math.floor(absDiff / 86_400_000) });
   }
 
-  if (diffMs < 60_000) return "just now";
-  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`;
-  return `${Math.floor(diffMs / 86_400_000)}d ago`;
+  if (diffMs < 60_000) return t("agents.time.justNow", "just now");
+  if (diffMs < 3_600_000) return t("agents.time.minutesAgo", "{{count}}m ago", { count: Math.floor(diffMs / 60_000) });
+  if (diffMs < 86_400_000) return t("agents.time.hoursAgo", "{{count}}h ago", { count: Math.floor(diffMs / 3_600_000) });
+  return t("agents.time.daysAgo", "{{count}}d ago", { count: Math.floor(diffMs / 86_400_000) });
 }
 
 /** Get display label for a trigger type */
-function getTriggerLabel(trigger: string): string {
+function getTriggerLabel(trigger: string, t: (key: string, defaultValue: string) => string): string {
   switch (trigger) {
     case "periodic":
-      return "Periodic";
+      return t("agents.reflections.triggerPeriodic", "Periodic");
     case "post-task":
-      return "Post-Task";
+      return t("agents.reflections.triggerPostTask", "Post-Task");
     case "manual":
-      return "Manual";
+      return t("agents.reflections.triggerManual", "Manual");
     case "user-requested":
-      return "User Requested";
+      return t("agents.reflections.triggerUserRequested", "User Requested");
     default:
       return trigger;
   }
@@ -91,16 +91,16 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function getTrendLabel(trend: string): string {
+function getTrendLabel(trend: string, t: (key: string, defaultValue: string) => string): string {
   switch (trend) {
     case "improving":
-      return "↑ Improving";
+      return t("agents.ratings.trendImproving", "↑ Improving");
     case "declining":
-      return "↓ Declining";
+      return t("agents.ratings.trendDeclining", "↓ Declining");
     case "stable":
-      return "→ Stable";
+      return t("agents.ratings.trendStable", "→ Stable");
     default:
-      return "Insufficient data";
+      return t("agents.ratings.trendInsufficient", "Insufficient data");
   }
 }
 
@@ -373,7 +373,7 @@ export function AgentReflectionsTab({ agentId, projectId, addToast }: AgentRefle
                 <div className="rating-stats">
                   <span className="rating-count">{t("agents.ratings.count", "{{count}} ratings", { count: ratingSummary.totalRatings })}</span>
                   <span className={`rating-trend-badge ${getTrendClass(ratingSummary.trend)}`}>
-                    {getTrendLabel(ratingSummary.trend)}
+                    {getTrendLabel(ratingSummary.trend, t)}
                   </span>
                 </div>
               </div>
@@ -450,7 +450,7 @@ export function AgentReflectionsTab({ agentId, projectId, addToast }: AgentRefle
                       {rating.category && (
                         <span className="rating-category-badge">{rating.category}</span>
                       )}
-                      <span className="rating-time">{relativeTime(rating.createdAt)}</span>
+                      <span className="rating-time">{relativeTime(rating.createdAt, t)}</span>
                       <button
                         type="button"
                         className="rating-delete-btn touch-target"
@@ -500,9 +500,9 @@ export function AgentReflectionsTab({ agentId, projectId, addToast }: AgentRefle
                 >
                   <div className="reflection-card-header">
                     <span className={`reflection-trigger-badge reflection-trigger-${reflection.trigger}`}>
-                      {getTriggerLabel(reflection.trigger)}
+                      {getTriggerLabel(reflection.trigger, t)}
                     </span>
-                    <span className="reflection-timestamp">{relativeTime(reflection.timestamp)}</span>
+                    <span className="reflection-timestamp">{relativeTime(reflection.timestamp, t)}</span>
                     <span className="reflection-chevron">
                       {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </span>

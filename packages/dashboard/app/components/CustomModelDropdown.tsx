@@ -52,7 +52,7 @@ export function CustomModelDropdown({
   models,
   value,
   onChange,
-  placeholder = "Select a model…",
+  placeholder: placeholderProp,
   disabled = false,
   id,
   label,
@@ -61,9 +61,11 @@ export function CustomModelDropdown({
   favoriteModels = [],
   onToggleModelFavorite,
   noChangeValue,
-  noChangeLabel = "No change",
+  noChangeLabel: noChangeLabelProp,
 }: CustomModelDropdownProps) {
   const { t } = useTranslation("app");
+  const placeholder = placeholderProp ?? t("model.selectPlaceholder", "Select a model…");
+  const noChangeLabel = noChangeLabelProp ?? t("model.noChange", "No change");
   const [isOpen, setIsOpen] = useState(false);
   const [localFilter, setLocalFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);

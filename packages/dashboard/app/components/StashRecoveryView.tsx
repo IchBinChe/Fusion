@@ -31,9 +31,9 @@ export function StashRecoveryView() {
       const data = await api<{ records: RecordItem[] }>("/stash-recovery/orphans");
       setRecords(data.records ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load orphans");
+      setError(err instanceof Error ? err.message : t("stashRecovery.failedToLoadOrphans", "Failed to load orphans"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -42,18 +42,18 @@ export function StashRecoveryView() {
   const groups = useMemo(() => {
     const map = new Map<string, RecordItem[]>();
     for (const record of records) {
-      const key = record.sourceTaskId ?? "Unknown source";
+      const key = record.sourceTaskId ?? t("stashRecovery.unknownSource", "Unknown source");
       const existing = map.get(key) ?? [];
       existing.push(record);
       map.set(key, existing);
     }
     return Array.from(map.entries());
-  }, [records]);
+  }, [records, t]);
 
   const handleApply = useCallback(async (sha: string) => {
     const result = await api<{ ok: boolean; reason?: string; stderr?: string }>(`/stash-recovery/orphans/${sha}/apply`, { method: "POST" });
-    setApplyState((prev) => ({ ...prev, [sha]: result.ok ? "Applied" : result.stderr ?? result.reason ?? "Apply failed" }));
-  }, []);
+    setApplyState((prev) => ({ ...prev, [sha]: result.ok ? t("stashRecovery.applied", "Applied") : result.stderr ?? result.reason ?? t("stashRecovery.applyFailed", "Apply failed") }));
+  }, [t]);
 
   const handleDrop = useCallback(async (sha: string) => {
     const shouldDrop = await confirm({
@@ -73,9 +73,9 @@ export function StashRecoveryView() {
       const data = await api<DiffResponse>(`/stash-recovery/orphans/${sha}/diff`);
       setDiffState({ sha, diff: data.diff ?? "", truncated: Boolean(data.truncated), loading: false, error: null });
     } catch (err) {
-      setDiffState({ sha, diff: "", truncated: false, loading: false, error: err instanceof Error ? err.message : "Failed to load diff" });
+      setDiffState({ sha, diff: "", truncated: false, loading: false, error: err instanceof Error ? err.message : t("stashRecovery.failedToLoadDiff", "Failed to load diff") });
     }
-  }, []);
+  }, [t]);
 
   if (records.length === 0 && !error) {
     return <div className="card stash-recovery-view"><p>{t("stashRecovery.noOrphans", "No orphaned merger autostashes found.")}</p><button className="btn btn-sm" onClick={() => void load()}>{t("actions.refresh", "Refresh")}</button></div>;

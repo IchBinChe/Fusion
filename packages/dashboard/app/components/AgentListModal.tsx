@@ -214,7 +214,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
 
     try {
       await updateAgent(agentId, { role: newRole }, projectId);
-      addToast(t("agents.roleUpdateSuccess", "Agent role updated to {{role}}", { role: AGENT_ROLES.find(r => r.value === newRole)?.label ?? newRole }), "success");
+      addToast(t("agents.roleUpdateSuccess", "Agent role updated to {{role}}", { role: getRoleLabel(newRole) }), "success");
       setEditingRoleForAgent(null);
       void loadAgents(true);
     } catch (err) {
@@ -240,7 +240,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
   const getRoleLabel = (role: AgentCapability) => {
     const entry = ROLE_LABEL_KEYS[role];
     if (entry) return t(entry.key, entry.defaultValue);
-    return AGENT_ROLES.find(r => r.value === role)?.label ?? role;
+    return role;
   };
 
   // Use centralized health status utility for consistent labels across all views

@@ -391,7 +391,7 @@ export function DockerNodeOnboardingModal({ isOpen, onClose, onSubmit, addToast:
                     <div key={`env-${index}`} className="docker-onboarding__kv-row docker-onboarding__kv-row--env">
                       <input
                         className="input"
-                        placeholder="KEY"
+                        placeholder={t("docker.placeholders.envVarKey", "KEY")}
                         value={row.key}
                         disabled={submitting}
                         onChange={(event) =>
@@ -403,7 +403,7 @@ export function DockerNodeOnboardingModal({ isOpen, onClose, onSubmit, addToast:
                       />
                       <input
                         className="input"
-                        placeholder="Value"
+                        placeholder={t("docker.placeholders.envVarValue", "Value")}
                         value={row.value}
                         disabled={submitting}
                         onChange={(event) =>

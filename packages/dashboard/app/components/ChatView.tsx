@@ -48,6 +48,7 @@ import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 export interface ChatViewProps {
   projectId?: string;
@@ -73,7 +74,7 @@ export function clampChatInputHeight(scrollHeight: number): number {
   return Math.max(40, Math.min(scrollHeight, CHAT_INPUT_MAX_HEIGHT_PX));
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string, t: TFunction<"app">): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -82,10 +83,10 @@ function formatRelativeTime(dateStr: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffSecs < 60) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffSecs < 60) return t("chat.relativeTimeJustNow", "just now");
+  if (diffMins < 60) return t("chat.relativeTimeMinutes", "{{count}}m ago", { count: diffMins });
+  if (diffHours < 24) return t("chat.relativeTimeHours", "{{count}}h ago", { count: diffHours });
+  if (diffDays < 7) return t("chat.relativeTimeDays", "{{count}}d ago", { count: diffDays });
   return date.toLocaleDateString();
 }
 
@@ -775,7 +776,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
       const mentionedAgent = mentionAgentsByName.get(normalizedName);
       if (mentionedAgent) {
         const isNonMember = Boolean(roomContext && !roomContext.memberIds.has(mentionedAgent.id));
-        const nonMemberLabel = isNonMember ? `Not a member of ${roomContext?.roomName}` : undefined;
+        const nonMemberLabel = isNonMember ? t("chat.mentionNonMember", "Not a member of {{roomName}}", { roomName: roomContext?.roomName }) : undefined;
         parts.push(
           <span
             key={`${mentionedAgent.id}-${start}`}
@@ -925,7 +926,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
         </details>
       )}
       {renderedAttachments}
-      <div className="chat-message-time">{formatRelativeTime(message.createdAt)}</div>
+      <div className="chat-message-time">{formatRelativeTime(message.createdAt, t)}</div>
     </div>
   );
 });
@@ -2729,7 +2730,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                               (session.agentId === FN_AGENT_ID ? sessionModelTag : session.agentId.slice(0, 30))}
                           </span>
                         </span>
-                        <span>{session.updatedAt ? formatRelativeTime(session.updatedAt) : ""}</span>
+                        <span>{session.updatedAt ? formatRelativeTime(session.updatedAt, t) : ""}</span>
                       </div>
                     </div>
                   );

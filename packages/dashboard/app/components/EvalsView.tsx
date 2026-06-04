@@ -85,7 +85,7 @@ export function EvalsView({ projectId, onOpenSettings, onOpenTaskDetail }: Evals
             <li key={result.id}>
               <button className={`evals-result ${result.id === selectedEvalId ? "evals-result--active" : ""}`} type="button" onClick={() => setSelectedEvalId(result.id)}>
                 <span className="evals-result-title">{result.taskTitle}</span>
-                <span className="evals-result-meta">{result.taskId} · {result.runId} · {result.overallScore ?? "n/a"}</span>
+                <span className="evals-result-meta">{result.taskId} · {result.runId} · {result.overallScore ?? t("evals.naPlaceholder", "n/a")}</span>
               </button>
             </li>
           ))}
@@ -98,7 +98,7 @@ export function EvalsView({ projectId, onOpenSettings, onOpenTaskDetail }: Evals
           <>
             <h3 className="evals-detail-title">{selectedSummary?.taskTitle ?? selectedEval.taskTitle}</h3>
             <p className="evals-result-meta">{selectedEval.taskId} · {selectedEval.runId}</p>
-            <p className="evals-score">{t("evals.overallScore", "Overall score: {{score}}", { score: selectedEval.overallScore ?? "n/a" })}</p>
+            <p className="evals-score">{t("evals.overallScore", "Overall score: {{score}}", { score: selectedEval.overallScore ?? t("evals.naPlaceholder", "n/a") })}</p>
             <ul className="evals-categories">
               {selectedEval.categoryScores.map((score) => (
                 <li key={score.category}>{score.category}: {score.finalScore}</li>

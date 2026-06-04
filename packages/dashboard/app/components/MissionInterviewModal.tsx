@@ -1421,7 +1421,7 @@ function MissionPlanReview({
                       <textarea
                         className="planning-textarea roadmap-textarea-md"
                         rows={2}
-                        placeholder="Milestone description..."
+                        placeholder={t("missions.milestoneDescriptionPlaceholder", "Milestone description...")}
                         value={milestone.description || ""}
                         onChange={(e) => updateMilestone(mi, { description: e.target.value })}
                       />

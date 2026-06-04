@@ -85,6 +85,29 @@ export const AGENT_BROWSER_SETTINGS_SCHEMA: Record<string, PluginSettingSchema> 
   },
 };
 
+/** Maps known agent-browser schema group names to their i18n keys */
+const AGENT_BROWSER_GROUP_KEYS: Record<string, string> = {
+  "General": "plugins.agentBrowser.groupGeneral",
+  "Browser": "plugins.agentBrowser.groupBrowser",
+  "Prompt Contributions": "plugins.agentBrowser.groupPromptContributions",
+  "Skills": "plugins.agentBrowser.groupSkills",
+};
+
+/** Maps known agent-browser schema label strings to their i18n keys */
+const AGENT_BROWSER_LABEL_KEYS: Record<string, string> = {
+  "Enable Agent Browser": "plugins.agentBrowser.labelEnabled",
+  "Install Channel": "plugins.agentBrowser.labelInstallChannel",
+  "Command Timeout (ms)": "plugins.agentBrowser.labelCommandTimeoutMs",
+  "Headless Mode": "plugins.agentBrowser.labelHeadlessMode",
+  "Allowed Domains": "plugins.agentBrowser.labelAllowedDomains",
+  "Executor System Prompt": "plugins.agentBrowser.labelPromptExecutorSystem",
+  "Executor Task Prompt": "plugins.agentBrowser.labelPromptExecutorTask",
+  "Triage Prompt": "plugins.agentBrowser.labelPromptTriage",
+  "Reviewer Prompt": "plugins.agentBrowser.labelPromptReviewer",
+  "Heartbeat Prompt": "plugins.agentBrowser.labelPromptHeartbeat",
+  "Skill Exposure": "plugins.agentBrowser.labelSkillExposure",
+};
+
 const BUILTIN_PLUGINS: BuiltinPlugin[] = [
   {
     id: "fusion-plugin-hermes-runtime",
@@ -654,14 +677,23 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
                       className={section.title ? "plugin-settings-group" : undefined}
                     >
                       {section.title && (
-                        <h6 className="plugin-settings-group-heading">{section.title}</h6>
+                        <h6 className="plugin-settings-group-heading">
+                          {AGENT_BROWSER_GROUP_KEYS[section.title]
+                            ? t(AGENT_BROWSER_GROUP_KEYS[section.title] as string, section.title)
+                            : section.title}
+                        </h6>
                       )}
                       {section.entries.map(([key, schema]) => {
                         const helpId = `setting-${key}-help`;
+                        const displayLabel = schema.label
+                          ? (AGENT_BROWSER_LABEL_KEYS[schema.label]
+                              ? t(AGENT_BROWSER_LABEL_KEYS[schema.label] as string, schema.label)
+                              : schema.label)
+                          : key;
                         return (
                     <div key={key} className="form-group">
                       <label htmlFor={`setting-${key}`}>
-                        {schema.label || key}
+                        {displayLabel}
                         {schema.required && " *"}
                       </label>
                       {schema.type === "string" && !schema.multiline && (

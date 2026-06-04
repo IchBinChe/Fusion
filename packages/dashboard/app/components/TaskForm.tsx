@@ -1129,7 +1129,7 @@ export function TaskForm({
             >
               {TASK_PRIORITIES.map((taskPriority) => (
                 <option key={taskPriority} value={taskPriority}>
-                  {taskPriority[0].toUpperCase() + taskPriority.slice(1)}
+                  {t(`taskForm.priority_${taskPriority}`, taskPriority[0].toUpperCase() + taskPriority.slice(1))}
                 </option>
               ))}
             </select>

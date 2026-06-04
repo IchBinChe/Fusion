@@ -25,14 +25,14 @@ export interface NewAgentDialogProps {
   onPrefillDraft?: (draft: AgentOnboardingSummary | null) => void;
 }
 
-const AGENT_ROLES: { value: AgentCapability; label: string; icon: string }[] = [
-  { value: "triage", label: "Triage", icon: "⊕" },
-  { value: "executor", label: "Executor", icon: "▶" },
-  { value: "reviewer", label: "Reviewer", icon: "⊙" },
-  { value: "merger", label: "Merger", icon: "⊞" },
-  { value: "scheduler", label: "Scheduler", icon: "◷" },
-  { value: "engineer", label: "Engineer", icon: "⎔" },
-  { value: "custom", label: "Custom", icon: "✦" },
+const AGENT_ROLES: { value: AgentCapability; icon: string }[] = [
+  { value: "triage", icon: "⊕" },
+  { value: "executor", icon: "▶" },
+  { value: "reviewer", icon: "⊙" },
+  { value: "merger", icon: "⊞" },
+  { value: "scheduler", icon: "◷" },
+  { value: "engineer", icon: "⎔" },
+  { value: "custom", icon: "✦" },
 ];
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
@@ -59,6 +59,20 @@ export function NewAgentDialog({
   onPrefillDraft,
 }: NewAgentDialogProps) {
   const { t } = useTranslation("app");
+
+  const getRoleLabel = (value: AgentCapability): string => {
+    const labels: Record<AgentCapability, string> = {
+      triage: t("agents.roleTriage", "Triage"),
+      executor: t("agents.roleExecutor", "Executor"),
+      reviewer: t("agents.roleReviewer", "Reviewer"),
+      merger: t("agents.roleMerger", "Merger"),
+      scheduler: t("agents.roleScheduler", "Scheduler"),
+      engineer: t("agents.roleEngineer", "Engineer"),
+      custom: t("agents.roleCustom", "Custom"),
+    };
+    return labels[value] ?? value;
+  };
+
   const [step, setStep] = useState(0);
   const [stepZeroTab, setStepZeroTab] = useState<StepZeroTab>("presets");
   const [name, setName] = useState("");
@@ -545,7 +559,7 @@ export function NewAgentDialog({
                             onClick={() => setRole(r.value)}
                           >
                             <span className="agent-role-option-icon">{r.icon}</span>
-                            <span className="agent-role-option-label">{r.label}</span>
+                            <span className="agent-role-option-label">{getRoleLabel(r.value)}</span>
                           </button>
                         ))}
                       </div>
@@ -727,7 +741,7 @@ export function NewAgentDialog({
                 </div>
                 <div className="agent-dialog-summary-row">
                   <span className="agent-dialog-summary-row-label">{t("agents.fieldRole", "Role")}</span>
-                  <span>{selectedRole?.icon} {selectedRole?.label}</span>
+                  <span>{selectedRole?.icon} {selectedRole ? getRoleLabel(selectedRole.value) : ""}</span>
                 </div>
                 {selectedReportsToId && (
                   <div className="agent-dialog-summary-row">

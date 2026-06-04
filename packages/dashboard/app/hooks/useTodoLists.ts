@@ -113,7 +113,7 @@ export function useTodoLists(options: UseTodoListsOptions = {}): UseTodoListsRes
         setLists([]);
         setItems([]);
         setSelectedListId(null);
-        setError(err instanceof Error ? err.message : "Failed to load todo lists");
+        setError(err instanceof Error ? err.message : t("todo.failedLoadLists", "Failed to load todo lists"));
       } finally {
         if (!cancelled) {
           setLoading(false);

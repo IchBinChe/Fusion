@@ -413,7 +413,7 @@ export function ScheduleStepsEditor({ steps, onChange, onEditingChange }: Schedu
                 <StepTypeBadge type={step.type} />
                 <span className="step-card-name">{step.name}</span>
                 {step.continueOnFailure && (
-                  <span className="step-card-flag" title="Continues on failure">⚡</span>
+                  <span className="step-card-flag" title={t("schedule.continuesOnFailure", "Continues on failure")}>⚡</span>
                 )}
                 <div className="step-card-actions">
                   <button

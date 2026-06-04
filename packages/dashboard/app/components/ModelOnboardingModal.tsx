@@ -73,73 +73,75 @@ interface ProviderInfo {
 }
 
 /** Provider metadata with plain-language descriptions for the onboarding UI */
-const PROVIDER_INFO: Record<string, ProviderInfo> = {
-  anthropic: { description: "Claude models — strong at reasoning, analysis, and code" },
-  openai: {
-    description: "GPT models — versatile for a wide range of tasks",
-    apiKeyInfo: {
-      fieldLabel: "OpenAI API Key",
-      setupInstructions: "Create an API key from your OpenAI dashboard under API keys.",
-      dashboardUrl: "https://platform.openai.com/api-keys",
-      inputPlaceholder: "sk-...",
-      usageDescription: "Used for GPT models in task execution and planning",
+function getProviderInfoMap(t: (key: string, defaultValue: string) => string): Record<string, ProviderInfo> {
+  return {
+    anthropic: { description: t("setup.providerDesc.anthropic", "Claude models — strong at reasoning, analysis, and code") },
+    openai: {
+      description: t("setup.providerDesc.openai", "GPT models — versatile for a wide range of tasks"),
+      apiKeyInfo: {
+        fieldLabel: t("setup.apiKeyLabel.openai", "OpenAI API Key"),
+        setupInstructions: t("setup.apiKeySetup.openai", "Create an API key from your OpenAI dashboard under API keys."),
+        dashboardUrl: "https://platform.openai.com/api-keys",
+        inputPlaceholder: "sk-...",
+        usageDescription: t("setup.apiKeyUsage.openai", "Used for GPT models in task execution and planning"),
+      },
     },
-  },
-  "openai-codex": { description: "Codex models by OpenAI — optimized for coding tasks" },
-  google: { description: "Gemini models — multimodal with strong reasoning" },
-  gemini: { description: "Gemini models — multimodal with strong reasoning" },
-  ollama: {
-    description: "Run open-source models locally on your machine",
-    apiKeyInfo: {
-      fieldLabel: "Ollama Endpoint",
-      setupInstructions: "Enter your Ollama endpoint URL (for example http://localhost:11434).",
-      inputPlaceholder: "http://localhost:11434",
-      usageDescription: "Connects to your local Ollama instance",
+    "openai-codex": { description: t("setup.providerDesc.openaiCodex", "Codex models by OpenAI — optimized for coding tasks") },
+    google: { description: t("setup.providerDesc.google", "Gemini models — multimodal with strong reasoning") },
+    gemini: { description: t("setup.providerDesc.gemini", "Gemini models — multimodal with strong reasoning") },
+    ollama: {
+      description: t("setup.providerDesc.ollama", "Run open-source models locally on your machine"),
+      apiKeyInfo: {
+        fieldLabel: t("setup.apiKeyLabel.ollama", "Ollama Endpoint"),
+        setupInstructions: t("setup.apiKeySetup.ollama", "Enter your Ollama endpoint URL (for example http://localhost:11434)."),
+        inputPlaceholder: "http://localhost:11434",
+        usageDescription: t("setup.apiKeyUsage.ollama", "Connects to your local Ollama instance"),
+      },
     },
-  },
-  minimax: {
-    description: "MiniMax models — cost-effective for high-volume usage",
-    apiKeyInfo: {
-      fieldLabel: "MiniMax API Key",
-      setupInstructions: "Generate an API key from the MiniMax platform developer console.",
-      dashboardUrl: "https://platform.minimaxi.com/",
-      inputPlaceholder: "Enter your MiniMax API key",
-      usageDescription: "Used for MiniMax models in task execution",
+    minimax: {
+      description: t("setup.providerDesc.minimax", "MiniMax models — cost-effective for high-volume usage"),
+      apiKeyInfo: {
+        fieldLabel: t("setup.apiKeyLabel.minimax", "MiniMax API Key"),
+        setupInstructions: t("setup.apiKeySetup.minimax", "Generate an API key from the MiniMax platform developer console."),
+        dashboardUrl: "https://platform.minimaxi.com/",
+        inputPlaceholder: t("setup.apiKeyPlaceholder.minimax", "Enter your MiniMax API key"),
+        usageDescription: t("setup.apiKeyUsage.minimax", "Used for MiniMax models in task execution"),
+      },
     },
-  },
-  zai: {
-    description: "GLM models by Zhipu AI — strong multilingual support",
-    apiKeyInfo: {
-      fieldLabel: "Zhipu AI API Key",
-      setupInstructions: "Create an API key in the Zhipu AI open platform account settings.",
-      dashboardUrl: "https://open.bigmodel.cn/",
-      inputPlaceholder: "Enter your Zhipu AI API key",
-      usageDescription: "Used for GLM models in task execution",
+    zai: {
+      description: t("setup.providerDesc.zai", "GLM models by Zhipu AI — strong multilingual support"),
+      apiKeyInfo: {
+        fieldLabel: t("setup.apiKeyLabel.zai", "Zhipu AI API Key"),
+        setupInstructions: t("setup.apiKeySetup.zai", "Create an API key in the Zhipu AI open platform account settings."),
+        dashboardUrl: "https://open.bigmodel.cn/",
+        inputPlaceholder: t("setup.apiKeyPlaceholder.zai", "Enter your Zhipu AI API key"),
+        usageDescription: t("setup.apiKeyUsage.zai", "Used for GLM models in task execution"),
+      },
     },
-  },
-  kimi: { description: "Kimi by Moonshot AI — long-context capabilities" },
-  moonshot: { description: "Kimi by Moonshot AI — long-context capabilities" },
-  "kimi-coding": {
-    description: "Kimi by Moonshot AI — long-context capabilities",
-    apiKeyInfo: {
-      fieldLabel: "Kimi API Key",
-      setupInstructions: "Create your API key in the Moonshot platform account settings.",
-      dashboardUrl: "https://platform.moonshot.cn/",
-      inputPlaceholder: "Enter your Kimi API key",
-      usageDescription: "Used for Kimi/Moonshot AI models in task execution and planning",
+    kimi: { description: t("setup.providerDesc.kimi", "Kimi by Moonshot AI — long-context capabilities") },
+    moonshot: { description: t("setup.providerDesc.moonshot", "Kimi by Moonshot AI — long-context capabilities") },
+    "kimi-coding": {
+      description: t("setup.providerDesc.kimiCoding", "Kimi by Moonshot AI — long-context capabilities"),
+      apiKeyInfo: {
+        fieldLabel: t("setup.apiKeyLabel.kimiCoding", "Kimi API Key"),
+        setupInstructions: t("setup.apiKeySetup.kimiCoding", "Create your API key in the Moonshot platform account settings."),
+        dashboardUrl: "https://platform.moonshot.cn/",
+        inputPlaceholder: t("setup.apiKeyPlaceholder.kimiCoding", "Enter your Kimi API key"),
+        usageDescription: t("setup.apiKeyUsage.kimiCoding", "Used for Kimi/Moonshot AI models in task execution and planning"),
+      },
     },
-  },
-  openrouter: {
-    description: "OpenRouter — route requests across multiple AI providers",
-    apiKeyInfo: {
-      fieldLabel: "OpenRouter API Key",
-      setupInstructions: "Create an API key from your OpenRouter account key management page.",
-      dashboardUrl: "https://openrouter.ai/keys",
-      inputPlaceholder: "sk-or-v1-...",
-      usageDescription: "Routes to multiple AI model providers through a single key",
+    openrouter: {
+      description: t("setup.providerDesc.openrouter", "OpenRouter — route requests across multiple AI providers"),
+      apiKeyInfo: {
+        fieldLabel: t("setup.apiKeyLabel.openrouter", "OpenRouter API Key"),
+        setupInstructions: t("setup.apiKeySetup.openrouter", "Create an API key from your OpenRouter account key management page."),
+        dashboardUrl: "https://openrouter.ai/keys",
+        inputPlaceholder: "sk-or-v1-...",
+        usageDescription: t("setup.apiKeyUsage.openrouter", "Routes to multiple AI model providers through a single key"),
+      },
     },
-  },
-};
+  };
+}
 
 const PROVIDER_KEY_HINTS: Record<string, {
   pattern: RegExp;
@@ -284,10 +286,10 @@ function compareOnboardingProviders(a: AuthProvider, b: AuthProvider): number {
   return a.id.localeCompare(b.id);
 }
 
-function validateApiKeyFormat(providerId: string, key: string): string | null {
+function validateApiKeyFormat(providerId: string, key: string, t: (key: string, defaultValue: string, options?: Record<string, unknown>) => string): string | null {
   const trimmedKey = key.trim();
   if (!trimmedKey) {
-    return "API key is required";
+    return t("setup.apiKeyRequired", "API key is required");
   }
 
   const providerHint = PROVIDER_KEY_HINTS[providerId] ?? PROVIDER_KEY_HINTS_FALLBACK;
@@ -296,29 +298,29 @@ function validateApiKeyFormat(providerId: string, key: string): string | null {
   }
 
   const providerName = getProviderDisplayName(providerId);
-  return `${providerName} keys should follow this format: ${providerHint.hint} (e.g. ${providerHint.example})`;
+  return t("setup.apiKeyFormatError", "{{providerName}} keys should follow this format: {{hint}} (e.g. {{example}})", { providerName, hint: providerHint.hint, example: providerHint.example });
 }
 
-const API_KEY_INFO_FALLBACK: ApiKeyInfo = {
-  fieldLabel: "API Key",
-  setupInstructions: "Enter your API key for this provider.",
-  inputPlaceholder: "Enter API key",
-  usageDescription: "Used by Fusion to authenticate requests to this provider",
-};
-
-/** Fallback description for providers not in the map */
-const PROVIDER_INFO_FALLBACK: ProviderInfo = {
-  description: "AI provider — connect to start using AI models",
-  apiKeyInfo: API_KEY_INFO_FALLBACK,
-};
-
-function getProviderInfo(providerId: string): ProviderInfo {
-  return PROVIDER_INFO[providerId] ?? PROVIDER_INFO_FALLBACK;
+function getApiKeyInfoFallback(t: (key: string, defaultValue: string) => string): ApiKeyInfo {
+  return {
+    fieldLabel: t("setup.apiKeyLabel.fallback", "API Key"),
+    setupInstructions: t("setup.apiKeySetup.fallback", "Enter your API key for this provider."),
+    inputPlaceholder: t("setup.apiKeyPlaceholder.fallback", "Enter API key"),
+    usageDescription: t("setup.apiKeyUsage.fallback", "Used by Fusion to authenticate requests to this provider"),
+  };
 }
 
-function getApiKeyInfo(provider: AuthProvider): ApiKeyInfo {
-  const info = getProviderInfo(provider.id);
-  return info.apiKeyInfo ?? API_KEY_INFO_FALLBACK;
+function getProviderInfo(providerId: string, t: (key: string, defaultValue: string) => string): ProviderInfo {
+  const fallback: ProviderInfo = {
+    description: t("setup.providerDesc.fallback", "AI provider — connect to start using AI models"),
+    apiKeyInfo: getApiKeyInfoFallback(t),
+  };
+  return getProviderInfoMap(t)[providerId] ?? fallback;
+}
+
+function getApiKeyInfo(provider: AuthProvider, t: (key: string, defaultValue: string) => string): ApiKeyInfo {
+  const info = getProviderInfo(provider.id, t);
+  return info.apiKeyInfo ?? getApiKeyInfoFallback(t);
 }
 
 interface ReadinessItem {
@@ -1389,7 +1391,7 @@ export function ModelOnboardingModal({
   const handleSaveApiKey = useCallback(
     async (providerId: string, keyValue?: string) => {
       const key = (keyValue ?? apiKeyInputs[providerId] ?? "").trim();
-      const validationError = validateApiKeyFormat(providerId, key);
+      const validationError = validateApiKeyFormat(providerId, key, t);
       if (validationError) {
         setApiKeyErrors((prev) => ({
           ...prev,
@@ -1900,8 +1902,8 @@ export function ModelOnboardingModal({
     }
 
     if (provider.type === "api_key") {
-      const providerInfo = getProviderInfo(provider.id);
-      const apiKeyInfo = getApiKeyInfo(provider);
+      const providerInfo = getProviderInfo(provider.id, t);
+      const apiKeyInfo = getApiKeyInfo(provider, t);
 
       return (
         <div
@@ -1963,7 +1965,7 @@ export function ModelOnboardingModal({
         <div className="onboarding-provider-card__body">
           <strong className="onboarding-provider-card__name">{provider.name}</strong>
           <span className="onboarding-provider-card__description">
-            {getProviderInfo(provider.id).description}
+            {getProviderInfo(provider.id, t).description}
           </span>
           <ProviderStatusBadge status={getProviderStatus(provider)} />
         </div>
@@ -2257,10 +2259,12 @@ export function ModelOnboardingModal({
 
                   if (connectedCount > 0) {
                     summaryClass += " onboarding-provider-summary--connected";
-                    summaryText = t("setup.providersConnectedSummary", "✓ {{connected}} of {{total}} provider(s) connected", { connected: connectedCount, total: totalAiProviders });
+                    summaryText = t("setup.providersConnectedSummary", "✓ {{connected}} of {{total}} providers connected", { connected: connectedCount, total: totalAiProviders });
                   } else if (skippedCount > 0) {
                     summaryClass += " onboarding-provider-summary--skipped";
-                    summaryText = t("setup.providersSkippedSummary", "{{count}} provider(s) skipped", { count: skippedCount });
+                    summaryText = skippedCount === 1
+                      ? t("setup.providersSkippedSummary_one", "{{count}} provider skipped", { count: skippedCount })
+                      : t("setup.providersSkippedSummary_other", "{{count}} providers skipped", { count: skippedCount });
                   } else {
                     summaryClass += " onboarding-provider-summary--none";
                     summaryText = t("setup.noProvidersConnectedYet", "No providers connected yet");

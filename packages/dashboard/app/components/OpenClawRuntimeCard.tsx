@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import {
   fetchOpenClawStatus,
   fetchPluginSettings,
@@ -219,13 +219,11 @@ export function OpenClawRuntimeCard() {
       statusKind={statusKind}
       statusText={statusText}
       description={
-        <>
-          Drives the local <code>openclaw</code> CLI as a subprocess. Each
-          Fusion prompt is dispatched via{" "}
-          <code>openclaw agent --local --json</code>; the agent definition,
-          model, and thinking level are resolved by OpenClaw. This card only
-          sets overrides and the binary path.
-        </>
+        <Trans
+          i18nKey="app:openclaw.description"
+          defaults="Drives the local <code1>openclaw</code1> CLI as a subprocess. Each Fusion prompt is dispatched via <code2>openclaw agent --local --json</code2>; the agent definition, model, and thinking level are resolved by OpenClaw. This card only sets overrides and the binary path."
+          components={{ code1: <code />, code2: <code /> }}
+        />
       }
       busy={busy}
       toast={toast}
@@ -236,14 +234,18 @@ export function OpenClawRuntimeCard() {
         binary?.available === false ? (
           <div className="onboarding-helper-text">
             <p>
-              <code>openclaw</code> not detected. Install the upstream agent:
+              <Trans
+                i18nKey="app:openclaw.notDetectedInstall"
+                defaults="<code>openclaw</code> not detected. Install the upstream agent:"
+                components={{ code: <code /> }}
+              />
             </p>
             <pre>
               <code>npm install -g openclaw</code>
             </pre>
             <p>
               <a href={OPENCLAW_GITHUB} target="_blank" rel="noreferrer">
-                openclaw on GitHub
+                {t("openclaw.githubLink", "openclaw on GitHub")}
               </a>
             </p>
           </div>

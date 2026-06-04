@@ -616,9 +616,9 @@ export function InsightsView({ projectId, addToast, onClose, onCreateTask, model
       {latestRun && (
         <div className="insights-run-info" data-testid="latest-run">
           <span className="insights-run-status">
-            Latest run: {latestRun.status}
+            {t("insights.latestRun", "Latest run:")} {latestRun.status}
             {latestRun.status === "completed" && (
-              <> — {latestRun.insightsCreated} created, {latestRun.insightsUpdated} updated</>
+              <> — {t("insights.runCompleted", "{{created}} created, {{updated}} updated", { created: latestRun.insightsCreated, updated: latestRun.insightsUpdated })}</>
             )}
             {latestRun.status === "failed" && latestRun.error && (
               <> — {latestRun.error}</>

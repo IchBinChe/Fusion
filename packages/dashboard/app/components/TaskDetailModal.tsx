@@ -48,6 +48,7 @@ import { appendTokenQuery } from "../auth";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
 import { MAX_AUTO_MERGE_RETRIES, computeBlockerFanoutMap } from "../hooks/useBlockerFanout";
 import { resolveEffectiveGithubRepoDefault } from "./githubTracking";
+import type { TFunction } from "i18next";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
@@ -358,6 +359,7 @@ interface ProvenanceDisplay {
 
 interface ProvenanceLabelOptions {
   sourceAgentName?: string;
+  t?: TFunction<"app">;
 }
 
 function getIssueUrlFromMetadata(metadata: Task["sourceMetadata"]): string | undefined {
@@ -391,32 +393,33 @@ function getResearchContextInfo(metadata: Task["sourceMetadata"]): string | unde
 const AgentDetailView = lazy(() => import("./AgentDetailView").then((m) => ({ default: m.AgentDetailView })));
 
 function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOptions = {}): ProvenanceDisplay | null {
+  const tr = options.t;
   switch (task.sourceType) {
     case "dashboard_ui":
-      return { label: "Dashboard" };
+      return { label: tr ? tr("taskDetail.provenance.dashboard", "Dashboard") : "Dashboard" };
     case "quick_chat":
-      return { label: "Quick Chat" };
+      return { label: tr ? tr("taskDetail.provenance.quickChat", "Quick Chat") : "Quick Chat" };
     case "chat_session":
-      return { label: "Chat Session" };
+      return { label: tr ? tr("taskDetail.provenance.chatSession", "Chat Session") : "Chat Session" };
     case "agent_heartbeat": {
       const sourceLabel = options.sourceAgentName ?? task.sourceAgentId;
       return {
-        label: sourceLabel ?? "agent",
+        label: sourceLabel ?? (tr ? tr("taskDetail.provenance.agent", "agent") : "agent"),
         sourceAgentId: task.sourceAgentId,
       };
     }
     case "automation":
-      return { label: "Automation" };
+      return { label: tr ? tr("taskDetail.provenance.automation", "Automation") : "Automation" };
     case "cron":
-      return { label: "Scheduled Task" };
+      return { label: tr ? tr("taskDetail.provenance.scheduledTask", "Scheduled Task") : "Scheduled Task" };
     case "workflow_step":
-      return { label: "Workflow Step" };
+      return { label: tr ? tr("taskDetail.provenance.workflowStep", "Workflow Step") : "Workflow Step" };
     case "github_import": {
       const issueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
       const parsedIssue = issueUrl ? parseGithubIssueLabel(issueUrl) : null;
       return {
-        label: "GitHub Import",
-        contextInfo: issueUrl ? (parsedIssue?.label ?? "Open issue") : undefined,
+        label: tr ? tr("taskDetail.provenance.githubImport", "GitHub Import") : "GitHub Import",
+        contextInfo: issueUrl ? (parsedIssue?.label ?? (tr ? tr("taskDetail.provenance.openIssue", "Open issue") : "Open issue")) : undefined,
         contextHref: issueUrl,
         contextInfoFull: issueUrl,
       };
@@ -424,27 +427,27 @@ function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOpt
     case "research": {
       const contextInfo = getResearchContextInfo(task.sourceMetadata);
       return {
-        label: "Research",
+        label: tr ? tr("taskDetail.provenance.research", "Research") : "Research",
         contextInfo,
         contextInfoFull: contextInfo,
       };
     }
     case "task_refine":
       return {
-        label: "Refinement",
+        label: tr ? tr("taskDetail.provenance.refinement", "Refinement") : "Refinement",
         parentTaskId: task.sourceParentTaskId,
       };
     case "task_duplicate":
       return {
-        label: "Duplicate",
+        label: tr ? tr("taskDetail.provenance.duplicate", "Duplicate") : "Duplicate",
         parentTaskId: task.sourceParentTaskId,
       };
     case "cli":
-      return { label: "CLI" };
+      return { label: tr ? tr("taskDetail.provenance.cli", "CLI") : "CLI" };
     case "api":
-      return { label: "API" };
+      return { label: tr ? tr("taskDetail.provenance.api", "API") : "API" };
     case "recovery":
-      return { label: "Recovery" };
+      return { label: tr ? tr("taskDetail.provenance.recovery", "Recovery") : "Recovery" };
     case "unknown":
     default:
       return null;
@@ -557,6 +560,7 @@ export function TaskDetailContent({
   const [selectedSourceAgentId, setSelectedSourceAgentId] = useState<string | null>(null);
   const provenanceDisplay = getProvenanceLabel(workingTask, {
     sourceAgentName: sourceAgent?.name,
+    t,
   });
 
   // Sync activeTab when the caller changes initialTab (e.g. opening a different tab)
@@ -990,7 +994,7 @@ export function TaskDetailContent({
     if (!canEditGithubTracking || isSavingGithubTracking) return;
     const requestTaskId = task.id;
     if (githubRepoOverrideTrimmed.length > 0 && !REPO_OVERRIDE_RE.test(githubRepoOverrideTrimmed)) {
-      setGithubRepoOverrideError("Repository override must be in owner/repo format");
+      setGithubRepoOverrideError(t("taskDetail.githubTracking.repoOverrideFormat", "Repository override must be in owner/repo format"));
       return;
     }
     setGithubRepoOverrideError(null);
@@ -1158,12 +1162,12 @@ export function TaskDetailContent({
       if (task.sourceIssue) updates.sourceIssue = null;
     } else {
       if (!normalizedProvider || !normalizedRepository || !normalizedExternalId) {
-        return { updates: null, error: "Source issue provider, repository, and issue identifier are required" };
+        return { updates: null, error: t("taskDetail.edit.sourceIssueRequiredFields", "Source issue provider, repository, and issue identifier are required") };
       }
       const fallbackIssueNumber = Number.parseInt(normalizedExternalId, 10);
       const issueNumber = task.sourceIssue?.issueNumber ?? fallbackIssueNumber;
       if (!Number.isFinite(issueNumber) || issueNumber <= 0) {
-        return { updates: null, error: "Source issue identifier must be numeric for new metadata" };
+        return { updates: null, error: t("taskDetail.edit.sourceIssueIdentifierNumeric", "Source issue identifier must be numeric for new metadata") };
       }
       const nextSourceIssue: TaskSourceIssue = {
         provider: normalizedProvider,
@@ -3061,7 +3065,7 @@ export function TaskDetailContent({
                   {task.sourceIssue.provider.toLowerCase() === "github" && (
                     <span className="detail-source-provider-badge" aria-label={t("taskDetail.sourceIssue.githubAriaLabel", "GitHub source issue")}>
                       <GitBranch aria-hidden="true" />
-                      <span>GitHub</span>
+                      <span>{t("taskDetail.sourceIssue.githubBadge", "GitHub")}</span>
                     </span>
                   )}
                   {task.sourceIssue.url ? (

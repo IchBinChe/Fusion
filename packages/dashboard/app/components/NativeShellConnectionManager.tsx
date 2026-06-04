@@ -42,11 +42,11 @@ export function NativeShellConnectionManager({ open, shellApi, shellState, onClo
     try {
       const parsed = new URL(workingUrl.trim());
       if (!/^https?:$/.test(parsed.protocol)) {
-        throw new Error("Server URL must use http or https");
+        throw new Error(t("shell.serverUrlProtocolError", "Server URL must use http or https"));
       }
       const saved = await shellApi.saveProfile({
         id: isAddingConnection ? undefined : (editingProfileId ?? editingProfile?.id),
-        name: workingName || "Remote Server",
+        name: workingName || t("shell.defaultProfileName", "Remote Server"),
         serverUrl: workingUrl,
         authToken: workingToken || null,
       });

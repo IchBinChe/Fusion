@@ -1070,7 +1070,7 @@ export function MailboxView({
       return (
         <div className="mailbox-message-detail mailbox-approval-detail" data-testid="mailbox-approval-detail">
           {isMobile && (
-            <button className="btn btn-sm btn-secondary" onClick={() => setSelectedApproval(null)} data-testid="mailbox-approval-back-to-list">← Back</button>
+            <button className="btn btn-sm btn-secondary" onClick={() => setSelectedApproval(null)} data-testid="mailbox-approval-back-to-list">← {t("mailbox.back", "Back")}</button>
           )}
           <div className="mailbox-message-detail-header">
             <div className="mailbox-message-detail-meta">
@@ -1080,9 +1080,9 @@ export function MailboxView({
           </div>
           <div className="mailbox-message-body">
             <strong>{selectedApproval.actionSummary}</strong>
-            <p>Requester: {selectedApproval.requester.actorName} ({selectedApproval.agentId})</p>
-            {selectedApproval.taskId && <p>Task: {selectedApproval.taskId}</p>}
-            <p>Requested: {formatTimestamp(selectedApproval.createdAt)}</p>
+            <p>{t("mailbox.approvalRequester", "Requester")}: {selectedApproval.requester.actorName} ({selectedApproval.agentId})</p>
+            {selectedApproval.taskId && <p>{t("mailbox.approvalTask", "Task")}: {selectedApproval.taskId}</p>}
+            <p>{t("mailbox.approvalRequested", "Requested")}: {formatTimestamp(selectedApproval.createdAt)}</p>
           </div>
           {selectedApproval.targetAction.category === "network_api" && selectedApproval.targetAction.action === "worktrunk_install" && (
             <WorktrunkInstallApprovalDetails targetAction={selectedApproval.targetAction} />
@@ -1104,15 +1104,15 @@ export function MailboxView({
                 className="message-composer-textarea mailbox-approval-comment"
                 value={approvalComment}
                 onChange={(event) => setApprovalComment(event.target.value)}
-                placeholder="Optional comment"
+                placeholder={t("mailbox.approvalCommentPlaceholder", "Optional comment")}
                 data-testid="mailbox-approval-comment"
               />
               <div className="mailbox-header-actions">
                 <button className="btn btn-sm btn-secondary" onClick={() => void handleApprovalDecision("deny")} disabled={approvalDecisionLoading !== false} data-testid="mailbox-approval-deny">
-                  Deny
+                  {t("mailbox.approvalDeny", "Deny")}
                 </button>
                 <button className="btn btn-sm btn-primary" onClick={() => void handleApprovalDecision("approve")} disabled={approvalDecisionLoading !== false} data-testid="mailbox-approval-approve">
-                  Approve
+                  {t("mailbox.approvalApprove", "Approve")}
                 </button>
               </div>
             </div>

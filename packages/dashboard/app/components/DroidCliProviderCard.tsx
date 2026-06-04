@@ -157,13 +157,13 @@ export function DroidCliProviderCard({
         <div className="auth-provider-header">
           <div className="auth-provider-info">
             <ProviderIcon provider="droid-cli" size="sm" />
-            <strong>Factory AI — via Droid CLI</strong>
+            <strong>{t("droidCli.cardTitle", "Factory AI — via Droid CLI")}</strong>
             <DroidCliBadge status={status} authenticated={authenticated} />
           </div>
           <div className="auth-provider-cli-actions">{actions}</div>
         </div>
         <details className="auth-provider-cli-details">
-          <summary>Details</summary>
+          <summary>{t("droidCli.details", "Details")}</summary>
           <div className="auth-provider-cli-details-body">
             {description}
             <DroidCliStatusLine status={status} authenticated={authenticated} />
@@ -183,7 +183,7 @@ export function DroidCliProviderCard({
         <ProviderIcon provider="droid-cli" size="md" />
       </div>
       <div className="onboarding-provider-card__body">
-        <strong className="onboarding-provider-card__name">Factory AI — via Droid CLI</strong>
+        <strong className="onboarding-provider-card__name">{t("droidCli.cardTitle", "Factory AI — via Droid CLI")}</strong>
         {description}
         <DroidCliStatusLine status={status} authenticated={authenticated} />
       </div>

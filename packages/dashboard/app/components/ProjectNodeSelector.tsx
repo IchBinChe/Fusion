@@ -46,7 +46,7 @@ export function ProjectNodeSelector({
             title={t("nodes.statusTitle", "Status: {{status}}", { status: node.status })}
             className={node.status === "offline" || node.status === "error" ? "project-node-selector__option--dim" : ""}
           >
-            {node.name} ({node.type}) — {node.status}
+            {t("nodes.nodeLabel", "{{name}} ({{type}}) — {{status}}", { name: node.name, type: node.type, status: node.status })}
           </option>
         ))}
       </select>

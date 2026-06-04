@@ -44,25 +44,32 @@ function cn(...classes: (string | boolean | undefined | null)[]): string {
 /**
  * Format an ISO timestamp to a relative time string.
  */
-export function relativeTime(iso: string): string {
+export function relativeTime(iso: string, t?: (key: string, defaultValue: string, options?: Record<string, unknown>) => string): string {
   const now = Date.now();
   const then = new Date(iso).getTime();
   const diffMs = now - then;
+  // Fallback interpolates {{n}} manually when no t() is provided
+  const tr = t ?? ((_key: string, def: string, opts?: Record<string, unknown>) => {
+    if (!opts) return def;
+    return def.replace(/\{\{(\w+)\}\}/g, (_, k) => String(opts[k] ?? ""));
+  });
 
   // Future
   if (diffMs < 0) {
     const absDiff = Math.abs(diffMs);
-    if (absDiff < 60_000) return "in a moment";
-    if (absDiff < 3_600_000) return `in ${Math.floor(absDiff / 60_000)}m`;
-    if (absDiff < 86_400_000) return `in ${Math.floor(absDiff / 3_600_000)}h`;
-    return `in ${Math.floor(absDiff / 86_400_000)}d`;
+    if (absDiff < 60_000) return tr("time.inAMoment", "in a moment");
+    if (absDiff < 3_600_000) { const n = Math.floor(absDiff / 60_000); return tr("time.inMinutes", "in {{n}}m", { n }); }
+    if (absDiff < 86_400_000) { const n = Math.floor(absDiff / 3_600_000); return tr("time.inHours", "in {{n}}h", { n }); }
+    const n = Math.floor(absDiff / 86_400_000);
+    return tr("time.inDays", "in {{n}}d", { n });
   }
 
   // Past
-  if (diffMs < 60_000) return "just now";
-  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`;
-  return `${Math.floor(diffMs / 86_400_000)}d ago`;
+  if (diffMs < 60_000) return tr("time.justNow", "just now");
+  if (diffMs < 3_600_000) { const n = Math.floor(diffMs / 60_000); return tr("time.minutesAgo", "{{n}}m ago", { n }); }
+  if (diffMs < 86_400_000) { const n = Math.floor(diffMs / 3_600_000); return tr("time.hoursAgo", "{{n}}h ago", { n }); }
+  const n = Math.floor(diffMs / 86_400_000);
+  return tr("time.daysAgo", "{{n}}d ago", { n });
 }
 
 interface AgentDetailViewProps {
@@ -548,7 +555,9 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
 
       const successCount = results.length - failedResults.length;
       const failureCount = failedResults.length;
-      const baseSummary = t("agents.bulkResult", "{{action}} {{successCount}} agent(s); skipped {{skippedCount}}", { action: targetState === "paused" ? t("agents.pausedPast", "Paused") : t("agents.resumedPast", "Resumed"), successCount, skippedCount });
+      const actionWord = targetState === "paused" ? t("agents.pausedPast", "Paused") : t("agents.resumedPast", "Resumed");
+      const agentWord = successCount === 1 ? t("agents.agentSingular", "agent") : t("agents.agentPlural", "agents");
+      const baseSummary = t(successCount === 1 ? "agents.bulkResult_one" : "agents.bulkResult_other", "{{action}} {{successCount}} {{agentWord}}; skipped {{skippedCount}}", { action: actionWord, successCount, agentWord, skippedCount });
 
       if (failureCount > 0) {
         const failureSummary = failedResults
@@ -822,7 +831,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                           ? t("agents.loadingEligible", "Loading eligible agents...")
                           : isPauseAllDisabled
                             ? t("agents.noActiveEligible", "No active agents eligible")
-                            : t("agents.pauseCountHint", "Pause {{count}} active/running agent(s)", { count: bulkPauseEligibleCount })}
+                            : t(bulkPauseEligibleCount === 1 ? "agents.pauseCountHint_one" : "agents.pauseCountHint_other", bulkPauseEligibleCount === 1 ? "Pause {{count}} active/running agent" : "Pause {{count}} active/running agents", { count: bulkPauseEligibleCount })}
                       </span>
                     </button>
                     <button
@@ -838,7 +847,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                           ? t("agents.loadingEligible", "Loading eligible agents...")
                           : isResumeAllDisabled
                             ? t("agents.noPausedEligible", "No paused agents eligible")
-                            : t("agents.resumeCountHint", "Resume {{count}} paused agent(s)", { count: bulkResumeEligibleCount })}
+                            : t(bulkResumeEligibleCount === 1 ? "agents.resumeCountHint_one" : "agents.resumeCountHint_other", bulkResumeEligibleCount === 1 ? "Resume {{count}} paused agent" : "Resume {{count}} paused agents", { count: bulkResumeEligibleCount })}
                       </span>
                     </button>
                   </div>
@@ -1264,11 +1273,11 @@ function DashboardTab({
         <div className="dashboard-summary-grid">
           <div>
             <p className="dashboard-summary-label">{t("agents.lastHeartbeat", "Last heartbeat")}</p>
-            <p>{agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt) : t("agents.never", "Never")}</p>
+            <p>{agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt, t) : t("agents.never", "Never")}</p>
           </div>
           <div>
             <p className="dashboard-summary-label">{t("agents.nextExpected", "Next expected")}</p>
-            <p>{nextHeartbeatAt ? relativeTime(nextHeartbeatAt) : t("agents.notScheduled", "Not scheduled")}</p>
+            <p>{nextHeartbeatAt ? relativeTime(nextHeartbeatAt, t) : t("agents.notScheduled", "Not scheduled")}</p>
           </div>
           <div>
             <p className="dashboard-summary-label">{t("agents.interval", "Interval")}</p>
@@ -1306,7 +1315,7 @@ function DashboardTab({
               return (
                 <div key={run.id} className="run-item">
                   <StatusIcon size={14} style={{ color: statusSpec.color }} />
-                  <span>{relativeTime(run.startedAt)}</span>
+                  <span>{relativeTime(run.startedAt, t)}</span>
                   <span className="text-muted">{Math.max(0, Math.round((new Date(run.endedAt || run.startedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))}s</span>
                 </div>
               );
@@ -1409,18 +1418,22 @@ function LogsTab({
   );
 }
 
-function formatMailboxTimestamp(ts: string): string {
+function formatMailboxTimestamp(ts: string, t?: (key: string, defaultValue: string, options?: Record<string, unknown>) => string): string {
   const date = new Date(ts);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
+  const tr = t ?? ((_key: string, def: string, opts?: Record<string, unknown>) => {
+    if (!opts) return def;
+    return def.replace(/\{\{(\w+)\}\}/g, (_, k) => String(opts[k] ?? ""));
+  });
 
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMins < 1) return tr("time.justNow", "just now");
+  if (diffMins < 60) return tr("time.minutesAgo", "{{n}}m ago", { n: diffMins });
+  if (diffHours < 24) return tr("time.hoursAgo", "{{n}}h ago", { n: diffHours });
+  if (diffDays < 7) return tr("time.daysAgo", "{{n}}d ago", { n: diffDays });
 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -1429,14 +1442,19 @@ function mailboxParticipantLabel(
   id: string,
   type: ParticipantType,
   agentNamesById?: ReadonlyMap<string, string>,
+  t?: (key: string, defaultValue: string, options?: Record<string, unknown>) => string,
 ): string {
-  if (type === "user") return id === "dashboard" ? "You" : `User: ${id}`;
+  const tr = t ?? ((_key: string, def: string, opts?: Record<string, unknown>) => {
+    if (!opts) return def;
+    return def.replace(/\{\{(\w+)\}\}/g, (_, k) => String(opts[k] ?? ""));
+  });
+  if (type === "user") return id === "dashboard" ? tr("mailbox.you", "You") : tr("mailbox.userLabel", "User: {{id}}", { id });
   if (type === "agent") {
     const name = agentNamesById?.get(id)?.trim();
-    if (!name || name === id) return `Agent: ${id}`;
-    return `Agent: ${name}`;
+    if (!name || name === id) return tr("mailbox.agentById", "Agent: {{id}}", { id });
+    return tr("mailbox.agentByName", "Agent: {{name}}", { name });
   }
-  return "System";
+  return tr("mailbox.system", "System");
 }
 
 function MailTab({
@@ -1542,11 +1560,11 @@ function MailTab({
       <div className="mailbox-item-content">
         <div className="mailbox-item-header">
           {activeSubtab === "inbox" ? (
-            <span className="mailbox-item-from">{mailboxParticipantLabel(message.fromId, message.fromType, agentNamesById)}</span>
+            <span className="mailbox-item-from">{mailboxParticipantLabel(message.fromId, message.fromType, agentNamesById, t)}</span>
           ) : (
-            <span className="mailbox-item-to">{t("agents.mailTo", "To: {{recipient}}", { recipient: mailboxParticipantLabel(message.toId, message.toType, agentNamesById) })}</span>
+            <span className="mailbox-item-to">{t("agents.mailTo", "To: {{recipient}}", { recipient: mailboxParticipantLabel(message.toId, message.toType, agentNamesById, t) })}</span>
           )}
-          <span className="mailbox-item-time">{formatMailboxTimestamp(message.createdAt)}</span>
+          <span className="mailbox-item-time">{formatMailboxTimestamp(message.createdAt, t)}</span>
         </div>
         <div className="mailbox-item-preview">{message.content.slice(0, 80)}{message.content.length > 80 ? "…" : ""}</div>
       </div>
@@ -1611,11 +1629,11 @@ function MailTab({
             <div className="agent-mail-tab-detail-meta">
               <div className="agent-mail-tab-detail-row">
                 <span className="agent-mail-tab-detail-label">{t("agents.mailFrom", "From")}</span>
-                <span>{mailboxParticipantLabel(selectedMessage.fromId, selectedMessage.fromType, agentNamesById)}</span>
+                <span>{mailboxParticipantLabel(selectedMessage.fromId, selectedMessage.fromType, agentNamesById, t)}</span>
               </div>
               <div className="agent-mail-tab-detail-row">
                 <span className="agent-mail-tab-detail-label">{t("agents.mailToLabel", "To")}</span>
-                <span>{mailboxParticipantLabel(selectedMessage.toId, selectedMessage.toType, agentNamesById)}</span>
+                <span>{mailboxParticipantLabel(selectedMessage.toId, selectedMessage.toType, agentNamesById, t)}</span>
               </div>
               <div className="agent-mail-tab-detail-row">
                 <span className="agent-mail-tab-detail-label">{t("agents.mailType", "Type")}</span>
@@ -1977,7 +1995,7 @@ function RunsTab({
             </div>
           </div>
           <div className="run-details">
-            <span>{t("agents.runStarted", "Started {{time}}", { time: relativeTime(run.startedAt) })}</span>
+            <span>{t("agents.runStarted", "Started {{time}}", { time: relativeTime(run.startedAt, t) })}</span>
             <span>•</span>
             <span>{duration}</span>
             {run.triggerDetail && (
@@ -2271,7 +2289,7 @@ function TasksTab({
             {truncateTaskLabel(task)}
           </div>
           <div className="agent-task-status">
-            {task.status ?? "idle"} · {t("agents.taskUpdated", "Updated {{time}}", { time: relativeTime(task.updatedAt) })}
+            {task.status ?? "idle"} · {t("agents.taskUpdated", "Updated {{time}}", { time: relativeTime(task.updatedAt, t) })}
           </div>
         </a>
       ))}
@@ -2805,7 +2823,7 @@ function MemoryTab({
               <div className="config-hint config-hint--top-spacing">
                 <strong>{({ "long-term": t("agents.memoryLayerLongTerm", "Long-term"), daily: t("agents.memoryLayerDaily", "Daily"), dreams: t("agents.memoryLayerDreams", "Dreams") } as Record<string, string>)[selectedMemoryFile.layer] ?? selectedMemoryFile.layer}</strong> · {selectedLayerDescription}
                 <br />
-                {t("agents.memoryFileMeta", "{{size}} bytes · Updated {{time}}", { size: selectedMemoryFile.size.toLocaleString(), time: relativeTime(selectedMemoryFile.updatedAt) })}
+                {t("agents.memoryFileMeta", "{{size}} bytes · Updated {{time}}", { size: selectedMemoryFile.size.toLocaleString(), time: relativeTime(selectedMemoryFile.updatedAt, t) })}
               </div>
             )}
 

@@ -57,7 +57,7 @@ export function TodoModal({ onClose, projectId, addToast, onPlanningMode }: Todo
               <p>{t("todo.manageDescription", "Manage reusable todo lists for your project.")}</p>
             </div>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
+          <button className="modal-close" onClick={onClose} aria-label={t("common.close", "Close")}>
             <X size={20} />
           </button>
         </div>

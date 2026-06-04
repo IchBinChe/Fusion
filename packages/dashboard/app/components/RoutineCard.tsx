@@ -239,7 +239,7 @@ export function RoutineCard({ routine, onEdit, onDelete, onRun, onToggle, runnin
         {routine.steps && routine.steps.length > 0 ? (
           <div className="routine-meta-item">
             <Layers size={12} />
-            <span className="routine-policy-badge">{routine.steps.length} step{routine.steps.length === 1 ? "" : "s"}</span>
+            <span className="routine-policy-badge">{t("routine.stepCount", "{{count}} step", { count: routine.steps.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })}</span>
           </div>
         ) : routine.command ? (
           <div className="routine-meta-item routine-meta-command-preview" title={routine.command}>

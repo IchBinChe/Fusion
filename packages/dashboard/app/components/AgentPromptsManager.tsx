@@ -31,15 +31,15 @@ type TabId = "templates" | "assignments" | "overrides";
 /** Core agent roles that have built-in templates */
 const CORE_ROLES: AgentCapability[] = ["executor", "triage", "reviewer", "merger"];
 
-/** Role display labels */
-const ROLE_LABELS: Record<AgentCapability, string> = {
-  executor: "Executor Agent",
-  triage: "Triage Agent",
-  reviewer: "Reviewer Agent",
-  merger: "Merger Agent",
-  scheduler: "Scheduler Agent",
-  engineer: "Engineer Agent",
-  custom: "Custom Agent",
+/** Role display label keys for i18n */
+const ROLE_LABEL_KEYS: Record<AgentCapability, { key: string; defaultValue: string }> = {
+  executor: { key: "agentPrompts.roles.executor", defaultValue: "Executor Agent" },
+  triage: { key: "agentPrompts.roles.triage", defaultValue: "Triage Agent" },
+  reviewer: { key: "agentPrompts.roles.reviewer", defaultValue: "Reviewer Agent" },
+  merger: { key: "agentPrompts.roles.merger", defaultValue: "Merger Agent" },
+  scheduler: { key: "agentPrompts.roles.scheduler", defaultValue: "Scheduler Agent" },
+  engineer: { key: "agentPrompts.roles.engineer", defaultValue: "Engineer Agent" },
+  custom: { key: "agentPrompts.roles.custom", defaultValue: "Custom Agent" },
 };
 
 const getRoleToneClassName = (role: AgentCapability): string => {
@@ -115,6 +115,11 @@ export function AgentPromptsManager({
   onPromptOverridesChange,
 }: AgentPromptsManagerProps) {
   const { t } = useTranslation("app");
+
+  const getRoleLabel = (role: AgentCapability): string => {
+    const entry = ROLE_LABEL_KEYS[role];
+    return t(entry.key, entry.defaultValue);
+  };
 
   // Tab state
   const [activeTab, setActiveTab] = useState<TabId>("templates");
@@ -465,7 +470,7 @@ export function AgentPromptsManager({
                     >
                       {CORE_ROLES.map((role) => (
                         <option key={role} value={role}>
-                          {ROLE_LABELS[role]}
+                          {getRoleLabel(role)}
                         </option>
                       ))}
                     </select>
@@ -594,7 +599,7 @@ export function AgentPromptsManager({
                         <span
                           className={`prompt-template-badge-role ${getRoleToneClassName(template.role)}`}
                         >
-                          {ROLE_LABELS[template.role]}
+                          {getRoleLabel(template.role)}
                         </span>
                       </div>
                       <div className="prompt-template-card-actions">
@@ -677,7 +682,7 @@ export function AgentPromptsManager({
                               <span
                                 className={`prompt-template-badge-role ${getRoleToneClassName(template.role)}`}
                               >
-                                {ROLE_LABELS[template.role]}
+                                {getRoleLabel(template.role)}
                               </span>
                               {/* Show override indicator if this custom template overrides a built-in */}
                               {isBuiltinId(template.id) && (
@@ -766,7 +771,7 @@ export function AgentPromptsManager({
                     <span
                       className={`prompt-template-badge-role ${getRoleToneClassName(fullscreenTemplate.role)}`}
                     >
-                      {ROLE_LABELS[fullscreenTemplate.role]}
+                      {getRoleLabel(fullscreenTemplate.role)}
                     </span>
                   </div>
                   <button
@@ -811,7 +816,7 @@ export function AgentPromptsManager({
                       <span
                         className={`prompt-role-badge ${getRoleToneClassName(role)}`}
                       >
-                        {ROLE_LABELS[role]}
+                        {getRoleLabel(role)}
                       </span>
                       {isOverriding && (
                         <span className="prompt-role-assignment-status">

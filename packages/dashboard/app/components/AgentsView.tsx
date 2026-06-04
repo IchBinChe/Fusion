@@ -1,5 +1,6 @@
 import "./AgentsView.css";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useState, useEffect, useCallback, useRef, useMemo, useId, useLayoutEffect, lazy, Suspense, type CSSProperties, type ReactNode, type MutableRefObject, type RefObject, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, List, ChevronRight, Filter, Upload, Network, SlidersHorizontal, ZoomIn, ZoomOut, Minimize2, Move, Info } from "lucide-react";
 import type { Agent, AgentCapability, AgentOnboardingSummary, AgentState, OrgTreeNode } from "../api";
@@ -43,15 +44,17 @@ export interface AgentsViewProps {
   agentOnboardingEnabled?: boolean;
 }
 
-const AGENT_ROLES: { value: AgentCapability; label: string; icon: string }[] = [
-  { value: "triage", label: "Triage", icon: "⊕" },
-  { value: "executor", label: "Executor", icon: "▶" },
-  { value: "reviewer", label: "Reviewer", icon: "⊙" },
-  { value: "merger", label: "Merger", icon: "⊞" },
-  { value: "scheduler", label: "Scheduler", icon: "◷" },
-  { value: "engineer", label: "Engineer", icon: "⎔" },
-  { value: "custom", label: "Custom", icon: "✦" },
-];
+function getAgentRoles(t: TFunction<"app">): { value: AgentCapability; label: string; icon: string }[] {
+  return [
+    { value: "triage", label: t("agents.roleTriage", "Triage"), icon: "⊕" },
+    { value: "executor", label: t("agents.roleExecutor", "Executor"), icon: "▶" },
+    { value: "reviewer", label: t("agents.roleReviewer", "Reviewer"), icon: "⊙" },
+    { value: "merger", label: t("agents.roleMerger", "Merger"), icon: "⊞" },
+    { value: "scheduler", label: t("agents.roleScheduler", "Scheduler"), icon: "◷" },
+    { value: "engineer", label: t("agents.roleEngineer", "Engineer"), icon: "⎔" },
+    { value: "custom", label: t("agents.roleCustom", "Custom"), icon: "✦" },
+  ];
+}
 
 const HEARTBEAT_MULTIPLIER_PRESETS = [0.1, 0.25, 0.5, 1, 2, 3, 5, 10] as const;
 
@@ -104,9 +107,9 @@ function getOrgChartLeafCount(node: OrgTreeNode): number {
   return node.children.reduce((sum, child) => sum + getOrgChartLeafCount(child), 0);
 }
 
-function getHealthSummary(agent: Agent, health: AgentHealthStatus): { title: string | undefined; label: string | null } {
+function getHealthSummary(agent: Agent, health: AgentHealthStatus, t: TFunction<"app">): { title: string | undefined; label: string | null } {
   if (agent.state === "error") {
-    return { title: undefined, label: "Error" };
+    return { title: undefined, label: t("agents.healthError", "Error") };
   }
 
   return {
@@ -131,7 +134,7 @@ function OrgChartNode({ node, onSelect, getHealthStatus, selectedAgentId, regist
   const { t } = useTranslation("app");
   const { agent, children } = node;
   const health = getHealthStatus(agent);
-  const healthSummary = getHealthSummary(agent, health);
+  const healthSummary = getHealthSummary(agent, health, t);
   const stateBadgeClass = getStateBadgeClass(agent.state);
   const stateNodeClass = getStateCardClass("org-chart-node-card", agent.state);
   const subtreeLeafCount = getOrgChartLeafCount(node);
@@ -265,6 +268,7 @@ function OrgChartConnectors({
 
 export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardingEnabled = false }: AgentsViewProps) {
   const { t } = useTranslation("app");
+  const agentRoles = getAgentRoles(t);
   const [showSystemAgents, setShowSystemAgents] = useState(false);
   const viewportMode = useViewportMode();
   const isMobileViewport = viewportMode === "mobile";
@@ -686,7 +690,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
 
     try {
       await updateAgent(agentId, { role: newRole }, projectId);
-      addToast(t("agents.roleUpdated", "Agent role updated to {{role}}", { role: AGENT_ROLES.find(r => r.value === newRole)?.label ?? newRole }), "success");
+      addToast(t("agents.roleUpdated", "Agent role updated to {{role}}", { role: agentRoles.find(r => r.value === newRole)?.label ?? newRole }), "success");
       setEditingRoleForAgent(null);
       void loadAgents();
     } catch (err) {
@@ -966,7 +970,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
     }
   }, [handleCloseDetail, isMobileViewport, selectedAgentId]);
 
-  const getRoleLabel = (role: AgentCapability) => AGENT_ROLES.find(r => r.value === role)?.label ?? role;
+  const getRoleLabel = (role: AgentCapability) => agentRoles.find(r => r.value === role)?.label ?? role;
   const orgChartLayoutMode: OrgChartLayoutMode = useMemo(() => resolveOrgChartLayoutMode({
     tree: displayOrgTree,
     availableWidth: orgChartViewportWidth,
@@ -1559,7 +1563,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
             ) : (
               displayAgents.map((agent) => {
                 const health = getHealthStatus(agent);
-                const healthSummary = getHealthSummary(agent, health);
+                const healthSummary = getHealthSummary(agent, health, t);
                 const stateBadgeClass = getStateBadgeClass(agent.state);
                 const stateCardClass = getStateCardClass("agent-board-card", agent.state);
                 return (
@@ -1608,7 +1612,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
             // List view: detailed card layout
             displayAgents.map(agent => {
               const health = getHealthStatus(agent);
-              const healthSummary = getHealthSummary(agent, health);
+              const healthSummary = getHealthSummary(agent, health, t);
               const stateBadgeClass = getStateBadgeClass(agent.state);
               const stateCardClass = getStateCardClass("agent-card", agent.state);
               const configuredIntervalMs = resolveHeartbeatIntervalMs(agent.runtimeConfig?.heartbeatIntervalMs);
@@ -1658,7 +1662,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                           onBlur={() => setEditingRoleForAgent(null)}
                           autoFocus
                         >
-                          {AGENT_ROLES.map(role => (
+                          {agentRoles.map(role => (
                             <option key={role.value} value={role.value}>
                               {role.icon} {role.label}
                             </option>

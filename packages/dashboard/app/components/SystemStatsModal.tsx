@@ -69,10 +69,10 @@ function severityClassName(severity: Severity): string {
   return "";
 }
 
-function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return "Not yet";
+function formatTimestamp(value: string | null | undefined, notYetLabel: string): string {
+  if (!value) return notYetLabel;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Not yet";
+  if (Number.isNaN(parsed.getTime())) return notYetLabel;
   return parsed.toLocaleString();
 }
 
@@ -249,7 +249,7 @@ export function SystemStatsModal({ isOpen, onClose, projectId }: SystemStatsModa
       ? "system-stats-modal__kill-result system-stats-modal__kill-result--success"
       : "system-stats-modal__kill-result system-stats-modal__kill-result--error"
     : "";
-  const lastAutoKillLabel = formatTimestamp(stats?.vitestLastAutoKillAt);
+  const lastAutoKillLabel = formatTimestamp(stats?.vitestLastAutoKillAt, t("systemStats.notYet", "Not yet"));
 
   return (
     <div

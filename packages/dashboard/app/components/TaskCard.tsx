@@ -1,5 +1,6 @@
 import "./TaskCard.css";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest } from "lucide-react";
 import type { Task, TaskDetail, Column, PrInfo, IssueInfo, TaskPriority, GithubIssueAction } from "@fusion/core";
@@ -155,8 +156,8 @@ const TIME_INDICATOR_COLUMNS = new Set<Column>([
 ]);
 const LIVE_TIME_INDICATOR_POLL_MS = 30_000;
 
-function getTaskStatusLabel(status: string): string {
-  if (status === "merging-fix") return "Merging fixes…";
+function getTaskStatusLabel(status: string, t: TFunction<"app">): string {
+  if (status === "merging-fix") return t("tasks.statusMergingFix", "Merging fixes…");
   return status;
 }
 
@@ -1710,7 +1711,7 @@ function TaskCardComponent({
           <span
             className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
-            {isStuck ? t("tasks.stuck", "Stuck") : isAwaitingApproval ? t("tasks.awaitingApproval", "Awaiting Approval") : visualStatus === "merging-fix" ? t("tasks.statusMergingFix", "Merging fixes…") : getTaskStatusLabel(visualStatus)}
+            {isStuck ? t("tasks.stuck", "Stuck") : isAwaitingApproval ? t("tasks.awaitingApproval", "Awaiting Approval") : visualStatus === "merging-fix" ? t("tasks.statusMergingFix", "Merging fixes…") : getTaskStatusLabel(visualStatus, t)}
           </span>
         )}
         {hasInReviewStall && stallCopy && (

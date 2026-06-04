@@ -3,6 +3,7 @@
 import "./ScriptsModal.css";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { X, History, Trash2, Filter, RefreshCw, CheckCircle, XCircle, ArrowRight, Plus, Settings, AlertCircle, Loader2, Folder } from "lucide-react";
 import { clearActivityLog, type ActivityLogEntry, type ActivityEventType, type ActivityFeedEntry } from "../api";
 import { useActivityLog } from "../hooks/useActivityLog";
@@ -24,23 +25,25 @@ interface ActivityLogModalProps {
   currentProject?: ProjectInfo | null;
 }
 
-const EVENT_TYPE_LABELS: Record<ActivityEventType, string> = {
-  "task:created": "Task Created",
-  "task:moved": "Task Moved",
-  "task:updated": "Task Updated",
-  "task:deleted": "Task Deleted",
-  "task:merged": "Task Merged",
-  "task:failed": "Task Failed",
-  "task:duplicate-warning-overridden": "Duplicate Warning Overridden",
-  "task:auto-archived-ghost-bug": "Task Auto-Archived (Ghost Bug)",
-  "task:auto-archived-duplicate": "Task Auto-Archived (Duplicate)",
-  "task:merge-worktree-reacquired": "Merge Worktree Reacquired",
-  "task:auto-archived-deterministic-duplicate": "Task Auto-Archived (Deterministic Duplicate)",
-  "task:auto-archived-near-duplicate": "Task Auto-Archived (Near-Duplicate)",
-  "task:near-duplicate-flagged": "Near-Duplicate Flagged",
-  "settings:updated": "Settings Updated",
-  "project:isolation-transition": "Project Isolation Transition",
-};
+function getEventTypeLabels(t: TFunction<"app">): Record<ActivityEventType, string> {
+  return {
+    "task:created": t("activityLog.eventType.taskCreated", "Task Created"),
+    "task:moved": t("activityLog.eventType.taskMoved", "Task Moved"),
+    "task:updated": t("activityLog.eventType.taskUpdated", "Task Updated"),
+    "task:deleted": t("activityLog.eventType.taskDeleted", "Task Deleted"),
+    "task:merged": t("activityLog.eventType.taskMerged", "Task Merged"),
+    "task:failed": t("activityLog.eventType.taskFailed", "Task Failed"),
+    "task:duplicate-warning-overridden": t("activityLog.eventType.duplicateWarningOverridden", "Duplicate Warning Overridden"),
+    "task:auto-archived-ghost-bug": t("activityLog.eventType.autoArchivedGhostBug", "Task Auto-Archived (Ghost Bug)"),
+    "task:auto-archived-duplicate": t("activityLog.eventType.autoArchivedDuplicate", "Task Auto-Archived (Duplicate)"),
+    "task:merge-worktree-reacquired": t("activityLog.eventType.mergeWorktreeReacquired", "Merge Worktree Reacquired"),
+    "task:auto-archived-deterministic-duplicate": t("activityLog.eventType.autoArchivedDeterministicDuplicate", "Task Auto-Archived (Deterministic Duplicate)"),
+    "task:auto-archived-near-duplicate": t("activityLog.eventType.autoArchivedNearDuplicate", "Task Auto-Archived (Near-Duplicate)"),
+    "task:near-duplicate-flagged": t("activityLog.eventType.nearDuplicateFlagged", "Near-Duplicate Flagged"),
+    "settings:updated": t("activityLog.eventType.settingsUpdated", "Settings Updated"),
+    "project:isolation-transition": t("activityLog.eventType.projectIsolationTransition", "Project Isolation Transition"),
+  };
+}
 
 const EVENT_TYPE_ICONS: Record<ActivityEventType, React.ReactNode> = {
   "task:created": <Plus size={14} className="activity-icon created" />,
@@ -60,7 +63,7 @@ const EVENT_TYPE_ICONS: Record<ActivityEventType, React.ReactNode> = {
   "project:isolation-transition": <Folder size={14} className="activity-icon settings" />,
 };
 
-function formatTimestamp(timestamp: string): string {
+function formatTimestamp(timestamp: string, t: TFunction<"app">): string {
   const date = new Date(timestamp);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -68,10 +71,10 @@ function formatTimestamp(timestamp: string): string {
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMins < 1) return t("activityLog.time.justNow", "Just now");
+  if (diffMins < 60) return t("activityLog.time.minutesAgo", "{{count}}m ago", { count: diffMins });
+  if (diffHours < 24) return t("activityLog.time.hoursAgo", "{{count}}h ago", { count: diffHours });
+  if (diffDays < 7) return t("activityLog.time.daysAgo", "{{count}}d ago", { count: diffDays });
 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -103,6 +106,7 @@ export function ActivityLogModal({
   currentProject,
 }: ActivityLogModalProps) {
   const { t } = useTranslation("app");
+  const EVENT_TYPE_LABELS = getEventTypeLabels(t);
   const [filteredType, setFilteredType] = useState<ActivityEventType | "all">("all");
   const [filteredProjectId, setFilteredProjectId] = useState<string | "all">(projectId || "all");
   const [showConfirmClear, setShowConfirmClear] = useState(false);
@@ -361,7 +365,7 @@ export function ActivityLogModal({
                       {EVENT_TYPE_LABELS[entry.type]}
                     </span>
                     <span className="activity-log-entry-time">
-                      {formatTimestamp(entry.timestamp)}
+                      {formatTimestamp(entry.timestamp, t)}
                     </span>
                   </div>
                   <div className="activity-log-entry-details">
@@ -388,7 +392,9 @@ export function ActivityLogModal({
                       )}
                       {typeof entry.metadata.merged === "boolean" && (
                         <span className={`activity-log-metadata-item ${entry.metadata.merged ? "success" : "error"}`}>
-                          {entry.metadata.merged ? "Merged" : "Not merged"}
+                          {entry.metadata.merged
+                            ? t("activityLog.merged", "Merged")
+                            : t("activityLog.notMerged", "Not merged")}
                         </span>
                       )}
                     </div>

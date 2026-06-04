@@ -255,7 +255,7 @@ export function RoutineEditor({ routine, onSubmit, onCancel, scope: formScope, p
         if (!cancelled) setModels(response.models);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setModelsError(err instanceof Error ? err.message : "Failed to load models");
+        if (!cancelled) setModelsError(err instanceof Error ? err.message : t("schedule.errorLoadModels", "Failed to load models"));
       })
       .finally(() => {
         if (!cancelled) setModelsLoading(false);

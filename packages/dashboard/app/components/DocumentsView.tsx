@@ -145,7 +145,7 @@ function TaskGroup({ taskId, taskTitle, documents, onOpenTask, renderMarkdownSta
           <span className="documents-group-task-title">{taskTitle || t("documents.untitled", "Untitled")}</span>
         </button>
 
-        <span className="documents-group-count">{documents.length} doc{documents.length !== 1 ? "s" : ""}</span>
+        <span className="documents-group-count">{t("documents.docCount", "{{count}} doc{{plural}}", { count: documents.length, plural: documents.length !== 1 ? "s" : "" })}</span>
 
         <button
           className="documents-group-task-link"
@@ -388,7 +388,7 @@ export function DocumentsView({ projectId, addToast, onOpenDetail }: DocumentsVi
             {t("documents.title", "Documents")}
           </h2>
           <span className="documents-view-count">
-            {activeCount} result{activeCount !== 1 ? "s" : ""}
+            {t("documents.resultCount", "{{count}} result{{plural}}", { count: activeCount, plural: activeCount !== 1 ? "s" : "" })}
           </span>
         </div>
 

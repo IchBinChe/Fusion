@@ -92,7 +92,7 @@ export function CursorCliProviderCard({ authenticated, compact = false, onToggle
           <div className="auth-provider-info">
             <ProviderIcon provider="cursor-cli" size="sm" />
             <strong>Cursor — via Cursor CLI</strong>
-            <span className={`auth-status-badge ${currentlyEnabled ? "authenticated" : "not-authenticated"}`}>{currentlyEnabled ? "✓ Active" : "✗ Not connected"}</span>
+            <span className={`auth-status-badge ${currentlyEnabled ? "authenticated" : "not-authenticated"}`}>{currentlyEnabled ? t("setup.cursorCli.active", "✓ Active") : t("setup.cursorCli.notConnected", "✗ Not connected")}</span>
           </div>
           <div className="auth-provider-cli-actions">{actions}</div>
         </div>

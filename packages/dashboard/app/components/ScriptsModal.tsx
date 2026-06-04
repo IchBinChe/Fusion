@@ -64,7 +64,7 @@ export function ScriptsModal({ isOpen, onClose, addToast, projectId, onRunScript
       const data = await fetchScripts(projectId);
       setScripts(data);
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to load scripts", "error");
+      addToast(getErrorMessage(err) || t("scriptsModal.failedToLoadScripts", "Failed to load scripts"), "error");
     } finally {
       setLoading(false);
     }

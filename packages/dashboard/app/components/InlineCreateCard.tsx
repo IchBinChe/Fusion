@@ -774,7 +774,7 @@ export function InlineCreateCard({
             ref={inputRef}
             rows={10}
             className="inline-create-input inline-create-input--fullscreen"
-            placeholder="What needs to be done?"
+            placeholder={t("inline.whatNeedsToBeDone", "What needs to be done?")}
             value={description}
             onChange={(e) => {
               setDescription(e.target.value);

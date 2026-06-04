@@ -576,7 +576,7 @@ export function MailboxModal({
       });
       return message;
     } catch {
-      setReplyContextErrors((prev) => ({ ...prev, [messageId]: "Failed to load replied message. Click to retry." }));
+      setReplyContextErrors((prev) => ({ ...prev, [messageId]: t("mailbox.replyLoadFailed", "Failed to load replied message. Click to retry.") }));
       return null;
     } finally {
       setReplyContextLoading((prev) => ({ ...prev, [messageId]: false }));
@@ -984,7 +984,7 @@ export function MailboxModal({
                             onChange={(e) => { setSelectedAgentId(e.target.value); setAgentSubTab("inbox"); }}
                             data-testid="mailbox-agent-select"
                           >
-                            <option value={ALL_AGENTS_MAILBOX_ID}>All agents</option>
+                            <option value={ALL_AGENTS_MAILBOX_ID}>{t("mailbox.allAgentsOption", "All agents")}</option>
                             {agents.map((agent) => (
                               <option key={agent.id} value={agent.id}>
                                 {agent.name || agent.id}

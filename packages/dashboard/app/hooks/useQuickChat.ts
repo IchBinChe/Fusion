@@ -922,7 +922,7 @@ export function useQuickChat(
             lastAttachedGenerationRef.current = null;
             console.error("[useQuickChat] Stream error:", data);
 
-            const errorMessage = typeof data === "string" && data.trim() ? data : "Failed to get response";
+            const errorMessage = typeof data === "string" && data.trim() ? data : t("quickChat.errorGettingResponse", "Failed to get response");
             const shouldSuppressSuspensionError = isLikelyTabSuspensionError(errorMessage);
 
             if (shouldSuppressSuspensionError) {

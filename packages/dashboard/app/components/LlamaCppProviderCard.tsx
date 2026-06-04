@@ -94,7 +94,7 @@ export function LlamaCppProviderCard({ authenticated, onToggled, compact = false
         <div className="auth-provider-header">
           <div className="auth-provider-info">
             <ProviderIcon provider="llama-cpp" size="sm" />
-            <strong>llama.cpp — via HTTP server</strong>
+            <strong>{t("providers.llamaCpp.title", "llama.cpp — via HTTP server")}</strong>
           </div>
           {actions}
         </div>
@@ -107,7 +107,7 @@ export function LlamaCppProviderCard({ authenticated, onToggled, compact = false
     <div className="onboarding-provider-card llama-cpp-provider-card llama-cpp-provider-card--full" data-testid="llama-cpp-provider-card">
       <div className="auth-provider-info">
         <ProviderIcon provider="llama-cpp" size="md" />
-        <strong>llama.cpp — via HTTP server</strong>
+        <strong>{t("providers.llamaCpp.title", "llama.cpp — via HTTP server")}</strong>
       </div>
       <small className={`llama-cpp-status${status?.ready ? " llama-cpp-status--ok" : ""}`}>{statusText}</small>
       {actions}

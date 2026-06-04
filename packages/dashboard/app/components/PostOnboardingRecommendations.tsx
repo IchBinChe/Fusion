@@ -167,7 +167,7 @@ export function PostOnboardingRecommendations({
     <section
       className="post-onboarding-recommendations"
       role="region"
-      aria-label="Setup recommendations"
+      aria-label={t("setup.ariaSetupRecommendations", "Setup recommendations")}
     >
       <div className="post-onboarding-recommendations__main">
         <div className="post-onboarding-recommendations__icon" aria-hidden="true">
@@ -212,7 +212,7 @@ export function PostOnboardingRecommendations({
         type="button"
         className="post-onboarding-recommendations__dismiss"
         onClick={handleDismiss}
-        aria-label="Dismiss recommendations"
+        aria-label={t("setup.ariaDismissRecommendations", "Dismiss recommendations")}
       >
         <X size={16} aria-hidden={true} />
       </button>

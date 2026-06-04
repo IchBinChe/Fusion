@@ -238,7 +238,7 @@ export function HermesRuntimeCard() {
         </span>
       }
       name="Hermes"
-      subname="by Nous Research"
+      subname={t("hermes.subname", "by Nous Research")}
       learnMoreHref={HERMES_LEARN_MORE}
       statusKind={statusKind}
       statusText={statusText}
@@ -281,7 +281,7 @@ export function HermesRuntimeCard() {
           {profiles.map((p) => (
             <option key={p.name} value={p.name}>
               {p.name}
-              {p.model ? ` — ${p.model}` : ""}
+              {p.model ? t("hermes.profileModelSeparator", " — {{model}}", { model: p.model }) : ""}
               {p.isDefault ? t("hermes.defaultProfile", " (default)") : ""}
             </option>
           ))}

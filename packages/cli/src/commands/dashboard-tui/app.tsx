@@ -3,6 +3,7 @@ import { Box, Text, useInput, useApp, useStdout } from "ink";
 import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
@@ -778,49 +779,50 @@ function UtilitiesPanel({ state, isFocused }: { state: DashboardState; isFocused
 // ── Help overlay ──────────────────────────────────────────────────────────────
 
 function HelpOverlay() {
+  const { t } = useTranslation("cli");
   const shortcuts: Array<[string, string]> = [
-    ["[m] / [s]", "Main (status mode)"],
-    ["[b]", "Board view"],
-    ["[a]", "Agents view"],
-    ["[g]", "Settings view"],
-    ["[t]", "Git view"],
-    ["[f]", "Files (when not on Logs); cycles log severity filter on Logs"],
-    ["[Tab]", "Cycle focused panel / pane forward"],
-    ["[Shift+Tab]", "Cycle focused panel / pane backward"],
-    ["[1-5]", "Jump to panel (Main: System/Logs/Stats/Utilities/Settings)"],
-    ["[← / →]", "Switch pane (Agents, Settings, Files, Git)"],
-    ["[→] / [↓] / [n]", "Next panel (Main; ↑/↓ scroll on Logs)"],
-    ["[←] / [↑] / [p]", "Previous panel (Main; ↑/↓ scroll on Logs)"],
-    ["[Enter]", "Expand log + release mouse for text selection (Logs)"],
-    ["[r]", "Refresh stats (Utilities)"],
-    ["[c]", "Clear logs (Utilities)"],
-    ["[k]", "Kill all vitest processes (Utilities)"],
-    ["[v]", "Toggle auto-kill vitest on memory pressure (Utilities)"],
-    ["[+/-]", "Adjust vitest kill memory threshold (Utilities)"],
-    ["[Enter]", "Open dashboard URL in browser (System)"],
-    ["[c]", "Copy auth token to clipboard (System)"],
-    ["[M]", "Manual mouse-mode toggle (auto: on for Logs/Files/Git/Board, off elsewhere)"],
-    ["[↑/↓/k/j]", "Navigate list / log entries"],
-    ["[Home / G]", "First / last log entry (Logs)"],
-    ["[Enter/Space]", "Expand log entry (Logs)"],
-    ["[c]", "Copy selected log entry to clipboard (Logs)"],
-    ["[w]", "Toggle word wrap (Logs / Files)"],
-    ["[Space]", "Toggle boolean (Settings)"],
-    ["[+/-]", "Adjust number (Settings)"],
-    ["[p]", "Project picker (Board, Files)"],
-    ["[n]", "New task (Board)"],
-    ["[D]", "Delete agent — requires confirm (Agents)"],
-    ["[P] / [F]", "Push / fetch (Git)"],
-    ["[.]", "Toggle hidden files (Files)"],
-    ["[?] / [h]", "Toggle help"],
-    ["[q]", "Quit"],
-    ["[Ctrl+C]", "Force quit"],
+    ["[m] / [s]", t("tui.helpShortcutMain", "Main (status mode)")],
+    ["[b]", t("tui.helpShortcutBoard", "Board view")],
+    ["[a]", t("tui.helpShortcutAgents", "Agents view")],
+    ["[g]", t("tui.helpShortcutSettings", "Settings view")],
+    ["[t]", t("tui.helpShortcutGit", "Git view")],
+    ["[f]", t("tui.helpShortcutFiles", "Files (when not on Logs); cycles log severity filter on Logs")],
+    ["[Tab]", t("tui.helpShortcutTabForward", "Cycle focused panel / pane forward")],
+    ["[Shift+Tab]", t("tui.helpShortcutTabBackward", "Cycle focused panel / pane backward")],
+    ["[1-5]", t("tui.helpShortcutJumpPanel", "Jump to panel (Main: System/Logs/Stats/Utilities/Settings)")],
+    ["[← / →]", t("tui.helpShortcutSwitchPane", "Switch pane (Agents, Settings, Files, Git)")],
+    ["[→] / [↓] / [n]", t("tui.helpShortcutNextPanel", "Next panel (Main; ↑/↓ scroll on Logs)")],
+    ["[←] / [↑] / [p]", t("tui.helpShortcutPrevPanel", "Previous panel (Main; ↑/↓ scroll on Logs)")],
+    ["[Enter]", t("tui.helpShortcutExpandLog", "Expand log + release mouse for text selection (Logs)")],
+    ["[r]", t("tui.helpShortcutRefreshStats", "Refresh stats (Utilities)")],
+    ["[c]", t("tui.helpShortcutClearLogs", "Clear logs (Utilities)")],
+    ["[k]", t("tui.helpShortcutKillVitest", "Kill all vitest processes (Utilities)")],
+    ["[v]", t("tui.helpShortcutToggleAutoKill", "Toggle auto-kill vitest on memory pressure (Utilities)")],
+    ["[+/-]", t("tui.helpShortcutAdjustThreshold", "Adjust vitest kill memory threshold (Utilities)")],
+    ["[Enter]", t("tui.helpShortcutOpenUrl", "Open dashboard URL in browser (System)")],
+    ["[c]", t("tui.helpShortcutCopyToken", "Copy auth token to clipboard (System)")],
+    ["[M]", t("tui.helpShortcutMouseToggle", "Manual mouse-mode toggle (auto: on for Logs/Files/Git/Board, off elsewhere)")],
+    ["[↑/↓/k/j]", t("tui.helpShortcutNavigate", "Navigate list / log entries")],
+    ["[Home / G]", t("tui.helpShortcutFirstLast", "First / last log entry (Logs)")],
+    ["[Enter/Space]", t("tui.helpShortcutExpandEntry", "Expand log entry (Logs)")],
+    ["[c]", t("tui.helpShortcutCopyEntry", "Copy selected log entry to clipboard (Logs)")],
+    ["[w]", t("tui.helpShortcutWordWrap", "Toggle word wrap (Logs / Files)")],
+    ["[Space]", t("tui.helpShortcutToggleBool", "Toggle boolean (Settings)")],
+    ["[+/-]", t("tui.helpShortcutAdjustNumber", "Adjust number (Settings)")],
+    ["[p]", t("tui.helpShortcutProjectPicker", "Project picker (Board, Files)")],
+    ["[n]", t("tui.helpShortcutNewTask", "New task (Board)")],
+    ["[D]", t("tui.helpShortcutDeleteAgent", "Delete agent — requires confirm (Agents)")],
+    ["[P] / [F]", t("tui.helpShortcutPushFetch", "Push / fetch (Git)")],
+    ["[.]", t("tui.helpShortcutHiddenFiles", "Toggle hidden files (Files)")],
+    ["[?] / [h]", t("tui.helpShortcutToggleHelp", "Toggle help")],
+    ["[q]", t("tui.helpShortcutQuit", "Quit")],
+    ["[Ctrl+C]", t("tui.helpShortcutForceQuit", "Force quit")],
   ];
 
   const rowKeyWidth = 22;
   const rowDescWidth = Math.max(...shortcuts.map(([, d]) => d.length));
   const innerWidth = rowKeyWidth + 2 + rowDescWidth + 2;
-  const titleRow = " KEYBOARD SHORTCUTS".padEnd(innerWidth);
+  const titleRow = ` ${t("tui.helpTitle", "KEYBOARD SHORTCUTS")}`.padEnd(innerWidth);
 
   return (
     <Box borderStyle="round" borderColor="cyanBright" flexDirection="column" backgroundColor="black">
@@ -1066,12 +1068,12 @@ function MainHeader({ state }: { state: DashboardState }) {
     | { key: string; label: string; kind: "main" }
     | { key: string; label: string; kind: "interactive"; view: InteractiveView };
   const tabs: Tab[] = [
-    { key: "m", label: "Main", kind: "main" },
-    { key: "b", label: "Board", kind: "interactive", view: "board" },
-    { key: "a", label: "Agents", kind: "interactive", view: "agents" },
-    { key: "g", label: "Settings", kind: "interactive", view: "settings" },
-    { key: "t", label: "Git", kind: "interactive", view: "git" },
-    { key: "f", label: "Files", kind: "interactive", view: "files" },
+    { key: "m", label: t("tui.tabMain", "Main"), kind: "main" },
+    { key: "b", label: t("tui.tabBoard", "Board"), kind: "interactive", view: "board" },
+    { key: "a", label: t("tui.tabAgents", "Agents"), kind: "interactive", view: "agents" },
+    { key: "g", label: t("tui.tabSettings", "Settings"), kind: "interactive", view: "settings" },
+    { key: "t", label: t("tui.tabGit", "Git"), kind: "interactive", view: "git" },
+    { key: "f", label: t("tui.tabFiles", "Files"), kind: "interactive", view: "files" },
   ];
   const showHelpHint = cols >= 110;
   const fullLabels = cols >= 90;
@@ -2012,18 +2014,18 @@ function heartbeatFreshness(lastHeartbeatAt?: string): { fresh: boolean; label: 
 
 type AgentSubView = "list" | "confirm-delete";
 
-function formatRunStatusLabel(status: string): string {
+function formatRunStatusLabel(status: string, t: TFunction): string {
   switch (status) {
     case "completed":
-      return "Completed";
+      return t("tui.runStatusCompleted", "Completed");
     case "failed":
-      return "Failed";
+      return t("tui.runStatusFailed", "Failed");
     case "terminated":
-      return "Terminated";
+      return t("tui.runStatusTerminated", "Terminated");
     case "active":
-      return "Active";
+      return t("tui.runStatusActive", "Active");
     default:
-      return status.length > 0 ? `${status[0]!.toUpperCase()}${status.slice(1)}` : "Unknown";
+      return status.length > 0 ? `${status[0]!.toUpperCase()}${status.slice(1)}` : t("tui.runStatusUnknown", "Unknown");
   }
 }
 
@@ -2042,26 +2044,26 @@ function runStatusColor(status: string): "green" | "red" | "yellow" | "cyanBrigh
   }
 }
 
-function getRunLogLines(run: AgentRunItem): string[] {
+function getRunLogLines(run: AgentRunItem, t: TFunction): string[] {
   if (Array.isArray(run.logs) && run.logs.length > 0) return run.logs;
 
   const lines: string[] = [];
-  if (run.triggerDetail) lines.push(`trigger: ${run.triggerDetail}`);
-  if (run.invocationSource) lines.push(`source: ${run.invocationSource}`);
+  if (run.triggerDetail) lines.push(`${t("tui.runLogTrigger", "trigger")}: ${run.triggerDetail}`);
+  if (run.invocationSource) lines.push(`${t("tui.runLogSource", "source")}: ${run.invocationSource}`);
   if (run.stdoutExcerpt) {
-    lines.push("stdout:");
+    lines.push(t("tui.runLogStdout", "stdout:"));
     lines.push(...run.stdoutExcerpt.split(/\r?\n/).filter((line) => line.length > 0));
   }
   if (run.stderrExcerpt) {
-    lines.push("stderr:");
+    lines.push(t("tui.runLogStderr", "stderr:"));
     lines.push(...run.stderrExcerpt.split(/\r?\n/).filter((line) => line.length > 0));
   }
   if (run.resultJson) {
-    lines.push("result:");
+    lines.push(t("tui.runLogResult", "result:"));
     lines.push(JSON.stringify(run.resultJson));
   }
 
-  return lines.length > 0 ? lines : ["No logs captured for this run."];
+  return lines.length > 0 ? lines : [t("tui.runLogNone", "No logs captured for this run.")];
 }
 
 function AgentsView({ state }: { state: DashboardState }) {
@@ -2328,7 +2330,7 @@ function AgentsView({ state }: { state: DashboardState }) {
                       <Text dimColor>{t("tui.agentRunLogsTitle", "Run logs ({{index}})", { index: selectedRunIndex + 1 })}</Text>
                       <Text dimColor>{t("tui.agentRunId", "ID:")} {selectedRun.id}</Text>
                       <Box height={1} />
-                      {getRunLogLines(selectedRun).slice(0, 10).map((line, i) => (
+                      {getRunLogLines(selectedRun, t).slice(0, 10).map((line, i) => (
                         <Text key={`${selectedRun.id}-log-${i}`} wrap="truncate-end">{line}</Text>
                       ))}
                       <Box height={1} />
@@ -2373,7 +2375,7 @@ function AgentsView({ state }: { state: DashboardState }) {
                               <Text color={detailFocused && i === selectedRunIndex ? "white" : "gray"}>
                                 {detailFocused && i === selectedRunIndex ? "▶" : " "}
                               </Text>
-                              <Text color={runStatusColor(run.status)}>{formatRunStatusLabel(run.status)}</Text>
+                              <Text color={runStatusColor(run.status)}>{formatRunStatusLabel(run.status, t)}</Text>
                               <Text dimColor>{run.startedAt.slice(11, 19)}</Text>
                               {run.triggerDetail && <Text dimColor wrap="truncate-end">{run.triggerDetail}</Text>}
                             </Box>
@@ -2407,22 +2409,23 @@ type SettingKey = "maxConcurrent" | "maxWorktrees" | "autoMerge" | "mergeStrateg
 
 interface SettingDef {
   key: SettingKey;
-  label: string;
+  labelKey: string;
+  labelDefault: string;
   type: "number" | "boolean" | "enum";
   options?: string[];
 }
 
 const SETTING_DEFS: SettingDef[] = [
-  { key: "maxConcurrent", label: "Max Concurrent", type: "number" },
-  { key: "maxWorktrees", label: "Max Worktrees", type: "number" },
-  { key: "autoMerge", label: "Auto Merge", type: "boolean" },
-  { key: "mergeStrategy", label: "Merge Strategy", type: "enum", options: ["direct", "squash", "rebase"] },
-  { key: "pollIntervalMs", label: "Poll Interval (ms)", type: "number" },
-  { key: "enginePaused", label: "Engine Paused", type: "boolean" },
-  { key: "globalPause", label: "Global Pause", type: "boolean" },
-  { key: "remoteActiveProvider", label: "Remote Provider", type: "enum", options: ["tailscale", "cloudflare"] },
-  { key: "remoteShortLivedEnabled", label: "Short-Lived Tokens", type: "boolean" },
-  { key: "remoteShortLivedTtlMs", label: "Short-Lived TTL (ms)", type: "number" },
+  { key: "maxConcurrent", labelKey: "tui.settingMaxConcurrent", labelDefault: "Max Concurrent", type: "number" },
+  { key: "maxWorktrees", labelKey: "tui.settingMaxWorktrees", labelDefault: "Max Worktrees", type: "number" },
+  { key: "autoMerge", labelKey: "tui.settingAutoMerge", labelDefault: "Auto Merge", type: "boolean" },
+  { key: "mergeStrategy", labelKey: "tui.settingMergeStrategy", labelDefault: "Merge Strategy", type: "enum", options: ["direct", "squash", "rebase"] },
+  { key: "pollIntervalMs", labelKey: "tui.settingPollIntervalMs", labelDefault: "Poll Interval (ms)", type: "number" },
+  { key: "enginePaused", labelKey: "tui.settingEnginePaused", labelDefault: "Engine Paused", type: "boolean" },
+  { key: "globalPause", labelKey: "tui.settingGlobalPause", labelDefault: "Global Pause", type: "boolean" },
+  { key: "remoteActiveProvider", labelKey: "tui.settingRemoteActiveProvider", labelDefault: "Remote Provider", type: "enum", options: ["tailscale", "cloudflare"] },
+  { key: "remoteShortLivedEnabled", labelKey: "tui.settingRemoteShortLivedEnabled", labelDefault: "Short-Lived Tokens", type: "boolean" },
+  { key: "remoteShortLivedTtlMs", labelKey: "tui.settingRemoteShortLivedTtlMs", labelDefault: "Short-Lived TTL (ms)", type: "number" },
 ];
 
 function SettingsInteractiveView({ state, controller }: { state: DashboardState; controller: DashboardTUI }) {
@@ -2743,7 +2746,7 @@ function SettingsInteractiveView({ state, controller }: { state: DashboardState;
                   <Box key={def.key} flexDirection="row" gap={1}>
                     <Text color={isSel ? "white" : "gray"}>{isSel ? "▶" : " "}</Text>
                     <Text bold={isSel} color={isSel ? "whiteBright" : undefined} wrap="truncate">
-                      {def.label}
+                      {t(def.labelKey, def.labelDefault)}
                     </Text>
                     <Box flexGrow={1} />
                     {renderValue(def, localSettings)}
@@ -2772,7 +2775,7 @@ function SettingsInteractiveView({ state, controller }: { state: DashboardState;
               <Text dimColor>{t("tui.settingsLoadingSettings", "Loading settings…")}</Text>
             ) : !selectedDef ? null : (
               <>
-                <Text bold color="whiteBright">{selectedDef.label}</Text>
+                <Text bold color="whiteBright">{t(selectedDef.labelKey, selectedDef.labelDefault)}</Text>
                 <Box height={1} />
                 <Box flexDirection="row" gap={1}>
                   <Text dimColor>{t("tui.settingsCurrentLabel", "Current:")}</Text>

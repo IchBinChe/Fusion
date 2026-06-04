@@ -124,7 +124,9 @@ export function MilestoneSliceInterviewModal({
   const applyInterview =
     targetType === "milestone" ? applyMilestoneInterview : applySliceInterview;
   const skipInterview = targetType === "milestone" ? skipMilestoneInterview : skipSliceInterview;
-  const targetLabel = targetType === "milestone" ? "Milestone" : "Slice";
+  const targetLabel = targetType === "milestone"
+    ? t("interview.targetLabel.milestone", "Milestone")
+    : t("interview.targetLabel.slice", "Slice");
   const interviewType = targetType === "milestone" ? "milestone_interview" : "slice_interview";
 
   const connectToInterviewStream = useCallback(
@@ -177,7 +179,7 @@ export function MilestoneSliceInterviewModal({
           });
         },
         onError: (message) => {
-          const errorMessage = message || "Session failed while contacting the AI.";
+          const errorMessage = message || t("interview.error.sessionFailed", "Session failed while contacting the AI.");
           setIsReconnecting(false);
           setError(null);
           setView({ type: "error", sessionId, errorMessage });
@@ -230,7 +232,7 @@ export function MilestoneSliceInterviewModal({
       connectToInterviewStream(sessionId);
     } catch (err) {
       setIsReconnecting(false);
-      setError(getErrorMessage(err) || `Failed to start ${targetLabel.toLowerCase()} interview`);
+      setError(getErrorMessage(err) || t("interview.error.failedToStart", "Failed to start {{targetLabel}} interview", { targetLabel: targetLabel.toLowerCase() }));
       setView({ type: "initial" });
       currentSessionIdRef.current = null;
       setLockSessionId(null);
@@ -246,7 +248,7 @@ export function MilestoneSliceInterviewModal({
       onApplied();
       setView({ type: "applied" });
     } catch (err) {
-      setError(getErrorMessage(err) || `Failed to skip ${targetLabel.toLowerCase()} interview`);
+      setError(getErrorMessage(err) || t("interview.error.failedToSkip", "Failed to skip {{targetLabel}} interview", { targetLabel: targetLabel.toLowerCase() }));
       setIsApplying(false);
     }
   }, [onApplied, projectId, skipInterview, targetId, targetLabel]);
@@ -284,7 +286,7 @@ export function MilestoneSliceInterviewModal({
           currentSessionIdRef.current = session.id;
           setView({ type: "question", sessionId: session.id, question });
         } catch {
-          setError("Failed to restore session question.");
+          setError(t("interview.error.failedToRestoreQuestion", "Failed to restore session question."));
         }
       } else if (session.status === "complete" && session.result) {
         try {
@@ -293,7 +295,7 @@ export function MilestoneSliceInterviewModal({
           setEditedSummary(summary);
           setView({ type: "summary", sessionId: session.id, summary });
         } catch {
-          setError("Failed to restore session result.");
+          setError(t("interview.error.failedToRestoreResult", "Failed to restore session result."));
         }
       } else if (session.status === "generating") {
         currentSessionIdRef.current = session.id;
@@ -308,11 +310,11 @@ export function MilestoneSliceInterviewModal({
         setView({
           type: "error",
           sessionId: session.id,
-          errorMessage: session.error ?? "The session encountered an error.",
+          errorMessage: session.error ?? t("interview.error.sessionEncounteredError", "The session encountered an error."),
         });
       }
     }).catch(() => {
-      if (!cancelled) setError("Failed to resume session.");
+      if (!cancelled) setError(t("interview.error.failedToResume", "Failed to resume session."));
     });
 
     return () => {
@@ -416,7 +418,7 @@ export function MilestoneSliceInterviewModal({
       } catch (err) {
         streamConnectionRef.current?.close();
         streamConnectionRef.current = null;
-        setError(getErrorMessage(err) || "Failed to submit response");
+        setError(getErrorMessage(err) || t("interview.error.failedToSubmit", "Failed to submit response"));
         setView({ type: "question", sessionId, question: view.question });
       }
     },
@@ -434,7 +436,7 @@ export function MilestoneSliceInterviewModal({
       onApplied();
       setView({ type: "applied" });
     } catch (err) {
-      setError(getErrorMessage(err) || "Failed to apply interview results");
+      setError(getErrorMessage(err) || t("interview.error.failedToApply", "Failed to apply interview results"));
       setIsApplying(false);
     }
   }, [applyInterview, editedSummary, onApplied, projectId, view]);

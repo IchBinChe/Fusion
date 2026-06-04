@@ -95,19 +95,28 @@ function selectionsEqual(a: ModelSelection, b: ModelSelection): boolean {
   return a.provider === b.provider && a.modelId === b.modelId;
 }
 
-function getSuccessToastMessage(target: "executor" | "validator" | "planning", selection: ModelSelection): string {
-  const labels: Record<string, string> = {
-    executor: "Executor",
-    validator: "Reviewer",
-    planning: "Planning",
+function getSuccessToastMessage(
+  target: "executor" | "validator" | "planning",
+  selection: ModelSelection,
+  t: (key: string, defaultValue: string, options?: Record<string, unknown>) => string,
+): string {
+  const labelKeys: Record<string, { key: string; defaultValue: string }> = {
+    executor: { key: "models.targetLabels.executor", defaultValue: "Executor" },
+    validator: { key: "models.targetLabels.validator", defaultValue: "Reviewer" },
+    planning: { key: "models.targetLabels.planning", defaultValue: "Planning" },
   };
-  const label = labels[target] || target;
+  const labelEntry = labelKeys[target] ?? { key: `models.targetLabels.${target}`, defaultValue: target };
+  const label = t(labelEntry.key, labelEntry.defaultValue);
 
   if (!selection.provider || !selection.modelId) {
-    return `${label} model set to default`;
+    return t("models.messages.modelSetToDefault", "{{label}} model set to default", { label });
   }
 
-  return `${label} model set to ${selection.provider}/${selection.modelId}`;
+  return t("models.messages.modelSetTo", "{{label}} model set to {{provider}}/{{modelId}}", {
+    label,
+    provider: selection.provider,
+    modelId: selection.modelId,
+  });
 }
 
 export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: ModelSelectorTabProps) {
@@ -235,7 +244,7 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
         };
 
         addToast(
-          getSuccessToastMessage(target, targetSelections[target]),
+          getSuccessToastMessage(target, targetSelections[target], t),
           "success",
         );
       } catch (err) {
@@ -258,7 +267,7 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
         }
       }
     },
-    [task.id, savedExecutor, savedValidator, savedPlanning, addToast, onTaskUpdated],
+    [task.id, savedExecutor, savedValidator, savedPlanning, addToast, onTaskUpdated, t],
   );
 
   const handleExecutorChange = useCallback(

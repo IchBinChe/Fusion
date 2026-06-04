@@ -1,5 +1,5 @@
 import "./AgentProvisioningPolicyEditor.css";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import {
   AGENT_PROVISIONING_APPROVAL_MODES,
   type AgentProvisioningApprovalMode,
@@ -90,7 +90,7 @@ export function AgentProvisioningPolicyEditor({ value, onChange, disabled = fals
           value={(value?.trustedRoles ?? []).join(", ")}
           onChange={(event) => update({ trustedRoles: tokenizeList(event.target.value) })}
           disabled={disabled}
-          placeholder="reviewer, ceo"
+          placeholder={t("agentProvisioning.trustedRolesPlaceholder", "reviewer, ceo")}
           rows={2}
         />
       </div>
@@ -103,14 +103,17 @@ export function AgentProvisioningPolicyEditor({ value, onChange, disabled = fals
           value={(value?.trustedAgentIds ?? []).join(", ")}
           onChange={(event) => update({ trustedAgentIds: tokenizeList(event.target.value) })}
           disabled={disabled}
-          placeholder="agent-abc123"
+          placeholder={t("agentProvisioning.trustedAgentIdsPlaceholder", "agent-abc123")}
           rows={2}
         />
       </div>
 
       <p className="agent-provisioning-policy-help">
-        These settings govern durable provisioning tools only: <code>fn_agent_create</code> and <code>fn_agent_delete</code>.
-        Ephemeral <code>fn_spawn_agent</code> requests stay under the task/agent mutation approval gate (FN-3973).
+        <Trans
+          i18nKey="app:agentProvisioning.helpText"
+          defaults="These settings govern durable provisioning tools only: <code>fn_agent_create</code> and <code>fn_agent_delete</code>. Ephemeral <code2>fn_spawn_agent</code2> requests stay under the task/agent mutation approval gate (FN-3973)."
+          components={{ code: <code />, code2: <code /> }}
+        />
       </p>
     </div>
   );

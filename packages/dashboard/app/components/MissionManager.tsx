@@ -165,12 +165,6 @@ const autopilotStateColors: Record<AutopilotState, { bg: string; text: string }>
   completing: { bg: "var(--autopilot-completing-bg)", text: "var(--autopilot-completing-text)" },
 };
 
-const autopilotStateLabels: Record<AutopilotState, string> = {
-  inactive: "Off",
-  watching: "Watching",
-  activating: "Activating slice",
-  completing: "Completing",
-};
 
 /** Assertion status colors */
 const assertionStatusColors: Record<MissionAssertionStatus, { bg: string; text: string }> = {
@@ -197,39 +191,47 @@ const missionInterviewListStatuses: ReadonlySet<AiSessionSummary["status"]> = ne
   "complete",
 ]);
 
-function getInterviewStatusLabel(status: AiSessionSummary["status"]): string {
+function getInterviewStatusLabel(status: AiSessionSummary["status"], t: (key: string, fallback: string) => string): string {
   switch (status) {
     case "generating":
-      return "Generating plan";
+      return t("missions.interviewStatusGenerating", "Generating plan");
     case "awaiting_input":
-      return "Awaiting input";
+      return t("missions.interviewStatusAwaitingInput", "Awaiting input");
     case "error":
-      return "Needs retry";
+      return t("missions.interviewStatusError", "Needs retry");
     case "complete":
-      return "Plan ready";
+      return t("missions.interviewStatusComplete", "Plan ready");
     default:
       return status;
   }
 }
 
-function getMissionRunHelperText(status: MissionStatus): string | null {
+function getMissionRunHelperText(status: MissionStatus, t: (key: string, fallback: string) => string): string | null {
   switch (status) {
     case "planning":
-      return "Starting activates the first slice so work can begin.";
+      return t("missions.runHelperPlanning", "Starting activates the first slice so work can begin.");
     case "active":
-      return "Stopping pauses linked tasks and marks the mission blocked.";
+      return t("missions.runHelperActive", "Stopping pauses linked tasks and marks the mission blocked.");
     case "blocked":
-      return "Resuming re-activates the mission and continues execution.";
+      return t("missions.runHelperBlocked", "Resuming re-activates the mission and continues execution.");
     default:
       return null;
   }
 }
 
-function getAutopilotStateLabel(state: string): string {
-  if (state in autopilotStateLabels) {
-    return autopilotStateLabels[state as AutopilotState];
+function getAutopilotStateLabel(state: string, t: (key: string, fallback: string) => string): string {
+  switch (state as AutopilotState) {
+    case "inactive":
+      return t("missions.autopilotStateInactive", "Off");
+    case "watching":
+      return t("missions.autopilotStateWatching", "Watching");
+    case "activating":
+      return t("missions.autopilotStateActivating", "Activating slice");
+    case "completing":
+      return t("missions.autopilotStateCompleting", "Completing");
+    default:
+      return state ? state.replace(/_/g, " ") : t("missions.autopilotStateUnknown", "Unknown");
   }
-  return state ? state.replace(/_/g, " ") : "Unknown";
 }
 
 /** Get the plan state for a milestone (derived from interviewState) */
@@ -266,8 +268,8 @@ function PlanStateIndicator({ state }: { state: "not_started" | "planned" | "nee
 }
 
 /** Convert validation state snake_case to human-readable label */
-function formatValidationState(state?: string): string {
-  if (!state) return "Not started";
+function formatValidationState(state: string | undefined, t: (key: string, fallback: string) => string): string {
+  if (!state) return t("missions.validationStateNotStarted", "Not started");
   // Replace underscores with spaces and title-case the result
   return state.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
@@ -393,24 +395,24 @@ type MissionHealthState = "healthy" | "warning" | "error";
 
 const HOUR_MS = 60 * 60 * 1000;
 
-function getRelativeTime(timestamp?: string): string {
+function getRelativeTime(timestamp: string | undefined, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string {
   if (!timestamp) return "—";
 
   const ts = new Date(timestamp).getTime();
   if (Number.isNaN(ts)) return "—";
 
   const diffMs = Date.now() - ts;
-  if (diffMs < 0) return "just now";
+  if (diffMs < 0) return t("missions.relativeTimeJustNow", "just now");
 
   const diffMinutes = Math.floor(diffMs / (60 * 1000));
-  if (diffMinutes < 1) return "just now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  if (diffMinutes < 1) return t("missions.relativeTimeJustNow", "just now");
+  if (diffMinutes < 60) return t("missions.relativeTimeMinutes", "{{count}}m ago", { count: diffMinutes });
 
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffHours < 24) return t("missions.relativeTimeHours", "{{count}}h ago", { count: diffHours });
 
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+  return t("missions.relativeTimeDays", "{{count}}d ago", { count: diffDays });
 }
 
 function getMissionHealthState(health?: MissionHealth): MissionHealthState {
@@ -553,16 +555,16 @@ function renderMarkdownText(text: string): ReactNode {
   );
 }
 
-function getAutopilotActivitySummary(state: AutopilotState, lastActivityAt?: string): string | null {
+function getAutopilotActivitySummary(state: AutopilotState, lastActivityAt: string | undefined, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string | null {
   if (!lastActivityAt) {
     return null;
   }
 
   if (state === "watching") {
-    return `Watching since ${getRelativeTime(lastActivityAt)}`;
+    return t("missions.autopilotWatchingSince", "Watching since {{time}}", { time: getRelativeTime(lastActivityAt, t) });
   }
 
-  return `Last activation ${getRelativeTime(lastActivityAt)}`;
+  return t("missions.autopilotLastActivation", "Last activation {{time}}", { time: getRelativeTime(lastActivityAt, t) });
 }
 
 function normalizeMissionHierarchy(mission: MissionWithHierarchy): MissionWithHierarchy {
@@ -2374,6 +2376,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const autopilotActivitySummary = getAutopilotActivitySummary(
     autopilotState,
     selectedMission?.lastAutopilotActivityAt,
+    t,
   );
 
   const previousSelectedMissionIdRef = useRef<string | null>(selectedMission?.id ?? null);
@@ -2507,7 +2510,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 )}
                 <div className="mission-detail__meta">
                   <span className="mission-detail__meta-info">
-                    {t("missions.milestonesCount", { count: selectedMission.milestones.length, defaultValue_one: "{{count}} milestone", defaultValue_other: "{{count}} milestones" })}
+                    {t("missions.milestonesCount", "{{count}} milestones", { count: selectedMission.milestones.length })}
                   </span>
                 </div>
 
@@ -2570,7 +2573,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                           : autopilotState === "watching" ? t("missions.autopilotWatchingState", "Watching")
                           : autopilotState === "activating" ? t("missions.autopilotActivatingSlice", "Activating slice")
                           : autopilotState === "completing" ? t("missions.autopilotCompleting", "Completing")
-                          : getAutopilotStateLabel(autopilotState)}
+                          : getAutopilotStateLabel(autopilotState, t)}
                       </span>
                     </div>
                     <span className="mission-detail__autopilot-description">
@@ -2618,13 +2621,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                         <span>{t("missions.startMission", "Start mission")}</span>
                       </button>
                     )}
-                    {getMissionRunHelperText(selectedMission.status) && (
-                      <span className="mission-detail__run-help">{
-                        selectedMission.status === "planning" ? t("missions.helperTextPlanning", "Starting activates the first slice so work can begin.")
-                        : selectedMission.status === "active" ? t("missions.helperTextActive", "Stopping pauses linked tasks and marks the mission blocked.")
-                        : selectedMission.status === "blocked" ? t("missions.helperTextBlocked", "Resuming re-activates the mission and continues execution.")
-                        : getMissionRunHelperText(selectedMission.status)
-                      }</span>
+                    {getMissionRunHelperText(selectedMission.status, t) && (
+                      <span className="mission-detail__run-help">{getMissionRunHelperText(selectedMission.status, t)}</span>
                     )}
                   </div>
                     <div className="mission-detail__management-actions">
@@ -2809,7 +2807,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       >
                         {milestone.status}
                       </span>
-                      <span className="mission-milestone__count">{t("missions.slicesCount", { count: milestone.slices.length, defaultValue_one: "{{count}} slice", defaultValue_other: "{{count}} slices" })}</span>
+                      <span className="mission-milestone__count">{t("missions.slicesCount", "{{count}} slices", { count: milestone.slices.length })}</span>
                       <PlanStateIndicator state={getMilestonePlanState(milestone.interviewState)} />
                       {/* Validation state badge and coverage bar in milestone header */}
                       {milestoneRollup && (
@@ -2822,7 +2820,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                             }}
                             title={t("missions.validationState", "Validation state")}
                           >
-                            {formatValidationState(milestoneRollup.state)}
+                            {formatValidationState(milestoneRollup.state, t)}
                           </span>
                           {milestoneRollup.totalAssertions > 0 && (
                             <div
@@ -3101,7 +3099,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                 >
                                   {slice.status}
                                 </span>
-                                <span className="mission-slice__count">{t("missions.featuresCount", { count: slice.features?.length || 0, defaultValue_one: "{{count}} feature", defaultValue_other: "{{count}} features" })}</span>
+                                <span className="mission-slice__count">{t("missions.featuresCount", "{{count}} features", { count: slice.features?.length || 0 })}</span>
                                 <PlanStateIndicator state={slice.planState ?? "not_started"} />
                                 {slice.status !== "complete" && (
                                   <button
@@ -3614,7 +3612,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                     color: milestoneValidationColors.text,
                                   }}
                                 >
-                                  {formatValidationState(milestoneRollup.state)}
+                                  {formatValidationState(milestoneRollup.state, t)}
                                 </span>
                               )}
                               {/* Assertion coverage bar */}
@@ -4018,7 +4016,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                               <span className={`mission-event__type ${getEventTypeClassName(event.eventType)}`}>
                                 {getEventTypeLabel(event.eventType)}
                               </span>
-                              <span className="mission-event__time">{getRelativeTime(event.timestamp)}</span>
+                              <span className="mission-event__time">{getRelativeTime(event.timestamp, t)}</span>
                             </div>
                             <p className="mission-event__description">{event.description}</p>
                             <span className="mission-event__timestamp">
@@ -4147,11 +4145,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           </div>
           <div className="mission-list__item-tags">
             <span className={`mission-status-badge mission-status-badge--sm mission-interview-status mission-interview-status--${session.status}`}>
-              {session.status === "generating" ? t("missions.interviewStatusGenerating", "Generating plan")
-                : session.status === "awaiting_input" ? t("missions.interviewStatusAwaitingInput", "Awaiting input")
-                : session.status === "error" ? t("missions.interviewStatusNeedsRetry", "Needs retry")
-                : session.status === "complete" ? t("missions.interviewStatusPlanReady", "Plan ready")
-                : getInterviewStatusLabel(session.status)}
+              {getInterviewStatusLabel(session.status, t)}
             </span>
           </div>
           <p className="mission-list__item-description">{description}</p>
@@ -4304,7 +4298,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           {showSummaryBlock && (
             <div className="mission-list__item-activity">
               <span className="mission-relative-time" data-testid={`mission-last-activity-${m.id}`}>
-                {t("missions.activityTime", "Activity {{time}}", { time: getRelativeTime(health?.lastActivityAt) })}
+                {t("missions.activityTime", "Activity {{time}}", { time: getRelativeTime(health?.lastActivityAt, t) })}
               </span>
             </div>
           )}
@@ -4344,13 +4338,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 <span>{t("missions.startMission", "Start mission")}</span>
               </button>
             )}
-            {getMissionRunHelperText(m.status) && (
-              <span className="mission-list__item-run-help">{
-                m.status === "planning" ? t("missions.helperTextPlanning", "Starting activates the first slice so work can begin.")
-                : m.status === "active" ? t("missions.helperTextActive", "Stopping pauses linked tasks and marks the mission blocked.")
-                : m.status === "blocked" ? t("missions.helperTextBlocked", "Resuming re-activates the mission and continues execution.")
-                : getMissionRunHelperText(m.status)
-              }</span>
+            {getMissionRunHelperText(m.status, t) && (
+              <span className="mission-list__item-run-help">{getMissionRunHelperText(m.status, t)}</span>
             )}
           </div>
           <button

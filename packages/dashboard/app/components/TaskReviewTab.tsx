@@ -194,10 +194,16 @@ export function TaskReviewTab({
     if (!review) return t("taskReview.noCapturedFeedback", "No review feedback captured yet.");
     if (review.source === "pull-request") {
       const prSummary = review.summary as { reviewDecision?: string } | undefined;
-      return `${prSummary?.reviewDecision ?? "REVIEW_REQUIRED"} · ${displayItems.length} review item(s)`;
+      return t("taskReview.prSummaryLine", "{{decision}} · {{count}} review item(s)", {
+        decision: prSummary?.reviewDecision ?? "REVIEW_REQUIRED",
+        count: displayItems.length,
+      });
     }
     const reviewerSummary = review.summary as { summary?: string } | undefined;
-    return `${reviewerSummary?.summary ?? "reviewer-agent"} · ${displayItems.length} review item(s)`;
+    return t("taskReview.reviewerSummaryLine", "{{reviewer}} · {{count}} review item(s)", {
+      reviewer: reviewerSummary?.summary ?? "reviewer-agent",
+      count: displayItems.length,
+    });
   }, [review, displayItems.length, t]);
 
   const decisionLabel = !review
@@ -361,7 +367,11 @@ export function TaskReviewTab({
       </div>
       <div className="task-review-tab__meta task-review-tab__refresh-meta" aria-live="polite">
         <span className={refreshToneClass} aria-hidden="true" />
-        <span>{refreshStatus === "error" ? t("taskReview.refreshFailed", "Refresh failed") : refreshStatus === "refreshing" ? t("taskReview.refreshing", "Refreshing") : t("taskReview.upToDate", "Up to date")} · {t("taskReview.lastRefreshed", "Last refreshed")}: {formatTimestamp(review?.lastRefreshedAt, t)} · {formatRefreshSource(review?.refreshSource, t)}</span>
+        <span>{t("taskReview.refreshStatusLine", "{{status}} · Last refreshed: {{timestamp}} · {{source}}", {
+          status: refreshStatus === "error" ? t("taskReview.refreshFailed", "Refresh failed") : refreshStatus === "refreshing" ? t("taskReview.refreshing", "Refreshing") : t("taskReview.upToDate", "Up to date"),
+          timestamp: formatTimestamp(review?.lastRefreshedAt, t),
+          source: formatRefreshSource(review?.refreshSource, t),
+        })}</span>
       </div>
       {loading ? <div className="task-review-tab__meta">{t("taskReview.loadingData", "Loading review data…")}</div> : null}
       {!loading && error ? <div className="task-review-tab__error">{error}</div> : null}
@@ -386,7 +396,12 @@ export function TaskReviewTab({
                   <div className="task-review-tab__item-meta-list">
                     <div className="task-review-tab__meta">{formatTimestamp(item.createdAt, t)}</div>
                     {item.addressing ? (
-                      <div className="task-review-tab__meta">{t("taskReview.selected", "Selected")}: {formatTimestamp(item.addressing.selectedAt, t)}{item.addressing.startedAt ? ` · ${t("taskReview.started", "Started")}: ${formatTimestamp(item.addressing.startedAt, t)}` : ""}{item.addressing.completedAt ? ` · ${t("taskReview.completed", "Completed")}: ${formatTimestamp(item.addressing.completedAt, t)}` : ""}{item.addressing.error ? ` · ${t("taskReview.error", "Error")}: ${item.addressing.error}` : ""}</div>
+                      <div className="task-review-tab__meta">
+                        {t("taskReview.selectedAt", "Selected: {{timestamp}}", { timestamp: formatTimestamp(item.addressing.selectedAt, t) })}
+                        {item.addressing.startedAt ? t("taskReview.startedAtSep", " · Started: {{timestamp}}", { timestamp: formatTimestamp(item.addressing.startedAt, t) }) : ""}
+                        {item.addressing.completedAt ? t("taskReview.completedAtSep", " · Completed: {{timestamp}}", { timestamp: formatTimestamp(item.addressing.completedAt, t) }) : ""}
+                        {item.addressing.error ? t("taskReview.errorSep", " · Error: {{message}}", { message: item.addressing.error }) : ""}
+                      </div>
                     ) : null}
                   </div>
                   {renderMarkdown ? (

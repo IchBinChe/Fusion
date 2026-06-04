@@ -356,14 +356,14 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
         <h2>{COLUMN_LABELS[column]}</h2>
         <span className={`column-count${countFlashing ? " count-flash" : ""}`}>{tasks.length}</span>
         {column === "in-review" && onToggleAutoMerge && (
-          <label className="auto-merge-toggle" title={autoMerge ? "Auto-merge enabled" : "Auto-merge disabled"}>
+          <label className="auto-merge-toggle" title={autoMerge ? t("column.autoMergeEnabled", "Auto-merge enabled") : t("column.autoMergeDisabled", "Auto-merge disabled")}>
             <input
               type="checkbox"
               checked={!!autoMerge}
               onChange={onToggleAutoMerge}
             />
             <span className="toggle-slider" />
-            <span className="toggle-label">Auto-merge</span>
+            <span className="toggle-label">{t("column.autoMerge", "Auto-merge")}</span>
           </label>
         )}
         {onNewTask && (

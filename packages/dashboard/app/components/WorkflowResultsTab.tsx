@@ -340,11 +340,11 @@ export function WorkflowResultsTab({
       return {
         id: stepId,
         name: stepInfo?.name || stepId,
-        description: stepInfo?.description || "Step definition not found.",
+        description: stepInfo?.description || t("workflow.stepDefinitionNotFound", "Step definition not found."),
         phase: stepInfo?.phase || "pre-merge",
       } as WorkflowStepOption;
     });
-  }, [selectedWorkflowSteps, workflowStepLookup]);
+  }, [selectedWorkflowSteps, workflowStepLookup, t]);
 
   const renderEditor = () => {
     if (!canEdit || !isEditing || loading) {
@@ -459,17 +459,17 @@ export function WorkflowResultsTab({
     const skipped = results.filter((r) => r.status === "skipped").length;
     const pending = results.filter((r) => r.status === "pending").length;
 
-    const summaryParts: string[] = [`${results.length} step${results.length !== 1 ? "s" : ""}`];
-    if (passed > 0) summaryParts.push(`${passed} passed`);
-    if (failed > 0) summaryParts.push(`${failed} failed`);
-    if (advisoryFailures.length > 0) summaryParts.push(`${advisoryFailures.length} advisory`);
-    if (skipped > 0) summaryParts.push(`${skipped} skipped`);
-    if (pending > 0) summaryParts.push(`${pending} running`);
+    const summaryParts: string[] = [t("workflow.summaryStepCount", { count: results.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })];
+    if (passed > 0) summaryParts.push(t("workflow.summaryPassed", "{{count}} passed", { count: passed }));
+    if (failed > 0) summaryParts.push(t("workflow.summaryFailed", "{{count}} failed", { count: failed }));
+    if (advisoryFailures.length > 0) summaryParts.push(t("workflow.summaryAdvisory", "{{count}} advisory", { count: advisoryFailures.length }));
+    if (skipped > 0) summaryParts.push(t("workflow.summarySkipped", "{{count}} skipped", { count: skipped }));
+    if (pending > 0) summaryParts.push(t("workflow.summaryRunning", "{{count}} running", { count: pending }));
 
     return (
       <div className="workflow-results-list" data-testid="workflow-results-list">
         <div className="workflow-results-summary-bar" data-testid="workflow-results-summary">
-          {summaryParts.join(" · ")}
+          {summaryParts.join(t("workflow.summarySeparator", " · "))}
         </div>
         {advisoryFailures.length > 0 && (
           <div className="workflow-polish-notes" data-testid="workflow-polish-notes">
@@ -527,7 +527,7 @@ export function WorkflowResultsTab({
 
               <div className="workflow-result-meta">
                 {result.startedAt && (
-                  <span className="workflow-result-timestamp">Started: {formatTimestamp(result.startedAt)}</span>
+                  <span className="workflow-result-timestamp">{t("workflow.started", "Started:")} {formatTimestamp(result.startedAt)}</span>
                 )}
                 {result.completedAt && (
                   <span className="workflow-result-duration">{formatDuration(result.startedAt, result.completedAt)}</span>
@@ -646,7 +646,7 @@ export function WorkflowResultsTab({
             <div className="workflow-configured-title-row">
               <h4>{t("workflow.configuredSteps", "Configured Workflow Steps")}</h4>
               <span className="workflow-configured-count" data-testid="workflow-configured-count">
-                {t("workflow.stepCount", "{{count}} step{{count_one::count_other:s}}", { count: configuredSteps.length })}
+                {t("workflow.stepCount", { count: configuredSteps.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })}
               </span>
             </div>
             {editButton}

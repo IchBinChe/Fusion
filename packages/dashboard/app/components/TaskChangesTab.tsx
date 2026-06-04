@@ -323,14 +323,14 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
           )}
           {mergeDetails.mergedAt && (
             <div className="commit-diff-timestamp">
-              Merged {new Date(mergeDetails.mergedAt).toLocaleString()}
+              {t("taskChanges.mergedAt", "Merged {{date}}", { date: new Date(mergeDetails.mergedAt).toLocaleString() })}
             </div>
           )}
           {mergeDetails.noOpVerifiedShortCircuit && (
-            <div className="text-muted">Verified short-circuit — work was already on main (rebase walked foreign commits).</div>
+            <div className="text-muted">{t("taskChanges.noOpShortCircuit", "Verified short-circuit — work was already on main (rebase walked foreign commits).")}</div>
           )}
           {mergeDetails.landedFilesCaptureFallback === "attribution-failed" && (
-            <div className="text-muted">Landed-files set may include foreign commits (attribution unavailable).</div>
+            <div className="text-muted">{t("taskChanges.attributionFailed", "Landed-files set may include foreign commits (attribution unavailable).")}</div>
           )}
         </div>
       )}
@@ -339,7 +339,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
         <div className="task-changes-header-title">
           <h4>
             <FileCode size={16} />
-            Files Changed ({stats.filesChanged})
+            {t("taskChanges.filesChangedHeading", "Files Changed ({{count}})", { count: stats.filesChanged })}
           </h4>
           <span className="task-changes-stats changes-stat-summary">
             <span className="diff-add">+{stats.additions}</span>{" "}

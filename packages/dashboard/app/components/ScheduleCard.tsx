@@ -231,7 +231,7 @@ export function ScheduleCard({ schedule, onEdit, onDelete, onRun, onToggle, runn
         {schedule.steps && schedule.steps.length > 0 ? (
           <div className="schedule-meta-item">
             <Layers size={12} />
-            <span className="schedule-steps-badge">{schedule.steps.length} step{schedule.steps.length !== 1 ? "s" : ""}</span>
+            <span className="schedule-steps-badge">{t("schedule.stepCount", "{{count}} step", { count: schedule.steps.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })}</span>
           </div>
         ) : (
           <div className="schedule-meta-item schedule-meta-command-preview" title={schedule.command}>

@@ -210,7 +210,7 @@ export function CustomProviderForm({ initialConfig, onSave, onCancel, saving = f
               />
               <input
                 className="input"
-                aria-label={`${t("providers.fields.modelName", "Display name")} ${index + 1}`}
+                aria-label={`${t("providers.fields.modelNameLabel", "Model name")} ${index + 1}`}
                 placeholder={t("providers.fields.modelName", "Display name")}
                 value={model.name ?? ""}
                 onChange={(e) => updateModel(index, { name: e.target.value })}

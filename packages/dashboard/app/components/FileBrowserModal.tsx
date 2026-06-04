@@ -286,7 +286,7 @@ export function FileBrowserModal({
     return workspaces.find((workspace) => workspace.id === currentWorkspace)?.id ?? currentWorkspace;
   }, [currentWorkspace, workspaces, t]);
 
-  const modalTitle = `Files — ${workspaceLabel}`;
+  const modalTitle = t("fileBrowser.modalTitle", "Files — {{workspace}}", { workspace: workspaceLabel });
 
   // Compute image source URL when an image file is selected
   const imageSrc = useMemo(() => {
@@ -353,7 +353,7 @@ export function FileBrowserModal({
               aria-valuemin={SIDEBAR_MIN_WIDTH}
               aria-valuemax={SIDEBAR_MAX_WIDTH}
               aria-valuenow={sidebarWidth}
-              aria-label="Resize sidebar"
+              aria-label={t("fileBrowser.resizeSidebar", "Resize sidebar")}
               tabIndex={0}
               onPointerDown={handleResizeStart}
               onKeyDown={handleResizeKeyDown}
@@ -379,8 +379,8 @@ export function FileBrowserModal({
                       <button
                         className="btn btn-sm btn-icon file-editor-toolbar-button"
                         onClick={() => setToolbarActionsExpanded((prev) => !prev)}
-                        aria-label="Toggle editor options"
-                        title="Toggle editor options"
+                        aria-label={t("fileBrowser.toggleEditorOptions", "Toggle editor options")}
+                        title={t("fileBrowser.toggleEditorOptions", "Toggle editor options")}
                         aria-expanded={toolbarActionsExpanded}
                         aria-controls={toolbarActionsId}
                       >
@@ -396,7 +396,7 @@ export function FileBrowserModal({
                     )}
                     {mtime && (
                       <span className="file-browser-mtime">
-                        Modified: {new Date(mtime).toLocaleString()}
+                        {t("fileBrowser.modified", "Modified: {{date}}", { date: new Date(mtime).toLocaleString() })}
                       </span>
                     )}
                     {editorLoading && (

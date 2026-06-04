@@ -1,6 +1,6 @@
 import "./SpecEditor.css";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -156,7 +156,7 @@ export function SpecEditor({
       {/* Keyboard hint for edit mode */}
       {isEditing && (
         <div className="spec-editor-hint">
-          Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or <kbd>Cmd</kbd>+<kbd>Enter</kbd>) to save
+          <Trans i18nKey="app:specEditor.keyboardHint" defaults="Press <ctrl>Ctrl</ctrl>+<enter>Enter</enter> (or <cmd>Cmd</cmd>+<enter2>Enter</enter2>) to save" components={{ ctrl: <kbd />, enter: <kbd />, cmd: <kbd />, enter2: <kbd /> }} />
         </div>
       )}
 

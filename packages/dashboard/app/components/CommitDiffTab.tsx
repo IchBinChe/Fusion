@@ -188,7 +188,7 @@ export function CommitDiffTab({ commitSha, mergeDetails }: CommitDiffTabProps) {
       <div className="changes-header">
         <h4>
           <FileCode size={16} />
-          Files Changed ({totalFiles})
+          {t("commit.filesChanged", "Files Changed ({{count}})", { count: totalFiles })}
           <span className="changes-stat-summary">
             <span className="diff-add">+{totalAdditions}</span>{" "}
             <span className="diff-del">-{totalDeletions}</span>

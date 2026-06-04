@@ -51,7 +51,7 @@ export function TaskIdIntegrityBanner({ report, recommendedAction, onRefresh }: 
       const health = await refreshDashboardHealth();
       onRefresh?.(health.taskIdIntegrity, health.taskIdIntegrity.recommendedAction);
     } catch (error) {
-      setRefreshError(error instanceof Error ? error.message : "Failed to refresh integrity status.");
+      setRefreshError(error instanceof Error ? error.message : t("health.refreshFailed", "Failed to refresh integrity status."));
     } finally {
       setRefreshing(false);
     }

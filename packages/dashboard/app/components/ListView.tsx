@@ -1,6 +1,7 @@
 import "./ListView.css";
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive } from "lucide-react";
 import type { Task, TaskDetail, Column, TaskCreateInput, MergeResult, GithubIssueAction } from "@fusion/core";
 import { COLUMNS, DEFAULT_COLUMN, getErrorMessage, isColumn } from "@fusion/core";
@@ -33,8 +34,8 @@ const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finali
 
 type SortField = "title" | "status" | "column" | "retries";
 
-function getTaskStatusLabel(status: string): string {
-  if (status === "merging-fix") return "Merging fixes…";
+function getTaskStatusLabel(status: string, t: TFunction<"app">): string {
+  if (status === "merging-fix") return t("listView.statusMergingFix", "Merging fixes…");
   return status;
 }
 type SortDirection = "asc" | "desc";
@@ -44,11 +45,11 @@ const ALL_LIST_COLUMNS = ["title", "status", "column", "retries", "dependencies"
 const DEFAULT_LIST_COLUMNS = ["title", "status", "column", "retries"] as const;
 type ListColumn = typeof ALL_LIST_COLUMNS[number];
 
-function getNodeStatusLabel(status: NodeInfo["status"]): string {
-  if (status === "online") return "Online";
-  if (status === "connecting") return "Connecting";
-  if (status === "error") return "Error";
-  return "Offline";
+function getNodeStatusLabel(status: NodeInfo["status"], t: TFunction<"app">): string {
+  if (status === "online") return t("listView.nodeStatusOnline", "Online");
+  if (status === "connecting") return t("listView.nodeStatusConnecting", "Connecting");
+  if (status === "error") return t("listView.nodeStatusError", "Error");
+  return t("listView.nodeStatusOffline", "Offline");
 }
 
 function getNodeStatusSymbol(status: NodeInfo["status"]): string {
@@ -894,7 +895,7 @@ export function ListView({
 
     const summaryMessage = shouldArchiveDoneInstead
       ? t("listView.bulkDeleteArchiveSummary", "Archived {{archived}}, deleted {{deleted}}, failed {{failed}}", { archived: archivedIds.length, deleted: deletedIds.length, failed: failedIds.length })
-      : t("listView.bulkDeleteSummary", "Deleted {{deleted}} task(s) · {{skipped}} archived skipped · {{failed}} failed", { deleted: deletedIds.length, skipped: skippedIds.length, failed: failedIds.length });
+      : t("listView.bulkDeleteSummary", { count: deletedIds.length, skipped: skippedIds.length, failed: failedIds.length, defaultValue_one: "Deleted {{count}} task · {{skipped}} archived skipped · {{failed}} failed", defaultValue_other: "Deleted {{count}} tasks · {{skipped}} archived skipped · {{failed}} failed" });
 
     addToast(summaryMessage, failedIds.length > 0 ? "error" : "success");
   }, [addToast, confirm, confirmWithChoice, onArchiveTask, onDeleteTask, selectedTaskIds, tasks]);
@@ -1531,7 +1532,7 @@ export function ListView({
               <option value="">{t("listView.useProjectDefault", "Use project default")}</option>
               {availableNodes.map((node) => (
                 <option key={node.id} value={node.id}>
-                  {`${getNodeStatusSymbol(node.status)} ${node.name || node.id} (${getNodeStatusLabel(node.status)})`}
+                  {`${getNodeStatusSymbol(node.status)} ${node.name || node.id} (${getNodeStatusLabel(node.status, t)})`}
                 </option>
               ))}
             </select>
@@ -1787,7 +1788,7 @@ export function ListView({
                                   <span className="list-status-badge stuck">{t("listView.stuck", "Stuck")}</span>
                                 ) : hasStatus ? (
                                   <span className={`list-status-badge list-status-badge--${task.column}${isFailed ? " failed" : ""}${isAgentActive ? " pulsing" : ""}`}>
-                                    {getTaskStatusLabel(visualStatus ?? "")}
+                                    {getTaskStatusLabel(visualStatus ?? "", t)}
                                   </span>
                                 ) : null}
                               </div>
@@ -1996,7 +1997,7 @@ export function ListView({
                                           isAgentActive ? " pulsing" : ""
                                         }`}
                                       >
-                                        {getTaskStatusLabel(visualStatus ?? "")}
+                                        {getTaskStatusLabel(visualStatus ?? "", t)}
                                       </span>
                                     ) : (
                                       <span className="list-status-badge">-</span>

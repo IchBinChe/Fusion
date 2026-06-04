@@ -59,14 +59,14 @@ export function AgentErrorDetailsModal({ open, onClose, errorText, issueContext 
   }
 
   return (
-    <div className="modal-overlay open" onClick={(event) => event.target === event.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Agent error details">
+    <div className="modal-overlay open" onClick={(event) => event.target === event.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label={t("agentError.dialogLabel", "Agent error details")}>
       <div className="modal agent-error-modal">
         <div className="modal-header">
           <h2 className="modal-title">
             <AlertCircle size={16} />
             {t("agentError.title", "Agent Error Details")}
           </h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close">&times;</button>
+          <button className="modal-close" onClick={onClose} aria-label={t("common.close", "Close")}>&times;</button>
         </div>
         <div className="agent-error-modal__content">
           <pre className="agent-error-modal__error">{errorText}</pre>

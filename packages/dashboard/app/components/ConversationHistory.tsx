@@ -1,5 +1,6 @@
 import "./ConversationHistory.css";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { PlanningQuestion } from "@fusion/core";
 import { useState } from "react";
 import type { ConversationHistoryEntry } from "../api";
@@ -27,7 +28,7 @@ function getResponseValue(entry: ConversationHistoryEntry): unknown {
   return response;
 }
 
-function formatResponse(question: PlanningQuestion, responseValue: unknown): string {
+function formatResponse(question: PlanningQuestion, responseValue: unknown, t: TFunction<"app">): string {
   switch (question.type) {
     case "text": {
       if (typeof responseValue === "string") return responseValue;
@@ -55,8 +56,8 @@ function formatResponse(question: PlanningQuestion, responseValue: unknown): str
       return responseValue == null ? "" : String(responseValue);
     }
     case "confirm": {
-      if (responseValue === true) return "Yes";
-      if (responseValue === false) return "No";
+      if (responseValue === true) return t("conversation.confirm.yes", "Yes");
+      if (responseValue === false) return t("conversation.confirm.no", "No");
       return responseValue == null ? "" : String(responseValue);
     }
     default:
@@ -102,7 +103,7 @@ export function ConversationHistory({ entries, defaultShowThinking = false }: Co
         const responseValue = hasQuestion ? getResponseValue(entry) : undefined;
         const formattedResponse =
           entry.question && responseValue !== undefined
-            ? formatResponse(entry.question, responseValue)
+            ? formatResponse(entry.question, responseValue, t)
             : "";
         const responseRecord =
           entry.response && typeof entry.response === "object" && !Array.isArray(entry.response)

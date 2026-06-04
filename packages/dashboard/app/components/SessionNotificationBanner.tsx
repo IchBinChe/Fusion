@@ -19,13 +19,13 @@ const TYPE_ICONS = {
   slice_interview: Target,
 } as const;
 
-const TYPE_LABELS = {
-  planning: "Planning",
-  subtask: "Subtask Breakdown",
-  mission_interview: "Mission Interview",
-  milestone_interview: "Milestone Interview",
-  slice_interview: "Slice Interview",
-} as const;
+const TYPE_LABEL_KEYS: Record<keyof typeof TYPE_ICONS, { key: string; defaultVal: string }> = {
+  planning: { key: "sessionBanner.typeLabel.planning", defaultVal: "Planning" },
+  subtask: { key: "sessionBanner.typeLabel.subtask", defaultVal: "Subtask Breakdown" },
+  mission_interview: { key: "sessionBanner.typeLabel.missionInterview", defaultVal: "Mission Interview" },
+  milestone_interview: { key: "sessionBanner.typeLabel.milestoneInterview", defaultVal: "Milestone Interview" },
+  slice_interview: { key: "sessionBanner.typeLabel.sliceInterview", defaultVal: "Slice Interview" },
+};
 
 const STORAGE_KEY = "fusion:session-banner-dismissed";
 
@@ -134,11 +134,35 @@ export function SessionNotificationBanner({
 
   let headerText = "";
   if (awaitingInputCount > 0 && errorCount > 0) {
-    headerText = `${awaitingInputCount} AI session${awaitingInputCount === 1 ? "" : "s"} need${awaitingInputCount === 1 ? "s" : ""} your input, ${errorCount} failed`;
+    headerText = t(
+      awaitingInputCount === 1
+        ? "sessionBanner.headerAwaitingAndErrorSingular"
+        : "sessionBanner.headerAwaitingAndErrorPlural",
+      awaitingInputCount === 1
+        ? "{{awaitingCount}} AI session needs your input, {{errorCount}} failed"
+        : "{{awaitingCount}} AI sessions need your input, {{errorCount}} failed",
+      { awaitingCount: awaitingInputCount, errorCount },
+    );
   } else if (awaitingInputCount > 0) {
-    headerText = `${awaitingInputCount} AI session${awaitingInputCount === 1 ? "" : "s"} need${awaitingInputCount === 1 ? "s" : ""} your input`;
+    headerText = t(
+      awaitingInputCount === 1
+        ? "sessionBanner.headerAwaitingSingular"
+        : "sessionBanner.headerAwaitingPlural",
+      awaitingInputCount === 1
+        ? "{{count}} AI session needs your input"
+        : "{{count}} AI sessions need your input",
+      { count: awaitingInputCount },
+    );
   } else if (errorCount > 0) {
-    headerText = `${errorCount} AI session${errorCount === 1 ? "" : "s"} failed`;
+    headerText = t(
+      errorCount === 1
+        ? "sessionBanner.headerErrorSingular"
+        : "sessionBanner.headerErrorPlural",
+      errorCount === 1
+        ? "{{count}} AI session failed"
+        : "{{count}} AI sessions failed",
+      { count: errorCount },
+    );
   }
 
   const dismissLocally = (session: AiSessionSummary) => {
@@ -167,7 +191,7 @@ export function SessionNotificationBanner({
   };
 
   return (
-    <section className="session-notification-banner" role="region" aria-live="polite" aria-label="AI sessions needing input or failed">
+    <section className="session-notification-banner" role="region" aria-live="polite" aria-label={t("sessionBanner.regionLabel", "AI sessions needing input or failed")}>
       <div className="session-notification-banner__header">
         <div className="session-notification-banner__headline">
           <AlertCircle size={16} aria-hidden="true" />
@@ -200,7 +224,7 @@ export function SessionNotificationBanner({
                 <div className="session-notification-banner__text">
                   <p className="session-notification-banner__title" title={session.title}>{session.title}</p>
                   <p className="session-notification-banner__meta">
-                    {isError ? t("sessionBanner.failed", "Failed") : TYPE_LABELS[session.type]}
+                    {isError ? t("sessionBanner.failed", "Failed") : t(TYPE_LABEL_KEYS[session.type].key, TYPE_LABEL_KEYS[session.type].defaultVal)}
                   </p>
                 </div>
               </div>
@@ -215,7 +239,7 @@ export function SessionNotificationBanner({
                     dismissLocally(session);
                     onDismissSession(session.id);
                   }}
-                  aria-label={`Dismiss ${session.title}`}
+                  aria-label={t("sessionBanner.dismissItem", "Dismiss {{title}}", { title: session.title })}
                 >
                   <X size={14} aria-hidden="true" />
                 </button>

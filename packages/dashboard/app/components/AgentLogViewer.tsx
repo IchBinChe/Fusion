@@ -1,5 +1,6 @@
 import type { AgentLogEntry } from "@fusion/core";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { ProviderIcon } from "./ProviderIcon";
 import React, { useRef, useEffect, useState, useCallback, useLayoutEffect, useMemo, useId, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
@@ -32,7 +33,7 @@ function writeBooleanPref(key: string, value: boolean): void {
   }
 }
 
-function formatTimestamp(iso: string): string {
+function formatTimestamp(iso: string, t: TFunction<"app">): string {
   const date = new Date(iso);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -40,10 +41,10 @@ function formatTimestamp(iso: string): string {
   const diffHr = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHr / 24);
 
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
+  if (diffMin < 1) return t("agentLog.timeJustNow", "just now");
+  if (diffMin < 60) return t("agentLog.timeMinutesAgo", "{{count}}m ago", { count: diffMin });
+  if (diffHr < 24) return t("agentLog.timeHoursAgo", "{{count}}h ago", { count: diffHr });
+  if (diffDay < 7) return t("agentLog.timeDaysAgo", "{{count}}d ago", { count: diffDay });
   return date.toLocaleDateString();
 }
 
@@ -87,9 +88,10 @@ const markdownComponents: Components = {
 
 const BOTTOM_FOLLOW_THRESHOLD_PX = 50;
 
-const AGENT_DISPLAY_NAMES: Record<string, string> = {
-  triage: "Plan",
-};
+function getAgentDisplayName(agent: string, t: TFunction<"app">): string {
+  if (agent === "triage") return t("agentLog.agentNameTriage", "Plan");
+  return agent;
+}
 
 function isNearBottom(container: HTMLDivElement): boolean {
   return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD_PX;
@@ -624,13 +626,13 @@ export function AgentLogViewer({
           const firstEntry = group.kind === "single" ? group.entry : group.entries[0];
           const timestampSpan = group.showBadge ? (
             <span className="agent-log-timestamp" data-testid="agent-log-timestamp">
-              {formatTimestamp(firstEntry.timestamp)}
+              {formatTimestamp(firstEntry.timestamp, t as TFunction<"app">)}
             </span>
           ) : null;
 
           const agentBadge = group.showBadge ? (
             <span className="agent-log-badge-row">
-              <span className="agent-log-agent-badge">[{AGENT_DISPLAY_NAMES[firstEntry.agent!] ?? firstEntry.agent}]</span>
+              <span className="agent-log-agent-badge">[{getAgentDisplayName(firstEntry.agent!, t as TFunction<"app">)}]</span>
               {timestampSpan}
             </span>
           ) : null;

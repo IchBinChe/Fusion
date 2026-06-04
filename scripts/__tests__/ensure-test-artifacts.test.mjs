@@ -1,13 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  computeCombinedSourceHash,
   detectMissingOrStaleArtifacts,
   ensureTestArtifacts,
   isStale,
+  packageSourceInputs,
   REQUIRED_BUILD_PACKAGES,
+  seedArtifactCache,
 } from "../ensure-test-artifacts.mjs";
 
 const ENGINE_ENTRY = REQUIRED_BUILD_PACKAGES.find((pkg) => pkg.name === "@fusion/engine");
@@ -498,3 +501,108 @@ function sourceHashFor(gitFn) {
     gitFn,
   });
 }
+
+// ---------------------------------------------------------------------------
+// CI dist-artifact cache: combined source hash (cache key) + seed mode.
+// ---------------------------------------------------------------------------
+
+const ALL_SOURCE_INPUTS = [
+  ...new Set(REQUIRED_BUILD_PACKAGES.flatMap((pkg) => packageSourceInputs(pkg))),
+];
+
+test("packageSourceInputs covers every build package (no empty source sets)", () => {
+  for (const pkg of REQUIRED_BUILD_PACKAGES) {
+    assert.ok(
+      packageSourceInputs(pkg).length > 0,
+      `${pkg.name} must contribute at least one source input to the combined hash`,
+    );
+  }
+});
+
+/**
+ * A whole-repo git stub: every source input dir reports a single tracked file
+ * with the given per-path blob sha (defaults to a stable derived value). Lets us
+ * drive the combined hash deterministically without a real work tree.
+ */
+function fakeGitForAllSources(blobFor = (filePath) => `blob:${filePath}`) {
+  return (args) => {
+    if (args[0] === "rev-parse") return "true";
+    if (args[0] === "ls-files") {
+      const lines = ALL_SOURCE_INPUTS.map((dir) => {
+        const filePath = `${dir}/index.ts`;
+        return `100644 ${blobFor(filePath)} 0\t${filePath}`;
+      });
+      return lines.join("\n");
+    }
+    if (args[0] === "status") return ""; // clean
+    return null;
+  };
+}
+
+test("computeCombinedSourceHash: same tree -> identical hash (deterministic)", () => {
+  const git = fakeGitForAllSources();
+  const a = computeCombinedSourceHash("/repo", git);
+  const b = computeCombinedSourceHash("/repo", git);
+  assert.equal(typeof a, "string");
+  assert.equal(a.length, 64);
+  assert.equal(a, b);
+});
+
+test("computeCombinedSourceHash: any source change -> different hash", () => {
+  const base = computeCombinedSourceHash("/repo", fakeGitForAllSources());
+  // Flip the blob sha for engine src only; the combined hash must change.
+  const mutated = computeCombinedSourceHash(
+    "/repo",
+    fakeGitForAllSources((filePath) =>
+      filePath.startsWith("packages/engine/src") ? "blob:CHANGED" : `blob:${filePath}`,
+    ),
+  );
+  assert.notEqual(base, mutated);
+});
+
+test("computeCombinedSourceHash: returns null outside a git work tree (no unstable key)", () => {
+  const noGit = (args) => (args[0] === "rev-parse" ? "false" : null);
+  assert.equal(computeCombinedSourceHash("/repo", noGit), null);
+});
+
+test("seedArtifactCache: records hashes for staleable packages when all artifacts exist", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "fn-dist-seed-"));
+  try {
+    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+    // All artifacts present.
+    const seeded = seedArtifactCache(root, () => true, fakeGitForAllSources());
+    // recordArtifactBuild only writes entries for packages with source globs
+    // (engine + the 4 plugins); the mtime-immune core/dashboard/plugin-sdk are
+    // returned as "present" but contribute no cache entry.
+    assert.ok(seeded.includes("@fusion/engine"));
+    assert.ok(seeded.includes("@fusion-plugin-examples/hermes-runtime"));
+
+    const cache = JSON.parse(
+      readFileSync(path.join(root, "node_modules", ".cache", "fusion", "artifact-cache.json"), "utf8"),
+    );
+    assert.ok(cache.entries["@fusion/engine"]?.sourceHash);
+    assert.ok(cache.entries["@fusion-plugin-examples/hermes-runtime"]?.sourceHash);
+    // No-glob packages must not get a (meaningless) entry.
+    assert.equal(cache.entries["@fusion/core"], undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("seedArtifactCache: does NOT record a package whose artifacts are missing", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "fn-dist-seed-miss-"));
+  try {
+    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+    // Engine dist is missing; everything else present.
+    const existsFn = (p) => !p.endsWith("packages/engine/dist/index.js");
+    const seeded = seedArtifactCache(root, existsFn, fakeGitForAllSources());
+    assert.ok(!seeded.includes("@fusion/engine"), "missing-artifact package must not be seeded");
+
+    const cache = JSON.parse(
+      readFileSync(path.join(root, "node_modules", ".cache", "fusion", "artifact-cache.json"), "utf8"),
+    );
+    assert.equal(cache.entries["@fusion/engine"], undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

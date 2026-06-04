@@ -11,14 +11,27 @@ import {
 } from "./lib/content-hash.mjs";
 
 export const REQUIRED_BUILD_PACKAGES = [
-  { name: "@fusion/core", requiredArtifacts: ["packages/core/dist/index.js"] },
-  { name: "@fusion/dashboard", requiredArtifacts: ["packages/dashboard/dist/index.js"] },
+  {
+    name: "@fusion/core",
+    requiredArtifacts: ["packages/core/dist/index.js"],
+    sourceInputs: ["packages/core/src"],
+  },
+  {
+    name: "@fusion/dashboard",
+    requiredArtifacts: ["packages/dashboard/dist/index.js"],
+    // Dashboard's `vite build && tsc` reads both app/ and src/.
+    sourceInputs: ["packages/dashboard/app", "packages/dashboard/src"],
+  },
   {
     name: "@fusion/engine",
     requiredArtifacts: ["packages/engine/dist/index.js"],
     staleAgainstGlobs: [{ sourcePath: "packages/engine/src" }],
   },
-  { name: "@fusion/plugin-sdk", requiredArtifacts: ["packages/plugin-sdk/dist/index.js"] },
+  {
+    name: "@fusion/plugin-sdk",
+    requiredArtifacts: ["packages/plugin-sdk/dist/index.js"],
+    sourceInputs: ["packages/plugin-sdk/src"],
+  },
   {
     name: "@fusion-plugin-examples/dependency-graph",
     requiredArtifacts: [
@@ -74,6 +87,53 @@ export const REQUIRED_BUILD_PACKAGES = [
 // ---------------------------------------------------------------------------
 
 const ARTIFACT_CACHE_VERSION = 1;
+
+/**
+ * Repo-relative source input paths for a build package. Prefers the explicit
+ * `sourceInputs` list (covers packages with no mtime-staleness globs, e.g.
+ * @fusion/core), and falls back to the `staleAgainstGlobs` source paths so the
+ * engine + plugin entries keep a single source of truth.
+ *
+ * @param {object} pkgEntry
+ * @returns {string[]}
+ */
+export function packageSourceInputs(pkgEntry) {
+  if (Array.isArray(pkgEntry?.sourceInputs) && pkgEntry.sourceInputs.length > 0) {
+    return [...pkgEntry.sourceInputs];
+  }
+  if (pkgEntry?.staleAgainstGlobs?.length) {
+    return pkgEntry.staleAgainstGlobs.map((glob) => glob.sourcePath);
+  }
+  return [];
+}
+
+/**
+ * Stable, git-based combined source hash over ALL build packages' source
+ * inputs. Computable BEFORE any build (it only reads git blob SHAs / working
+ * tree bytes, never dist), and branch-switch stable because it defers to git
+ * content rather than file mtimes. Used as the CI dist-cache key.
+ *
+ * Returns null when git is unavailable (no stable key → caller must not cache).
+ *
+ * @param {string} rootDir
+ * @param {(args: string[], cwd: string) => string|null} [gitFn]
+ * @returns {string|null}
+ */
+export function computeCombinedSourceHash(rootDir = process.cwd(), gitFn = defaultGitRunner) {
+  const probe = gitFn(["rev-parse", "--is-inside-work-tree"], rootDir);
+  if (probe !== "true") return null;
+  // Sorted, de-duplicated union of every package's source inputs so the order in
+  // REQUIRED_BUILD_PACKAGES can't perturb the hash.
+  const inputPaths = [
+    ...new Set(REQUIRED_BUILD_PACKAGES.flatMap((pkg) => packageSourceInputs(pkg))),
+  ].sort((a, b) => a.localeCompare(b));
+  return computeContentHash({
+    rootDir,
+    inputPaths,
+    versionPrefix: `artifact-combined-v${ARTIFACT_CACHE_VERSION}`,
+    gitFn,
+  });
+}
 
 function artifactCachePath(rootDir) {
   return path.join(fusionCacheDir(rootDir), "artifact-cache.json");
@@ -376,6 +436,48 @@ export function ensureTestArtifacts(
   return names;
 }
 
+/**
+ * Seed the per-package content-hash cache for every build package whose dist
+ * artifacts are ALL present, recording the current source hash as the "built
+ * baseline". Intended to run right after a CI dist-cache HIT: the restored dist
+ * carries the saved (older) mtime while checkout rewrites src mtimes to "now",
+ * so without a seeded hash-cache `isStale`'s mtime fallback would rebuild
+ * everything and defeat the cache. Seeding adopts the restored content as fresh
+ * so the content-hash short-circuit fires instead.
+ *
+ * Only seeds packages with all artifacts present (never masks a genuinely
+ * missing/partial dist). Returns the list of package names seeded.
+ *
+ * @param {string} rootDir
+ * @param {(p: string) => boolean} [existsFn]
+ * @param {(args: string[], cwd: string) => string|null} [gitFn]
+ * @returns {string[]}
+ */
+export function seedArtifactCache(rootDir = process.cwd(), existsFn = existsSync, gitFn = defaultGitRunner) {
+  const resolvedRootDir = resolveWorkspaceRoot(rootDir);
+  const present = REQUIRED_BUILD_PACKAGES.filter((pkg) =>
+    pkg.requiredArtifacts.every((artifactPath) => existsFn(path.join(resolvedRootDir, artifactPath))),
+  );
+  // recordArtifactBuild itself no-ops packages without source globs (the
+  // mtime-immune @fusion/core/dashboard/plugin-sdk), so only the staleable
+  // packages actually get an entry — exactly the ones that need the override.
+  recordArtifactBuild(present, resolvedRootDir, gitFn);
+  return present.map((pkg) => pkg.name);
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  ensureTestArtifacts();
+  const argv = process.argv.slice(2);
+  if (argv.includes("--print-source-hash")) {
+    const hash = computeCombinedSourceHash();
+    if (hash === null) {
+      process.stderr.write("[test-bootstrap] cannot compute source hash: not a git work tree\n");
+      process.exit(1);
+    }
+    process.stdout.write(`${hash}\n`);
+  } else if (argv.includes("--seed-artifact-cache")) {
+    const seeded = seedArtifactCache();
+    process.stderr.write(`[test-bootstrap] seeded artifact hash-cache for: ${seeded.join(", ") || "(none)"}\n`);
+  } else {
+    ensureTestArtifacts();
+  }
 }

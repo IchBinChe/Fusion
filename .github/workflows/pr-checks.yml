@@ -83,6 +83,43 @@ jobs:
       - name: Setup Node.js and pnpm
         uses: ./.github/actions/setup-node-pnpm
 
+      # Dist-artifact cache (L1): ensureTestArtifacts otherwise rebuilds dist/
+      # for 8 packages (~71s) on every shard because CI starts with no dist.
+      # Key on a stable, pre-build, git-based hash of ALL build packages' source
+      # inputs. Exact-match only — NO restore-keys: a partial/stale dist hit is
+      # the exact failure mode this repo has been bitten by (FN-4232/FN-4605),
+      # and ensureTestArtifacts still validates/rebuilds anything missing-or-stale
+      # after restore, so a miss is safe but a wrong-content hit would not be.
+      # NEVER add node_modules here (breaks Windows pnpm junctions elsewhere).
+      - name: Compute dist source hash
+        id: dist-hash
+        run: echo "hash=$(node scripts/ensure-test-artifacts.mjs --print-source-hash)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache built dist artifacts
+        id: dist-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages/core/dist
+            packages/dashboard/dist
+            packages/engine/dist
+            packages/plugin-sdk/dist
+            plugins/fusion-plugin-dependency-graph/dist
+            plugins/fusion-plugin-hermes-runtime/dist
+            plugins/fusion-plugin-openclaw-runtime/dist
+            plugins/fusion-plugin-paperclip-runtime/dist
+          key: dist-${{ runner.os }}-${{ steps.dist-hash.outputs.hash }}
+
+      # On a cache HIT, restored dist files carry their save-time mtimes while
+      # checkout rewrites src mtimes to "now" (src newer than dist), which would
+      # make ensureTestArtifacts' mtime fallback rebuild everything and defeat
+      # the cache. Seed the per-package content-hash cache so its content-hash
+      # short-circuit fires instead. ensureTestArtifacts still runs (inside
+      # test:ci:shard) and rebuilds anything genuinely missing/changed.
+      - name: Seed artifact hash-cache on cache hit
+        if: steps.dist-cache.outputs.cache-hit == 'true'
+        run: node scripts/ensure-test-artifacts.mjs --seed-artifact-cache
+
       - name: Test (deterministic shard)
         run: pnpm test:ci:shard --shard ${{ matrix.shard }} --total 4
 
@@ -120,6 +157,33 @@ jobs:
 
       - name: Setup Node.js and pnpm
         uses: ./.github/actions/setup-node-pnpm
+
+      # Same dist-artifact cache as test-shards (L1): the curated-gate guard runs
+      # `vitest list`, whose config resolution can touch built dist, so it also
+      # pays the cold-dist rebuild. Exact-match key on the pre-build source hash;
+      # NO restore-keys (stale dist is the failure mode), NO node_modules.
+      - name: Compute dist source hash
+        id: dist-hash
+        run: echo "hash=$(node scripts/ensure-test-artifacts.mjs --print-source-hash)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache built dist artifacts
+        id: dist-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages/core/dist
+            packages/dashboard/dist
+            packages/engine/dist
+            packages/plugin-sdk/dist
+            plugins/fusion-plugin-dependency-graph/dist
+            plugins/fusion-plugin-hermes-runtime/dist
+            plugins/fusion-plugin-openclaw-runtime/dist
+            plugins/fusion-plugin-paperclip-runtime/dist
+          key: dist-${{ runner.os }}-${{ steps.dist-hash.outputs.hash }}
+
+      - name: Seed artifact hash-cache on cache hit
+        if: steps.dist-cache.outputs.cache-hit == 'true'
+        run: node scripts/ensure-test-artifacts.mjs --seed-artifact-cache
 
       - name: Assert every dashboard test file is gated or skip-listed
         run: node scripts/check-test-inventory.mjs --dashboard-curated

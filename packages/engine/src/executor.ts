@@ -103,6 +103,7 @@ import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
+import { resetStepToBaseline } from "./step-runner.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { resolveCapturedBaseCommitSha } from "./base-commit-capture.js";
 import { installTaskWorktreeIdentityGuard } from "./worktree-hooks.js";
@@ -7453,61 +7454,31 @@ export class TaskExecutor {
               }
               break;
             case "RETHINK": {
-              // For code reviews: git reset to baseline to revert file changes
-              // For plan reviews: skip git reset (no code has been written yet)
-              if (reviewType === "code" && baseline) {
-                try {
-                  await execAsync(`git reset --hard ${baseline}`, { cwd: worktreePath });
-                  executorLog.log(`${taskId}: RETHINK — git reset --hard ${baseline}`);
-                } catch (gitErr: unknown) {
-                  const gitErrMessage = gitErr instanceof Error ? gitErr.message : String(gitErr);
-                  executorLog.error(`${taskId}: RETHINK git reset failed: ${gitErrMessage}`);
-                }
-              } else if (reviewType === "code") {
-                executorLog.log(`${taskId}: RETHINK — no baseline SHA, skipping git reset`);
-              }
-
-              // Rewind conversation to pre-step checkpoint
+              // RETHINK mechanics (git reset to baseline + session rewind +
+              // step→pending + RETHINK log entry) are the U2 substrate seam.
+              // The legacy in-session path delegates to the single extracted
+              // implementation in step-runner.ts so there is exactly one copy.
+              // No blast-radius guard here: this path is intra-session with an
+              // agent-supplied baseline (KTD-2 — the guard is for graph-owned
+              // shared-isolation resets), so behavior stays byte-identical.
               const checkpointId = stepCheckpoints.get(stepIndex);
-              if (checkpointId && sessionRef.current) {
-                try {
-                  await sessionRef.current.navigateTree(checkpointId, { summarize: false });
-                  executorLog.log(`${taskId}: RETHINK — session rewound to checkpoint ${checkpointId}`);
-                } catch (rewindErr: unknown) {
-                  const msg = rewindErr instanceof Error ? rewindErr.message : String(rewindErr);
-                  executorLog.warn(`${taskId}: RETHINK navigateTree rewind failed, falling back to branchWithSummary: ${msg}`);
-                  // Fallback to branchWithSummary
-                  try {
-                    sessionRef.current.sessionManager.branchWithSummary(
-                      checkpointId,
-                      `RETHINK: ${result.summary || "Approach rejected by reviewer"}`,
-                    );
-                    executorLog.log(`${taskId}: RETHINK — branched from checkpoint ${checkpointId}`);
-                  } catch (branchErr: unknown) {
-                    const branchErrMessage = branchErr instanceof Error ? branchErr.message : String(branchErr);
-                    executorLog.error(`${taskId}: RETHINK session rewind failed: ${branchErrMessage}`);
-                  }
-                }
-              } else {
-                executorLog.log(`${taskId}: RETHINK — no session checkpoint for step ${step}, skipping rewind`);
-              }
-
-              // Reset step status to pending
-              await store.updateStep(taskId, stepIndex, "pending");
+              await resetStepToBaseline(
+                {
+                  store,
+                  worktreePath,
+                  sessionRef,
+                  reviewType: reviewType === "plan" ? "plan" : "code",
+                  summary: result.summary,
+                },
+                { id: taskId, steps: taskSteps },
+                stepIndex,
+                reviewType === "code" ? baseline : undefined,
+                checkpointId,
+              );
 
               if (reviewType === "plan") {
-                await store.logEntry(
-                  taskId,
-                  `RETHINK: Step ${step} plan rewound — session checkpoint ${checkpointId || "N/A"}`,
-                  result.summary,
-                );
                 text = `RETHINK\n\nYour plan was rejected. Here is why:\n\n${result.review}\n\nTake a different approach to planning this step. Do NOT repeat the rejected strategy.`;
               } else {
-                await store.logEntry(
-                  taskId,
-                  `RETHINK: Step ${step} rewound — git reset to ${baseline || "N/A"}, session checkpoint ${checkpointId || "N/A"}`,
-                  result.summary,
-                );
                 text = `RETHINK\n\nYour previous approach was rejected. Here is why:\n\n${result.review}\n\nTake a different approach. Do NOT repeat the rejected strategy. Re-read the step requirements and find an alternative solution.`;
               }
               break;

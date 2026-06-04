@@ -554,6 +554,21 @@ export {
 } from "./hold-release.js";
 export { StepSessionExecutor } from "./step-session-executor.js";
 export type { StepResult, ParallelWave, StepSessionExecutorOptions } from "./step-session-executor.js";
+export {
+  runTaskStep,
+  resetStepToBaseline,
+  makeAncestryBlastRadiusGuard,
+} from "./step-runner.js";
+export type {
+  RunTaskStepDeps,
+  RunTaskStepOptions,
+  RunTaskStepResult,
+  ResetStepDeps,
+  ResetStepResult,
+  RunSingleStep,
+  SessionRef,
+  StepRunnerTask,
+} from "./step-runner.js";
 // Multi-project runtime types
 export {
   type ProjectRuntime,

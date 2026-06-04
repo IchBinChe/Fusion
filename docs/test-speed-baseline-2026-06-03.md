@@ -147,3 +147,13 @@ aggregate full-suite/CI path the cold-start tax is **material but second-order**
 trim), U5 (config tuning), U6 (duration sharding), and U7 (slow-test triage)
 first, then re-evaluating the U8 gate once those land, since they shrink both the
 per-process count and the heavy-test tail that currently dominate.
+
+## U5 canary evidence (2026-06-03): isolate:false rejected everywhere
+
+| Project | Variant | Result | Verdict |
+|---|---|---|---|
+| engine-default | `--no-isolate` | EXIT 143 (SIGTERM) at ~27s, twice | revert |
+| dashboard-api-quality | `--no-isolate` | hung, 164s (5.8x slower), twice | revert |
+| dashboard-app-quality-foundation-hooks-utils | `--no-isolate` | run1 crash; run2 33 fails (cross-file contamination) | revert |
+
+Root cause: `packages/core/src/__test-utils__/vitest-setup.ts` mutates `fs`/`child_process`/cwd/HOME at module level per worker; non-isolated files share that state. Isolation is load-bearing for this repo — do not re-trial without restructuring the setup file. happy-dom and deps.optimizer trials dropped (lowest value; happy-dom not installed, optimizer not cleanly canary-able under `projects`). Deprecation audit: zero `poolMatchGlobs`/`environmentMatchGlobs`/workspace-file usages across all 28 configs — vitest 4 migration delta for these is already zero.

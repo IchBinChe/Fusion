@@ -54,7 +54,7 @@ import {
   FOREACH_CHILD_X,
   FOREACH_CHILD_Y,
 } from "./workflow-flow-mapping";
-import { fetchTraits, type TraitCatalogEntry } from "../api";
+import { fetchTraits, fetchStepParsers, type TraitCatalogEntry } from "../api";
 import { WorkflowColumnPanel } from "./WorkflowColumnPanel";
 import { WorkflowFieldsPanel } from "./WorkflowFieldsPanel";
 import type { WorkflowFieldDefinition } from "../api";
@@ -93,8 +93,9 @@ function newNodeId(): string {
   return `n-${Date.now().toString(36)}-${nodeSeq}`;
 }
 
-/** Built-in step parsers (KTD-12). Hardcoded for now; TODO: source from the live
- *  parser registry once a catalog endpoint exists (incl. plugin parsers). */
+/** Built-in step parsers (KTD-12). Fallback list when the live catalog endpoint
+ *  (GET /api/step-parsers) is unreachable; the editor otherwise merges in any
+ *  registered plugin parsers fetched from the registry. */
 const BUILTIN_STEP_PARSERS = ["step-headings", "json-steps"] as const;
 
 /** Step-review verdict outcomes (KTD-4), authored as `outcome:<verdict>` edge
@@ -138,6 +139,10 @@ function InnerEditor({
   // v2 custom field definitions the editor is authoring (KTD-13/14, U13).
   const [fields, setFields] = useState<WorkflowFieldDefinition[]>([]);
   const [traitCatalog, setTraitCatalog] = useState<TraitCatalogEntry[]>([]);
+  // Step-parser ids for the parse-steps inspector (KTD-12). Seeded with the
+  // built-in pair so the select is never empty; replaced by the live catalog
+  // (built-ins + plugin parsers) once GET /api/step-parsers resolves.
+  const [stepParsers, setStepParsers] = useState<string[]>([...BUILTIN_STEP_PARSERS]);
 
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
@@ -152,6 +157,23 @@ function InnerEditor({
       })
       .catch(() => {
         // Non-fatal: validation degrades to server-side parse on save.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Step-parser catalog (KTD-12) for the parse-steps inspector's parser select.
+  // Merges built-ins with any registered plugin parsers; falls back to the
+  // built-in pair if the fetch fails so the select always has options.
+  useEffect(() => {
+    let cancelled = false;
+    fetchStepParsers(projectId)
+      .then((ids) => {
+        if (!cancelled && ids.length > 0) setStepParsers(ids);
+      })
+      .catch(() => {
+        // Non-fatal: keep the built-in fallback already in state.
       });
     return () => {
       cancelled = true;
@@ -1181,12 +1203,17 @@ function InnerEditor({
                   )}
                   <label className="wf-field">
                     <span>{t("workflowNodes.parseParser", "Parser")}</span>
-                    {/* TODO: source from the live parser registry (incl. plugin parsers). */}
+                    {/* Sourced from the live parser registry via GET /api/step-parsers
+                        (built-ins + plugin parsers), with a built-in fallback. The
+                        node's current parser is always included so a plugin parser
+                        the catalog missed never silently drops out of the select. */}
                     <select
                       value={String(selectedNode.data.config?.parser ?? "step-headings")}
                       onChange={(e) => updateSelectedData({ config: { parser: e.target.value } })}
                     >
-                      {BUILTIN_STEP_PARSERS.map((p) => (
+                      {Array.from(
+                        new Set([String(selectedNode.data.config?.parser ?? "step-headings"), ...stepParsers]),
+                      ).map((p) => (
                         <option key={p} value={p}>
                           {p}
                         </option>

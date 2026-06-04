@@ -113,6 +113,24 @@ describe("validateCodeNodeSources (U14, save-time helper)", () => {
     const ir = { nodes: [codeNode("export default async () => ({ outcome: 'ok' });")] };
     expect(await validateCodeNodeSources(ir)).toEqual([]);
   });
+
+  it("does not crash on a malformed foreach template.nodes (non-array)", async () => {
+    const ir = {
+      nodes: [
+        // `nodes` is an object, not an array — a truthy-but-malformed config.
+        { id: "fe", kind: "foreach", config: { template: { nodes: { bogus: true } } } } as unknown as WorkflowIrNode,
+      ],
+    };
+    const failures = await validateCodeNodeSources(ir);
+    expect(failures).toEqual([{ nodeId: "fe", error: "foreach template.nodes must be an array" }]);
+  });
+
+  it("ignores a foreach with no template nodes", async () => {
+    const ir = {
+      nodes: [{ id: "fe", kind: "foreach", config: { template: {} } } as unknown as WorkflowIrNode],
+    };
+    expect(await validateCodeNodeSources(ir)).toEqual([]);
+  });
 });
 
 describe("createCodeNodeRunner result mapping (U14, seam-injected)", () => {

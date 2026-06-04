@@ -27,8 +27,14 @@ describe("runGraphTaskStep (FIX 3)", () => {
       steps: stepStatus ? [{ name: "S1", status: stepStatus }] : [{ name: "S1", status: "pending" }],
     });
     const executor: any = new TaskExecutor(store, "/tmp/test", {});
-    // Stamp the active foreach context the seam would normally stamp.
-    if (active) executor.graphStepActiveContext.set("FN-001", { stepIndex: 0, ...active });
+    // Stamp the active foreach context the seam would normally stamp, keyed by
+    // the composite per-instance key (T7).
+    if (active) {
+      executor.graphStepActiveContext.set(
+        executor.graphActiveContextKey("FN-001", "inst-0"),
+        { stepIndex: 0, instanceId: "inst-0", ...active },
+      );
+    }
     return { executor, store };
   }
 
@@ -92,5 +98,56 @@ describe("runGraphTaskStep (FIX 3)", () => {
     executor.runImplementationPhase = vi.fn().mockResolvedValue({ taskDone: true, modifiedFiles: [] });
     const result = await executor.runGraphTaskStep(task, 0);
     expect(result.success).toBe(true);
+  });
+
+  // T9: a RETHINK after a SUCCESSFUL pass must clear the memoized implementation
+  // so the rework re-runs implementation rather than re-awaiting the resolved memo.
+  it("clears the memo on rethink reset so implementation re-runs after a successful pass", async () => {
+    const { executor, store } = makeExecutor("done", { deferDoneToReview: true });
+    // No-op the git/step reset machinery — only the memo-clearing path matters here.
+    store.getTask = vi.fn().mockResolvedValue({ id: "FN-001", steps: [{ name: "S1", status: "done" }] });
+    let calls = 0;
+    executor.runImplementationPhase = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      return { taskDone: true, modifiedFiles: [] };
+    });
+
+    // First pass: succeeds and the memo is now resolved.
+    const first = await executor.runGraphTaskStep(task, 0, "inst-0");
+    expect(first.success).toBe(true);
+    expect(calls).toBe(1);
+    expect(executor.graphStepRunOnce.has("FN-001")).toBe(true);
+
+    // RETHINK reset clears the SETTLED memo (guarded against in-flight clobber).
+    await executor.applyGraphRethinkReset("FN-001", { stepIndex: 0, instanceId: "inst-0" });
+    expect(executor.graphStepRunOnce.has("FN-001")).toBe(false);
+
+    // Rework re-run: implementation is invoked AGAIN (the bug re-awaited the memo).
+    const second = await executor.runGraphTaskStep(task, 0, "inst-0");
+    expect(second.success).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  // T7: parallel instances of the same task keep independent active contexts.
+  it("keys active context per-instance so parallel foreach instances do not clobber", async () => {
+    const store = createMockStore();
+    store.getTask = vi.fn().mockResolvedValue({ id: "FN-001", steps: [{ name: "S1", status: "in-progress" }] });
+    const executor: any = new TaskExecutor(store, "/tmp/test", {});
+    // Instance A defers done to review (non-terminal → success); instance B does not
+    // (non-terminal → failure). A per-task key would let one overwrite the other.
+    executor.graphStepActiveContext.set(
+      executor.graphActiveContextKey("FN-001", "inst-A"),
+      { stepIndex: 0, instanceId: "inst-A", deferDoneToReview: true },
+    );
+    executor.graphStepActiveContext.set(
+      executor.graphActiveContextKey("FN-001", "inst-B"),
+      { stepIndex: 0, instanceId: "inst-B", deferDoneToReview: false },
+    );
+    executor.runImplementationPhase = vi.fn().mockResolvedValue({ taskDone: false, modifiedFiles: [] });
+
+    const a = await executor.runGraphTaskStep(task, 0, "inst-A");
+    const b = await executor.runGraphTaskStep(task, 0, "inst-B");
+    expect(a.success).toBe(true); // review authors done
+    expect(b.success).toBe(false); // implementation left it incomplete
   });
 });

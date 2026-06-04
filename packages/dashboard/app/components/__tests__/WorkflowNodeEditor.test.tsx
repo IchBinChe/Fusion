@@ -11,13 +11,14 @@ vi.mock("../../api", () => ({
   deleteWorkflow: vi.fn(),
   compileWorkflow: vi.fn(),
   fetchTraits: vi.fn(),
+  fetchStepParsers: vi.fn(),
   fetchModels: vi.fn(),
   fetchAgents: vi.fn(),
   fetchDiscoveredSkills: vi.fn(),
 }));
 
 import { fireEvent } from "@testing-library/react";
-import { fetchWorkflows, fetchTraits, updateWorkflow, compileWorkflow, createWorkflow, fetchModels } from "../../api";
+import { fetchWorkflows, fetchTraits, fetchStepParsers, updateWorkflow, compileWorkflow, createWorkflow, fetchModels } from "../../api";
 import type { TraitCatalogEntry } from "../../api";
 import { WorkflowNodeEditor } from "../WorkflowNodeEditor";
 
@@ -122,6 +123,7 @@ describe("WorkflowNodeEditor", () => {
   beforeEach(() => {
     vi.mocked(fetchWorkflows).mockResolvedValue([]);
     vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
   });
 
   afterEach(() => {
@@ -145,6 +147,7 @@ describe("WorkflowNodeEditor", () => {
 describe("WorkflowNodeEditor — U10 columns/traits/holds", () => {
   beforeEach(() => {
     vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
   });
   afterEach(() => {
     cleanup();
@@ -321,6 +324,7 @@ function stepwiseDef(): WorkflowDefinition {
 describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
   beforeEach(() => {
     vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
   });
   afterEach(() => {
     cleanup();
@@ -466,6 +470,40 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     expect(parserSel.value).toBe("json-steps");
   });
 
+  it("offers plugin step parsers from the live catalog (KTD-12)", async () => {
+    vi.mocked(fetchStepParsers).mockResolvedValue([
+      "step-headings",
+      "json-steps",
+      "plugin:acme:yaml-steps",
+    ]);
+    vi.mocked(fetchWorkflows).mockResolvedValue([stepwiseDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    const parseNode = await screen.findByTestId("wf-node-parse-steps");
+    fireEvent.click(parseNode);
+    const parserSel = (await screen.findByText("Parser")).parentElement!.querySelector("select")! as HTMLSelectElement;
+    // The plugin parser option becomes available once the catalog resolves...
+    await waitFor(() =>
+      expect(
+        Array.from(parserSel.options).some((o) => o.value === "plugin:acme:yaml-steps"),
+      ).toBe(true),
+    );
+    // ...and is selectable.
+    fireEvent.change(parserSel, { target: { value: "plugin:acme:yaml-steps" } });
+    expect(parserSel.value).toBe("plugin:acme:yaml-steps");
+  });
+
+  it("falls back to the built-in parser pair when the catalog fetch fails", async () => {
+    vi.mocked(fetchStepParsers).mockRejectedValue(new Error("offline"));
+    vi.mocked(fetchWorkflows).mockResolvedValue([stepwiseDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    const parseNode = await screen.findByTestId("wf-node-parse-steps");
+    fireEvent.click(parseNode);
+    const parserSel = (await screen.findByText("Parser")).parentElement!.querySelector("select")! as HTMLSelectElement;
+    const values = Array.from(parserSel.options).map((o) => o.value);
+    expect(values).toContain("step-headings");
+    expect(values).toContain("json-steps");
+  });
+
   it("edits a code node source and timeout", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
@@ -501,6 +539,7 @@ function builtinStepwiseDef(): WorkflowDefinition {
 describe("WorkflowNodeEditor — built-in stepwise selection render path", () => {
   beforeEach(() => {
     vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
   });
   afterEach(() => {
     cleanup();

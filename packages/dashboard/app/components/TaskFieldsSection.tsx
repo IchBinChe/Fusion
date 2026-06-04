@@ -30,7 +30,7 @@
  * nothing (null), so a task on a field-less workflow is byte-identical to
  * today's UI (snapshot-guarded by the test suite).
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import type {
@@ -92,16 +92,51 @@ function FieldRow({ field, value, onSave, error, readOnly }: FieldRowProps) {
   const fieldError = error && error.fieldId === field.id ? error : null;
   const disabled = readOnly || !onSave;
 
+  // Serialize per-field saves: rapid chip/toggle/blur edits to the same field
+  // would otherwise fire overlapping PATCHes whose responses can resolve out of
+  // order, letting an older request clobber a newer selection. We chain each
+  // save onto the previous one for this field so they apply in click order.
+  const saveTailRef = useRef<Promise<void>>(Promise.resolve());
   const commit = useCallback(
     (next: unknown) => {
       if (!onSave) return;
-      void onSave({ [field.id]: next });
+      const run = () => onSave({ [field.id]: next });
+      // Run after any in-flight save for this field, regardless of its outcome,
+      // so a rejected save doesn't permanently break the chain. The tail is kept
+      // settled-always (.catch) so its own rejection never floats unhandled and
+      // never blocks the next queued save — the caller surfaces failures via
+      // `error`, so we intentionally swallow here for ordering purposes only.
+      const prev = saveTailRef.current;
+      saveTailRef.current = prev.then(run, run).catch(() => {});
     },
     [onSave, field.id],
   );
 
   const labelId = `task-field-label-${field.id}`;
   const controlId = `task-field-${field.id}`;
+
+  // Prop-derived string value for the uncontrolled-style inputs (date / text /
+  // string / number / url). These were previously rendered with `defaultValue`,
+  // which only seeds on mount — so an external refresh of `customFields` (SSE or
+  // a save round-trip) left the DOM showing a stale value, and a later blur would
+  // commit that stale value back over the refreshed one. We make them controlled
+  // and re-sync to the latest prop whenever it changes.
+  const propTextValue =
+    field.type === "date"
+      ? typeof value === "string"
+        ? value.slice(0, 10)
+        : ""
+      : field.type === "number"
+        ? typeof value === "number"
+          ? String(value)
+          : ""
+        : typeof value === "string"
+          ? value
+          : "";
+  const [localValue, setLocalValue] = useState(propTextValue);
+  useEffect(() => {
+    setLocalValue(propTextValue);
+  }, [propTextValue]);
 
   const renderControl = () => {
     // enum → select / radio / chips (single)
@@ -218,18 +253,18 @@ function FieldRow({ field, value, onSave, error, readOnly }: FieldRowProps) {
 
     // date → date input
     if (field.type === "date") {
-      const current = typeof value === "string" ? value.slice(0, 10) : "";
       return (
         <input
           id={controlId}
           type="date"
           className="task-field-input"
-          defaultValue={current}
+          value={localValue}
           disabled={disabled}
           aria-labelledby={labelId}
+          onChange={(e) => setLocalValue(e.target.value)}
           onBlur={(e) => {
             const next = e.target.value;
-            if (next === current) return;
+            if (next === propTextValue) return;
             commit(next === "" ? null : next);
           }}
         />
@@ -238,17 +273,17 @@ function FieldRow({ field, value, onSave, error, readOnly }: FieldRowProps) {
 
     // text → textarea
     if (field.type === "text") {
-      const current = typeof value === "string" ? value : "";
       return (
         <textarea
           id={controlId}
           className="task-field-textarea"
-          defaultValue={current}
+          value={localValue}
           disabled={disabled}
           aria-labelledby={labelId}
           rows={3}
+          onChange={(e) => setLocalValue(e.target.value)}
           onBlur={(e) => {
-            if (e.target.value === current) return;
+            if (e.target.value === propTextValue) return;
             commit(e.target.value === "" ? null : e.target.value);
           }}
         />
@@ -256,21 +291,18 @@ function FieldRow({ field, value, onSave, error, readOnly }: FieldRowProps) {
     }
 
     // number / url / string → validated input
-    const current =
-      field.type === "number"
-        ? (typeof value === "number" ? String(value) : "")
-        : (typeof value === "string" ? value : "");
     return (
       <input
         id={controlId}
         type={field.type === "number" ? "number" : field.type === "url" ? "url" : "text"}
         className="task-field-input"
-        defaultValue={current}
+        value={localValue}
         disabled={disabled}
         aria-labelledby={labelId}
+        onChange={(e) => setLocalValue(e.target.value)}
         onBlur={(e) => {
           const raw = e.target.value;
-          if (raw === current) return;
+          if (raw === propTextValue) return;
           if (raw === "") {
             commit(null);
             return;

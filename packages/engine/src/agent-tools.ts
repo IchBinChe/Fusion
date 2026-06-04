@@ -1080,10 +1080,14 @@ export function createWorkflowGetTool(store: TaskStore): ToolDefinition {
           description: def.description,
           builtin,
           ir: def.ir,
+          // Preserve editor node positions so a read→modify→write cycle does not
+          // strip the layout. May be absent for older/built-in defs; only include
+          // when present to keep the payload tidy.
+          ...(def.layout ? { layout: def.layout } : {}),
         };
         return {
           content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-          details: { workflowId: def.id, builtin },
+          details: { workflowId: def.id, builtin, ...(def.layout ? { layout: def.layout } : {}) },
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {

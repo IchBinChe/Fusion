@@ -171,6 +171,96 @@ describe("TaskFieldsSection", () => {
     expect(body.textContent).toContain("stale");
   });
 
+  it("serializes per-field saves so a stale response can't clobber a newer one (T2)", async () => {
+    // Two overlapping chip clicks: the FIRST save resolves slowly, the second
+    // quickly. With serialization the second onSave must not start until the
+    // first settles, guaranteeing the newer selection is applied last.
+    const resolvers: Array<() => void> = [];
+    const onSave = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const field: WorkflowFieldDefinition = { ...enumField, render: { placement: "detail", widget: "chips" } };
+    render(<TaskFieldsSection fieldDefs={[field]} customFields={{}} onSave={onSave} />);
+    const low = screen.getByRole("button", { name: "Low" });
+    const high = screen.getByRole("button", { name: "High" });
+
+    fireEvent.click(low);
+    fireEvent.click(high);
+
+    // Only the first save has started; the second is queued behind it.
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenNthCalledWith(1, { severity: "low" });
+    expect(resolvers).toHaveLength(1);
+
+    // Resolve the first; the second now runs.
+    resolvers[0]();
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave).toHaveBeenNthCalledWith(2, { severity: "high" });
+  });
+
+  it("keeps the chain alive after a rejected save (T2)", async () => {
+    // First save rejects; the chain must recover so a later edit still saves.
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue(undefined);
+    const field: WorkflowFieldDefinition = { id: "owner", name: "Owner", type: "string", render: { placement: "detail" } };
+    render(<TaskFieldsSection fieldDefs={[field]} customFields={{}} onSave={onSave} />);
+    const input = screen.getByLabelText("Owner") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "a" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(onSave).toHaveBeenNthCalledWith(1, { owner: "a" }));
+
+    fireEvent.change(input, { target: { value: "ab" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(onSave).toHaveBeenNthCalledWith(2, { owner: "ab" }));
+  });
+
+  it("text input re-syncs to refreshed customFields after mount (T3)", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const field: WorkflowFieldDefinition = { id: "owner", name: "Owner", type: "string", render: { placement: "detail" } };
+    const { rerender } = render(
+      <TaskFieldsSection fieldDefs={[field]} customFields={{ owner: "alice" }} onSave={onSave} />,
+    );
+    const input = screen.getByLabelText("Owner") as HTMLInputElement;
+    expect(input.value).toBe("alice");
+    // External refresh (SSE / save round-trip) — uncontrolled inputs would keep
+    // showing "alice"; controlled inputs must reflect the new prop value.
+    rerender(<TaskFieldsSection fieldDefs={[field]} customFields={{ owner: "bob" }} onSave={onSave} />);
+    expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("bob");
+  });
+
+  it("a stale blur does not overwrite a refreshed value (T3)", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const field: WorkflowFieldDefinition = { id: "owner", name: "Owner", type: "string", render: { placement: "detail" } };
+    const { rerender } = render(
+      <TaskFieldsSection fieldDefs={[field]} customFields={{ owner: "alice" }} onSave={onSave} />,
+    );
+    // External refresh to "bob" while the field still holds the old DOM value.
+    rerender(<TaskFieldsSection fieldDefs={[field]} customFields={{ owner: "bob" }} onSave={onSave} />);
+    const input = screen.getByLabelText("Owner") as HTMLInputElement;
+    // Blur with the refreshed value present → no spurious commit of the stale value.
+    fireEvent.blur(input);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("date input re-syncs to refreshed customFields after mount (T3)", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const field: WorkflowFieldDefinition = { id: "due", name: "Due", type: "date", render: { placement: "detail" } };
+    const { rerender } = render(
+      <TaskFieldsSection fieldDefs={[field]} customFields={{ due: "2026-06-04T00:00:00.000Z" }} onSave={onSave} />,
+    );
+    expect((screen.getByLabelText("Due") as HTMLInputElement).value).toBe("2026-06-04");
+    rerender(
+      <TaskFieldsSection fieldDefs={[field]} customFields={{ due: "2026-07-01T00:00:00.000Z" }} onSave={onSave} />,
+    );
+    expect((screen.getByLabelText("Due") as HTMLInputElement).value).toBe("2026-07-01");
+  });
+
   it("does not call onSave when readOnly", () => {
     const onSave = vi.fn();
     render(<TaskFieldsSection fieldDefs={[enumField]} customFields={{ severity: "low" }} onSave={onSave} readOnly />);

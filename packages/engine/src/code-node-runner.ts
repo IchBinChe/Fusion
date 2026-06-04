@@ -401,9 +401,15 @@ export async function validateCodeNodeSources(
   // Recurse into any foreach templates (code nodes are legal inside them, KTD-15).
   for (const node of ir.nodes) {
     if (node.kind !== "foreach") continue;
-    const template = (node.config as { template?: { nodes?: WorkflowIrNode[] } } | undefined)?.template;
-    if (template?.nodes) {
-      failures.push(...(await validateCodeNodeSources({ nodes: template.nodes })));
+    const template = (node.config as { template?: { nodes?: unknown } } | undefined)?.template;
+    // Guard with an explicit array check: a malformed config where `nodes` is a
+    // non-array truthy value would otherwise break the `for...of` inside the
+    // recursive validateCodeNodeSources call and bubble as a 500 rather than a
+    // clean validation failure.
+    if (Array.isArray(template?.nodes)) {
+      failures.push(...(await validateCodeNodeSources({ nodes: template.nodes as WorkflowIrNode[] })));
+    } else if (template?.nodes != null) {
+      failures.push({ nodeId: node.id, error: "foreach template.nodes must be an array" });
     }
   }
   return failures;

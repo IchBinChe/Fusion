@@ -432,6 +432,81 @@ describe("store: updateWorkflowDefinition field-type change coercion (U11)", () 
     // y orphaned but retained.
     expect(got?.customFields).toEqual({ x: "a", y: "b" });
   });
+
+  // T1 (store.ts:12410): a field-schema edit that adds a new required+default
+  // field must backfill the default onto EVERY occupant, including occupants
+  // that currently hold no custom field values — not only ones already populated.
+  it("backfills a new required+default field onto occupants with no existing values", async () => {
+    const { taskId, workflowId } = await fieldedTaskAndWf([F({ id: "x", type: "string" })]);
+    // Occupant deliberately has NO custom field values stored.
+    const before = await store.getTask(taskId);
+    expect(before?.customFields ?? {}).toEqual({});
+
+    await store.updateWorkflowDefinition(workflowId, {
+      ir: irWith([
+        F({ id: "x", type: "string" }),
+        F({ id: "tier", type: "string", required: true, default: "bronze" }),
+      ]),
+    });
+
+    const got = await store.getTask(taskId);
+    expect(got?.customFields).toEqual({ tier: "bronze" });
+  });
+});
+
+// ── Archive → unarchive customFields round-trip ──────────────────────────────
+
+describe("store: archive → unarchive preserves customFields (T0)", () => {
+  const harness = createTaskStoreTestHarness();
+  let store: ReturnType<typeof harness.store>;
+
+  const irWith = (fields: WorkflowFieldDefinition[], name = "WF"): WorkflowIr =>
+    ({
+      version: "v2",
+      name,
+      columns: [
+        { id: "todo", name: "todo", traits: [] },
+        { id: "in-progress", name: "in-progress", traits: [] },
+        { id: "done", name: "done", traits: [] },
+      ],
+      nodes: [
+        { id: "start", kind: "start", column: "todo" },
+        { id: "end", kind: "end", column: "todo" },
+      ],
+      edges: [{ from: "start", to: "end" }],
+      fields,
+    }) as unknown as WorkflowIr;
+
+  beforeEach(async () => {
+    await harness.beforeEach();
+    store = harness.store();
+  });
+  afterEach(async () => {
+    await harness.afterEach();
+  });
+
+  it("restores customFields after an archive → unarchive round-trip", async () => {
+    const def = await (store as any).createWorkflowDefinition({
+      name: "WF",
+      ir: irWith([F({ id: "sev", type: "enum", options: enumOpts }), F({ id: "pts", type: "number" })]),
+    });
+    const t = await store.createTask({ description: "round-trip" });
+    await (store as any).selectTaskWorkflow(t.id, def.id);
+    await (store as any).updateTaskCustomFields(t.id, { sev: "high", pts: 5 });
+
+    // Move through the legacy transition chain to reach 'done', then archive.
+    await store.moveTask(t.id, "todo");
+    await store.moveTask(t.id, "in-progress");
+    await store.moveTask(t.id, "in-review");
+    await store.moveTask(t.id, "done");
+    const archived = await store.archiveTask(t.id);
+    expect(archived.column).toBe("archived");
+
+    const restored = await store.unarchiveTask(t.id);
+    expect(restored.customFields).toEqual({ sev: "high", pts: 5 });
+    const got = await store.getTask(t.id);
+    expect(got?.customFields).toEqual({ sev: "high", pts: 5 });
+  });
 });
 
 // ── JSON round-trip stability ────────────────────────────────────────────────

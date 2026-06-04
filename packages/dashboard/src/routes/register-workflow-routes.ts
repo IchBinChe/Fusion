@@ -1,5 +1,5 @@
 import type { WorkflowIr, WorkflowIrNode } from "@fusion/core";
-import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, compileWorkflowToSteps, listTraits } from "@fusion/core";
+import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, compileWorkflowToSteps, listTraits, listStepParsers } from "@fusion/core";
 import { validateCodeNodeSources } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import { emitWorkflowSseEvent } from "../sse.js";
@@ -60,6 +60,24 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
           hooks: t.hooks,
           configSchema: t.configSchema,
         })),
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  // GET /api/step-parsers — step-parser catalog for the parse-steps node
+  // inspector (KTD-12). Returns the registry's listStepParsers() ids (built-ins
+  // plus any registered plugin parsers), mirroring GET /api/traits: registry-
+  // backed, read-only, and session-scoped via getProjectContext. The editor
+  // falls back to the built-in pair if this fetch fails, so it adds no hard
+  // dependency on the project store beyond confirming the session.
+  router.get("/step-parsers", async (req, res) => {
+    try {
+      await getProjectContext(req);
+      res.json({
+        parsers: listStepParsers().map((p) => ({ id: p.id })),
       });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;

@@ -11703,6 +11703,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: entry.dependencies,
       steps: entry.steps,
       currentStep: entry.currentStep,
+      customFields: entry.customFields ?? undefined,
       size: entry.size,
       reviewLevel: entry.reviewLevel,
       prInfo: entry.prInfo,
@@ -12381,7 +12382,6 @@ ${stepsSection}`;
       if (fieldsChanged) {
         const occupantTaskIds = this.listWorkflowOccupantTaskIds(id, false);
         const occupantsByField = new Map<string, number>();
-        const occupantsWithFields: string[] = [];
         for (const taskId of occupantTaskIds) {
           const row = this.db.prepare("SELECT customFields FROM tasks WHERE id = ?").get(taskId) as
             | { customFields: string | null }
@@ -12389,8 +12389,11 @@ ${stepsSection}`;
           const values = row?.customFields
             ? (fromJson<Record<string, unknown>>(row.customFields) ?? {})
             : {};
+          // Incompatible-change detection only blocks on occupants that already
+          // HOLD a value for a field, so count only those. Reconciliation itself
+          // must still touch every occupant so new required+default fields get
+          // backfilled onto tasks that currently have no custom field values.
           if (Object.keys(values).length === 0) continue;
-          occupantsWithFields.push(taskId);
           for (const key of Object.keys(values)) {
             occupantsByField.set(key, (occupantsByField.get(key) ?? 0) + 1);
           }
@@ -12406,7 +12409,7 @@ ${stepsSection}`;
         pendingFieldReconcile = {
           oldFields,
           newFields,
-          occupantTaskIds: occupantsWithFields,
+          occupantTaskIds,
           coerce: updates.coerce,
         };
       }

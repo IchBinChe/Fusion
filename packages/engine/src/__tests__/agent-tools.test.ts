@@ -433,6 +433,40 @@ describe("createWorkflowGetTool", () => {
     expect(result.details).toMatchObject({ builtin: true });
   });
 
+  it("includes layout when the definition carries editor positions", async () => {
+    const layout = { n1: { x: 10, y: 20 } };
+    const store = {
+      getWorkflowDefinition: vi.fn().mockResolvedValue({
+        id: "WF-005",
+        name: "Laid out",
+        description: "",
+        ir: { version: "v2", name: "Laid out", columns: [], nodes: [{ id: "n1", kind: "step-execute" }], edges: [] },
+        layout,
+      }),
+    };
+    const tool = createWorkflowGetTool(store as any);
+    const result = await tool.execute("call-1", { workflow_id: "WF-005" } as any, undefined, undefined, {} as any);
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(JSON.parse(text).layout).toEqual(layout);
+    expect(result.details).toMatchObject({ workflowId: "WF-005", layout });
+  });
+
+  it("omits layout when the definition has none", async () => {
+    const store = {
+      getWorkflowDefinition: vi.fn().mockResolvedValue({
+        id: "WF-006",
+        name: "No layout",
+        description: "",
+        ir: { version: "v2", name: "No layout", columns: [], nodes: [], edges: [] },
+      }),
+    };
+    const tool = createWorkflowGetTool(store as any);
+    const result = await tool.execute("call-1", { workflow_id: "WF-006" } as any, undefined, undefined, {} as any);
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(JSON.parse(text)).not.toHaveProperty("layout");
+    expect(result.details).not.toHaveProperty("layout");
+  });
+
   it("returns an error result for an unknown id", async () => {
     const store = { getWorkflowDefinition: vi.fn().mockResolvedValue(undefined) };
     const tool = createWorkflowGetTool(store as any);

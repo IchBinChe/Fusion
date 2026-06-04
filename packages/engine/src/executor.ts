@@ -3249,8 +3249,15 @@ export class TaskExecutor {
    *  `deferDoneToReview` when deciding whether a non-terminal step is a success
    *  (review will author done) or a failure (implementation left it incomplete).
    *  Stamped by the stepExecute seam around the runTaskStep call; cleared with the
-   *  per-run pins. */
+   *  per-run pins. Keyed by `${task.id}:${instanceId}` so parallel foreach
+   *  instances of the same task cannot clobber each other's active context
+   *  (the read path threads the same instanceId through `runGraphTaskStep`). */
   private graphStepActiveContext = new Map<string, ForeachActiveContext>();
+
+  /** Composite key for {@link graphStepActiveContext}: per-instance, not per-task. */
+  private graphActiveContextKey(taskId: string, instanceId: string): string {
+    return `${taskId}:${instanceId}`;
+  }
 
   /** Tasks currently being orchestrated by the graph runner. Process-wide for
    *  the same reason as executingTaskLock (FN-4811): duplicate execute()
@@ -3378,7 +3385,11 @@ export class TaskExecutor {
       // Clear per-run step-inversion pins (KTD-8: pinned only for the run's life).
       this.graphStepSessionPinned.delete(task.id);
       this.graphStepRunOnce.delete(task.id);
-      this.graphStepActiveContext.delete(task.id);
+      // Per-instance keys: clear every instance slot owned by this task.
+      const ctxPrefix = `${task.id}:`;
+      for (const key of this.graphStepActiveContext.keys()) {
+        if (key.startsWith(ctxPrefix)) this.graphStepActiveContext.delete(key);
+      }
     }
   }
 
@@ -3656,17 +3667,26 @@ export class TaskExecutor {
         integrate: async (branchName, stepIndex): Promise<import("./step-integration.js").IntegrationAttemptResult> => {
           const cwd = await mainWorktree();
           const target = await mainBranch();
+          // The instance branch is checked out in its OWN worktree, so the rebase
+          // (which checks out `branchName`) must run THERE — running it from the
+          // main worktree fails with "branch is already checked out in another
+          // worktree". The final fast-forward merge still runs from the main
+          // worktree (it only advances `target`, which is checked out there).
+          const instanceCwd = instancePaths.get(stepIndex) ?? cwd;
           try {
-            // Rebase the instance branch onto the current main tip, then ff main.
-            await execAsync(`git rebase ${target} ${branchName}`, { cwd });
+            // Rebase the instance branch onto the current main tip (in its own
+            // worktree), then ff main from the main worktree.
+            await execAsync(`git rebase ${target} ${branchName}`, { cwd: instanceCwd });
             await execAsync(`git checkout ${target}`, { cwd });
             await execAsync(`git merge --ff-only ${branchName}`, { cwd });
             return { kind: "integrated", integratedAt: new Date().toISOString() };
           } catch (err) {
             // Conflict (or other rebase failure): classify via merger helper, abort.
-            const conflictedFiles = await getConflictedFiles(cwd);
+            // The rebase ran in the instance worktree, so conflicts live there and
+            // the abort must target that same cwd.
+            const conflictedFiles = await getConflictedFiles(instanceCwd);
             try {
-              await execAsync("git rebase --abort", { cwd });
+              await execAsync("git rebase --abort", { cwd: instanceCwd });
             } catch {
               // best-effort; leave the worktree recoverable.
             }
@@ -3808,6 +3828,28 @@ export class TaskExecutor {
    * the documented KTD-2 semantics; the git reset + step→pending are authoritative.
    */
   private async applyGraphRethinkReset(taskId: string, active: ForeachActiveContext): Promise<void> {
+    // Clear the memoized implementation pass so the next `runGraphTaskStep`
+    // re-executes (T9): the per-run pass is memoized in `graphStepRunOnce` keyed
+    // by task id and is normally only cleared on REJECTION. A RETHINK fires AFTER
+    // a SUCCESSFUL pass (a review verdict resets git/step state via this reset),
+    // so without clearing the memo the rework re-awaits the already-resolved
+    // promise and implementation never re-runs — leaving the instance permanently
+    // pending or falsely successful under `deferDoneToReview`. Mirrors the
+    // rejection-clear guard: only delete the memo when the stored promise is the
+    // SETTLED pass (a fresh in-flight attempt another caller installed is left
+    // untouched). At rethink time the pass under review has already resolved, so
+    // checking settled-ness avoids clobbering a concurrent re-dispatch.
+    const memo = this.graphStepRunOnce.get(taskId);
+    if (memo) {
+      let settled = false;
+      await Promise.race([memo.then(
+        () => { settled = true; },
+        () => { settled = true; },
+      ), Promise.resolve()]);
+      if (settled && this.graphStepRunOnce.get(taskId) === memo) {
+        this.graphStepRunOnce.delete(taskId);
+      }
+    }
     // Worktree isolation (KTD-11): reset the instance's OWN branch/worktree only —
     // sibling instances and the integration base are untouched, so the blast-radius
     // guard is STRUCTURAL (skipped) in this mode. Shared isolation resets the task's
@@ -4015,7 +4057,11 @@ export class TaskExecutor {
    *
    * Returns whether the targeted step ended up `done`/`skipped` in the projection.
    */
-  private async runGraphTaskStep(task: Task, stepIndex: number): Promise<{ success: boolean; error?: string }> {
+  private async runGraphTaskStep(
+    task: Task,
+    stepIndex: number,
+    instanceId?: string,
+  ): Promise<{ success: boolean; error?: string }> {
     // Pin step-session physics for the run before the implementation pass.
     this.graphStepSessionPinned.add(task.id);
 
@@ -4049,7 +4095,7 @@ export class TaskExecutor {
     // completes; a step-review node (when present) decides done-ness instead.
     try {
       const live = await this.store.getTask(task.id);
-      const active = this.foreachActiveForTask(task.id);
+      const active = this.foreachActiveForTask(task.id, instanceId);
       const status = live.steps[stepIndex]?.status;
       if (status === "done" || status === "skipped") return { success: true };
       // Step not terminal after the pass: when a review will author done-ness
@@ -4071,8 +4117,21 @@ export class TaskExecutor {
    *  the step driver can honor `deferDoneToReview`. The active context is threaded
    *  through the foreach sub-walk; we surface it via a per-task slot the
    *  step-execute seam stamps. Returns undefined outside a foreach instance. */
-  private foreachActiveForTask(taskId: string): ForeachActiveContext | undefined {
-    return this.graphStepActiveContext.get(taskId);
+  private foreachActiveForTask(taskId: string, instanceId?: string): ForeachActiveContext | undefined {
+    if (typeof instanceId === "string") {
+      const byInstance = this.graphStepActiveContext.get(this.graphActiveContextKey(taskId, instanceId));
+      if (byInstance) return byInstance;
+    }
+    // Fallback (single-instance / no instanceId threaded): return the sole slot
+    // owned by this task if exactly one exists.
+    const prefix = `${taskId}:`;
+    let only: ForeachActiveContext | undefined;
+    for (const [key, value] of this.graphStepActiveContext) {
+      if (!key.startsWith(prefix)) continue;
+      if (only) return undefined; // ambiguous: more than one instance active
+      only = value;
+    }
+    return only;
   }
 
   /** Seam implementations delegating to the legacy engine (KTD-1: delegate, never reimplement). */
@@ -4160,7 +4219,7 @@ export class TaskExecutor {
         const worktreePath = active.worktreePath || live.worktree || this.rootDir;
         // Stamp the active instance so `runGraphTaskStep` can honor
         // `deferDoneToReview` when judging a non-terminal step (FIX 3).
-        this.graphStepActiveContext.set(seamTask.id, active);
+        this.graphStepActiveContext.set(this.graphActiveContextKey(seamTask.id, active.instanceId), active);
         const result = await runTaskStep(
           {
             store: this.store,
@@ -4168,8 +4227,9 @@ export class TaskExecutor {
             // U6/U8: per-step session physics — graph-owned runs force
             // step-session mode for the run (KTD-2/KTD-8) regardless of the
             // runStepsInNewSessions setting. The agent authors the step's commit;
-            // this driver only observes (KTD-2).
-            runStep: (stepIndex) => this.runGraphTaskStep(seamTask, stepIndex),
+            // this driver only observes (KTD-2). Thread the instanceId so the
+            // active-context read is per-instance (parallel-foreach safe).
+            runStep: (stepIndex) => this.runGraphTaskStep(seamTask, stepIndex, active.instanceId),
           },
           { id: seamTask.id, steps: live.steps },
           active.stepIndex,

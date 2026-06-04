@@ -5058,6 +5058,16 @@ export function fetchTraits(projectId?: string): Promise<TraitCatalogEntry[]> {
   );
 }
 
+/** Fetch the step-parser id catalog (built-ins + registered plugin parsers) for
+ *  the parse-steps node inspector (KTD-12). Registry-backed, read-only,
+ *  session-scoped. Mirrors fetchTraits. */
+export function fetchStepParsers(projectId?: string): Promise<string[]> {
+  const path = withProjectId("/step-parsers", projectId);
+  return dedupe(path, () =>
+    api<{ parsers: Array<{ id: string }> }>(path).then((res) => res.parsers.map((p) => p.id)),
+  );
+}
+
 /** Fetch a single workflow definition. */
 export function fetchWorkflow(id: string, projectId?: string): Promise<import("@fusion/core").WorkflowDefinition> {
   return api<import("@fusion/core").WorkflowDefinition>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId));

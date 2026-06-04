@@ -3377,10 +3377,20 @@ export class TaskExecutor {
         stageByNodeId.set(node.id, seam);
       }
     }
+    // Stop the shadow walk at the live terminal seam. The graph walker visits a
+    // node *before* invoking its seam, so even a failing merge seam (the case
+    // when the live task is parked in-review with autoMerge off) still records a
+    // "merge" stage. The legacy side never reports merge for an in-review task,
+    // so that phantom stage manufactures stageTransitions drift on healthy runs.
+    // Truncate the visited-stage sequence at the stage the live task actually
+    // reached: merged → merge, reachedReview → review, else → execute.
+    const terminalStage: WorkflowStage = merged ? "merge" : reachedReview ? "review" : "execute";
     const stages: WorkflowStage[] = [];
     for (const nodeId of result.visitedNodeIds) {
       const stage = stageByNodeId.get(nodeId);
-      if (stage && stages[stages.length - 1] !== stage) stages.push(stage);
+      if (!stage || stages[stages.length - 1] === stage) continue;
+      stages.push(stage);
+      if (stage === terminalStage) break;
     }
 
     return buildWorkflowObservation({

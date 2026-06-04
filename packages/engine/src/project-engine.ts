@@ -1065,10 +1065,17 @@ export class ProjectEngine {
       && this.allowInReviewMergeProcessing(task, settings)
       && !(task.paused && !task.mergeDetails?.mergeConfirmed);
     if (!eligible) {
+      // A null task means the lookup failed or the task was deleted; never hand
+      // back a MergeResult with `task` cast from null — callers dereference
+      // result.task. Throw so the merge seam (which converts seam throws into a
+      // clean "failure" outcome) parks the task for human review.
+      if (!task) {
+        throw new Error(`Interpreter merge for ${taskId} aborted: task not found (deleted or lookup failed)`);
+      }
       runtimeLog.log(`Interpreter merge for ${taskId} not auto-eligible (autoMerge off / not ready) — manual merge required`);
       return {
-        task: task as Task,
-        branch: task?.branch ?? "",
+        task,
+        branch: task.branch ?? "",
         merged: false,
         worktreeRemoved: false,
         branchDeleted: false,

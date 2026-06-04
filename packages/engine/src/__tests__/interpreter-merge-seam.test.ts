@@ -84,5 +84,47 @@ describe("interpreter merge seam", () => {
       expect(onMerge).toHaveBeenCalledWith("FN-3");
       expect(result.merged).toBe(true);
     });
+
+    it("throws (never returns a null-task MergeResult) when the task lookup yields nothing", async () => {
+      // getTask returning null (deleted task / failed lookup) must not produce a
+      // MergeResult whose `task` is a null cast — callers dereference result.task.
+      const onMerge = vi.fn();
+      const fakeEngine = {
+        runtime: {
+          getTaskStore: () => ({
+            getSettings: async () => ({ autoMerge: true, globalPause: false, enginePaused: false }),
+            getTask: async () => null,
+          }),
+        },
+        allowInReviewMergeProcessing: () => true,
+        onMerge,
+      };
+
+      await expect(
+        (ProjectEngine.prototype as any).requestInterpreterMerge.call(fakeEngine, "FN-404"),
+      ).rejects.toThrow(/FN-404/);
+      expect(onMerge).not.toHaveBeenCalled();
+    });
+
+    it("throws when getTask itself rejects (lookup failure), not a null-task result", async () => {
+      const onMerge = vi.fn();
+      const fakeEngine = {
+        runtime: {
+          getTaskStore: () => ({
+            getSettings: async () => ({ autoMerge: true, globalPause: false, enginePaused: false }),
+            getTask: async () => {
+              throw new Error("store offline");
+            },
+          }),
+        },
+        allowInReviewMergeProcessing: () => true,
+        onMerge,
+      };
+
+      await expect(
+        (ProjectEngine.prototype as any).requestInterpreterMerge.call(fakeEngine, "FN-500"),
+      ).rejects.toThrow(/FN-500/);
+      expect(onMerge).not.toHaveBeenCalled();
+    });
   });
 });

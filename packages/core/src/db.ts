@@ -4129,6 +4129,7 @@ export class Database {
             FROM task_workflow_selection sel
             JOIN json_each(sel.stepIds) je
             WHERE json_valid(sel.stepIds)
+              AND json_type(sel.stepIds) = 'array'
               AND sel.taskId NOT IN (SELECT id FROM tasks)
           );
           DELETE FROM task_workflow_selection

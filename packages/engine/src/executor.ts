@@ -10,7 +10,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
 import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled } from "@fusion/core";
+import {
+  buildWorkflowObservationFromTask,
+  buildWorkflowObservation,
+  type WorkflowStage,
+  type WorkflowRunObservation,
+} from "@fusion/core";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
+import { observeWorkflowParity, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from "./workflow-parity-observer.js";
 import type { WorkflowLegacySeams } from "./workflow-node-handlers.js";
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
 import {
@@ -1454,6 +1461,10 @@ export class TaskExecutor {
         state: handedOff.autoMerge === false ? "manual-required" : "queued",
       });
     }
+
+    // Dual-observe parity (CU-U5): post-execute observation point. Flag-gated
+    // and fully isolated — never affects the authoritative handoff result.
+    await this.maybeObserveWorkflowParity(task.id, settings);
 
     return handedOff;
   }
@@ -3266,6 +3277,118 @@ export class TaskExecutor {
     } finally {
       this.graphRouting.delete(task.id);
     }
+  }
+
+  /**
+   * Dual-observe parity (CU-U5): for a workflow-selected task, compare the
+   * selected graph's routing against the legacy authoritative run for the SAME
+   * task and record the result as workflow:parity-observed / -drift audit
+   * events. Observe-only — the shadow walks the graph with no-side-effect seams
+   * driven by the legacy task's actual outcomes, so it never mutates anything.
+   * Gated by workflowInterpreterDualObserve (off by default) and fully isolated
+   * (never throws into the caller). Hooked at the post-execute handoff point.
+   *
+   * Scope: this validates execute→review→merge ROUTING parity. Full
+   * execution-fidelity parity (a real isolated shadow run) is future work.
+   */
+  private async maybeObserveWorkflowParity(taskId: string, settings: Settings): Promise<void> {
+    if (!isExperimentalFeatureEnabled(settings, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG)) return;
+    if (typeof this.store.getTaskWorkflowSelection !== "function") return;
+    try {
+      const selection = this.store.getTaskWorkflowSelection(taskId);
+      if (!selection) return;
+      const def = await this.store.getWorkflowDefinition?.(selection.workflowId);
+      if (!def) return;
+      const live = await this.store.getTask(taskId);
+
+      const legacyObs = buildWorkflowObservationFromTask(
+        {
+          column: live.column,
+          status: live.status ?? null,
+          review: live.review as { verdict?: string } | null,
+          mergeDetails: live.mergeDetails as { outcome?: string } | null,
+        },
+        { columnSequence: this.inferLegacyColumnSequence(live.column) },
+      );
+      const legacyAudit = typeof this.store.getRunAuditEvents === "function"
+        ? this.store.getRunAuditEvents({ taskId })
+        : [];
+
+      await observeWorkflowParity({
+        settings,
+        store: this.store,
+        agentId: "workflow-shadow",
+        legacy: { taskId, observation: legacyObs, auditEvents: legacyAudit },
+        runShadow: async () => ({
+          observation: await this.buildShadowObservation(live, def, settings, legacyObs),
+          auditEvents: [],
+        }),
+      });
+    } catch (err) {
+      executorLog.warn(
+        `${taskId}: dual-observe parity skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** Canonical column path a legacy run took to reach its terminal column
+   *  (excluding the pre-execute todo/triage prefix so it lines up with the
+   *  graph's execute→review→merge seam nodes). */
+  private inferLegacyColumnSequence(terminalColumn: string): string[] {
+    switch (terminalColumn) {
+      case "done": return ["in-progress", "in-review", "done"];
+      case "in-review": return ["in-progress", "in-review"];
+      case "in-progress": return ["in-progress"];
+      default: return [terminalColumn];
+    }
+  }
+
+  /** Build the interpreter-side observation by walking the selected graph with
+   *  no-side-effect seams whose outcomes mirror the legacy task's reality. */
+  private async buildShadowObservation(
+    live: TaskDetail,
+    def: { ir: { nodes: Array<{ id: string; kind: string; config?: Record<string, unknown> }> } },
+    settings: Settings,
+    legacyObs: WorkflowRunObservation,
+  ): Promise<WorkflowRunObservation> {
+    const reachedReview = live.column === "in-review" || live.column === "done";
+    const merged = live.column === "done";
+    const verdict = (live.review as { verdict?: string } | undefined)?.verdict;
+    const outcome = (ok: boolean): WorkflowNodeResult => ({ outcome: ok ? "success" : "failure" });
+    const seams: WorkflowLegacySeams = {
+      planning: async () => outcome(true),
+      execute: async () => outcome(reachedReview || merged),
+      review: async () => outcome(verdict !== "REVISE"),
+      merge: async () => outcome(merged),
+      schedule: async () => outcome(true),
+    };
+    const runner = new WorkflowGraphTaskRunner({
+      store: this.store,
+      seams,
+      runCustomNode: async () => outcome(true),
+    });
+    const result = await runner.run(live, settings);
+
+    const stageByNodeId = new Map<string, WorkflowStage>();
+    for (const node of def.ir.nodes) {
+      const seam = typeof node.config?.seam === "string" ? node.config.seam : undefined;
+      if (seam === "execute" || seam === "review" || seam === "merge") {
+        stageByNodeId.set(node.id, seam);
+      }
+    }
+    const stages: WorkflowStage[] = [];
+    for (const nodeId of result.visitedNodeIds) {
+      const stage = stageByNodeId.get(nodeId);
+      if (stage && stages[stages.length - 1] !== stage) stages.push(stage);
+    }
+
+    return buildWorkflowObservation({
+      stageTransitions: stages,
+      terminalColumn: result.disposition === "completed" ? (merged ? "done" : "in-review") : live.column,
+      terminalStatus: live.status ?? null,
+      reviewVerdict: legacyObs.reviewVerdict,
+      mergeOutcome: merged ? "merged" : null,
+    });
   }
 
   /**

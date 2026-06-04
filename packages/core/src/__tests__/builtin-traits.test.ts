@@ -42,11 +42,19 @@ describe("built-in traits", () => {
     expect(r.getTrait("gate")?.hooks?.gate).toBe(true);
   });
 
-  it("merge trait ships a config STUB shape (behavior is U7)", () => {
+  it("merge trait config schema matches the U7 policy fields", () => {
     const r = freshRegistry();
-    const keys = (r.getTrait("merge")?.configSchema?.fields ?? []).map((f) => f.key).sort();
-    expect(keys).toEqual(["conflictStrategy", "fileScope", "squash", "strategy"]);
+    const fields = r.getTrait("merge")?.configSchema?.fields ?? [];
+    const keys = fields.map((f) => f.key).sort();
+    // U7 tightened the schema: strategy enum, fileScope enum (incl. custom),
+    // custom-rules array, squash posture, conflictStrategy.
+    expect(keys).toEqual(["conflictStrategy", "fileScope", "rules", "squash", "strategy"]);
     expect(r.getTrait("merge")?.flags.mergeOrchestration).toBe(true);
+
+    const strategy = fields.find((f) => f.key === "strategy");
+    expect(strategy?.enumValues).toEqual(["always-squash", "auto", "always-rebase", "pr-only"]);
+    const fileScope = fields.find((f) => f.key === "fileScope");
+    expect(fileScope?.enumValues).toEqual(["strict", "warn", "off", "custom"]);
   });
 
   it("hold trait's release config matches WorkflowHoldRelease kinds", () => {

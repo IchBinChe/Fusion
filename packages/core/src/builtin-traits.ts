@@ -142,7 +142,7 @@ export const BUILTIN_TRAIT_DEFINITIONS: TraitDefinition[] = [
     id: "merge",
     name: "Merge",
     description:
-      "Enqueues onto the merge-request queue; configures merge policy. Behavior is U7 — this is a config STUB.",
+      "Enqueues onto the merge-request queue; configures merge policy (U7). The lost-work guard trio stays capability-level and is unreachable from this config (KTD-6).",
     builtin: true,
     flags: { mergeOrchestration: true },
     hooks: { onEnter: true, onExit: true },
@@ -151,14 +151,27 @@ export const BUILTIN_TRAIT_DEFINITIONS: TraitDefinition[] = [
         {
           key: "strategy",
           type: "enum",
-          enumValues: ["squash", "merge-commit", "rebase", "pr-only"],
+          // Direct-merge commit strategies (`DirectMergeCommitStrategy`) plus
+          // `pr-only` (maps onto `mergeStrategy: "pull-request"`). Absent →
+          // settings read-through (back-compat for the default workflow).
+          enumValues: ["always-squash", "auto", "always-rebase", "pr-only"],
           description: "Merge strategy",
         },
         {
           key: "fileScope",
           type: "enum",
+          // strict = throw on zero-overlap (today); warn = log + proceed (audit
+          // carries the violating file list); off = skip the throw + emit one
+          // per-merge "scope enforcement disabled" audit (per-task scopeOverride
+          // is a documented no-op here); custom = evaluate `rules` in place of
+          // the task's File Scope section.
           enumValues: ["strict", "warn", "off", "custom"],
           description: "File-scope enforcement mode",
+        },
+        {
+          key: "rules",
+          type: "array",
+          description: "Custom file-scope glob/path rules (used when fileScope === 'custom')",
         },
         { key: "squash", type: "boolean", description: "Squash posture" },
         {

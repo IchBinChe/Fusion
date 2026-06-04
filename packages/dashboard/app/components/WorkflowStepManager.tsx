@@ -46,6 +46,8 @@ interface WorkflowStepManagerProps {
   onClose: () => void;
   addToast: (message: string, type?: ToastType) => void;
   projectId?: string;
+  /** Optional: open the visual graph workflow editor. */
+  onOpenGraphEditor?: () => void;
 }
 
 interface StepFormData {
@@ -127,7 +129,7 @@ function getCategoryClassName(category: string): string {
   }
 }
 
-export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: WorkflowStepManagerProps) {
+export function WorkflowStepManager({ isOpen, onClose, addToast, projectId, onOpenGraphEditor }: WorkflowStepManagerProps) {
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [templates, setTemplates] = useState<WorkflowStepTemplate[]>([]);
   const [pluginTemplateOwners, setPluginTemplateOwners] = useState<Record<string, string>>({});
@@ -422,9 +424,16 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         {/* Header */}
         <div className="modal-header">
           <h2>Workflow Steps</h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            &times;
-          </button>
+          <div className="wfm-header-actions">
+            {onOpenGraphEditor && (
+              <button className="wfm-graph-editor-link" onClick={onOpenGraphEditor}>
+                <LayoutGrid size={14} /> Graph editor
+              </button>
+            )}
+            <button className="modal-close" onClick={onClose} aria-label="Close">
+              &times;
+            </button>
+          </div>
         </div>
 
         <div className="wfm-body">

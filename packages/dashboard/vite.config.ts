@@ -172,6 +172,10 @@ export default defineConfig({
             return "vendor-codemirror";
           }
 
+          if (id.includes("/node_modules/@xyflow/")) {
+            return "vendor-reactflow";
+          }
+
           return undefined;
         },
       },

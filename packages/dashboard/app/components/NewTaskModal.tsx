@@ -3,7 +3,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { DEFAULT_TASK_PRIORITY, type Task, type TaskCreateInput, type TaskPriority } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
-import { uploadAttachment } from "../api";
+import { uploadAttachment, selectTaskWorkflow } from "../api";
 import { Bot } from "lucide-react";
 import { useSetupReadiness } from "../hooks/useSetupReadiness";
 import { SetupWarningBanner } from "./SetupWarningBanner";
@@ -15,6 +15,7 @@ import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
+import { WorkflowSelector } from "./WorkflowSelector";
 
 interface NewTaskModalProps {
   isOpen: boolean;
@@ -53,6 +54,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [presetMode, setPresetMode] = useState<"default" | "preset" | "custom">("default");
   const [hasDirtyState, setHasDirtyState] = useState(false);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [selectedWorkflowSteps, setSelectedWorkflowSteps] = useState<string[]>([]);
   const [workflowStepsExplicitlySet, setWorkflowStepsExplicitlySet] = useState(false);
   const [reviewLevel, setReviewLevel] = useState<number | undefined>(undefined);
@@ -155,6 +157,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       description.trim() !== "" ||
       dependencies.length > 0 ||
       pendingImages.length > 0 ||
+      selectedWorkflowId !== null ||
       executorModel !== "" ||
       validatorModel !== "" ||
       planningModel !== "" ||
@@ -171,7 +174,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       githubTrackingEnabled ||
       githubRepoOverrideTrimmed !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, selectedWorkflowId, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
   const handleClose = useCallback(async () => {
     if (hasDirtyState) {
@@ -194,6 +197,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setThinkingLevel("");
     setSelectedPresetId("");
     setPresetMode("default");
+    setSelectedWorkflowId(null);
     setSelectedWorkflowSteps([]);
     setWorkflowStepsExplicitlySet(false);
     setSelectedAgentId(null);
@@ -265,6 +269,15 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
 
       const task = await onCreateTask(createInput);
 
+      // Apply custom workflow if selected (non-blocking — task already exists)
+      if (selectedWorkflowId) {
+        try {
+          await selectTaskWorkflow(task.id, selectedWorkflowId, projectId);
+        } catch (err) {
+          addToast(getErrorMessage(err) || "Failed to apply workflow", "error");
+        }
+      }
+
       // Upload pending images as attachments
       if (pendingImages.length > 0) {
         const failures: string[] = [];
@@ -291,6 +304,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setThinkingLevel("");
       setSelectedPresetId("");
       setPresetMode("default");
+      setSelectedWorkflowId(null);
       setSelectedWorkflowSteps([]);
       setWorkflowStepsExplicitlySet(false);
       setSelectedAgentId(null);
@@ -310,7 +324,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowSteps, workflowStepsExplicitlySet, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, selectedWorkflowSteps, workflowStepsExplicitlySet, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -451,6 +465,17 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             </div>
           )}
         </div>
+      </div>
+      {/* Custom Workflow */}
+      <div className="form-group">
+        <WorkflowSelector
+          value={selectedWorkflowId}
+          onChange={(id) => setSelectedWorkflowId(id)}
+          projectId={projectId}
+          addToast={addToast}
+          label="Custom workflow"
+          disabled={isSubmitting}
+        />
       </div>
     </div>
   );

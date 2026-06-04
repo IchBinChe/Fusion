@@ -68,6 +68,8 @@ export interface LaneProps {
   onOpenMission?: (missionId: string) => void;
   lastFetchTimeMs?: number;
   workflowStepNameLookup?: ReadonlyMap<string, string>;
+  /** Per-task card-placed custom field definitions (U13/KTD-14). */
+  taskCardFieldDefs?: ReadonlyMap<string, import("../api").WorkflowFieldDefinition[]>;
   blockerFanoutMap?: ReadonlyMap<string, BlockerFanoutEntry>;
   prAuthAvailable?: boolean;
 }
@@ -191,6 +193,7 @@ function LaneComponent(props: LaneProps) {
               onOpenMission={props.onOpenMission}
               lastFetchTimeMs={props.lastFetchTimeMs}
               workflowStepNameLookup={props.workflowStepNameLookup}
+              taskCardFieldDefs={props.taskCardFieldDefs}
               blockerFanoutMap={props.blockerFanoutMap}
               prAuthAvailable={props.prAuthAvailable}
               autoMerge={props.autoMerge}

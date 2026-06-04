@@ -6792,5 +6792,11 @@
     "installRequestTitle": "Worktrunk 설치 요청",
     "sha256": "SHA-256",
     "version": "버전"
+  },
+  "taskFields": {
+    "unset": "—",
+    "moreFields": "추가 필드",
+    "orphaned": "고아 필드",
+    "saveFailed": "필드 저장 실패"
   }
 }

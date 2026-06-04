@@ -3217,6 +3217,53 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  // Patch a task's custom field values (U13/KTD-14). Delegates to the single
+  // store write authority (`updateTaskCustomFields`), which validates the patch
+  // against the task's workflow field schema. A typed rejection surfaces as a
+  // 400 carrying `{ fieldId, code, detail }` so the dashboard can render an
+  // inline per-field error. `null`/`undefined` values delete the field.
+  router.patch("/tasks/:id/custom-fields", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const body = req.body as { customFields?: unknown };
+      const patch = body?.customFields;
+      if (patch === undefined || patch === null || typeof patch !== "object" || Array.isArray(patch)) {
+        throw badRequest("customFields must be an object");
+      }
+
+      const storeWithFields = scopedStore as TaskStore & {
+        updateTaskCustomFields?: (
+          taskId: string,
+          patch: Record<string, unknown>,
+        ) => Promise<{ ok: true; task: Task } | { ok: false; rejection: { code: string; fieldId: string; detail: string } }>;
+      };
+      if (typeof storeWithFields.updateTaskCustomFields !== "function") {
+        throw notFound("custom fields unavailable");
+      }
+
+      const result = await storeWithFields.updateTaskCustomFields(
+        req.params.id,
+        patch as Record<string, unknown>,
+      );
+      if (!result.ok) {
+        throw new ApiError(400, result.rejection.detail, {
+          fieldId: result.rejection.fieldId,
+          code: result.rejection.code,
+          detail: result.rejection.detail,
+        });
+      }
+      res.json(result.task);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code === "ENOENT" || (err instanceof Error ? err.message : String(err)).includes("not found")) {
+        throw notFound(err instanceof Error ? err.message : String(err));
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   // Accept review - clear assignee and awaiting-user-review status, keep in in-review
   router.post("/tasks/:id/accept-review", async (req, res) => {
     try {

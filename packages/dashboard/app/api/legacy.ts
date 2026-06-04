@@ -552,10 +552,52 @@ export interface BoardWorkflowColumn {
   flags: BoardWorkflowColumnFlags;
 }
 
+/** Supported custom-field value types (mirrors core `WorkflowFieldType`, KTD-13).
+ *  Duplicated client-side (same posture as the BoardWorkflow* types above) since
+ *  the core field-schema types are not exported through the `@fusion/core`
+ *  barrel. */
+export type WorkflowFieldType =
+  | "string"
+  | "text"
+  | "number"
+  | "boolean"
+  | "enum"
+  | "multi-enum"
+  | "date"
+  | "url";
+
+/** A single enum/multi-enum option (KTD-13). */
+export interface WorkflowFieldOption {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** Rendering instructions for a custom field (KTD-14). */
+export interface WorkflowFieldRender {
+  placement?: "card" | "detail" | "detail-section";
+  widget?: "select" | "radio" | "chips" | "input" | "textarea" | "toggle";
+  badge?: boolean;
+}
+
+/** A workflow-defined custom task field (KTD-13). */
+export interface WorkflowFieldDefinition {
+  id: string;
+  name: string;
+  type: WorkflowFieldType;
+  required?: boolean;
+  default?: unknown;
+  options?: WorkflowFieldOption[];
+  render?: WorkflowFieldRender;
+}
+
 export interface BoardWorkflowDefinition {
   id: string;
   name: string;
   columns: BoardWorkflowColumn[];
+  /** Custom field definitions declared by this workflow (U13/KTD-14). Absent on
+   *  workflows with no fields, or from older servers. */
+  fields?: WorkflowFieldDefinition[];
 }
 
 export interface BoardWorkflowsPayload {
@@ -563,6 +605,31 @@ export interface BoardWorkflowsPayload {
   defaultWorkflowId: string;
   workflows: BoardWorkflowDefinition[];
   taskWorkflowIds: Record<string, string>;
+}
+
+/** A typed custom-field rejection surfaced by the PATCH endpoint (KTD-13). */
+export interface CustomFieldRejection {
+  code: "no-fields-defined" | "unknown-field" | "type-mismatch" | "enum-violation";
+  fieldId: string;
+  detail: string;
+}
+
+/**
+ * Patch a task's custom field values (U13/KTD-14). The server validates the
+ * patch against the task's workflow field schema and returns the updated task;
+ * a validation failure surfaces as a 400 carrying `{ fieldId, code, detail }`.
+ * A `null` value for a field deletes it.
+ */
+export function updateTaskCustomFields(
+  id: string,
+  customFields: Record<string, unknown>,
+  projectId?: string,
+): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/custom-fields`, projectId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customFields }),
+  });
 }
 
 /** Fetch the multi-lane board metadata (U9). When the flag is OFF the server

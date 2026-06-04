@@ -4532,3 +4532,84 @@ describe("TaskCard agent badge", () => {
     expect(screen.queryByTitle(/Assigned to/)).toBeNull();
   });
 });
+
+describe("TaskCard custom field badges (U13/KTD-14)", () => {
+  type FieldDef = import("../../api").WorkflowFieldDefinition;
+  const cardDef = (over: Partial<FieldDef> & Pick<FieldDef, "id" | "name" | "type">): FieldDef => ({
+    render: { placement: "card" },
+    ...over,
+  });
+
+  it("renders no badges and stays byte-identical when no field defs are passed", () => {
+    const { container: withTask } = render(
+      <TaskCard task={makeTask({ customFields: { x: "y" } })} onOpenDetail={noop} addToast={noop} />,
+    );
+    expect(withTask.querySelector('[data-testid="card-field-badges"]')).toBeNull();
+  });
+
+  it("renders an enum badge with the option color and label", () => {
+    const defs: FieldDef[] = [
+      cardDef({ id: "sev", name: "Severity", type: "enum", options: [{ value: "high", label: "High", color: "#ef4444" }] }),
+    ];
+    render(
+      <TaskCard
+        task={makeTask({ customFields: { sev: "high" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        cardFieldDefs={defs}
+      />,
+    );
+    const badge = screen.getByText("High");
+    expect(badge.getAttribute("style")).toContain("rgb(239, 68, 68)");
+  });
+
+  it("renders a labeled chip for boolean true and nothing for false", () => {
+    const defs: FieldDef[] = [cardDef({ id: "blk", name: "Blocked", type: "boolean" })];
+    const { rerender } = render(
+      <TaskCard task={makeTask({ customFields: { blk: true } })} onOpenDetail={noop} addToast={noop} cardFieldDefs={defs} />,
+    );
+    expect(screen.getByText("Blocked")).toBeTruthy();
+    rerender(
+      <TaskCard task={makeTask({ customFields: { blk: false } })} onOpenDetail={noop} addToast={noop} cardFieldDefs={defs} />,
+    );
+    expect(screen.queryByTestId("card-field-badges")).toBeNull();
+  });
+
+  it("caps at 3 badges and shows a +N overflow indicator", () => {
+    const defs: FieldDef[] = [
+      cardDef({ id: "a", name: "A", type: "string" }),
+      cardDef({ id: "b", name: "B", type: "string" }),
+      cardDef({ id: "c", name: "C", type: "string" }),
+      cardDef({ id: "d", name: "D", type: "string" }),
+      cardDef({ id: "e", name: "E", type: "string" }),
+    ];
+    render(
+      <TaskCard
+        task={makeTask({ customFields: { a: "1", b: "2", c: "3", d: "4", e: "5" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        cardFieldDefs={defs}
+      />,
+    );
+    const overflow = screen.getByTestId("card-field-overflow");
+    expect(overflow.textContent).toBe("+2");
+    // Exactly 3 value badges + 1 overflow chip.
+    const container = screen.getByTestId("card-field-badges");
+    expect(container.querySelectorAll(".card-field-badge").length).toBe(4);
+  });
+
+  it("ignores non-card-placed defs", () => {
+    const defs: FieldDef[] = [
+      { id: "detailOnly", name: "Detail", type: "string", render: { placement: "detail" } },
+    ];
+    render(
+      <TaskCard
+        task={makeTask({ customFields: { detailOnly: "x" } })}
+        onOpenDetail={noop}
+        addToast={noop}
+        cardFieldDefs={defs}
+      />,
+    );
+    expect(screen.queryByTestId("card-field-badges")).toBeNull();
+  });
+});

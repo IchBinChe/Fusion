@@ -6792,5 +6792,11 @@
     "installRequestTitle": "Solicitud de instalación de Worktrunk",
     "sha256": "SHA-256",
     "version": "Versión"
+  },
+  "taskFields": {
+    "unset": "—",
+    "moreFields": "Campos adicionales",
+    "orphaned": "Campos huérfanos",
+    "saveFailed": "No se pudo guardar el campo"
   }
 }

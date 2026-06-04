@@ -379,6 +379,28 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     return result;
   }, [boardWorkflows, flagOn, tasks]);
 
+  // Card-placed custom field definitions per task (U13/KTD-14). Resolves each
+  // task's workflow from the board-workflows payload and exposes that workflow's
+  // card-placed field defs so TaskCard can render value badges. Empty map when
+  // no workflow declares card fields — cards stay byte-identical.
+  const taskCardFieldDefs = useMemo(() => {
+    const map = new Map<string, import("../api").WorkflowFieldDefinition[]>();
+    if (!boardWorkflows) return map;
+    const { workflows, taskWorkflowIds, defaultWorkflowId } = boardWorkflows;
+    const cardDefsByWorkflow = new Map<string, import("../api").WorkflowFieldDefinition[]>();
+    for (const wf of workflows) {
+      const cardDefs = (wf.fields ?? []).filter((f) => f.render?.placement === "card");
+      if (cardDefs.length > 0) cardDefsByWorkflow.set(wf.id, cardDefs);
+    }
+    if (cardDefsByWorkflow.size === 0) return map;
+    for (const task of tasks) {
+      const workflowId = taskWorkflowIds[task.id] ?? defaultWorkflowId;
+      const defs = cardDefsByWorkflow.get(workflowId);
+      if (defs) map.set(task.id, defs);
+    }
+    return map;
+  }, [boardWorkflows, tasks]);
+
   // Drag pre-check (R17): adjacency + capacity from the lane's column metadata.
   // Cross-lane drag → workflow-mismatch. Deterministic rejections return a
   // messageKey (no-move); null = allowed.
@@ -467,6 +489,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
             onOpenMission={onOpenMission}
             lastFetchTimeMs={lastFetchTimeMs}
             workflowStepNameLookup={workflowStepNameLookup}
+            taskCardFieldDefs={taskCardFieldDefs}
             blockerFanoutMap={blockerFanoutMap}
             prAuthAvailable={prAuthAvailable}
           />
@@ -508,6 +531,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
             onOpenMission={onOpenMission}
             lastFetchTimeMs={lastFetchTimeMs}
             workflowStepNameLookup={workflowStepNameLookup}
+            taskCardFieldDefs={taskCardFieldDefs}
             blockerFanoutMap={blockerFanoutMap}
             prAuthAvailable={prAuthAvailable}
             autoMerge={autoMerge}

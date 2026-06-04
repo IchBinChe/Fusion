@@ -1,5 +1,6 @@
 import "./SessionNotificationBanner.css";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertCircle, Lightbulb, Layers, Target, X } from "lucide-react";
 import type { AiSessionSummary } from "../api";
 
@@ -78,6 +79,7 @@ export function SessionNotificationBanner({
   onDismissSession,
   onDismissAll,
 }: SessionNotificationBannerProps) {
+  const { t } = useTranslation("app");
   const [dismissRevision, setDismissRevision] = useState(0);
   const bump = () => {
     persistDismissed(dismissedIds);
@@ -173,7 +175,7 @@ export function SessionNotificationBanner({
         </div>
         <button className="session-notification-banner__dismiss-all" onClick={handleDismissAll}>
           <X size={14} aria-hidden="true" />
-          <span>Dismiss all</span>
+          <span>{t("sessionBanner.dismissAll", "Dismiss all")}</span>
         </button>
       </div>
 
@@ -198,14 +200,14 @@ export function SessionNotificationBanner({
                 <div className="session-notification-banner__text">
                   <p className="session-notification-banner__title" title={session.title}>{session.title}</p>
                   <p className="session-notification-banner__meta">
-                    {isError ? "Failed" : TYPE_LABELS[session.type]}
+                    {isError ? t("sessionBanner.failed", "Failed") : TYPE_LABELS[session.type]}
                   </p>
                 </div>
               </div>
 
               <div className="session-notification-banner__actions">
                 <button className="session-notification-banner__resume" onClick={() => handleResume(session)}>
-                  {isError ? "Retry" : "Resume"}
+                  {isError ? t("sessionBanner.retry", "Retry") : t("sessionBanner.resume", "Resume")}
                 </button>
                 <button
                   className="session-notification-banner__dismiss"

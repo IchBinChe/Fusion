@@ -1,4 +1,5 @@
 import "./AgentProvisioningPolicyEditor.css";
+import { useTranslation } from "react-i18next";
 import {
   AGENT_PROVISIONING_APPROVAL_MODES,
   type AgentProvisioningApprovalMode,
@@ -11,20 +12,7 @@ interface Props {
   disabled?: boolean;
 }
 
-const MODE_LABELS: Record<AgentProvisioningApprovalMode, { label: string; description: string }> = {
-  always: {
-    label: "Always require approval",
-    description: "All fn_agent_create/fn_agent_delete requests require approval unless caller is trusted.",
-  },
-  "trusted-only": {
-    label: "Trusted-only",
-    description: "Trusted roles/agent IDs bypass approval; other callers require approval.",
-  },
-  never: {
-    label: "Never require approval",
-    description: "Allow provisioning without approval for non-privileged callers.",
-  },
-};
+// Note: MODE_LABELS moved into component for i18n access
 
 function tokenizeList(value: string): string[] {
   return Array.from(
@@ -38,8 +26,24 @@ function tokenizeList(value: string): string[] {
 }
 
 export function AgentProvisioningPolicyEditor({ value, onChange, disabled = false }: Props) {
+  const { t } = useTranslation("app");
   const approvalMode = value?.approvalMode ?? "trusted-only";
   const alwaysApproveDelete = value?.alwaysApproveDelete ?? true;
+
+  const MODE_LABELS: Record<AgentProvisioningApprovalMode, { label: string; description: string }> = {
+    always: {
+      label: t("agentProvisioning.always", "Always require approval"),
+      description: t("agentProvisioning.alwaysDesc", "All fn_agent_create/fn_agent_delete requests require approval unless caller is trusted."),
+    },
+    "trusted-only": {
+      label: t("agentProvisioning.trustedOnly", "Trusted-only"),
+      description: t("agentProvisioning.trustedOnlyDesc", "Trusted roles/agent IDs bypass approval; other callers require approval."),
+    },
+    never: {
+      label: t("agentProvisioning.never", "Never require approval"),
+      description: t("agentProvisioning.neverDesc", "Allow provisioning without approval for non-privileged callers."),
+    },
+  };
 
   const update = (patch: Partial<NonNullable<ProjectSettings["agentProvisioning"]>>) => {
     onChange({ ...(value ?? {}), ...patch });
@@ -48,7 +52,7 @@ export function AgentProvisioningPolicyEditor({ value, onChange, disabled = fals
   return (
     <div className="agent-provisioning-policy-editor card">
       <div className="form-group">
-        <label htmlFor="agent-provisioning-approval-mode">Approval mode</label>
+        <label htmlFor="agent-provisioning-approval-mode">{t("agentProvisioning.approvalMode", "Approval mode")}</label>
         <select
           id="agent-provisioning-approval-mode"
           className="select"
@@ -74,12 +78,12 @@ export function AgentProvisioningPolicyEditor({ value, onChange, disabled = fals
             onChange={(event) => update({ alwaysApproveDelete: event.target.checked })}
             disabled={disabled}
           />
-          Always require approval for fn_agent_delete
+          {t("agentProvisioning.alwaysApproveDelete", "Always require approval for fn_agent_delete")}
         </label>
       </div>
 
       <div className="form-group">
-        <label htmlFor="agent-provisioning-trusted-roles">Trusted roles</label>
+        <label htmlFor="agent-provisioning-trusted-roles">{t("agentProvisioning.trustedRoles", "Trusted roles")}</label>
         <textarea
           id="agent-provisioning-trusted-roles"
           className="input agent-provisioning-policy-textarea"
@@ -92,7 +96,7 @@ export function AgentProvisioningPolicyEditor({ value, onChange, disabled = fals
       </div>
 
       <div className="form-group">
-        <label htmlFor="agent-provisioning-trusted-agent-ids">Trusted agent IDs</label>
+        <label htmlFor="agent-provisioning-trusted-agent-ids">{t("agentProvisioning.trustedAgentIds", "Trusted agent IDs")}</label>
         <textarea
           id="agent-provisioning-trusted-agent-ids"
           className="input agent-provisioning-policy-textarea"

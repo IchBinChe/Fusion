@@ -1,5 +1,6 @@
 import "./WorkflowResultsTab.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, ChevronUp, Maximize2, Pencil, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -51,18 +52,18 @@ interface WorkflowStepOption {
   icon?: ReactNode;
 }
 
-function getStatusLabel(status: WorkflowStepResult["status"]): string {
+function getStatusLabel(status: WorkflowStepResult["status"], t: ReturnType<typeof useTranslation>["t"]): string {
   switch (status) {
     case "passed":
-      return "Passed";
+      return t("workflow.statusPassed", "Passed");
     case "failed":
-      return "Failed";
+      return t("workflow.statusFailed", "Failed");
     case "advisory_failure":
-      return "Advisory failure";
+      return t("workflow.statusAdvisory", "Advisory failure");
     case "skipped":
-      return "Skipped";
+      return t("workflow.statusSkipped", "Skipped");
     case "pending":
-      return "Running…";
+      return t("workflow.statusRunning", "Running…");
     default:
       return status;
   }
@@ -93,14 +94,14 @@ function getOutputPreview(output: string): string {
   return `${lines.length} lines`;
 }
 
-function phaseBadge(phase: "pre-merge" | "post-merge", id: string, prefix: string): ReactNode {
+function phaseBadge(phase: "pre-merge" | "post-merge", id: string, prefix: string, t: ReturnType<typeof useTranslation>["t"]): ReactNode {
   const phaseClass = phase === "post-merge" ? "phase-badge--post-merge" : "phase-badge--pre-merge";
   return (
     <span
       className={`phase-badge ${phaseClass}`}
       data-testid={`${prefix}-${id}`}
     >
-      {phase === "post-merge" ? "Post-merge" : "Pre-merge"}
+      {phase === "post-merge" ? t("workflow.postMerge", "Post-merge") : t("workflow.preMerge", "Pre-merge")}
     </span>
   );
 }
@@ -113,10 +114,12 @@ function LiveAgentLogOutput({
   entries,
   startedAt,
   stepId,
+  t,
 }: {
   entries: AgentLogEntry[];
   startedAt: string;
   stepId: string;
+  t: ReturnType<typeof useTranslation>["t"];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const startedAtMs = new Date(startedAt).getTime();
@@ -137,7 +140,7 @@ function LiveAgentLogOutput({
   if (stepEntries.length === 0) {
     return (
       <div className="workflow-live-log" data-testid={`workflow-live-log-${stepId}`}>
-        <div className="workflow-live-log-empty">Waiting for agent output…</div>
+        <div className="workflow-live-log-empty">{t("workflow.waitingForOutput", "Waiting for agent output…")}</div>
       </div>
     );
   }
@@ -201,6 +204,7 @@ export function WorkflowResultsTab({
   isTaskInProgress,
   onWorkflowStepsChange,
 }: WorkflowResultsTabProps) {
+  const { t } = useTranslation("app");
   const [expandedOutputs, setExpandedOutputs] = useState<Record<string, boolean>>({});
   const [renderModes, setRenderModes] = useState<Record<string, "markdown" | "plain">>({});
   const [expandedViewStepId, setExpandedViewStepId] = useState<string | null>(null);
@@ -351,7 +355,7 @@ export function WorkflowResultsTab({
       <div className="workflow-results-editor" data-testid="workflow-steps-editor">
         <div className="workflow-steps-section">
           <small className="workflow-steps-description">
-            Select steps to run after task implementation completes
+            {t("workflow.selectStepsDescription", "Select steps to run after task implementation completes")}
           </small>
           <div className="workflow-steps-list">
             {workflowStepOptions.map((step) => (
@@ -368,7 +372,7 @@ export function WorkflowResultsTab({
                 <div>
                   <span className="workflow-step-name">
                     {step.name}
-                    {phaseBadge(step.phase, step.id, "workflow-step-phase")}
+                    {phaseBadge(step.phase, step.id, "workflow-step-phase", t)}
                   </span>
                   <div className="workflow-step-description">
                     {step.description}
@@ -381,7 +385,7 @@ export function WorkflowResultsTab({
 
         {selectedWorkflowSteps.length > 1 && (
           <div className="workflow-step-order" data-testid="workflow-step-order">
-            <small className="workflow-step-order-label">Execution order:</small>
+            <small className="workflow-step-order-label">{t("workflow.executionOrder", "Execution order:")}</small>
             {selectedWorkflowSteps.map((stepId, index) => {
               const stepInfo = workflowStepLookup.get(stepId);
               return (
@@ -395,7 +399,7 @@ export function WorkflowResultsTab({
                       onClick={() => moveWorkflowStepUp(index)}
                       disabled={index === 0}
                       data-testid={`workflow-step-move-up-${stepId}`}
-                      title="Move up"
+                      title={t("workflow.moveUp", "Move up")}
                     >
                       <ChevronUp />
                     </button>
@@ -405,7 +409,7 @@ export function WorkflowResultsTab({
                       onClick={() => moveWorkflowStepDown(index)}
                       disabled={index === selectedWorkflowSteps.length - 1}
                       data-testid={`workflow-step-move-down-${stepId}`}
-                      title="Move down"
+                      title={t("workflow.moveDown", "Move down")}
                     >
                       <ChevronDown />
                     </button>
@@ -414,7 +418,7 @@ export function WorkflowResultsTab({
                       className="btn btn-icon btn-sm"
                       onClick={() => removeWorkflowStep(stepId)}
                       data-testid={`workflow-step-remove-${stepId}`}
-                      title="Remove"
+                      title={t("workflow.remove", "Remove")}
                     >
                       <X />
                     </button>
@@ -433,7 +437,7 @@ export function WorkflowResultsTab({
       return (
         <div className="workflow-results-loading" data-testid="workflow-results-loading">
           <div className="workflow-results-spinner" />
-          <span>Loading workflow results…</span>
+          <span>{t("workflow.loadingResults", "Loading workflow results…")}</span>
         </div>
       );
     }
@@ -441,9 +445,9 @@ export function WorkflowResultsTab({
     if (!hasResults) {
       return (
         <div className="workflow-results-empty" data-testid="workflow-results-empty">
-          <p>No workflow steps configured for this task.</p>
+          <p>{t("workflow.noStepsConfigured", "No workflow steps configured for this task.")}</p>
           <p className="workflow-results-empty-hint">
-            Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.
+            {t("workflow.stepsExplanation", "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")}
           </p>
         </div>
       );
@@ -469,12 +473,12 @@ export function WorkflowResultsTab({
         </div>
         {advisoryFailures.length > 0 && (
           <div className="workflow-polish-notes" data-testid="workflow-polish-notes">
-            <h4>Polish notes</h4>
-            <p>Advisory workflow steps flagged non-blocking improvements:</p>
+            <h4>{t("workflow.polishNotes", "Polish notes")}</h4>
+            <p>{t("workflow.advisoryExplanation", "Advisory workflow steps flagged non-blocking improvements:")}</p>
             <ul>
               {advisoryFailures.map((result, index) => (
                 <li key={`advisory-${result.workflowStepId}-${index}`}>
-                  <strong>{result.workflowStepName}:</strong> {result.output || "Needs follow-up review."}
+                  <strong>{result.workflowStepName}:</strong> {result.output || t("workflow.needsReview", "Needs follow-up review.")}
                 </li>
               ))}
             </ul>
@@ -492,7 +496,7 @@ export function WorkflowResultsTab({
               <div className="workflow-result-header">
                 <div className="workflow-result-name">
                   {result.workflowStepName}
-                  {phaseBadge(phase, result.workflowStepId, "workflow-result-phase")}
+                  {phaseBadge(phase, result.workflowStepId, "workflow-result-phase", t)}
                 </div>
                 <div className="workflow-result-badges">
                   {result.verdict && (
@@ -507,14 +511,14 @@ export function WorkflowResultsTab({
                     className={`workflow-result-badge workflow-result-badge--${result.status}`}
                     data-testid={`workflow-result-badge-${result.workflowStepId}`}
                   >
-                    {getStatusLabel(result.status)}
+                    {getStatusLabel(result.status, t)}
                   </span>
                 </div>
               </div>
 
               {result.notes && result.status !== "pending" && (
                 <div className="workflow-result-notes" data-testid={`workflow-result-notes-${result.workflowStepId}`}>
-                  <span className="workflow-result-notes-label">Notes:</span>
+                  <span className="workflow-result-notes-label">{t("workflow.notes", "Notes:")} </span>
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {result.notes}
                   </ReactMarkdown>
@@ -536,18 +540,19 @@ export function WorkflowResultsTab({
                   entries={liveLogEntries}
                   startedAt={result.startedAt}
                   stepId={result.workflowStepId}
+                  t={t}
                 />
               ) : result.output ? (
                 <div className="workflow-result-output-section">
                   <div className="workflow-result-output-header">
-                    <span className="workflow-result-output-label">Output:</span>
+                    <span className="workflow-result-output-label">{t("workflow.output", "Output:")} </span>
                     <button
                       type="button"
                       className="btn btn-sm workflow-result-toggle"
                       onClick={() => toggleOutput(result.workflowStepId)}
                       data-testid={`workflow-result-toggle-${result.workflowStepId}`}
                     >
-                      {isExpanded ? "Hide output" : "Show output"}
+                      {isExpanded ? t("workflow.hideOutput", "Hide output") : t("workflow.showOutput", "Show output")}
                     </button>
                     {!isExpanded && (
                       <span
@@ -564,16 +569,16 @@ export function WorkflowResultsTab({
                           className="btn btn-sm workflow-result-mode-toggle"
                           onClick={() => toggleRenderMode(result.workflowStepId)}
                           data-testid={`workflow-result-mode-toggle-${result.workflowStepId}`}
-                          title={(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? "Switch to plain text" : "Switch to markdown"}
+                          title={(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? t("workflow.switchToPlain", "Switch to plain text") : t("workflow.switchToMarkdown", "Switch to markdown")}
                         >
-                          {(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? "Markdown" : "Plain"}
+                          {(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? t("workflow.markdown", "Markdown") : t("workflow.plain", "Plain")}
                         </button>
                         <button
                           type="button"
                           className="btn btn-icon btn-sm workflow-result-expand-toggle"
                           onClick={() => openExpandedView(result.workflowStepId)}
                           data-testid={`workflow-result-expand-${result.workflowStepId}`}
-                          title="Expand output"
+                          title={t("workflow.expandOutput", "Expand output")}
                         >
                           <Maximize2 size={12} />
                         </button>
@@ -613,18 +618,18 @@ export function WorkflowResultsTab({
       className="btn btn-sm workflow-results-edit-toggle"
       onClick={() => setIsEditing((prev) => !prev)}
       data-testid="workflow-steps-edit-toggle"
-      aria-label={isEditing ? "Done editing workflow steps" : "Edit workflow steps"}
-      title={isEditing ? "Done" : "Edit"}
+      aria-label={isEditing ? t("workflow.doneEditingAriaLabel", "Done editing workflow steps") : t("workflow.editAriaLabel", "Edit workflow steps")}
+      title={isEditing ? t("workflow.done", "Done") : t("workflow.edit", "Edit")}
     >
       {isEditing ? (
         <>
           <Check size={14} />
-          Done
+          {t("workflow.done", "Done")}
         </>
       ) : (
         <>
           <Pencil size={14} />
-          Edit
+          {t("workflow.edit", "Edit")}
         </>
       )}
     </button>
@@ -639,9 +644,9 @@ export function WorkflowResultsTab({
         <div className="workflow-configured-steps" data-testid="workflow-configured-steps">
           <div className="workflow-configured-header" data-testid="workflow-configured-header">
             <div className="workflow-configured-title-row">
-              <h4>Configured Workflow Steps</h4>
+              <h4>{t("workflow.configuredSteps", "Configured Workflow Steps")}</h4>
               <span className="workflow-configured-count" data-testid="workflow-configured-count">
-                {configuredSteps.length} step{configuredSteps.length === 1 ? "" : "s"}
+                {t("workflow.stepCount", "{{count}} step{{count_one::count_other:s}}", { count: configuredSteps.length })}
               </span>
             </div>
             {editButton}
@@ -656,7 +661,7 @@ export function WorkflowResultsTab({
               >
                 <div className="workflow-configured-name">
                   <span className="workflow-configured-name-text">{step.name}</span>
-                  {phaseBadge(step.phase, step.id, "workflow-configured-phase")}
+                  {phaseBadge(step.phase, step.id, "workflow-configured-phase", t)}
                 </div>
                 <p className="workflow-configured-description">{step.description}</p>
               </div>
@@ -664,7 +669,7 @@ export function WorkflowResultsTab({
           </div>
 
           <p className="workflow-results-empty-hint">
-            Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.
+            {t("workflow.stepsExplanation", "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")}
           </p>
 
           {renderEditor()}
@@ -673,7 +678,7 @@ export function WorkflowResultsTab({
         <>
           {showEditHeaderForResults && (
             <div className="workflow-results-edit-header" data-testid="workflow-results-edit-header">
-              <h4>Workflow Steps</h4>
+              <h4>{t("workflow.steps", "Workflow Steps")}</h4>
               {editButton}
             </div>
           )}
@@ -702,7 +707,7 @@ export function WorkflowResultsTab({
               <div className="workflow-output-modal-header">
                 <div className="workflow-output-modal-title">
                   <span className="workflow-output-modal-name">{result.workflowStepName}</span>
-                  {phaseBadge(phase, result.workflowStepId, "workflow-output-modal-phase")}
+                  {phaseBadge(phase, result.workflowStepId, "workflow-output-modal-phase", t)}
                 </div>
                 <div className="workflow-output-modal-controls">
                   <button
@@ -710,16 +715,16 @@ export function WorkflowResultsTab({
                     className="btn btn-sm workflow-result-mode-toggle"
                     onClick={() => toggleRenderMode(result.workflowStepId)}
                     data-testid="workflow-output-modal-mode-toggle"
-                    title={renderMode === "markdown" ? "Switch to plain text" : "Switch to markdown"}
+                    title={renderMode === "markdown" ? t("workflow.switchToPlain", "Switch to plain text") : t("workflow.switchToMarkdown", "Switch to markdown")}
                   >
-                    {renderMode === "markdown" ? "Markdown" : "Plain"}
+                    {renderMode === "markdown" ? t("workflow.markdown", "Markdown") : t("workflow.plain", "Plain")}
                   </button>
                   <button
                     type="button"
                     className="btn btn-icon btn-sm workflow-output-modal-close"
                     onClick={closeExpandedView}
                     data-testid="workflow-output-modal-close"
-                    aria-label="Close"
+                    aria-label={t("actions.close", "Close")}
                   >
                     <X size={16} />
                   </button>

@@ -2,6 +2,7 @@
 // in ScriptsModal.css. Until extracted, import that file so this eager modal is styled.
 import "./ScriptsModal.css";
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { X, History, Trash2, Filter, RefreshCw, CheckCircle, XCircle, ArrowRight, Plus, Settings, AlertCircle, Loader2, Folder } from "lucide-react";
 import { clearActivityLog, type ActivityLogEntry, type ActivityEventType, type ActivityFeedEntry } from "../api";
 import { useActivityLog } from "../hooks/useActivityLog";
@@ -91,7 +92,7 @@ function formatTimestamp(timestamp: string): string {
  * - Event type filter
  * - Real-time updates via useActivityLog hook
  */
-export function ActivityLogModal({ 
+export function ActivityLogModal({
   isOpen,
   onClose,
   tasks: _tasks,
@@ -101,6 +102,7 @@ export function ActivityLogModal({
   onProjectFilterChange,
   currentProject,
 }: ActivityLogModalProps) {
+  const { t } = useTranslation("app");
   const [filteredType, setFilteredType] = useState<ActivityEventType | "all">("all");
   const [filteredProjectId, setFilteredProjectId] = useState<string | "all">(projectId || "all");
   const [showConfirmClear, setShowConfirmClear] = useState(false);
@@ -209,7 +211,7 @@ export function ActivityLogModal({
         <div className="modal-header activity-log-header">
           <div className="activity-log-title">
             <History size={18} />
-            <span>Activity Log</span>
+            <span>{t("activityLog.title", "Activity Log")}</span>
           </div>
           <div className="activity-log-actions">
             {/* Project filter dropdown (when projects provided) */}
@@ -222,7 +224,7 @@ export function ActivityLogModal({
                   className="activity-log-filter-select"
                   data-testid="activity-project-filter"
                 >
-                  <option value="all">All Projects</option>
+                  <option value="all">{t("activityLog.allProjects", "All Projects")}</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
@@ -241,7 +243,7 @@ export function ActivityLogModal({
                 className="activity-log-filter-select"
                 data-testid="activity-filter"
               >
-                <option value="all">All Events</option>
+                <option value="all">{t("activityLog.allEvents", "All Events")}</option>
                 {Object.entries(EVENT_TYPE_LABELS).map(([type, label]) => (
                   <option key={type} value={type}>
                     {label}
@@ -254,7 +256,7 @@ export function ActivityLogModal({
             <button
               className="activity-log-refresh"
               onClick={() => refresh()}
-              title="Refresh"
+              title={t("activityLog.refresh", "Refresh")}
               data-testid="activity-refresh"
             >
               {isLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
@@ -265,7 +267,7 @@ export function ActivityLogModal({
               <button
                 className="activity-log-clear"
                 onClick={() => setShowConfirmClear(true)}
-                title="Clear Log"
+                title={t("activityLog.clearLog", "Clear Log")}
                 data-testid="activity-clear"
               >
                 <Trash2 size={14} />
@@ -276,8 +278,8 @@ export function ActivityLogModal({
           <button
             className="modal-close"
             onClick={onClose}
-            aria-label="Close"
-            title="Close"
+            aria-label={t("actions.close", "Close")}
+            title={t("actions.close", "Close")}
             data-testid="activity-close"
           >
             ×
@@ -287,7 +289,7 @@ export function ActivityLogModal({
         {/* Active filters display */}
         {isFilterActive && (
           <div className="activity-log-active-filters">
-            <span className="activity-log-filter-label">Active filters:</span>
+            <span className="activity-log-filter-label">{t("activityLog.activeFilters", "Active filters:")}</span>
             {filteredProjectId !== "all" && (
               <span className="activity-log-filter-badge">
                 Project: {projects.find(p => p.id === filteredProjectId)?.name || filteredProjectId}
@@ -306,7 +308,7 @@ export function ActivityLogModal({
                 onProjectFilterChange?.(undefined);
               }}
             >
-              Clear all
+              {t("activityLog.clearFilters", "Clear all")}
             </button>
           </div>
         )}
@@ -324,9 +326,9 @@ export function ActivityLogModal({
             <div className="activity-log-empty" data-testid="activity-empty">
               <History size={48} className="activity-log-empty-icon" />
               <p>
-                {isFilterActive 
-                  ? "No activity matches the current filters" 
-                  : "No activity recorded yet"}
+                {isFilterActive
+                  ? t("activityLog.noMatchingActivity", "No activity matches the current filters")
+                  : t("activityLog.noActivityRecorded", "No activity recorded yet")}
               </p>
               {isFilterActive && (
                 <button
@@ -337,7 +339,7 @@ export function ActivityLogModal({
                     onProjectFilterChange?.(undefined);
                   }}
                 >
-                  Clear Filters
+                  {t("activityLog.clearFiltersBtnLabel", "Clear Filters")}
                 </button>
               )}
             </div>
@@ -402,7 +404,7 @@ export function ActivityLogModal({
               onClick={refresh}
               data-testid="activity-load-more"
             >
-              Load More
+              {t("activityLog.loadMore", "Load More")}
             </button>
           )}
 
@@ -417,20 +419,20 @@ export function ActivityLogModal({
         {showConfirmClear && (
           <div className="activity-log-confirm-overlay">
             <div className="activity-log-confirm-dialog">
-              <h3>Clear Activity Log?</h3>
-              <p>This will permanently delete all activity log entries. This action cannot be undone.</p>
+              <h3>{t("activityLog.confirmClear", "Clear Activity Log?")}</h3>
+              <p>{t("activityLog.confirmClearMessage", "This will permanently delete all activity log entries. This action cannot be undone.")}</p>
               <div className="activity-log-confirm-actions">
                 <button
                   className="activity-log-confirm-cancel"
                   onClick={() => setShowConfirmClear(false)}
                 >
-                  Cancel
+                  {t("actions.cancel", "Cancel")}
                 </button>
                 <button
                   className="activity-log-confirm-clear"
                   onClick={handleClearLog}
                 >
-                  Clear Log
+                  {t("activityLog.confirmClearButton", "Clear Log")}
                 </button>
               </div>
             </div>

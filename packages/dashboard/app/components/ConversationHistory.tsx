@@ -1,4 +1,5 @@
 import "./ConversationHistory.css";
+import { useTranslation } from "react-i18next";
 import type { PlanningQuestion } from "@fusion/core";
 import { useState } from "react";
 import type { ConversationHistoryEntry } from "../api";
@@ -83,6 +84,7 @@ function normalizeEntries(entries: ConversationHistoryEntry[]): NumberedEntry[] 
 }
 
 export function ConversationHistory({ entries, defaultShowThinking = false }: ConversationHistoryProps) {
+  const { t } = useTranslation("app");
   const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
   const normalizedEntries = normalizeEntries(entries);
 
@@ -118,13 +120,13 @@ export function ConversationHistory({ entries, defaultShowThinking = false }: Co
               </div>
             ) : (
               <div className="conversation-entry-question">
-                <span className="conversation-entry-question-label">AI Reasoning</span>
+                <span className="conversation-entry-question-label">{t("conversation.aiReasoning", "AI Reasoning")}</span>
               </div>
             )}
 
             {hasQuestion && (
               <div className="conversation-entry-response">
-                <strong>Your response</strong>
+                <strong>{t("conversation.yourResponse", "Your response")}</strong>
                 <p>{formattedResponse || "—"}</p>
                 {comment && <p className="conversation-comment">💬 {comment}</p>}
               </div>
@@ -145,8 +147,8 @@ export function ConversationHistory({ entries, defaultShowThinking = false }: Co
                 >
                   <span aria-hidden="true">{isExpanded ? "▾" : "▸"}</span>
                   {isExpanded
-                    ? `Hide ${hasQuestion ? "AI thinking" : "AI reasoning"}`
-                    : `Show ${hasQuestion ? "AI thinking" : "AI reasoning"}`}
+                    ? t("conversation.hide", `Hide {{type}}`, { type: hasQuestion ? t("conversation.aiThinking", "AI thinking") : t("conversation.aiReasoning", "AI reasoning") })
+                    : t("conversation.show", `Show {{type}}`, { type: hasQuestion ? t("conversation.aiThinking", "AI thinking") : t("conversation.aiReasoning", "AI reasoning") })}
                 </button>
                 {isExpanded && <pre>{entry.thinkingOutput}</pre>}
               </div>

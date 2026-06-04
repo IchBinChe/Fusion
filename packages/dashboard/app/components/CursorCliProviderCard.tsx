@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import { fetchCursorCliStatus, setCursorCliEnabled, type CursorCliStatus } from "../api";
 import { ProviderIcon } from "./ProviderIcon";
@@ -11,6 +12,7 @@ interface CursorCliProviderCardProps {
 }
 
 export function CursorCliProviderCard({ authenticated, compact = false, onToggled }: CursorCliProviderCardProps) {
+  const { t } = useTranslation("app");
   const [status, setStatus] = useState<CursorCliStatus | null>(null);
   const [busy, setBusy] = useState<"enabling" | "disabling" | "testing" | null>(null);
   const mountedRef = useRef(true);
@@ -61,27 +63,27 @@ export function CursorCliProviderCard({ authenticated, compact = false, onToggle
           if (mountedRef.current) setBusy(null);
         });
       }} disabled={busy !== null}>
-        {busy === "testing" ? <><Loader2 size={12} className="animate-spin" /> Testing…</> : "Test"}
+        {busy === "testing" ? <><Loader2 size={12} className="animate-spin" /> {t("setup.cursorCli.testing", "Testing…")}</> : t("setup.cursorCli.test", "Test")}
       </button>
       {currentlyEnabled ? (
         <button type="button" className="btn btn-sm" onClick={() => void handleToggle(false)} disabled={busy !== null}>
-          {busy === "disabling" ? "Disabling…" : "Disable"}
+          {busy === "disabling" ? t("setup.cursorCli.disabling", "Disabling…") : t("setup.cursorCli.disable", "Disable")}
         </button>
       ) : (
         <button type="button" className="btn btn-primary btn-sm" onClick={() => void handleToggle(true)} disabled={busy !== null || !binaryAvailable}>
-          {busy === "enabling" ? "Enabling…" : "Enable"}
+          {busy === "enabling" ? t("setup.cursorCli.enabling", "Enabling…") : t("setup.cursorCli.enable", "Enable")}
         </button>
       )}
     </>
   );
 
   const statusText = !status
-    ? "Probing local CLI…"
+    ? t("setup.cursorCli.probing", "Probing local CLI…")
     : !status.binary.available
-      ? status.binary.reason ?? "`cursor-agent` not found on PATH"
+      ? status.binary.reason ?? t("setup.cursorCli.binaryNotFound", "`cursor-agent` not found on PATH")
       : currentlyEnabled
-        ? `Connected${status.binary.version ? ` — ${status.binary.version}` : ""}`
-        : "Detected. Click Enable to route calls through Cursor CLI.";
+        ? t("setup.cursorCli.connected", "Connected{{version}}", { version: status.binary.version ? ` — ${status.binary.version}` : "" })
+        : t("setup.cursorCli.detectedPrompt", "Detected. Click Enable to route calls through Cursor CLI.");
 
   if (compact) {
     return (
@@ -106,7 +108,7 @@ export function CursorCliProviderCard({ authenticated, compact = false, onToggle
       </div>
       <div className="onboarding-provider-card__body">
         <strong className="onboarding-provider-card__name">Cursor — via Cursor CLI</strong>
-        <span className="onboarding-provider-card__description">Route AI calls through your local Cursor agent runtime.</span>
+        <span className="onboarding-provider-card__description">{t("setup.cursorCli.description", "Route AI calls through your local Cursor agent runtime.")}</span>
         <small className="settings-muted">{statusText}</small>
       </div>
       <div className="onboarding-provider-card__actions">{actions}</div>

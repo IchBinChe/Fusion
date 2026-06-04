@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Task, TaskComment } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import "./TaskComments.css";
@@ -26,6 +27,7 @@ function isAIGuidanceComment(author: string): boolean {
 }
 
 export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "user", projectId }: TaskCommentsProps) {
+  const { t } = useTranslation("app");
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -48,7 +50,7 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
       const updated = await addSteeringComment(task.id, text, projectId);
       setDraft("");
       onTaskUpdated?.(updated);
-      addToast("Comment added", "success");
+      addToast(t("comments.addedSuccess", "Comment added"), "success");
     } catch (error) {
       addToast(getErrorMessage(error) || "Failed to add comment", "error");
     } finally {
@@ -65,7 +67,7 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
       setEditingId(null);
       setEditingText("");
       onTaskUpdated?.(updated);
-      addToast("Comment updated", "success");
+      addToast(t("comments.updatedSuccess", "Comment updated"), "success");
     } catch (error) {
       addToast(getErrorMessage(error) || "Failed to update comment", "error");
     } finally {
@@ -78,7 +80,7 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
     try {
       const updated = await deleteTaskComment(task.id, commentId, projectId);
       onTaskUpdated?.(updated);
-      addToast("Comment deleted", "success");
+      addToast(t("comments.deletedSuccess", "Comment deleted"), "success");
     } catch (error) {
       addToast(getErrorMessage(error) || "Failed to delete comment", "error");
     } finally {
@@ -93,14 +95,14 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
     }
   }
 
-  const placeholder = "Add a comment";
-  const buttonLabel = "Add Comment";
+  const placeholder = t("comments.placeholder", "Add a comment");
+  const buttonLabel = t("comments.addButton", "Add Comment");
 
   return (
     <div className="detail-section">
-      <h4>Comments</h4>
+      <h4>{t("comments.heading", "Comments")}</h4>
       {comments.length === 0 ? (
-        <div className="detail-log-empty">No comments yet.</div>
+        <div className="detail-log-empty">{t("comments.emptyState", "No comments yet.")}</div>
       ) : (
         <div className="detail-activity-list">
           {comments.map((comment) => {
@@ -126,14 +128,14 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
                         setEditingId(comment.id);
                         setEditingText(comment.text);
                       }}>
-                        Edit
+                        {t("actions.edit", "Edit")}
                       </button>
                       <button
                         className="btn btn-danger btn-sm"
                         onClick={() => void handleDelete(comment.id)}
                         disabled={deletingId === comment.id}
                       >
-                        {deletingId === comment.id ? "Deleting…" : "Delete"}
+                        {deletingId === comment.id ? t("comments.deletingButton", "Deleting…") : t("actions.delete", "Delete")}
                       </button>
                     </div>
                   ) : null}
@@ -155,14 +157,14 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
                         }}
                         disabled={submitting}
                       >
-                        Cancel
+                        {t("actions.cancel", "Cancel")}
                       </button>
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() => void handleSaveEdit(comment.id)}
                         disabled={submitting || !editingText.trim()}
                       >
-                        Save
+                        {t("actions.save", "Save")}
                       </button>
                     </div>
                   </div>
@@ -195,7 +197,7 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
             onClick={() => void handleAddComment()}
             disabled={submitting || !draft.trim() || isOverLimit}
           >
-            {submitting ? "Posting…" : buttonLabel}
+            {submitting ? t("comments.postingButton", "Posting…") : buttonLabel}
           </button>
         </div>
       </div>

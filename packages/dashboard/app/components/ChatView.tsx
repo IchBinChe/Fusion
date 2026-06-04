@@ -47,6 +47,7 @@ import { matchesAgentMentionFilter } from "./mentionMatching";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
+import { useTranslation } from "react-i18next";
 
 export interface ChatViewProps {
   projectId?: string;
@@ -207,7 +208,7 @@ function buildFailureReferenceHref(reference: FailureInfo["reference"]): string 
   return null;
 }
 
-function renderFailureReference(reference: FailureInfo["reference"]): ReactNode {
+function renderFailureReference(reference: FailureInfo["reference"], t: (key: string, defaultValue: string) => string): ReactNode {
   if (!reference) {
     return null;
   }
@@ -220,27 +221,27 @@ function renderFailureReference(reference: FailureInfo["reference"]): ReactNode 
 
   return (
     <div className="chat-message-failure-reference">
-      <span className="chat-message-failure-reference-label">Reference</span>
+      <span className="chat-message-failure-reference-label">{t("chat.failureReferenceLabel", "Reference")}</span>
       <span className="chat-message-failure-reference-value">{referenceLabel}</span>
       {referenceHref ? (
         <a className="btn btn-sm chat-message-failure-reference-link" href={referenceHref}>
-          Open mailbox message
+          {t("chat.openMailboxMessage", "Open mailbox message")}
         </a>
       ) : (
         <details className="chat-message-failure-reference-details">
-          <summary className="btn btn-sm chat-message-failure-reference-link">View failure details</summary>
+          <summary className="btn btn-sm chat-message-failure-reference-link">{t("chat.viewFailureDetails", "View failure details")}</summary>
           <dl className="chat-message-failure-reference-meta" id={referenceDetailsId}>
             <div>
-              <dt>Kind</dt>
+              <dt>{t("chat.failureReferenceKind", "Kind")}</dt>
               <dd>{reference.kind}</dd>
             </div>
             <div>
-              <dt>ID</dt>
+              <dt>{t("chat.failureReferenceId", "ID")}</dt>
               <dd>{reference.id}</dd>
             </div>
             {reference.label && (
               <div>
-                <dt>Label</dt>
+                <dt>{t("chat.failureReferenceMetaLabel", "Label")}</dt>
                 <dd>{reference.label}</dd>
               </div>
             )}
@@ -251,7 +252,7 @@ function renderFailureReference(reference: FailureInfo["reference"]): ReactNode 
   );
 }
 
-function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
+function renderToolCalls(toolCalls: ToolCallInfo[] | undefined, t: (key: string, defaultValue: string, opts?: Record<string, unknown>) => string): ReactNode {
   if (!toolCalls || toolCalls.length === 0) return null;
 
   const renderToolCallItem = (toolCall: ToolCallInfo, index: number) => {
@@ -262,11 +263,11 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
     const summaryPreview = isRunning
       ? argsSummary
       : resultSummary
-        ? `result: ${resultSummary}`
+        ? `${t("chat.toolCallResultPrefix", "result")}: ${resultSummary}`
         : argsSummary
-          ? `args: ${argsSummary}`
+          ? `${t("chat.toolCallArgsPrefix", "args")}: ${argsSummary}`
           : null;
-    const statusLabel = isRunning ? "running" : isError ? "error" : "completed";
+    const statusLabel = isRunning ? t("chat.toolCallStatusRunning", "running") : isError ? t("chat.toolCallStatusError", "error") : t("chat.toolCallStatusCompleted", "completed");
 
     return (
       <details
@@ -287,13 +288,13 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
         <div className="chat-tool-call-content">
           {argsSummary && (
             <div className="chat-tool-call-row">
-              <span className="chat-tool-call-label">args</span>
+              <span className="chat-tool-call-label">{t("chat.toolCallArgsPrefix", "args")}</span>
               <span className="chat-tool-call-value">{argsSummary}</span>
             </div>
           )}
           {resultSummary && (
             <div className={`chat-tool-call-row${isError ? " chat-tool-call-row--error" : ""}`}>
-              <span className="chat-tool-call-label">result</span>
+              <span className="chat-tool-call-label">{t("chat.toolCallResultPrefix", "result")}</span>
               <span className="chat-tool-call-value">{resultSummary}</span>
             </div>
           )}
@@ -308,7 +309,7 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
       <div className={className} data-testid="chat-tool-calls">
         <div className="chat-tool-calls-header">
           <Wrench size={12} aria-hidden="true" />
-          <span>Tool calls</span>
+          <span>{t("chat.toolCallsHeader", "Tool calls")}</span>
         </div>
         {renderToolCallItem(toolCalls[0], 0)}
       </div>
@@ -325,9 +326,9 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
     ? `${visibleNames.join(", ")}, +${overflowCount} more`
     : visibleNames.join(", ");
   const statusSummary = hasRunning
-    ? `(${runningCount} running)`
+    ? `(${runningCount} ${t("chat.toolCallStatusRunning", "running")})`
     : errorCount > 0
-      ? `(${errorCount} ${errorCount === 1 ? "error" : "errors"})`
+      ? `(${errorCount} ${errorCount === 1 ? t("chat.toolCallStatusError", "error") : t("chat.toolCallStatusErrors", "errors")})`
       : null;
 
   return (
@@ -335,7 +336,7 @@ function renderToolCalls(toolCalls?: ToolCallInfo[]): ReactNode {
       <details className="chat-tool-calls-group" data-testid="chat-tool-calls-group" open={hasRunning}>
         <summary className="chat-tool-calls-group-summary">
           <Wrench size={12} aria-hidden="true" />
-          <span className="chat-tool-calls-count">{toolCalls.length} tool calls</span>
+          <span className="chat-tool-calls-count">{t("chat.toolCallsCount", "{{count}} tool calls", { count: toolCalls.length })}</span>
           <span className="chat-tool-calls-names" title={namesSummary}>{namesSummary}</span>
           {statusSummary && <span className="chat-tool-calls-group-status">{statusSummary}</span>}
         </summary>
@@ -525,6 +526,7 @@ interface NewChatDialogProps {
 }
 
 function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDialogProps) {
+  const { t } = useTranslation("app");
   const [chatMode, setChatMode] = useState<"agent" | "model">("agent");
   const { agents, loading: agentsLoading } = useAgentsMapCache(projectId);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
@@ -611,7 +613,7 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
   return (
     <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div className="chat-new-dialog chat-view-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>New Chat</h3>
+        <h3>{t("chat.newChatTitle", "New Chat")}</h3>
         <div className="chat-new-dialog-mode-toggle" data-testid="chat-new-dialog-mode-toggle">
           <button
             type="button"
@@ -621,7 +623,7 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
               setChatMode("agent");
             }}
           >
-            Agent
+            {t("chat.newChatModeAgent", "Agent")}
           </button>
           <button
             type="button"
@@ -633,17 +635,17 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
               setSelectedModel((current) => current || defaultModelValue);
             }}
           >
-            Model
+            {t("chat.newChatModeModel", "Model")}
           </button>
         </div>
         <form onSubmit={handleSubmit}>
           {chatMode === "agent" && (
             <label className="chat-new-dialog-model-label">
-              Agent
+              {t("chat.newChatModeAgent", "Agent")}
               {agentsLoading ? (
-                <div className="chat-new-dialog-loading">Loading agents...</div>
+                <div className="chat-new-dialog-loading">{t("chat.loadingAgents", "Loading agents...")}</div>
               ) : agents.length === 0 ? (
-                <div className="chat-new-dialog-empty">No agents available</div>
+                <div className="chat-new-dialog-empty">{t("chat.noAgentsAvailable", "No agents available")}</div>
               ) : (
                 <div className="chat-new-dialog-agent-list">
                   {agents.map((agent) => (
@@ -666,14 +668,14 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
           {chatMode === "model" && (
             <div className="chat-new-dialog-model-dropdown" data-testid="chat-new-dialog-model-section">
               {modelsLoading ? (
-                <div className="chat-new-dialog-loading">Loading models...</div>
+                <div className="chat-new-dialog-loading">{t("chat.loadingModels", "Loading models...")}</div>
               ) : (
                 <CustomModelDropdown
                   models={models}
                   value={selectedModel}
                   onChange={setSelectedModel}
-                  label="Model"
-                  placeholder="Select a model"
+                  label={t("chat.newChatModeModel", "Model")}
+                  placeholder={t("chat.selectModel", "Select a model")}
                   favoriteProviders={favoriteProviders}
                   onToggleFavorite={handleToggleFavorite}
                   favoriteModels={favoriteModels}
@@ -684,14 +686,14 @@ function NewChatDialog({ projectId, defaultModel, onClose, onCreate }: NewChatDi
           )}
           <div className="chat-new-dialog-actions">
             <button type="button" className="btn btn-sm" onClick={onClose}>
-              Cancel
+              {t("chat.cancel", "Cancel")}
             </button>
             <button
               type="submit"
               className="btn btn-sm btn-primary"
               disabled={isSubmitDisabled}
             >
-              Create
+              {t("chat.create", "Create")}
             </button>
           </div>
         </form>
@@ -753,6 +755,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   copyAction,
   onScrollToTop,
 }: ChatMessageItemProps) {
+  const { t } = useTranslation("app");
   const isAssistantMessage = message.role === "assistant";
   const failureInfo = isAssistantMessage ? message.failureInfo : undefined;
   const showAssistantIdentity = isAssistantMessage && (!hideAssistantIdentity || Boolean(failureInfo));
@@ -848,7 +851,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
         <div className="chat-message-content chat-message-content--failure">
           <div className="chat-message-failure-summary-row">
             <span className="status-dot status-dot--error" aria-hidden="true" />
-            <span className="chat-message-failure-label">Response failed</span>
+            <span className="chat-message-failure-label">{t("chat.responseFailed", "Response failed")}</span>
           </div>
           <div className="chat-message-failure-summary">{failureInfo.summary}</div>
           {(failureInfo.errorClass || failureInfo.code) && (
@@ -861,10 +864,10 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <details className="chat-message-failure-details">
               <summary>
                 <TriangleAlert size={14} aria-hidden="true" />
-                <span>Failure details</span>
+                <span>{t("chat.failureDetails", "Failure details")}</span>
               </summary>
               {failureInfo.detail && <pre className="chat-message-failure-detail">{linkifyFilePaths(failureInfo.detail)}</pre>}
-              {renderFailureReference(failureInfo.reference)}
+              {renderFailureReference(failureInfo.reference, t)}
             </details>
           )}
         </div>
@@ -905,7 +908,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <button
               type="button"
               className="btn-icon chat-message-scroll-to-top-action"
-              aria-label="Scroll message to top"
+              aria-label={t("chat.scrollMessageToTop", "Scroll message to top")}
               data-testid={`chat-message-scroll-to-top-${message.id}`}
               onClick={() => onScrollToTop(message.id)}
             >
@@ -914,10 +917,10 @@ const ChatMessageItem = memo(function ChatMessageItem({
           )}
         </div>
       )}
-      {renderToolCalls(message.toolCalls)}
+      {renderToolCalls(message.toolCalls, t)}
       {message.thinkingOutput && (
         <details className="chat-message-thinking">
-          <summary>Thinking</summary>
+          <summary>{t("chat.thinking", "Thinking")}</summary>
           <pre className="chat-message-thinking-content">{linkifyFilePaths(message.thinkingOutput)}</pre>
         </details>
       )}
@@ -928,6 +931,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
 });
 
 export function ChatView({ projectId, addToast, experimentalFeatures }: ChatViewProps) {
+  const { t } = useTranslation("app");
   useEffect(() => {
     recordResumeEvent({
       view: "ChatView",
@@ -1814,7 +1818,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         // On mobile, hide sidebar after selecting
         if (isMobile) setSidebarVisible(false);
       } catch {
-        addToast("Failed to create chat session", "error");
+        addToast(t("chat.failedToCreateSession", "Failed to create chat session"), "error");
       }
     },
     [createSession, addToast, isMobile],
@@ -1883,7 +1887,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         modelProvider: activeSession.modelProvider ?? undefined,
         modelId: activeSession.modelId ?? undefined,
       }).catch(() => {
-        addToast("Failed to clear conversation", "error");
+        addToast(t("chat.failedToClearConversation", "Failed to clear conversation"), "error");
       });
       return;
     }
@@ -1919,7 +1923,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         try {
           await rooms.clearRoom(rooms.activeRoom.id);
         } catch {
-          addToast("Failed to clear room conversation", "error");
+          addToast(t("chat.failedToClearRoomConversation", "Failed to clear room conversation"), "error");
         }
         return;
       }
@@ -1938,15 +1942,15 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         if (error instanceof RoomMessageDeliveredButReplyFailedError) {
           const message = error.message.trim()
             ? error.message
-            : "Message sent, but assistant reply failed";
-          addToast(`Message sent, but assistant reply failed: ${message}`, "error");
+            : t("chat.messageSentButReplyFailed", "Message sent, but assistant reply failed");
+          addToast(t("chat.messageSentButReplyFailedDetail", "Message sent, but assistant reply failed: {{detail}}", { detail: message }), "error");
           return;
         }
 
         setMessageInput(previousInput);
         const message = error instanceof Error && error.message.trim()
           ? error.message
-          : "Failed to send room message";
+          : t("chat.failedToSendRoomMessage", "Failed to send room message");
         addToast(message, "error");
       } finally {
         roomSendInFlightRef.current = false;
@@ -2292,9 +2296,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       setContextMenu(null);
       try {
         await archiveSession(id);
-        addToast("Conversation archived", "success");
+        addToast(t("chat.conversationArchived", "Conversation archived"), "success");
       } catch {
-        addToast("Failed to archive conversation", "error");
+        addToast(t("chat.failedToArchiveConversation", "Failed to archive conversation"), "error");
       }
     },
     [archiveSession, addToast],
@@ -2307,9 +2311,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       setContextMenu(null);
       try {
         await deleteSession(id);
-        addToast("Conversation deleted", "success");
+        addToast(t("chat.conversationDeleted", "Conversation deleted"), "success");
       } catch {
-        addToast("Failed to delete conversation", "error");
+        addToast(t("chat.failedToDeleteConversation", "Failed to delete conversation"), "error");
       }
     },
     [deleteSession, addToast],
@@ -2413,10 +2417,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     return (
       <div className="chat-empty-state">
         <MessageSquare size={48} strokeWidth={1.5} />
-        <h2>Start a new conversation</h2>
+        <h2>{t("chat.startNewConversation", "Start a new conversation")}</h2>
         <button className="btn btn-primary" onClick={() => setShowNewDialog(true)}>
           <Plus size={16} />
-          New Chat
+          {t("chat.newChat", "New Chat")}
         </button>
       </div>
     );
@@ -2597,7 +2601,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       type="button"
       className={`btn-icon chat-message-copy-action${copyFeedbackByMessageId[messageId] === "success" ? " chat-message-copy-action--success" : ""}${copyFeedbackByMessageId[messageId] === "error" ? " chat-message-copy-action--error" : ""}`}
       data-testid={testId ?? `chat-copy-response-${messageId}`}
-      aria-label={copyFeedbackByMessageId[messageId] === "success" ? "Response copied" : copyFeedbackByMessageId[messageId] === "error" ? "Copy failed" : "Copy response"}
+      aria-label={copyFeedbackByMessageId[messageId] === "success" ? t("chat.responseCopied", "Response copied") : copyFeedbackByMessageId[messageId] === "error" ? t("chat.copyFailed", "Copy failed") : t("chat.copyResponse", "Copy response")}
       onClick={() => {
         void handleCopyResponse(messageId, content);
       }}
@@ -2635,7 +2639,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               data-testid="chat-sidebar-scope-direct"
               onClick={() => setChatScope("direct")}
             >
-              Direct
+              {t("chat.scopeDirect", "Direct")}
             </button>
             <button
               type="button"
@@ -2645,7 +2649,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               data-testid="chat-sidebar-scope-rooms"
               onClick={() => setChatScope("rooms")}
             >
-              Rooms
+              {t("chat.scopeRooms", "Rooms")}
             </button>
           </div>
         )}
@@ -2658,7 +2662,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 <input
                   type="text"
                   className="chat-sidebar-search"
-                  placeholder="Search conversations..."
+                  placeholder={t("chat.searchConversations", "Search conversations...")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   data-testid="chat-search-input"
@@ -2668,9 +2672,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             {/* Session list section */}
             <div className="chat-session-list chat-sidebar-list">
               {sessionsLoading ? (
-                <div className="chat-empty-state chat-empty-state--padded">Loading...</div>
+                <div className="chat-empty-state chat-empty-state--padded">{t("chat.loadingConversations", "Loading...")}</div>
               ) : filteredSessions.length === 0 ? (
-                <div className="chat-empty-state chat-empty-state--padded">No conversations yet</div>
+                <div className="chat-empty-state chat-empty-state--padded">{t("chat.noConversationsYet", "No conversations yet")}</div>
               ) : (
                 filteredSessions.map((session) => {
                   const isActive = activeSession?.id === session.id;
@@ -2700,22 +2704,22 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                           setConfirmDelete(session.id);
                         }}
                         data-testid="chat-session-delete-btn"
-                        aria-label="Delete conversation"
+                        aria-label={t("chat.deleteConversation", "Delete conversation")}
                       >
                         <Trash2 size={14} />
                       </button>
                       <div className="chat-session-title">
-                        {session.title || "Untitled"}
+                        {session.title || t("chat.untitledSession", "Untitled")}
                         {showUnreadDot ? (
                           <span
                             className="chat-unread-dot"
                             data-testid={`chat-unread-dot-${session.id}`}
-                            aria-label="Unread messages"
+                            aria-label={t("chat.unreadMessages", "Unread messages")}
                           />
                         ) : null}
                       </div>
                       <div className="chat-session-preview">
-                        {session.lastMessagePreview || "No messages"}
+                        {session.lastMessagePreview || t("chat.noMessages", "No messages")}
                       </div>
                       <div className="chat-session-meta">
                         <span className="chat-session-meta-model">
@@ -2744,13 +2748,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   onClick={() => setCreateRoomOpen(true)}
                 >
                   <Plus size={14} />
-                  Create room
+                  {t("chat.createRoom", "Create room")}
                 </button>
               </div>
             )}
             {rooms.rooms.length === 0 ? (
               <div className="chat-sidebar-rooms-empty" data-testid="chat-sidebar-rooms-empty">
-                No rooms yet.
+                {t("chat.noRoomsYet", "No rooms yet.")}
               </div>
             ) : (
               <div className="chat-session-list chat-sidebar-list">
@@ -2789,13 +2793,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                             <span
                               className="chat-unread-dot"
                               data-testid={`chat-unread-dot-${room.id}`}
-                              aria-label="Unread messages"
+                              aria-label={t("chat.unreadMessages", "Unread messages")}
                             />
                           ) : null}
                         </span>
                         {isActive ? (
                           <span className="chat-room-item-meta">
-                            {rooms.activeRoomMembers.length} {rooms.activeRoomMembers.length === 1 ? "member" : "members"}
+                            {t("chat.roomMemberCount", "{{count}} member", { count: rooms.activeRoomMembers.length, defaultValue_one: "{{count}} member", defaultValue_other: "{{count}} members" })}
                           </span>
                         ) : null}
                       </span>
@@ -2803,7 +2807,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                         type="button"
                         className="btn-icon chat-room-item-delete"
                         data-testid={`chat-room-delete-${room.slug}`}
-                        aria-label={`Delete room ${room.name}`}
+                        aria-label={t("chat.deleteRoom", "Delete room {{name}}", { name: room.name })}
                         onClick={(event) => {
                           event.stopPropagation();
                           setConfirmDeleteRoomId(room.id);
@@ -2828,7 +2832,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 onClick={() => setCreateRoomOpen(true)}
               >
                 <Plus size={14} />
-                Create room
+                {t("chat.createRoom", "Create room")}
               </button>
             </div>
           ) : null
@@ -2840,7 +2844,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               data-testid="chat-new-btn"
             >
               <Plus size={14} />
-              New Chat
+              {t("chat.newChat", "New Chat")}
             </button>
           </div>
         )}
@@ -2854,7 +2858,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
           aria-valuemin={CHAT_SIDEBAR_MIN_WIDTH}
           aria-valuemax={CHAT_SIDEBAR_MAX_WIDTH}
           aria-valuenow={sidebarWidth}
-          aria-label="Resize chat sidebar"
+          aria-label={t("chat.resizeSidebar", "Resize chat sidebar")}
           tabIndex={0}
           onPointerDown={handleResizeStart}
           onKeyDown={handleResizeKeyDown}
@@ -2873,7 +2877,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             data-testid="chat-context-archive"
           >
             <Archive size={14} />
-            Archive
+            {t("chat.archive", "Archive")}
           </button>
           <button
             onClick={() => {
@@ -2883,7 +2887,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             data-testid="chat-context-delete"
           >
             <Trash2 size={14} />
-            Delete
+            {t("chat.delete", "Delete")}
           </button>
         </div>
       )}
@@ -2892,19 +2896,19 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       {confirmDelete && (
         <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={() => setConfirmDelete(null)}>
           <div className="chat-new-dialog chat-view-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Delete Conversation?</h3>
+            <h3>{t("chat.deleteConversationTitle", "Delete Conversation?")}</h3>
             <p className="chat-view-delete-dialog-copy">
-              This action cannot be undone. All messages in this conversation will be permanently deleted.
+              {t("chat.deleteConversationBody", "This action cannot be undone. All messages in this conversation will be permanently deleted.")}
             </p>
             <div className="chat-new-dialog-actions">
               <button className="btn btn-sm" onClick={() => setConfirmDelete(null)}>
-                Cancel
+                {t("chat.cancel", "Cancel")}
               </button>
               <button
                 className="btn btn-sm btn-danger"
                 onClick={() => void handleDelete(confirmDelete)}
               >
-                Delete
+                {t("chat.delete", "Delete")}
               </button>
             </div>
           </div>
@@ -2914,13 +2918,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       {chatRoomsEnabled && confirmDeleteRoomId && (
         <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={() => setConfirmDeleteRoomId(null)}>
           <div className="chat-new-dialog chat-view-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Delete Room?</h3>
+            <h3>{t("chat.deleteRoomTitle", "Delete Room?")}</h3>
             <p className="chat-view-delete-dialog-copy">
-              This action cannot be undone. This room and all its messages will be permanently deleted.
+              {t("chat.deleteRoomBody", "This action cannot be undone. This room and all its messages will be permanently deleted.")}
             </p>
             <div className="chat-new-dialog-actions">
               <button className="btn btn-sm" onClick={() => setConfirmDeleteRoomId(null)}>
-                Cancel
+                {t("chat.cancel", "Cancel")}
               </button>
               <button
                 className="btn btn-sm btn-danger"
@@ -2930,12 +2934,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                       await rooms.deleteRoom(confirmDeleteRoomId);
                       setConfirmDeleteRoomId(null);
                     } catch {
-                      addToast("Failed to delete room", "error");
+                      addToast(t("chat.failedToDeleteRoom", "Failed to delete room"), "error");
                     }
                   })();
                 }}
               >
-                Delete
+                {t("chat.delete", "Delete")}
               </button>
             </div>
           </div>
@@ -3005,14 +3009,14 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               </div>
               <div className="chat-messages" ref={messagesContainerRef} onScroll={updateScrollState}>
                 {rooms.messagesLoading ? (
-                  <div className="chat-empty-state">Loading messages...</div>
+                  <div className="chat-empty-state">{t("chat.loadingMessages", "Loading messages...")}</div>
                 ) : rooms.messages.filter((message) => message.content.trim() !== ROOM_SKIP_SENTINEL).length === 0 ? (
-                  <div className="chat-empty-state">No messages yet. Start the conversation!</div>
+                  <div className="chat-empty-state">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
                 ) : (
                   rooms.messages
                     .filter((message) => message.content.trim() !== ROOM_SKIP_SENTINEL)
                     .map((message) => {
-                    const senderName = message.senderAgentId ? (agentsMap.get(message.senderAgentId)?.name ?? message.senderAgentId.slice(0, 30)) : "You";
+                    const senderName = message.senderAgentId ? (agentsMap.get(message.senderAgentId)?.name ?? message.senderAgentId.slice(0, 30)) : t("chat.you", "You");
                     const roomMessage: ChatMessageInfo = {
                       id: message.id,
                       sessionId: message.roomId,
@@ -3052,12 +3056,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   onClick={() => scrollToBottom("fab-click")}
                 >
                   <ChevronDown size={14} />
-                  Latest
+                  {t("chat.latest", "Latest")}
                 </button>
               )}
             </>
           ) : (
-            <div className="chat-room-empty-pane" data-testid="chat-rooms-empty-pane">Select a room or create one</div>
+            <div className="chat-room-empty-pane" data-testid="chat-rooms-empty-pane">{t("chat.selectRoomOrCreate", "Select a room or create one")}</div>
           )}
 
           {rooms.activeRoom && (
@@ -3067,7 +3071,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   <textarea
                     ref={handleComposerRef}
                     className="chat-input-textarea"
-                    placeholder="Type a message..."
+                    placeholder={t("chat.typeMessage", "Type a message...")}
                     value={messageInput}
                     onChange={handleInputChange}
                     onKeyDown={handleInputKeyDown}
@@ -3172,7 +3176,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                           data-testid={`chat-mobile-session-option-${session.id}`}
                           onClick={() => handleSessionClick(session.id)}
                         >
-                          <span className="chat-mobile-session-option-title">{session.title || "Untitled"}</span>
+                          <span className="chat-mobile-session-option-title">{session.title || t("chat.untitledSession", "Untitled")}</span>
                         </button>
                       ))}
                     </div>
@@ -3191,7 +3195,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 type="button"
                 className={`chat-thread-header-render-toggle${showAllAsPlain ? " chat-thread-header-render-toggle--plain" : ""}`}
                 data-testid="chat-thread-render-toggle"
-                aria-label={showAllAsPlain ? "Show all messages as rendered Markdown" : "Show all messages as plain text"}
+                aria-label={showAllAsPlain ? t("chat.showRenderedMarkdown", "Show all messages as rendered Markdown") : t("chat.showPlainText", "Show all messages as plain text")}
                 onClick={toggleAllAsPlain}
               >
                 {showAllAsPlain ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -3204,7 +3208,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 data-testid="chat-thread-new-chat-btn"
               >
                 <Plus size={14} />
-                New Chat
+                {t("chat.newChat", "New Chat")}
               </button>
             )}
 
@@ -3215,7 +3219,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         <div className="chat-messages" ref={messagesContainerRef} onScroll={updateScrollState}>
           <div ref={loadMoreSentinelRef} className="chat-load-more-sentinel">
             {hasMoreMessages && messagesLoading && (
-              <div className="chat-loading-older">Loading older messages…</div>
+              <div className="chat-loading-older">{t("chat.loadingOlderMessages", "Loading older messages…")}</div>
             )}
           </div>
           {isStreaming ? (
@@ -3249,14 +3253,14 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   renderAssistantContent(streamingText, showAllAsPlain)
                 ) : (
                   <div className="chat-message-content chat-message-content--waiting">
-                    {streamingThinking ? "Thinking…" : "Connecting…"}
+                    {streamingThinking ? t("chat.thinkingStatus", "Thinking…") : t("chat.connectingStatus", "Connecting…")}
                   </div>
                 )}
                 {showProviderResponseCopy && streamingText && renderCopyAction("__streaming__", streamingText, "chat-copy-response-streaming")}
-                {renderToolCalls(streamingToolCalls)}
+                {renderToolCalls(streamingToolCalls, t)}
                 {streamingThinking && (
                   <details className="chat-message-thinking">
-                    <summary>Thinking</summary>
+                    <summary>{t("chat.thinking", "Thinking")}</summary>
                     <pre className="chat-message-thinking-content">{linkifyFilePaths(streamingThinking)}</pre>
                   </details>
                 )}
@@ -3268,11 +3272,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               </div>
             </>
           ) : messagesLoading ? (
-            <div className="chat-empty-state">Loading messages...</div>
+            <div className="chat-empty-state">{t("chat.loadingMessages", "Loading messages...")}</div>
           ) : messages.length === 0 && !activeSession ? (
             renderEmptyState()
           ) : messages.length === 0 && activeSession ? (
-            <div className="chat-empty-state">No messages yet. Start the conversation!</div>
+            <div className="chat-empty-state">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
           ) : (
             <>
               {messages.map((message) => (
@@ -3304,7 +3308,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             onClick={() => scrollToBottom("fab-click")}
           >
             <ChevronDown size={14} />
-            Latest
+            {t("chat.latest", "Latest")}
           </button>
         )}
 
@@ -3323,12 +3327,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               }}
             />
             {showSkillMenu && (
-              <div className="chat-skill-menu" data-testid="chat-skill-menu" role="listbox" aria-label="Skill suggestions">
+              <div className="chat-skill-menu" data-testid="chat-skill-menu" role="listbox" aria-label={t("chat.skillSuggestions", "Skill suggestions")}>
                 {skillsLoading ? (
-                  <div className="chat-skill-menu-empty">Loading skills…</div>
+                  <div className="chat-skill-menu-empty">{t("chat.loadingSkills", "Loading skills…")}</div>
                 ) : filteredSkills.length === 0 ? (
                   <div className="chat-skill-menu-empty">
-                    {skillFilter ? "No skills found" : "No skills available"}
+                    {skillFilter ? t("chat.noSkillsFound", "No skills found") : t("chat.noSkillsAvailable", "No skills available")}
                   </div>
                 ) : (
                   filteredSkills.map((skill, index) => (
@@ -3382,7 +3386,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 type="button"
                 className="btn-icon chat-attach-btn"
                 data-testid="chat-attach-btn"
-                aria-label="Attach files"
+                aria-label={t("chat.attachFiles", "Attach files")}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Paperclip size={16} />
@@ -3403,7 +3407,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 <textarea
                   ref={handleComposerRef}
                   className="chat-input-textarea"
-                  placeholder="Type a message..."
+                  placeholder={t("chat.typeMessage", "Type a message...")}
                   value={messageInput}
                   onChange={handleInputChange}
                   onKeyDown={handleInputKeyDown}
@@ -3452,11 +3456,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 />
                 {pendingMessage && (
                   <div className="chat-pending-message" data-testid="chat-pending-indicator">
-                    <span>{`Queued: ${pendingPreview}`}</span>
+                    <span>{t("chat.queuedMessage", "Queued: {{preview}}", { preview: pendingPreview })}</span>
                     <button
                       type="button"
                       className="chat-pending-message-dismiss"
-                      aria-label="Dismiss queued message"
+                      aria-label={t("chat.dismissQueuedMessage", "Dismiss queued message")}
                       data-testid="chat-pending-dismiss"
                       onClick={clearPendingMessage}
                     >
@@ -3469,7 +3473,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 <button
                   className="chat-input-stop"
                   onClick={stopStreaming}
-                  aria-label="Stop generation"
+                  aria-label={t("chat.stopGeneration", "Stop generation")}
                   data-testid="chat-stop-btn"
                 >
                   <Square size={14} />

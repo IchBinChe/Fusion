@@ -1,4 +1,5 @@
 import "./AgentPermissionPolicyEditor.css";
+import { useTranslation } from "react-i18next";
 import {
   AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
   AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES,
@@ -78,6 +79,7 @@ function derivePresetFromRules(rules: AgentPermissionPolicyRules): AgentPermissi
 }
 
 export function AgentPermissionPolicyEditor({ value, projectDefault, mode, onChange, disabled = false }: Props) {
+  const { t } = useTranslation("app");
   const derivedPreset = value ? derivePresetFromRules(value.rules) : "unrestricted";
   const currentPreset = mode === "agent-override" && !value ? "inherit" : (value?.presetId === "custom" ? derivedPreset : (value?.presetId ?? "unrestricted"));
   const rules = value?.rules ?? buildAllowRules();
@@ -109,7 +111,7 @@ export function AgentPermissionPolicyEditor({ value, projectDefault, mode, onCha
   return (
     <div className="agent-policy-editor card">
       <div className="form-group">
-        <label htmlFor="agent-policy-preset">Preset</label>
+        <label htmlFor="agent-policy-preset">{t("agentPolicy.preset", "Preset")}</label>
         <select
           id="agent-policy-preset"
           className="select"
@@ -117,15 +119,15 @@ export function AgentPermissionPolicyEditor({ value, projectDefault, mode, onCha
           onChange={(event) => setPreset(event.target.value)}
           disabled={disabled}
         >
-          {mode === "agent-override" ? <option value="inherit">Inherit project default</option> : null}
-          <option value="unrestricted">Unrestricted</option>
-          <option value="approval-required">Approval Required</option>
-          <option value="locked-down">Locked Down</option>
-          <option value="custom">Custom</option>
+          {mode === "agent-override" ? <option value="inherit">{t("agentPolicy.inheritDefault", "Inherit project default")}</option> : null}
+          <option value="unrestricted">{t("agentPolicy.unrestricted", "Unrestricted")}</option>
+          <option value="approval-required">{t("agentPolicy.approvalRequired", "Approval Required")}</option>
+          <option value="locked-down">{t("agentPolicy.lockedDown", "Locked Down")}</option>
+          <option value="custom">{t("agentPolicy.custom", "Custom")}</option>
         </select>
       </div>
 
-      <div className="agent-policy-table" role="table" aria-label="Permission policy categories">
+      <div className="agent-policy-table" role="table" aria-label={t("agentPolicy.ariaLabel", "Permission policy categories")}>
         {AGENT_PERMISSION_POLICY_ACTION_CATEGORIES.map((category) => {
           const meta = CATEGORY_LABELS[category] ?? { label: category, description: "" };
           const inherited = projectDefault?.[category] ?? "allow";
@@ -151,15 +153,15 @@ export function AgentPermissionPolicyEditor({ value, projectDefault, mode, onCha
                   onChange={(event) => setRule(category, event.target.value)}
                   disabled={disabled}
                 >
-                  {mode === "agent-override" ? <option value="inherit">Inherit</option> : null}
+                  {mode === "agent-override" ? <option value="inherit">{t("agentPolicy.inherit", "Inherit")}</option> : null}
                   {DISPOSITIONS.map((disposition) => (
                     <option key={disposition} value={disposition}>
-                      {disposition === "require-approval" ? "Require approval" : disposition[0]?.toUpperCase() + disposition.slice(1)}
+                      {disposition === "require-approval" ? t("agentPolicy.requireApproval", "Require approval") : disposition[0]?.toUpperCase() + disposition.slice(1)}
                     </option>
                   ))}
                 </select>
                 {mode === "agent-override" && rowValue === "inherit" ? (
-                  <div className="agent-policy-inherit-note">from project default: {inherited === "require-approval" ? "Require approval" : inherited}</div>
+                  <div className="agent-policy-inherit-note">{t("agentPolicy.fromProjectDefault", "from project default")}: {inherited === "require-approval" ? t("agentPolicy.requireApproval", "Require approval") : inherited}</div>
                 ) : null}
               </div>
             </div>
@@ -168,10 +170,9 @@ export function AgentPermissionPolicyEditor({ value, projectDefault, mode, onCha
       </div>
 
       <details className="agent-policy-exempt" open={false}>
-        <summary>Tools exempt from approval policy</summary>
+        <summary>{t("agentPolicy.exemptTools", "Tools exempt from approval policy")}</summary>
         <p>
-          These coordination tools bypass approval policy so heartbeats and inter-agent messaging cannot deadlock. They
-          are not user-configurable.
+          {t("agentPolicy.exemptToolsDescription", "These coordination tools bypass approval policy so heartbeats and inter-agent messaging cannot deadlock. They are not user-configurable.")}
         </p>
         <ul className="agent-policy-exempt-list">
           {AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES.map((toolName) => (

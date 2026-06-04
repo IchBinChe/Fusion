@@ -1,6 +1,7 @@
 import "./BackgroundTasksIndicator.css";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Lightbulb, Layers, Target, Loader2, HelpCircle, X, Lock, AlertCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { AiSessionSummary } from "../api";
 import { useAiSessionSync } from "../hooks/useAiSessionSync";
 import { useConfirm } from "../hooks/useConfirm";
@@ -22,14 +23,6 @@ const TYPE_ICONS = {
   slice_interview: Target,
 } as const;
 
-const TYPE_LABELS = {
-  planning: "Planning",
-  subtask: "Subtask Breakdown",
-  mission_interview: "Mission Interview",
-  milestone_interview: "Milestone Interview",
-  slice_interview: "Slice Interview",
-} as const;
-
 export function BackgroundTasksIndicator({
   sessions,
   generating,
@@ -37,6 +30,7 @@ export function BackgroundTasksIndicator({
   onOpenSession,
   onDismissSession,
 }: BackgroundTasksIndicatorProps) {
+  const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [recentlyUpdated, setRecentlyUpdated] = useState<Set<string>>(new Set());
@@ -46,6 +40,18 @@ export function BackgroundTasksIndicator({
 
   const { activeTabMap } = useAiSessionSync();
   const localSessionTabId = useMemo(() => getSessionTabId(), []);
+
+  // Type labels that are translatable
+  const TYPE_LABELS = useMemo(
+    () => ({
+      planning: t("backgroundTasks.typeLabel.planning", "Planning"),
+      subtask: t("backgroundTasks.typeLabel.subtask", "Subtask Breakdown"),
+      mission_interview: t("backgroundTasks.typeLabel.missionInterview", "Mission Interview"),
+      milestone_interview: t("backgroundTasks.typeLabel.milestoneInterview", "Milestone Interview"),
+      slice_interview: t("backgroundTasks.typeLabel.sliceInterview", "Slice Interview"),
+    }),
+    [t],
+  );
 
   // Close popover on outside click
   useEffect(() => {
@@ -128,7 +134,7 @@ export function BackgroundTasksIndicator({
       {popoverOpen && (
         <div className="background-tasks-indicator__popover">
           <div className="background-tasks-indicator__popover-header">
-            Background Tasks
+            {t("backgroundTasks.popoverHeader", "Background Tasks")}
           </div>
           <div className="background-tasks-indicator__popover-list">
             {sessions.map((session) => {
@@ -157,8 +163,8 @@ export function BackgroundTasksIndicator({
                   onClick={async () => {
                     if (activeElsewhere) {
                       const shouldOpen = await confirm({
-                        title: "Open Active Session",
-                        message: "This session is active in another tab. Open anyway?",
+                        title: t("backgroundTasks.confirmTitle", "Open Active Session"),
+                        message: t("backgroundTasks.confirmMessage", "This session is active in another tab. Open anyway?"),
                       });
                       if (!shouldOpen) {
                         return;
@@ -179,10 +185,10 @@ export function BackgroundTasksIndicator({
                       {session.title}
                     </div>
                     <div className="background-tasks-indicator__session-meta">
-                      {isError ? "Failed" : TYPE_LABELS[session.type]}
-                      {isGenerating && " — generating..."}
-                      {isAwaiting && !activeElsewhere && " — needs input"}
-                      {isAwaiting && activeElsewhere && " — active in another tab"}
+                      {isError ? t("backgroundTasks.status.failed", "Failed") : TYPE_LABELS[session.type]}
+                      {isGenerating && ` — ${t("backgroundTasks.status.generating", "generating...")}`}
+                      {isAwaiting && !activeElsewhere && ` — ${t("backgroundTasks.status.needsInput", "needs input")}`}
+                      {isAwaiting && activeElsewhere && ` — ${t("backgroundTasks.status.activeElsewhere", "active in another tab")}`}
                     </div>
                   </div>
                   {isGenerating && (
@@ -212,7 +218,7 @@ export function BackgroundTasksIndicator({
                       e.stopPropagation();
                       onDismissSession(session.id);
                     }}
-                    title="Dismiss"
+                    title={t("backgroundTasks.dismissButton", "Dismiss")}
                   >
                     <X size={12} />
                   </button>

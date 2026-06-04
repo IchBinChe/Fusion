@@ -1,15 +1,23 @@
 {
+  "actions": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "save": "Save"
+  },
+  "archive": "Archive",
+  "cancel": "Cancel",
+  "close": "Close",
   "columns": {
-    "triage": "Planning",
-    "todo": "Todo",
+    "archived": "Archived",
+    "done": "Done",
     "in-progress": "In Progress",
     "in-review": "In Review",
-    "done": "Done",
-    "archived": "Archived"
+    "todo": "Todo",
+    "triage": "Planning"
   },
-  "actions": {
-    "save": "Save",
-    "cancel": "Cancel",
-    "close": "Close"
-  }
+  "delete": "Delete",
+  "refresh": "Refresh",
+  "retry": "Retry",
+  "skip": "Skip",
+  "tryAgain": "Try Again"
 }

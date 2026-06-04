@@ -1,15 +1,23 @@
 {
+  "actions": {
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "save": "Enregistrer"
+  },
+  "archive": "Archiver",
+  "cancel": "Annuler",
+  "close": "Fermer",
   "columns": {
-    "triage": "Planification",
-    "todo": "À faire",
+    "archived": "Archivé",
+    "done": "Terminé",
     "in-progress": "En cours",
     "in-review": "En revue",
-    "done": "Terminé",
-    "archived": "Archivé"
+    "todo": "À faire",
+    "triage": "Planification"
   },
-  "actions": {
-    "save": "Enregistrer",
-    "cancel": "Annuler",
-    "close": "Fermer"
-  }
+  "delete": "Supprimer",
+  "refresh": "Actualiser",
+  "retry": "Réessayer",
+  "skip": "Ignorer",
+  "tryAgain": "Réessayer"
 }

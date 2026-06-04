@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import {
   computeCapacityRisk,
   DEFAULT_CAPACITY_RISK_TODO_THRESHOLD,
@@ -236,6 +237,7 @@ export function shouldShowFirstEverBootLoader(projectsLoading: boolean, projectC
 }
 
 function AppInner() {
+  const { t } = useTranslation("app");
   const { toasts, addToast, removeToast } = useToast();
   const { shellApi, state: shellState, ready: shellReady, openConnectionManagerSignal } = useShellConnection();
   const shellHost = useShellHostContext();
@@ -1336,7 +1338,7 @@ function AppInner() {
     if (showBackendConnectionErrorPage) {
       return (
         <BackendConnectionErrorPage
-          errorMessage={projectsError ?? "Failed to fetch projects"}
+          errorMessage={projectsError ?? t("app.backendError.failedFetch", "Failed to fetch projects")}
           isRetrying={retryingProjects}
           onRetry={handleRetryProjects}
           onManageConnection={shellApi ? () => {

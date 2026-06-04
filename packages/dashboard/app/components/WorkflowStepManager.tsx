@@ -1,5 +1,6 @@
 import "./WorkflowStepManager.css";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import type { WorkflowStep, WorkflowStepInput, WorkflowStepMode, WorkflowStepPhase, WorkflowStepGateMode } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -128,6 +129,7 @@ function getCategoryClassName(category: string): string {
 }
 
 export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: WorkflowStepManagerProps) {
+  const { t } = useTranslation("app");
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [templates, setTemplates] = useState<WorkflowStepTemplate[]>([]);
   const [pluginTemplateOwners, setPluginTemplateOwners] = useState<Record<string, string>>({});
@@ -154,7 +156,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       const data = await fetchWorkflowSteps(projectId);
       setSteps(data);
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to load workflow steps", "error");
+      addToast(getErrorMessage(err) || t("workflow.errorLoadSteps", "Failed to load workflow steps"), "error");
     } finally {
       setLoading(false);
     }
@@ -189,7 +191,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       const owners = Object.fromEntries(pluginResponse.templates.map(({ pluginId, template }) => [template.id, pluginId]));
       setPluginTemplateOwners(owners);
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to load templates", "error");
+      addToast(getErrorMessage(err) || t("workflow.errorLoadTemplates", "Failed to load templates"), "error");
     } finally {
       setTemplatesLoading(false);
     }
@@ -245,7 +247,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim() || !form.description.trim()) {
-      addToast("Name and description are required", "error");
+      addToast(t("workflow.errorNameDescRequired", "Name and description are required"), "error");
       return;
     }
 
@@ -272,7 +274,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
           ...modelFields,
         };
         await createWorkflowStep(input, projectId);
-        addToast("Workflow step created", "success");
+        addToast(t("workflow.stepCreated", "Workflow step created"), "success");
       } else if (editingId) {
         await updateWorkflowStep(editingId, {
           name: form.name.trim(),
@@ -286,7 +288,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
           defaultOn: form.defaultOn,
           ...modelFields,
         }, projectId);
-        addToast("Workflow step updated", "success");
+        addToast(t("workflow.stepUpdated", "Workflow step updated"), "success");
       }
 
       setIsCreating(false);
@@ -294,7 +296,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       setForm(EMPTY_FORM);
       await loadSteps();
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to save workflow step", "error");
+      addToast(getErrorMessage(err) || t("workflow.errorSaveStep", "Failed to save workflow step"), "error");
     } finally {
       setSaving(false);
     }
@@ -303,7 +305,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
   const handleDelete = useCallback(async (id: string) => {
     try {
       await deleteWorkflowStep(id, projectId);
-      addToast("Workflow step deleted", "success");
+      addToast(t("workflow.stepDeleted", "Workflow step deleted"), "success");
       setDeleteConfirmId(null);
       if (editingId === id) {
         setEditingId(null);
@@ -311,7 +313,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
       }
       await loadSteps();
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to delete workflow step", "error");
+      addToast(getErrorMessage(err) || t("workflow.errorDeleteStep", "Failed to delete workflow step"), "error");
     }
   }, [editingId, addToast, loadSteps]);
 
@@ -323,7 +325,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
     // For new steps being created, we need to save first then refine
     if (isCreating) {
       if (!form.name.trim() || !form.description.trim()) {
-        addToast("Name and description are required before refining", "error");
+        addToast(t("workflow.errorNameDescRequiredRefine", "Name and description are required before refining"), "error");
         return;
       }
 
@@ -351,10 +353,10 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         setRefining(true);
         const result = await refineWorkflowStepPrompt(created.id, projectId);
         setForm((prev) => ({ ...prev, prompt: result.prompt }));
-        addToast("Prompt refined with AI", "success");
+        addToast(t("workflow.promptRefined", "Prompt refined with AI"), "success");
         await loadSteps();
       } catch (err) {
-        addToast(getErrorMessage(err) || "Failed to refine prompt", "error");
+        addToast(getErrorMessage(err) || t("workflow.errorRefinePrompt", "Failed to refine prompt"), "error");
       } finally {
         setSaving(false);
         setRefining(false);
@@ -368,10 +370,10 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
     try {
       const result = await refineWorkflowStepPrompt(editingId, projectId);
       setForm((prev) => ({ ...prev, prompt: result.prompt }));
-      addToast("Prompt refined with AI", "success");
+      addToast(t("workflow.promptRefined", "Prompt refined with AI"), "success");
       await loadSteps();
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to refine prompt", "error");
+      addToast(getErrorMessage(err) || t("workflow.errorRefinePrompt", "Failed to refine prompt"), "error");
     } finally {
       setRefining(false);
     }
@@ -381,7 +383,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
     setAddingTemplateId(template.id);
     try {
       await createWorkflowStepFromTemplate(template.id, projectId);
-      addToast(`Added ${template.name} workflow step`, "success");
+      addToast(t("workflow.templateAdded", "Added {{name}} workflow step", { name: template.name }), "success");
       await loadSteps();
       // Switch to "My Workflow Steps" tab to show the newly added step
       setActiveTab("my-steps");
@@ -389,9 +391,9 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
     } catch (err) {
       const msg = getErrorMessage(err);
       if (msg?.includes("already exists")) {
-        addToast(`A workflow step named '${template.name}' already exists`, "error");
+        addToast(t("workflow.errorTemplateAlreadyExists", "A workflow step named '{{name}}' already exists", { name: template.name }), "error");
       } else {
-        addToast(msg || "Failed to add workflow step from template", "error");
+        addToast(msg || t("workflow.errorAddTemplate", "Failed to add workflow step from template"), "error");
       }
     } finally {
       setAddingTemplateId(null);
@@ -417,19 +419,19 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
         className="modal workflow-step-manager-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Workflow Steps"
+        aria-label={t("workflow.modalAriaLabel", "Workflow Steps")}
       >
         {/* Header */}
         <div className="modal-header">
-          <h2>Workflow Steps</h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
+          <h2>{t("workflow.modalTitle", "Workflow Steps")}</h2>
+          <button className="modal-close" onClick={onClose} aria-label={t("common.close", "Close")}>
             &times;
           </button>
         </div>
 
         <div className="wfm-body">
           {loading ? (
-            <div className="wfm-loading">Loading...</div>
+            <div className="wfm-loading">{t("common.loading", "Loading...")}</div>
           ) : (
             <>
               {/* Tab Navigation */}
@@ -441,7 +443,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     data-testid="tab-my-steps"
                   >
                     <BookOpen size={14} />
-                    My Workflow Steps ({steps.length})
+                    {t("workflow.tabMySteps", "My Workflow Steps ({{count}})", { count: steps.length })}
                   </button>
                   <button
                     className={`btn ${activeTab === "templates" ? "btn-primary" : "btn-secondary"} wfm-tab-btn`}
@@ -449,7 +451,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     data-testid="tab-templates"
                   >
                     <LayoutGrid size={14} />
-                    Templates ({templates.length})
+                    {t("workflow.tabTemplates", "Templates ({{count}})", { count: templates.length })}
                   </button>
                 </div>
               )}
@@ -459,7 +461,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                 <>
                   {steps.length === 0 && (
                     <div className="wfm-empty" data-testid="empty-state">
-                      No workflow steps defined. Create one to get started, or add one from the Templates tab.
+                      {t("workflow.emptySteps", "No workflow steps defined. Create one to get started, or add one from the Templates tab.")}
                     </div>
                   )}
 
@@ -476,20 +478,20 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                               <div className="wfm-step-card-title-row">
                                 <span className="wfm-step-card-name">{step.name}</span>
                                 <span className={`wfm-badge ${step.enabled ? "wfm-badge-enabled" : "wfm-badge-disabled"}`}>
-                                  {step.enabled ? "Enabled" : "Disabled"}
+                                  {step.enabled ? t("workflow.badgeEnabled", "Enabled") : t("workflow.badgeDisabled", "Disabled")}
                                 </span>
                                 <span className={`wfm-badge ${(step.mode || "prompt") === "script" ? "wfm-badge-script" : "wfm-badge-prompt"}`}>
-                                  {(step.mode || "prompt") === "script" ? "Script" : "AI Prompt"}
+                                  {(step.mode || "prompt") === "script" ? t("workflow.badgeScript", "Script") : t("workflow.badgeAiPrompt", "AI Prompt")}
                                 </span>
                                 <span className={`wfm-badge ${(step.phase || "pre-merge") === "post-merge" ? "wfm-badge-post-merge" : "wfm-badge-pre-merge"}`}>
-                                  {(step.phase || "pre-merge") === "post-merge" ? "Post-merge" : "Pre-merge"}
+                                  {(step.phase || "pre-merge") === "post-merge" ? t("workflow.badgePostMerge", "Post-merge") : t("workflow.badgePreMerge", "Pre-merge")}
                                 </span>
                                 <span className={`wfm-badge ${(step.gateMode || ((step.mode || "prompt") === "script" ? "gate" : "advisory")) === "gate" ? "wfm-badge-gate" : "wfm-badge-advisory"}`}>
-                                  {(step.gateMode || ((step.mode || "prompt") === "script" ? "gate" : "advisory")) === "gate" ? "Gate" : "Advisory"}
+                                  {(step.gateMode || ((step.mode || "prompt") === "script" ? "gate" : "advisory")) === "gate" ? t("workflow.badgeGate", "Gate") : t("workflow.badgeAdvisory", "Advisory")}
                                 </span>
                                 {step.defaultOn && (
                                   <span className="wfm-badge wfm-badge-default-on">
-                                    Default on
+                                    {t("workflow.badgeDefaultOn", "Default on")}
                                   </span>
                                 )}
                               </div>
@@ -501,8 +503,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                               <button
                                 className="btn-icon"
                                 onClick={() => handleEdit(step)}
-                                title="Edit"
-                                aria-label={`Edit ${step.name}`}
+                                title={t("common.edit", "Edit")}
+                                aria-label={t("workflow.editStepAriaLabel", "Edit {{name}}", { name: step.name })}
                               >
                                 <Pencil size={14} />
                               </button>
@@ -511,16 +513,16 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                                   <button
                                     className="btn-icon wfm-delete-confirm-btn"
                                     onClick={() => handleDelete(step.id)}
-                                    title="Confirm delete"
-                                    aria-label={`Confirm delete ${step.name}`}
+                                    title={t("workflow.confirmDeleteTitle", "Confirm delete")}
+                                    aria-label={t("workflow.confirmDeleteAriaLabel", "Confirm delete {{name}}", { name: step.name })}
                                   >
                                     <Check size={14} />
                                   </button>
                                   <button
                                     className="btn-icon"
                                     onClick={() => setDeleteConfirmId(null)}
-                                    title="Cancel delete"
-                                    aria-label="Cancel delete"
+                                    title={t("workflow.cancelDeleteTitle", "Cancel delete")}
+                                    aria-label={t("workflow.cancelDeleteAriaLabel", "Cancel delete")}
                                   >
                                     <X size={14} />
                                   </button>
@@ -529,8 +531,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                                 <button
                                   className="btn-icon"
                                   onClick={() => setDeleteConfirmId(step.id)}
-                                  title="Delete"
-                                  aria-label={`Delete ${step.name}`}
+                                  title={t("common.delete", "Delete")}
+                                  aria-label={t("workflow.deleteStepAriaLabel", "Delete {{name}}", { name: step.name })}
                                 >
                                   <Trash2 size={14} />
                                 </button>
@@ -550,11 +552,11 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                   {templatesLoading ? (
                     <div className="wfm-loading">
                       <Loader2 size={24} className="spin wfm-spinner" />
-                      Loading templates...
+                      {t("workflow.loadingTemplates", "Loading templates...")}
                     </div>
                   ) : templates.length === 0 ? (
                     <div className="wfm-empty" data-testid="no-templates-state">
-                      No templates available.
+                      {t("workflow.noTemplates", "No templates available.")}
                     </div>
                   ) : (
                     <div className="wfm-template-list">
@@ -602,12 +604,12 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                                   {isAdding ? (
                                     <>
                                       <Loader2 size={12} className="spin" />
-                                      Adding...
+                                      {t("workflow.adding", "Adding...")}
                                     </>
                                   ) : (
                                     <>
                                       <Plus size={12} />
-                                      Add
+                                      {t("workflow.add", "Add")}
                                     </>
                                   )}
                                 </button>
@@ -624,9 +626,9 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
               {/* Create chooser */}
               {showCreateChooser && !isEditing && (
                 <div className="wfm-create-chooser" data-testid="workflow-step-create-chooser">
-                  <h3 className="wfm-form-title">How would you like to create this workflow step?</h3>
+                  <h3 className="wfm-form-title">{t("workflow.createChooserTitle", "How would you like to create this workflow step?")}</h3>
                   <p className="wfm-create-chooser-hint">
-                    Start from a built-in template or create a fully custom workflow step.
+                    {t("workflow.createChooserHint", "Start from a built-in template or create a fully custom workflow step.")}
                   </p>
 
                   <button
@@ -635,17 +637,17 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     data-testid="create-custom-step"
                   >
                     <Plus size={14} />
-                    Custom workflow step
+                    {t("workflow.createCustomStep", "Custom workflow step")}
                   </button>
 
                   {templatesLoading ? (
                     <div className="wfm-loading" data-testid="create-chooser-template-loading">
                       <Loader2 size={24} className="spin wfm-spinner" />
-                      Loading built-in templates...
+                      {t("workflow.loadingBuiltInTemplates", "Loading built-in templates...")}
                     </div>
                   ) : templates.length === 0 ? (
                     <div className="wfm-empty" data-testid="create-chooser-no-templates">
-                      No built-in templates are available right now. You can still create a custom step.
+                      {t("workflow.noBuiltInTemplates", "No built-in templates are available right now. You can still create a custom step.")}
                     </div>
                   ) : (
                     <div className="wfm-template-list" data-testid="create-chooser-templates">
@@ -685,12 +687,12 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                                   {isAdding ? (
                                     <>
                                       <Loader2 size={12} className="spin" />
-                                      Adding...
+                                      {t("workflow.adding", "Adding...")}
                                     </>
                                   ) : (
                                     <>
                                       <Plus size={12} />
-                                      Add template
+                                      {t("workflow.addTemplate", "Add template")}
                                     </>
                                   )}
                                 </button>
@@ -708,29 +710,29 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
               {isEditing && (
                 <div className="wfm-form" data-testid="workflow-step-form">
                   <h3 className="wfm-form-title">
-                    {isCreating ? "New Workflow Step" : "Edit Workflow Step"}
+                    {isCreating ? t("workflow.newStepTitle", "New Workflow Step") : t("workflow.editStepTitle", "Edit Workflow Step")}
                   </h3>
 
                   <div className="wfm-form-fields">
                     {/* Name */}
                     <div className="wfm-field">
-                      <label>Name</label>
+                      <label>{t("workflow.formNameLabel", "Name")}</label>
                       <input
                         type="text"
                         value={form.name}
                         onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                        placeholder="e.g. Documentation Review"
+                        placeholder={t("workflow.formNamePlaceholder", "e.g. Documentation Review")}
                         data-testid="workflow-step-name"
                       />
                     </div>
 
                     {/* Description */}
                     <div className="wfm-field">
-                      <label>Description</label>
+                      <label>{t("workflow.formDescriptionLabel", "Description")}</label>
                       <textarea
                         value={form.description}
                         onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                        placeholder="Brief description of what this step does"
+                        placeholder={t("workflow.formDescriptionPlaceholder", "Brief description of what this step does")}
                         rows={2}
                         data-testid="workflow-step-description"
                       />
@@ -738,7 +740,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
 
                     {/* Mode Selector */}
                     <div className="wfm-field">
-                      <label>Execution Mode</label>
+                      <label>{t("workflow.executionModeLabel", "Execution Mode")}</label>
                       <div className="wfm-mode-selector" data-testid="workflow-step-mode-selector">
                         <button
                           className={`btn ${form.mode === "prompt" ? "btn-primary" : "btn-secondary"} wfm-mode-btn`}
@@ -746,7 +748,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                           data-testid="mode-prompt"
                         >
                           <MessageSquare size={14} />
-                          AI Prompt
+                          {t("workflow.modeAiPrompt", "AI Prompt")}
                         </button>
                         <button
                           className={`btn ${form.mode === "script" ? "btn-primary" : "btn-secondary"} wfm-mode-btn`}
@@ -754,60 +756,60 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                           data-testid="mode-script"
                         >
                           <Terminal size={14} />
-                          Run Script
+                          {t("workflow.modeScript", "Run Script")}
                         </button>
                       </div>
                     </div>
 
                     {/* Phase Selector */}
                     <div className="wfm-field">
-                      <label>Execution Phase</label>
+                      <label>{t("workflow.executionPhaseLabel", "Execution Phase")}</label>
                       <div className="wfm-mode-selector" data-testid="workflow-step-phase-selector">
                         <button
                           className={`btn ${form.phase === "pre-merge" ? "btn-primary" : "btn-secondary"} wfm-mode-btn`}
                           onClick={() => setForm((prev) => ({ ...prev, phase: "pre-merge" }))}
                           data-testid="phase-pre-merge"
                         >
-                          Pre-merge
+                          {t("workflow.phasePreMerge", "Pre-merge")}
                         </button>
                         <button
                           className={`btn ${form.phase === "post-merge" ? "btn-primary" : "btn-secondary"} wfm-mode-btn`}
                           onClick={() => setForm((prev) => ({ ...prev, phase: "post-merge" }))}
                           data-testid="phase-post-merge"
                         >
-                          Post-merge
+                          {t("workflow.phasePostMerge", "Post-merge")}
                         </button>
                       </div>
                       <div className="wfm-field-hint">
                         {form.phase === "pre-merge"
-                          ? "Runs before merge — can block merge on failure"
-                          : "Runs after merge success — failures are logged but do not block"}
+                          ? t("workflow.phasePreMergeHint", "Runs before merge — can block merge on failure")
+                          : t("workflow.phasePostMergeHint", "Runs after merge success — failures are logged but do not block")}
                       </div>
                     </div>
 
                     {/* Gate mode */}
                     <div className="wfm-field">
-                      <label>Failure Behavior</label>
+                      <label>{t("workflow.failureBehaviorLabel", "Failure Behavior")}</label>
                       <div className="wfm-mode-selector" data-testid="workflow-step-gate-mode-selector">
                         <button
                           className={`btn ${form.gateMode === "advisory" ? "btn-primary" : "btn-secondary"} wfm-mode-btn`}
                           onClick={() => setForm((prev) => ({ ...prev, gateMode: "advisory" }))}
                           data-testid="gate-mode-advisory"
                         >
-                          Advisory
+                          {t("workflow.gateModeAdvisory", "Advisory")}
                         </button>
                         <button
                           className={`btn ${form.gateMode === "gate" ? "btn-primary" : "btn-secondary"} wfm-mode-btn`}
                           onClick={() => setForm((prev) => ({ ...prev, gateMode: "gate" }))}
                           data-testid="gate-mode-gate"
                         >
-                          Gate
+                          {t("workflow.gateModeGate", "Gate")}
                         </button>
                       </div>
                       <div className="wfm-field-hint">
                         {form.gateMode === "gate"
-                          ? "Failures block merge and request remediation."
-                          : "Failures are recorded as advisory and do not block merge."}
+                          ? t("workflow.gateModeGateHint", "Failures block merge and request remediation.")
+                          : t("workflow.gateModeAdvisoryHint", "Failures are recorded as advisory and do not block merge.")}
                       </div>
                     </div>
 
@@ -815,13 +817,13 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     {form.mode === "prompt" && (
                       <div className="wfm-field">
                         <div className="wfm-prompt-header">
-                          <label>Agent Prompt</label>
+                          <label>{t("workflow.agentPromptLabel", "Agent Prompt")}</label>
                           <button
                             className="btn-icon wfm-refine-btn"
                             onClick={handleRefine}
                             disabled={!form.description.trim() || refining}
-                            title="Refine with AI"
-                            aria-label="Refine prompt with AI"
+                            title={t("workflow.refineWithAiTitle", "Refine with AI")}
+                            aria-label={t("workflow.refineWithAiAriaLabel", "Refine prompt with AI")}
                             data-testid="refine-btn"
                           >
                             {refining ? (
@@ -829,13 +831,13 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                             ) : (
                               <Sparkles size={12} />
                             )}
-                            <span>Refine with AI</span>
+                            <span>{t("workflow.refineWithAi", "Refine with AI")}</span>
                           </button>
                         </div>
                         <textarea
                           value={form.prompt}
                           onChange={(e) => setForm((prev) => ({ ...prev, prompt: e.target.value }))}
-                          placeholder="Leave empty to use AI refinement"
+                          placeholder={t("workflow.agentPromptPlaceholder", "Leave empty to use AI refinement")}
                           rows={6}
                           className="wfm-prompt-textarea"
                           data-testid="workflow-step-prompt"
@@ -847,24 +849,24 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     {form.mode === "prompt" && (
                       <div className="wfm-field" data-testid="workflow-step-model-field">
                         <div className="wfm-model-header">
-                          <label>Model Override</label>
+                          <label>{t("workflow.modelOverrideLabel", "Model Override")}</label>
                           {form.modelProvider && form.modelId && (
                             <button
                               type="button"
                               className="btn-icon wfm-model-clear-btn"
                               onClick={() => setForm((prev) => ({ ...prev, modelProvider: "", modelId: "" }))}
-                              title="Clear model override (use global default)"
+                              title={t("workflow.clearModelOverrideTitle", "Clear model override (use global default)")}
                               data-testid="clear-model-override"
                             >
                               <X size={12} />
-                              <span>Use default</span>
+                              <span>{t("workflow.useDefault", "Use default")}</span>
                             </button>
                           )}
                         </div>
                         <span className="wfm-model-hint">
                           {form.modelProvider && form.modelId
-                            ? `Using ${form.modelProvider}/${form.modelId}`
-                            : "Using global default model"}
+                            ? t("workflow.modelHintCustom", "Using {{provider}}/{{modelId}}", { provider: form.modelProvider, modelId: form.modelId })
+                            : t("workflow.modelHintDefault", "Using global default model")}
                         </span>
                         <div data-testid="workflow-step-model-select">
                           <CustomModelDropdown
@@ -874,8 +876,8 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                               const parsed = parseModelDropdownValue(value);
                               setForm((prev) => ({ ...prev, modelProvider: parsed.provider, modelId: parsed.modelId }));
                             }}
-                            placeholder="Select a model override…"
-                            label="Model override for this workflow step"
+                            placeholder={t("workflow.modelOverridePlaceholder", "Select a model override…")}
+                            label={t("workflow.modelOverrideDropdownLabel", "Model override for this workflow step")}
                           />
                         </div>
                       </div>
@@ -884,10 +886,10 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                     {/* Script selector (script mode only) */}
                     {form.mode === "script" && (
                       <div className="wfm-field">
-                        <label>Script</label>
+                        <label>{t("workflow.scriptLabel", "Script")}</label>
                         {Object.keys(availableScripts).length === 0 ? (
                           <div className="wfm-no-scripts" data-testid="no-scripts-message">
-                            No scripts configured. Add scripts in Settings → Scripts first.
+                            {t("workflow.noScripts", "No scripts configured. Add scripts in Settings → Scripts first.")}
                           </div>
                         ) : (
                           <select
@@ -895,7 +897,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                             onChange={(e) => setForm((prev) => ({ ...prev, scriptName: e.target.value }))}
                             data-testid="workflow-step-script-select"
                           >
-                            <option value="">Select a script…</option>
+                            <option value="">{t("workflow.selectScript", "Select a script…")}</option>
                             {Object.entries(availableScripts).map(([name, command]) => (
                               <option key={name} value={name}>
                                 {name} ({command})
@@ -914,7 +916,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                         onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.target.checked }))}
                         data-testid="workflow-step-enabled"
                       />
-                      Enabled (available for selection on new tasks)
+                      {t("workflow.enabledCheckbox", "Enabled (available for selection on new tasks)")}
                     </label>
 
                     {/* Default on toggle */}
@@ -925,13 +927,13 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                         onChange={(e) => setForm((prev) => ({ ...prev, defaultOn: e.target.checked }))}
                         data-testid="workflow-step-default-on"
                       />
-                      Default on for new tasks
+                      {t("workflow.defaultOnCheckbox", "Default on for new tasks")}
                     </label>
 
                     {/* Form actions */}
                     <div className="wfm-form-actions">
                       <button className="btn btn-secondary" onClick={handleCancel} disabled={saving}>
-                        Cancel
+                        {t("common.cancel", "Cancel")}
                       </button>
                       <button
                         className="btn btn-primary"
@@ -944,7 +946,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
                         }
                         data-testid="save-workflow-step"
                       >
-                        {saving ? "Saving..." : isCreating ? "Create" : "Save"}
+                        {saving ? t("common.saving", "Saving...") : isCreating ? t("common.create", "Create") : t("common.save", "Save")}
                       </button>
                     </div>
                   </div>
@@ -963,7 +965,7 @@ export function WorkflowStepManager({ isOpen, onClose, addToast, projectId }: Wo
               data-testid="add-workflow-step"
             >
               <Plus size={14} />
-              Add Workflow Step
+              {t("workflow.addWorkflowStep", "Add Workflow Step")}
             </button>
           </div>
         )}

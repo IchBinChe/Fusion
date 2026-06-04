@@ -1,4 +1,4 @@
-import type { Settings, TaskDetail, WorkflowIr, WorkflowIrEdge, WorkflowIrNode } from "@fusion/core";
+import type { Settings, TaskDetail, TaskStep, WorkflowIr, WorkflowIrEdge, WorkflowIrNode } from "@fusion/core";
 import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, isExperimentalFeatureEnabled } from "@fusion/core";
 
 import {
@@ -15,6 +15,10 @@ import {
   type WorkflowBranchRunState,
   type WorkflowBranchSemaphore,
 } from "./workflow-graph-branches.js";
+import {
+  runForeach,
+  type WorkflowStepInstancePersistence,
+} from "./workflow-graph-foreach.js";
 
 export type WorkflowNodeOutcome = "success" | "failure";
 
@@ -50,6 +54,28 @@ export interface WorkflowGraphExecutorDeps {
   onBranchProgress?: (progress: WorkflowBranchProgress) => void;
   /** Stable identifier for this run, used to key persisted branch state. */
   runId?: string;
+  /**
+   * Step-inversion (KTD-3, U3): fresh `Task.steps[]` accessor used by a `foreach`
+   * node at expansion time. Defaults to reading `task.steps` off the run's task.
+   * A production caller may inject a fresh store fetch so the count reflects the
+   * planning seam's latest write; tests inject a fixed list.
+   */
+  getTaskSteps?: (task: TaskDetail) => Promise<TaskStep[]> | TaskStep[];
+  /**
+   * Step-inversion (KTD-6, U3 stub): per-instance run-state persistence for
+   * foreach instances. Optional with no-op default — the real SQLite adapter is
+   * U4's executor-half wiring; the sub-walk already calls into this so that
+   * wiring is purely additive.
+   */
+  stepInstancePersistence?: WorkflowStepInstancePersistence;
+  /**
+   * Step-inversion (U3): top-level abort signal honored between foreach instance
+   * nodes (existing posture, mirrors the branch path's per-branch signal). When a
+   * run is cancelled (pause/abort), the in-flight instance stops cleanly between
+   * nodes and the foreach fails with `value: "aborted"`. Undefined on normal
+   * runs (zero behavior change for non-foreach graphs).
+   */
+  signal?: AbortSignal;
 }
 
 export interface WorkflowGraphExecutorResult {
@@ -171,6 +197,34 @@ export class WorkflowGraphExecutor {
           );
         }
 
+        if (node.kind === "foreach") {
+          // Step-inversion (KTD-3/KTD-5, U3): expand the foreach into per-step
+          // instances run through an iterative region sub-walk. The recursive
+          // walk's inStack cycle detector is untouched — rework loops are
+          // expressed inside the sub-walk only. The foreach node's own outcome
+          // routes its outgoing edges (success / outcome:rework-exhausted / ...).
+          const steps = await this.resolveTaskSteps(task);
+          const foreachResult = await runForeach(node, {
+            task,
+            runId,
+            steps,
+            context,
+            runTemplateNode: (tNode, sig) =>
+              this.executeNodeWithRetries(tNode, task, settings, context, sig),
+            shouldTraverseEdge: (edge, src) => this.shouldTraverseEdge(edge, src),
+            persistence: this.deps.stepInstancePersistence,
+            signal: this.deps.signal,
+          });
+          visitedNodeIds.push(...foreachResult.visitedNodeIds);
+          const result: WorkflowNodeResult = {
+            outcome: foreachResult.outcome,
+            value: foreachResult.value,
+          };
+          context[`node:${node.id}:outcome`] = result.outcome;
+          if (result.value !== undefined) context[`node:${node.id}:value`] = result.value;
+          return await traverseChildren(node, result);
+        }
+
         const result = await this.executeNodeWithRetries(node, task, settings, context);
         if (result.contextPatch) Object.assign(context, result.contextPatch);
         context[`node:${node.id}:outcome`] = result.outcome;
@@ -220,6 +274,18 @@ export class WorkflowGraphExecutor {
       context,
       visitedNodeIds,
     };
+  }
+
+  /**
+   * Resolve the task's step list for a foreach expansion (KTD-3). Defaults to
+   * the steps already on the run's task; a caller may inject `getTaskSteps` to
+   * fetch fresh state (e.g. after the planning seam populated steps).
+   */
+  private async resolveTaskSteps(task: TaskDetail): Promise<TaskStep[]> {
+    if (this.deps.getTaskSteps) {
+      return await this.deps.getTaskSteps(task);
+    }
+    return task.steps ?? [];
   }
 
   /** Best-effort prune of stale-run branch rows; never throws into the run. */

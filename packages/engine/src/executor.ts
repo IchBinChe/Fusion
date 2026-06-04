@@ -19,7 +19,11 @@ import {
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
 import type { WorkflowBranchPersistence, WorkflowBranchRunState } from "./workflow-graph-branches.js";
 import { observeWorkflowParity, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from "./workflow-parity-observer.js";
-import type { WorkflowLegacySeams } from "./workflow-node-handlers.js";
+import {
+  FOREACH_ACTIVE_CONTEXT_KEY,
+  type ForeachActiveContext,
+  type WorkflowLegacySeams,
+} from "./workflow-node-handlers.js";
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
 import {
   ApprovalRequestStore,
@@ -103,7 +107,7 @@ import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
-import { resetStepToBaseline } from "./step-runner.js";
+import { resetStepToBaseline, runTaskStep } from "./step-runner.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { resolveCapturedBaseCommitSha } from "./base-commit-capture.js";
 import { installTaskWorktreeIdentityGuard } from "./worktree-hooks.js";
@@ -3519,6 +3523,47 @@ export class TaskExecutor {
         }
       },
       schedule: async () => ({ outcome: "success" }),
+      // Step-inversion (KTD-2/KTD-4, U3): run exactly the foreach-active step.
+      // The foreach sub-walk has set `foreach:active` with the step index; here
+      // we drive runTaskStep (step-runner.ts) over the task's worktree, then
+      // capture the per-step baselineSha/checkpointId back INTO the active
+      // context object so a later RETHINK (U5) can reset the step. The full
+      // single-step session physics (a StepSessionExecutor scoped to one step)
+      // is U5/U7 territory; U3 wires the seam and the context capture, using the
+      // existing implementation phase as the single-pass step driver.
+      stepExecute: async (seamTask, context) => {
+        const active = context[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext | undefined;
+        if (!active || typeof active.stepIndex !== "number") {
+          return { outcome: "failure", value: "no-active-step-instance" };
+        }
+        const live = await this.store.getTask(seamTask.id);
+        const worktreePath = live.worktree || this.rootDir;
+        const result = await runTaskStep(
+          {
+            store: this.store,
+            worktreePath,
+            // Single-pass step driver. The agent authors the step's commit; this
+            // only observes (KTD-2). Refined to per-step session physics in U5/U7.
+            runStep: async () => {
+              const phase = await this.runImplementationPhase(seamTask);
+              return { success: phase.taskDone };
+            },
+          },
+          { id: seamTask.id, steps: live.steps },
+          active.stepIndex,
+        );
+        // Capture baseline/checkpoint back into the reserved active context so the
+        // foreach sub-walk threads them to later template nodes (step-review/reset).
+        active.baselineSha = result.baselineSha;
+        active.checkpointId = result.checkpointId;
+        return {
+          outcome: result.outcome,
+          value: result.outcome === "success" ? "step-done" : "step-failed",
+          contextPatch: {
+            [FOREACH_ACTIVE_CONTEXT_KEY]: active,
+          },
+        };
+      },
     };
   }
 

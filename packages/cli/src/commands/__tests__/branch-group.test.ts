@@ -244,9 +244,11 @@ describe("branch-group CLI abandon (agent-native parity, Fix #7)", () => {
     await runBranchGroupAbandon("BG-1");
 
     expect(closeGroupPullRequestMock).not.toHaveBeenCalled();
+    // A group that never had a PR keeps prState "none" — "closed" would falsely
+    // imply a PR existed and was explicitly closed.
     expect(store.updateBranchGroup).toHaveBeenCalledWith(
       "BG-1",
-      expect.objectContaining({ status: "abandoned", prState: "closed" }),
+      expect.objectContaining({ status: "abandoned", prState: "none" }),
     );
   });
 

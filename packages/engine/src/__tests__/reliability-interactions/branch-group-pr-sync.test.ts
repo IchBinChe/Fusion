@@ -195,44 +195,4 @@ describe("U6: group PR sync on member landing", () => {
     }
   }, 45_000);
 
-  it.skipIf(!hasGit)("does not clobber a newer PR stored between sync and write (stale snapshot guard)", async () => {
-    const fixture = await makeReliabilityFixture({ taskId: "FN-U6-SYNC-STALE", settings: { testMode: true, autoMerge: true } as any });
-    try {
-      const { rootDir, store, task } = fixture;
-      const group = store.createBranchGroup({
-        sourceType: "planning",
-        sourceId: "PS-U6-STALE",
-        branchName: "fusion/groups/fn-u6-stale",
-        autoMerge: true,
-      });
-      await store.setTaskBranchGroup(task.id, group.id);
-      await store.updateTask(task.id, { branchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" } } as any);
-      // Snapshot synced by this background task: open PR #13.
-      store.updateBranchGroup(group.id, { prState: "open", prNumber: 13, prUrl: "https://github.com/o/r/pull/13" });
-
-      // GitHub reports PR #13 merged out-of-band; but while we await, a newer
-      // landing/promotion replaces it with a newer OPEN PR #88. The stale write
-      // (which would mark the group merged) must be skipped so #88 survives.
-      const syncGroupPr: SyncGroupPrFn = vi.fn(async ({ group: g }) => {
-        store.updateBranchGroup(group.id, { prState: "open", prNumber: 88, prUrl: "https://github.com/o/r/pull/88" });
-        return { prNumber: g.prNumber!, prUrl: g.prUrl!, prState: "merged" as const };
-      });
-
-      let syncSettled: Promise<void> = Promise.resolve();
-      await stageMergeBranch(store, rootDir, task.id, "fnU6Stale");
-      const merge = await aiMergeTask(store, rootDir, task.id, {
-        syncGroupPr,
-        onGroupPrSyncSettled: (settled) => {
-          syncSettled = settled;
-        },
-      });
-      expect(merge.merged).toBe(true);
-      await syncSettled;
-      // The newer open PR #88 is untouched; the stale "merged" reconciliation was skipped.
-      expect(store.getBranchGroup(group.id)?.prNumber).toBe(88);
-      expect(store.getBranchGroup(group.id)?.prState).toBe("open");
-    } finally {
-      await fixture.cleanup();
-    }
-  }, 45_000);
 });

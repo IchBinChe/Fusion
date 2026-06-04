@@ -7440,6 +7440,54 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
   return result;
 }
 
+/**
+ * U6 (R6) sync-on-landing seam, extracted for narrow unit testing (FN-5048: the
+ * stale-snapshot write guard is covered in-memory, not via the slow real-git
+ * reliability suite). Pushes the group PR body for a group with a persisted
+ * open PR, then persists out-of-band reconciliation — but only when the group
+ * still points at the exact PR snapshot that was synced (same prNumber AND
+ * prState). A newer landing/promotion that swapped in a different PR mid-sync
+ * must not be clobbered by this stale write.
+ */
+export async function syncGroupPrOnLanding(input: {
+  store: Pick<TaskStore, "getBranchGroup" | "listTasksByBranchGroup" | "updateBranchGroup">;
+  groupId: string;
+  cwd: string;
+  syncGroupPr: import("./group-merge-coordinator.js").SyncGroupPrFn;
+}): Promise<void> {
+  const { store, groupId, cwd, syncGroupPr } = input;
+  const latestGroup = store.getBranchGroup(groupId);
+  if (!latestGroup || latestGroup.prNumber == null || latestGroup.prState !== "open") {
+    return;
+  }
+  const members = await store.listTasksByBranchGroup(latestGroup.id);
+  const reconciled = await syncGroupPr({
+    cwd,
+    group: latestGroup,
+    members,
+  });
+  // Guard against stale snapshots: a newer landing/promotion may have stored a
+  // different (e.g. newer open) PR for this group while we were awaiting the
+  // sync. Re-read and only persist when the snapshot still matches.
+  const currentGroup = store.getBranchGroup(groupId);
+  if (
+    !currentGroup ||
+    currentGroup.prNumber !== latestGroup.prNumber ||
+    currentGroup.prState !== latestGroup.prState
+  ) {
+    return;
+  }
+  // Out-of-band reconciliation: if GitHub reports the PR is no longer open
+  // (closed/merged), persist the corrected prState rather than leaving a stale "open".
+  if (reconciled.prState !== currentGroup.prState) {
+    store.updateBranchGroup(currentGroup.id, {
+      prState: reconciled.prState,
+      prNumber: reconciled.prNumber,
+      prUrl: reconciled.prUrl,
+    });
+  }
+}
+
 export async function aiMergeTask(
   store: TaskStore,
   rootDir: string,
@@ -7542,42 +7590,12 @@ export async function aiMergeTask(
     if (options.syncGroupPr) {
       const syncGroupPr = options.syncGroupPr;
       const groupId = groupRouting.branchGroup.id;
-      const settled = (async () => {
-        const latestGroup = store.getBranchGroup(groupId);
-        if (!latestGroup || latestGroup.prNumber == null || latestGroup.prState !== "open") {
-          return;
-        }
-        const members = await store.listTasksByBranchGroup(latestGroup.id);
-        const reconciled = await syncGroupPr({
-          cwd: projectRootDir,
-          group: latestGroup,
-          members,
-        });
-        // Guard against stale snapshots: a newer landing/promotion may have
-        // stored a different (e.g. newer open) PR for this group while we were
-        // awaiting the sync. Re-read the current group and only persist the
-        // reconciled state if it still points at the exact PR snapshot we
-        // synced (same prNumber AND prState); otherwise skip to avoid clobbering
-        // the newer PR.
-        const currentGroup = store.getBranchGroup(groupId);
-        if (
-          !currentGroup ||
-          currentGroup.prNumber !== latestGroup.prNumber ||
-          currentGroup.prState !== latestGroup.prState
-        ) {
-          return;
-        }
-        // Out-of-band reconciliation: if GitHub reports the PR is no longer
-        // open (closed/merged), persist the corrected prState rather than
-        // leaving a stale "open".
-        if (reconciled.prState !== currentGroup.prState) {
-          store.updateBranchGroup(currentGroup.id, {
-            prState: reconciled.prState,
-            prNumber: reconciled.prNumber,
-            prUrl: reconciled.prUrl,
-          });
-        }
-      })().catch((err) => {
+      const settled = syncGroupPrOnLanding({
+        store,
+        groupId,
+        cwd: projectRootDir,
+        syncGroupPr,
+      }).catch((err) => {
         // Non-fatal: never fail the merge/landing because PR sync failed.
         try {
           store.recordRunAuditEvent({

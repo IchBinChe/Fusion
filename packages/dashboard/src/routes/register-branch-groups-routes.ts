@@ -176,9 +176,11 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
       throw badRequest("Branch group is already abandoned, finalized, or merged and cannot be abandoned");
     }
 
-    // The guard above already rejected `prState === "merged"`, so abandon always
-    // resolves to "closed" unless the GitHub reconcile below reports otherwise.
-    let prState: BranchGroup["prState"] = "closed";
+    // The guard above already rejected `prState === "merged"`. A group with a PR
+    // abandons to "closed" (unless the GitHub reconcile below reports otherwise);
+    // a group that never had a PR keeps its existing prState — "closed" would
+    // falsely imply a PR existed and was closed when none ever did.
+    let prState: BranchGroup["prState"] = group.prNumber != null ? "closed" : group.prState;
     let prNumber = group.prNumber;
     let prUrl = group.prUrl;
 

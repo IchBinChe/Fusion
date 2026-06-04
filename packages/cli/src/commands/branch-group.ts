@@ -137,7 +137,9 @@ export async function runBranchGroupAbandon(id: string, projectName?: string) {
     process.exit(1);
   }
 
-  let prState: BranchGroup["prState"] = "closed";
+  // A group with a PR abandons to "closed"; a group that never had a PR keeps
+  // its existing prState — "closed" would falsely imply a PR existed.
+  let prState: BranchGroup["prState"] = group.prNumber != null ? "closed" : group.prState;
   let prNumber = group.prNumber;
   let prUrl = group.prUrl;
 

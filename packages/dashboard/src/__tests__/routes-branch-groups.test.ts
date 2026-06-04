@@ -330,6 +330,22 @@ describe("branch group abandon (U6, R7)", () => {
     expect(closeGroupPr).not.toHaveBeenCalled();
     expect(updateBranchGroup).not.toHaveBeenCalled();
   });
+
+  it("preserves prState 'none' when abandoning a group that never had a PR", async () => {
+    // "closed" would falsely imply a PR existed and was explicitly closed.
+    const noPr = { ...buildOpenGroup(), prState: "none" as const, prNumber: undefined, prUrl: undefined };
+    const { store, updateBranchGroup } = buildAbandonStore(noPr);
+    const closeGroupPr = vi.fn();
+    const app = mount(store, closeGroupPr as unknown as ReturnType<typeof vi.fn>);
+
+    const res = await REQUEST(app, "POST", "/branch-groups/BG-AB/abandon", JSON.stringify({}), { "content-type": "application/json" });
+    expect(res.status).toBe(200);
+    expect(closeGroupPr).not.toHaveBeenCalled();
+    expect(updateBranchGroup).toHaveBeenCalledWith(
+      "BG-AB",
+      expect.objectContaining({ status: "abandoned", prState: "none" }),
+    );
+  });
 });
 
 describe("branch group reconcile-on-read (Fix #3)", () => {

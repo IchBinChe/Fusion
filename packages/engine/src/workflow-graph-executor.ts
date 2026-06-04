@@ -116,6 +116,8 @@ export interface WorkflowGraphExecutorDeps {
   semaphoreAvailability?: ForeachEnvironment["semaphoreAvailability"];
   /** Step-inversion (KTD-11, U10): crash-resume reconciliation hook. */
   resumeReconcile?: ForeachEnvironment["resumeReconcile"];
+  /** FIX 4 (context gap): task-level log sink for integration-conflict rework. */
+  logTaskEntry?: ForeachEnvironment["logTaskEntry"];
 }
 
 export interface WorkflowGraphExecutorResult {
@@ -192,6 +194,11 @@ export class WorkflowGraphExecutor {
     // load so this run's own (taskId, runId) rows survive while every stale run
     // is removed. Never throws into the run.
     await this.pruneStaleBranches(task.id, runId);
+    // Same posture for foreach step-instance rows (KTD-6, U4): prune every stale
+    // run's instance rows, keeping only this run's, so the table does not
+    // accumulate historical runs for a long-lived task. The resume reconcile path
+    // (foreach worktree scheduler) loads THIS run's rows, which survive.
+    await this.pruneStaleInstances(task.id, runId);
 
     // Shared branch environment: built lazily so the sequential path pays nothing.
     const branchEnv = (): BranchEnvironment => ({
@@ -280,6 +287,7 @@ export class WorkflowGraphExecutor {
             integrationProjection: this.deps.integrationProjection,
             semaphoreAvailability: this.deps.semaphoreAvailability,
             resumeReconcile: this.deps.resumeReconcile,
+            logTaskEntry: this.deps.logTaskEntry,
           });
           visitedNodeIds.push(...foreachResult.visitedNodeIds);
           const result: WorkflowNodeResult = {
@@ -334,6 +342,7 @@ export class WorkflowGraphExecutor {
     // Prune again on run completion (#1412): keeps only this run's rows so the
     // table does not accumulate historical runs for a long-lived task.
     await this.pruneStaleBranches(task.id, runId);
+    await this.pruneStaleInstances(task.id, runId);
     return {
       executed: true,
       outcome: terminal.outcome,
@@ -358,6 +367,16 @@ export class WorkflowGraphExecutor {
   private async pruneStaleBranches(taskId: string, keepRunId: string): Promise<void> {
     try {
       await this.deps.branchPersistence?.clearStaleBranchStates?.(taskId, keepRunId);
+    } catch {
+      // Pruning is additive bookkeeping — a failure must not affect the run.
+    }
+  }
+
+  /** Best-effort prune of stale-run foreach instance rows (KTD-6, U4); identical
+   *  keepRunId posture as {@link pruneStaleBranches}. Never throws into the run. */
+  private async pruneStaleInstances(taskId: string, keepRunId: string): Promise<void> {
+    try {
+      await this.deps.stepInstancePersistence?.clearStaleInstanceStates?.(taskId, keepRunId);
     } catch {
       // Pruning is additive bookkeeping — a failure must not affect the run.
     }

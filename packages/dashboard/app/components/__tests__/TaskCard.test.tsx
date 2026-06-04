@@ -4187,6 +4187,42 @@ describe("TaskCard memo comparator provenance behavior", () => {
       ),
     ).toBe(false);
   });
+
+  it("skips customFields JSON.stringify when both cardFieldDefs are absent", () => {
+    // Without cardFieldDefs present, two tasks with different customFields should
+    // compare equal (JSON.stringify is skipped — guard path).
+    const taskA = makeTask({ customFields: { x: "a" } });
+    const taskB = makeTask({ customFields: { x: "b" } });
+    expect(
+      __test_areTaskCardPropsEqual(
+        { task: taskA, onOpenDetail: noop, addToast: noop } as any,
+        { task: taskB, onOpenDetail: noop, addToast: noop } as any,
+      ),
+    ).toBe(true);
+  });
+
+  it("detects customFields change when cardFieldDefs are present on both sides", () => {
+    const defs = [{ id: "sev", name: "Severity", type: "enum" as const, render: { placement: "card" as const } }];
+    const taskA = makeTask({ customFields: { sev: "low" } });
+    const taskB = makeTask({ customFields: { sev: "high" } });
+    expect(
+      __test_areTaskCardPropsEqual(
+        { task: taskA, cardFieldDefs: defs, onOpenDetail: noop, addToast: noop } as any,
+        { task: taskB, cardFieldDefs: defs, onOpenDetail: noop, addToast: noop } as any,
+      ),
+    ).toBe(false);
+  });
+
+  it("detects customFields change when only one side has cardFieldDefs", () => {
+    const defs = [{ id: "sev", name: "Severity", type: "enum" as const, render: { placement: "card" as const } }];
+    const task = makeTask({ customFields: { sev: "low" } });
+    expect(
+      __test_areTaskCardPropsEqual(
+        { task, cardFieldDefs: undefined, onOpenDetail: noop, addToast: noop } as any,
+        { task, cardFieldDefs: defs, onOpenDetail: noop, addToast: noop } as any,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("TaskCard mission badge", () => {

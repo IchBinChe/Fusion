@@ -197,7 +197,7 @@ function InnerEditor({
     setNodes(flow.nodes);
     setEdges(flow.edges);
     setColumns(columnsOf(activeWorkflow));
-    setFields(fieldsOf(activeWorkflow) as WorkflowFieldDefinition[]);
+    setFields(fieldsOf(activeWorkflow));
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setValidationError(null);

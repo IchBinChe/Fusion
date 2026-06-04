@@ -16,6 +16,7 @@ import {
   createPostRoomMessageTool,
   createResearchTools,
   createWorkflowListTool,
+  createWorkflowGetTool,
   createWorkflowSelectTool,
   createTaskPromoteTool,
   createWorkflowCreateTool,
@@ -390,6 +391,55 @@ describe("createWorkflowListTool", () => {
     const result = await tool.execute("call-1", {} as any, undefined, undefined, {} as any);
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toMatch(/no workflows/i);
+  });
+});
+
+describe("createWorkflowGetTool", () => {
+  it("returns the definition with builtin flag and full IR as JSON", async () => {
+    const ir = {
+      version: "v2",
+      name: "QA",
+      columns: [{ id: "intake", name: "Intake", traits: [] }],
+      nodes: [{ id: "n1", kind: "step-execute" }],
+      edges: [],
+      fields: [{ id: "severity", name: "Severity", type: "enum", options: [{ value: "low", label: "Low" }] }],
+    };
+    const store = {
+      getWorkflowDefinition: vi.fn().mockResolvedValue({ id: "WF-003", name: "QA", description: "QA flow", ir }),
+    };
+    const tool = createWorkflowGetTool(store as any);
+    const result = await tool.execute("call-1", { workflow_id: "WF-003" } as any, undefined, undefined, {} as any);
+    expect(store.getWorkflowDefinition).toHaveBeenCalledWith("WF-003");
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    const parsed = JSON.parse(text);
+    expect(parsed).toMatchObject({ id: "WF-003", name: "QA", description: "QA flow", builtin: false });
+    expect(parsed.ir.fields[0].id).toBe("severity");
+    expect(result.details).toMatchObject({ workflowId: "WF-003", builtin: false });
+  });
+
+  it("marks a builtin id as builtin", async () => {
+    const store = {
+      getWorkflowDefinition: vi.fn().mockResolvedValue({
+        id: "builtin:coding",
+        name: "Coding",
+        description: "Standard",
+        ir: { version: "v2", name: "Coding", columns: [], nodes: [], edges: [] },
+      }),
+    };
+    const tool = createWorkflowGetTool(store as any);
+    const result = await tool.execute("call-1", { workflow_id: "builtin:coding" } as any, undefined, undefined, {} as any);
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(JSON.parse(text).builtin).toBe(true);
+    expect(result.details).toMatchObject({ builtin: true });
+  });
+
+  it("returns an error result for an unknown id", async () => {
+    const store = { getWorkflowDefinition: vi.fn().mockResolvedValue(undefined) };
+    const tool = createWorkflowGetTool(store as any);
+    const result = await tool.execute("call-1", { workflow_id: "WF-404" } as any, undefined, undefined, {} as any);
+    expect((result as { isError?: boolean }).isError).toBe(true);
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(text).toMatch(/Unknown workflow id 'WF-404'/);
   });
 });
 

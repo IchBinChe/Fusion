@@ -541,7 +541,9 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.prAuthAvailable === next.prAuthAvailable &&
     previous.autoMergeEnabled === next.autoMergeEnabled &&
     previous.cardFieldDefs === next.cardFieldDefs &&
-    JSON.stringify(previousTask.customFields ?? null) === JSON.stringify(nextTask.customFields ?? null) &&
+    (previous.cardFieldDefs == null && next.cardFieldDefs == null
+      ? true
+      : JSON.stringify(previousTask.customFields ?? null) === JSON.stringify(nextTask.customFields ?? null)) &&
     previous.onOpenDetail === next.onOpenDetail &&
     previous.onOpenGroupModal === next.onOpenGroupModal &&
     previous.addToast === next.addToast &&

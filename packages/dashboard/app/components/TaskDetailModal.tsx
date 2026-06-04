@@ -308,6 +308,11 @@ export interface TaskDetailModalProps {
   initialTab?: TabId;
   /** Mobile-only header affordance mode. */
   mobileHeaderMode?: "close" | "back";
+  /** Pre-resolved workflow field defs for this task's workflow (U13/KTD-14).
+   *  When provided (e.g. threaded from a Board that already holds the payload)
+   *  the modal skips its own board-workflows fetch entirely. Falls back to the
+   *  self-fetch when absent (e.g. modal opened from non-board contexts). */
+  workflowFieldDefs?: WorkflowFieldDefinition[] | null;
 }
 
 export type TaskDetailContentProps = Omit<TaskDetailModalProps, "onClose"> & {
@@ -483,6 +488,7 @@ export function TaskDetailContent({
   mobileHeaderMode = "close",
   embedded = false,
   onRequestClose,
+  workflowFieldDefs: workflowFieldDefsProp,
 }: TaskDetailContentProps) {
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
@@ -610,7 +616,11 @@ export function TaskDetailContent({
   // Custom field definitions (U13/KTD-14). Resolved for this task's workflow
   // from the board-workflows payload; absent when the workflow declares none,
   // in which case the fields section renders nothing (today's UI byte-identical).
-  const [customFieldDefs, setCustomFieldDefs] = useState<WorkflowFieldDefinition[] | null>(null);
+  // When `workflowFieldDefsProp` is provided by the caller (e.g. the Board
+  // already holds the payload) we skip the self-fetch entirely.
+  const [customFieldDefs, setCustomFieldDefs] = useState<WorkflowFieldDefinition[] | null>(
+    workflowFieldDefsProp !== undefined ? (workflowFieldDefsProp ?? null) : null,
+  );
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(task.customFields ?? {});
   const [customFieldError, setCustomFieldError] = useState<CustomFieldRejection | null>(null);
 
@@ -619,9 +629,15 @@ export function TaskDetailContent({
     setCustomFieldValues(task.customFields ?? {});
   }, [task.id, task.customFields]);
 
-  // Resolve this task's workflow field definitions once per task. Best-effort:
+  // Resolve this task's workflow field definitions once per task. Skipped when
+  // the caller supplies `workflowFieldDefs` directly (Board context). Best-effort:
   // a failed fetch (or flag-OFF empty payload) leaves defs null → no section.
   useEffect(() => {
+    if (workflowFieldDefsProp !== undefined) {
+      // Prop-driven path: keep in sync if the prop changes (task switch etc.).
+      setCustomFieldDefs(workflowFieldDefsProp ?? null);
+      return;
+    }
     let cancelled = false;
     void fetchBoardWorkflows(projectId)
       .then((payload) => {
@@ -636,7 +652,7 @@ export function TaskDetailContent({
     return () => {
       cancelled = true;
     };
-  }, [task.id, projectId]);
+  }, [task.id, projectId, workflowFieldDefsProp]);
 
   const handleSaveCustomFields = useCallback(
     async (patch: Record<string, unknown>) => {

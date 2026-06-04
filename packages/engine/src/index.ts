@@ -8,6 +8,7 @@ export {
   createSendMessageTool,
   createReadMessagesTool,
   createWorkflowListTool,
+  createWorkflowGetTool,
   createWorkflowSelectTool,
   taskCreateParams,
   taskDocumentReadParams,

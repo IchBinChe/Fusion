@@ -4,6 +4,7 @@ import { WorkflowIrError } from "@fusion/core";
 import type { WorkflowNodeOutcome, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import {
   FOREACH_ACTIVE_CONTEXT_KEY,
+  INTEGRATION_CONFLICT_CONTEXT_KEY,
   type ForeachActiveContext,
 } from "./workflow-node-handlers.js";
 import {
@@ -224,6 +225,15 @@ export interface ForeachEnvironment {
   ) =>
     | Promise<Array<{ stepIndex: number; disposition: "integrated" | "reintegrate" | "rerun"; branchName?: string }>>
     | Array<{ stepIndex: number; disposition: "integrated" | "reintegrate" | "rerun"; branchName?: string }>;
+  /**
+   * Optional task-level log sink (FIX 4 — context gap). When an integration
+   * conflict routes a step instance to rework, the re-running agent has no record
+   * of WHY its base changed. Wiring this to the engine's task log path
+   * (`store.logEntry`) writes a visible entry so the rework is explicable. Best
+   * effort: a logging failure must never affect the run. Absent under tests / a
+   * foreach env without a logging dep (the conflict still logs to schedulerLog).
+   */
+  logTaskEntry?: (summary: string, detail?: string) => void | Promise<void>;
 }
 
 export interface ForeachRunResult {
@@ -489,6 +499,10 @@ async function runForeachWorktree(
     env.integrationGitOps,
     env.integrationProjection,
     pinnedStepCount,
+    // Single source of truth for the instance-row identity (KTD-6/KTD-11): the
+    // REAL runId + foreachNodeId the sub-walk persisted rows under, so integration
+    // flips the SAME row instead of writing an orphan.
+    { runId: env.runId, foreachNodeId: foreachNode.id },
   );
 
   // Crash-resume reconciliation (KTD-11): integrated → skip; branch-exists → re-enter
@@ -520,6 +534,45 @@ async function runForeachWorktree(
   const depsIntegrated = (i: number): boolean =>
     resolveDependsOn(env.steps, i).every((d) => isIntegrated(d));
 
+  // Track instances whose worktree/branch has been released so a terminal sweep
+  // (and the integration queue) never double-discards. The integration queue
+  // releases integrated/conflicted branches itself; this set covers the branches
+  // we release directly (failed / aborted / stuck instances that allocated a
+  // worktree but the queue never resolved). discardBranch is best-effort either
+  // way, but the guard keeps the release "exactly once" contract honest (FIX 2).
+  const released = new Set<number>();
+  const releaseInstanceWorktree = async (inst: WorktreeInstance): Promise<void> => {
+    if (!inst.branchName) return; // never allocated.
+    if (released.has(inst.stepIndex)) return;
+    released.add(inst.stepIndex);
+    try {
+      await env.integrationGitOps!.discardBranch(inst.branchName, inst.stepIndex);
+    } catch (err) {
+      schedulerLog.warn(
+        `foreach ${foreachNode.id} step ${inst.stepIndex}: worktree release failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  // Terminal cleanup: release every allocated instance the integration queue did
+  // NOT own. The queue itself releases `integrated` (post-integration discard) and
+  // `awaiting-integration` (via discardAllPending on the abort/fail/stuck paths)
+  // and conflicted branches (marked in `released`). This sweep covers the
+  // remainder — `failed` / `running` / `pending` instances that allocated a
+  // worktree — so failure / rework-exhausted / abort / scheduler-stuck never leak
+  // an allocated worktree+branch. The `released` guard keeps it exactly once.
+  const releaseUnresolvedAllocated = async (): Promise<void> => {
+    await Promise.all(
+      instances
+        .filter(
+          (i) =>
+            i.branchName &&
+            i.state !== "integrated" &&
+            i.state !== "awaiting-integration",
+        )
+        .map((i) => releaseInstanceWorktree(i)),
+    );
+  };
+
   // Run one instance's sub-walk in an isolated context + freshly-allocated
   // worktree off the CURRENT integration base. Returns awaiting-integration (with
   // the branch) on a clean sub-walk, or a failure outcome (rework-exhausted etc.).
@@ -538,6 +591,10 @@ async function runForeachWorktree(
     }
     inst.branchName = allocation.branchName;
     inst.worktreePath = allocation.worktreePath;
+    // Fresh allocation: this instance now holds a live, un-released worktree again
+    // (a prior conflict/rework may have flagged it released). Clear the marker so a
+    // later failure of THIS run releases the new worktree exactly once.
+    released.delete(inst.stepIndex);
 
     return runWorktreeInstanceSubWalk(foreachNode, env, plan, pinnedStepCount, visitedNodeIds, inst);
   };
@@ -546,6 +603,7 @@ async function runForeachWorktree(
   for (;;) {
     if (env.signal?.aborted) {
       await queue.discardAllPending();
+      await releaseUnresolvedAllocated();
       return { outcome: "failure", value: "aborted", visitedNodeIds };
     }
 
@@ -575,8 +633,11 @@ async function runForeachWorktree(
             } else {
               inst.state = "failed";
               // A failed instance is skipped in the ordered queue so the cursor can
-              // advance past it; the foreach reports the failure value below.
+              // advance past it; the foreach reports the failure value below. Release
+              // its allocated worktree+branch immediately (FIX 2 — the queue never
+              // sees a failed instance, so it would otherwise leak).
               queue.skip(inst.stepIndex);
+              await releaseInstanceWorktree(inst);
               (inst as WorktreeInstance & { failValue?: string }).failValue = result.value;
             }
           }),
@@ -593,10 +654,14 @@ async function runForeachWorktree(
       if (outcome.status === "integrated") {
         inst.state = "integrated";
       } else {
-        // integration-conflict: route as rework on the UPDATED base (KTD-11). The
-        // explicit `outcome:integration-conflict` edge (if authored) is honored by
-        // the sub-walk; the DEFAULT here is the rework path (re-execute on the
-        // updated base, budget-counted). Either way we re-run the instance.
+        // integration-conflict: the queue's drain() already discarded the
+        // conflicting branch (safeDiscard) before reporting the conflict, so the
+        // branch is released — record it so the terminal sweep never double-discards.
+        released.add(inst.stepIndex);
+        // Route as rework on the UPDATED base (KTD-11). The explicit
+        // `outcome:integration-conflict` edge (if authored) is honored by the
+        // sub-walk; the DEFAULT here is the rework path (re-execute on the updated
+        // base, budget-counted). Either way we re-run the instance.
         if (inst.reworkBudget <= 0) {
           inst.state = "failed";
           queue.skip(inst.stepIndex);
@@ -612,9 +677,22 @@ async function runForeachWorktree(
           // (the edge overrides the implicit "from entry" rework).
           (inst as WorktreeInstance & { lastIntegrationConflict?: boolean }).lastIntegrationConflict =
             plan.hasExplicitIntegrationConflictEdge;
+          const conflictedFiles =
+            outcome.status === "conflict" && Array.isArray(outcome.conflictedFiles)
+              ? outcome.conflictedFiles
+              : [];
           schedulerLog.log(
             `foreach ${foreachNode.id} step ${inst.stepIndex}: integration-conflict — reworking on updated base (budget left ${inst.reworkBudget})`,
           );
+          // Task-level audit so the re-running agent sees WHY its base moved
+          // (FIX 4). Best-effort; a logging failure never affects the run.
+          try {
+            const filesNote = conflictedFiles.length > 0 ? ` (files: ${conflictedFiles.join(", ")})` : "";
+            await env.logTaskEntry?.(
+              `integration conflict on step ${inst.stepIndex}: reworking on updated base${filesNote}`,
+              conflictedFiles.length > 0 ? `Conflicted files:\n${conflictedFiles.map((f) => `- ${f}`).join("\n")}` : undefined,
+            );
+          } catch { /* log is best-effort */ }
         }
       }
     }
@@ -623,6 +701,7 @@ async function runForeachWorktree(
     const failed = instances.find((i) => i.state === "failed");
     if (failed) {
       await queue.discardAllPending();
+      await releaseUnresolvedAllocated();
       const value = (failed as WorktreeInstance & { failValue?: string }).failValue ?? "instance-failed";
       return { outcome: "failure", value, visitedNodeIds };
     }
@@ -636,6 +715,7 @@ async function runForeachWorktree(
     const anyRunnable = instances.some((i) => i.state === "pending" && depsIntegrated(i.stepIndex));
     if (!progressed && !anyActive && !anyRunnable) {
       await queue.discardAllPending();
+      await releaseUnresolvedAllocated();
       return { outcome: "failure", value: "scheduler-stuck", visitedNodeIds };
     }
   }
@@ -679,8 +759,14 @@ async function runWorktreeInstanceSubWalk(
   instanceContext[FOREACH_ACTIVE_CONTEXT_KEY] = active;
   // Surface a prior integration-conflict to the author's nodes when the template
   // authored an explicit `outcome:integration-conflict` edge (KTD-11 override).
-  const lastConflict = (inst as WorktreeInstance & { lastIntegrationConflict?: boolean }).lastIntegrationConflict;
-  if (lastConflict) instanceContext["integration:conflict"] = true;
+  // Consume the one-shot signal here: clear it on the instance so a LATER clean
+  // rework (e.g. a fresh rethink with no conflict) does not re-surface a stale
+  // conflict on the seeded context.
+  const conflictHolder = inst as WorktreeInstance & { lastIntegrationConflict?: boolean };
+  if (conflictHolder.lastIntegrationConflict) {
+    instanceContext[INTEGRATION_CONFLICT_CONTEXT_KEY] = true;
+    conflictHolder.lastIntegrationConflict = false;
+  }
 
   const persist = (status: WorkflowStepInstanceState["status"], currentNodeId: string): Promise<void> =>
     persistInstanceState(env.persistence, {

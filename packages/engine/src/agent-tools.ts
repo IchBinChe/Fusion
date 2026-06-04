@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
-import { listTraits } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -64,6 +64,14 @@ export const taskDocumentReadParams = Type.Object({
 });
 
 export const workflowListParams = Type.Object({});
+
+export const workflowGetParams = Type.Object({
+  workflow_id: Type.String({
+    description:
+      "The workflow definition ID to fetch (e.g. 'WF-003', or a 'builtin:*' id). " +
+      "Use fn_workflow_list to discover available IDs.",
+  }),
+});
 
 export const workflowSelectParams = Type.Object({
   workflow_id: Type.String({
@@ -1023,6 +1031,64 @@ export function createWorkflowListTool(store: TaskStore): ToolDefinition {
       } catch (err: any) {
         return {
           content: [{ type: "text" as const, text: `ERROR: Failed to list workflows: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
+ * Create a `fn_workflow_get` tool that returns a single workflow definition by
+ * id — id/name/description, whether it is a read-only built-in, and the full
+ * resolved IR (nodes/edges/columns/artifacts/fields) as JSON. Agent-native
+ * read parity with the dashboard's workflow inspector; the companion read tool
+ * to fn_workflow_list. Read-only; an unknown id is reported as a tool error.
+ */
+export function createWorkflowGetTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_workflow_get",
+    label: "Get Workflow",
+    description:
+      "Fetch a single workflow definition by its ID — its name, description, whether it is a " +
+      "read-only built-in, and its full IR (nodes, edges, columns, artifacts, and custom fields) " +
+      "as JSON. Use fn_workflow_list to discover IDs first.",
+    parameters: workflowGetParams,
+    execute: async (_id: string, params: Static<typeof workflowGetParams>) => {
+      const workflowId = params.workflow_id?.trim();
+      if (!workflowId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: workflow_id is required." }],
+          details: {},
+          isError: true,
+        };
+      }
+      try {
+        const def = await store.getWorkflowDefinition(workflowId);
+        if (!def) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Unknown workflow id '${workflowId}'. Use fn_workflow_list to discover valid IDs.` }],
+            details: {},
+            isError: true,
+          };
+        }
+        const builtin = isBuiltinWorkflowId(def.id);
+        const payload = {
+          id: def.id,
+          name: def.name,
+          description: def.description,
+          builtin,
+          ir: def.ir,
+        };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+          details: { workflowId: def.id, builtin },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to get workflow: ${err?.message ?? err}` }],
           details: {},
           isError: true,
         };

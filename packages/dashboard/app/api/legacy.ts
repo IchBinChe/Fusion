@@ -79,6 +79,10 @@ import type {
   TaskIdIntegrityReport,
   BranchGroup,
   BranchGroupPrState,
+  WorkflowFieldDefinition,
+  WorkflowFieldType,
+  WorkflowFieldOption,
+  WorkflowFieldRender,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -552,44 +556,9 @@ export interface BoardWorkflowColumn {
   flags: BoardWorkflowColumnFlags;
 }
 
-/** Supported custom-field value types (mirrors core `WorkflowFieldType`, KTD-13).
- *  Duplicated client-side (same posture as the BoardWorkflow* types above) since
- *  the core field-schema types are not exported through the `@fusion/core`
- *  barrel. */
-export type WorkflowFieldType =
-  | "string"
-  | "text"
-  | "number"
-  | "boolean"
-  | "enum"
-  | "multi-enum"
-  | "date"
-  | "url";
-
-/** A single enum/multi-enum option (KTD-13). */
-export interface WorkflowFieldOption {
-  value: string;
-  label: string;
-  color?: string;
-}
-
-/** Rendering instructions for a custom field (KTD-14). */
-export interface WorkflowFieldRender {
-  placement?: "card" | "detail" | "detail-section";
-  widget?: "select" | "radio" | "chips" | "input" | "textarea" | "toggle";
-  badge?: boolean;
-}
-
-/** A workflow-defined custom task field (KTD-13). */
-export interface WorkflowFieldDefinition {
-  id: string;
-  name: string;
-  type: WorkflowFieldType;
-  required?: boolean;
-  default?: unknown;
-  options?: WorkflowFieldOption[];
-  render?: WorkflowFieldRender;
-}
+// WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender
+// are re-exported from @fusion/core above (KTD-13/14).
+export type { WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender };
 
 export interface BoardWorkflowDefinition {
   id: string;

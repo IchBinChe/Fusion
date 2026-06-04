@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import type { WorkflowFieldDefinition } from "../../api";
 import {
   makeTask,
   noop,
@@ -66,5 +67,52 @@ describe("TaskDetailModal custom fields (U13/KTD-14)", () => {
     renderModal(makeTask({ id: "FN-001", column: "done", customFields: { owner: "alice" } }));
     await waitFor(() => expect(screen.getByTestId("task-fields-section")).toBeTruthy());
     expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("alice");
+  });
+
+  it("uses workflowFieldDefs prop directly and skips the board-workflows fetch", async () => {
+    const fetchSpy = vi.spyOn(dashboardApi, "fetchBoardWorkflows");
+    const defs: WorkflowFieldDefinition[] = [
+      { id: "owner", name: "Owner", type: "string", render: { placement: "detail" } },
+    ];
+    render(
+      <FileBrowserProvider openFile={vi.fn()}>
+        <TaskDetailModal
+          task={makeTask({ id: "FN-002", column: "done", customFields: { owner: "bob" } })}
+          workflowFieldDefs={defs}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />
+      </FileBrowserProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("task-fields-section")).toBeTruthy());
+    expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("bob");
+    // The fetch must NOT have been triggered since the prop was provided.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders no fields section when workflowFieldDefs prop is an empty array", async () => {
+    const fetchSpy = vi.spyOn(dashboardApi, "fetchBoardWorkflows");
+    render(
+      <FileBrowserProvider openFile={vi.fn()}>
+        <TaskDetailModal
+          task={makeTask({ id: "FN-003", column: "done" })}
+          workflowFieldDefs={[]}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />
+      </FileBrowserProvider>,
+    );
+    // Give React a tick to settle; no section should appear.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId("task-fields-section")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

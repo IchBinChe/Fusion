@@ -68,6 +68,21 @@ export interface IntegrationGitOps {
   discardBranch(branchName: string, stepIndex: number): Promise<void>;
 }
 
+/**
+ * Identity of the persisted instance row to flip on integration. The queue
+ * sources this from the foreach environment (the SINGLE source of truth for
+ * runId/foreachNodeId/pinnedStepCount — the same values the sub-walk persisted
+ * the row under) so `markInstanceIntegrated` updates the EXISTING row keyed by
+ * `(taskId, runId, foreachNodeId, stepIndex)` instead of writing an orphan.
+ */
+export interface IntegrationInstanceIdentity {
+  runId: string;
+  foreachNodeId: string;
+  pinnedStepCount: number;
+  /** The instance branch being integrated (carried onto the flipped row). */
+  branchName: string;
+}
+
 /** Projection + persistence side-effects the queue performs on a successful
  *  integration (KTD-7 projection-first ordering). Injected so the queue stays
  *  engine-agnostic and unit-testable. */
@@ -80,9 +95,16 @@ export interface IntegrationProjection {
   markStepDone(stepIndex: number): Promise<void>;
   /**
    * Mark the instance row `completed` with `integratedAt` AFTER the projection
-   * flip (projection-first ordering). Optional — a fully in-memory run needs none.
+   * flip (projection-first ordering). The queue passes the row's REAL identity
+   * (runId/foreachNodeId/pinnedStepCount/branchName) so the production impl flips
+   * the SAME row the sub-walk persisted — never an orphan. Optional — a fully
+   * in-memory run needs none.
    */
-  markInstanceIntegrated?(stepIndex: number, integratedAt: string): Promise<void> | void;
+  markInstanceIntegrated?(
+    stepIndex: number,
+    integratedAt: string,
+    identity: IntegrationInstanceIdentity,
+  ): Promise<void> | void;
 }
 
 /** One enqueued, completed instance awaiting ordered integration. */
@@ -126,6 +148,11 @@ export class IntegrationQueue {
     private readonly gitOps: IntegrationGitOps,
     private readonly projection: IntegrationProjection,
     private readonly pinnedStepCount: number,
+    /** Identity context for instance-row flips on integration (KTD-6/KTD-11):
+     *  the REAL runId + foreachNodeId the sub-walk persisted rows under, so
+     *  `markInstanceIntegrated` updates the existing row, not an orphan. Optional
+     *  for fully in-memory runs that pass no `markInstanceIntegrated`. */
+    private readonly rowIdentity?: { runId: string; foreachNodeId: string },
   ) {}
 
   /** Enqueue a completed instance awaiting integration. Idempotent per step. */
@@ -181,7 +208,12 @@ export class IntegrationQueue {
         // here the worktree is released after a clean integration via discardBranch
         // which the production op treats as "release, branch already merged").
         await this.projection.markStepDone(ready.stepIndex);
-        await this.projection.markInstanceIntegrated?.(ready.stepIndex, result.integratedAt);
+        await this.projection.markInstanceIntegrated?.(ready.stepIndex, result.integratedAt, {
+          runId: this.rowIdentity?.runId ?? "",
+          foreachNodeId: this.rowIdentity?.foreachNodeId ?? "",
+          pinnedStepCount: this.pinnedStepCount,
+          branchName: ready.branchName,
+        });
         // Release the instance worktree post-integration (pool hygiene). The branch
         // is already on the base; discardBranch in production only releases here.
         await this.safeDiscard(ready.branchName, ready.stepIndex);

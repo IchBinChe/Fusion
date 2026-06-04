@@ -334,6 +334,11 @@ function defaultSpawnRunner(params: {
       {
         cwd: params.cwd,
         timeout: params.timeoutMs,
+        // Ensure the timeout actually KILLS a child that traps/ignores SIGTERM:
+        // execFile defaults to SIGTERM, which a long-running or signal-trapping
+        // script can swallow, letting it outlive the timeout. SIGKILL cannot be
+        // trapped, so the timeout is enforceable.
+        killSignal: "SIGKILL",
         // Minimal env: PATH + a few harmless basics; no inherited secrets beyond
         // what the worktree-scoped script tier already has access to (KTD-15:
         // same trust as existing script steps).
@@ -390,13 +395,10 @@ export async function validateCodeNodeSources(
         error: err instanceof CodeNodeError ? err.message : String(err),
       });
     }
-    // Recurse into foreach templates (code nodes are legal inside them, KTD-15).
-    const template = (node.config as { template?: { nodes?: WorkflowIrNode[] } } | undefined)?.template;
-    if (template?.nodes) {
-      failures.push(...(await validateCodeNodeSources({ nodes: template.nodes })));
-    }
+    // (A `code` node has no `template` — the only template recursion is the
+    // foreach pass below; the prior code-node-loop recursion here was dead.)
   }
-  // Also recurse into any foreach templates at the top level.
+  // Recurse into any foreach templates (code nodes are legal inside them, KTD-15).
   for (const node of ir.nodes) {
     if (node.kind !== "foreach") continue;
     const template = (node.config as { template?: { nodes?: WorkflowIrNode[] } } | undefined)?.template;

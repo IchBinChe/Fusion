@@ -10,7 +10,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
 import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask } from "@fusion/core";
-import type { TaskStep, WorkflowIr } from "@fusion/core";
+import type { TaskStep, WorkflowIr, WorkflowFieldDefinition } from "@fusion/core";
 import {
   buildWorkflowObservationFromTask,
   buildWorkflowObservation,
@@ -157,6 +157,7 @@ import {
   createTaskDocumentWriteTool as sharedCreateTaskDocumentWriteTool,
   createTaskLogTool as sharedCreateTaskLogTool,
   createWorkflowListTool as sharedCreateWorkflowListTool,
+  createWorkflowGetTool as sharedCreateWorkflowGetTool,
   createWorkflowSelectTool as sharedCreateWorkflowSelectTool,
   createTaskPromoteTool as sharedCreateTaskPromoteTool,
   createWorkflowCreateTool as sharedCreateWorkflowCreateTool,
@@ -3243,6 +3244,14 @@ export class TaskExecutor {
    *  Keyed by task id; cleared alongside the pin. */
   private graphStepRunOnce = new Map<string, Promise<{ taskDone: boolean; modifiedFiles: string[] }>>();
 
+  /** Step-inversion (KTD-4): the foreach instance the step-execute seam is
+   *  currently driving for a graph-owned task, so `runGraphTaskStep` can honor
+   *  `deferDoneToReview` when deciding whether a non-terminal step is a success
+   *  (review will author done) or a failure (implementation left it incomplete).
+   *  Stamped by the stepExecute seam around the runTaskStep call; cleared with the
+   *  per-run pins. */
+  private graphStepActiveContext = new Map<string, ForeachActiveContext>();
+
   /** Tasks currently being orchestrated by the graph runner. Process-wide for
    *  the same reason as executingTaskLock (FN-4811): duplicate execute()
    *  invocations can arrive from different TaskExecutor instances in one
@@ -3288,8 +3297,25 @@ export class TaskExecutor {
       }
       if (!selection) return false;
 
+      // Resolve the production run id ONCE, here, so it is the single source of
+      // truth shared by the runner AND the executor-side persistence deps
+      // (parse-steps pin probe, foreach instance-row flips, resume reconcile). The
+      // runner derives `${task.id}:${definition.id}`; we mirror that derivation
+      // from the resolved definition and thread it everywhere. Best-effort: if the
+      // definition cannot be resolved (older store), the runner falls back to its
+      // own derivation and the deps fall back to the legacy `:run` literal — the
+      // prior behavior — so this never strands a task.
+      let resolvedRunId: string | undefined;
+      try {
+        const definition = await this.store.getWorkflowDefinition?.(selection.workflowId);
+        if (definition) resolvedRunId = `${task.id}:${definition.id}`;
+      } catch {
+        // Definition load failure — leave undefined; deps/runner use fallbacks.
+      }
+
       const runner = new WorkflowGraphTaskRunner({
         store: this.store,
+        runId: resolvedRunId,
         seams: this.createGraphSeams(settings),
         runCustomNode: (node, nodeTask) => this.runGraphCustomNode(node, nodeTask, settings),
         onEvent: (event) => executorLog.log(`[workflow-graph] ${event.type} ${event.taskId}: ${event.detail}`),
@@ -3309,7 +3335,7 @@ export class TaskExecutor {
         // Step-inversion (KTD-12, U12): parse-steps node handler deps — artifact
         // read (through task-documents with PROMPT.md fallback), step-list write
         // (graph-source projection), pin-protection probe, and audit.
-        parseStepsDeps: this.buildParseStepsDeps(),
+        parseStepsDeps: this.buildParseStepsDeps(resolvedRunId),
         // Step-inversion (KTD-15, U14): code node runner — esbuild compile +
         // child-process execution with the harness contract.
         runCode: this.buildCodeNodeRunner(),
@@ -3317,7 +3343,15 @@ export class TaskExecutor {
         // parallel scheduling. Per-instance worktrees branched off the task's main
         // branch tip; integration rebases each branch in step order; the projection
         // flips done-iff-integrated. Shared isolation never invokes these.
-        ...this.buildForeachWorktreeDeps(task),
+        ...this.buildForeachWorktreeDeps(task, resolvedRunId),
+        // FIX 4 (context gap): task-level log sink so an integration-conflict
+        // rework writes a visible "reworking on updated base (files: ...)" entry
+        // the re-running agent can read. Best-effort; logging failures swallowed.
+        logTaskEntry: (summary: string, detail?: string) => {
+          void this.store
+            .logEntry(task.id, summary, detail, this.getRunContextFor(task.id))
+            .catch(() => {});
+        },
       });
       let result: WorkflowGraphTaskRunResult;
       try {
@@ -3344,6 +3378,7 @@ export class TaskExecutor {
       // Clear per-run step-inversion pins (KTD-8: pinned only for the run's life).
       this.graphStepSessionPinned.delete(task.id);
       this.graphStepRunOnce.delete(task.id);
+      this.graphStepActiveContext.delete(task.id);
     }
   }
 
@@ -3408,34 +3443,57 @@ export class TaskExecutor {
   }
 
   /**
+   * Resolve the custom field definitions declared by a task's selected workflow
+   * (KTD-13) so the executor prompt can surface the schema and current values to
+   * the agent. Pure read; degrades to undefined on any resolution failure (no
+   * selection, missing/corrupt definition, older store) so prompt-building never
+   * throws and legacy tasks see no custom-fields section.
+   */
+  private async resolveTaskCustomFieldDefs(taskId: string): Promise<WorkflowFieldDefinition[] | undefined> {
+    try {
+      const ir = await resolveWorkflowIrForTask(this.store, taskId);
+      const fields = ir.version === "v2" ? ir.fields : undefined;
+      return fields && fields.length > 0 ? fields : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Build the parse-steps node handler deps (KTD-12, U12): artifact read through
    * the task-documents machinery (PROMPT.md falls back to the task's own PROMPT
    * content the way step-init does), step-list write through the graph-source
    * projection (`updateTask({ steps })`), pin-protection probe (persisted instance
    * rows exist → re-parse illegal, KTD-3), and a logEntry-backed audit sink.
    */
-  private buildParseStepsDeps(): ParseStepsHandlerDeps {
+  /**
+   * Read a task artifact by key through the task-documents layer, falling back to
+   * the task's own PROMPT content for the default `PROMPT.md` step-source artifact
+   * (the same source the legacy step-init reads). Shared by the parse-steps and
+   * code-node deps (FIX 7: one source of truth for the fallback).
+   */
+  private async readTaskArtifact(taskId: string, key: string): Promise<string | undefined> {
+    // Declared artifacts ride the task-documents layer.
+    try {
+      const doc = await this.store.getTaskDocument(taskId, key);
+      if (doc) return doc.content;
+    } catch {
+      // Fall through to the PROMPT fallback below.
+    }
+    if (key === "PROMPT.md") {
+      try {
+        const detail = await this.store.getTask(taskId);
+        if (typeof detail.prompt === "string") return detail.prompt;
+      } catch {
+        // No PROMPT available.
+      }
+    }
+    return undefined;
+  }
+
+  private buildParseStepsDeps(runId?: string): ParseStepsHandlerDeps {
     return {
-      readArtifact: async (task, key): Promise<string | undefined> => {
-        // Declared artifacts ride the task-documents layer.
-        try {
-          const doc = await this.store.getTaskDocument(task.id, key);
-          if (doc) return doc.content;
-        } catch {
-          // Fall through to the PROMPT fallback below.
-        }
-        // Default step-source artifact (PROMPT.md): fall back to the task's PROMPT
-        // content (the same source the legacy step-init reads).
-        if (key === "PROMPT.md") {
-          try {
-            const detail = await this.store.getTask(task.id);
-            if (typeof detail.prompt === "string") return detail.prompt;
-          } catch {
-            // No PROMPT available.
-          }
-        }
-        return undefined;
-      },
+      readArtifact: (task, key): Promise<string | undefined> => this.readTaskArtifact(task.id, key),
       writeSteps: async (task, steps: TaskStep[]): Promise<void> => {
         await this.store.updateTask(task.id, { steps });
       },
@@ -3445,9 +3503,12 @@ export class TaskExecutor {
         };
         if (typeof store.loadWorkflowRunStepInstances !== "function") return false;
         try {
-          // Any persisted instance row for this task (any run) means a foreach has
-          // expanded — re-parsing would desynchronize the pinned instance set.
-          const rows = store.loadWorkflowRunStepInstances(task.id, `${task.id}:run`);
+          // Any persisted instance row for THIS run means a foreach has expanded —
+          // re-parsing would desynchronize the pinned instance set (KTD-3). Probe
+          // under the REAL run id (threaded from maybeExecuteWorkflowGraph) so the
+          // pin protection actually fires; fall back to the legacy literal only when
+          // the run id was not threaded (older store / no definition).
+          const rows = store.loadWorkflowRunStepInstances(task.id, runId ?? `${task.id}:run`);
           return Array.isArray(rows) && rows.length > 0;
         } catch {
           return false;
@@ -3484,14 +3545,11 @@ export class TaskExecutor {
         } catch {
           // No documents — pass an empty artifact map.
         }
-        // Surface PROMPT.md from the task prompt when not already a document.
+        // Surface PROMPT.md from the task prompt when not already a document
+        // (shared artifact-read fallback — FIX 7).
         if (out["PROMPT.md"] === undefined) {
-          try {
-            const detail = await this.store.getTask(task.id);
-            if (typeof detail.prompt === "string") out["PROMPT.md"] = detail.prompt;
-          } catch {
-            // No prompt available.
-          }
+          const prompt = await this.readTaskArtifact(task.id, "PROMPT.md");
+          if (typeof prompt === "string") out["PROMPT.md"] = prompt;
         }
         return out;
       },
@@ -3537,7 +3595,7 @@ export class TaskExecutor {
    * Best-effort throughout: a git failure routes the foreach to a clean failure
    * (parked for human review) rather than crashing the run.
    */
-  private buildForeachWorktreeDeps(task: Task): {
+  private buildForeachWorktreeDeps(task: Task, runId?: string): {
     allocateInstanceWorktree: (
       stepIndex: number,
       base: string | undefined,
@@ -3651,22 +3709,39 @@ export class TaskExecutor {
           // dependency order; predecessors are integrated (done) by construction.
           await this.store.updateStep(taskId, stepIndex, "done", { source: "graph" });
         },
-        markInstanceIntegrated: async (stepIndex, integratedAt): Promise<void> => {
+        markInstanceIntegrated: async (stepIndex, integratedAt, identity): Promise<void> => {
           const store = this.store as unknown as {
             saveWorkflowRunStepInstance?: (state: WorkflowStepInstanceState) => void;
+            loadWorkflowRunStepInstances?: (taskId: string, runId: string) => WorkflowStepInstanceState[];
           };
           if (typeof store.saveWorkflowRunStepInstance !== "function") return;
+          // The upsert is keyed by (taskId, runId, foreachNodeId, stepIndex). The
+          // queue passes the REAL identity (the same runId + foreachNodeId the
+          // foreach sub-walk persisted the row under) so this FLIPS the existing
+          // row to completed/integratedAt instead of writing an orphan (FIX 1).
+          // Load the current row to preserve its fields (currentNodeId, baseline,
+          // reworkCount) we don't otherwise carry on the identity.
+          let existing: WorkflowStepInstanceState | undefined;
+          try {
+            const rows = store.loadWorkflowRunStepInstances?.(taskId, identity.runId) ?? [];
+            existing = rows.find(
+              (r) => r.foreachNodeId === identity.foreachNodeId && r.stepIndex === stepIndex,
+            );
+          } catch {
+            // Best-effort read; fall back to a minimal flip below.
+          }
           try {
             store.saveWorkflowRunStepInstance({
+              ...(existing ?? {}),
               taskId,
-              runId: `${taskId}:run`,
-              foreachNodeId: "",
+              runId: identity.runId,
+              foreachNodeId: identity.foreachNodeId,
               stepIndex,
-              pinnedStepCount: 0,
-              currentNodeId: "",
+              pinnedStepCount: identity.pinnedStepCount,
+              currentNodeId: existing?.currentNodeId ?? "",
               status: "completed",
-              reworkCount: 0,
-              branchName: canonicalStepInstanceBranchName(taskId, stepIndex),
+              reworkCount: existing?.reworkCount ?? 0,
+              branchName: identity.branchName || canonicalStepInstanceBranchName(taskId, stepIndex),
               integratedAt,
             } as WorkflowStepInstanceState);
           } catch {
@@ -3690,7 +3765,9 @@ export class TaskExecutor {
         if (typeof store.loadWorkflowRunStepInstances !== "function") return [];
         let rows: WorkflowStepInstanceState[] = [];
         try {
-          rows = store.loadWorkflowRunStepInstances(taskId, `${taskId}:run`) ?? [];
+          // Load under the REAL run id (threaded) so resume actually sees the rows
+          // the sub-walk persisted; the legacy literal is the unthreaded fallback.
+          rows = store.loadWorkflowRunStepInstances(taskId, runId ?? `${taskId}:run`) ?? [];
         } catch {
           return [];
         }
@@ -3942,6 +4019,14 @@ export class TaskExecutor {
     // Pin step-session physics for the run before the implementation pass.
     this.graphStepSessionPinned.add(task.id);
 
+    // Single-flight per attempt (KTD-2/KTD-8): the implementation phase runs once
+    // per run, memoized by task id, so each foreach instance's `runStep` observes
+    // the projection rather than re-running the agent. A REJECTED phase must NOT
+    // poison later attempts: a rework cycle re-enters `runStep` and would otherwise
+    // re-await the same stored rejection forever, so the implementation is never
+    // retried. On rejection we therefore clear the memo entry so the NEXT call
+    // (the rework re-run) re-invokes the implementation phase. Concurrent
+    // in-flight callers within a single attempt still share the one promise.
     let phase = this.graphStepRunOnce.get(task.id);
     if (!phase) {
       phase = this.runImplementationPhase(task);
@@ -3950,25 +4035,44 @@ export class TaskExecutor {
     try {
       await phase;
     } catch (err) {
+      // Clear the poisoned memo so a rework cycle can retry the implementation
+      // (only if it is still the same rejected promise — do not clobber a fresh
+      // attempt another caller may have already installed).
+      if (this.graphStepRunOnce.get(task.id) === phase) {
+        this.graphStepRunOnce.delete(task.id);
+      }
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
 
     // Consult the projection (the single source of truth, KTD-7) for this step's
     // terminal state. The step-session pass marks each step done/skipped as it
-    // completes; a step-review node (when present) decides done-ness instead, so
-    // here we treat a completed step-session pass as success for this step and let
-    // the review gate the projection write.
+    // completes; a step-review node (when present) decides done-ness instead.
     try {
       const live = await this.store.getTask(task.id);
+      const active = this.foreachActiveForTask(task.id);
       const status = live.steps[stepIndex]?.status;
       if (status === "done" || status === "skipped") return { success: true };
-      // Step-session pass completed but this step is not yet terminal — when a
-      // review will mark it done (deferDoneToReview) the pass having run is the
-      // success signal; otherwise the implementation left it incomplete.
-      return { success: true };
+      // Step not terminal after the pass: when a review will author done-ness
+      // (deferDoneToReview), the pass having RUN is the success signal — the review
+      // gates the projection write. Otherwise the implementation pass failed to
+      // complete this step, so report failure rather than masking it (FIX 3: the
+      // prior code returned success on both branches, hiding step-session failures).
+      if (active?.deferDoneToReview === true) return { success: true };
+      return {
+        success: false,
+        error: `step ${stepIndex} not completed by implementation pass (status: ${status ?? "unknown"})`,
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /** Read the active foreach instance context for a graph-owned task (if any) so
+   *  the step driver can honor `deferDoneToReview`. The active context is threaded
+   *  through the foreach sub-walk; we surface it via a per-task slot the
+   *  step-execute seam stamps. Returns undefined outside a foreach instance. */
+  private foreachActiveForTask(taskId: string): ForeachActiveContext | undefined {
+    return this.graphStepActiveContext.get(taskId);
   }
 
   /** Seam implementations delegating to the legacy engine (KTD-1: delegate, never reimplement). */
@@ -4054,6 +4158,9 @@ export class TaskExecutor {
         // worktree (shared isolation — unchanged). The file-scope guard the session
         // machinery installs applies to either worktree unchanged (not bypassed).
         const worktreePath = active.worktreePath || live.worktree || this.rootDir;
+        // Stamp the active instance so `runGraphTaskStep` can honor
+        // `deferDoneToReview` when judging a non-terminal step (FIX 3).
+        this.graphStepActiveContext.set(seamTask.id, active);
         const result = await runTaskStep(
           {
             store: this.store,
@@ -5518,6 +5625,7 @@ export class TaskExecutor {
         this.createTaskDocumentWriteTool(task.id),
         this.createTaskDocumentReadTool(task.id),
         this.createWorkflowListTool(),
+        this.createWorkflowGetTool(),
         this.createWorkflowSelectTool(task.id),
         this.createTaskPromoteTool(task.id),
         this.createWorkflowCreateTool(),
@@ -5776,12 +5884,14 @@ export class TaskExecutor {
               "Review the current state of your worktree and proceed with the next pending step.",
             ].join("\n"));
           } else {
+            const customFieldDefs = await this.resolveTaskCustomFieldDefs(task.id);
             const agentPrompt = buildExecutionPrompt(
               detail,
               this.rootDir,
               settings,
               worktreePath,
               this.options.pluginRunner,
+              customFieldDefs,
             );
             await promptWithFallback(session, agentPrompt);
           }
@@ -6139,6 +6249,7 @@ export class TaskExecutor {
                 }, worktreePath);
                 stuckDetector?.trackTask(task.id, retrySession);
 
+                const retryCustomFieldDefs = await this.resolveTaskCustomFieldDefs(task.id);
                 let retryPrompt: string;
                 if (pseudoPause.kind !== "none") {
                   const shortMatch = (pseudoPause.matched ?? "").slice(0, 120);
@@ -6158,7 +6269,7 @@ export class TaskExecutor {
                     "Do NOT ask for permission. Do NOT write a summary. Just call a tool and keep working.",
                     "",
                     "Original task:",
-                    buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner),
+                    buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner, retryCustomFieldDefs),
                   ].join("\n");
                 } else {
                   retryPrompt = [
@@ -6168,7 +6279,7 @@ export class TaskExecutor {
                     "2. If there is remaining work, finish it and then call fn_task_done.",
                     "",
                     "Original task:",
-                    buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner),
+                    buildExecutionPrompt(detail, this.rootDir, settings, worktreePath, this.options.pluginRunner, retryCustomFieldDefs),
                   ].join("\n");
                 }
 
@@ -7103,6 +7214,23 @@ export class TaskExecutor {
       execute: async (_id: string, params: Static<typeof taskUpdateParams>) => {
         const { step, status, dependencies, custom_fields } = params;
 
+        // Bare-call guard (P1 api-contract): a call with none of
+        // step/status/dependencies/custom_fields silently no-op'd, which the
+        // agent cannot observe. Reject it up front so the failure is visible and
+        // self-describing. The legacy no-op text is preserved as the detail.
+        if (step === undefined && status === undefined && dependencies === undefined && custom_fields === undefined) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "ERROR: fn_task_update requires at least one of: step+status (report step progress), " +
+                "dependencies (array of task ids), or custom_fields (workflow-defined field patch). " +
+                "No-op: provide a step+status, dependencies, or custom_fields to update.",
+            }],
+            details: {},
+            isError: true,
+          };
+        }
+
         // Custom-field patch (KTD-13): routed through the store's single write
         // authority, which validates each value against the task's workflow field
         // schema. A typed rejection surfaces the offending field id + reason as a
@@ -7112,10 +7240,28 @@ export class TaskExecutor {
           const res = await store.updateTaskCustomFields(taskId, custom_fields);
           if (!res.ok) {
             const r = res.rejection;
+            // Self-correcting rejection text: append the valid field ids (and,
+            // for an enum violation, the valid values for the offending field)
+            // resolved from the task's workflow field schema so a failed write
+            // carries everything the agent needs to retry. Best-effort: a
+            // resolution failure just omits the hint (the base reason still ships).
+            let hint = "";
+            try {
+              const defs = await this.resolveTaskCustomFieldDefs(taskId);
+              if (defs && defs.length > 0) {
+                if (r.code === "unknown-field" || r.code === "no-fields-defined") {
+                  hint = ` Valid field ids: ${defs.map((f) => f.id).join(", ")}.`;
+                } else if (r.code === "enum-violation") {
+                  const field = defs.find((f) => f.id === r.fieldId);
+                  const opts = field?.options?.map((o) => o.value) ?? [];
+                  if (opts.length > 0) hint = ` Valid values for '${r.fieldId}': ${opts.join(", ")}.`;
+                }
+              }
+            } catch { /* hint is best-effort */ }
             return {
               content: [{
                 type: "text" as const,
-                text: `ERROR: custom field '${r.fieldId}' rejected (${r.code}): ${r.detail}`,
+                text: `ERROR: custom field '${r.fieldId}' rejected (${r.code}): ${r.detail}${hint}`,
               }],
               details: { fieldId: r.fieldId, code: r.code, detail: r.detail },
               isError: true,
@@ -7349,6 +7495,10 @@ export class TaskExecutor {
 
   private createWorkflowListTool(): ToolDefinition {
     return sharedCreateWorkflowListTool(this.store);
+  }
+
+  private createWorkflowGetTool(): ToolDefinition {
+    return sharedCreateWorkflowGetTool(this.store);
   }
 
   private createWorkflowSelectTool(taskId: string): ToolDefinition {
@@ -12420,6 +12570,7 @@ export function buildExecutionPrompt(
   settings?: Settings,
   worktreePath?: string,
   pluginRunner?: PluginRunner,
+  customFieldDefs?: WorkflowFieldDefinition[],
 ): string {
   const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath);
   const reviewLevel = parseReviewLevelFromPrompt(prompt);
@@ -12518,6 +12669,35 @@ git log --oneline
     steeringSection = lines.join("\n");
   }
 
+  // Build custom fields section (KTD-13): when the task's workflow declares
+  // custom fields, the executor agent can write them via fn_task_update
+  // (custom_fields) — but without the schema it is writing blind. List each
+  // field's id/name/type, enum options, required flag, and current value so
+  // the write is informed and self-correcting. Compact: one line per field.
+  let customFieldsSection = "";
+  if (customFieldDefs && customFieldDefs.length > 0) {
+    const current = task.customFields ?? {};
+    const lines = [
+      "",
+      "## Custom fields",
+      "",
+      "This task's workflow declares custom fields. Set them with `fn_task_update(custom_fields={...})` keyed by field id (pass null to clear).",
+      "",
+    ];
+    for (const f of customFieldDefs) {
+      const parts = [`- \`${f.id}\` (${f.name}) — type: ${f.type}`];
+      if ((f.type === "enum" || f.type === "multi-enum") && f.options && f.options.length > 0) {
+        const opts = f.options.map((o) => (o.label && o.label !== o.value ? `${o.value} (${o.label})` : o.value)).join(", ");
+        parts.push(`options: [${opts}]`);
+      }
+      if (f.required) parts.push("required");
+      const hasValue = Object.prototype.hasOwnProperty.call(current, f.id) && current[f.id] !== null && current[f.id] !== undefined;
+      parts.push(`current: ${hasValue ? JSON.stringify(current[f.id]) : "unset"}`);
+      lines.push(parts.join("; "));
+    }
+    customFieldsSection = lines.join("\n") + "\n";
+  }
+
   const taskPromptContributions = pluginRunner?.getPromptContributionsForSurface("executor-task") ?? [];
   if (taskPromptContributions.length > 0) {
     executorLog.log(`${task.id}: applied ${taskPromptContributions.length} plugin prompt contributions for executor-task surface`);
@@ -12533,7 +12713,7 @@ ${task.dependencies.length > 0 ? `Dependencies: ${task.dependencies.join(", ")}`
 ## PROMPT.md
 
 ${prompt}
-${attachmentsSection}${commandsSection}${memorySection}${progressSection}${steeringSection}
+${attachmentsSection}${commandsSection}${memorySection}${progressSection}${steeringSection}${customFieldsSection}
 ## Review level: ${reviewLevel}
 
 ${reviewLevel === 0 ? "No reviews required. Implement directly." : ""}

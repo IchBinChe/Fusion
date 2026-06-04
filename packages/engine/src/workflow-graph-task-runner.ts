@@ -77,6 +77,16 @@ export interface WorkflowGraphTaskRunnerDeps {
   integrationProjection?: ForeachEnvironment["integrationProjection"];
   semaphoreAvailability?: ForeachEnvironment["semaphoreAvailability"];
   resumeReconcile?: ForeachEnvironment["resumeReconcile"];
+  /** FIX 4 (context gap): task-level log sink for integration-conflict rework. */
+  logTaskEntry?: ForeachEnvironment["logTaskEntry"];
+  /**
+   * Step-inversion (KTD-6): the production run id, threaded from the caller so it
+   * is the SINGLE source of truth shared with the executor-side persistence deps
+   * (`buildParseStepsDeps` / `buildForeachWorktreeDeps` probe and flip rows under
+   * the SAME id). When omitted the runner derives `${task.id}:${definition.id}` —
+   * the same formula — so a caller that does not thread it keeps prior behavior.
+   */
+  runId?: string;
 }
 
 /**
@@ -189,7 +199,11 @@ export class WorkflowGraphTaskRunner {
         integrationProjection: this.deps.integrationProjection,
         semaphoreAvailability: this.deps.semaphoreAvailability,
         resumeReconcile: this.deps.resumeReconcile,
-        runId: `${task.id}:${definition.id}`,
+        logTaskEntry: this.deps.logTaskEntry,
+        // Single source of truth (KTD-6): prefer the caller-threaded run id so the
+        // executor's persistence deps probe/flip rows under the SAME id; fall back
+        // to the canonical derivation when unthreaded.
+        runId: this.deps.runId ?? `${task.id}:${definition.id}`,
         onBranchProgress: (progress) => {
           this.branchProgress.set(progress.branchId, progress);
           try {

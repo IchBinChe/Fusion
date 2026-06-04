@@ -261,6 +261,8 @@ describe("WorkflowGraphExecutor parallel/worktree foreach (U10)", () => {
       stepReview: WorkflowLegacySeams["stepReview"];
       onReworkReset: (a: ForeachActiveContext) => void;
       template: { nodes: WorkflowIrNode[]; edges: WorkflowIr["edges"] };
+      signal: AbortSignal;
+      logTaskEntry: (summary: string, detail?: string) => void;
     }> = {},
   ) {
     const startOrder: number[] = [];
@@ -279,6 +281,8 @@ describe("WorkflowGraphExecutor parallel/worktree foreach (U10)", () => {
       ...backend.deps,
       ...(overrides.semaphoreAvailability ? { semaphoreAvailability: overrides.semaphoreAvailability } : {}),
       ...(overrides.onReworkReset ? { onReworkReset: overrides.onReworkReset as never } : {}),
+      ...(overrides.signal ? { signal: overrides.signal } : {}),
+      ...(overrides.logTaskEntry ? { logTaskEntry: overrides.logTaskEntry } : {}),
     });
     const ir = foreachIr(overrides.template ?? singleExecuteTemplate(), config);
     const result = await executor.run(task, settingsOn(), ir);
@@ -392,6 +396,25 @@ describe("WorkflowGraphExecutor parallel/worktree foreach (U10)", () => {
     expect(step1Allocs[1].base).toBe("main@1");
   });
 
+  it("FIX 4: an integration conflict writes a task-level log entry naming the conflicted files", async () => {
+    const task = taskWithSteps([{ dependsOn: [] }, { dependsOn: [] }]);
+    const backend = makeFakeBackend({ conflictOnceSteps: new Set([1]) });
+    const logged: Array<{ summary: string; detail?: string }> = [];
+    const { result } = await runScenario(
+      task,
+      { mode: "parallel", isolation: "worktree", concurrency: 2 },
+      backend,
+      { logTaskEntry: (summary, detail) => logged.push({ summary, detail }) },
+    );
+    expect(result.outcome).toBe("success");
+    const conflictLog = logged.find((l) => l.summary.includes("integration conflict on step 1"));
+    expect(conflictLog).toBeDefined();
+    expect(conflictLog!.summary).toContain("reworking on updated base");
+    // The fake backend reports `step-1.ts` as the conflicted file.
+    expect(conflictLog!.summary).toContain("step-1.ts");
+    expect(conflictLog!.detail).toContain("step-1.ts");
+  });
+
   it("conflict rework exhaustion routes rework-exhausted", async () => {
     const task = taskWithSteps([{ dependsOn: [] }]);
     const backend = makeFakeBackend({ conflictSteps: new Set([0]) }); // always conflicts.
@@ -406,6 +429,59 @@ describe("WorkflowGraphExecutor parallel/worktree foreach (U10)", () => {
     expect(result.visitedNodeIds).toContain("fe");
     // Never marked done.
     expect(backend.doneSteps).toEqual([]);
+  });
+
+  it("FIX 2: a failed instance releases its allocated worktree exactly once", async () => {
+    const task = taskWithSteps([{ dependsOn: [] }]);
+    const backend = makeFakeBackend();
+    const { result } = await runScenario(
+      task,
+      { mode: "parallel", isolation: "worktree", concurrency: 1 },
+      backend,
+      {
+        // The instance allocates a worktree, then its step-execute FAILS — the
+        // scheduler never enqueues it for integration, so without explicit
+        // release its worktree+branch would leak.
+        stepExecute: async () => ({ outcome: "failure", value: "boom" }),
+      },
+    );
+    expect(result.outcome).toBe("failure");
+    // The allocated branch was released exactly once (discard==release in the fake).
+    expect(backend.allocations.map((a) => a.branchName)).toEqual(["fusion/fn-par-step-0"]);
+    expect(backend.released).toEqual(["fusion/fn-par-step-0"]);
+    expect(backend.released.filter((b) => b === "fusion/fn-par-step-0").length).toBe(1);
+    // It never integrated.
+    expect(backend.doneSteps).toEqual([]);
+  });
+
+  it("FIX 2: abort mid-run releases every allocated instance worktree", async () => {
+    const task = taskWithSteps([{ dependsOn: [] }, { dependsOn: [] }]);
+    const backend = makeFakeBackend();
+    const controller = new AbortController();
+    let executed = 0;
+    const { result } = await runScenario(
+      task,
+      { mode: "parallel", isolation: "worktree", concurrency: 2 },
+      backend,
+      {
+        // Both instances allocate worktrees and run; abort after the first batch's
+        // step-execute so the scheduler's top-of-loop abort check fires while their
+        // worktrees are still allocated.
+        stepExecute: async () => {
+          executed += 1;
+          if (executed >= 1) controller.abort();
+          return { outcome: "success", value: "step-done" };
+        },
+        signal: controller.signal,
+      },
+    );
+    expect(result.outcome).toBe("failure");
+    // Every allocated branch was released (no leak), each exactly once.
+    const allocated = backend.allocations.map((a) => a.branchName);
+    expect(allocated.length).toBeGreaterThan(0);
+    for (const b of allocated) {
+      expect(backend.released.filter((r) => r === b).length).toBe(1);
+    }
   });
 
   it("integration order is step order even when completion order inverts", async () => {

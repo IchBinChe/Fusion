@@ -28,26 +28,13 @@ import {
   type TraitFlags,
   type WorkflowIr,
   type WorkflowIrV2,
+  type WorkflowFieldDefinition,
 } from "@fusion/core";
 
-/** A workflow-defined custom task field as the board client needs it (U13/
- *  KTD-14). Structurally mirrors core's `WorkflowFieldDefinition`; declared
- *  locally because the core field-schema types are not exported through the
- *  `@fusion/core` barrel. The payload is a verbatim pass-through of the IR's
- *  `fields` array. */
-export interface BoardWorkflowField {
-  id: string;
-  name: string;
-  type: "string" | "text" | "number" | "boolean" | "enum" | "multi-enum" | "date" | "url";
-  required?: boolean;
-  default?: unknown;
-  options?: Array<{ value: string; label: string; color?: string }>;
-  render?: {
-    placement?: "card" | "detail" | "detail-section";
-    widget?: "select" | "radio" | "chips" | "input" | "textarea" | "toggle";
-    badge?: boolean;
-  };
-}
+/** A workflow-defined custom task field as the board client needs it (U13/KTD-14).
+ *  Uses @fusion/core's WorkflowFieldDefinition directly now that it is exported
+ *  through the barrel. The payload is a verbatim pass-through of the IR's `fields` array. */
+export type BoardWorkflowField = WorkflowFieldDefinition;
 
 /** Stable id the client uses for the implicit default lane (null selection). */
 export const DEFAULT_WORKFLOW_LANE_ID = "builtin:coding";
@@ -102,7 +89,7 @@ function describeFields(ir: WorkflowIr): BoardWorkflowField[] | undefined {
   const v2 = toV2(ir);
   const fields = v2?.fields;
   if (!fields || fields.length === 0) return undefined;
-  return fields as BoardWorkflowField[];
+  return fields;
 }
 
 async function describeWorkflow(

@@ -6,6 +6,7 @@ import type {
   WorkflowIrNode,
   WorkflowIrEdge,
   WorkflowDefinition,
+  WorkflowFieldDefinition,
 } from "@fusion/core";
 import type { WorkflowFlowNodeData, WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
 
@@ -21,19 +22,10 @@ interface WorkflowForeachConfig {
   template: { nodes: WorkflowIrNode[]; edges: WorkflowIrEdge[] };
 }
 
-/** Local mirror of @fusion/core's WorkflowFieldDefinition (KTD-13). The core
- *  barrel does not re-export it and the dashboard build aliases @fusion/core to
- *  a types-only entry; the editor only needs to carry the array through the
- *  IR<->flow round-trip without inspecting it, so this minimal shape suffices. */
-export interface WorkflowFieldDefinitionShape {
-  id: string;
-  name: string;
-  type: string;
-  required?: boolean;
-  default?: unknown;
-  options?: { value: string; label: string; color?: string }[];
-  render?: { placement?: string; widget?: string; badge?: boolean };
-}
+// WorkflowFieldDefinition is imported from @fusion/core above (KTD-13/14).
+// Re-exported so existing importers that reference WorkflowFieldDefinitionShape
+// can migrate; callers should prefer WorkflowFieldDefinition directly.
+export type { WorkflowFieldDefinition as WorkflowFieldDefinitionShape };
 
 // ── foreach template region (KTD-3, U8) ──────────────────────────────────────
 //
@@ -286,7 +278,7 @@ export function flowToIr(
   nodes: FlowNode<WorkflowFlowNodeData>[],
   edges: FlowEdge[],
   columns?: WorkflowIrColumn[],
-  fields?: WorkflowFieldDefinitionShape[],
+  fields?: WorkflowFieldDefinition[],
 ): { ir: WorkflowIr; layout: Record<string, { x: number; y: number }> } {
   const realNodes = nodes.filter((n) => !isColumnBandNode(n.id));
   // Partition by parentId: foreach group children reassemble into that group's
@@ -540,8 +532,8 @@ export function columnsOf(def: WorkflowDefinition): WorkflowIrColumn[] {
 
 /** Extract the editor's working custom-field list from a definition (KTD-13).
  *  v2 with `fields` → a deep-ish copy; v1 or no fields → empty. */
-export function fieldsOf(def: WorkflowDefinition): WorkflowFieldDefinitionShape[] {
-  const ir = def.ir as { fields?: WorkflowFieldDefinitionShape[] };
+export function fieldsOf(def: WorkflowDefinition): WorkflowFieldDefinition[] {
+  const ir = def.ir as { fields?: WorkflowFieldDefinition[] };
   if (!isV2(def.ir) || !Array.isArray(ir.fields)) return [];
   return ir.fields.map((f) => ({
     ...f,

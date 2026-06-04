@@ -81,6 +81,15 @@ export const FOREACH_ACTIVE_CONTEXT_KEY = "foreach:active";
  */
 export const SPLIT_ACTIVE_CONTEXT_KEY = "split:active";
 
+/**
+ * Reserved context marker (KTD-11) the worktree-isolation foreach seeds into an
+ * instance's context for ONE re-run after an integration-conflict, when the
+ * template authored an explicit `outcome:integration-conflict` edge. Author nodes
+ * read it to branch on the conflict; the sub-walk clears it after seeding so a
+ * later clean rework does not re-surface a stale conflict signal.
+ */
+export const INTEGRATION_CONFLICT_CONTEXT_KEY = "integration:conflict";
+
 /** Shape of the value stored under {@link FOREACH_ACTIVE_CONTEXT_KEY}. */
 export interface ForeachActiveContext {
   foreachNodeId: string;

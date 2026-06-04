@@ -113,6 +113,65 @@ For a single Vitest file, use package-local `exec vitest`:
 pnpm --filter @fusion/core exec vitest run src/__tests__/central-db.test.ts --silent=passed-only --reporter=dot
 ```
 
+## Changed-only test cache (`pnpm test`)
+
+`pnpm test` runs `scripts/test-changed.mjs`, which selects only the workspace
+packages affected by your branch diff (plus their reverse-dependents) and skips
+packages whose content hasn't changed since they last passed. A per-package
+pass-cache lives at `node_modules/.cache/fusion/test-cache.json`.
+
+### What a cache entry's hash covers (dependency-aware invalidation)
+
+Each package's cache hash (`computePackageHash`) folds in, so any of these
+changing forces that package to re-run:
+
+- **The package's own tracked files**, hashed via the **working-tree bytes** for
+  any file that is dirty (unstaged/uncommitted edits) or untracked-not-ignored,
+  and via git's index blob SHA only when the file is fully clean. This means an
+  **unstaged edit to a tracked file busts the cache** — no false HIT on a stale
+  index blob.
+- **Every transitive workspace dependency's own hash.** A change to `@fusion/core`
+  invalidates the cache entries of `engine`, `dashboard`, `cli`, and everything
+  else that (transitively) depends on it, even when the dependent's own files are
+  untouched. This is the R11 correctness fix: a dependent is never cache-skipped
+  when a dependency it consumes has changed.
+- **Shared inputs folded into *every* package**: `pnpm-lock.yaml`,
+  `tsconfig.base.json`, and the shared `packages/core/src/__test-utils__` tree.
+  The test-utils tree is imported by nearly every package's vitest config via a
+  relative cross-package path, including packages that have **no** `@fusion/core`
+  workspace dependency (mobile, droid-cli, pi-\*, and the plugins). Folding it in
+  globally (like `tsconfig.base.json`) guarantees an edit there invalidates the
+  whole workspace.
+
+The hash carries a version prefix (`HASH_VERSION_PREFIX`). Bumping it (done in U4:
+`v1` → `v2`) invalidates every pre-existing entry exactly once; old-format cache
+files are discarded gracefully rather than crashed on.
+
+### Escape hatches
+
+If you suspect a stale or wrong cache result (e.g. a flaky test that happened to
+pass got cached, or you want to force a clean re-run), bypass the cache:
+
+```bash
+pnpm test --no-cache          # bypass cache reads AND writes for this run
+FUSION_TEST_NO_CACHE=1 pnpm test
+```
+
+`--no-cache` re-runs every selected package without consulting or clearing the
+cache file; a subsequent normal `pnpm test` still hits the cache. `pnpm test:full`
+already passes `--no-cache` (a full run means full). These flags already exist;
+this section documents them.
+
+### TTL rationale (7-day expiry)
+
+Entries older than **7 days** are treated as a MISS even on a hash match
+(`CACHE_MAX_AGE_MS`). The TTL is intentionally retained even though dep-aware
+hashing makes content-staleness impossible: it guards against **environmental
+drift** that the content hash cannot see — toolchain/Node upgrades, OS or native
+dependency changes, and other host-level shifts that can change test outcomes
+without changing any hashed file. Seven days bounds that blind spot while keeping
+the cache useful across a normal work week.
+
 ## Engine test helper convention
 
 `packages/engine/src/__tests__/executor-test-helpers.ts` defaults both `isUsableTaskWorktree` to `true` and `classifyTaskWorktree` to `{ ok: true }` via a helper-level `worktree-pool` mock. To test failure paths, override with `vi.spyOn(worktreePool, "classifyTaskWorktree").mockResolvedValueOnce({ ok: false, classification: "unregistered", reason: "..." })` (or `isUsableTaskWorktree` for legacy call sites). Production liveness assertions in `executor.ts` are unchanged.

@@ -29,11 +29,19 @@ import {
   __setCleanupRmSyncForTests,
   emitModeDecision,
   pruneFusionTestHomes,
+  buildForwardDependencyMap,
+  collectTransitiveDependencies,
+  computeOwnHash,
 } from "../test-changed.mjs";
 
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const thisFile = fileURLToPath(import.meta.url);
+const scriptModulePath = path.resolve(path.dirname(thisFile), "..", "test-changed.mjs");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,14 +74,22 @@ function withTmpDir(fn) {
 /**
  * A deterministic fake gitFn that returns a fixed blob sha for any path.
  *
+ * Handles the two subcommands the U4 dirty-aware hash issues:
+ *   - `ls-files -s [--] <paths...>` → one tracked entry per path (the same
+ *     fixed blob sha), so the hash is content-stable.
+ *   - `status --porcelain ...` → empty (clean tree; nothing dirty/untracked).
+ *
  * @param {string} blobSha
  * @returns {(args: string[]) => string}
  */
 function fakeGit(blobSha = "aabbccdd00112233aabbccdd00112233aabbccdd") {
   return (args) => {
-    // ls-files -s output format: "<mode> <sha> <stage>\t<path>"
-    const pathArg = args[args.length - 1];
-    return `100644 ${blobSha} 0\t${pathArg}`;
+    if (args[0] === "status") return ""; // clean working tree
+    // ls-files -s [--] <paths...> → "<mode> <sha> <stage>\t<path>" per path.
+    const paths = args.filter((a, i) => i >= 2 && a !== "--");
+    return paths
+      .map((p) => `100644 ${blobSha} 0\t${p}`)
+      .join("\n");
   };
 }
 
@@ -387,38 +403,34 @@ test("computePackageHash: different blob sha produces different hash", () => {
   assert.notEqual(h1, h2);
 });
 
-test("computePackageHash: hash includes pnpm-lock.yaml so lockfile change busts everything", () => {
-  // Two fakeGit functions that return different blob SHAs for pnpm-lock.yaml.
-  const gitWithLockA = (args) => {
-    const p = args[args.length - 1];
-    if (p === "pnpm-lock.yaml") return `100644 locksha-AAAA 0\tpnpm-lock.yaml`;
-    return `100644 pkgsha-same 0\t${p}`;
+// Build a clean-tree gitFn that emits one ls-files entry per requested path,
+// letting the caller override a specific path's blob sha (for shared-input tests).
+function cleanGitWithOverrides(overrides = {}, fallbackSha = "pkgsha-same") {
+  return (args) => {
+    if (args[0] === "status") return "";
+    const paths = args.filter((a, i) => i >= 2 && a !== "--");
+    return paths
+      .map((p) => `100644 ${overrides[p] ?? fallbackSha} 0\t${p}`)
+      .join("\n");
   };
-  const gitWithLockB = (args) => {
-    const p = args[args.length - 1];
-    if (p === "pnpm-lock.yaml") return `100644 locksha-BBBB 0\tpnpm-lock.yaml`;
-    return `100644 pkgsha-same 0\t${p}`;
-  };
+}
 
-  const hashA = computePackageHash("packages/engine", gitWithLockA);
-  const hashB = computePackageHash("packages/engine", gitWithLockB);
+test("computePackageHash: hash includes pnpm-lock.yaml so lockfile change busts everything", () => {
+  const hashA = computePackageHash("packages/engine", cleanGitWithOverrides({ "pnpm-lock.yaml": "locksha-AAAA" }));
+  const hashB = computePackageHash("packages/engine", cleanGitWithOverrides({ "pnpm-lock.yaml": "locksha-BBBB" }));
   assert.notEqual(hashA, hashB);
 });
 
 test("computePackageHash: hash includes tsconfig.base.json so shared TS config change busts cache", () => {
-  const gitWithTsA = (args) => {
-    const p = args[args.length - 1];
-    if (p === "tsconfig.base.json") return `100644 tsconfig-SHA-AAA 0\ttsconfig.base.json`;
-    return `100644 same-blob 0\t${p}`;
-  };
-  const gitWithTsB = (args) => {
-    const p = args[args.length - 1];
-    if (p === "tsconfig.base.json") return `100644 tsconfig-SHA-BBB 0\ttsconfig.base.json`;
-    return `100644 same-blob 0\t${p}`;
-  };
+  const hashA = computePackageHash("packages/engine", cleanGitWithOverrides({ "tsconfig.base.json": "tsconfig-SHA-AAA" }));
+  const hashB = computePackageHash("packages/engine", cleanGitWithOverrides({ "tsconfig.base.json": "tsconfig-SHA-BBB" }));
+  assert.notEqual(hashA, hashB);
+});
 
-  const hashA = computePackageHash("packages/engine", gitWithTsA);
-  const hashB = computePackageHash("packages/engine", gitWithTsB);
+test("computePackageHash: hash includes shared __test-utils__ so editing it busts every package", () => {
+  const testUtilsPath = "packages/core/src/__test-utils__";
+  const hashA = computePackageHash("plugins/fusion-plugin-roadmap", cleanGitWithOverrides({ [testUtilsPath]: "tu-AAAA" }));
+  const hashB = computePackageHash("plugins/fusion-plugin-roadmap", cleanGitWithOverrides({ [testUtilsPath]: "tu-BBBB" }));
   assert.notEqual(hashA, hashB);
 });
 
@@ -628,11 +640,16 @@ test("applyCacheToPlan: mixed HIT and MISS across multiple packages", () => {
   // lookup so that root-file blob SHAs (pnpm-lock.yaml, tsconfig.base.json)
   // are identical in both contexts.
   const gitFnMulti = (args) => {
-    const p = args[args.length - 1];
-    if (p === "packages/engine") return `100644 sha-engine 0\tpackages/engine/src/index.ts`;
-    if (p === "packages/core") return `100644 sha-core 0\tpackages/core/src/index.ts`;
-    // Root files (pnpm-lock.yaml, tsconfig.base.json) get a stable blob sha.
-    return `100644 common-root-sha 0\t${p}`;
+    if (args[0] === "status") return "";
+    const paths = args.filter((a, i) => i >= 2 && a !== "--");
+    return paths
+      .map((p) => {
+        if (p === "packages/engine") return `100644 sha-engine 0\tpackages/engine/src/index.ts`;
+        if (p === "packages/core") return `100644 sha-core 0\tpackages/core/src/index.ts`;
+        // Shared inputs (pnpm-lock.yaml, tsconfig.base.json, __test-utils__) get a stable blob sha.
+        return `100644 common-root-sha 0\t${p}`;
+      })
+      .join("\n");
   };
 
   // Pre-compute the engine hash using the SAME gitFnMulti so the stored hash
@@ -916,6 +933,398 @@ test("pruneFusionTestHomes: bounded — removes at most maxEntries per call", ()
   } finally {
     for (const dir of created) rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// U4: real-git-fixture integration (dirty working tree + transitive deps).
+//
+// These drive the REAL module against a throwaway git repo via a subprocess
+// (FUSION_PROJECT_DIR), so git status / working-tree byte reads execute for real
+// rather than through stubs.
+// ---------------------------------------------------------------------------
+
+function git(cwd, args) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout;
+}
+
+/** Build a tiny 3-package chain repo: a <- b <- c, plus unrelated d. */
+function makeChainRepo(dir) {
+  git(dir, ["init", "-q"]);
+  git(dir, ["config", "user.email", "t@t.t"]);
+  git(dir, ["config", "user.name", "t"]);
+  writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  writeFileSync(path.join(dir, "tsconfig.base.json"), "{}\n");
+  writeFileSync(path.join(dir, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+  // Shared __test-utils__ tree consumed by every package.
+  mkdirSync(path.join(dir, "packages", "core", "src", "__test-utils__"), { recursive: true });
+  writeFileSync(path.join(dir, "packages", "core", "src", "__test-utils__", "vitest-setup.ts"), "export const setup = 1;\n");
+  const pkgs = [
+    ["a", "@x/a", {}],
+    ["b", "@x/b", { "@x/a": "workspace:*" }],
+    ["c", "@x/c", { "@x/b": "workspace:*" }],
+    ["d", "@x/d", {}],
+  ];
+  for (const [folder, name, deps] of pkgs) {
+    const pkgDir = path.join(dir, "packages", folder, "src");
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(path.join(pkgDir, "index.ts"), `export const x = "${folder}-orig";\n`);
+    writeFileSync(
+      path.join(dir, "packages", folder, "package.json"),
+      JSON.stringify({ name, version: "1.0.0", scripts: { test: "true" }, dependencies: deps }, null, 2),
+    );
+  }
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-q", "-m", "init"]);
+}
+
+/**
+ * Run a snippet inside a subprocess with FUSION_PROJECT_DIR set, importing the
+ * real test-changed module. The snippet receives `mod` and must console.log a
+ * single JSON line, which we parse and return.
+ */
+function runInRepo(repoDir, snippet) {
+  const code = `
+    import * as mod from ${JSON.stringify(scriptModulePath)};
+    const out = (${snippet})(mod);
+    console.log(JSON.stringify(out));
+  `;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+    cwd: repoDir,
+    encoding: "utf8",
+    env: { ...process.env, FUSION_PROJECT_DIR: repoDir },
+  });
+  if (r.status !== 0) throw new Error(`subprocess failed: ${r.stderr}\n${r.stdout}`);
+  const lastLine = r.stdout.trim().split("\n").filter(Boolean).pop();
+  return JSON.parse(lastLine);
+}
+
+const packageHashSnippet = (pkgName) => `(mod) => {
+  const infos = mod.listWorkspacePackageInfos();
+  const dirByName = mod.buildPackageDirByName(infos);
+  const fwd = mod.buildForwardDependencyMap(infos);
+  return { hash: mod.computePackageHash(dirByName.get(${JSON.stringify(pkgName)}), undefined, {
+    packageName: ${JSON.stringify(pkgName)},
+    forwardDependencyMap: fwd,
+    packageDirByName: dirByName,
+  }) };
+}`;
+
+test("integration: mutating core (a) changes transitive dependents b,c but not unrelated d", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tc-chain-"));
+  try {
+    makeChainRepo(dir);
+    const before = {
+      b: runInRepo(dir, packageHashSnippet("@x/b")).hash,
+      c: runInRepo(dir, packageHashSnippet("@x/c")).hash,
+      d: runInRepo(dir, packageHashSnippet("@x/d")).hash,
+    };
+    // Mutate + commit package a.
+    writeFileSync(path.join(dir, "packages", "a", "src", "index.ts"), `export const x = "a-CHANGED";\n`);
+    git(dir, ["commit", "-qam", "change a"]);
+    const after = {
+      b: runInRepo(dir, packageHashSnippet("@x/b")).hash,
+      c: runInRepo(dir, packageHashSnippet("@x/c")).hash,
+      d: runInRepo(dir, packageHashSnippet("@x/d")).hash,
+    };
+    assert.notEqual(after.b, before.b, "b (depends on a) must change");
+    assert.notEqual(after.c, before.c, "c (transitively depends on a) must change");
+    assert.equal(after.d, before.d, "d (unrelated) must NOT change");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: unstaged edit to a tracked file changes the hash (no false cache HIT)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tc-dirty-"));
+  try {
+    makeChainRepo(dir);
+    const clean = runInRepo(dir, packageHashSnippet("@x/a")).hash;
+    // Unstaged edit (NOT committed, NOT staged) — index blob SHA stays identical.
+    writeFileSync(path.join(dir, "packages", "a", "src", "index.ts"), `export const x = "a-DIRTY-UNSTAGED";\n`);
+    const dirty = runInRepo(dir, packageHashSnippet("@x/a")).hash;
+    assert.notEqual(dirty, clean, "unstaged working-tree edit must bust the hash");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: editing shared __test-utils__ invalidates an unrelated package (d) with no core dep", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tc-tu-"));
+  try {
+    makeChainRepo(dir);
+    const before = runInRepo(dir, packageHashSnippet("@x/d")).hash;
+    // d has no @fusion/core / @x/a..c dependency, yet must invalidate when the
+    // globally-folded shared test-utils tree changes.
+    writeFileSync(
+      path.join(dir, "packages", "core", "src", "__test-utils__", "vitest-setup.ts"),
+      "export const setup = 999;\n",
+    );
+    git(dir, ["commit", "-qam", "change test-utils"]);
+    const after = runInRepo(dir, packageHashSnippet("@x/d")).hash;
+    assert.notEqual(after, before, "shared __test-utils__ edit must invalidate every package");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: end-to-end cache HIT then dep-change MISS via applyCacheToPlan/recordCachePass", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tc-e2e-"));
+  try {
+    makeChainRepo(dir);
+    const e2e = `(mod) => {
+      const infos = mod.listWorkspacePackageInfos();
+      const dirByName = mod.buildPackageDirByName(infos);
+      const fwd = mod.buildForwardDependencyMap(infos);
+      let store = { version: 1, entries: {} };
+      const readCacheFn = () => store;
+      const writeCacheFn = (c) => { store = c; };
+      // Record b as passing now.
+      mod.recordCachePass(["@x/b"], dirByName, { forwardDependencyMap: fwd, readCacheFn, writeCacheFn });
+      // Immediate re-check: HIT.
+      const hit = mod.applyCacheToPlan({ mode: "changed", packages: ["@x/b"] },
+        { packageDirByName: dirByName, forwardDependencyMap: fwd, readCacheFn, writeCacheFn });
+      return { cachedAfterRecord: hit.cachedPackages, activeAfterRecord: hit.activePackages };
+    }`;
+    const phase1 = runInRepo(dir, e2e);
+    assert.deepEqual(phase1.cachedAfterRecord, ["@x/b"], "unchanged dependent hits cache");
+    assert.deepEqual(phase1.activeAfterRecord, []);
+
+    // Record b's passing hash under the CURRENT (pre-change) tree, capturing the
+    // serialized cache so we can replay it after mutating the dependency.
+    const recordSnippet = `(mod) => {
+      const infos = mod.listWorkspacePackageInfos();
+      const dirByName = mod.buildPackageDirByName(infos);
+      const fwd = mod.buildForwardDependencyMap(infos);
+      let store = { version: 1, entries: {} };
+      mod.recordCachePass(["@x/b"], dirByName, { forwardDependencyMap: fwd,
+        readCacheFn: () => store, writeCacheFn: (c) => { store = c; } });
+      return { recorded: store };
+    }`;
+    const recorded = runInRepo(dir, recordSnippet).recorded;
+    writeFileSync(path.join(dir, "packages", "a", "src", "index.ts"), `export const x = "a-CHANGED-2";\n`);
+    git(dir, ["commit", "-qam", "change a again"]);
+    const checkMissSnippet = `(mod) => {
+      const infos = mod.listWorkspacePackageInfos();
+      const dirByName = mod.buildPackageDirByName(infos);
+      const fwd = mod.buildForwardDependencyMap(infos);
+      const store = ${JSON.stringify(recorded)};
+      const res = mod.applyCacheToPlan({ mode: "changed", packages: ["@x/b"] },
+        { packageDirByName: dirByName, forwardDependencyMap: fwd, readCacheFn: () => store });
+      return { cached: res.cachedPackages, active: res.activePackages };
+    }`;
+    const phase2 = runInRepo(dir, checkMissSnippet);
+    assert.deepEqual(phase2.active, ["@x/b"], "after dep a changed, b cache MISSES");
+    assert.deepEqual(phase2.cached, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// U4: dependency-aware cache invalidation
+// ---------------------------------------------------------------------------
+
+// Stub gitFn that returns per-package blob SHAs from a lookup table, treating
+// each directory arg as a single tracked file. Clean tree (status empty).
+function depGraphGit(blobByDir) {
+  return (args) => {
+    if (args[0] === "status") return "";
+    const paths = args.filter((a, i) => i >= 2 && a !== "--");
+    return paths
+      .map((p) => `100644 ${blobByDir[p] ?? "default-sha"} 0\t${p}/index.ts`)
+      .join("\n");
+  };
+}
+
+const chainPackages = [
+  { name: "@x/a", dir: "packages/a", dependencyNames: [] },
+  { name: "@x/b", dir: "packages/b", dependencyNames: ["@x/a"] },
+  { name: "@x/c", dir: "packages/c", dependencyNames: ["@x/b"] },
+  { name: "@x/d", dir: "packages/d", dependencyNames: [] },
+];
+
+const chainDirByName = dirByName([
+  ["@x/a", "packages/a"],
+  ["@x/b", "packages/b"],
+  ["@x/c", "packages/c"],
+  ["@x/d", "packages/d"],
+]);
+
+test("buildForwardDependencyMap: maps each package to its workspace deps", () => {
+  const fwd = buildForwardDependencyMap(chainPackages);
+  assert.deepEqual(fwd.get("@x/a"), []);
+  assert.deepEqual(fwd.get("@x/b"), ["@x/a"]);
+  assert.deepEqual(fwd.get("@x/c"), ["@x/b"]);
+  assert.deepEqual(fwd.get("@x/d"), []);
+});
+
+test("collectTransitiveDependencies: a <- b <- c chain resolves full closure", () => {
+  const fwd = buildForwardDependencyMap(chainPackages);
+  assert.deepEqual(collectTransitiveDependencies("@x/c", fwd), ["@x/a", "@x/b"]);
+  assert.deepEqual(collectTransitiveDependencies("@x/b", fwd), ["@x/a"]);
+  assert.deepEqual(collectTransitiveDependencies("@x/a", fwd), []);
+});
+
+test("collectTransitiveDependencies: tolerates dependency cycles without looping", () => {
+  const cyclic = buildForwardDependencyMap([
+    { name: "@y/a", dir: "packages/a", dependencyNames: ["@y/b"] },
+    { name: "@y/b", dir: "packages/b", dependencyNames: ["@y/a"] },
+  ]);
+  assert.deepEqual(collectTransitiveDependencies("@y/a", cyclic), ["@y/b"]);
+});
+
+test("computePackageHash: mutating core invalidates transitive dependents, not unrelated package", () => {
+  const fwd = buildForwardDependencyMap(chainPackages);
+  const hashOf = (pkgName, blobByDir) =>
+    computePackageHash(chainDirByName.get(pkgName), depGraphGit(blobByDir), {
+      packageName: pkgName,
+      forwardDependencyMap: fwd,
+      packageDirByName: chainDirByName,
+    });
+
+  const before = { "packages/a": "a-1", "packages/b": "b-1", "packages/c": "c-1", "packages/d": "d-1" };
+  const after = { ...before, "packages/a": "a-2" }; // mutate a only
+
+  const bBefore = hashOf("@x/b", before);
+  const cBefore = hashOf("@x/c", before);
+  const dBefore = hashOf("@x/d", before);
+
+  // b depends on a; c depends on b->a. Both must change. d is unrelated.
+  assert.notEqual(hashOf("@x/b", after), bBefore, "b (direct dependent of a) must invalidate");
+  assert.notEqual(hashOf("@x/c", after), cBefore, "c (transitive dependent of a) must invalidate");
+  assert.equal(hashOf("@x/d", after), dBefore, "d (unrelated) must stay stable");
+});
+
+test("computePackageHash: hashing without dep options ignores transitive deps (own-only fallback)", () => {
+  // Same dir, no packageName/forwardDependencyMap → only own + shared inputs.
+  const g = depGraphGit({ "packages/b": "b-1" });
+  const h1 = computePackageHash("packages/b", g);
+  const h2 = computePackageHash("packages/b", g);
+  assert.equal(h1, h2);
+});
+
+test("computeOwnHash: memoizes per packageDir (same content -> same hash, computed once)", () => {
+  let lsCalls = 0;
+  const countingGit = (args) => {
+    if (args[0] === "status") return "";
+    if (args[0] === "ls-files") lsCalls += 1;
+    const paths = args.filter((a, i) => i >= 2 && a !== "--");
+    return paths.map((p) => `100644 same-sha 0\t${p}/index.ts`).join("\n");
+  };
+  const memo = new Map();
+  const h1 = computeOwnHash("packages/a", countingGit, memo);
+  const callsAfterFirst = lsCalls;
+  const h2 = computeOwnHash("packages/a", countingGit, memo);
+  assert.equal(h1, h2, "same content -> same hash");
+  assert.equal(lsCalls, callsAfterFirst, "second call served from memo, no extra git calls");
+});
+
+test("computePackageHash: shared memo computes each dependency own-hash once across packages", () => {
+  const fwd = buildForwardDependencyMap(chainPackages);
+  const blobByDir = { "packages/a": "a", "packages/b": "b", "packages/c": "c", "packages/d": "d" };
+  const lsByDir = new Map();
+  const countingGit = (args) => {
+    if (args[0] === "status") return "";
+    const paths = args.filter((a, i) => i >= 2 && a !== "--");
+    for (const p of paths) lsByDir.set(p, (lsByDir.get(p) ?? 0) + 1);
+    return paths.map((p) => `100644 ${blobByDir[p] ?? "x"} 0\t${p}/index.ts`).join("\n");
+  };
+  const memo = new Map();
+  for (const name of ["@x/b", "@x/c"]) {
+    computePackageHash(chainDirByName.get(name), countingGit, {
+      packageName: name,
+      forwardDependencyMap: fwd,
+      packageDirByName: chainDirByName,
+      memo,
+    });
+  }
+  // packages/a is a dependency of both b and c; with the shared memo its
+  // own-hash ls-files runs exactly once, not once per dependent.
+  assert.equal(lsByDir.get("packages/a"), 1, "core own-hash computed once via memo");
+});
+
+test("readCache: old cache version is discarded (version-prefix bump invalidates entries)", () => {
+  // HASH_VERSION_PREFIX bumped v1->v2 in U4: a v1-era stored hash for the same
+  // package will no longer match the freshly-computed v2 hash, so the entry is a
+  // MISS rather than a crash or false hit.
+  const g = depGraphGit({ "packages/a": "a-1" });
+  const v2Hash = computePackageHash("packages/a", g, {
+    packageName: "@x/a",
+    forwardDependencyMap: buildForwardDependencyMap(chainPackages),
+    packageDirByName: chainDirByName,
+  });
+  const staleV1LikeHash = "0".repeat(64); // a pre-bump digest shape
+  assert.notEqual(v2Hash, staleV1LikeHash);
+
+  const cache = {
+    version: 1,
+    entries: { "@x/a": { hash: staleV1LikeHash, passedAt: new Date().toISOString(), command: "test" } },
+  };
+  const result = applyCacheToPlan(
+    { mode: "changed", packages: ["@x/a"] },
+    {
+      gitFn: g,
+      readCacheFn: () => cache,
+      packageDirByName: chainDirByName,
+      forwardDependencyMap: buildForwardDependencyMap(chainPackages),
+    },
+  );
+  assert.deepEqual(result.cachedPackages, []);
+  assert.deepEqual(result.activePackages, ["@x/a"]);
+});
+
+test("applyCacheToPlan: dependency change forces dependent re-run even with fresh own hash", () => {
+  const fwd = buildForwardDependencyMap(chainPackages);
+  // Cache b as passing under blob a-1. Then a changes to a-2: b must re-run.
+  const cachedHash = computePackageHash("packages/b", depGraphGit({ "packages/a": "a-1", "packages/b": "b-1" }), {
+    packageName: "@x/b",
+    forwardDependencyMap: fwd,
+    packageDirByName: chainDirByName,
+  });
+  const cache = {
+    version: 1,
+    entries: { "@x/b": { hash: cachedHash, passedAt: new Date().toISOString(), command: "test" } },
+  };
+
+  // Dependency a mutated; b's own files unchanged.
+  const result = applyCacheToPlan(
+    { mode: "changed", packages: ["@x/b"] },
+    {
+      gitFn: depGraphGit({ "packages/a": "a-2", "packages/b": "b-1" }),
+      readCacheFn: () => cache,
+      packageDirByName: chainDirByName,
+      forwardDependencyMap: fwd,
+    },
+  );
+  assert.deepEqual(result.activePackages, ["@x/b"], "b must re-run after its dep changed");
+  assert.deepEqual(result.cachedPackages, []);
+});
+
+test("applyCacheToPlan: genuinely unchanged dependent still hits cache (fast path preserved)", () => {
+  const fwd = buildForwardDependencyMap(chainPackages);
+  const blobs = { "packages/a": "a-1", "packages/b": "b-1" };
+  const cachedHash = computePackageHash("packages/b", depGraphGit(blobs), {
+    packageName: "@x/b",
+    forwardDependencyMap: fwd,
+    packageDirByName: chainDirByName,
+  });
+  const cache = {
+    version: 1,
+    entries: { "@x/b": { hash: cachedHash, passedAt: new Date().toISOString(), command: "test" } },
+  };
+  const result = applyCacheToPlan(
+    { mode: "changed", packages: ["@x/b"] },
+    {
+      gitFn: depGraphGit(blobs), // nothing changed
+      readCacheFn: () => cache,
+      packageDirByName: chainDirByName,
+      forwardDependencyMap: fwd,
+    },
+  );
+  assert.deepEqual(result.cachedPackages, ["@x/b"]);
+  assert.deepEqual(result.activePackages, []);
 });
 
 test("pruneFusionTestHomes: only targets the fusion-test-home-root- prefix", () => {

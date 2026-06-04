@@ -48,7 +48,6 @@ import {
   parseWorkflowIr,
   type TaskStore,
   type Task,
-  type Settings,
   type WorkflowIr,
   type WorkflowIrV2,
   type WorkflowIrColumn,

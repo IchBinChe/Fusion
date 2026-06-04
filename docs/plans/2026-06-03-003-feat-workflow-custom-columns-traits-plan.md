@@ -1,7 +1,7 @@
 ---
 title: "feat: Workflow-defined custom columns — engine as substrate, workflows as operating logic"
 type: feat
-status: active
+status: completed
 date: 2026-06-03
 depth: deep
 origin: none (solo planning bootstrap)

@@ -23,7 +23,6 @@ import type {
   PluginWorkflowStepContribution,
   PluginTraitContribution,
   WorkflowIr,
-  TaskDetail,
   PluginPromptContribution,
   PluginPromptContributions,
   PluginPromptSurface,

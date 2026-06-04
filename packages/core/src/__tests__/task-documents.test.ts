@@ -51,7 +51,7 @@ describe("TaskStore task documents", () => {
 
     expect(tableNames.has("task_documents")).toBe(true);
     expect(tableNames.has("task_document_revisions")).toBe(true);
-    expect(db.getSchemaVersion()).toBe(106);
+    expect(db.getSchemaVersion()).toBe(107);
 
     const index = db
       .prepare(

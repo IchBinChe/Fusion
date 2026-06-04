@@ -98,14 +98,11 @@ export type {
 
 import type { FusionPlugin } from "@fusion/core";
 
-// Re-export the trait contribution validator + constants so plugin authors can
-// validate their trait manifests with the same rules the engine enforces (U8).
-export {
-  validatePluginTraitContribution,
-  PLUGIN_TRAIT_RESTRICTED_FLAGS,
-  PLUGIN_TRAIT_ALLOWED_HOOK_POINTS,
-  PLUGIN_TRAIT_SCHEMA_VERSION,
-} from "@fusion/core";
+// NOTE (U8): trait-contribution VALIDATION lives in @fusion/core
+// (validatePluginTraitContribution) and runs engine-side at registration.
+// It is deliberately NOT re-exported here — plugin-sdk's built artifact must
+// carry no @fusion runtime specifiers (see cli plugin-sdk-export test); only
+// type-level re-exports are allowed from @fusion/core.
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

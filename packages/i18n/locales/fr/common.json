@@ -1,4 +1,9 @@
 {
+  "actions": {
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "save": "Enregistrer"
+  },
   "agents": {
     "ratings": {
       "trendDeclining": "",
@@ -29,6 +34,7 @@
       "minutesAgo_other": ""
     }
   },
+  "archive": "Archiver",
   "board": {
     "rejection": {
       "capacityExhausted": "",
@@ -38,6 +44,7 @@
       "workflowMismatch": ""
     }
   },
+  "cancel": "Annuler",
   "chat": {
     "failedToGetResponse": "",
     "failureReferenceId": "",
@@ -47,15 +54,25 @@
     "openMailboxMessage": "",
     "toolCallArgsPrefix": "",
     "toolCallResultPrefix": "",
-    "toolCallsCount_one": "",
-    "toolCallsCount_other": "",
-    "toolCallsHeader": "",
     "toolCallStatusCompleted": "",
     "toolCallStatusError": "",
     "toolCallStatusErrors": "",
     "toolCallStatusRunning": "",
+    "toolCallsCount_one": "",
+    "toolCallsCount_other": "",
+    "toolCallsHeader": "",
     "viewFailureDetails": ""
   },
+  "close": "Fermer",
+  "columns": {
+    "archived": "Archivé",
+    "done": "Terminé",
+    "in-progress": "En cours",
+    "in-review": "En revue",
+    "todo": "À faire",
+    "triage": "Planification"
+  },
+  "delete": "Supprimer",
   "health": {
     "anomaly": {
       "duplicateActiveId": "",
@@ -93,6 +110,13 @@
       "modelSetToDefault": ""
     }
   },
+  "nodeStatus": {
+    "connecting": "",
+    "error": "",
+    "offline": "",
+    "online": "",
+    "unknown": ""
+  },
   "nodes": {
     "auth": {
       "differ": "",
@@ -113,13 +137,7 @@
       "stopped": ""
     }
   },
-  "nodeStatus": {
-    "connecting": "",
-    "error": "",
-    "offline": "",
-    "online": "",
-    "unknown": ""
-  },
+  "refresh": "Actualiser",
   "research": {
     "providerGitHub": "",
     "providerLlmSynthesis": "",
@@ -127,6 +145,7 @@
     "providerPageFetch": "",
     "providerWebSearch": ""
   },
+  "retry": "Réessayer",
   "routing": {
     "policyLabel": {
       "block": "",
@@ -186,6 +205,7 @@
       "zai": ""
     }
   },
+  "skip": "Ignorer",
   "taskForm": {
     "nodeStatusConnecting": "",
     "nodeStatusError": "",
@@ -200,6 +220,7 @@
     "refreshSourceInitialLoad": "",
     "refreshSourceManual": ""
   },
+  "tryAgain": "Réessayer",
   "workflow": {
     "postMerge": "",
     "preMerge": "",

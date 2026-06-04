@@ -798,6 +798,87 @@ const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
   "agents.md",
 ]);
 
+/**
+ * Parse `### Step N:` headings into the task step list (step-inversion U1).
+ *
+ * Backward compatibility is exact: an UNannotated heading parses byte-identically
+ * to the legacy regex `^###\s+Step\s+\d+[^:]*:\s*(.+)$` (name = text after the
+ * first colon, trimmed).
+ *
+ * The annotation `### Step N (depends: 1,2): Title` is parsed explicitly (the
+ * legacy regex breaks on the colon inside `depends:`): depends values are
+ * 1-indexed step numbers in the document and are stored as 0-indexed indices on
+ * `dependsOn` (deduped, sorted, dropping values <= 0).
+ *
+ * Malformed `(depends: …)` annotations fall back deterministically: the heading
+ * is treated as `### Step N:` with the name starting after the FIRST colon
+ * following the closing paren (if present), else after the first colon — and no
+ * `dependsOn` is recorded.
+ */
+export function parseStepHeadings(content: string): import("./types.js").TaskStep[] {
+  const steps: import("./types.js").TaskStep[] = [];
+  // Legacy matcher — UNCHANGED from the original implementation, so unannotated
+  // headings (and every legacy edge case, including `[^:]*` spanning newlines)
+  // parse byte-identically. The full match (`m[0]`) is re-inspected only to layer
+  // the `(depends: …)` annotation on top.
+  const stepRegex = /^###\s+Step\s+\d+[^:]*:\s*(.+)$/gm;
+  // Well-formed annotation form: `### Step N (depends: …): name`.
+  const annotatedRegex = /^###\s+Step\s+\d+\s*\(depends:\s*([^)]*)\)\s*:\s*([^\n]+)$/;
+
+  let match: RegExpExecArray | null;
+  while ((match = stepRegex.exec(content)) !== null) {
+    const full = match[0];
+
+    // No annotation present → byte-identical legacy behavior.
+    if (!full.includes("(depends:")) {
+      steps.push({ name: match[1].trim(), status: "pending" });
+      continue;
+    }
+
+    // 1) Well-formed depends annotation.
+    const annotated = annotatedRegex.exec(full);
+    if (annotated) {
+      const parsed = parseDependsList(annotated[1]);
+      const name = annotated[2].trim();
+      if (parsed !== null) {
+        if (parsed.length > 0) steps.push({ name, status: "pending", dependsOn: parsed });
+        else steps.push({ name, status: "pending" });
+        continue;
+      }
+    }
+
+    // 2) Annotation present but unparseable (bad values or no closing paren):
+    //    deterministic fallback — name starts after the FIRST colon following the
+    //    closing paren if present, else after the first colon. Operate on the
+    //    first line of the match only (the heading line itself).
+    const line = full.split("\n")[0];
+    const parenIdx = line.indexOf(")");
+    const colonAfterParen = parenIdx >= 0 ? line.indexOf(":", parenIdx) : -1;
+    const colonIdx = colonAfterParen >= 0 ? colonAfterParen : line.indexOf(":");
+    if (colonIdx >= 0) {
+      const fallbackName = line.slice(colonIdx + 1).trim();
+      if (fallbackName) steps.push({ name: fallbackName, status: "pending" });
+    }
+  }
+  return steps;
+}
+
+/** Parse a `depends:` value list (1-indexed step numbers) into 0-indexed,
+ *  deduped, sorted indices. Returns null if any token is not a positive integer. */
+function parseDependsList(raw: string): number[] | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return [];
+  const tokens = trimmed.split(",").map((t) => t.trim());
+  const out = new Set<number>();
+  for (const token of tokens) {
+    if (!/^\d+$/.test(token)) return null;
+    const n = Number(token);
+    if (!Number.isInteger(n) || n < 1) return null;
+    out.add(n - 1);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 export function isValidFileScopeEntry(token: string): boolean {
   const trimmed = token.trim();
   if (!trimmed) return false;
@@ -8537,13 +8618,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (!existsSync(promptPath)) return [];
 
     const content = await readFile(promptPath, "utf-8");
-    const steps: import("./types.js").TaskStep[] = [];
-    const stepRegex = /^###\s+Step\s+\d+[^:]*:\s*(.+)$/gm;
-    let match;
-    while ((match = stepRegex.exec(content)) !== null) {
-      steps.push({ name: match[1].trim(), status: "pending" });
-    }
-    return steps;
+    return parseStepHeadings(content);
   }
 
   /**

@@ -1061,6 +1061,11 @@ export type StepStatus = "pending" | "in-progress" | "done" | "skipped";
 export interface TaskStep {
   name: string;
   status: StepStatus;
+  /** Step-inversion (KTD-11): 0-indexed indices of steps this step depends on,
+   *  parsed from the PROMPT.md `### Step N (depends: 1,2): Title` annotation
+   *  (1-indexed step numbers in the doc → 0-indexed indices here). Absent for
+   *  unannotated steps. */
+  dependsOn?: number[];
 }
 
 /** Correlation metadata linking a task mutation to the agent run that caused it. */

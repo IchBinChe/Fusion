@@ -94,6 +94,7 @@ const qualityAppComponentTests = [
   "App",
   "AuthTokenRecoveryDialog",
   "Board",
+  "Board.canDropTask",
   "board-mobile",
   "board-mobile-view-switch",
   "BranchGroupCard",

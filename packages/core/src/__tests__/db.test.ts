@@ -2790,6 +2790,120 @@ describe("migration v77 task token budget columns", () => {
   });
 });
 
+describe("migration v106 adds tasks.transitionPending (FN-1417)", () => {
+  it("includes the transitionPending column on fresh init", () => {
+    const temp = makeTmpDir();
+    const fusion = join(temp, ".fusion");
+    const fresh = new Database(fusion);
+    try {
+      fresh.init();
+      expect(fresh.getSchemaVersion()).toBe(107);
+      const names = new Set(
+        (fresh.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((r) => r.name),
+      );
+      expect(names.has("transitionPending")).toBe(true);
+    } finally {
+      try { fresh.close(); } catch { /* already closed */ }
+      removeTrackedTmpDirSync(temp);
+    }
+  });
+
+  it("from v105 → init() adds transitionPending; existing rows keep it NULL and survive", () => {
+    const temp = makeTmpDir();
+    const fusion = join(temp, ".fusion");
+    const localDb = new Database(fusion);
+    let migrated: Database | undefined;
+    try {
+      localDb.init();
+      localDb
+        .prepare('INSERT INTO tasks (id, description, "column", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)')
+        .run("FN-V105", "pre-106 row", "todo", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+      // Roll back to v105 and drop the column the v106 migration adds.
+      localDb.exec("ALTER TABLE tasks DROP COLUMN transitionPending");
+      localDb.prepare("UPDATE __meta SET value = '105' WHERE key = 'schemaVersion'").run();
+      localDb.close();
+
+      migrated = new Database(fusion);
+      migrated.init();
+      expect(migrated.getSchemaVersion()).toBe(107);
+      const names = new Set(
+        (migrated.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((r) => r.name),
+      );
+      expect(names.has("transitionPending")).toBe(true);
+      const row = migrated
+        .prepare("SELECT id, transitionPending FROM tasks WHERE id = ?")
+        .get("FN-V105") as { id: string; transitionPending: string | null } | undefined;
+      expect(row?.id).toBe("FN-V105");
+      // Additive, nullable, no backfill — the pre-existing row stays NULL.
+      expect(row?.transitionPending).toBeNull();
+    } finally {
+      try { migrated?.close(); } catch { /* already closed */ }
+      try { localDb.close(); } catch { /* already closed */ }
+      removeTrackedTmpDirSync(temp);
+    }
+  });
+});
+
+describe("migration v107 adds workflow_run_branches + index (FN-1417)", () => {
+  it("creates the workflow_run_branches table and its index on fresh init", () => {
+    const temp = makeTmpDir();
+    const fusion = join(temp, ".fusion");
+    const fresh = new Database(fusion);
+    try {
+      fresh.init();
+      expect(fresh.getSchemaVersion()).toBe(107);
+      const table = fresh
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'workflow_run_branches'")
+        .get() as { name: string } | undefined;
+      expect(table?.name).toBe("workflow_run_branches");
+      const index = fresh
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name = 'idx_workflow_run_branches_task_run'")
+        .get() as { name: string } | undefined;
+      expect(index?.name).toBe("idx_workflow_run_branches_task_run");
+    } finally {
+      try { fresh.close(); } catch { /* already closed */ }
+      removeTrackedTmpDirSync(temp);
+    }
+  });
+
+  it("from v106 → init() adds workflow_run_branches + index without dropping existing rows", () => {
+    const temp = makeTmpDir();
+    const fusion = join(temp, ".fusion");
+    const localDb = new Database(fusion);
+    let migrated: Database | undefined;
+    try {
+      localDb.init();
+      localDb
+        .prepare('INSERT INTO tasks (id, description, "column", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)')
+        .run("FN-V106", "pre-107 row", "todo", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+      // Roll back to v106 and drop the table the v107 migration creates. (v106
+      // schema already has tasks.transitionPending, so we leave it in place.)
+      localDb.exec("DROP INDEX IF EXISTS idx_workflow_run_branches_task_run");
+      localDb.exec("DROP TABLE IF EXISTS workflow_run_branches");
+      localDb.prepare("UPDATE __meta SET value = '106' WHERE key = 'schemaVersion'").run();
+      localDb.close();
+
+      migrated = new Database(fusion);
+      migrated.init();
+      expect(migrated.getSchemaVersion()).toBe(107);
+      const table = migrated
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'workflow_run_branches'")
+        .get() as { name: string } | undefined;
+      expect(table?.name).toBe("workflow_run_branches");
+      const index = migrated
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name = 'idx_workflow_run_branches_task_run'")
+        .get() as { name: string } | undefined;
+      expect(index?.name).toBe("idx_workflow_run_branches_task_run");
+      const task = migrated.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-V106") as { id: string } | undefined;
+      expect(task?.id).toBe("FN-V106");
+    } finally {
+      try { migrated?.close(); } catch { /* already closed */ }
+      try { localDb.close(); } catch { /* already closed */ }
+      removeTrackedTmpDirSync(temp);
+    }
+  });
+});
+
 describe("migration v67 drops orphan project auth tables", () => {
   it("drops project_auth_* tables left over from the removed pluggable auth feature", () => {
     const temp = makeTmpDir();

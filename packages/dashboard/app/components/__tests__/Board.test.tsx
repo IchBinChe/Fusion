@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "../Board";
 import { COLUMNS } from "@fusion/core";
 
@@ -31,6 +31,21 @@ vi.mock("../../api", () => ({
   ]),
   fetchBoardWorkflows: (...args: unknown[]) => fetchBoardWorkflowsMock(...args),
   promoteTask: (...args: unknown[]) => promoteTaskMock(...args),
+}));
+
+// Capture SSE event handlers registered via subscribeSse so tests can simulate
+// server-pushed `workflow:*` events without a real EventSource.
+const sseHandlers: Record<string, (event?: unknown) => void> = {};
+const subscribeSseMock = vi.fn(
+  (_url: string, opts: { events?: Record<string, (event?: unknown) => void> }) => {
+    for (const [name, handler] of Object.entries(opts.events ?? {})) {
+      sseHandlers[name] = handler;
+    }
+    return () => {};
+  },
+);
+vi.mock("../../sse-bus", () => ({
+  subscribeSse: (...args: unknown[]) => (subscribeSseMock as (...a: unknown[]) => () => void)(...args),
 }));
 
 const columnRenderCounts: Record<string, number> = {};
@@ -80,6 +95,8 @@ const noopAsync = () => Promise.resolve({} as any);
 beforeEach(() => {
   fetchBatchMock.mockReset();
   promoteTaskMock.mockClear();
+  subscribeSseMock.mockClear();
+  for (const key of Object.keys(sseHandlers)) delete sseHandlers[key];
   fetchBoardWorkflowsMock.mockReset();
   fetchBoardWorkflowsMock.mockResolvedValue({
     flagEnabled: false,
@@ -989,6 +1006,23 @@ describe("Board", () => {
       renderBoard({ tasks: [mkTask({ id: "FN-1" })] });
       await waitFor(() => expect(screen.getByTestId("lane-builtin:coding")).toBeDefined());
       expect(screen.getByTestId("lane-builtin:coding").getAttribute("data-lane-collapsed")).toBe("true");
+    });
+  });
+
+  describe("workflow:updated SSE invalidation (#1406)", () => {
+    it("re-fetches board-workflows when a workflow:updated SSE event arrives", async () => {
+      renderBoard({ projectId: "proj-1" });
+      // Initial mount fetch.
+      await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(1));
+      // Board subscribed for workflow lifecycle events.
+      expect(subscribeSseMock).toHaveBeenCalled();
+      expect(typeof sseHandlers["workflow:updated"]).toBe("function");
+
+      // Simulate a server-pushed workflow:updated event → invalidate + re-fetch.
+      await act(async () => {
+        sseHandlers["workflow:updated"]?.();
+      });
+      await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(2));
     });
   });
 });

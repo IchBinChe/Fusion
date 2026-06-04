@@ -1,5 +1,5 @@
 import type { WorkflowIr } from "@fusion/core";
-import { OccupiedColumnsError, WorkflowCompileError, WorkflowIrError, compileWorkflowToSteps } from "@fusion/core";
+import { OccupiedColumnsError, WorkflowCompileError, WorkflowIrError, compileWorkflowToSteps, listTraits } from "@fusion/core";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 
@@ -18,6 +18,32 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
     }
     return ir as WorkflowIr;
   }
+
+  // GET /api/traits — trait catalog for the node editor's trait picker (U10).
+  // Returns the registry's listTraits() (built-ins + any registered plugin
+  // traits): id, name, description, flags, hook descriptors, and config schema.
+  // Session-scoped via getProjectContext exactly like the other workflow routes;
+  // no new auth surface. The catalog is registry-backed and read-only, so it
+  // does not depend on the project store beyond confirming the session.
+  router.get("/traits", async (req, res) => {
+    try {
+      await getProjectContext(req);
+      res.json({
+        traits: listTraits().map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          builtin: t.builtin === true,
+          flags: t.flags,
+          hooks: t.hooks,
+          configSchema: t.configSchema,
+        })),
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
 
   // GET /api/workflows — list all workflow definitions for the project.
   router.get("/workflows", async (req, res) => {

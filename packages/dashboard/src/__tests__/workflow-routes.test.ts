@@ -107,6 +107,23 @@ describe("workflow routes (U4)", () => {
     expect(list.some((w) => isBuiltinWorkflowId(w.id))).toBe(true);
   });
 
+  it("GET /traits returns the registry trait catalog (built-ins, with flags + schema)", async () => {
+    const res = await get("/api/traits");
+    expect(res.status).toBe(200);
+    const { traits } = res.body as {
+      traits: Array<{ id: string; name: string; builtin: boolean; flags: Record<string, boolean>; configSchema?: unknown }>;
+    };
+    // The 14 built-in traits are registered on import.
+    expect(traits.length).toBeGreaterThanOrEqual(14);
+    const intake = traits.find((t) => t.id === "intake");
+    expect(intake?.builtin).toBe(true);
+    expect(intake?.flags.intake).toBe(true);
+    const wip = traits.find((t) => t.id === "wip");
+    expect(wip?.configSchema).toBeTruthy();
+    const complete = traits.find((t) => t.id === "complete");
+    expect(complete?.flags.complete).toBe(true);
+  });
+
   it("POST /workflows/:id/compile returns steps for linear and 422 for branching", async () => {
     const linear = await post("/api/workflows", { name: "L", ir: linearIr() });
     const linearId = (linear.body as { id: string }).id;

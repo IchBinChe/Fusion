@@ -533,6 +533,49 @@ export function moveTask(
   });
 }
 
+/** Resolved trait flags for a board column (subset the client cares about). */
+export interface BoardWorkflowColumnFlags {
+  countsTowardWip?: boolean;
+  complete?: boolean;
+  archived?: boolean;
+  hiddenFromBoard?: boolean;
+  hold?: boolean;
+  intake?: boolean;
+  mergeBlocker?: boolean;
+  humanReview?: boolean;
+  [key: string]: boolean | undefined;
+}
+
+export interface BoardWorkflowColumn {
+  id: string;
+  name: string;
+  flags: BoardWorkflowColumnFlags;
+}
+
+export interface BoardWorkflowDefinition {
+  id: string;
+  name: string;
+  columns: BoardWorkflowColumn[];
+}
+
+export interface BoardWorkflowsPayload {
+  flagEnabled: boolean;
+  defaultWorkflowId: string;
+  workflows: BoardWorkflowDefinition[];
+  taskWorkflowIds: Record<string, string>;
+}
+
+/** Fetch the multi-lane board metadata (U9). When the flag is OFF the server
+ *  returns `{ flagEnabled: false }` and the board renders its legacy form. */
+export function fetchBoardWorkflows(projectId?: string): Promise<BoardWorkflowsPayload> {
+  return api<BoardWorkflowsPayload>(withProjectId("/tasks/board-workflows", projectId));
+}
+
+/** Manually promote a held card out of its hold column (U9). */
+export function promoteTask(id: string, projectId?: string): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/promote`, projectId), { method: "POST" });
+}
+
 /**
  * Soft-deletes a task by setting `deletedAt` server-side while preserving the row/artifacts,
  * and keeping the task ID reserved.
@@ -4956,6 +4999,27 @@ export type {
 export function fetchWorkflows(projectId?: string): Promise<import("@fusion/core").WorkflowDefinition[]> {
   const path = withProjectId("/workflows", projectId);
   return dedupe(path, () => api<import("@fusion/core").WorkflowDefinition[]>(path));
+}
+
+/** A trait catalog entry as returned by GET /api/traits (U10). Mirrors the
+ *  registry's TraitDefinition projection (flags + hook descriptors + schema). */
+export interface TraitCatalogEntry {
+  id: string;
+  name: string;
+  description?: string;
+  builtin: boolean;
+  flags: import("@fusion/core").TraitFlags;
+  hooks?: import("@fusion/core").TraitHookDescriptors;
+  configSchema?: import("@fusion/core").TraitConfigSchema;
+}
+
+/** Fetch the trait catalog (built-ins + registered plugin traits) for the
+ *  workflow editor's trait picker. Registry-backed, read-only, session-scoped. */
+export function fetchTraits(projectId?: string): Promise<TraitCatalogEntry[]> {
+  const path = withProjectId("/traits", projectId);
+  return dedupe(path, () =>
+    api<{ traits: TraitCatalogEntry[] }>(path).then((res) => res.traits),
+  );
 }
 
 /** Fetch a single workflow definition. */

@@ -38,12 +38,9 @@
  */
 
 import {
-  BUILTIN_CODING_WORKFLOW_IR,
-  getBuiltinWorkflow,
-  isBuiltinWorkflowId,
   isWorkflowColumnsEnabled,
-  parseWorkflowIr,
   registerTraitHookImpl,
+  resolveWorkflowIrForTask,
   type DirectMergeCommitStrategy,
   type Settings,
   type Task,
@@ -83,37 +80,9 @@ export interface ResolvedMergePolicy {
 }
 
 // ── Workflow IR resolution (read-only, flag-gated) ───────────────────────────
-
-/**
- * Resolve the task's workflow IR. Mirrors the store's private
- * `resolveTaskWorkflowIrSync` resolution rule (selection → builtin/custom →
- * default) but stays read-only and engine-side. A missing/corrupt definition
- * degrades to the default workflow so policy resolution never throws.
- */
-async function resolveTaskWorkflowIr(store: TaskStore, taskId: string): Promise<WorkflowIr> {
-  let workflowId: string | undefined;
-  try {
-    workflowId = store.getTaskWorkflowSelection(taskId)?.workflowId;
-  } catch {
-    workflowId = undefined;
-  }
-  if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
-
-  if (isBuiltinWorkflowId(workflowId)) {
-    const builtin = getBuiltinWorkflow(workflowId);
-    return builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
-  }
-
-  try {
-    const def = await store.getWorkflowDefinition(workflowId);
-    if (!def) return BUILTIN_CODING_WORKFLOW_IR;
-    // `def.ir` is already a parsed WorkflowIr; reparse defensively only if a
-    // raw string ever slips through.
-    return typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
-  } catch {
-    return BUILTIN_CODING_WORKFLOW_IR;
-  }
-}
+// The selection → builtin/custom → default rule is shared via @fusion/core's
+// resolveWorkflowIrForTask (GitHub #1402); a missing/corrupt definition degrades
+// to the default workflow so policy resolution never throws.
 
 /** Find the column the task currently sits in (by id). */
 function findColumn(ir: WorkflowIr, columnId: string): WorkflowIrColumn | undefined {
@@ -178,7 +147,7 @@ export async function resolveMergePolicy(
 
   let config: Record<string, unknown> | undefined;
   try {
-    const ir = await resolveTaskWorkflowIr(store, task.id);
+    const ir = await resolveWorkflowIrForTask(store, task.id);
     config = readMergeTraitConfig(findColumn(ir, task.column));
   } catch {
     config = undefined;

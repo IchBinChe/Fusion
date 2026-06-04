@@ -43,10 +43,7 @@ import {
   resolveColumnAdjacency,
   DEFAULT_WORKFLOW_POOL_ID,
   TransitionRejectionError,
-  BUILTIN_CODING_WORKFLOW_IR,
-  getBuiltinWorkflow,
-  isBuiltinWorkflowId,
-  parseWorkflowIr,
+  resolveWorkflowIrForTask,
   type TaskStore,
   type Task,
   type WorkflowIr,
@@ -92,40 +89,10 @@ export interface HoldReleaseResult {
   held: Array<{ taskId: string; reason: string }>;
 }
 
-// ── Workflow IR resolution (read-only, mirrors store + merge-trait) ───────────
-
-async function resolveTaskWorkflowIr(
-  store: TaskStore,
-  taskId: string,
-  // Optional per-sweep cache keyed by workflowId so each distinct workflow's IR
-  // is resolved (and its definition fetched) at most once per sweep.
-  irCache?: Map<string, WorkflowIr>,
-): Promise<WorkflowIr> {
-  let workflowId: string | undefined;
-  try {
-    workflowId = store.getTaskWorkflowSelection(taskId)?.workflowId;
-  } catch {
-    workflowId = undefined;
-  }
-  if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
-  const cached = irCache?.get(workflowId);
-  if (cached) return cached;
-  if (isBuiltinWorkflowId(workflowId)) {
-    const builtin = getBuiltinWorkflow(workflowId);
-    const ir = builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
-    irCache?.set(workflowId, ir);
-    return ir;
-  }
-  try {
-    const def = await store.getWorkflowDefinition(workflowId);
-    if (!def) return BUILTIN_CODING_WORKFLOW_IR;
-    const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
-    irCache?.set(workflowId, ir);
-    return ir;
-  } catch {
-    return BUILTIN_CODING_WORKFLOW_IR;
-  }
-}
+// ── Workflow IR resolution (read-only) ────────────────────────────────────────
+// The selection → builtin/custom → default rule lives in @fusion/core's
+// resolveWorkflowIrForTask (GitHub #1402); the optional per-sweep irCache Map is
+// threaded straight through.
 
 function effectiveWorkflowId(store: TaskStore, taskId: string): string {
   try {
@@ -220,7 +187,7 @@ function legacyDependencySatisfied(dep: Task): boolean {
  * audit-diff event is logged.
  */
 async function dependencySatisfied(store: TaskStore, dep: Task): Promise<boolean> {
-  const ir = await resolveTaskWorkflowIr(store, dep.id);
+  const ir = await resolveWorkflowIrForTask(store, dep.id);
   const column = findColumn(ir, dep.column);
   const completeFlag = column ? resolveColumnFlags(column).complete === true : false;
 
@@ -358,7 +325,7 @@ export async function runHoldReleaseSweep(
       continue;
     }
 
-    const ir = await resolveTaskWorkflowIr(store, task.id, irCache);
+    const ir = await resolveWorkflowIrForTask(store, task.id, irCache);
     if (!isHeldTask(ir, task)) continue;
 
     const column = findColumn(ir, task.column);
@@ -452,14 +419,37 @@ async function issueRelease(
     }
   }
 
+  // A concurrent sweep (or explicit promote) can win the move for this same card
+  // while we hold a reservation. The store serializes the move under a per-task
+  // lock and resolves a redundant same-column move to a silent no-op: it returns
+  // the card already at the target WITHOUT re-allocating a slot or emitting a
+  // `task:moved`. A snapshot/pre-read can't tell winner from loser (both reads
+  // race ahead of either commit on the per-task lock). Instead we attribute the
+  // transition by OBJECT IDENTITY: a real move emits `task:moved` with the very
+  // Task object it then returns, whereas a no-op returns a freshly-read object
+  // and emits nothing. So the call whose `moveTask` result IS the emitted task is
+  // the real mover; any other call that reserved performed a redundant no-op and
+  // must release the slot it grabbed (FN-1415).
+  const movedTaskObjects = new Set<object>();
+  const onMoved = (data: { task: object; to: string }): void => {
+    if (data.to === target) movedTaskObjects.add(data.task);
+  };
+  store.on("task:moved", onMoved);
+
   try {
-    await store.moveTask(task.id, target, {
+    const result = await store.moveTask(task.id, target, {
       moveSource: "scheduler",
       allocateWorktree:
         targetIsProcessing && deps.allocateWorktree
           ? (reservedNames) => deps.allocateWorktree!(task, reservedNames)
           : undefined,
     });
+    if (reservation && !movedTaskObjects.has(result)) {
+      // Same-column no-op: a racing sweep already moved this card to the target.
+      reservation.release();
+      schedulerLog.log(`Hold release for ${task.id} skipped — already at ${target} (racing sweep won)`);
+      return false;
+    }
     return true;
   } catch (error) {
     if (error instanceof TransitionRejectionError && error.rejection.code === "capacity-exhausted") {
@@ -474,6 +464,8 @@ async function issueRelease(
       `Hold release for ${task.id} into ${target} failed: ${error instanceof Error ? error.message : String(error)}`,
     );
     return false;
+  } finally {
+    store.off("task:moved", onMoved);
   }
 }
 
@@ -495,7 +487,7 @@ export async function promoteHeldTask(
   const task = await store.getTask(taskId);
   if (!task) return { released: false, rejection: "task-not-found" };
 
-  const ir = await resolveTaskWorkflowIr(store, taskId);
+  const ir = await resolveWorkflowIrForTask(store, taskId);
   if (!isHeldTask(ir, task)) {
     return { released: false, rejection: "not-held" };
   }
@@ -527,7 +519,7 @@ export async function releaseHeldTaskByEvent(
   const task = await store.getTask(taskId);
   if (!task) return { released: false, rejection: "task-not-found" };
 
-  const ir = await resolveTaskWorkflowIr(store, taskId);
+  const ir = await resolveWorkflowIrForTask(store, taskId);
   const column = findColumn(ir, task.column);
   const holdConfig = column ? resolveHoldConfig(column) : undefined;
   if (!column || !holdConfig || holdConfig.release !== "external-event") {

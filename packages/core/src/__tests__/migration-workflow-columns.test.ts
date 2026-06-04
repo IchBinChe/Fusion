@@ -272,6 +272,102 @@ describe("Residual B: getBranchProgressByTask reads workflow_run_branches", () =
   });
 });
 
+describe("#1407/#1412/#1413: workflow_run_branches persistence + latest-run JOIN + prune", () => {
+  const harness = createTaskStoreTestHarness();
+  let store: ReturnType<typeof harness.store>;
+
+  beforeEach(async () => {
+    await harness.beforeEach();
+    store = harness.store();
+  });
+  afterEach(async () => {
+    await harness.afterEach();
+  });
+
+  type BranchStore = {
+    saveWorkflowRunBranch(state: {
+      taskId: string; runId: string; branchId: string; currentNodeId: string; status: string;
+    }): void;
+    loadWorkflowRunBranches(taskId: string, runId: string): Array<{
+      taskId: string; runId: string; branchId: string; currentNodeId: string; status: string;
+    }>;
+    clearWorkflowRunBranches(taskId: string, keepRunId: string): void;
+  };
+  const bs = (): BranchStore => store as unknown as BranchStore;
+
+  function rawCount(taskId: string): number {
+    const db = (store as unknown as { db: { prepare: (s: string) => { get: (...a: unknown[]) => unknown } } }).db;
+    const row = db
+      .prepare("SELECT COUNT(*) AS c FROM workflow_run_branches WHERE taskId = ?")
+      .get(taskId) as { c: number };
+    return row.c;
+  }
+
+  it("saveWorkflowRunBranch upserts one row per (taskId, runId, branchId) keyed by currentNodeId", async () => {
+    const t = await store.createTask({ description: "fanout" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "r1", branchId: "b1", currentNodeId: "n1", status: "running" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "r1", branchId: "b1", currentNodeId: "n2", status: "completed" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "r1", branchId: "b2", currentNodeId: "n3", status: "running" });
+
+    // b1 overwrote in place (still one row), b2 added — 2 rows total.
+    expect(rawCount(t.id)).toBe(2);
+    const loaded = bs().loadWorkflowRunBranches(t.id, "r1");
+    const b1 = loaded.find((s) => s.branchId === "b1");
+    expect(b1?.currentNodeId).toBe("n2");
+    expect(b1?.status).toBe("completed");
+  });
+
+  it("loadWorkflowRunBranches returns only the requested run", async () => {
+    const t = await store.createTask({ description: "fanout" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "r1", branchId: "b1", currentNodeId: "n1", status: "completed" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "r2", branchId: "b1", currentNodeId: "n9", status: "running" });
+    expect(bs().loadWorkflowRunBranches(t.id, "r1").length).toBe(1);
+    expect(bs().loadWorkflowRunBranches(t.id, "r1")[0]?.currentNodeId).toBe("n1");
+  });
+
+  it("clearWorkflowRunBranches prunes all runs except the kept one (#1412)", async () => {
+    const t = await store.createTask({ description: "fanout" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "old-1", branchId: "b1", currentNodeId: "n1", status: "completed" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "old-2", branchId: "b1", currentNodeId: "n1", status: "completed" });
+    bs().saveWorkflowRunBranch({ taskId: t.id, runId: "keep", branchId: "b1", currentNodeId: "n5", status: "running" });
+    expect(rawCount(t.id)).toBe(3);
+
+    bs().clearWorkflowRunBranches(t.id, "keep");
+    expect(rawCount(t.id)).toBe(1);
+    expect(bs().loadWorkflowRunBranches(t.id, "keep").length).toBe(1);
+  });
+
+  it("getBranchProgressByTask returns only the latest run's branches across multiple runs (#1413)", async () => {
+    const t = await store.createTask({ description: "fanout" });
+    const ins = `INSERT INTO workflow_run_branches (taskId, runId, branchId, currentNodeId, status, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`;
+    const db = (store as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } } }).db;
+    // Older run.
+    db.prepare(ins).run(t.id, "run-1", "b1", "n1", "completed", "2026-06-01T00:00:00.000Z");
+    db.prepare(ins).run(t.id, "run-1", "b2", "n2", "completed", "2026-06-01T00:00:01.000Z");
+    // Latest run, two branches with staggered updatedAt (both must be returned).
+    db.prepare(ins).run(t.id, "run-2", "b1", "n3", "running", "2026-06-03T00:00:00.000Z");
+    db.prepare(ins).run(t.id, "run-2", "b2", "n4", "completed", "2026-06-03T00:00:01.000Z");
+
+    const entries = store.getBranchProgressByTask([t.id]).get(t.id) ?? [];
+    expect(entries.length).toBe(2);
+    expect(entries.map((e) => e.nodeId).sort()).toEqual(["n3", "n4"]);
+  });
+
+  it("getBranchProgressByTask breaks updatedAt ties deterministically by runId (#1413)", async () => {
+    const t = await store.createTask({ description: "fanout" });
+    const ins = `INSERT INTO workflow_run_branches (taskId, runId, branchId, currentNodeId, status, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`;
+    const db = (store as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } } }).db;
+    const ts = "2026-06-03T00:00:00.000Z";
+    // Two runs with identical updatedAt — runId DESC ("run-b" > "run-a") wins.
+    db.prepare(ins).run(t.id, "run-a", "b1", "nA", "running", ts);
+    db.prepare(ins).run(t.id, "run-b", "b1", "nB", "running", ts);
+
+    const entries = store.getBranchProgressByTask([t.id]).get(t.id) ?? [];
+    expect(entries.length).toBe(1);
+    expect(entries[0]?.nodeId).toBe("nB");
+  });
+});
+
 describe("U12 graduation report — parity drift is caught", () => {
   it("transition-parity holds for the unmodified default workflow", () => {
     expect(checkTransitionParity(BUILTIN_CODING_WORKFLOW_IR).agree).toBe(true);

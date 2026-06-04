@@ -36,10 +36,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { isAbsolute } from "node:path";
 import {
   getTraitRegistry,
-  parseWorkflowIr,
-  BUILTIN_CODING_WORKFLOW_IR,
-  getBuiltinWorkflow,
-  isBuiltinWorkflowId,
+  resolveWorkflowIrForTask,
 } from "@fusion/core";
 import { createLogger, executorLog } from "./logger.js";
 import type { WorkflowCustomNodeRunner } from "./workflow-node-handlers.js";
@@ -539,33 +536,13 @@ export class PluginRunner {
   }
 
   /**
-   * Resolve a task's workflow IR through the public store API (selection +
-   * workflow definition). Mirrors the store's private resolver but stays on the
-   * public surface so the adapter never reaches into store internals. Falls back
-   * to the built-in default workflow on any miss.
+   * Resolve a task's workflow IR through the shared @fusion/core resolver
+   * (selection → builtin/custom → default fallback) on the public store surface
+   * — the adapter never reaches into store internals (GitHub #1402; previously a
+   * divergent raw-SQL copy via getDatabase()).
    */
-  private resolveTaskWorkflowIr(taskId: string): WorkflowIr | undefined {
-    const store = this.options.taskStore;
-    let workflowId: string | undefined;
-    try {
-      workflowId = store.getTaskWorkflowSelection?.(taskId)?.workflowId;
-    } catch {
-      return BUILTIN_CODING_WORKFLOW_IR;
-    }
-    if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
-    if (isBuiltinWorkflowId(workflowId)) {
-      return getBuiltinWorkflow(workflowId)?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
-    }
-    try {
-      const db = store.getDatabase();
-      const row = db.prepare("SELECT ir FROM workflows WHERE id = ?").get(workflowId) as
-        | { ir: string }
-        | undefined;
-      if (!row) return BUILTIN_CODING_WORKFLOW_IR;
-      return parseWorkflowIr(row.ir);
-    } catch {
-      return BUILTIN_CODING_WORKFLOW_IR;
-    }
+  private resolveTaskWorkflowIr(taskId: string): Promise<WorkflowIr> {
+    return resolveWorkflowIrForTask(this.options.taskStore, taskId);
   }
 
   getPluginWorkflowStepTemplates(): Array<{ pluginId: string; template: WorkflowStepTemplate }> {

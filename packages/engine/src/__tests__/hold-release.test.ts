@@ -164,27 +164,18 @@ describe("hold-release sweep (U6)", () => {
 
     // (b) Reservation accounting across the racing sweeps.
     //
-    // PRODUCTION BUG CAPTURED HERE (report only — prod is owned by another agent):
-    // The desired safety invariant is `reserveCount - releaseCount <= 1` (at most
-    // one live reservation, backing the single occupant). Under two overlapping
-    // sweeps with one held card + one slot, that invariant is VIOLATED: both
-    // sweeps read the same snapshot, both pass the pre-check, both reserve a slot
-    // (reserveCount === 2), and BOTH moveTask calls succeed — the second is an
-    // idempotent same-column move (todo→in-progress on an already-released card)
-    // whose in-txn capacity count includes the card as its own occupant, so it
-    // never throws capacity-exhausted and `issueRelease` never calls
-    // reservation.release(). Result: releaseCount === 0, leaking the loser's
-    // semaphore/worktree reservation.
-    //
-    // We assert the OBSERVED (leaking) behavior so the suite stays green while the
-    // leak is documented. Tighten this to `<= 1` once the prod fix lands (e.g.
-    // re-read the card's column inside issueRelease and skip/release when it is
-    // already at target).
+    // Both sweeps read the same snapshot, both pass the pre-check, and both
+    // reserve a slot (reserveCount === 2). The winning sweep commits the move;
+    // the losing sweep, after acquiring its reservation, re-reads the card's
+    // current column inside `issueRelease`, sees it already at the target (the
+    // winner moved it), and releases its reservation without issuing a redundant
+    // same-column move. The safety invariant therefore holds: at most one live
+    // reservation backs the single occupant.
     expect(reserveCount).toBe(2);
-    expect(releaseCount).toBe(0);
-    // The net leaked reservations (2) is the bug; single board occupancy (asserted
-    // above) is still preserved, so no double card placement occurs.
-    expect(reserveCount - releaseCount).toBe(2);
+    // The loser releases its reservation, so the net live reservations is exactly
+    // one (the winner's), backing the single in-progress occupant — no leak.
+    expect(releaseCount).toBe(1);
+    expect(reserveCount - releaseCount).toBe(1);
   });
 
   it("sweep release into a full column is rejected by the in-txn check (capacity is not a guard, scheduler bypasses guards)", async () => {

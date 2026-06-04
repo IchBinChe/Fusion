@@ -22,6 +22,7 @@ import {
   isWorkflowColumnsEnabled,
   parseWorkflowIr,
   resolveColumnFlags,
+  resolveWorkflowIrById,
   type Settings,
   type TaskStore,
   type TraitFlags,
@@ -72,25 +73,6 @@ function describeColumns(ir: WorkflowIr): BoardWorkflowColumn[] {
   }));
 }
 
-async function resolveWorkflowIr(
-  store: Pick<TaskStore, "getWorkflowDefinition">,
-  workflowId: string,
-): Promise<WorkflowIr> {
-  if (isBuiltinWorkflowId(workflowId)) {
-    const builtin = getBuiltinWorkflow(workflowId);
-    const ir = builtin?.ir;
-    if (!ir) return BUILTIN_CODING_WORKFLOW_IR;
-    return typeof ir === "string" ? parseWorkflowIr(ir) : ir;
-  }
-  try {
-    const def = await store.getWorkflowDefinition(workflowId);
-    if (!def) return BUILTIN_CODING_WORKFLOW_IR;
-    return typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
-  } catch {
-    return BUILTIN_CODING_WORKFLOW_IR;
-  }
-}
-
 async function describeWorkflow(
   store: Pick<TaskStore, "getWorkflowDefinition">,
   workflowId: string,
@@ -98,7 +80,7 @@ async function describeWorkflow(
   // The display name comes from the persisted definition when available,
   // otherwise the IR's own name (default workflow).
   if (isBuiltinWorkflowId(workflowId)) {
-    const ir = await resolveWorkflowIr(store, workflowId);
+    const ir = await resolveWorkflowIrById(store, workflowId);
     const name = getBuiltinWorkflow(workflowId)?.name ?? ir.name;
     return { id: workflowId, name, columns: describeColumns(ir) };
   }

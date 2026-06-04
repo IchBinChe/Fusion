@@ -5071,17 +5071,37 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (!any) return result;
 
       const placeholders = taskIds.map(() => "?").join(", ");
+      // Filter to the latest run per task entirely in SQL (#1413): the
+      // correlated subquery resolves the winning (updatedAt, runId) pair per
+      // task — MAX(updatedAt) with a deterministic MAX(runId) tie-break — and
+      // the JOIN matches both columns so only the latest run's rows are read.
+      // The runId tie-break makes ties on updatedAt deterministic instead of
+      // letting an arbitrary historical run win.
       const rows = this.db
         .prepare(
           `SELECT b.taskId AS taskId, b.runId AS runId, b.branchId AS branchId,
                   b.currentNodeId AS nodeId, b.status AS status, b.updatedAt AS updatedAt
              FROM workflow_run_branches b
              JOIN (
-               SELECT taskId, MAX(updatedAt) AS latest
-                 FROM workflow_run_branches
-                WHERE taskId IN (${placeholders})
-                GROUP BY taskId
-             ) latest_run ON latest_run.taskId = b.taskId
+               -- Resolve the winning run per task: the run owning the row with
+               -- the greatest updatedAt, with runId as a deterministic
+               -- tie-break when two runs share an updatedAt. Returns the whole
+               -- run's rows (all its branches), not just the single max row.
+               SELECT taskId, runId AS latestRunId
+                 FROM (
+                   SELECT taskId, runId,
+                          ROW_NUMBER() OVER (
+                            PARTITION BY taskId
+                            ORDER BY MAX(updatedAt) DESC, runId DESC
+                          ) AS rn
+                     FROM workflow_run_branches
+                    WHERE taskId IN (${placeholders})
+                    GROUP BY taskId, runId
+                 )
+                WHERE rn = 1
+             ) latest_run
+               ON latest_run.taskId = b.taskId
+              AND latest_run.latestRunId = b.runId
             WHERE b.taskId IN (${placeholders})`,
         )
         .all(...taskIds, ...taskIds) as Array<{
@@ -5093,18 +5113,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           updatedAt: string;
         }>;
 
-      // Group by task; for each task keep only the branches of its most-recent
-      // run (the runId of the row with the latest updatedAt).
-      const maxByTask = new Map<string, { runId: string; updatedAt: string }>();
       for (const row of rows) {
-        const cur = maxByTask.get(row.taskId);
-        if (!cur || row.updatedAt > cur.updatedAt) {
-          maxByTask.set(row.taskId, { runId: row.runId, updatedAt: row.updatedAt });
-        }
-      }
-      for (const row of rows) {
-        const latest = maxByTask.get(row.taskId);
-        if (!latest || row.runId !== latest.runId) continue;
         const list = result.get(row.taskId) ?? [];
         list.push({ branchId: row.branchId, nodeId: row.nodeId, status: row.status });
         result.set(row.taskId, list);
@@ -5114,6 +5123,94 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       return new Map();
     }
     return result;
+  }
+
+  /**
+   * Persist (idempotent upsert) one branch's progress for a fan-out run (#1407).
+   * Keyed by (taskId, runId, branchId) — the table PK — so re-running the same
+   * branch overwrites its single row with the latest currentNodeId/status. The
+   * executor's crash-resume reads only `status = 'completed'` rows and skips
+   * those nodes, so resume granularity is keyed by the persisted currentNodeId.
+   * Additive: silently no-ops on a legacy/missing table.
+   */
+  saveWorkflowRunBranch(state: {
+    taskId: string;
+    runId: string;
+    branchId: string;
+    currentNodeId: string;
+    status: string;
+  }): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO workflow_run_branches
+             (taskId, runId, branchId, currentNodeId, status, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(taskId, runId, branchId) DO UPDATE SET
+             currentNodeId = excluded.currentNodeId,
+             status = excluded.status,
+             updatedAt = excluded.updatedAt`,
+        )
+        .run(
+          state.taskId,
+          state.runId,
+          state.branchId,
+          state.currentNodeId,
+          state.status,
+          new Date().toISOString(),
+        );
+    } catch {
+      // Legacy/missing table — persistence is additive, so degrade silently.
+    }
+  }
+
+  /** Load persisted branch states for a run (crash-resume; #1407). */
+  loadWorkflowRunBranches(
+    taskId: string,
+    runId: string,
+  ): Array<{
+    taskId: string;
+    runId: string;
+    branchId: string;
+    currentNodeId: string;
+    status: "running" | "completed" | "failed" | "aborted";
+  }> {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT taskId, runId, branchId, currentNodeId, status
+             FROM workflow_run_branches
+            WHERE taskId = ? AND runId = ?`,
+        )
+        .all(taskId, runId) as Array<{
+          taskId: string;
+          runId: string;
+          branchId: string;
+          currentNodeId: string;
+          status: "running" | "completed" | "failed" | "aborted";
+        }>;
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Prune stale branch rows for a task (#1412). Deletes every row for `taskId`
+   * whose runId differs from the supplied `keepRunId`, bounding growth across a
+   * long-lived task's repeated runs. Called on run start and run completion.
+   * Additive: silently no-ops on a legacy/missing table.
+   */
+  clearWorkflowRunBranches(taskId: string, keepRunId: string): void {
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM workflow_run_branches WHERE taskId = ? AND runId != ?`,
+        )
+        .run(taskId, keepRunId);
+    } catch {
+      // Legacy/missing table — pruning is additive, so degrade silently.
+    }
   }
 
   async listTasksForGithubTrackingReconcile(options?: { offset?: number; limit?: number }): Promise<{ tasks: Task[]; hasMore: boolean }> {

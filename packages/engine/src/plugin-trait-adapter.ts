@@ -210,8 +210,9 @@ export class PluginTraitHasDependentsError extends Error {
  */
 export async function findLivePluginTraitDependents(params: {
   store: Pick<TaskStore, "listTasks">;
-  /** Resolve the (already-parsed) workflow IR for a task id. */
-  resolveTaskWorkflowIr: (taskId: string) => WorkflowIr | undefined;
+  /** Resolve the (already-parsed) workflow IR for a task id. May resolve
+   *  asynchronously (the shared @fusion/core resolver awaits the definition). */
+  resolveTaskWorkflowIr: (taskId: string) => WorkflowIr | undefined | Promise<WorkflowIr | undefined>;
   /** The registry ids of the plugin's traits to check for. */
   pluginTraitIds: string[];
 }): Promise<PluginTraitDependent[]> {
@@ -222,7 +223,7 @@ export async function findLivePluginTraitDependents(params: {
   const dependents: PluginTraitDependent[] = [];
   const tasks = await store.listTasks({ slim: true, includeArchived: false });
   for (const task of tasks) {
-    const ir = resolveTaskWorkflowIr(task.id);
+    const ir = await resolveTaskWorkflowIr(task.id);
     if (!ir) continue;
     const column = findWorkflowColumn(ir, task.column);
     if (!column) continue;

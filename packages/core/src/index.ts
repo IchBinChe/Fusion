@@ -188,6 +188,11 @@ export {
   getBuiltinWorkflow,
   isBuiltinWorkflowId,
 } from "./builtin-workflows.js";
+export {
+  resolveWorkflowIrForTask,
+  resolveWorkflowIrById,
+  type WorkflowIrResolverStore,
+} from "./workflow-ir-resolver.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {

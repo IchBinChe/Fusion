@@ -119,6 +119,11 @@ export class WorkflowGraphExecutor {
       );
     }
 
+    // Prune prior-run branch rows on run start (#1412). Done after the resume
+    // load so this run's own (taskId, runId) rows survive while every stale run
+    // is removed. Never throws into the run.
+    await this.pruneStaleBranches(task.id, runId);
+
     // Shared branch environment: built lazily so the sequential path pays nothing.
     const branchEnv = (): BranchEnvironment => ({
       task,
@@ -206,12 +211,24 @@ export class WorkflowGraphExecutor {
     };
 
     const terminal = await walk(startNode.id);
+    // Prune again on run completion (#1412): keeps only this run's rows so the
+    // table does not accumulate historical runs for a long-lived task.
+    await this.pruneStaleBranches(task.id, runId);
     return {
       executed: true,
       outcome: terminal.outcome,
       context,
       visitedNodeIds,
     };
+  }
+
+  /** Best-effort prune of stale-run branch rows; never throws into the run. */
+  private async pruneStaleBranches(taskId: string, keepRunId: string): Promise<void> {
+    try {
+      await this.deps.branchPersistence?.clearStaleBranchStates?.(taskId, keepRunId);
+    } catch {
+      // Pruning is additive bookkeeping — a failure must not affect the run.
+    }
   }
 
   private shouldTraverseEdge(edge: WorkflowIrEdge, sourceResult: WorkflowNodeResult): boolean {

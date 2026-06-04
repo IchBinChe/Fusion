@@ -39,6 +39,12 @@ export interface WorkflowBranchPersistence {
   saveBranchState?(state: WorkflowBranchRunState): void | Promise<void>;
   /** Load any persisted branch states for a run (used on resume). */
   loadBranchStates?(taskId: string, runId: string): WorkflowBranchRunState[] | Promise<WorkflowBranchRunState[]>;
+  /**
+   * Prune stale branch rows for a task, keeping only `keepRunId` (#1412).
+   * Called on run start and run completion to bound unbounded growth across a
+   * long-lived task's repeated runs.
+   */
+  clearStaleBranchStates?(taskId: string, keepRunId: string): void | Promise<void>;
 }
 
 /**

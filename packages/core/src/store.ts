@@ -8,6 +8,25 @@ import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSn
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import { parseWorkflowIr, serializeWorkflowIr } from "./workflow-ir.js";
+import { isWorkflowColumnsEnabled } from "./workflow-columns-settings.js";
+import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
+import {
+  type DefaultWorkflowMoveContext,
+  applyDefaultWorkflowMoveEffects,
+  evaluateMergeBlockerGuard,
+  registerDefaultWorkflowHooks,
+} from "./default-workflow-hooks.js";
+import {
+  type TransitionRejection,
+  makeTransitionRejection,
+  makeTransitionPending,
+} from "./transition-types.js";
+import { writeTransitionPending, clearTransitionPending } from "./transition-pending.js";
+import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+import type { WorkflowIr } from "./workflow-ir-types.js";
+// Side-effect import: registers the 14 built-in trait DEFINITIONS into the
+// shared trait registry on load (the flag-ON path resolves traits by id).
+import "./builtin-traits.js";
 import type {
   WorkflowDefinition,
   WorkflowDefinitionInput,
@@ -1047,6 +1066,28 @@ export class HandoffInvariantViolationError extends Error {
   }
 }
 
+/**
+ * Thrown by the flag-ON (`workflowColumns`) `moveTaskInternal` path when a move
+ * is rejected, carrying the typed {@link TransitionRejection} (KTD-3/R13). The
+ * existing callers of `moveTask` catch thrown `Error`s (e.g. the dashboard move
+ * route inspects `err.message`), so the rejection rides on an `Error` subclass
+ * — `.message` reproduces the legacy human-readable string so flag-ON callers
+ * that only read the message keep working, while `.rejection` exposes the
+ * machine-stable code/messageKey/retryable for surfaces that want it.
+ *
+ * The FLAG-OFF path still throws the bare legacy `Error` strings unchanged
+ * (zero behavior change while the flag is off — proven by the characterization
+ * suite).
+ */
+export class TransitionRejectionError extends Error {
+  readonly rejection: TransitionRejection;
+  constructor(rejection: TransitionRejection, message: string) {
+    super(message);
+    this.name = "TransitionRejectionError";
+    this.rejection = rejection;
+  }
+}
+
 interface MoveTaskOptions {
   preserveResumeState?: boolean;
   preserveProgress?: boolean;
@@ -1056,6 +1097,15 @@ interface MoveTaskOptions {
   moveSource?: "user" | "engine";
   skipMergeBlocker?: boolean;
   allowDirectInReviewMove?: boolean;
+  /**
+   * KTD-9: engine/recovery moves bypass trait guards and abort-on-exit effects
+   * (the generalization of `skipMergeBlocker`). It NEVER bypasses capacity
+   * (KTD-10). Engine-internal only: HTTP move endpoints hardcode it off and must
+   * never forward a caller-supplied value (mirrors the hardcoded
+   * `moveSource: "user"` posture). When unset, the flag-ON path derives it from
+   * `moveSource === "engine"` plus `skipMergeBlocker`.
+   */
+  bypassGuards?: boolean;
 }
 
 interface MoveTaskInternalOptions {
@@ -1395,7 +1445,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async init(): Promise<void> {
     await mkdir(this.tasksDir, { recursive: true });
-    
+
+    // U4: register the default-workflow trait hook implementations into the
+    // shared trait registry (the flag-ON moveTaskInternal path resolves the
+    // legacy per-column effects through these). Idempotent; built-in trait
+    // DEFINITIONS self-register on import of ./builtin-traits.js (pulled in
+    // transitively via default-workflow-hooks / trait-registry).
+    registerDefaultWorkflowHooks();
+
     // Initialize SQLite database
     if (!this._db) {
       // Startup corruption guard: before opening, detect a malformed fusion.db
@@ -5533,6 +5590,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         {
           ...opts.moveOptions,
           skipMergeBlocker: true,
+          // KTD-9: handoff is an engine/recovery-class move; its skipMergeBlocker
+          // maps onto bypassGuards under the flag (identical behavior both paths).
+          bypassGuards: true,
         },
         {
           fromHandoff: true,
@@ -5559,6 +5619,27 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const dir = this.taskDir(id);
     const task = currentTask ?? await this.readTaskForMove(id);
     const moveSource = options?.moveSource ?? "engine";
+
+    // ── U4: flag-gated workflow-resolved transition path (KTD-8) ─────────────
+    // Flag OFF (default): the legacy `VALID_TRANSITIONS` / inline-side-effect
+    // path below runs byte-identical (proven by the characterization suite).
+    // Flag ON: validate against the task's resolved workflow column graph, run
+    // sync trait guards (unless bypassed), and route the legacy per-column side
+    // effects through the default-workflow trait hooks.
+    // `experimentalFeatures` is a global-scoped setting, so the project-only
+    // `getSettingsSync()` row would miss it — read merged settings (global +
+    // project) via getSettingsFast(). This is an async read taken before the
+    // lock-sensitive transaction; it does not touch the task lock.
+    const useWorkflow = isWorkflowColumnsEnabled(await this.getSettingsFast());
+    // bypassGuards (KTD-9): engine-sourced moves + the existing skipMergeBlocker
+    // call sites map onto it. Capacity (KTD-10) is NEVER bypassed by this — the
+    // capacity check is not a guard (U6 fills the enforcement; U4 leaves a
+    // pass-through slot). An explicit option value wins; otherwise derive it.
+    const bypassGuards =
+      options?.bypassGuards ?? (moveSource === "engine" || options?.skipMergeBlocker === true);
+    const workflowIr: WorkflowIr | undefined = useWorkflow
+      ? this.resolveTaskWorkflowIrSync(id)
+      : undefined;
 
     if (task.column === toColumn) {
       if (internal.fromHandoff && toColumn === "in-review") {
@@ -5616,19 +5697,70 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       return task;
     }
 
-    const validTargets = VALID_TRANSITIONS[task.column];
-    if (!validTargets.includes(toColumn)) {
-      throw new Error(
-        `Invalid transition: '${task.column}' → '${toColumn}'. ` +
-          `Valid targets: ${validTargets.join(", ") || "none"}`,
-      );
-    }
-
     const fromColumn = task.column;
-    if (fromColumn === "in-review" && toColumn === "done" && !options?.skipMergeBlocker) {
-      const mergeBlocker = getTaskMergeBlocker(task);
-      if (mergeBlocker) {
-        throw new Error(`Cannot move ${id} to done: ${mergeBlocker}`);
+
+    if (useWorkflow && workflowIr) {
+      // ── Flag-ON validation + sync guards (typed rejections, KTD-3/R13) ─────
+      // 1. Target column must exist in the task's workflow → unknown-column.
+      if (!workflowHasColumn(workflowIr, toColumn)) {
+        throw new TransitionRejectionError(
+          makeTransitionRejection(
+            "unknown-column",
+            "transition.rejected.unknownColumn",
+            false,
+            `Column '${toColumn}' is not defined in this task's workflow`,
+          ),
+          `Invalid transition: '${fromColumn}' → '${toColumn}'. Unknown column for this workflow.`,
+        );
+      }
+      // 2. Column-graph adjacency. For the default workflow this reproduces
+      //    VALID_TRANSITIONS verbatim (resolveAllowedColumns); the
+      //    transition-parity suite machine-checks the equivalence.
+      const allowed = resolveAllowedColumns(workflowIr, fromColumn);
+      if (!allowed.includes(toColumn)) {
+        throw new TransitionRejectionError(
+          makeTransitionRejection(
+            "guard-rejected",
+            "transition.rejected.invalidTransition",
+            false,
+            `Valid targets: ${allowed.join(", ") || "none"}`,
+          ),
+          `Invalid transition: '${fromColumn}' → '${toColumn}'. ` +
+            `Valid targets: ${allowed.join(", ") || "none"}`,
+        );
+      }
+      // 3. Sync trait guards (in-lock). Skipped entirely when bypassGuards
+      //    (engine/recovery moves, KTD-9). The default workflow's merge-blocker
+      //    trait reads the same getTaskMergeBlocker.
+      if (!bypassGuards) {
+        const guardReason = evaluateMergeBlockerGuard(task, fromColumn, toColumn);
+        if (guardReason) {
+          throw new TransitionRejectionError(
+            makeTransitionRejection(
+              "merge-blocked",
+              "transition.rejected.mergeBlocked",
+              true,
+              guardReason,
+            ),
+            `Cannot move ${id} to done: ${guardReason}`,
+          );
+        }
+      }
+    } else {
+      // ── Flag-OFF legacy path (unchanged) ───────────────────────────────────
+      const validTargets = VALID_TRANSITIONS[task.column];
+      if (!validTargets.includes(toColumn)) {
+        throw new Error(
+          `Invalid transition: '${task.column}' → '${toColumn}'. ` +
+            `Valid targets: ${validTargets.join(", ") || "none"}`,
+        );
+      }
+
+      if (fromColumn === "in-review" && toColumn === "done" && !options?.skipMergeBlocker) {
+        const mergeBlocker = getTaskMergeBlocker(task);
+        if (mergeBlocker) {
+          throw new Error(`Cannot move ${id} to done: ${mergeBlocker}`);
+        }
       }
     }
 
@@ -5642,106 +5774,153 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     task.columnMovedAt = movedAt;
     task.updatedAt = movedAt;
 
-    if (fromColumn === "in-progress" && toColumn !== "in-progress") {
-      const segmentStartMs = Date.parse(task.executionStartedAt ?? task.columnMovedAt);
-      const segmentEndMs = Date.parse(task.columnMovedAt);
-      const segmentDeltaMs =
-        Number.isFinite(segmentStartMs) && Number.isFinite(segmentEndMs)
-          ? Math.max(0, segmentEndMs - segmentStartMs)
-          : 0;
-      task.cumulativeActiveMs = Math.max(0, task.cumulativeActiveMs ?? 0) + segmentDeltaMs;
-    }
-
-    if (toColumn === "in-progress") {
-      task.cumulativeActiveMs ??= 0;
-      if (!task.firstExecutionAt) {
-        task.firstExecutionAt = task.columnMovedAt;
-      }
-      if (!task.executionStartedAt) {
-        task.executionStartedAt = task.columnMovedAt;
-      }
-      task.userPaused = undefined;
-    }
-    if (toColumn === "done" && !task.executionCompletedAt) {
-      task.executionCompletedAt = task.columnMovedAt;
-    }
-
-    if (toColumn === "done") {
-      this.clearDoneTransientFields(task);
-    }
-
-    const isReopenToTodoOrTriage =
-      (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review")
-      && (toColumn === "todo" || toColumn === "triage");
-
-    if (isReopenToTodoOrTriage) {
-      if (!options?.preserveStatus) {
-        task.status = undefined;
-        task.error = undefined;
-        task.pausedReason = undefined;
-      }
-      task.blockedBy = undefined;
-      task.overlapBlockedBy = undefined;
-      task.paused = undefined;
-      task.pausedByAgentId = undefined;
-      if (moveSource === "user" && toColumn === "todo") {
-        task.userPaused = true;
-      } else {
-        task.userPaused = undefined;
-      }
-
+    if (useWorkflow) {
+      // ── Flag-ON: route the legacy per-column side effects through the
+      //    default-workflow trait hooks (timing, reset-on-entry, abort-on-exit,
+      //    merge.onEnter). "Moved, not duplicated" applies to this path; the
+      //    flag-off branch below keeps the legacy inline code verbatim. ───────
+      const ctx: DefaultWorkflowMoveContext = {
+        task,
+        fromColumn,
+        toColumn,
+        moveSource,
+        bypassGuards,
+        movedAt,
+        settings: settingsForInReview,
+        options: {
+          preserveStatus: options?.preserveStatus,
+          preserveResumeState: options?.preserveResumeState,
+          preserveProgress: options?.preserveProgress,
+          preserveWorktree: options?.preserveWorktree,
+        },
+        resetSteps: () => this.resetAllStepsToPending(task),
+      };
+      const isReopenToTodoOrTriage =
+        (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review") &&
+        (toColumn === "todo" || toColumn === "triage");
       const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
       const preserveStepProgress =
-        options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
-
-      if (!options?.preserveWorktree) {
-        task.worktree = undefined;
+        options?.preserveResumeState ||
+        (options?.preserveProgress === true && hasNonPendingStepProgress);
+      const { warnings } = applyDefaultWorkflowMoveEffects(ctx);
+      for (const warning of warnings) {
+        storeLog.warn("Default-workflow trait hook degraded to no-op", {
+          phase: "moveTaskInternal:workflow-hooks",
+          taskId: id,
+          ...warning,
+        });
       }
-
-      if (!options?.preserveResumeState) {
-        task.executionStartedAt = undefined;
-        task.executionCompletedAt = undefined;
-      } else {
-        task.executionCompletedAt = undefined;
+      // Store-owned effects the hooks intentionally do NOT perform (filesystem /
+      // store-private): clearing done transient fields + prompt-checkbox reset.
+      if (toColumn === "done") {
+        this.clearDoneTransientFields(task);
       }
-
-      if (!preserveStepProgress) {
-        this.resetAllStepsToPending(task);
+      if (isReopenToTodoOrTriage && !preserveStepProgress) {
         await this.resetPromptCheckboxes(dir);
       }
-    }
-
-    if (toColumn === "in-review") {
-      if (task.autoMerge === undefined && settingsForInReview) {
-        task.autoMerge = settingsForInReview.autoMerge;
+    } else {
+      // ── Flag-OFF legacy inline side effects (UNCHANGED — the flag-off path) ──
+      if (fromColumn === "in-progress" && toColumn !== "in-progress") {
+        const segmentStartMs = Date.parse(task.executionStartedAt ?? task.columnMovedAt);
+        const segmentEndMs = Date.parse(task.columnMovedAt);
+        const segmentDeltaMs =
+          Number.isFinite(segmentStartMs) && Number.isFinite(segmentEndMs)
+            ? Math.max(0, segmentEndMs - segmentStartMs)
+            : 0;
+        task.cumulativeActiveMs = Math.max(0, task.cumulativeActiveMs ?? 0) + segmentDeltaMs;
       }
-      task.recoveryRetryCount = undefined;
-      task.nextRecoveryAt = undefined;
-      // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
-      // `overlapBlockedBy` are stamped while the task waits in `todo`. If
-      // they survive the transition into `in-review` they permanently block
-      // the merge gate (see getTaskMergeBlocker's BLOCKING_TASK_STATUSES).
-      if (task.status === "queued") {
-        task.status = undefined;
+
+      if (toColumn === "in-progress") {
+        task.cumulativeActiveMs ??= 0;
+        if (!task.firstExecutionAt) {
+          task.firstExecutionAt = task.columnMovedAt;
+        }
+        if (!task.executionStartedAt) {
+          task.executionStartedAt = task.columnMovedAt;
+        }
+        task.userPaused = undefined;
       }
-      task.blockedBy = undefined;
-      task.overlapBlockedBy = undefined;
-    }
+      if (toColumn === "done" && !task.executionCompletedAt) {
+        task.executionCompletedAt = task.columnMovedAt;
+      }
 
-    if (
-      (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
-      || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
-    ) {
-      task.workflowStepResults = undefined;
-    }
+      if (toColumn === "done") {
+        this.clearDoneTransientFields(task);
+      }
 
-    if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
-      task.branch = undefined;
-      task.executionStartBranch = undefined;
-      task.baseCommitSha = undefined;
-      task.summary = undefined;
-      task.recoveryRetryCount = undefined;
-      task.nextRecoveryAt = undefined;
+      const isReopenToTodoOrTriage =
+        (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review")
+        && (toColumn === "todo" || toColumn === "triage");
+
+      if (isReopenToTodoOrTriage) {
+        if (!options?.preserveStatus) {
+          task.status = undefined;
+          task.error = undefined;
+          task.pausedReason = undefined;
+        }
+        task.blockedBy = undefined;
+        task.overlapBlockedBy = undefined;
+        task.paused = undefined;
+        task.pausedByAgentId = undefined;
+        if (moveSource === "user" && toColumn === "todo") {
+          task.userPaused = true;
+        } else {
+          task.userPaused = undefined;
+        }
+
+        const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
+        const preserveStepProgress =
+          options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
+
+        if (!options?.preserveWorktree) {
+          task.worktree = undefined;
+        }
+
+        if (!options?.preserveResumeState) {
+          task.executionStartedAt = undefined;
+          task.executionCompletedAt = undefined;
+        } else {
+          task.executionCompletedAt = undefined;
+        }
+
+        if (!preserveStepProgress) {
+          this.resetAllStepsToPending(task);
+          await this.resetPromptCheckboxes(dir);
+        }
+      }
+
+      if (toColumn === "in-review") {
+        if (task.autoMerge === undefined && settingsForInReview) {
+          task.autoMerge = settingsForInReview.autoMerge;
+        }
+        task.recoveryRetryCount = undefined;
+        task.nextRecoveryAt = undefined;
+        // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
+        // `overlapBlockedBy` are stamped while the task waits in `todo`. If
+        // they survive the transition into `in-review` they permanently block
+        // the merge gate (see getTaskMergeBlocker's BLOCKING_TASK_STATUSES).
+        if (task.status === "queued") {
+          task.status = undefined;
+        }
+        task.blockedBy = undefined;
+        task.overlapBlockedBy = undefined;
+      }
+
+      if (
+        (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
+        || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
+      ) {
+        task.workflowStepResults = undefined;
+      }
+
+      if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
+        task.branch = undefined;
+        task.executionStartBranch = undefined;
+        task.baseCommitSha = undefined;
+        task.summary = undefined;
+        task.recoveryRetryCount = undefined;
+        task.nextRecoveryAt = undefined;
+      }
     }
 
     if (toColumn === "in-progress" && !task.worktree && options?.allocateWorktree) {
@@ -5784,6 +5963,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         },
       });
       this.dequeueMergeQueueOnColumnExit(id, fromColumn, toColumn, movedAt);
+
+      // U4 (flag-ON): write the crash-safe transitionPending marker in the SAME
+      // transaction as the column change (KTD-2). It records the post-commit
+      // hooks that still owe idempotent execution so a crash mid-transition is
+      // recoverable from SQLite (the authoritative store, ADR-0001). The store
+      // clears it immediately after the post-commit hook runner completes
+      // (below). For the default workflow the field effects already applied
+      // in-lock; the marker guards the post-commit completion so recovery never
+      // double-runs (idempotent) and never strands the card.
+      if (useWorkflow) {
+        writeTransitionPending(
+          this.db,
+          id,
+          makeTransitionPending(toColumn, ["default-workflow:postCommit"], Date.parse(movedAt) || Date.now()),
+        );
+      }
 
       if (toColumn === "in-review" && !internal.fromHandoff && options?.allowDirectInReviewMove !== true) {
         this.insertRunAuditEventRow({
@@ -5858,6 +6053,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     if (this.isWatching) this.taskCache.set(id, { ...task });
+
+    // U4 (flag-ON): post-commit hook completion. The default-workflow field
+    // effects already ran in-lock and committed; the post-commit phase here is
+    // the fire-and-forget hook runner per KTD-2. It is idempotent and clears the
+    // transitionPending marker once done. A crash before this point leaves the
+    // marker for the recovery sweep to re-run (re-running is a no-op for the
+    // default workflow's already-committed field effects). We clear it
+    // synchronously here because the default workflow has no async post-commit
+    // hook bodies in U4 (merge enqueue is in-txn via the handoff path);
+    // plugin/async post-commit hooks land in U7/U8 and will defer the clear.
+    if (useWorkflow) {
+      try {
+        clearTransitionPending(this.db, id);
+      } catch {
+        // Clearing is best-effort; the marker recovery sweep is the backstop.
+      }
+    }
 
     if (fromColumn !== toColumn) {
       this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
@@ -11436,6 +11648,36 @@ ${stepsSection}`;
   }
 
   /** Read the workflow currently selected for a task, if any. */
+  /**
+   * Synchronously resolve the parsed WorkflowIr that governs a task's columns
+   * (U4, flag-ON path). Resolution order:
+   *   1. the task's workflow selection (side table) → that workflow's IR;
+   *   2. null/missing selection → the built-in default workflow IR (KTD-1).
+   * Built-in workflow IRs are resolved from the parsed module constant; custom
+   * workflows are read + parsed from the `workflows` row. Pure DB read, safe to
+   * call inside `withTaskLock` (no further locks taken). A parse failure or
+   * missing custom row falls back to the default workflow so a move is never
+   * stranded by a corrupt definition (degraded, not crashed).
+   */
+  private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
+    const selection = this.getTaskWorkflowSelection(taskId);
+    const workflowId = selection?.workflowId;
+    if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
+    if (isBuiltinWorkflowId(workflowId)) {
+      const builtin = getBuiltinWorkflow(workflowId);
+      return builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+    }
+    try {
+      const row = this.db
+        .prepare("SELECT ir FROM workflows WHERE id = ?")
+        .get(workflowId) as { ir: string } | undefined;
+      if (!row) return BUILTIN_CODING_WORKFLOW_IR;
+      return parseWorkflowIr(row.ir);
+    } catch {
+      return BUILTIN_CODING_WORKFLOW_IR;
+    }
+  }
+
   getTaskWorkflowSelection(taskId: string): { workflowId: string; stepIds: string[] } | undefined {
     const row = this.db
       .prepare("SELECT workflowId, stepIds FROM task_workflow_selection WHERE taskId = ?")

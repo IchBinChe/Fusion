@@ -124,6 +124,14 @@ export type {
   TransitionPendingDbHandle,
   ReconcileHooksResult,
 } from "./transition-pending.js";
+// ── U4: workflow-resolved transition adjacency + flag accessor ───────────────
+export {
+  resolveColumnAdjacency,
+  resolveAllowedColumns,
+  workflowHasColumn,
+} from "./workflow-transitions.js";
+export type { ColumnAdjacency } from "./workflow-transitions.js";
+export { isWorkflowColumnsEnabled } from "./workflow-columns-settings.js";
 export {
   readTransitionPending,
   writeTransitionPending,
@@ -259,6 +267,7 @@ export {
   MergeQueueLeaseOwnershipError,
   InvalidMergeQueueLeaseDurationError,
   HandoffInvariantViolationError,
+  TransitionRejectionError,
 } from "./store.js";
 export {
   STOPWORDS,

@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, lstatSync, readdirSync, rmSync, realpathSync } from "node:fs";
 import { basename, join, relative, resolve, isAbsolute } from "node:path";
-import type { Column, ColumnId, SecretsStore, Settings, TaskStore, WorktrunkSettings } from "@fusion/core";
+import type { ColumnId, SecretsStore, Settings, TaskStore, WorktrunkSettings } from "@fusion/core";
 import { assertCleanBranchAtBase, inspectBranchConflict } from "./branch-conflicts.js";
 import { worktreePoolLog } from "./logger.js";
 import { isInsideConfiguredWorktreesDir, resolveWorktreesDir } from "./worktree-paths.js";

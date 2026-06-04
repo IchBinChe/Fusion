@@ -132,6 +132,9 @@ export {
 } from "./workflow-transitions.js";
 export type { ColumnAdjacency } from "./workflow-transitions.js";
 export { isWorkflowColumnsEnabled } from "./workflow-columns-settings.js";
+// ── U6: workflow capacity (WIP) resolution shared by store + sweep ───────────
+export { resolveColumnCapacity } from "./workflow-capacity.js";
+export type { ColumnCapacity } from "./workflow-capacity.js";
 // ── U5: workflow lifecycle reconciliation (switch / edit / delete) ───────────
 export {
   OccupiedColumnsError,

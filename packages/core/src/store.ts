@@ -10,6 +10,7 @@ import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import { parseWorkflowIr, serializeWorkflowIr } from "./workflow-ir.js";
 import { isWorkflowColumnsEnabled } from "./workflow-columns-settings.js";
 import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
+import { resolveColumnCapacity } from "./workflow-capacity.js";
 import {
   OccupiedColumnsError,
   assertRehomeTargetValid,
@@ -676,7 +677,7 @@ function deepMergeWithNullDelete(
 
 export interface TaskStoreEvents {
   "task:created": [task: Task];
-  "task:moved": [data: { task: Task; from: Column; to: Column; source: "user" | "engine" }];
+  "task:moved": [data: { task: Task; from: Column; to: Column; source: "user" | "engine" | "scheduler" }];
   "task:updated": [task: Task];
   "task:deleted": [task: Task, meta?: { githubIssueAction?: GithubIssueAction }];
   "task:merged": [result: MergeResult];
@@ -1102,7 +1103,7 @@ interface MoveTaskOptions {
   preserveWorktree?: boolean;
   preserveStatus?: boolean;
   allocateWorktree?: (reservedNames: Set<string>) => string | null;
-  moveSource?: "user" | "engine";
+  moveSource?: "user" | "engine" | "scheduler";
   skipMergeBlocker?: boolean;
   allowDirectInReviewMove?: boolean;
   /**
@@ -1138,6 +1139,10 @@ interface MoveTaskInternalOptions {
 
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private static readonly ACTIVE_TASKS_WHERE = '"deletedAt" IS NULL';
+  /** U6: sentinel effective-workflow id for default-workflow (null-selection)
+   *  tasks, so they all share one per-column capacity pool (KTD-10). It is not a
+   *  real workflow row id (no `builtin:`/custom collision possible). */
+  private static readonly DEFAULT_WORKFLOW_POOL_ID = "__default-workflow__";
 
   static async getOrCreateForProject(
     projectId?: string,
@@ -5653,14 +5658,16 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // `getSettingsSync()` row would miss it — read merged settings (global +
     // project) via getSettingsFast(). This is an async read taken before the
     // lock-sensitive transaction; it does not touch the task lock.
-    const useWorkflow = isWorkflowColumnsEnabled(await this.getSettingsFast());
+    const mergedSettingsForMove = await this.getSettingsFast();
+    const useWorkflow = isWorkflowColumnsEnabled(mergedSettingsForMove);
     // bypassGuards (KTD-9): engine-sourced moves + the existing skipMergeBlocker
     // call sites map onto it. Capacity (KTD-10) is NEVER bypassed by this — the
     // capacity check is not a guard (U6 fills the enforcement; U4 leaves a
     // pass-through slot). An explicit option value wins; otherwise derive it.
     const bypassGuards =
       options?.recoveryRehome === true ||
-      (options?.bypassGuards ?? (moveSource === "engine" || options?.skipMergeBlocker === true));
+      (options?.bypassGuards ??
+        (moveSource === "engine" || moveSource === "scheduler" || options?.skipMergeBlocker === true));
     const workflowIr: WorkflowIr | undefined = useWorkflow
       ? this.resolveTaskWorkflowIrSync(id)
       : undefined;
@@ -5972,6 +5979,41 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       deletedAt = this.getSoftDeletedWriteConflict(id, task);
       if (deletedAt) {
         return;
+      }
+
+      // ── U6: in-txn capacity enforcement (KTD-10) ──────────────────────────
+      // WIP limits are trait *config*; enforcement is a substrate capability
+      // that runs HERE, inside the move transaction, so two holds releasing into
+      // one slot serialize — exactly one commits, the other rejects and retries
+      // next sweep. It is NOT a guard: it runs regardless of bypassGuards /
+      // recoveryRehome / moveSource (engine/recovery/scheduler moves honor it
+      // too). Only a real column change into a capacity-bearing column is gated;
+      // same-column no-ops were returned earlier. The count is taken with the
+      // moving task EXCLUDED and the prospective slot it is about to occupy
+      // added back implicitly (it must fit alongside existing holders), so a
+      // full column (occupants == limit) rejects.
+      if (useWorkflow && workflowIr && fromColumn !== toColumn) {
+        const capacity = resolveColumnCapacity(workflowIr, toColumn, mergedSettingsForMove);
+        if (capacity.hasCapacity && Number.isFinite(capacity.limit)) {
+          const workflowId = this.resolveEffectiveWorkflowIdSync(id);
+          const occupants = this.countActiveInCapacitySlotSync({
+            targetColumn: toColumn,
+            workflowId,
+            countPending: capacity.countPending,
+            excludeTaskId: id,
+          });
+          if (occupants >= capacity.limit) {
+            throw new TransitionRejectionError(
+              makeTransitionRejection(
+                "capacity-exhausted",
+                "transition.rejected.capacityExhausted",
+                true,
+                `Column '${toColumn}' is at capacity (${occupants}/${capacity.limit})`,
+              ),
+              `Cannot move ${id} to '${toColumn}': column at capacity (${occupants}/${capacity.limit})`,
+            );
+          }
+        }
       }
 
       this.upsertTaskWithFtsRecovery(task);
@@ -11878,6 +11920,81 @@ ${stepsSection}`;
     } catch {
       return BUILTIN_CODING_WORKFLOW_IR;
     }
+  }
+
+  /**
+   * U6 (KTD-10): the *effective workflow id* used to scope the per-(workflow,
+   * column) capacity count. A task with no selection (or a missing/empty
+   * selection row) resolves to the built-in default workflow, represented by a
+   * stable sentinel so all default-workflow tasks share one capacity pool. A
+   * selected workflow id (builtin or custom) is its own pool. Pure DB read; safe
+   * inside the move transaction.
+   */
+  private resolveEffectiveWorkflowIdSync(taskId: string): string {
+    const selection = this.getTaskWorkflowSelection(taskId);
+    return selection?.workflowId ?? TaskStore.DEFAULT_WORKFLOW_POOL_ID;
+  }
+
+  /**
+   * U6 (KTD-10): count cards currently occupying a (workflow, column) capacity
+   * slot, for the in-txn capacity check. Runs INSIDE `moveTaskInternal`'s
+   * transaction. A slot is held by a card that:
+   *   - has committed its column to `targetColumn` (the steady-state holders), OR
+   *   - (when `countPending`) has a `transitionPending` marker targeting
+   *     `targetColumn` — it reserved the slot at commit time even though its
+   *     post-commit hooks haven't finished yet.
+   * The moving task itself (`excludeTaskId`) is excluded so a same-column no-op
+   * or re-entry never counts itself. Only the candidates in the SAME effective
+   * workflow as the mover count (capacity is per-(workflow, column)). Soft-deleted
+   * tasks never hold a slot.
+   */
+  private countActiveInCapacitySlotSync(params: {
+    targetColumn: string;
+    workflowId: string;
+    countPending: boolean;
+    excludeTaskId: string;
+  }): number {
+    const { targetColumn, workflowId, countPending, excludeTaskId } = params;
+    // Candidate rows: in the column now, or (optionally) mid-transition into it.
+    // LEFT JOIN the selection row so we can scope by effective workflow id in JS.
+    const rows = this.db
+      .prepare(
+        `SELECT t.id AS id, t."column" AS col, t.transitionPending AS tp, s.workflowId AS wid
+         FROM tasks t
+         LEFT JOIN task_workflow_selection s ON s.taskId = t.id
+         WHERE t.deletedAt IS NULL
+           AND t.id != ?
+           AND (t."column" = ? OR (t.transitionPending IS NOT NULL AND t.transitionPending != ''))`,
+      )
+      .all(excludeTaskId, targetColumn) as Array<{
+        id: string;
+        col: string;
+        tp: string | null;
+        wid: string | null;
+      }>;
+
+    let count = 0;
+    for (const row of rows) {
+      const effectiveWorkflowId = row.wid ?? TaskStore.DEFAULT_WORKFLOW_POOL_ID;
+      if (effectiveWorkflowId !== workflowId) continue;
+
+      if (row.col === targetColumn) {
+        count += 1;
+        continue;
+      }
+      // Not committed into the column — only counts if it has reserved the slot
+      // via a transitionPending marker targeting this column AND countPending.
+      if (!countPending || !row.tp) continue;
+      let toColumn: string | undefined;
+      try {
+        const parsed = JSON.parse(row.tp) as { toColumn?: unknown };
+        if (typeof parsed.toColumn === "string") toColumn = parsed.toColumn;
+      } catch {
+        // Corrupt marker — treat as not holding this slot.
+      }
+      if (toColumn === targetColumn) count += 1;
+    }
+    return count;
   }
 
   getTaskWorkflowSelection(taskId: string): { workflowId: string; stepIds: string[] } | undefined {

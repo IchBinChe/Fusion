@@ -69,7 +69,7 @@ export interface DefaultWorkflowMoveContext {
   task: Task;
   fromColumn: string;
   toColumn: string;
-  moveSource: "user" | "engine";
+  moveSource: "user" | "engine" | "scheduler";
   /** True when guards + abort-on-exit are bypassed (engine/recovery, KTD-9). */
   bypassGuards: boolean;
   movedAt: string;

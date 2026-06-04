@@ -12,7 +12,7 @@
 //   - crash-mid-transition marker recovery (SQLite authoritative)
 //   - unknown-column rejection
 //   - guard rejection typed (flag-ON) vs legacy string (flag-OFF)
-//   - bypassGuards capacity pass-through (documenting; U6 fills enforcement)
+//   - in-txn capacity enforcement (U6; NEVER bypassable — KTD-10)
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { VALID_TRANSITIONS } from "../types.js";
@@ -199,18 +199,69 @@ describe("transition-parity — store flag-ON scenarios", () => {
     expect(after?.worktree).toBe("/tmp/wt/seed-todo");
   });
 
-  it("bypassGuards capacity pass-through (U4 documenting test): engine move into in-progress is NOT blocked by capacity (U6 fills enforcement)", async () => {
-    // U4 intentionally leaves the per-(workflow,column) capacity check as a
-    // pass-through slot; capacity enforcement lands in U6. This test pins the
-    // U4 contract: no WIP-constrained scenario is enforced yet, and an engine
-    // move (bypassGuards) into a wip-flagged column commits. It must be UPDATED
-    // by U6 (capacity is NEVER bypassable, KTD-10) — not silently left green.
+  it("U6 in-txn capacity: default-workflow in-progress WIP reads through maxConcurrent and rejects the over-limit move", async () => {
+    // The default workflow's in-progress column has a `wip` trait whose limit
+    // reads through to settings.maxConcurrent (legacy parity). With limit 1, the
+    // first move into in-progress commits and a second rejects with the typed
+    // capacity-exhausted code.
+    await store.updateSettings({ maxConcurrent: 1 } as Parameters<typeof store.updateSettings>[0]);
     const t1 = await seedInColumn("todo");
     const t2 = await seedInColumn("todo");
-    const m1 = await store.moveTask(t1.id, "in-progress", { moveSource: "engine" });
-    const m2 = await store.moveTask(t2.id, "in-progress", { moveSource: "engine" });
+    const m1 = await store.moveTask(t1.id, "in-progress", { moveSource: "user" });
     expect(m1.column).toBe("in-progress");
-    expect(m2.column).toBe("in-progress");
+
+    let caught: unknown;
+    try {
+      await store.moveTask(t2.id, "in-progress", { moveSource: "user" });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(TransitionRejectionError);
+    expect((caught as TransitionRejectionError).rejection.code).toBe("capacity-exhausted");
+    // The rejected card is untouched.
+    expect((await store.getTask(t2.id))?.column).toBe("todo");
+  });
+
+  it("U6 capacity is NEVER bypassable (KTD-10): an engine/bypassGuards move into a full column still rejects", async () => {
+    await store.updateSettings({ maxConcurrent: 1 } as Parameters<typeof store.updateSettings>[0]);
+    const t1 = await seedInColumn("todo");
+    const t2 = await seedInColumn("todo");
+    await store.moveTask(t1.id, "in-progress", { moveSource: "user" });
+
+    let caught: unknown;
+    try {
+      // Engine-sourced + bypassGuards skips trait guards, but capacity is not a
+      // guard — it must still reject.
+      await store.moveTask(t2.id, "in-progress", { moveSource: "engine", bypassGuards: true });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(TransitionRejectionError);
+    expect((caught as TransitionRejectionError).rejection.code).toBe("capacity-exhausted");
+  });
+
+  it("U6 capacity counts cards mid-transitionPending (they hold their slot from commit time)", async () => {
+    await store.updateSettings({ maxConcurrent: 1 } as Parameters<typeof store.updateSettings>[0]);
+    const t1 = await seedInColumn("todo");
+    const t2 = await seedInColumn("todo");
+    await store.moveTask(t1.id, "in-progress", { moveSource: "user" });
+    // Simulate a crash before t1's marker clears: it is still mid-transition into
+    // in-progress, holding its slot. (Its column already equals in-progress, so
+    // this also independently holds the slot; this asserts the marker path does
+    // not under-count or double-count.)
+    const db = (store as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } } }).db;
+    db.prepare("UPDATE tasks SET transitionPending = ? WHERE id = ?").run(
+      JSON.stringify({ toColumn: "in-progress", hooksRemaining: ["default-workflow:postCommit"], startedAt: Date.now() }),
+      t1.id,
+    );
+    let caught: unknown;
+    try {
+      await store.moveTask(t2.id, "in-progress", { moveSource: "user" });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(TransitionRejectionError);
+    expect((caught as TransitionRejectionError).rejection.code).toBe("capacity-exhausted");
   });
 });
 

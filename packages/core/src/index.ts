@@ -1148,6 +1148,7 @@ export type {
   WorkflowObservationTaskInput,
   WorkflowObservationBuildOptions,
   WorkflowObservationParts,
+  WorkflowParitySummary,
 } from "./workflow-parity.js";
 export { isResearchExperimentalEnabled, resolveResearchSettings } from "./research-settings.js";
 export type { ResolvedResearchSettings } from "./research-settings.js";

@@ -16,6 +16,12 @@ import type {
 } from "./workflow-definition-types.js";
 import { compileWorkflowToSteps } from "./workflow-compiler.js";
 import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, isBuiltinWorkflowId } from "./builtin-workflows.js";
+import {
+  WORKFLOW_PARITY_OBSERVED_MUTATION,
+  WORKFLOW_PARITY_DRIFT_MUTATION,
+  type WorkflowParityDiff,
+  type WorkflowParitySummary,
+} from "./workflow-parity.js";
 
 /** Tags WorkflowStep rows materialized by compiling a workflow so they can be
  *  filtered out of the user-facing step manager and cleaned up on re-selection. */
@@ -7278,6 +7284,55 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     `).all(...sqlParams) as unknown as RunAuditEventRow[];
 
     return rows.map((row) => this.rowToRunAuditEvent(row));
+  }
+
+  /**
+   * Aggregate the dual-observe parity audit events (CU-U5) into the graduation
+   * signal: how often the interpreter's shadow observation agreed with the
+   * legacy authoritative run, and which fields drift when it doesn't.
+   */
+  getWorkflowParitySummary(options: { since?: string; limit?: number } = {}): WorkflowParitySummary {
+    const limit = options.limit ?? 1000;
+    const observed = this.getRunAuditEvents({
+      domain: "database",
+      mutationType: WORKFLOW_PARITY_OBSERVED_MUTATION as unknown as RunAuditEvent["mutationType"],
+      startTime: options.since,
+      limit,
+    });
+    const driftEvents = this.getRunAuditEvents({
+      domain: "database",
+      mutationType: WORKFLOW_PARITY_DRIFT_MUTATION as unknown as RunAuditEvent["mutationType"],
+      startTime: options.since,
+      limit,
+    });
+
+    let agreed = 0;
+    for (const event of observed) {
+      if (event.metadata?.agree === true) agreed += 1;
+    }
+
+    const driftFieldCounts: Record<string, number> = {};
+    const recentDrift: WorkflowParitySummary["recentDrift"] = [];
+    for (const event of driftEvents) {
+      const diffs = Array.isArray(event.metadata?.diffs)
+        ? (event.metadata.diffs as WorkflowParityDiff[])
+        : [];
+      for (const diff of diffs) {
+        driftFieldCounts[diff.field] = (driftFieldCounts[diff.field] ?? 0) + 1;
+      }
+      if (recentDrift.length < 20) {
+        recentDrift.push({ taskId: event.taskId ?? event.target, timestamp: event.timestamp, diffs });
+      }
+    }
+
+    return {
+      observed: observed.length,
+      agreed,
+      drift: driftEvents.length,
+      agreeRate: observed.length > 0 ? agreed / observed.length : 0,
+      driftFieldCounts,
+      recentDrift,
+    };
   }
 
   enqueueMergeQueue(taskId: string, opts: MergeQueueEnqueueOptions = {}): MergeQueueEntry {

@@ -276,6 +276,22 @@ export function buildWorkflowObservationFromTask(
   };
 }
 
+/** Aggregate of dual-observe parity audit events — the graduation signal. */
+export interface WorkflowParitySummary {
+  /** Total `workflow:parity-observed` events in scope. */
+  observed: number;
+  /** Of those, how many reported agree=true. */
+  agreed: number;
+  /** Total `workflow:parity-drift` events in scope. */
+  drift: number;
+  /** agreed / observed in [0,1]; 0 when nothing observed yet. */
+  agreeRate: number;
+  /** Count of drift occurrences per observation field, most-divergent first. */
+  driftFieldCounts: Record<string, number>;
+  /** Most recent drift events (capped) for inspection. */
+  recentDrift: Array<{ taskId: string; timestamp: string; diffs: WorkflowParityDiff[] }>;
+}
+
 export interface WorkflowObservationParts {
   stageTransitions: readonly WorkflowStage[];
   terminalColumn?: string | null;

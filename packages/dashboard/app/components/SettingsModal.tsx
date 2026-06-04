@@ -345,6 +345,7 @@ const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
   chatRooms: "Chat Rooms",
   agentOnboarding: "Planning-style Agent Onboarding",
   workflowGraphExecutor: "Workflow Graph Engine (run custom workflows)",
+  workflowInterpreterDualObserve: "Workflow Graph Engine — dual-observe parity (diagnostic)",
 };
 
 const EXPERIMENTAL_FEATURE_LEGACY_ALIASES: Record<string, string> = {

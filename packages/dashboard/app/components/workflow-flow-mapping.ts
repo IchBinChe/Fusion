@@ -415,6 +415,75 @@ function flowEdgeToIr(edge: FlowEdge, groupId?: string): WorkflowIrEdge {
   return { from, to, condition, ...(isRework ? { kind: "rework" as const } : {}) };
 }
 
+// ── Deletion with cascade semantics (U3, R6) ─────────────────────────────────
+//
+// Pure node/edge transformation for deleting nodes and/or edges. React Flow's
+// built-in deletion removes incident edges but does NOT cascade group children
+// (deleting a foreach group leaves its `parentId` children orphaned), so the
+// editor routes all deletions through this helper for explicit, testable
+// behavior.
+
+/** Node kinds that may never be deleted (start/end are structural). */
+const PROTECTED_NODE_KINDS = new Set<string>(["start", "end"]);
+
+/** True when a flow node is protected from deletion: start/end kinds and column
+ *  band group nodes are never removable, regardless of the requested ids. */
+function isProtectedFromDelete(node: FlowNode<WorkflowFlowNodeData>): boolean {
+  return isColumnBandNode(node.id) || PROTECTED_NODE_KINDS.has(node.data.kind);
+}
+
+/**
+ * Delete the requested node and/or edge ids from the flow graph, applying R6's
+ * cascade rules:
+ *   - Deleting a node removes ALL edges incident to it (no auto-bridging).
+ *   - Deleting a `foreach` group node also deletes its template children
+ *     (nodes with `parentId === groupId`) and every edge incident to those
+ *     children (React Flow does not cascade parents — handled explicitly).
+ *   - `start`/`end` nodes and column band nodes are never deleted: they are
+ *     filtered out of the requested ids up front (and their incident edges are
+ *     therefore preserved).
+ *   - Edge ids in `ids` are removed directly.
+ *
+ * Pure and order-independent: the same `ids` set always yields the same result.
+ */
+export function cascadeDelete(
+  nodes: FlowNode<WorkflowFlowNodeData>[],
+  edges: FlowEdge[],
+  ids: Iterable<string>,
+): { nodes: FlowNode<WorkflowFlowNodeData>[]; edges: FlowEdge[] } {
+  const requested = new Set(ids);
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  // Resolve which node ids are actually deletable, expanding foreach groups to
+  // their template children. Protected nodes are dropped from the request.
+  const deleteNodeIds = new Set<string>();
+  for (const id of requested) {
+    const node = nodeById.get(id);
+    if (!node || isProtectedFromDelete(node)) continue;
+    deleteNodeIds.add(id);
+    if (node.data.kind === "foreach") {
+      for (const child of nodes) {
+        if (child.parentId === id) deleteNodeIds.add(child.id);
+      }
+    }
+  }
+
+  // Edge ids requested directly (only ones that exist as edges).
+  const deleteEdgeIds = new Set<string>();
+  for (const e of edges) {
+    if (requested.has(e.id)) deleteEdgeIds.add(e.id);
+  }
+
+  const nextNodes = nodes.filter((n) => !deleteNodeIds.has(n.id));
+  const nextEdges = edges.filter(
+    (e) =>
+      !deleteEdgeIds.has(e.id) &&
+      !deleteNodeIds.has(e.source) &&
+      !deleteNodeIds.has(e.target),
+  );
+  return { nodes: nextNodes, edges: nextEdges };
+}
+
 // ── Edge-condition authoring (U2) ────────────────────────────────────────────
 
 /** Editor node kinds whose edges expose a success/failure condition select

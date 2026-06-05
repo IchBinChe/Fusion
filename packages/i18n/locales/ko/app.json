@@ -6761,6 +6761,8 @@
     "codeSource": "소스(TypeScript)",
     "codeTimeout": "제한 시간(ms)",
     "cycleBlocked": "",
+    "deleteEdge": "",
+    "deleteNode": "",
     "edgeCondition": "",
     "edgeConditionLabel": "조건: {{condition}}",
     "edgeInspector": "에지",

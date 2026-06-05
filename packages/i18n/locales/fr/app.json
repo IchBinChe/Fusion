@@ -6761,6 +6761,8 @@
     "codeSource": "Source (TypeScript)",
     "codeTimeout": "Délai d’expiration (ms)",
     "cycleBlocked": "",
+    "deleteEdge": "",
+    "deleteNode": "",
     "edgeCondition": "",
     "edgeConditionLabel": "Condition : {{condition}}",
     "edgeInspector": "Lien",

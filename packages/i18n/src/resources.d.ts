@@ -6763,6 +6763,8 @@ export default interface Resources {
       "codeSource": "Source (TypeScript)",
       "codeTimeout": "Timeout (ms)",
       "cycleBlocked": "That connection would create a cycle — only rework edges inside a for-each template may loop back",
+      "deleteEdge": "Delete edge",
+      "deleteNode": "Delete node",
       "edgeCondition": "Condition",
       "edgeConditionLabel": "Condition: {{condition}}",
       "edgeInspector": "Edge",

@@ -6761,6 +6761,8 @@
     "codeSource": "源代码（TypeScript）",
     "codeTimeout": "超时（毫秒）",
     "cycleBlocked": "",
+    "deleteEdge": "",
+    "deleteNode": "",
     "edgeCondition": "",
     "edgeConditionLabel": "条件：{{condition}}",
     "edgeInspector": "连线",

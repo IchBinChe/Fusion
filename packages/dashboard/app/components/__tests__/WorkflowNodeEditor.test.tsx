@@ -292,6 +292,42 @@ describe("WorkflowNodeEditor — U10 columns/traits/holds", () => {
   });
 });
 
+// ── U3: deletion UX (delete buttons + cascade) ──────────────────────────────
+
+describe("WorkflowNodeEditor — U3 deletion", () => {
+  beforeEach(() => {
+    vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
+    vi.mocked(fetchModels).mockResolvedValue({ models: [] });
+  });
+  afterEach(() => cleanup());
+
+  it("shows a Delete node button when a node is selected and removes the node on click", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    const gate = await screen.findByTestId("wf-node-gate");
+    fireEvent.click(gate);
+    const delBtn = await screen.findByTestId("wf-delete-node");
+    fireEvent.click(delBtn);
+    // The gate node is removed from the canvas.
+    await waitFor(() => expect(screen.queryByTestId("wf-node-gate")).not.toBeInTheDocument());
+    // Selecting nothing → the delete button is gone too.
+    expect(screen.queryByTestId("wf-delete-node")).not.toBeInTheDocument();
+  });
+
+  it("does not render a Delete node button for built-in workflows", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([
+      { ...def(), id: "builtin:coding", name: "Built-in" },
+    ]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    const gate = await screen.findByTestId("wf-node-gate");
+    fireEvent.click(gate);
+    // Inspector renders (read-only note) but no delete button.
+    await screen.findByTestId("wf-readonly-banner");
+    expect(screen.queryByTestId("wf-delete-node")).not.toBeInTheDocument();
+  });
+});
+
 // ── U8: step-inversion authoring (foreach/step-review/parse-steps/code) ──────
 
 /** A custom v2 workflow with a foreach (one step-execute child + a step-review)

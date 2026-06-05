@@ -53,6 +53,7 @@ import {
   edgeClassName,
   edgeConditionEditability,
   buildConnectionEdge,
+  cascadeDelete,
   WF_EDGE_INTERACTION_WIDTH,
   FOREACH_GROUP_WIDTH,
   FOREACH_GROUP_HEIGHT,
@@ -152,6 +153,9 @@ function InnerEditor({
   // built-in pair so the select is never empty; replaced by the live catalog
   // (built-ins + plugin parsers) once GET /api/step-parsers resolves.
   const [stepParsers, setStepParsers] = useState<string[]>([...BUILTIN_STEP_PARSERS]);
+  // Wrapper around <ReactFlow> so keyboard deletion can return focus to the
+  // canvas container (R6) instead of leaving it on a now-removed node.
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
@@ -402,6 +406,61 @@ function InnerEditor({
     },
     [selectedEdgeId, setEdges],
   );
+
+  // ── Deletion (U3, R6) ──────────────────────────────────────────────────────
+  // Apply cascadeDelete to the current graph for the given node/edge ids,
+  // clearing any selection that pointed at a removed element. Shared by the
+  // inspector delete buttons and the keyboard-delete path.
+  const applyDelete = useCallback(
+    (ids: Iterable<string>) => {
+      const idSet = new Set(ids);
+      let next: { nodes: FlowNode<WorkflowFlowNodeData>[]; edges: FlowEdge[] } | null = null;
+      setNodes((ns) => {
+        next = cascadeDelete(ns, edges, idSet);
+        return next.nodes;
+      });
+      if (next) setEdges((next as { edges: FlowEdge[] }).edges);
+      if (selectedNodeId !== null && idSet.has(selectedNodeId)) setSelectedNodeId(null);
+      if (selectedEdgeId !== null && idSet.has(selectedEdgeId)) setSelectedEdgeId(null);
+    },
+    [edges, setNodes, setEdges, selectedNodeId, selectedEdgeId],
+  );
+
+  // Keyboard delete (Backspace/Delete) flows through React Flow's onBeforeDelete:
+  // it hands us the nodes/edges it intends to remove, and we return the
+  // cascadeDelete-expanded set (foreach children + incident edges, protected
+  // nodes filtered out) so React Flow deletes exactly the right elements. After
+  // deletion, focus returns to the canvas container (R6). Built-ins never reach
+  // here (deleteKeyCode is null and selection is read-only), but the protection
+  // in cascadeDelete is the backstop.
+  const onBeforeDelete = useCallback(
+    async ({ nodes: delNodes, edges: delEdges }: { nodes: FlowNode<WorkflowFlowNodeData>[]; edges: FlowEdge[] }) => {
+      if (isBuiltin) return false;
+      const ids = new Set<string>([...delNodes.map((n) => n.id), ...delEdges.map((e) => e.id)]);
+      const result = cascadeDelete(nodes, edges, ids);
+      const removedNodeIds = new Set(nodes.map((n) => n.id));
+      for (const n of result.nodes) removedNodeIds.delete(n.id);
+      const removedEdgeIds = new Set(edges.map((e) => e.id));
+      for (const e of result.edges) removedEdgeIds.delete(e.id);
+      if (removedNodeIds.size === 0 && removedEdgeIds.size === 0) return false;
+      return {
+        nodes: nodes.filter((n) => removedNodeIds.has(n.id)),
+        edges: edges.filter((e) => removedEdgeIds.has(e.id)),
+      };
+    },
+    [isBuiltin, nodes, edges],
+  );
+
+  // After React Flow removes the elements, drop any dangling selection and move
+  // focus to the canvas so keyboard nav continues from a live element (R6).
+  const onNodesDelete = useCallback(() => {
+    setSelectedNodeId(null);
+    canvasRef.current?.focus();
+  }, []);
+  const onEdgesDelete = useCallback(() => {
+    setSelectedEdgeId(null);
+    canvasRef.current?.focus();
+  }, []);
 
   const handleCreateWorkflow = useCallback(async () => {
     const name = window.prompt("New workflow name");
@@ -766,7 +825,7 @@ function InnerEditor({
                   </div>
                 )}
 
-                <div className="wf-editor-canvas">
+                <div className="wf-editor-canvas" ref={canvasRef} tabIndex={-1}>
                   <WorkflowEditorCatalogContext.Provider value={catalogs}>
                   <ReactFlow
                     nodes={nodesForRender}
@@ -776,6 +835,10 @@ function InnerEditor({
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
                     onNodeDragStop={onNodeDragStop}
+                    deleteKeyCode={isBuiltin ? null : ["Backspace", "Delete"]}
+                    onBeforeDelete={onBeforeDelete}
+                    onNodesDelete={onNodesDelete}
+                    onEdgesDelete={onEdgesDelete}
                     onNodeClick={(_, node) => {
                       setSelectedNodeId(node.id);
                       setSelectedEdgeId(null);
@@ -1391,6 +1454,19 @@ function InnerEditor({
                 </p>
               ) : null}
               </fieldset>
+              {!isBuiltin && (
+                <button
+                  type="button"
+                  className="wf-editor-delete wf-inspector-delete"
+                  data-testid="wf-delete-node"
+                  onClick={() => {
+                    applyDelete([selectedNode.id]);
+                    setSelectedNodeId(null);
+                  }}
+                >
+                  <Trash2 size={13} /> {t("workflowNodes.deleteNode", "Delete node")}
+                </button>
+              )}
             </aside>
           )}
 
@@ -1459,6 +1535,19 @@ function InnerEditor({
                   </p>
                 )}
               </fieldset>
+              {!isBuiltin && (
+                <button
+                  type="button"
+                  className="wf-editor-delete wf-inspector-delete"
+                  data-testid="wf-delete-edge"
+                  onClick={() => {
+                    applyDelete([selectedEdge.id]);
+                    setSelectedEdgeId(null);
+                  }}
+                >
+                  <Trash2 size={13} /> {t("workflowNodes.deleteEdge", "Delete edge")}
+                </button>
+              )}
             </aside>
           )}
         </div>

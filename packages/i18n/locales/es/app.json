@@ -6761,6 +6761,8 @@
     "codeSource": "Origen (TypeScript)",
     "codeTimeout": "Tiempo de espera (ms)",
     "cycleBlocked": "",
+    "deleteEdge": "",
+    "deleteNode": "",
     "edgeCondition": "",
     "edgeConditionLabel": "Condición: {{condition}}",
     "edgeInspector": "Conexión",

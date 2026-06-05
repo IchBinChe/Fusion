@@ -18,6 +18,7 @@ import {
   edgeConditionEditability,
   wouldCreateCycle,
   buildConnectionEdge,
+  cascadeDelete,
   COLUMN_BAND_HEIGHT,
   WF_CARD_WIDTH,
   WF_CARD_MAX_WIDTH,
@@ -599,5 +600,154 @@ describe("edge-condition authoring (U2)", () => {
     // b→a would be a cycle, but both are children of the same group → allowed.
     const res = buildConnectionEdge({ source: "g::b", target: "g::a" }, edges, nodes);
     expect("edge" in res).toBe(true);
+  });
+});
+
+describe("cascadeDelete (U3, R6)", () => {
+  // start → a → b → c → end (a/b/c are prompt nodes), so deleting a mid-chain
+  // node must drop its two incident edges with no bridge created.
+  const chainDef = (): WorkflowDefinition =>
+    makeDef({
+      version: "v1",
+      name: "chain",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "a", kind: "prompt", config: { prompt: "a" } },
+        { id: "b", kind: "prompt", config: { prompt: "b" } },
+        { id: "c", kind: "prompt", config: { prompt: "c" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "a", condition: "success" },
+        { from: "a", to: "b", condition: "success" },
+        { from: "b", to: "c", condition: "success" },
+        { from: "c", to: "end", condition: "success" },
+      ],
+    });
+
+  it("deletes a mid-chain node + both incident edges, with NO bridge edge", () => {
+    const { nodes, edges } = irToFlow(chainDef());
+    const bEdge = edges.find((e) => e.source === "a" && e.target === "b")!;
+    const result = cascadeDelete(nodes, edges, [/* node */ "b"]);
+    expect(result.nodes.find((n) => n.id === "b")).toBeUndefined();
+    // Both incident edges (a→b and b→c) are gone.
+    expect(result.edges.find((e) => e.source === "a" && e.target === "b")).toBeUndefined();
+    expect(result.edges.find((e) => e.source === "b" && e.target === "c")).toBeUndefined();
+    // No auto-bridge a→c.
+    expect(result.edges.find((e) => e.source === "a" && e.target === "c")).toBeUndefined();
+    // Untouched edges survive.
+    expect(result.edges.find((e) => e.source === "start" && e.target === "a")).toBeTruthy();
+    expect(result.edges.find((e) => e.source === "c" && e.target === "end")).toBeTruthy();
+    void bEdge;
+  });
+
+  // A foreach group with two template children (exec → review, review → exec
+  // rework), plus top-level edges parse→loop→end.
+  const foreachDef = (): WorkflowDefinition =>
+    makeDef({
+      version: "v1",
+      name: "loopwf",
+      nodes: [
+        { id: "start", kind: "start" },
+        {
+          id: "loop",
+          kind: "foreach",
+          config: {
+            source: "task-steps",
+            template: {
+              nodes: [
+                { id: "exec", kind: "prompt", config: { seam: "step-execute", prompt: "do" } },
+                { id: "review", kind: "step-review", config: { type: "code" } },
+              ],
+              edges: [
+                { from: "exec", to: "review", condition: "success" },
+                { from: "review", to: "exec", condition: "outcome:revise", kind: "rework" },
+              ],
+            },
+          },
+        },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "loop", condition: "success" },
+        { from: "loop", to: "end", condition: "success" },
+      ],
+    });
+
+  it("deleting a foreach group removes the group + children + template edges + incident edges", () => {
+    const { nodes, edges } = irToFlow(foreachDef());
+    const execId = foreachChildFlowId("loop", "exec");
+    const reviewId = foreachChildFlowId("loop", "review");
+    // Sanity: children + their template edges exist before delete.
+    expect(nodes.find((n) => n.id === execId)).toBeTruthy();
+    expect(edges.some((e) => e.source === execId && e.target === reviewId)).toBe(true);
+
+    const result = cascadeDelete(nodes, edges, ["loop"]);
+    // Group + both children gone.
+    expect(result.nodes.find((n) => n.id === "loop")).toBeUndefined();
+    expect(result.nodes.find((n) => n.id === execId)).toBeUndefined();
+    expect(result.nodes.find((n) => n.id === reviewId)).toBeUndefined();
+    // Intra-template edges gone.
+    expect(result.edges.some((e) => e.source === execId || e.target === execId)).toBe(false);
+    expect(result.edges.some((e) => e.source === reviewId || e.target === reviewId)).toBe(false);
+    // The group's own incident edges (start→loop, loop→end) gone.
+    expect(result.edges.some((e) => e.source === "loop" || e.target === "loop")).toBe(false);
+    // start and end nodes survive.
+    expect(result.nodes.find((n) => n.id === "start")).toBeTruthy();
+    expect(result.nodes.find((n) => n.id === "end")).toBeTruthy();
+  });
+
+  it("deleting only a template child removes the child + its edges, leaving the group", () => {
+    const { nodes, edges } = irToFlow(foreachDef());
+    const execId = foreachChildFlowId("loop", "exec");
+    const reviewId = foreachChildFlowId("loop", "review");
+
+    const result = cascadeDelete(nodes, edges, [execId]);
+    // The exec child is gone; the group + sibling remain.
+    expect(result.nodes.find((n) => n.id === execId)).toBeUndefined();
+    expect(result.nodes.find((n) => n.id === "loop")).toBeTruthy();
+    expect(result.nodes.find((n) => n.id === reviewId)).toBeTruthy();
+    // Edges touching exec (both directions) are gone.
+    expect(result.edges.some((e) => e.source === execId || e.target === execId)).toBe(false);
+  });
+
+  it("never deletes start/end nodes (and preserves their edges)", () => {
+    const { nodes, edges } = irToFlow(chainDef());
+    const result = cascadeDelete(nodes, edges, ["start", "end"]);
+    expect(result.nodes.find((n) => n.id === "start")).toBeTruthy();
+    expect(result.nodes.find((n) => n.id === "end")).toBeTruthy();
+    // Their incident edges survive too (start→a, c→end).
+    expect(result.edges.some((e) => e.source === "start")).toBe(true);
+    expect(result.edges.some((e) => e.target === "end")).toBe(true);
+    // Nothing was removed at all.
+    expect(result.nodes).toHaveLength(nodes.length);
+    expect(result.edges).toHaveLength(edges.length);
+  });
+
+  it("never deletes column band nodes", () => {
+    const v2: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "wf",
+      columns: [{ id: "col1", name: "Col 1", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start", column: "col1" },
+        { id: "end", kind: "end", column: "col1" },
+      ],
+      edges: [{ from: "start", to: "end", condition: "success" }],
+    };
+    const { nodes, edges } = irToFlow(makeDef(v2));
+    const bandId = nodes.find((n) => isColumnBandNode(n.id))!.id;
+    const result = cascadeDelete(nodes, edges, [bandId]);
+    expect(result.nodes.find((n) => n.id === bandId)).toBeTruthy();
+  });
+
+  it("deletes an edge id directly, removing just that edge", () => {
+    const { nodes, edges } = irToFlow(chainDef());
+    const target = edges.find((e) => e.source === "b" && e.target === "c")!;
+    const result = cascadeDelete(nodes, edges, [target.id]);
+    expect(result.edges.find((e) => e.id === target.id)).toBeUndefined();
+    // No nodes removed, all other edges intact.
+    expect(result.nodes).toHaveLength(nodes.length);
+    expect(result.edges).toHaveLength(edges.length - 1);
   });
 });

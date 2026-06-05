@@ -129,6 +129,33 @@ export type CliTelemetryWiring = (ctx: {
 
 // ── The adapter interface ─────────────────────────────────────────────────
 
+/**
+ * Per-adapter declaration of the argument markers that signify *elevated*
+ * (bypass-permissions / full-auto) autonomy (CLI Agent Executor, U15). The
+ * autonomy elevation detector scans the FULLY RESOLVED argv for these so an
+ * elevation smuggled through extra-args (not the autonomy field) is still
+ * caught. Generic env-pattern detection is shared across all adapters and lives
+ * in `autonomy.ts`; this only declares the adapter-specific argv side.
+ */
+export interface CliAdapterElevationMarkers {
+  /**
+   * Exact-match argv tokens that always denote elevation (e.g.
+   * `--dangerously-skip-permissions`).
+   */
+  readonly exactArgs?: readonly string[];
+  /**
+   * Regexes tested against each resolved argv token (e.g. Codex's
+   * `-c approval_policy=...` override, droid `--auto high`). A match denotes
+   * elevation. Authors keep these conservative — false positives gate launches.
+   */
+  readonly argPatterns?: readonly RegExp[];
+  /**
+   * Optional predicate over the whole resolved argv for multi-token markers
+   * (e.g. `--auto` followed by `high`). Returns the matched token(s) to report.
+   */
+  readonly matchArgv?: (argv: readonly string[]) => string[];
+}
+
 export interface CliAgentAdapter {
   /** Stable identifier (e.g. "claude-code", "codex", "generic"). */
   readonly id: string;
@@ -136,6 +163,17 @@ export interface CliAgentAdapter {
   readonly name: string;
   /** Capability flags — read honestly by the pipeline and UI. */
   readonly capabilities: CliAdapterCapabilities;
+  /**
+   * Default binary the adapter invokes when no command override is set (U15).
+   * Surfaced so the elevation detector can treat a *different* command override
+   * as privileged without reaching into the adapter's private constants.
+   */
+  readonly defaultCommand?: string;
+  /**
+   * Adapter-specific elevated-autonomy argv markers (U15). When omitted the
+   * detector relies on the shared generic env-pattern set only.
+   */
+  readonly elevationMarkers?: CliAdapterElevationMarkers;
 
   /** Build the launch command/args from settings + autonomy posture. */
   buildLaunch(ctx: CliAdapterLaunchContext): CliLaunchSpec;

@@ -347,6 +347,19 @@ export class GenericCliAdapter implements CliAgentAdapter {
   readonly id = "generic";
   readonly name = "Generic CLI";
   readonly capabilities = GENERIC_CAPABILITIES;
+  // The generic tier has no native autonomy concept, but common bypass flags
+  // smuggled through args/extraArgs are still caught so the posture chip is
+  // honest. The shared generic env-pattern detector applies on top of this.
+  readonly elevationMarkers = {
+    argPatterns: [
+      /dangerous/i,
+      /skip[-_]permissions?/i,
+      /bypass[-_](approvals?|permissions?|sandbox)/i,
+      /^--yolo$/i,
+      /^--full-auto$/i,
+      /auto[-_]approve/i,
+    ],
+  };
 
   buildLaunch(ctx: CliAdapterLaunchContext): CliLaunchSpec {
     const settings = ctx.settings as GenericAdapterSettings & { command?: string };

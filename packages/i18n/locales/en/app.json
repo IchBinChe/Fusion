@@ -5007,7 +5007,8 @@
       "tooltip": {
         "global": "Shared across all projects",
         "project": "Specific to this project"
-      }
+      },
+      "cliAgents": "CLI Agents"
     },
     "notifications": {
       "sending": "Sending…",
@@ -5050,6 +5051,34 @@
       "openApprovals": "Open Approvals",
       "selectWorktreesDir": "Select worktrees directory",
       "tryAgain": "Try again"
+    },
+    "cliAgents": {
+      "heading": "CLI Agents",
+      "description": "Per-adapter launch configuration for CLI coding agents driven in engine-owned terminals.",
+      "adapterLabel": "Adapter",
+      "tier": {
+        "native": "native",
+        "hybrid": "hybrid",
+        "generic": "generic"
+      },
+      "commandLabel": "Command override",
+      "commandHelp": "Path or name of the binary to launch. A non-default value is treated as privileged and requires autonomy approval.",
+      "extraArgsLabel": "Extra arguments",
+      "extraArgsHelp": "Appended after the adapter's computed arguments (space-separated). Bypass flags here are detected and gated.",
+      "envLabel": "Environment variable additions",
+      "envHelp": "Comma-separated variable NAMES forwarded from the parent process. Service credentials (FUSION_*) are always excluded.",
+      "autonomyLabel": "Autonomy mode",
+      "autonomyHelp": "Elevated autonomy requires a per-project approval before the agent can launch.",
+      "approvedNote": "Elevated autonomy is approved for this project.",
+      "autonomy": {
+        "default": "Default (request approvals)",
+        "elevated": "Elevated (bypass approvals)"
+      },
+      "elevatedConfirmTitle": "Approve elevated autonomy?",
+      "elevatedConfirmBody": "Elevated autonomy lets this CLI agent bypass per-step approvals (e.g. --dangerously-skip-permissions). It can modify files and run commands without pausing. Approve only if you trust this adapter for this project.",
+      "elevatedConfirmAction": "Approve elevated autonomy",
+      "saveFailed": "Failed to save CLI agent settings",
+      "approveFailed": "Failed to record autonomy approval"
     }
   },
   "setup": {
@@ -6832,5 +6861,26 @@
     "moreFields": "Additional fields",
     "orphaned": "Orphaned fields",
     "saveFailed": "Failed to save field"
+  },
+  "workflowEditor": {
+    "cliAgent": {
+      "executorOption": "CLI agent",
+      "adapterLabel": "CLI adapter",
+      "adapterPlaceholder": "— select adapter —",
+      "adapterNote": "Drives a CLI coding agent in an engine-owned terminal for this step.",
+      "tier": {
+        "native": "native",
+        "hybrid": "hybrid",
+        "generic": "generic"
+      },
+      "autonomyLabel": "Elevated autonomy (bypass approvals)",
+      "autonomyNote": "Elevated autonomy requires a per-project approval before the agent can launch. Until approved, launches with elevated posture fail.",
+      "notifyLabel": "Waiting-on-input notification",
+      "notify": {
+        "banner": "In-app banner",
+        "bannerNotify": "Banner + push notification"
+      },
+      "notifyNote": "How you are alerted when the agent pauses waiting for input on this step."
+    }
   }
 }

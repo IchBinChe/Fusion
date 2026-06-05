@@ -539,6 +539,22 @@ export const claudeCodeAdapter: CliAgentAdapter = {
   id: "claude-code",
   name: "Claude Code",
   capabilities: CLAUDE_CODE_CAPABILITIES,
+  defaultCommand: DEFAULT_COMMAND,
+  elevationMarkers: {
+    // Claude Code bypass: `--dangerously-skip-permissions` and the
+    // `--permission-mode bypassPermissions` form.
+    exactArgs: ["--dangerously-skip-permissions"],
+    argPatterns: [/^--permission-mode(=|$)/, /bypassPermissions/i],
+    matchArgv(argv) {
+      const hits: string[] = [];
+      for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === "--permission-mode" && argv[i + 1] === "bypassPermissions") {
+          hits.push("--permission-mode bypassPermissions");
+        }
+      }
+      return hits;
+    },
+  },
 
   buildLaunch(ctx: CliAdapterLaunchContext): CliLaunchSpec {
     const settings = readSettings(ctx);

@@ -12985,6 +12985,50 @@ ${stepsSection}`;
     } as unknown as Partial<Settings>);
   }
 
+  /** Whether a CLI-agent adapter has been approved for ELEVATED autonomy in this
+   *  project (CLI Agent Executor, U15). Mirrors the raw-command approval
+   *  precedent; approval is per-project + per-adapter and stored in project
+   *  settings (`approvedCliAutonomyAdapters`). */
+  async isCliAutonomyApproved(adapterId: string): Promise<boolean> {
+    const trimmed = adapterId.trim();
+    if (!trimmed) return false;
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedCliAutonomyAdapters?: string[] }).approvedCliAutonomyAdapters;
+    return Array.isArray(approved) && approved.includes(trimmed);
+  }
+
+  /** Record approval for elevated CLI-agent autonomy for an adapter. Idempotent.
+   *  The approving principal in v1 is the daemon-token holder (route-level). */
+  async approveCliAutonomy(adapterId: string): Promise<void> {
+    const trimmed = adapterId.trim();
+    if (!trimmed) throw new Error("Adapter id is required");
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedCliAutonomyAdapters?: string[] }).approvedCliAutonomyAdapters ?? [];
+    if (approved.includes(trimmed)) return;
+    await this.updateSettings({
+      approvedCliAutonomyAdapters: [...approved, trimmed],
+    } as unknown as Partial<Settings>);
+  }
+
+  /** Revoke a previously-granted elevated-autonomy approval. Idempotent. */
+  async revokeCliAutonomy(adapterId: string): Promise<void> {
+    const trimmed = adapterId.trim();
+    if (!trimmed) return;
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedCliAutonomyAdapters?: string[] }).approvedCliAutonomyAdapters ?? [];
+    if (!approved.includes(trimmed)) return;
+    await this.updateSettings({
+      approvedCliAutonomyAdapters: approved.filter((a) => a !== trimmed),
+    } as unknown as Partial<Settings>);
+  }
+
+  /** List adapters approved for elevated autonomy in this project. */
+  async listApprovedCliAutonomyAdapters(): Promise<string[]> {
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedCliAutonomyAdapters?: string[] }).approvedCliAutonomyAdapters;
+    return Array.isArray(approved) ? [...approved] : [];
+  }
+
   /** Read the workflow currently selected for a task, if any. */
   /**
    * Synchronously resolve the parsed WorkflowIr that governs a task's columns

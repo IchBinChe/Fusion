@@ -263,6 +263,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global" },
   { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global" },
   { id: "global-models", label: "Models", labelKey: "settings.nav.globalModels", scope: "global" },
+  { id: "cli-agents", label: "CLI Agents", labelKey: "settings.nav.cliAgents", scope: "global" },
   { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global" },
   { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global" },
   { id: "remote", label: "Remote Access", labelKey: "settings.nav.remote", scope: "global" },
@@ -420,6 +421,233 @@ interface SettingsModalProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open approvals/mailbox view. */
   onOpenApprovals?: (approvalId?: string) => void;
+}
+
+/** Adapter descriptor served by GET /api/cli-agents (U15). */
+interface CliAdapterDescriptorView {
+  id: string;
+  name: string;
+  tier: "native" | "hybrid" | "generic";
+  defaultCommand: string | null;
+}
+
+interface CliAgentSettingsEntry {
+  commandOverride?: string;
+  extraArgs?: string[];
+  autonomyMode?: "default" | "elevated";
+  envAdditions?: string[];
+}
+
+/**
+ * Per-adapter CLI-agent launch settings section (U15). Reads the adapter catalog
+ * + persisted settings + per-project autonomy approval state, and lets the
+ * operator edit command override / extra args / env additions / autonomy mode.
+ * Switching an adapter to elevated autonomy goes through an explicit
+ * confirmation flow before the per-project approval is granted.
+ */
+function CliAgentsSettingsSection({
+  projectId,
+  addToast,
+}: {
+  projectId?: string;
+  addToast: (message: string, type?: ToastType) => void;
+}) {
+  const { t } = useTranslation("app");
+  const { confirm } = useConfirm();
+  const [adapters, setAdapters] = useState<CliAdapterDescriptorView[]>([]);
+  const [settings, setSettings] = useState<Record<string, CliAgentSettingsEntry>>({});
+  const [approved, setApproved] = useState<Record<string, boolean>>({});
+  const [selectedId, setSelectedId] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [catRes, setRes] = await Promise.all([
+          fetch("/api/cli-agents"),
+          fetch("/api/cli-agents/settings"),
+        ]);
+        const cat = catRes.ok ? await catRes.json() : { adapters: [] };
+        const set = setRes.ok ? await setRes.json() : { cliAgents: {} };
+        if (cancelled) return;
+        const list = (cat.adapters ?? []) as CliAdapterDescriptorView[];
+        setAdapters(list);
+        setSettings((set.cliAgents ?? {}) as Record<string, CliAgentSettingsEntry>);
+        if (list.length > 0) setSelectedId((prev) => prev || list[0].id);
+        // Approval state is per-adapter; fetch lazily per selection below.
+      } catch {
+        // Non-fatal: render the static fallback list.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    fetch(`/api/cli-agents/${selectedId}/autonomy`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setApproved((prev) => ({ ...prev, [selectedId]: Boolean(data.approved) }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  const current = settings[selectedId] ?? {};
+
+  const persist = useCallback(
+    async (adapterId: string, config: CliAgentSettingsEntry) => {
+      try {
+        const res = await fetch("/api/cli-agents/settings", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ adapterId, config }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setSettings((data.cliAgents ?? {}) as Record<string, CliAgentSettingsEntry>);
+      } catch (err) {
+        addToast(getErrorMessage(err) || t("settings.cliAgents.saveFailed"), "error");
+      }
+    },
+    [addToast, t],
+  );
+
+  const updateCurrent = useCallback(
+    (patch: Partial<CliAgentSettingsEntry>) => {
+      if (!selectedId) return;
+      const next = { ...current, ...patch };
+      setSettings((prev) => ({ ...prev, [selectedId]: next }));
+      void persist(selectedId, next);
+    },
+    [selectedId, current, persist],
+  );
+
+  const onAutonomyChange = useCallback(
+    async (mode: "default" | "elevated") => {
+      if (!selectedId) return;
+      if (mode === "elevated") {
+        const ok = await confirm({
+          title: t("settings.cliAgents.elevatedConfirmTitle"),
+          message: t("settings.cliAgents.elevatedConfirmBody"),
+          confirmLabel: t("settings.cliAgents.elevatedConfirmAction"),
+          danger: true,
+        });
+        if (!ok) return;
+        // Record the per-project approval first, then persist the mode.
+        try {
+          const res = await fetch(`/api/cli-agents/${selectedId}/approve-autonomy`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ confirm: true }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          setApproved((prev) => ({ ...prev, [selectedId]: true }));
+        } catch (err) {
+          addToast(getErrorMessage(err) || t("settings.cliAgents.approveFailed"), "error");
+          return;
+        }
+      }
+      updateCurrent({ autonomyMode: mode });
+    },
+    [selectedId, confirm, t, addToast, updateCurrent],
+  );
+
+  return (
+    <div data-testid="cli-agents-settings">
+      <h4 className="settings-section-heading">{t("settings.cliAgents.heading")}</h4>
+      <p className="settings-section-description">{t("settings.cliAgents.description")}</p>
+
+      <div className="form-group">
+        <label htmlFor="cliAgentAdapter">{t("settings.cliAgents.adapterLabel")}</label>
+        <select
+          id="cliAgentAdapter"
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+        >
+          {adapters.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} ({t(`settings.cliAgents.tier.${a.tier}`)})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedId && (
+        <>
+          <div className="form-group">
+            <label htmlFor="cliAgentCommand">{t("settings.cliAgents.commandLabel")}</label>
+            <input
+              id="cliAgentCommand"
+              type="text"
+              placeholder={
+                adapters.find((a) => a.id === selectedId)?.defaultCommand ?? ""
+              }
+              value={current.commandOverride ?? ""}
+              onChange={(e) => updateCurrent({ commandOverride: e.target.value || undefined })}
+            />
+            <p className="settings-field-help">{t("settings.cliAgents.commandHelp")}</p>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="cliAgentExtraArgs">{t("settings.cliAgents.extraArgsLabel")}</label>
+            <input
+              id="cliAgentExtraArgs"
+              type="text"
+              value={(current.extraArgs ?? []).join(" ")}
+              onChange={(e) =>
+                updateCurrent({
+                  extraArgs: e.target.value.split(/\s+/).filter((s) => s.length > 0),
+                })
+              }
+            />
+            <p className="settings-field-help">{t("settings.cliAgents.extraArgsHelp")}</p>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="cliAgentEnv">{t("settings.cliAgents.envLabel")}</label>
+            <input
+              id="cliAgentEnv"
+              type="text"
+              value={(current.envAdditions ?? []).join(", ")}
+              onChange={(e) =>
+                updateCurrent({
+                  envAdditions: e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter((s) => s.length > 0),
+                })
+              }
+            />
+            <p className="settings-field-help">{t("settings.cliAgents.envHelp")}</p>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="cliAgentAutonomy">{t("settings.cliAgents.autonomyLabel")}</label>
+            <select
+              id="cliAgentAutonomy"
+              value={current.autonomyMode ?? "default"}
+              onChange={(e) => void onAutonomyChange(e.target.value as "default" | "elevated")}
+            >
+              <option value="default">{t("settings.cliAgents.autonomy.default")}</option>
+              <option value="elevated">{t("settings.cliAgents.autonomy.elevated")}</option>
+            </select>
+            <p className="settings-field-help">
+              {approved[selectedId]
+                ? t("settings.cliAgents.approvedNote")
+                : t("settings.cliAgents.autonomyHelp")}
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function SettingsModal({
@@ -2328,6 +2556,13 @@ export function SettingsModal({
 
   const renderSectionFields = () => {
     switch (activeSection) {
+      case "cli-agents":
+        return (
+          <>
+            {renderScopeBanner()}
+            <CliAgentsSettingsSection projectId={projectId} addToast={addToast} />
+          </>
+        );
       case "general":
         return (
           <>

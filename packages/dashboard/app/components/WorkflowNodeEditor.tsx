@@ -60,7 +60,23 @@ import { WorkflowFieldsPanel } from "./WorkflowFieldsPanel";
 import type { WorkflowFieldDefinition } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 
-type ExecutorKind = "model" | "agent" | "skill" | "cli";
+type ExecutorKind = "model" | "agent" | "skill" | "cli" | "cli-agent";
+
+/** Adapter descriptor served by GET /api/cli-agents (U15). */
+interface CliAdapterDescriptorView {
+  id: string;
+  name: string;
+  tier: "native" | "hybrid" | "generic";
+}
+
+/** Static fallback so the picker renders before/without the API fetch. */
+const CLI_AGENT_ADAPTER_FALLBACK: CliAdapterDescriptorView[] = [
+  { id: "claude-code", name: "Claude Code", tier: "native" },
+  { id: "codex", name: "Codex", tier: "hybrid" },
+  { id: "droid", name: "Droid", tier: "hybrid" },
+  { id: "pi", name: "Pi", tier: "hybrid" },
+  { id: "generic", name: "Generic CLI", tier: "generic" },
+];
 
 // Mirror of @fusion/core's isBuiltinWorkflowId / BUILTIN_WORKFLOW_ID_PREFIX.
 // Inlined because the dashboard app build aliases "@fusion/core" to its
@@ -551,8 +567,28 @@ function InnerEditor({
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<DiscoveredSkill[]>([]);
+  // CLI-agent adapter catalog (U15). Falls back to the static list when the API
+  // fetch fails so the picker is always usable.
+  const [cliAdapters, setCliAdapters] = useState<CliAdapterDescriptorView[]>(CLI_AGENT_ADAPTER_FALLBACK);
 
   const currentExecutor = (selectedNode?.data.config?.executor as ExecutorKind | undefined) ?? "model";
+
+  useEffect(() => {
+    if (currentExecutor !== "cli-agent") return;
+    let cancelled = false;
+    fetch("/api/cli-agents")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.adapters) return;
+        setCliAdapters(data.adapters as CliAdapterDescriptorView[]);
+      })
+      .catch(() => {
+        // Keep the static fallback; the picker stays functional.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentExecutor]);
 
   useEffect(() => {
     // step-review offers an optional review model picker (KTD-4).
@@ -774,6 +810,7 @@ function InnerEditor({
                       <option value="agent">Agent</option>
                       <option value="skill">Skill</option>
                       <option value="cli">CLI / script</option>
+                      <option value="cli-agent">{t("workflowEditor.cliAgent.executorOption")}</option>
                     </select>
                   </label>
 
@@ -869,6 +906,83 @@ function InnerEditor({
                         </label>
                       )}
                     </>
+                  )}
+
+                  {currentExecutor === "cli-agent" && (
+                    <div data-testid="cli-agent-config">
+                      <label className="wf-field">
+                        <span>{t("workflowEditor.cliAgent.adapterLabel")}</span>
+                        <select
+                          data-testid="cli-agent-adapter"
+                          value={String(selectedNode.data.config?.cliAdapterId ?? "")}
+                          onChange={(e) =>
+                            updateSelectedData({ config: { cliAdapterId: e.target.value || undefined } })
+                          }
+                        >
+                          <option value="">{t("workflowEditor.cliAgent.adapterPlaceholder")}</option>
+                          {cliAdapters.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name} ({t(`workflowEditor.cliAgent.tier.${a.tier}`)})
+                            </option>
+                          ))}
+                        </select>
+                        <span className="wf-inspector-note">
+                          {t("workflowEditor.cliAgent.adapterNote")}
+                        </span>
+                      </label>
+
+                      <label className="wf-field wf-field--checkbox">
+                        <input
+                          type="checkbox"
+                          data-testid="cli-agent-autonomy"
+                          checked={Boolean(
+                            (selectedNode.data.config?.cliAutonomy as { autoApprove?: boolean } | undefined)
+                              ?.autoApprove,
+                          )}
+                          onChange={(e) =>
+                            updateSelectedData({
+                              config: {
+                                cliAutonomy: {
+                                  ...((selectedNode.data.config?.cliAutonomy as Record<string, unknown>) ?? {}),
+                                  autoApprove: e.target.checked,
+                                },
+                              },
+                            })
+                          }
+                        />
+                        <span>{t("workflowEditor.cliAgent.autonomyLabel")}</span>
+                      </label>
+                      {Boolean(
+                        (selectedNode.data.config?.cliAutonomy as { autoApprove?: boolean } | undefined)
+                          ?.autoApprove,
+                      ) && (
+                        <p className="wf-inspector-note wf-inspector-note--info">
+                          {t("workflowEditor.cliAgent.autonomyNote")}
+                        </p>
+                      )}
+
+                      <label className="wf-field">
+                        <span>{t("workflowEditor.cliAgent.notifyLabel")}</span>
+                        <select
+                          data-testid="cli-agent-notify"
+                          value={String(
+                            (selectedNode.data.config?.cliNotify as { mode?: string } | undefined)?.mode ??
+                              "banner",
+                          )}
+                          onChange={(e) =>
+                            updateSelectedData({ config: { cliNotify: { mode: e.target.value } } })
+                          }
+                        >
+                          <option value="banner">{t("workflowEditor.cliAgent.notify.banner")}</option>
+                          <option value="banner+notify">
+                            {t("workflowEditor.cliAgent.notify.bannerNotify")}
+                          </option>
+                        </select>
+                        <span className="wf-inspector-note">
+                          {t("workflowEditor.cliAgent.notifyNote")}
+                        </span>
+                      </label>
+                    </div>
                   )}
 
                   <label className="wf-field wf-field--checkbox">

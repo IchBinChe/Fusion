@@ -579,6 +579,35 @@ export const codexAdapter: CliAgentAdapter = {
   id: "codex",
   name: "Codex",
   capabilities: CODEX_CAPABILITIES,
+  defaultCommand: DEFAULT_COMMAND,
+  elevationMarkers: {
+    // Codex elevation: the sandbox/approval bypass flag, `--full-auto`/`--yolo`
+    // shorthands, and `-c approval_policy=...` / `-c sandbox=...` config overrides.
+    exactArgs: [
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--full-auto",
+      "--yolo",
+    ],
+    argPatterns: [
+      /^-c\s*approval_policy=/i,
+      /^approval_policy=/i,
+      /^-c\s*sandbox(_mode)?=/i,
+      /^sandbox(_mode)?=/i,
+    ],
+    matchArgv(argv) {
+      const hits: string[] = [];
+      for (let i = 0; i < argv.length; i++) {
+        // `-c approval_policy=...` (or sandbox=...) passed as two tokens.
+        if (argv[i] === "-c" && typeof argv[i + 1] === "string") {
+          const v = argv[i + 1];
+          if (/^(approval_policy|sandbox|sandbox_mode)=/i.test(v)) {
+            hits.push(`-c ${v}`);
+          }
+        }
+      }
+      return hits;
+    },
+  },
 
   buildLaunch(ctx: CliAdapterLaunchContext): CliLaunchSpec {
     const settings = readSettings(ctx);

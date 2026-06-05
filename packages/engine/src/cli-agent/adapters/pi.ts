@@ -400,6 +400,24 @@ export const piAdapter: CliAgentAdapter = {
   id: "pi",
   name: "Pi",
   capabilities: PI_CAPABILITIES,
+  defaultCommand: DEFAULT_COMMAND,
+  elevationMarkers: {
+    // Pi elevation: widening the tool allowlist to include write-capable tools
+    // without per-tool confirmation (`--tools read,bash,edit,write`) or a yolo /
+    // no-confirm flag. The `--tools` form with bash/edit/write is the auto-approve
+    // equivalent the posture maps to.
+    exactArgs: ["--yolo", "--no-confirm", "--dangerously-skip-permissions"],
+    argPatterns: [/^--tools=.*\b(bash|edit|write)\b/i],
+    matchArgv(argv) {
+      const hits: string[] = [];
+      for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === "--tools" && /\b(bash|edit|write)\b/i.test(argv[i + 1] ?? "")) {
+          hits.push(`--tools ${argv[i + 1]}`);
+        }
+      }
+      return hits;
+    },
+  },
 
   buildLaunch(ctx: CliAdapterLaunchContext): CliLaunchSpec {
     const settings = readSettings(ctx);

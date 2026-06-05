@@ -676,7 +676,35 @@ export {
   DuplicateCliAdapterError,
   type CliAgentAdapter,
   type CliAdapterCapabilities,
+  type CliAdapterElevationMarkers,
 } from "./cli-agent/adapter.js";
+// CLI Agent Executor — autonomy posture resolution + approval gate (U15).
+export {
+  resolveEffectivePosture,
+  assertAutonomyApproved,
+  CliAutonomyNotApprovedError,
+  GENERIC_ELEVATION_ENV_PATTERNS,
+  tierForCapabilities,
+  type EffectivePosture,
+  type CliElevationFlag,
+  type CliAgentResolveSettings,
+  type CliAgentNodeConfig,
+  type AutonomyApprovalLookup,
+  type ResolveEffectivePostureArgs,
+  type AssertAutonomyApprovedArgs,
+  type CliAdapterTier,
+} from "./cli-agent/autonomy.js";
+// CLI Agent Executor — bundled adapters + UI descriptors (U15).
+export {
+  BUNDLED_CLI_ADAPTERS,
+  listCliAdapterDescriptors,
+  claudeCodeAdapter,
+  codexAdapter,
+  droidAdapter,
+  piAdapter,
+  genericCliAdapter,
+  type CliAdapterDescriptor,
+} from "./cli-agent/adapters/index.js";
 // CLI Agent Executor — task ↔ session orchestration (U7).
 export {
   CliTaskSession,

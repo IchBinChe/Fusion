@@ -58,6 +58,12 @@ import {
   writeSessionHookScripts,
   cleanupSessionHookDir,
 } from "./hook-scripts.js";
+import {
+  assertAutonomyApproved,
+  type AutonomyApprovalLookup,
+  type CliAgentResolveSettings,
+  type EffectivePosture,
+} from "./autonomy.js";
 
 // ── Outcome ──────────────────────────────────────────────────────────────────
 
@@ -108,6 +114,12 @@ export interface ResolvedCliExecutorConfig {
   cliNotify?: Record<string, unknown> | null;
   /** Adapter launch settings (model, command override, extra args, …). */
   settings?: Record<string, unknown>;
+  /**
+   * Per-adapter operator launch config (U15), resolved from
+   * `GlobalSettings.cliAgents[adapterId]`. Drives elevation detection + the
+   * approval gate, and is folded into the adapter launch settings at spawn.
+   */
+  cliAgentSettings?: CliAgentResolveSettings | null;
 }
 
 // ── Launch options ─────────────────────────────────────────────────────────────
@@ -140,6 +152,13 @@ export interface LaunchCliTaskSessionOptions {
    * dir; production callers may scope it under the engine's runtime dir.
    */
   hookDirRoot?: string;
+  /**
+   * Per-project autonomy-approval lookup (U15). Backs the elevation approval
+   * gate: when the resolved effective posture is elevated and this returns false,
+   * launch fails with a typed `CliAutonomyNotApprovedError` (never a stall).
+   * When omitted, an elevated posture fails closed (treated as unapproved).
+   */
+  isAutonomyApproved?: AutonomyApprovalLookup;
   /**
    * Optional logger for lifecycle breadcrumbs. Best-effort; never throws.
    */
@@ -205,6 +224,19 @@ export class CliTaskSession {
     const log = opts.log ?? (() => {});
     const adapter = opts.registry.get(opts.config.cliAdapterId);
 
+    // 0. Autonomy approval gate (U15). Resolve the EFFECTIVE posture from the
+    // fully resolved argv + env (NOT the autonomy field alone) and enforce the
+    // per-project approval for any elevation. A missing lookup fails closed.
+    // Runs BEFORE any side effects (scratch dir / spawn) so an unapproved
+    // elevation never reserves a concurrency slot or leaves a scratch dir.
+    const effectivePosture: EffectivePosture = await assertAutonomyApproved({
+      adapter,
+      settings: opts.config.cliAgentSettings ?? null,
+      nodeConfig: { cliAutonomy: opts.config.cliAutonomy ?? null },
+      projectId: opts.projectId,
+      isApproved: opts.isAutonomyApproved ?? (() => false),
+    });
+
     // 1. Scratch dir for the session-scoped hook scripts + settings.
     const root = opts.hookDirRoot ?? tmpdir();
     const hookDir = await mkdtemp(join(root, "fusion-cli-hooks-"));
@@ -219,11 +251,33 @@ export class CliTaskSession {
     const hookScriptPath = join(hookDir, HOOK_SCRIPT_NAMES.hook);
     const settingsPath = join(hookDir, "settings.json");
 
+    // Fold the per-adapter operator settings (U15) into the launch settings bag
+    // so they actually reach the child: command override → `command`, extra args
+    // → `extraArgs`, env additions → `envAllowlist`. Service credentials are
+    // ALWAYS excluded from the env allowlist regardless of what the operator
+    // added (a user must never widen the allowlist to leak FUSION_* creds).
+    const cliAgentSettings = opts.config.cliAgentSettings ?? null;
+    const operatorEnvAdditions = (cliAgentSettings?.envAdditions ?? []).filter(
+      (k) => !/^FUSION_/i.test(k),
+    );
+    const priorAllowlist = Array.isArray(
+      (opts.config.settings as Record<string, unknown> | undefined)?.envAllowlist,
+    )
+      ? ((opts.config.settings as Record<string, unknown>).envAllowlist as string[])
+      : [];
+
     // Build adapter launch settings carrying the hook-script refs. Claude's
     // settings flow reads `hookScripts` + `settingsPath` off ctx.settings; other
     // adapters ignore unknown keys.
     const settings: Record<string, unknown> = {
       ...(opts.config.settings ?? {}),
+      ...(cliAgentSettings?.commandOverride
+        ? { command: cliAgentSettings.commandOverride }
+        : {}),
+      ...(cliAgentSettings?.extraArgs && cliAgentSettings.extraArgs.length > 0
+        ? { extraArgs: [...cliAgentSettings.extraArgs] }
+        : {}),
+      envAllowlist: [...new Set([...priorAllowlist, ...operatorEnvAdditions])],
       hookScripts: {
         stopScript: hookScriptPath,
         notificationScript: hookScriptPath,
@@ -244,7 +298,24 @@ export class CliTaskSession {
         purpose: "execute",
         taskId: opts.taskId,
         worktreePath: opts.worktreePath,
-        posture: opts.config.cliAutonomy ?? null,
+        // Denormalize the EFFECTIVE posture (derived from resolved argv+env) onto
+        // the session record so the posture chip reflects the real launch
+        // posture, not the autonomy field alone. The autonomy intent fields are
+        // preserved (buildLaunch still reads `autoApprove`).
+        posture: {
+          ...(opts.config.cliAutonomy ?? {}),
+          // `autonomyMode: "elevated"` is an alternate channel to the field; map
+          // it onto `autoApprove` so the adapter's buildLaunch emits the
+          // privileged flags (it keys off `posture.autoApprove`).
+          ...(cliAgentSettings?.autonomyMode === "elevated"
+            ? { autoApprove: true }
+            : {}),
+          effectivePosture: {
+            mode: effectivePosture.mode,
+            elevated: effectivePosture.elevated,
+            flags: effectivePosture.flags,
+          },
+        },
         settings,
       });
     } catch (err) {

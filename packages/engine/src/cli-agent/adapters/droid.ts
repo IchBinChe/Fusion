@@ -471,6 +471,23 @@ export const droidAdapter: CliAgentAdapter = {
   id: "droid",
   name: "Droid",
   capabilities: DROID_CAPABILITIES,
+  defaultCommand: DEFAULT_COMMAND,
+  elevationMarkers: {
+    // Droid elevation: `--skip-permissions-unsafe` and `--auto <high|...>` full
+    // autonomy levels (per `droid --help`). `--auto low` is NOT treated as
+    // elevation; only `high`/`medium` levels bypass meaningful approvals.
+    exactArgs: ["--skip-permissions-unsafe"],
+    argPatterns: [/^--auto=(high|medium)$/i],
+    matchArgv(argv) {
+      const hits: string[] = [];
+      for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === "--auto" && /^(high|medium)$/i.test(argv[i + 1] ?? "")) {
+          hits.push(`--auto ${argv[i + 1]}`);
+        }
+      }
+      return hits;
+    },
+  },
 
   buildLaunch(ctx: CliAdapterLaunchContext): CliLaunchSpec {
     const settings = readSettings(ctx);

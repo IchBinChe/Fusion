@@ -248,47 +248,47 @@ test("decideExecutionPlan: forced full suite", () => {
   assert.equal(plan.reason, "forced");
 });
 
-test("decideExecutionPlan: missing comparison base → full", () => {
+test("decideExecutionPlan: missing comparison base → gate", () => {
   const plan = decideExecutionPlan({
     forceFullSuite: false,
     comparisonBase: null,
     changedFiles: null,
     packageNameByDir: basePackageMap,
   });
-  assert.equal(plan.mode, "full");
+  assert.equal(plan.mode, "gate");
   assert.equal(plan.reason, "missing-comparison-base");
 });
 
-test("decideExecutionPlan: diff failed → full", () => {
+test("decideExecutionPlan: diff failed → gate", () => {
   const plan = decideExecutionPlan({
     forceFullSuite: false,
     comparisonBase: "abc123",
     changedFiles: null,
     packageNameByDir: basePackageMap,
   });
-  assert.equal(plan.mode, "full");
+  assert.equal(plan.mode, "gate");
   assert.equal(plan.reason, "diff-failed");
 });
 
-test("decideExecutionPlan: no changes → full", () => {
+test("decideExecutionPlan: no changes → gate", () => {
   const plan = decideExecutionPlan({
     forceFullSuite: false,
     comparisonBase: "abc123",
     changedFiles: [],
     packageNameByDir: basePackageMap,
   });
-  assert.equal(plan.mode, "full");
+  assert.equal(plan.mode, "gate");
   assert.equal(plan.reason, "no-changes");
 });
 
-test("decideExecutionPlan: shared infra changed → full", () => {
+test("decideExecutionPlan: shared infra changed → gate", () => {
   const plan = decideExecutionPlan({
     forceFullSuite: false,
     comparisonBase: "abc123",
     changedFiles: ["pnpm-lock.yaml"],
     packageNameByDir: basePackageMap,
   });
-  assert.equal(plan.mode, "full");
+  assert.equal(plan.mode, "gate");
   assert.equal(plan.reason, "shared-infra-changed");
 });
 
@@ -344,14 +344,14 @@ test("decideExecutionPlan: expands changed packages with reverse dependents", ()
   assert.deepEqual(plan.packages, ["@fusion/core", "@fusion/engine", "@fusion/dashboard"]);
 });
 
-test("decideExecutionPlan: no affected package resolved → full", () => {
+test("decideExecutionPlan: no affected package resolved → gate", () => {
   const plan = decideExecutionPlan({
     forceFullSuite: false,
     comparisonBase: "abc123",
     changedFiles: ["packages/nonexistent/src/foo.ts"],
     packageNameByDir: basePackageMap,
   });
-  assert.equal(plan.mode, "full");
+  assert.equal(plan.mode, "gate");
   assert.equal(plan.reason, "no-affected-package");
 });
 
@@ -370,7 +370,7 @@ test("decideExecutionPlan: plugin-only workspace changes stay in changed mode", 
   assert.deepEqual(plan.packages, ["@fusion-plugin-examples/openclaw-runtime"]);
 });
 
-test("decideExecutionPlan: plugin changes without mapping fail safe to full", () => {
+test("decideExecutionPlan: plugin changes without mapping fail safe to gate", () => {
   const plan = decideExecutionPlan({
     forceFullSuite: false,
     comparisonBase: "abc123",
@@ -378,7 +378,7 @@ test("decideExecutionPlan: plugin changes without mapping fail safe to full", ()
     packageNameByDir: basePackageMap,
   });
 
-  assert.equal(plan.mode, "full");
+  assert.equal(plan.mode, "gate");
   assert.equal(plan.reason, "no-affected-package");
 });
 
@@ -857,23 +857,39 @@ test("emitModeDecision: changed plan reports changed-packages reason + package c
   assert.deepEqual(lines, [line]);
 });
 
-test("emitModeDecision: full plan surfaces the decideExecutionPlan reason, packages=0", () => {
+test("emitModeDecision: gate plan surfaces the decideExecutionPlan reason, packages=0", () => {
   assert.equal(
-    emitModeDecision({ mode: "full", reason: "missing-comparison-base" }, () => {}),
-    "[test-changed] mode=full reason=missing-comparison-base packages=0",
+    emitModeDecision({ mode: "gate", reason: "missing-comparison-base" }, () => {}),
+    "[test-changed] mode=gate reason=missing-comparison-base packages=0",
   );
   assert.equal(
-    emitModeDecision({ mode: "full", reason: "shared-infra-changed" }, () => {}),
-    "[test-changed] mode=full reason=shared-infra-changed packages=0",
+    emitModeDecision({ mode: "gate", reason: "shared-infra-changed" }, () => {}),
+    "[test-changed] mode=gate reason=shared-infra-changed packages=0",
   );
 });
 
-test("emitModeDecision: distinct full reasons round-trip from decideExecutionPlan", () => {
-  const full = decideExecutionPlan({ forceFullSuite: false, comparisonBase: null });
-  assert.equal(emitModeDecision(full, () => {}), "[test-changed] mode=full reason=missing-comparison-base packages=0");
+test("emitModeDecision: gate and forced-full reasons round-trip from decideExecutionPlan", () => {
+  const gate = decideExecutionPlan({ forceFullSuite: false, comparisonBase: null });
+  assert.equal(emitModeDecision(gate, () => {}), "[test-changed] mode=gate reason=missing-comparison-base packages=0");
 
   const forced = decideExecutionPlan({ forceFullSuite: true });
   assert.equal(emitModeDecision(forced, () => {}), "[test-changed] mode=full reason=forced packages=0");
+});
+
+// The implicit full-suite escalation was the local OOM path (FN: merge-gate
+// redesign). The full suite must be reachable ONLY via explicit opt-in.
+test("decideExecutionPlan: full mode is reachable only via forceFullSuite", () => {
+  const implicitInputs = [
+    { forceFullSuite: false, comparisonBase: null },
+    { forceFullSuite: false, comparisonBase: "origin/main", changedFiles: null },
+    { forceFullSuite: false, comparisonBase: "origin/main", changedFiles: [] },
+    { forceFullSuite: false, comparisonBase: "origin/main", changedFiles: [".github/workflows/pr-checks.yml"] },
+    { forceFullSuite: false, comparisonBase: "origin/main", changedFiles: ["unmapped/path.ts"], packageNameByDir: new Map() },
+  ];
+  for (const input of implicitInputs) {
+    const plan = decideExecutionPlan(input);
+    assert.equal(plan.mode, "gate", `expected gate mode for ${JSON.stringify(input)}`);
+  }
 });
 
 // ---------------------------------------------------------------------------

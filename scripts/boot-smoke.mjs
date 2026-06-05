@@ -9,6 +9,9 @@
  *   3. The server shuts down cleanly on SIGTERM.
  *
  * Safety properties (see scripts/check-no-kill-4040.mjs and AGENTS.md):
+ * (port-4040-allowlist: this file only ever AVOIDS the reserved ports — it
+ * requests an ephemeral port and rejects reserved ones; it never binds,
+ * probes, or kills them.)
  *   - Never binds or touches port 4040 / FUSION_RESERVED_PORTS — an ephemeral
  *     port is requested from the OS (listen on 0) and double-checked against
  *     the reserved list.

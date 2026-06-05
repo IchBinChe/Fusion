@@ -24,7 +24,7 @@ describe("root test command changed-only planning", () => {
     expect(plan).toEqual({ mode: "changed", packages: ["@fusion/core", "@fusion/engine"] });
   });
 
-  it("falls back to full suite when shared test infra changes", () => {
+  it("routes to gate mode when shared test infra changes (no implicit full suite)", () => {
     const plan = decideExecutionPlan({
       forceFullSuite: false,
       comparisonBase: "abc123",
@@ -32,10 +32,10 @@ describe("root test command changed-only planning", () => {
       packageNameByDir: new Map([["packages/core", "@fusion/core"]]),
     });
 
-    expect(plan).toEqual({ mode: "full", reason: "shared-infra-changed" });
+    expect(plan).toEqual({ mode: "gate", reason: "shared-infra-changed" });
   });
 
-  it("falls back to full suite when comparison base cannot be resolved", () => {
+  it("routes to gate mode when comparison base cannot be resolved", () => {
     const plan = decideExecutionPlan({
       forceFullSuite: false,
       comparisonBase: null,
@@ -43,16 +43,16 @@ describe("root test command changed-only planning", () => {
       packageNameByDir: new Map(),
     });
 
-    expect(plan).toEqual({ mode: "full", reason: "missing-comparison-base" });
+    expect(plan).toEqual({ mode: "gate", reason: "missing-comparison-base" });
   });
 
-  it("treats unknown package directories as full-suite fallback", () => {
+  it("treats unknown package directories as gate-mode fallback (resolver returns null)", () => {
     const resolved = resolveAffectedPackages(["packages/unknown/src/index.ts"], new Map());
     expect(resolved).toBeNull();
   });
 
-  it("marks root workflow/config changes as full-suite triggers", () => {
-    expect(shouldForceFullSuite([".github/workflows/ci.yml"])).toBe(true);
+  it("marks root workflow/config changes as shared-infra (gate-mode) triggers", () => {
+    expect(shouldForceFullSuite([".github/workflows/pr-checks.yml"])).toBe(true);
     expect(shouldForceFullSuite(["package.json"])).toBe(true);
     expect(shouldForceFullSuite(["packages/core/src/store.ts"])).toBe(false);
   });

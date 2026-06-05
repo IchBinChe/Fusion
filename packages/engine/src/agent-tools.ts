@@ -11,8 +11,8 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
-import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId, stripApprovalBypassFlags } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -102,6 +102,14 @@ export const workflowCreateParams = Type.Object({
       description: "Optional node layout map keyed by node id.",
     }),
   ),
+  confirm_policy_escalation: Type.Optional(
+    Type.Boolean({
+      description:
+        "Set true to confirm binding a column to an agent whose permission policy is broader " +
+        "(more privileged) than the project default. Required when such a binding is present; " +
+        "the create is otherwise rejected naming the offending column.",
+    }),
+  ),
 });
 
 export const workflowUpdateParams = Type.Object({
@@ -115,6 +123,14 @@ export const workflowUpdateParams = Type.Object({
       description:
         "When an IR update removes a column that still holds cards, supply the column id to re-home those occupants into. " +
         "Required to resolve an OccupiedColumns conflict; the target must exist in the new IR.",
+    }),
+  ),
+  confirm_policy_escalation: Type.Optional(
+    Type.Boolean({
+      description:
+        "Set true to confirm binding a column to an agent whose permission policy is broader " +
+        "(more privileged) than the project default. Required when such a binding is present; " +
+        "the update is otherwise rejected naming the offending column.",
     }),
   ),
 });
@@ -1198,6 +1214,48 @@ export function createTaskPromoteTool(store: TaskStore, currentTaskId: string): 
 }
 
 /**
+ * Shared write-time column-agent gate for the `fn_workflow_*` tools (R11/R13).
+ * Runs the SAME `validateColumnAgentBindings` check the dashboard route runs, so
+ * an agent cannot persist a binding the UI would reject (existence +
+ * policy-escalation). Constructs a per-call AgentStore from the store's fusion
+ * dir (the connection is process-cached) and feeds it the project settings.
+ *
+ * A {@link ColumnAgentBindingError} propagates unchanged; each tool's catch
+ * surfaces its message (which names the column and, for an escalation, instructs
+ * passing `confirm_policy_escalation: true`).
+ */
+async function assertWorkflowColumnAgentBindings(
+  store: TaskStore,
+  ir: unknown,
+  confirmPolicyEscalation: boolean,
+): Promise<void> {
+  const columns = (ir as { columns?: unknown })?.columns;
+  if (!Array.isArray(columns) || !columns.some((c) => c?.agent?.agentId)) return;
+  const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+  await agentStore.init();
+  const settings = await store.getSettings();
+  await validateColumnAgentBindings({ ir, agentStore, settings, confirmPolicyEscalation });
+}
+
+/**
+ * Render a {@link ColumnAgentBindingError} as a structured tool error result.
+ * Re-phrases the escalation guidance with the tool's snake_case flag name
+ * (`confirm_policy_escalation`) rather than the route's camelCase variant.
+ */
+function columnAgentBindingErrorResult(err: ColumnAgentBindingError) {
+  const text =
+    err.reason === "policy-escalation"
+      ? `Column '${err.columnId}' binds agent '${err.agentId}' whose permission policy is broader than ` +
+        `the project default; pass confirm_policy_escalation: true to confirm.`
+      : err.message;
+  return {
+    content: [{ type: "text" as const, text: `ERROR: ${text}` }],
+    details: { columnId: err.columnId, agentId: err.agentId, reason: err.reason },
+    isError: true as const,
+  };
+}
+
+/**
  * Create a `fn_workflow_create` tool — a thin wrapper over the store's workflow
  * definition create. The IR is validated server-side; a malformed graph rejects.
  */
@@ -1225,7 +1283,11 @@ export function createWorkflowCreateTool(
       "`code` node {source, timeoutMs?} runs sandboxed TypeScript returning {outcome?, contextPatch?, customFields?}. " +
       "Declare task documents via `artifacts: [{key, title?, producedBy?, role?}]` and custom task fields via " +
       "`fields: [{id, name, type, required?, default?, options?, render?}]` (types: string/text/number/boolean/" +
-      "enum/multi-enum/date/url; render.placement card|detail|detail-section, render.badge for card chips).",
+      "enum/multi-enum/date/url; render.placement card|detail|detail-section, render.badge for card chips).\n" +
+      "Bind a column to a permanent agent via `columns[].agent: { agentId, mode }`: `mode:'defer'` applies the " +
+      "column agent only when the work carries no own agent/model settings, while `mode:'override'` supersedes " +
+      "node/task settings wholesale. The bound agent must exist; if its permission policy is broader than the " +
+      "project default, pass `confirm_policy_escalation: true` to confirm (the create is otherwise rejected).",
     parameters: workflowCreateParams,
     execute: async (_id: string, params: Static<typeof workflowCreateParams>) => {
       try {
@@ -1237,6 +1299,7 @@ export function createWorkflowCreateTool(
           ir = result.ir;
           if (result.stripped) approvalNote = " (approval-bypass flags removed)";
         }
+        await assertWorkflowColumnAgentBindings(store, ir, params.confirm_policy_escalation === true);
         const created = await store.createWorkflowDefinition({
           name: params.name,
           description: params.description,
@@ -1250,6 +1313,9 @@ export function createWorkflowCreateTool(
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
+        if (err instanceof ColumnAgentBindingError) {
+          return columnAgentBindingErrorResult(err);
+        }
         return {
           content: [{ type: "text" as const, text: `ERROR: Failed to create workflow: ${err?.message ?? err}` }],
           details: {},
@@ -1279,17 +1345,24 @@ export function createWorkflowUpdateTool(
       "occupied columns — retry with rehome_to set to a column id that survives in the new IR. " +
       "The IR accepts the same step-inversion constructs as fn_workflow_create (foreach with mode/isolation/" +
       "concurrency, step-execute, step-review, parse-steps, code nodes, rework edges, artifacts, fields). " +
-      "Editing `fields` orphans (never destroys) existing task values for removed/incompatible fields.",
+      "Editing `fields` orphans (never destroys) existing task values for removed/incompatible fields.\n" +
+      "Bind a column to a permanent agent via `columns[].agent: { agentId, mode }`: `mode:'defer'` applies the " +
+      "column agent only when the work carries no own agent/model settings, while `mode:'override'` supersedes " +
+      "node/task settings wholesale. The bound agent must exist; if its permission policy is broader than the " +
+      "project default, pass `confirm_policy_escalation: true` to confirm (the update is otherwise rejected).",
     parameters: workflowUpdateParams,
     execute: async (_id: string, params: Static<typeof workflowUpdateParams>) => {
       try {
         let approvalNote = "";
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let ir = params.ir as any;
-        if (opts?.stripApprovalFlags && ir !== undefined && ir !== null) {
-          const result = stripApprovalBypassFlags(ir);
-          ir = result.ir;
-          if (result.stripped) approvalNote = " (approval-bypass flags removed)";
+        if (ir !== undefined && ir !== null) {
+          if (opts?.stripApprovalFlags) {
+            const result = stripApprovalBypassFlags(ir);
+            ir = result.ir;
+            if (result.stripped) approvalNote = " (approval-bypass flags removed)";
+          }
+          await assertWorkflowColumnAgentBindings(store, ir, params.confirm_policy_escalation === true);
         }
         const updated = await store.updateWorkflowDefinition(params.workflow_id, {
           name: params.name,
@@ -1305,6 +1378,9 @@ export function createWorkflowUpdateTool(
         };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
+        if (err instanceof ColumnAgentBindingError) {
+          return columnAgentBindingErrorResult(err);
+        }
         // Surface the typed OccupiedColumnsError as a structured, retryable result.
         if (err?.name === "OccupiedColumnsError") {
           const occupancies = err.occupancies ?? [];

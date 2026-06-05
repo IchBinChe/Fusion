@@ -1,7 +1,7 @@
 ---
 title: "feat: Add cli-agent executor with interactive PTY sessions"
 type: feat
-status: active
+status: completed
 date: 2026-06-04
 deepened: 2026-06-04
 origin: docs/brainstorms/2026-06-04-cli-executor-requirements.md

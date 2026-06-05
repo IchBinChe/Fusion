@@ -637,6 +637,12 @@ export {
   type CliSessionManagerOptions,
   type SpawnCliSessionOptions,
 } from "./cli-agent/session-manager.js";
+// CLI Agent Executor — per-project runtime bootstrap (integration).
+export {
+  createCliAgentRuntime,
+  type CreateCliAgentRuntimeOptions,
+  type BootstrappedCliAgentRuntime,
+} from "./cli-agent/runtime.js";
 // CLI Agent Executor — resume coordinator + self-healing/stuck integration (U8).
 export {
   CliResumeCoordinator,

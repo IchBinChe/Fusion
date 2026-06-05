@@ -56,6 +56,7 @@ import {
   rehydrateFromStore as rehydrateMilestoneSliceSessions,
 } from "./milestone-slice-interview.js";
 import { ChatManager } from "./chat.js";
+import { CliChatSessionRunner } from "./cli-chat.js";
 import { stopAllDevServers } from "./dev-server-routes.js";
 import type { SkillsAdapter } from "./skills-adapter.js";
 import { createAuthMiddleware, authenticateUpgradeRequest, getDaemonToken } from "./auth-middleware.js";
@@ -1135,6 +1136,73 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     () => store.getSettings(),
     options?.engine?.getMessageStore(),
   );
+
+  // CLI Agent Executor — chat surface wiring. When the cli-session transport is
+  // supplied (the runtime is live), broker cli-backed chat sends to the PTY and
+  // route the project hub's sanitized telemetry into the runner's transcript
+  // handler. The listener is keyed per-session inside one closure so it composes
+  // safely even if other taps exist.
+  if (options?.cliSessionTransport && options.cliAgentHubResolver) {
+    try {
+      const cliTransportStore = options.cliSessionTransport.store;
+      // The transport's `manager` is typed for the attach/inject transport slice;
+      // the chat runner additionally needs `spawn`. The concrete engine
+      // CliSessionManager provides both — widen via a structural cast to the
+      // spawn/inject slice the runner consumes.
+      const spawnInject = options.cliSessionTransport.manager as unknown as {
+        spawn: (opts: {
+          adapterId: string;
+          projectId: string;
+          purpose: "chat";
+          chatSessionId: string;
+          worktreePath?: string | null;
+          resume?: { sessionId: string; nativeSessionId: string };
+        }) => Promise<{ id: string; nativeSessionId: string | null; agentState: string }>;
+        inject: (sessionId: string, text: string) => Promise<void>;
+      };
+      // The runner needs spawn/inject (manager) + a fresh session record getter
+      // (store). Compose the slice the runner expects so flush decisions read
+      // authoritative records.
+      const cliChatRunner = new CliChatSessionRunner({
+        store: chatStore,
+        manager: {
+          spawn: (opts) => spawnInject.spawn(opts),
+          inject: (sessionId, text) => spawnInject.inject(sessionId, text),
+          getSession: (sessionId) => {
+            const r = cliTransportStore.getSession(sessionId);
+            return r
+              ? { id: r.id, nativeSessionId: r.nativeSessionId, agentState: r.agentState }
+              : undefined;
+          },
+        },
+      });
+      chatManager.setCliChatRunner(cliChatRunner, options.engine?.getProjectId?.());
+      const hub = options.cliAgentHubResolver(undefined, "");
+      if (hub) {
+        hub.setEventListener((cliSessionId, event) => {
+          // Per-session routing inside one listener: map the CLI session id to its
+          // owning chat session (only chat-purpose sessions carry chatSessionId);
+          // non-chat sessions (task/validator) are ignored here.
+          const record = cliTransportStore.getSession(cliSessionId);
+          const chatSessionId = record?.chatSessionId;
+          if (!chatSessionId) return;
+          void cliChatRunner
+            .handleTelemetry(chatSessionId, {
+              kind: event.kind,
+              text: event.text,
+              nativeSessionId: event.nativeSessionId,
+            })
+            .catch(() => {
+              // best-effort: a transcript-handler throw must never break ingest.
+            });
+        });
+      }
+    } catch (err) {
+      runtimeLogger.warn?.("CLI-agent chat runner wiring failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   const runAiSessionCleanup = (maxAgeMs: number, source: "initial" | "scheduled") => {
     const result = aiSessionStore.cleanupStaleSessions(maxAgeMs);

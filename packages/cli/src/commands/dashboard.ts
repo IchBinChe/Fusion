@@ -25,6 +25,9 @@ import {
 } from "@fusion/core";
 import {
   createServer,
+  AttachTicketStore,
+  CliInputAttributionLog,
+  CliConfirmAdvanceRegistry,
   GitHubClient,
   createSkillsAdapter,
   getCliPackageVersion,
@@ -1741,9 +1744,33 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     // to createServer — routes derived from getPluginRoutes() rely on it.
     await phaseTime("pluginLoadingPromise (await)", () => pluginLoadingPromise);
 
+    // ── CLI Agent Executor: hub resolver + session transport ─────────────
+    //
+    // The hook route validates a per-session token against the project's live
+    // TelemetryHub; resolve it from that project's engine. The cli-sessions
+    // transport (REST + WS attach) is supplied from the cwd project's runtime
+    // (the canonical single-project surface) when the experimental flag is on.
+    //
+    const cliAgentHubResolver = (projectId: string | undefined, _sessionId: string) => {
+      const engine = projectId ? engineManager.getEngine(projectId) : cwdEngine;
+      return engine?.getCliAgentRuntime()?.bundle.hub;
+    };
+    const cwdCliAgentRuntime = cwdEngine?.getCliAgentRuntime();
+    const cliSessionTransport = cwdCliAgentRuntime
+      ? {
+          manager: cwdCliAgentRuntime.bundle.manager,
+          store: cwdCliAgentRuntime.bundle.store,
+          ticketStore: new AttachTicketStore(),
+          attributionLog: new CliInputAttributionLog(),
+          confirmAdvance: new CliConfirmAdvanceRegistry(),
+        }
+      : undefined;
+
     app = createServer(store, {
       engine: cwdEngine,
       engineManager,
+      cliAgentHubResolver,
+      cliSessionTransport,
       hybridExecutor,
       centralCore: centralCoreForEngine,
       authStorage: dashboardAuthStorage,

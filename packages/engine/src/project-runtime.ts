@@ -55,6 +55,14 @@ export interface ProjectRuntimeConfig {
    * Useful when the caller (e.g. dashboard.ts) owns and watches the store.
    */
   externalTaskStore?: TaskStore;
+  /**
+   * Absolute URL of the dashboard's CLI-agent hook ingestion endpoint that
+   * generated hook scripts POST to (e.g. `http://127.0.0.1:4040/api/cli-agent/hooks`).
+   * Threaded from the dashboard boot once the listening port is known. When
+   * absent, the runtime derives a localhost URL from `FUSION_DASHBOARD_PORT`
+   * (falling back to 4040).
+   */
+  cliAgentHookEndpointUrl?: string;
 }
 
 /**

@@ -315,3 +315,108 @@ describe("SessionNotificationBanner", () => {
     expect(screen.queryByText("Error Session")).not.toBeInTheDocument();
   });
 });
+
+// ── CLI agent extensions (CLI Agent Executor, U11) ──────────────────────────
+function buildCliSession(overrides: Partial<AiSessionSummary>): AiSessionSummary {
+  return {
+    id: overrides.id ?? "cli-1",
+    type: "cli-agent",
+    status: overrides.status ?? "waiting_on_input",
+    title: overrides.title ?? "Implement FN-1",
+    projectId: overrides.projectId ?? "proj-1",
+    lockedByTab: null,
+    updatedAt: overrides.updatedAt ?? new Date().toISOString(),
+    cliVariant: overrides.cliVariant,
+    cliSessionId: overrides.cliSessionId ?? "cli-1",
+  };
+}
+
+describe("SessionNotificationBanner — cli-agent (U11)", () => {
+  beforeEach(() => dismissedIds.clear());
+
+  it("renders the cli-agent type without crashing (union regression)", () => {
+    expect(() =>
+      render(
+        <SessionNotificationBanner
+          sessions={[buildCliSession({ status: "waiting_on_input" })]}
+          onResumeSession={vi.fn()}
+          onDismissSession={vi.fn()}
+          onDismissAll={vi.fn()}
+        />,
+      ),
+    ).not.toThrow();
+    expect(screen.getByText("Implement FN-1")).toBeInTheDocument();
+  });
+
+  it("waiting_on_input surfaces a banner entry; busy clears it (F2)", () => {
+    const { rerender, container } = render(
+      <SessionNotificationBanner
+        sessions={[buildCliSession({ status: "waiting_on_input" })]}
+        onResumeSession={vi.fn()}
+        onDismissSession={vi.fn()}
+        onDismissAll={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".session-notification-banner")).toBeTruthy();
+
+    rerender(
+      <SessionNotificationBanner
+        sessions={[buildCliSession({ status: "generating" as AiSessionSummary["status"] })]}
+        onResumeSession={vi.fn()}
+        onDismissSession={vi.fn()}
+        onDismissAll={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".session-notification-banner")).toBeFalsy();
+  });
+
+  it("userExited needs-attention renders pinned copy + Advance/Retry/Cancel task", () => {
+    const onCliAction = vi.fn();
+    render(
+      <SessionNotificationBanner
+        sessions={[buildCliSession({ status: "needs_attention", cliVariant: "userExited" })]}
+        onResumeSession={vi.fn()}
+        onDismissSession={vi.fn()}
+        onDismissAll={vi.fn()}
+        onCliAction={onCliAction}
+      />,
+    );
+    expect(screen.getByText("Agent exited before completing")).toBeInTheDocument();
+    // All three pinned actions render before any action removes the item.
+    expect(screen.getByText("Advance")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+    expect(screen.getByText("Cancel task")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Advance"));
+    expect(onCliAction).toHaveBeenCalledWith(expect.objectContaining({ id: "cli-1" }), "advance");
+  });
+
+  it("authFailed renders Re-authenticate / Retry", () => {
+    render(
+      <SessionNotificationBanner
+        sessions={[buildCliSession({ status: "needs_attention", cliVariant: "authFailed" })]}
+        onResumeSession={vi.fn()}
+        onDismissSession={vi.fn()}
+        onDismissAll={vi.fn()}
+        onCliAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("CLI authentication failed")).toBeInTheDocument();
+    expect(screen.getByText("Re-authenticate")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+
+  it("resume-exhausted renders Relaunch fresh / Cancel task", () => {
+    render(
+      <SessionNotificationBanner
+        sessions={[buildCliSession({ status: "needs_attention", cliVariant: "resume-exhausted" })]}
+        onResumeSession={vi.fn()}
+        onDismissSession={vi.fn()}
+        onDismissAll={vi.fn()}
+        onCliAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Couldn't resume the session")).toBeInTheDocument();
+    expect(screen.getByText("Relaunch fresh")).toBeInTheDocument();
+    expect(screen.getByText("Cancel task")).toBeInTheDocument();
+  });
+});

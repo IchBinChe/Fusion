@@ -26,7 +26,7 @@ class MockApprovalRequestStore {
 }
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   WORKTRUNK_INSTALL_PATH: "~/.fusion/bin/wt",
   WORKTRUNK_PINNED_RELEASE: {
     source: "upstream-pending-verification",

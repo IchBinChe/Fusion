@@ -69,7 +69,8 @@
     "multer": "^2.1.1",
     "node-pty": "npm:@homebridge/node-pty-prebuilt-multiarch@^0.13.1",
     "react": "^19.2.0",
-    "react-i18next": "^17.0.8"
+    "react-i18next": "^17.0.8",
+    "ws": "^8.18.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -96,6 +97,7 @@
     "@fusion/pi-llama-cpp": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.0",
+    "@types/ws": "^8.5.0",
     "@vitest/coverage-v8": "^3.1.0",
     "cross-env": "^7.0.0",
     "esbuild": "^0.25.12",

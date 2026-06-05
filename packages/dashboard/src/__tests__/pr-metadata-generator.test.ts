@@ -14,7 +14,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   createFnAgent: vi.fn(async () => ({
     session: {
       prompt: promptMock,

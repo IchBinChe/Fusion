@@ -19,6 +19,7 @@ import { mkdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import type { GlobalSettings } from "./types.js";
 import { DEFAULT_GLOBAL_SETTINGS } from "./types.js";
+import { sanitizeCliAgentsSettings } from "./settings-schema.js";
 
 function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || homedir();
@@ -193,6 +194,11 @@ export class GlobalSettingsStore {
           // null → delete this key from the merged object
           // This effectively makes it fall through to the default
           delete merged[key];
+        } else if (key === "cliAgents") {
+          // Validation at the write boundary (U15, Global Settings convention):
+          // unknown adapter ids and invalid fields are dropped before persist so
+          // a malformed `cliAgents` payload can never reach launch resolution.
+          merged[key] = sanitizeCliAgentsSettings(value);
         } else {
           // normal value → set it
           merged[key] = value;

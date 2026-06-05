@@ -194,6 +194,20 @@ A workflow graph node that reads a declared Artifact and runs a registry parser 
 ### Custom task field
 A workflow-declared, typed task field (`string | text | number | boolean | enum | multi-enum | date | url`, with enum options and render hints) whose values live in `tasks.customFields`, keyed by field id. The task model is thereby recast as core fields (title, description) + standard metadata + these workflow-defined fields. Writes pass through a single store authority (`updateTaskCustomFields`) that validates each value against the resolving workflow's schema and returns typed rejections (offending `fieldId` + `code`); agents write them via `fn_task_update`'s `custom_fields` patch. Editing a workflow's fields or switching a task's workflow orphans (never destroys) values for removed or type-incompatible ids — orphans are retained and surfaced under a detail disclosure, excluded from cards. Same id means the same field within a project; there is no cross-workflow shared field namespace.
 
+## CLI executor
+
+### CLI Executor
+The executor type `cli-agent`: a Fusion agent session (task execute step, planning, validator, CE plugin session, or chat) driven by an interactive CLI coding agent running in a Fusion-owned PTY. Distinct from the pre-existing non-interactive `cli` executor kind (the named-script/raw-command runner). Selected on the workflow node for task surfaces (per-task override) and per session for chat/CE. The board lifecycle is unchanged — the terminal is the execution surface, not a separate workflow.
+*Avoid:* `cli` as the executor identifier — that name is taken by the script-runner kind.
+
+### CLI Adapter
+The per-CLI integration that launches and understands one CLI agent. Native-telemetry adapters (Claude Code, Codex, Droid, Pi) tap the CLI's own hooks/session logs for precise agent state, structured transcript, and native session identity; the generic adapter runs any CLI command with heuristic idle detection and a raw-terminal-only view. Adapters carry their own launch configuration (command, args, permission mode) with shipped defaults.
+
+### CLI Session
+A server-owned PTY bound to a task or chat entity. It survives client disconnects, supports concurrent attach from any surface, and carries an agent state (starting, ready, busy, waiting-on-input, done, dead). Its CLI-native session ID is persisted so a dead PTY or engine restart resumes via the CLI's own resume mechanism — needs-attention is the fallback when resume fails, never the first response.
+
+### Waiting-on-input
+The CLI Session state where the agent is blocked on the human (permission prompt, clarifying question), as distinct from idle-because-done. Entering it fires the notification configured on the workflow node; the task neither advances nor fails while in it.
 ## Testing
 
 ### Merge Gate

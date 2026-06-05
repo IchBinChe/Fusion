@@ -2,9 +2,61 @@ import { describe, expect, it, vi } from "vitest";
 import type { PlanningQuestion, PlanningResponse } from "@fusion/core";
 import {
   createInteractiveAiSessionWith,
+  runCliAgentPlanning,
   type InteractiveAgentResult,
   type InteractiveAgentSession,
 } from "../interactive-ai-session.js";
+import type {
+  OneShotResult,
+  RunOneShotOptions,
+} from "../cli-agent/one-shot-session.js";
+
+describe("runCliAgentPlanning (U9 one-shot planning seam)", () => {
+  const baseOpts = {
+    manager: {} as RunOneShotOptions["manager"],
+    adapterId: "claude-code",
+    projectId: "p",
+    prompt: "plan it",
+    cwd: "/tmp",
+  };
+
+  it("maps one-shot output to the SAME PlanningResponse shape a model run produces", async () => {
+    let seenPurpose: string | undefined;
+    const fakeRun = async (opts: RunOneShotOptions): Promise<OneShotResult> => {
+      seenPurpose = opts.purpose;
+      const summary = {
+        title: "Do X",
+        description: "Plan to do X",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["X"],
+      };
+      return {
+        ok: true,
+        sessionId: "s1",
+        parsed: {},
+        text: JSON.stringify({ type: "complete", data: summary }),
+        rawOutput: "",
+      };
+    };
+    const resp: PlanningResponse = await runCliAgentPlanning(baseOpts, fakeRun as never);
+    expect(seenPurpose).toBe("planning");
+    expect(resp.type).toBe("complete");
+    if (resp.type === "complete") expect(resp.data.title).toBe("Do X");
+  });
+
+  it("throws on a failed one-shot (never returns a fabricated plan)", async () => {
+    const fakeRun = async (): Promise<OneShotResult> => ({
+      ok: false,
+      reason: "unparseable",
+      sessionId: "s1",
+      exitCode: 0,
+      stderr: "",
+      message: "no result",
+    });
+    await expect(runCliAgentPlanning(baseOpts, fakeRun as never)).rejects.toThrow(/planning/i);
+  });
+});
 
 /**
  * A scripted fake agent: each `prompt()` advances through a queue of canned

@@ -41,7 +41,7 @@ const { mockCreateFnAgent } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   createFnAgent: mockCreateFnAgent,
   createResolvedAgentSession: vi.fn(async () => ({
     session: { state: { messages: [] }, prompt: vi.fn(), dispose: vi.fn() },

@@ -26,6 +26,50 @@ export interface WorkflowIrNode {
   config?: Record<string, unknown>;
 }
 
+/**
+ * Executor kinds selectable on a prompt/execute node's `config.executor` (CLI
+ * Agent Executor, U7). The engine reads `config.executor` as an open string; this
+ * union documents the recognized values and `WorkflowNodeExecutorConfig` the
+ * fields each one consumes. `config` itself stays an open `Record` so unknown
+ * keys remain forward-compatible.
+ *
+ * - `model`     (default): run the prompt on the configured/override model.
+ * - `agent`     : run as a named agent (adopt its model + persona).
+ * - `skill`     : invoke a named skill with the prompt as input.
+ * - `cli`       : run a named project script with the prompt via env.
+ * - `cli-agent` : drive a CLI coding agent (Claude Code / Codex / Droid / Pi /
+ *                 generic) in an engine-owned PTY for the execute step. Honors
+ *                 cancel/abort/re-entry semantics and positive-completion gating.
+ */
+export type WorkflowNodeExecutorKind = "model" | "agent" | "skill" | "cli" | "cli-agent";
+
+/**
+ * The cli-agent slice of a workflow node's `config`. These ride on the open
+ * `WorkflowIrNode.config` record (read at U7's executor seam); they are NOT a
+ * separate column. The resolved values are SNAPSHOTTED at session launch — a
+ * mid-run edit to the node config applies to the next run only.
+ */
+export interface WorkflowNodeExecutorConfig {
+  /** Selected executor kind for this node. */
+  executor?: WorkflowNodeExecutorKind;
+  /** cli-agent: adapter id to drive the session (resolved against the registry). */
+  cliAdapterId?: string;
+  /**
+   * cli-agent: autonomy posture (drives privileged flags + resume caps). Stored
+   * verbatim; structured but extensible (mirrors `CliAutonomyPosture`).
+   */
+  cliAutonomy?: {
+    autoApprove?: boolean;
+    maxResumeAttempts?: number;
+    [key: string]: unknown;
+  };
+  /**
+   * cli-agent: notification settings for waiting-on-input events on this node
+   * (origin R2/R11). Opaque to the engine seam; forwarded to the dispatch.
+   */
+  cliNotify?: Record<string, unknown>;
+}
+
 export interface WorkflowIrEdge {
   from: string;
   to: string;

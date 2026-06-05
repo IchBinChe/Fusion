@@ -173,6 +173,8 @@ import { registerRuntimeProviderRoutes } from "./routes/register-runtime-provide
 import { registerFnBinaryRoutes } from "./routes/register-fn-binary-routes.js";
 import { registerUpdateCheckRoutes } from "./routes/register-update-check-routes.js";
 import { registerDiagnosticsRoutes } from "./routes/register-diagnostics-routes.js";
+import { registerCliAgentHooksRoute } from "./routes/cli-agent-hooks.js";
+import { registerCliAgentSettingsRoutes } from "./routes/cli-agent-settings.js";
 import { registerIntegratedRouters, registerIntegratedDevServerRouter } from "./routes/register-integrated-routers.js";
 import { registerApprovalRoutes } from "./routes/register-approval-routes.js";
 import { registerWorktrunkRoutes } from "./routes/register-worktrunk-routes.js";
@@ -1953,6 +1955,13 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   registerUsageRoutes(routeContext);
   registerUpdateCheckRoutes(routeContext);
   registerDiagnosticsRoutes(routeContext);
+  // CLI Agent Executor hook ingestion (U17) — per-session token auth, exempt from
+  // the daemon bearer-token middleware (hook scripts only hold the session token).
+  registerCliAgentHooksRoute(routeContext);
+
+  // CLI Agent Executor adapter settings + autonomy approval (U15) — daemon-token
+  // authed like the rest of /api (the approving principal is the token holder).
+  registerCliAgentSettingsRoutes(routeContext);
 
   // ── Automation / Scheduled Task Routes ────────────────────────────
   //

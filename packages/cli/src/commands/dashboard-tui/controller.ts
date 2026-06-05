@@ -134,6 +134,14 @@ export class DashboardTUI {
     waitUntilExit: () => Promise<unknown>;
     clear?: () => void;
   } & Record<string, unknown> | null = null;
+  // Captured at start() so a full-screen terminal attach (U14) can unmount Ink,
+  // hand the TTY to the passthrough loop, then remount the same app on detach.
+  private renderApp: (() => unknown) | null = null;
+  private inkRender: ((node: unknown) => typeof this.inkInstance) | null = null;
+  // True while a full-screen terminal attach owns the TTY; suppresses Ink
+  // re-render/resize work that would corrupt the passthrough surface.
+  private terminalAttachActive = false;
+
   // Resize listener attached at start(), detached at stop().
   private resizeListener: (() => void) | null = null;
   // Debounce timer for resize handling — coalesces tmux/ssh resize bursts.
@@ -705,6 +713,12 @@ export class DashboardTUI {
       process.stdout.write("\x1b[?1049h\x1b[H");
     }
 
+    // Capture the app element factory + render fn so openTerminalAttach() can
+    // remount the identical tree after a full-screen passthrough detaches.
+    this.renderApp = () =>
+      createElement(I18nextProvider, { i18n }, createElement(DashboardApp, { controller: this }));
+    this.inkRender = (node: unknown) => render(node as Parameters<typeof render>[0]);
+
     this.inkInstance = render(
       createElement(I18nextProvider, { i18n }, createElement(DashboardApp, { controller: this })),
     );
@@ -897,6 +911,82 @@ export class DashboardTUI {
       process.stdout.write("\x1b[?1006l\x1b[?1000l");
       process.stdout.write("\x1b[?1049l");
     }
+  }
+
+  /**
+   * Open a CLI-agent session as a full-screen passthrough (U14). Suspend-and-
+   * handoff: unmount Ink (releasing its raw-mode / stdin grip), let
+   * `attachTerminalSession` own the alt-screen + raw mode for the passthrough
+   * loop, then remount the same Ink app once the user detaches (Ctrl-]) or the
+   * session ends. Resolves after the TUI has been remounted.
+   *
+   * No-op (resolves immediately) when there's no session info / not running.
+   */
+  async openTerminalAttach(sessionId: string, projectId?: string): Promise<void> {
+    if (!this.isRunning || this.terminalAttachActive) return;
+    if (!this.renderApp || !this.inkRender) return;
+    const baseUrl = this.systemInfo?.baseUrl;
+    if (!baseUrl) return;
+    const token = this.systemInfo?.authToken;
+
+    const { attachTerminalSession } = await import("./terminal-attach.js");
+
+    this.terminalAttachActive = true;
+
+    // Unmount Ink so it relinquishes raw mode + the stdin 'data' grip; the
+    // passthrough loop installs its own listeners on the bare stdin/stdout.
+    // Also drop our mouse listener so wheel reports don't leak into the PTY.
+    this.uninstallMouseListener();
+    if (this.inkInstance) {
+      try {
+        this.inkInstance.unmount();
+      } catch {
+        /* ignore */
+      }
+      this.inkInstance = null;
+    }
+    // Leave Ink's alt-screen; the passthrough enters its own.
+    if (process.stdout?.isTTY && typeof process.stdout.write === "function") {
+      try {
+        process.stdout.write("\x1b[?1049l");
+      } catch {
+        /* ignore */
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      const handle = attachTerminalSession({
+        baseUrl,
+        token,
+        sessionId,
+        projectId,
+        stdin: process.stdin as unknown as import("./terminal-attach.js").AttachStdin,
+        stdout: process.stdout as unknown as import("./terminal-attach.js").AttachStdout,
+        onDetach: (error) => {
+          if (error) {
+            this.error(`Terminal session detached: ${error.message}`, "cli-agent");
+          }
+        },
+      });
+      void handle.done.finally(() => resolve());
+    });
+
+    // Remount Ink on a clean alt-screen.
+    this.terminalAttachActive = false;
+    if (!this.isRunning) return; // stopped while attached — leave the terminal as-is
+    if (process.stdout?.isTTY && typeof process.stdout.write === "function") {
+      try {
+        process.stdout.write("\x1b[?1049h\x1b[H");
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      this.inkInstance = this.inkRender(this.renderApp());
+    } catch {
+      /* ignore — remount best-effort */
+    }
+    this.notify();
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────

@@ -619,3 +619,121 @@ export {
   type RuntimeStatus,
   type RuntimeMetrics,
 } from "./project-runtime.js";
+// Shared node-pty native-asset loader
+export {
+  loadPtyModule,
+  ensureNodePtyNativePermissions,
+  findStagedNativeDir,
+  findInstalledNodePtyNativeDir,
+  getNativePrebuildName,
+  resetPtyModuleCacheForTests,
+} from "./pty-native.js";
+// CLI agent executor — session manager (U2), telemetry hub (U3), state machine (U3),
+// hook scripts (U17); consumed by the dashboard hook route (U17) and transport (U10).
+export {
+  CliSessionManager,
+  CliConcurrencyLimitError,
+  CliResumeUnsupportedError,
+  UnknownCliSessionError,
+  neutralizeInjection,
+  DEFAULT_SCROLLBACK_BYTES,
+  DEFAULT_CONCURRENCY_CEILING,
+  type CliSessionAttachment,
+  type CliSessionManagerOptions,
+  type SpawnCliSessionOptions,
+} from "./cli-agent/session-manager.js";
+// CLI Agent Executor — per-project runtime bootstrap (integration).
+export {
+  createCliAgentRuntime,
+  type CreateCliAgentRuntimeOptions,
+  type BootstrappedCliAgentRuntime,
+} from "./cli-agent/runtime.js";
+// CLI Agent Executor — resume coordinator + self-healing/stuck integration (U8).
+export {
+  CliResumeCoordinator,
+  DEFAULT_MAX_RESUME_ATTEMPTS,
+  DEFAULT_RESUME_BACKOFF_BASE_MS,
+  type CliResumeCoordinatorOptions,
+  type ResumeResult,
+  type ResumeDisposition,
+} from "./cli-agent/resume-coordinator.js";
+export {
+  TelemetryHub,
+  stripAnsiControl,
+  DEFAULT_MAX_EVENT_CHARS,
+  DEFAULT_MAX_EVENTS_PER_TURN,
+  DEFAULT_CHUNK_CARRY_CHARS,
+  type TelemetryHubOptions,
+  type TelemetryEvent,
+  type TelemetryEventKind,
+  type SanitizedTelemetryEvent,
+  type NotificationDispatch,
+  type TelemetryEventListener,
+} from "./cli-agent/telemetry-hub.js";
+export {
+  CliSessionStateMachine,
+  classifyTermination,
+  isResumeEligible,
+  toPersistedState,
+  type CliMachineState,
+  type CliStateChange,
+  type CliStateChangeListener,
+  type CliStateMachineOptions,
+} from "./cli-agent/state-machine.js";
+// CLI Agent Executor — per-session hook scripts / notify shim (U17).
+export {
+  writeSessionHookScripts,
+  cleanupSessionHookDir,
+  buildHookScriptContent,
+  buildNotifyShimContent,
+  HOOK_SCRIPT_NAMES,
+  type WriteSessionHookScriptsOptions,
+  type WrittenHookScripts,
+} from "./cli-agent/hook-scripts.js";
+// CLI Agent Executor — adapter registry (U2).
+export {
+  CliAdapterRegistry,
+  defaultCliAdapterRegistry,
+  UnknownCliAdapterError,
+  DuplicateCliAdapterError,
+  type CliAgentAdapter,
+  type CliAdapterCapabilities,
+  type CliAdapterElevationMarkers,
+} from "./cli-agent/adapter.js";
+// CLI Agent Executor — autonomy posture resolution + approval gate (U15).
+export {
+  resolveEffectivePosture,
+  assertAutonomyApproved,
+  CliAutonomyNotApprovedError,
+  GENERIC_ELEVATION_ENV_PATTERNS,
+  tierForCapabilities,
+  type EffectivePosture,
+  type CliElevationFlag,
+  type CliAgentResolveSettings,
+  type CliAgentNodeConfig,
+  type AutonomyApprovalLookup,
+  type ResolveEffectivePostureArgs,
+  type AssertAutonomyApprovedArgs,
+  type CliAdapterTier,
+} from "./cli-agent/autonomy.js";
+// CLI Agent Executor — bundled adapters + UI descriptors (U15).
+export {
+  BUNDLED_CLI_ADAPTERS,
+  listCliAdapterDescriptors,
+  claudeCodeAdapter,
+  codexAdapter,
+  droidAdapter,
+  piAdapter,
+  genericCliAdapter,
+  type CliAdapterDescriptor,
+} from "./cli-agent/adapters/index.js";
+// CLI Agent Executor — task ↔ session orchestration (U7).
+export {
+  CliTaskSession,
+  launchCliTaskSession,
+  killLiveTaskSessions,
+  type CliTaskOutcome,
+  type CliTaskOutcomeKind,
+  type ResolvedCliExecutorConfig,
+  type LaunchCliTaskSessionOptions,
+} from "./cli-agent/task-session.js";

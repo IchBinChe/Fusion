@@ -86,6 +86,7 @@ interface ChatSessionRow {
   updatedAt: string;
   cliSessionFile: string | null;
   inFlightGeneration: string | null;
+  cliExecutorAdapterId: string | null;
 }
 
 /** Database row shape for chat_messages. */
@@ -161,6 +162,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       updatedAt: row.updatedAt,
       cliSessionFile: row.cliSessionFile ?? null,
       inFlightGeneration: fromJson<ChatInFlightGenerationState>(row.inFlightGeneration) ?? null,
+      cliExecutorAdapterId: row.cliExecutorAdapterId ?? null,
     };
   }
 
@@ -254,11 +256,12 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       updatedAt: now,
       cliSessionFile: null,
       inFlightGeneration: null,
+      cliExecutorAdapterId: input.cliExecutorAdapterId ?? null,
     };
 
     this.db.prepare(`
-      INSERT INTO chat_sessions (id, agentId, title, status, projectId, modelProvider, modelId, createdAt, updatedAt, inFlightGeneration)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO chat_sessions (id, agentId, title, status, projectId, modelProvider, modelId, createdAt, updatedAt, inFlightGeneration, cliExecutorAdapterId)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       session.id,
       session.agentId,
@@ -270,6 +273,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       session.createdAt,
       session.updatedAt,
       null,
+      session.cliExecutorAdapterId,
     );
 
     this.db.bumpLastModified();
@@ -464,6 +468,27 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       .prepare("UPDATE chat_sessions SET cliSessionFile = ? WHERE id = ?")
       .run(cliSessionFile, id);
     this.db.bumpLastModified();
+  }
+
+  /**
+   * Set (or clear) the cli-agent adapter that backs this chat session (U12).
+   * When set, the chat is CLI-backed: composer sends route through the inject
+   * path and adapter transcript events map to chat_messages rows. Emits a
+   * session update so the client can switch to the CLI-backed rendering path.
+   *
+   * @param id - Session ID
+   * @param adapterId - cli-agent adapter id, or null to revert to the provider path
+   */
+  setCliExecutorAdapterId(id: string, adapterId: string | null): ChatSession | undefined {
+    const existing = this.getSession(id);
+    if (!existing) return undefined;
+    this.db
+      .prepare("UPDATE chat_sessions SET cliExecutorAdapterId = ?, updatedAt = ? WHERE id = ?")
+      .run(adapterId, new Date().toISOString(), id);
+    this.db.bumpLastModified();
+    const updated = this.getSession(id)!;
+    this.emit("chat:session:updated", updated);
+    return updated;
   }
 
   setInFlightGeneration(id: string, inFlightGeneration: ChatInFlightGenerationState | null): ChatSession | undefined {

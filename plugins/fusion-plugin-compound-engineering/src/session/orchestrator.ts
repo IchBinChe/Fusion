@@ -85,6 +85,20 @@ export class CeTurnTimeoutError extends Error {
   }
 }
 
+/**
+ * Which session backend a CE stage runs on (U9 seam).
+ *
+ * - `model` (default): the model-backed interactive AI session (existing path).
+ * - `cli-agent`: a CLI agent adapter, run as a read-only one-shot per stage.
+ *
+ * The CE plugin threads this choice end-to-end (deps → resolver) per the
+ * plugin-skills option-threading learning; the cli-agent one-shot wiring itself
+ * lives engine-side in `@fusion/engine` (`runOneShotSession`).
+ */
+export type CeSessionExecutor =
+  | { kind: "model" }
+  | { kind: "cli-agent"; adapterId: string };
+
 export interface OrchestratorDeps {
   ctx: PluginContext;
   /**
@@ -96,6 +110,19 @@ export interface OrchestratorDeps {
   projectRoot?: string;
   /** Override the per-turn timeout (ms). */
   turnTimeoutMs?: number;
+  /**
+   * Session backend selector (U9). Defaults to `{ kind: "model" }`. When set to
+   * `{ kind: "cli-agent", adapterId }`, CE sessions select the CLI-agent
+   * one-shot executor. Threaded through to `resolveExecutor()` so callers can
+   * route a CE stage onto a CLI adapter.
+   *
+   * DEVIATION (see U9 report): the cli-agent branch of the *live* CE stage loop
+   * (replacing the interactive factory with one-shot turns inside
+   * `startStage`/`continueStage`) is not yet wired — only the option seam and
+   * its resolver contract land here. The engine-side one-shot runner is ready;
+   * the remaining work is invoking it from the stage loop.
+   */
+  executor?: CeSessionExecutor;
 }
 
 /**
@@ -176,6 +203,7 @@ export class CeOrchestrator {
   private readonly factory: CreateInteractiveAiSessionFactory | undefined;
   private readonly projectRoot: string;
   private readonly turnTimeoutMs: number;
+  private readonly executor: CeSessionExecutor;
   /** Live in-memory session handles keyed by ce_session id. */
   private readonly live = new Map<string, InteractiveAiSession>();
   /** Mid-turn working output per session (transient; flushed to history on settle). */
@@ -194,6 +222,17 @@ export class CeOrchestrator {
     this.factory = deps.createInteractiveAiSession ?? deps.ctx.createInteractiveAiSession;
     this.projectRoot = deps.projectRoot ?? deps.ctx.taskStore.getRootDir();
     this.turnTimeoutMs = deps.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    this.executor = deps.executor ?? { kind: "model" };
+  }
+
+  /**
+   * Resolve the session backend for a CE stage (U9 seam). Threaded from
+   * `OrchestratorDeps.executor`; defaults to the model-backed interactive
+   * session. Exposed so the seam contract is directly assertable in tests and so
+   * future stage-loop wiring has a single resolution point.
+   */
+  resolveExecutor(): CeSessionExecutor {
+    return this.executor;
   }
 
   /**

@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 109;
+const SCHEMA_VERSION = 111;
 
 export { SCHEMA_VERSION };
 
@@ -1241,6 +1241,23 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     updatedAt: "TEXT NOT NULL",
     cliSessionFile: "TEXT",
     inFlightGeneration: "TEXT",
+    cliExecutorAdapterId: "TEXT",
+  },
+  cli_sessions: {
+    id: "TEXT PRIMARY KEY",
+    taskId: "TEXT",
+    chatSessionId: "TEXT",
+    purpose: "TEXT NOT NULL",
+    projectId: "TEXT NOT NULL",
+    adapterId: "TEXT NOT NULL",
+    agentState: "TEXT NOT NULL DEFAULT 'starting'",
+    terminationReason: "TEXT",
+    nativeSessionId: "TEXT",
+    resumeAttempts: "INTEGER NOT NULL DEFAULT 0",
+    autonomyPosture: "TEXT",
+    worktreePath: "TEXT",
+    createdAt: "TEXT NOT NULL",
+    updatedAt: "TEXT NOT NULL",
   },
   chat_messages: {
     id: "TEXT PRIMARY KEY",
@@ -4300,16 +4317,54 @@ export class Database {
       });
     }
 
-    // Migration 109: Workflow editor consolidation (workflow-editor-consolidation
-    // U1, KTD-1). Adds workflows.kind (fragment vs workflow discriminator;
-    // existing rows default to 'workflow') and workflow_steps.migrated_fragment_id
-    // (nullable marker stamping a step that has been migrated into a fragment, so
-    // the lazy step migration is idempotent). Additive-only, idempotent
-    // (addColumnIfMissing guards); no backfill.
+    // Migration 109: Workflow editor consolidation. Adds workflows.kind
+    // (fragment vs workflow discriminator; existing rows default 'workflow')
+    // and workflow_steps.migrated_fragment_id (idempotent lazy step migration).
+    // Additive-only, idempotent (addColumnIfMissing guards); no backfill.
     if (version < 109) {
       this.applyMigration(109, () => {
         this.addColumnIfMissing("workflows", "kind", "TEXT NOT NULL DEFAULT 'workflow'");
         this.addColumnIfMissing("workflow_steps", "migrated_fragment_id", "TEXT");
+      });
+    }
+
+    // Migration 110: Durable CLI agent session records (CLI Agent Executor U1).
+    // cli_sessions — one row per long-lived CLI agent session. agentState ∈
+    // starting|ready|busy|waitingOnInput|done|dead|needsAttention; terminationReason
+    // ∈ completed|userExited|killed|crashed|authFailed|engineDeath; purpose ∈
+    // execute|planning|validator|ce|chat. Additive-only, idempotent.
+    if (version < 110) {
+      this.applyMigration(110, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS cli_sessions (
+            id TEXT PRIMARY KEY,
+            taskId TEXT,
+            chatSessionId TEXT,
+            purpose TEXT NOT NULL,
+            projectId TEXT NOT NULL,
+            adapterId TEXT NOT NULL,
+            agentState TEXT NOT NULL DEFAULT 'starting',
+            terminationReason TEXT,
+            nativeSessionId TEXT,
+            resumeAttempts INTEGER NOT NULL DEFAULT 0,
+            autonomyPosture TEXT,
+            worktreePath TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_taskId ON cli_sessions(taskId);
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_chatSessionId ON cli_sessions(chatSessionId);
+          CREATE INDEX IF NOT EXISTS idx_cli_sessions_project_state ON cli_sessions(projectId, agentState);
+        `);
+      });
+    }
+
+    // Migration 111: per-chat-session cli-agent adapter selection (U12).
+    if (version < 111) {
+      this.applyMigration(111, () => {
+        if (this.hasTable("chat_sessions")) {
+          this.addColumnIfMissing("chat_sessions", "cliExecutorAdapterId", "TEXT");
+        }
       });
     }
 

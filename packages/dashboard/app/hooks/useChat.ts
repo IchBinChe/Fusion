@@ -32,6 +32,14 @@ export interface ChatSessionInfo {
   lastMessageAt?: string;
   isGenerating?: boolean;
   inFlightGeneration?: ChatInFlightGenerationState | null;
+  /**
+   * When set, this chat session is driven by a cli-agent executor (U12). The
+   * message-pane + composer region is delegated to <CliChatSurface> instead of
+   * the standard provider transcript/composer.
+   */
+  cliExecutorAdapterId?: string | null;
+  /** Native CLI session id linkage (used as the terminal attach id for resume). */
+  cliSessionFile?: string | null;
 }
 
 // Re-export shared chat types so existing consumers (`import { ChatMessageInfo } from "../hooks/useChat"`)

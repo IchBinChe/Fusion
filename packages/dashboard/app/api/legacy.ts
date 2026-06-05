@@ -8496,10 +8496,36 @@ export function reorderTodoItems(listId: string, itemIds: string[], projectId?: 
 
 // ── AI Sessions (Background Tasks) ─────────────────────────────────────────
 
+/**
+ * Needs-attention variants for a CLI agent session (CLI Agent Executor, U11).
+ * Each carries pinned banner copy + action verbs:
+ *  - userExited        → Advance / Retry / Cancel task
+ *  - authFailed        → Re-authenticate / Retry
+ *  - resume-exhausted  → Relaunch fresh / Cancel task
+ */
+export type CliNeedsAttentionVariant = "userExited" | "authFailed" | "resume-exhausted";
+
 export interface AiSessionSummary {
   id: string;
-  type: "planning" | "subtask" | "mission_interview" | "milestone_interview" | "slice_interview";
-  status: "draft" | "generating" | "awaiting_input" | "complete" | "error";
+  type:
+    | "planning"
+    | "subtask"
+    | "mission_interview"
+    | "milestone_interview"
+    | "slice_interview"
+    | "cli-agent";
+  status:
+    | "draft"
+    | "generating"
+    | "awaiting_input"
+    | "complete"
+    | "error"
+    | "waiting_on_input"
+    | "needs_attention";
+  /** For cli-agent sessions: which needs-attention variant (drives pinned copy/actions). */
+  cliVariant?: CliNeedsAttentionVariant;
+  /** Underlying CLI session id, for action wiring (confirm-advance / re-auth / etc.). */
+  cliSessionId?: string;
   title: string;
   /** Server-derived preview of the in-progress initialPlan; only set for draft planning sessions. */
   preview?: string;

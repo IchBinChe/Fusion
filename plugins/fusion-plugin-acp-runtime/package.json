@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.24.0",
+    "@fusion/core": "workspace:*",
     "@fusion/plugin-sdk": "workspace:*"
   },
   "peerDependencies": {

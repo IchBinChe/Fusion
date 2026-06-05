@@ -1,4 +1,4 @@
-import type { GlobalSettings, ProjectSettings, Settings } from "./types.js";
+import type { CliAgentSettings, GlobalSettings, ProjectSettings, Settings } from "./types.js";
 
 export interface MergeRequestContractShadowSettingsSource {
   mergeRequestContractShadowEnabled?: boolean;
@@ -180,6 +180,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   },
   owningNodeHandoffPolicy: "reassign-to-local",
   experimentalFeatures: {},
+  cliAgents: {},
 } satisfies CompleteSettings<GlobalSettings>;
 
 /** Default values for project-level settings. */
@@ -188,6 +189,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   globalPauseReason: undefined,
   defaultWorkflowId: undefined,
   approvedWorkflowCliCommands: undefined,
+  approvedCliAutonomyAdapters: undefined,
   enginePaused: false,
   maxConcurrent: 2,
   maxTriageConcurrent: 2,
@@ -520,4 +522,82 @@ export function resolvePersistAgentThinkingLog(
   if (typeof granular === "boolean") return granular;
   if (typeof settings?.persistAgentThinkingLog === "boolean") return settings.persistAgentThinkingLog;
   return false;
+}
+
+// ── CLI-agent settings sanitization (U15) ───────────────────────────────────
+
+/** Adapter ids accepted in `cliAgents`. Unknown ids are dropped at the write
+ *  boundary so a settings file cannot carry config for non-existent adapters. */
+export const CLI_AGENT_ADAPTER_IDS = Object.freeze([
+  "claude-code",
+  "codex",
+  "droid",
+  "pi",
+  "generic",
+] as const);
+
+/** Autonomy modes accepted in a `CliAgentSettings` entry. */
+export const CLI_AGENT_AUTONOMY_MODES = Object.freeze(["default", "elevated"] as const);
+
+function sanitizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const cleaned = value
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/**
+ * Sanitize a single adapter's launch settings (U15). Drops unknown fields and
+ * invalid values; returns `undefined` when nothing survives (so the caller can
+ * omit an empty entry). Pure — no I/O.
+ *
+ * Validation rules:
+ * - `commandOverride`: non-empty trimmed string, else dropped.
+ * - `extraArgs` / `envAdditions`: arrays of non-empty trimmed strings, else dropped.
+ * - `autonomyMode`: one of CLI_AGENT_AUTONOMY_MODES, else dropped (falls back to
+ *   the adapter baseline at resolution time).
+ */
+export function sanitizeCliAgentSettings(value: unknown): CliAgentSettings | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const out: CliAgentSettings = {};
+
+  if (typeof input.commandOverride === "string") {
+    const trimmed = input.commandOverride.trim();
+    if (trimmed.length > 0) out.commandOverride = trimmed;
+  }
+
+  const extraArgs = sanitizeStringArray(input.extraArgs);
+  if (extraArgs) out.extraArgs = extraArgs;
+
+  const envAdditions = sanitizeStringArray(input.envAdditions);
+  if (envAdditions) out.envAdditions = envAdditions;
+
+  if (
+    typeof input.autonomyMode === "string" &&
+    (CLI_AGENT_AUTONOMY_MODES as readonly string[]).includes(input.autonomyMode)
+  ) {
+    out.autonomyMode = input.autonomyMode as CliAgentSettings["autonomyMode"];
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Sanitize the whole `cliAgents` map at the write boundary (U15). Drops unknown
+ * adapter ids and any entry that sanitizes to nothing. Returns a fresh object;
+ * always returns an object (possibly empty) so the field round-trips cleanly.
+ */
+export function sanitizeCliAgentsSettings(value: unknown): Record<string, CliAgentSettings> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const input = value as Record<string, unknown>;
+  const out: Record<string, CliAgentSettings> = {};
+  for (const adapterId of CLI_AGENT_ADAPTER_IDS) {
+    if (!(adapterId in input)) continue;
+    const entry = sanitizeCliAgentSettings(input[adapterId]);
+    if (entry) out[adapterId] = entry;
+  }
+  return out;
 }

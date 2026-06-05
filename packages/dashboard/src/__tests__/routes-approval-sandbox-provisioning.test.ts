@@ -55,7 +55,7 @@ vi.mock("@fusion/core", async () => {
 });
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   executeApprovedAgentProvisioning: vi.fn(async () => undefined),
 }));
 

@@ -1135,7 +1135,8 @@
       "missionInterview": "Mission Interview",
       "planning": "Planning",
       "sliceInterview": "Slice Interview",
-      "subtask": "Subtask Breakdown"
+      "subtask": "Subtask Breakdown",
+      "cliAgent": "CLI Agent"
     }
   },
   "board": {
@@ -4891,7 +4892,20 @@
     "headerErrorSingular_other": "",
     "regionLabel": "AI sessions needing input or failed",
     "resume": "Resume",
-    "retry": "Retry"
+    "retry": "Retry",
+    "typeLabel": {
+      "cliAgent": "CLI Agent"
+    },
+    "cli": {
+      "advance": "Advance",
+      "retry": "Retry",
+      "cancelTask": "Cancel task",
+      "reauthenticate": "Re-authenticate",
+      "relaunch": "Relaunch fresh",
+      "userExited": "Agent exited before completing",
+      "authFailed": "CLI authentication failed",
+      "resumeExhausted": "Couldn't resume the session"
+    }
   },
   "settings": {
     "actions": {
@@ -5008,7 +5022,8 @@
       "tooltip": {
         "global": "Shared across all projects",
         "project": "Specific to this project"
-      }
+      },
+      "cliAgents": "CLI Agents"
     },
     "notifications": {
       "sending": "Sending…",
@@ -5051,6 +5066,34 @@
       "openApprovals": "Open Approvals",
       "selectWorktreesDir": "Select worktrees directory",
       "tryAgain": "Try again"
+    },
+    "cliAgents": {
+      "heading": "CLI Agents",
+      "description": "Per-adapter launch configuration for CLI coding agents driven in engine-owned terminals.",
+      "adapterLabel": "Adapter",
+      "tier": {
+        "native": "native",
+        "hybrid": "hybrid",
+        "generic": "generic"
+      },
+      "commandLabel": "Command override",
+      "commandHelp": "Path or name of the binary to launch. A non-default value is treated as privileged and requires autonomy approval.",
+      "extraArgsLabel": "Extra arguments",
+      "extraArgsHelp": "Appended after the adapter's computed arguments (space-separated). Bypass flags here are detected and gated.",
+      "envLabel": "Environment variable additions",
+      "envHelp": "Comma-separated variable NAMES forwarded from the parent process. Service credentials (FUSION_*) are always excluded.",
+      "autonomyLabel": "Autonomy mode",
+      "autonomyHelp": "Elevated autonomy requires a per-project approval before the agent can launch.",
+      "approvedNote": "Elevated autonomy is approved for this project.",
+      "autonomy": {
+        "default": "Default (request approvals)",
+        "elevated": "Elevated (bypass approvals)"
+      },
+      "elevatedConfirmTitle": "Approve elevated autonomy?",
+      "elevatedConfirmBody": "Elevated autonomy lets this CLI agent bypass per-step approvals (e.g. --dangerously-skip-permissions). It can modify files and run commands without pausing. Approve only if you trust this adapter for this project.",
+      "elevatedConfirmAction": "Approve elevated autonomy",
+      "saveFailed": "Failed to save CLI agent settings",
+      "approveFailed": "Failed to record autonomy approval"
     }
   },
   "setup": {
@@ -6046,7 +6089,8 @@
       "review": "Review",
       "routing": "Routing",
       "stats": "Stats",
-      "workflow": "Workflow"
+      "workflow": "Workflow",
+      "terminal": "Terminal"
     },
     "timedDuration": "Timed duration",
     "timestamps": {
@@ -6069,7 +6113,10 @@
     },
     "workflowRuntime": "Workflow runtime",
     "workflowTimedSteps": "Workflow timed steps",
-    "yes": "Yes"
+    "yes": "Yes",
+    "terminal": {
+      "loading": "Loading terminal…"
+    }
   },
   "taskDocuments": {
     "cancel": "Cancel",
@@ -6453,7 +6500,11 @@
     "usingDefault": "Using default",
     "viewDependency": "Click to view {{depId}}",
     "workflow": "workflow",
-    "workflowCheck": "Workflow check"
+    "workflowCheck": "Workflow check",
+    "cliWaitingOnInput": "Waiting on input",
+    "cliWaitingOnInputTitle": "The CLI agent is waiting for your input",
+    "cliNeedsAttention": "Needs attention",
+    "cliNeedsAttentionTitle": "The CLI agent needs your attention"
   },
   "terminal": {
     "clear": "Clear",
@@ -6925,5 +6976,53 @@
     "installRequestTitle": "Worktrunk install request",
     "sha256": "SHA-256",
     "version": "Version"
+  },
+  "taskFields": {
+    "unset": "—",
+    "moreFields": "Additional fields",
+    "orphaned": "Orphaned fields",
+    "saveFailed": "Failed to save field"
+  },
+  "workflowEditor": {
+    "cliAgent": {
+      "executorOption": "CLI agent",
+      "adapterLabel": "CLI adapter",
+      "adapterPlaceholder": "— select adapter —",
+      "adapterNote": "Drives a CLI coding agent in an engine-owned terminal for this step.",
+      "tier": {
+        "native": "native",
+        "hybrid": "hybrid",
+        "generic": "generic"
+      },
+      "autonomyLabel": "Elevated autonomy (bypass approvals)",
+      "autonomyNote": "Elevated autonomy requires a per-project approval before the agent can launch. Until approved, launches with elevated posture fail.",
+      "notifyLabel": "Waiting-on-input notification",
+      "notify": {
+        "banner": "In-app banner",
+        "bannerNotify": "Banner + push notification"
+      },
+      "notifyNote": "How you are alerted when the agent pauses waiting for input on this step."
+    }
+  },
+  "cliTerminal": {
+    "replayIdle": "Session idle",
+    "replayEnded": "Session ended",
+    "readOnly": "Read-only",
+    "postureResolved": "Resolved posture",
+    "postureBaseline": "Baseline",
+    "adapterSettings": "Adapter settings",
+    "advancePrompt": "This session looks idle — advance to review?",
+    "advance": "Advance",
+    "notYet": "Not yet",
+    "mobileInputPlaceholder": "Type to send to the session…",
+    "mobileSend": "Send",
+    "mobileKeyEsc": "Send Escape",
+    "mobileKeyTab": "Send Tab",
+    "mobileKeyCtrlC": "Send Ctrl-C",
+    "mobileKeyCtrl": "Sticky Ctrl modifier",
+    "mobileKeyArrowUp": "Cursor up",
+    "mobileKeyArrowDown": "Cursor down",
+    "mobileKeyArrowLeft": "Cursor left",
+    "mobileKeyArrowRight": "Cursor right"
   }
 }

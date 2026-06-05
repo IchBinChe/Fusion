@@ -1,6 +1,6 @@
 import "./BackgroundTasksIndicator.css";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Lightbulb, Layers, Target, Loader2, HelpCircle, X, Lock, AlertCircle } from "lucide-react";
+import { Lightbulb, Layers, Target, Terminal, Loader2, HelpCircle, X, Lock, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AiSessionSummary } from "../api";
 import { useAiSessionSync } from "../hooks/useAiSessionSync";
@@ -21,6 +21,7 @@ const TYPE_ICONS = {
   mission_interview: Target,
   milestone_interview: Target,
   slice_interview: Target,
+  "cli-agent": Terminal,
 } as const;
 
 export function BackgroundTasksIndicator({
@@ -49,6 +50,7 @@ export function BackgroundTasksIndicator({
       mission_interview: t("backgroundTasks.typeLabel.missionInterview", "Mission Interview"),
       milestone_interview: t("backgroundTasks.typeLabel.milestoneInterview", "Milestone Interview"),
       slice_interview: t("backgroundTasks.typeLabel.sliceInterview", "Slice Interview"),
+      "cli-agent": t("backgroundTasks.typeLabel.cliAgent", "CLI Agent"),
     }),
     [t],
   );

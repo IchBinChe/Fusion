@@ -86,7 +86,7 @@ vi.mock("@fusion/core", async (importOriginal) => ({
 const executeApprovedWorktrunkInstall = vi.fn(async () => ({ binaryPath: "~/.fusion/bin/wt", source: "installed-release" }));
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   executeApprovedAgentProvisioning,
   executeApprovedWorktrunkInstall,
 }));

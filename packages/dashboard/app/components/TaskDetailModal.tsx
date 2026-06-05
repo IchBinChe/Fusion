@@ -21,7 +21,7 @@ import {
   resolveTaskPlanningModel,
   resolveTaskValidatorModel,
 } from "@fusion/core";
-import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, recoverBranchBinding, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, recoverBranchBinding, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, api } from "../api";
 import type { RecoverBranchBindingOutcome, WorkflowFieldDefinition, CustomFieldRejection } from "../api";
 import { ApiRequestError } from "../api";
 import { TaskFieldsSection } from "./TaskFieldsSection";
@@ -46,6 +46,7 @@ import { BranchGroupCard } from "./BranchGroupCard";
 import { PluginSlot } from "./PluginSlot";
 import { ProviderIcon } from "./ProviderIcon";
 import { subscribeSse } from "../sse-bus";
+import type { SessionTerminalMode, SessionTerminalPosture } from "./SessionTerminal";
 import { usePluginUiSlots } from "../hooks/usePluginUiSlots";
 import { appendTokenQuery } from "../auth";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
@@ -281,7 +282,69 @@ function formatDurationCompact(ageMs: number): string {
   return `${minutes}m`;
 }
 
-type TabId = "definition" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | `plugin-${string}`;
+type TabId = "definition" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
+
+// Lazy-load the terminal so xterm + addons stay out of the main bundle (U11).
+const LazySessionTerminal = lazy(() =>
+  import("./SessionTerminal").then((m) => ({ default: m.SessionTerminal })),
+);
+
+/** CLI session record fields the terminal tab needs (mirrors @fusion/core CliSession). */
+export interface CliSessionSummaryRecord {
+  id: string;
+  taskId: string | null;
+  projectId: string;
+  adapterId: string;
+  agentState:
+    | "starting"
+    | "ready"
+    | "busy"
+    | "waitingOnInput"
+    | "done"
+    | "dead"
+    | "needsAttention";
+  terminationReason: string | null;
+  autonomyPosture?: Record<string, unknown> | null;
+}
+
+type CliTabVisibility =
+  | { kind: "hidden" }
+  | { kind: "live"; readOnly: boolean; mode: SessionTerminalMode; showConfirmAdvance: boolean }
+  | { kind: "replay"; mode: SessionTerminalMode };
+
+/**
+ * Tab visibility matrix (U11):
+ *  - starting/ready/busy/waitingOnInput → live terminal
+ *  - one-shot (planning/validator) live → read-only live + badge
+ *  - done (resumable) → replay "session idle"
+ *  - dead/needsAttention (PTY reaped) → replay "session ended"
+ *  - no recorded session → hidden
+ */
+export function deriveCliTabVisibility(
+  session: CliSessionSummaryRecord | null,
+  opts: { oneShot?: boolean; genericIdle?: boolean } = {},
+): CliTabVisibility {
+  if (!session) return { kind: "hidden" };
+  const live =
+    session.agentState === "starting" ||
+    session.agentState === "ready" ||
+    session.agentState === "busy" ||
+    session.agentState === "waitingOnInput";
+  if (live) {
+    return {
+      kind: "live",
+      readOnly: Boolean(opts.oneShot),
+      mode: "live",
+      showConfirmAdvance: Boolean(opts.genericIdle),
+    };
+  }
+  if (session.agentState === "done") {
+    // execute-done but resumable → scrollback replay with a "session idle" header.
+    return { kind: "replay", mode: "idle" };
+  }
+  // dead / needsAttention → PTY reaped → "session ended".
+  return { kind: "replay", mode: "ended" };
+}
 
 export interface TaskDetailModalProps {
   task: Task | TaskDetail;
@@ -493,6 +556,9 @@ export function TaskDetailContent({
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
   const [activeTab, setActiveTab] = useState<TabId>(initialTab === "retries" ? "definition" : initialTab);
+
+  // ── CLI agent session (U11) ────────────────────────────────────────────────
+  const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
 
   // ── Async detail loading ──────────────────────────────────────────────────
   // When opened optimistically with a Task (no prompt), fetch the full
@@ -757,6 +823,56 @@ export function TaskDetailContent({
       ? pluginTabs.find((tab) => tab.tabId === activeTab) ?? null
       : null;
 
+  // ── CLI terminal tab visibility + posture (U11) ────────────────────────────
+  const cliOneShot =
+    cliSession?.adapterId != null &&
+    (cliSession?.autonomyPosture?.purpose === "planning" ||
+      cliSession?.autonomyPosture?.purpose === "validator" ||
+      cliSession?.autonomyPosture?.readOnly === true);
+  const cliGenericIdle = cliSession?.autonomyPosture?.genericIdle === true;
+  const cliTabVisibility = useMemo(
+    () =>
+      deriveCliTabVisibility(cliSession, {
+        oneShot: cliOneShot,
+        genericIdle: cliGenericIdle,
+      }),
+    [cliSession, cliOneShot, cliGenericIdle],
+  );
+  const showCliTab = cliTabVisibility.kind !== "hidden";
+  const cliPosture: SessionTerminalPosture | undefined = useMemo(() => {
+    if (!cliSession) return undefined;
+    const p = cliSession.autonomyPosture ?? {};
+    const flags = Array.isArray(p.elevatedFlags) ? (p.elevatedFlags as string[]) : undefined;
+    return {
+      adapterName: (p.adapterName as string) ?? cliSession.adapterId,
+      mode: (p.mode as string) ?? (p.autoApprove ? "auto-approve" : undefined),
+      elevated: p.elevated === true,
+      elevatedFlags: flags,
+      resolved: Array.isArray(p.resolved) ? (p.resolved as string[]) : undefined,
+    };
+  }, [cliSession]);
+
+  // Confirm-advance handler — POST /api/cli-sessions/:id/confirm-advance.
+  const handleConfirmAdvance = useCallback(
+    async (decision: "advance" | "not-yet") => {
+      if (!cliSession) return;
+      try {
+        await api(`/cli-sessions/${encodeURIComponent(cliSession.id)}/confirm-advance`, {
+          method: "POST",
+          body: JSON.stringify({ decision, ...(projectId ? { projectId } : {}) }),
+        });
+      } catch {
+        /* surfaced via the strip's disabled state reset */
+      }
+    },
+    [cliSession, projectId],
+  );
+
+  // If the terminal tab is active but the session disappears, fall back.
+  useEffect(() => {
+    if (activeTab === "terminal" && !showCliTab) setActiveTab("definition");
+  }, [activeTab, showCliTab]);
+
   // Track mount state to avoid setting state on unmounted component
   useEffect(() => {
     mountedRef.current = true;
@@ -885,6 +1001,76 @@ export function TaskDetailContent({
       events: { "task:updated": handleTaskUpdated },
     });
   }, [activeTab, task.id, projectId]);
+
+  // Load the CLI agent session for this task (drives the terminal tab + matrix).
+  useEffect(() => {
+    let cancelled = false;
+    const search = new URLSearchParams({ taskId: task.id });
+    if (projectId) search.set("projectId", projectId);
+    void api<{ sessions: CliSessionSummaryRecord[] }>(`/cli-sessions?${search.toString()}`)
+      .then((res) => {
+        if (cancelled) return;
+        // Most-recent session for the task (the list is store-ordered).
+        const sessions = res.sessions ?? [];
+        setCliSession(sessions.length > 0 ? sessions[sessions.length - 1] : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCliSession(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id, projectId]);
+
+  // Live CLI session state via SSE — MERGE payload fields onto the record
+  // (never wholesale-replace: the list fetch carries enriched fields the SSE
+  // payload omits, e.g. adapterId / autonomyPosture).
+  useEffect(() => {
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const handleCliState = (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data) as {
+          sessionId: string;
+          taskId: string | null;
+          state: string;
+          terminationReason?: string | null;
+        };
+        if (payload.taskId !== task.id) return;
+        setCliSession((prev) => {
+          if (!prev || prev.id !== payload.sessionId) {
+            // Unknown/new session for this task — keep the enriched record from
+            // the list fetch as the source of truth; ignore until it loads.
+            if (!prev) return prev;
+          }
+          // The machine "idle"/"resuming" states map onto persisted enums; the
+          // card/tab only need the persisted set, so coerce here.
+          const next = { ...prev } as CliSessionSummaryRecord;
+          if (
+            payload.state === "starting" ||
+            payload.state === "ready" ||
+            payload.state === "busy" ||
+            payload.state === "waitingOnInput" ||
+            payload.state === "done" ||
+            payload.state === "dead" ||
+            payload.state === "needsAttention"
+          ) {
+            next.agentState = payload.state;
+          } else if (payload.state === "idle" || payload.state === "resuming") {
+            next.agentState = "busy";
+          }
+          if (payload.terminationReason !== undefined) {
+            next.terminationReason = payload.terminationReason ?? null;
+          }
+          return next;
+        });
+      } catch {
+        /* skip malformed events */
+      }
+    };
+    return subscribeSse(`/api/events${query}`, {
+      events: { "cli:session:state": handleCliState },
+    });
+  }, [task.id, projectId]);
 
   // Reset dependency search when dropdown closes
   useEffect(() => {
@@ -2825,6 +3011,14 @@ export function TaskDetailContent({
             >
               {t("taskDetail.tabs.routing", "Routing")}
             </button>
+            {showCliTab && (
+              <button
+                className={`detail-tab${activeTab === "terminal" ? " detail-tab-active" : ""}`}
+                onClick={() => setActiveTab("terminal")}
+              >
+                {t("taskDetail.tabs.terminal", "Terminal")}
+              </button>
+            )}
             {/* Plugin tabs */}
             {pluginTabs.map(({ entry, tabId }) => {
               return (
@@ -3115,6 +3309,27 @@ export function TaskDetailContent({
                 addToast={addToast}
                 onTaskUpdated={onTaskUpdated}
               />
+            </div>
+          ) : activeTab === "terminal" ? (
+            <div className="detail-section detail-section--terminal">
+              {cliSession && cliTabVisibility.kind !== "hidden" ? (
+                <Suspense fallback={<div className="detail-loading">{t("taskDetail.terminal.loading", "Loading terminal…")}</div>}>
+                  <LazySessionTerminal
+                    sessionId={cliSession.id}
+                    projectId={projectId}
+                    posture={cliPosture}
+                    readOnly={
+                      cliTabVisibility.kind === "replay" ||
+                      (cliTabVisibility.kind === "live" && cliTabVisibility.readOnly)
+                    }
+                    mode={cliTabVisibility.mode}
+                    showConfirmAdvance={
+                      cliTabVisibility.kind === "live" && cliTabVisibility.showConfirmAdvance
+                    }
+                    onConfirmAdvance={handleConfirmAdvance}
+                  />
+                </Suspense>
+              ) : null}
             </div>
           ) : (
           <>

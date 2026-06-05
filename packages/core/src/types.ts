@@ -2967,6 +2967,39 @@ export interface GlobalSettings {
    *
    *  Default: {} (empty object — no experimental features enabled). */
   experimentalFeatures?: Record<string, boolean>;
+  /** Per-adapter CLI-agent launch configuration (CLI Agent Executor, U15).
+   *  Keyed by adapter id (e.g. `"claude-code"`, `"codex"`, `"generic"`). Each
+   *  entry carries operator overrides layered over the adapter's shipped
+   *  defaults: a command override, extra args, an autonomy mode, and env
+   *  allowlist additions. Validated + sanitized at the write boundary
+   *  (`sanitizeCliAgentsSettings`); invalid entries/fields are dropped.
+   *
+   *  Note: elevation expressed through ANY of these channels (autonomy mode,
+   *  extra args, env additions, a non-default command override) is gated by a
+   *  stored per-project approval at launch — see `@fusion/engine`'s
+   *  `resolveEffectivePosture`. These settings only describe *intent*; the
+   *  engine resolves and enforces posture. Default: {} (no overrides). */
+  cliAgents?: Record<string, CliAgentSettings>;
+}
+
+/** Operator launch config for one CLI-agent adapter (U15). Values are layered
+ *  over the adapter's shipped defaults at launch. All fields optional; an empty
+ *  object means "use shipped defaults". */
+export interface CliAgentSettings {
+  /** Override for the binary path/name to invoke. A non-default value is treated
+   *  as privileged (routes through the autonomy approval gate). */
+  commandOverride?: string;
+  /** Extra args appended after the adapter's computed base args. Free-form; the
+   *  engine's elevation detector scans these for bypass markers. */
+  extraArgs?: string[];
+  /** Autonomy mode above the adapter baseline. `"default"` is the baseline (no
+   *  elevation); `"elevated"` requests bypass-permissions-style autonomy and is
+   *  gated. Kept as a string enum so adapters can map it to their own flags. */
+  autonomyMode?: "default" | "elevated";
+  /** Additional env var KEYS to forward from the parent process to the child.
+   *  Names only (never values); the engine copies these from `process.env`.
+   *  Service credentials (`FUSION_*`) are always excluded regardless. */
+  envAdditions?: string[];
 }
 
 export type RemoteAccessProvider = "tailscale" | "cloudflare";
@@ -3056,6 +3089,12 @@ export interface ProjectSettings {
    *  (trust-on-first-use). A node's command must appear here before it runs;
    *  named scripts (settings.scripts) never require approval. */
   approvedWorkflowCliCommands?: string[];
+  /** CLI-agent adapter ids the project owner has approved for ELEVATED autonomy
+   *  (CLI Agent Executor, U15). An adapter must appear here before a launch whose
+   *  resolved posture is elevated (bypass-permissions-style) is permitted; an
+   *  unapproved elevation fails the launch with a typed error. Approving
+   *  principal in v1: the daemon-token holder (the single workspace owner). */
+  approvedCliAutonomyAdapters?: string[];
   /** Engine pause (soft pause): when true, the scheduler and triage
    *  processor stop dispatching **new** work (scheduling, triage
    *  specification, and auto-merge), but currently running agent sessions
@@ -3916,6 +3955,10 @@ export {
   isProjectSettingsKey,
   isMergeRequestContractShadowEnabled,
   resolvePersistAgentThinkingLog,
+  sanitizeCliAgentSettings,
+  sanitizeCliAgentsSettings,
+  CLI_AGENT_ADAPTER_IDS,
+  CLI_AGENT_AUTONOMY_MODES,
 } from "./settings-schema.js";
 
 export interface BoardConfig {

@@ -187,6 +187,40 @@ export function parseAgentResponse(text: string): PlanningResponse {
   throw new Error("AI returned an invalid response structure.");
 }
 
+/**
+ * CLI-agent planning one-shot seam (U9).
+ *
+ * Runs a CLI-agent one-shot in `planning` purpose and maps its output into the
+ * SAME `PlanningResponse` shape a model-backed planning run produces — so the
+ * downstream planning flow cannot tell a CLI-backed run from a model run. The
+ * one-shot runner is injected (`run`) so this is testable without a live PTY.
+ *
+ * NOTE (deviation, see report): the full planning *loop* (multi-turn
+ * question/answer over a resumable interactive session) is interactive, not
+ * one-shot — a one-shot planning run produces a single terminal response. This
+ * seam covers the single-shot "produce a plan" case and proves output-shape
+ * compatibility (`parseAgentResponse`). Wiring it into the resumable planning
+ * loop's executor resolution remains TODO when planning gains a CLI executor
+ * selector.
+ */
+export async function runCliAgentPlanning(
+  opts: Omit<
+    import("./cli-agent/one-shot-session.js").RunOneShotOptions,
+    "purpose"
+  >,
+  run: typeof import("./cli-agent/one-shot-session.js").runOneShotSession,
+): Promise<PlanningResponse> {
+  const result = await run({ ...opts, purpose: "planning" });
+  if (!result.ok) {
+    throw new Error(
+      `CLI-agent planning one-shot failed (${result.reason}): ${result.message}`,
+    );
+  }
+  // Map to the planning flow's shape exactly as a model run would: parse the
+  // adapter's textual result through the canonical planning parser.
+  return parseAgentResponse(result.text || result.rawOutput);
+}
+
 /** Extract text from the last assistant message (string | text blocks | thinking fallback). */
 function extractLastAssistantText(session: InteractiveAgentSession): string {
   const lastMessage = session.state.messages.filter((m) => m.role === "assistant").pop();

@@ -38,7 +38,7 @@ class MockApprovalRequestStore {
 vi.mock("@fusion/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@fusion/core")>()), ApprovalRequestStore: MockApprovalRequestStore, AgentStore: class { async init() {} async getAgent() { return null; } } }));
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   executeApprovedAgentProvisioning: vi.fn(),
   executeApprovedWorktrunkInstall: vi.fn(),
   assertNoSecretPlaintext: (metadata?: Record<string, unknown>) => {

@@ -1,22 +1,35 @@
 import "./SessionNotificationBanner.css";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Lightbulb, Layers, Target, X } from "lucide-react";
-import type { AiSessionSummary } from "../api";
+import { AlertCircle, Lightbulb, Layers, Target, Terminal, X } from "lucide-react";
+import type { AiSessionSummary, CliNeedsAttentionVariant } from "../api";
+
+type CliActionId = "advance" | "retry" | "cancel" | "reauthenticate" | "relaunch";
 
 interface SessionNotificationBannerProps {
   sessions: AiSessionSummary[];
   onResumeSession: (session: AiSessionSummary) => void;
   onDismissSession: (id: string) => void;
   onDismissAll: () => void;
+  /**
+   * CLI agent needs-attention / confirm-advance actions (CLI Agent Executor,
+   * U11). `advance` wires the userExited "Advance" verb + generic-tier
+   * confirm-advance; the others map to existing endpoints where present, else
+   * are no-op callbacks marked TODO-wire by the caller.
+   */
+  onCliAction?: (session: AiSessionSummary, action: CliActionId) => void;
 }
 
+// `cli-agent` extends the previously-closed union: a SINGLE Terminal icon for
+// all adapters (reusing the banner without this entry crashes on the unknown
+// type — the union-regression the U11 tests guard).
 const TYPE_ICONS = {
   planning: Lightbulb,
   subtask: Layers,
   mission_interview: Target,
   milestone_interview: Target,
   slice_interview: Target,
+  "cli-agent": Terminal,
 } as const;
 
 const TYPE_LABEL_KEYS: Record<keyof typeof TYPE_ICONS, { key: string; defaultVal: string }> = {
@@ -25,6 +38,38 @@ const TYPE_LABEL_KEYS: Record<keyof typeof TYPE_ICONS, { key: string; defaultVal
   mission_interview: { key: "sessionBanner.typeLabel.missionInterview", defaultVal: "Mission Interview" },
   milestone_interview: { key: "sessionBanner.typeLabel.milestoneInterview", defaultVal: "Milestone Interview" },
   slice_interview: { key: "sessionBanner.typeLabel.sliceInterview", defaultVal: "Slice Interview" },
+  "cli-agent": { key: "sessionBanner.typeLabel.cliAgent", defaultVal: "CLI Agent" },
+};
+
+/** Action verb defaults (i18n) for each pinned needs-attention variant. */
+const CLI_ACTION_LABELS: Record<CliActionId, { key: string; defaultVal: string }> = {
+  advance: { key: "sessionBanner.cli.advance", defaultVal: "Advance" },
+  retry: { key: "sessionBanner.cli.retry", defaultVal: "Retry" },
+  cancel: { key: "sessionBanner.cli.cancelTask", defaultVal: "Cancel task" },
+  reauthenticate: { key: "sessionBanner.cli.reauthenticate", defaultVal: "Re-authenticate" },
+  relaunch: { key: "sessionBanner.cli.relaunch", defaultVal: "Relaunch fresh" },
+};
+
+/** Pinned copy + ordered actions per needs-attention variant (U11). */
+const CLI_VARIANT_SPEC: Record<
+  CliNeedsAttentionVariant,
+  { messageKey: string; messageDefault: string; actions: CliActionId[] }
+> = {
+  userExited: {
+    messageKey: "sessionBanner.cli.userExited",
+    messageDefault: "Agent exited before completing",
+    actions: ["advance", "retry", "cancel"],
+  },
+  authFailed: {
+    messageKey: "sessionBanner.cli.authFailed",
+    messageDefault: "CLI authentication failed",
+    actions: ["reauthenticate", "retry"],
+  },
+  "resume-exhausted": {
+    messageKey: "sessionBanner.cli.resumeExhausted",
+    messageDefault: "Couldn't resume the session",
+    actions: ["relaunch", "cancel"],
+  },
 };
 
 const STORAGE_KEY = "fusion:session-banner-dismissed";
@@ -66,6 +111,21 @@ function persistDismissed(map: Map<string, number>): void {
   }
 }
 
+/**
+ * Statuses that warrant a banner entry. Extended for CLI agent sessions:
+ * `waiting_on_input` (F2) and `needs_attention` (pinned variants) join the
+ * existing `awaiting_input` / `error`. A CLI session returning to `busy`
+ * (no longer in this set) clears the banner entry — covering F2.
+ */
+function isNotifyingStatus(status: AiSessionSummary["status"]): boolean {
+  return (
+    status === "awaiting_input" ||
+    status === "error" ||
+    status === "waiting_on_input" ||
+    status === "needs_attention"
+  );
+}
+
 // Map of sessionId → epoch-ms timestamp at which the user dismissed the
 // banner for that session. The banner re-shows the session only when the
 // session's `updatedAt` advances strictly past the recorded dismissal time
@@ -78,6 +138,7 @@ export function SessionNotificationBanner({
   onResumeSession,
   onDismissSession,
   onDismissAll,
+  onCliAction,
 }: SessionNotificationBannerProps) {
   const { t } = useTranslation("app");
   const [dismissRevision, setDismissRevision] = useState(0);
@@ -98,7 +159,7 @@ export function SessionNotificationBanner({
     for (const [id, dismissedAtMs] of dismissedIds) {
       const session = sessionById.get(id);
       if (!session) continue;
-      const stillNotifying = session.status === "awaiting_input" || session.status === "error";
+      const stillNotifying = isNotifyingStatus(session.status);
       if (!stillNotifying) {
         dismissedIds.delete(id);
         pruned = true;
@@ -117,7 +178,7 @@ export function SessionNotificationBanner({
   const sessionsNeedingInput = useMemo(
     () =>
       sessions.filter((session) => {
-        if (session.status !== "awaiting_input" && session.status !== "error") return false;
+        if (!isNotifyingStatus(session.status)) return false;
         const dismissedAtMs = dismissedIds.get(session.id);
         if (dismissedAtMs === undefined) return true;
         return parseUpdatedAtMs(session.updatedAt) > dismissedAtMs;
@@ -129,8 +190,14 @@ export function SessionNotificationBanner({
     return null;
   }
 
-  const awaitingInputCount = sessionsNeedingInput.filter((s) => s.status === "awaiting_input").length;
-  const errorCount = sessionsNeedingInput.filter((s) => s.status === "error").length;
+  // CLI `waiting_on_input` rolls into the "needs input" count; `needs_attention`
+  // rolls into the "failed" count for the summary header.
+  const awaitingInputCount = sessionsNeedingInput.filter(
+    (s) => s.status === "awaiting_input" || s.status === "waiting_on_input",
+  ).length;
+  const errorCount = sessionsNeedingInput.filter(
+    (s) => s.status === "error" || s.status === "needs_attention",
+  ).length;
 
   let headerText = "";
   if (awaitingInputCount > 0 && errorCount > 0) {
@@ -207,6 +274,64 @@ export function SessionNotificationBanner({
         {sessionsNeedingInput.map((session) => {
           const Icon = TYPE_ICONS[session.type];
           const isError = session.status === "error";
+          const variantSpec =
+            session.type === "cli-agent" && session.cliVariant
+              ? CLI_VARIANT_SPEC[session.cliVariant]
+              : null;
+
+          // Pinned needs-attention variant: per-variant copy + ordered actions.
+          if (variantSpec) {
+            return (
+              <article
+                className="session-notification-banner__item session-notification-banner__item--cli session-notification-banner__item--error"
+                key={session.id}
+                data-session-type={session.type}
+                data-session-status={session.status}
+                data-cli-variant={session.cliVariant}
+              >
+                <div className="session-notification-banner__item-main">
+                  <Icon size={16} className="session-notification-banner__type-icon" aria-hidden="true" />
+                  <div className="session-notification-banner__text">
+                    <p className="session-notification-banner__title" title={session.title}>{session.title}</p>
+                    <p className="session-notification-banner__meta">
+                      {t(variantSpec.messageKey, variantSpec.messageDefault)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="session-notification-banner__actions">
+                  {variantSpec.actions.map((action) => (
+                    <button
+                      key={action}
+                      className="session-notification-banner__resume"
+                      data-cli-action={action}
+                      onClick={() => {
+                        // "advance" wires confirm-advance; other verbs hit
+                        // existing endpoints or remain TODO-wire no-ops upstream.
+                        onCliAction?.(session, action);
+                        if (action === "cancel" || action === "advance") {
+                          dismissLocally(session);
+                          onDismissSession(session.id);
+                        }
+                      }}
+                    >
+                      {t(CLI_ACTION_LABELS[action].key, CLI_ACTION_LABELS[action].defaultVal)}
+                    </button>
+                  ))}
+                  <button
+                    className="session-notification-banner__dismiss"
+                    onClick={() => {
+                      dismissLocally(session);
+                      onDismissSession(session.id);
+                    }}
+                    aria-label={t("sessionBanner.dismissItem", "Dismiss {{title}}", { title: session.title })}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              </article>
+            );
+          }
 
           return (
             <article

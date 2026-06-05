@@ -1,0 +1,152 @@
+// ChatView CLI-backed mount test (CLI Agent Executor, U12 completion).
+//
+// Asserts ChatView delegates the message-pane + composer region to
+// <CliChatSurface> when the active chat session carries a `cliExecutorAdapterId`,
+// and falls back to the normal provider composer for a regular session.
+//
+// SessionTerminal is mocked (no xterm / no WS / no PTY / no port 4040) because
+// CliChatSurface renders it under the hood.
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { ChatView } from "../ChatView";
+import * as useChatModule from "../../hooks/useChat";
+import * as useChatRoomsModule from "../../hooks/useChatRooms";
+import type { ChatSessionInfo, UseChatReturn } from "../../hooks/useChat";
+import type { UseChatRoomsResult } from "../../hooks/useChatRooms";
+import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
+
+Element.prototype.scrollIntoView = vi.fn();
+
+vi.mock("../SessionTerminal", () => ({
+  SessionTerminal: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="session-terminal" data-session-id={sessionId}>
+      terminal
+    </div>
+  ),
+}));
+
+vi.mock("../../hooks/useChat");
+vi.mock("../../hooks/useChatRooms");
+vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
+  return {
+    ...actual,
+    useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+  };
+});
+vi.mock("../../api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api")>();
+  return {
+    ...actual,
+    fetchAgents: vi.fn().mockResolvedValue([]),
+    fetchDiscoveredSkills: vi.fn().mockResolvedValue([]),
+    fetchTasks: vi.fn().mockResolvedValue([]),
+    searchFiles: vi.fn().mockResolvedValue({ files: [] }),
+  };
+});
+
+const mockUseChat = vi.mocked(useChatModule.useChat);
+const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
+
+function makeSession(overrides: Partial<ChatSessionInfo> = {}): ChatSessionInfo {
+  return {
+    id: "sess-1",
+    agentId: "agent-1",
+    status: "active",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function chatState(session: ChatSessionInfo): UseChatReturn {
+  return {
+    sessions: [session],
+    activeSession: session,
+    sessionsLoading: false,
+    messages: [],
+    messagesLoading: false,
+    isStreaming: false,
+    streamingText: "",
+    streamingThinking: "",
+    streamingToolCalls: [],
+    selectSession: vi.fn(),
+    createSession: vi.fn(),
+    archiveSession: vi.fn(),
+    deleteSession: vi.fn(),
+    sendMessage: vi.fn(),
+    stopStreaming: vi.fn(),
+    pendingMessage: "",
+    clearPendingMessage: vi.fn(),
+    loadMoreMessages: vi.fn(),
+    hasMoreMessages: false,
+    searchQuery: "",
+    setSearchQuery: vi.fn(),
+    filteredSessions: [session],
+    refreshSessions: vi.fn(),
+    agentsMap: new Map(),
+  };
+}
+
+const defaultRoomsState: UseChatRoomsResult = {
+  rooms: [],
+  roomsLoading: false,
+  roomsError: null,
+  activeRoom: null,
+  activeRoomMembers: [],
+  messages: [],
+  messagesLoading: false,
+  selectRoom: vi.fn(),
+  createRoom: vi.fn(),
+  deleteRoom: vi.fn(),
+  sendRoomMessage: vi.fn().mockResolvedValue(undefined),
+  refreshRooms: vi.fn(),
+};
+
+describe("ChatView CLI-backed session mount", () => {
+  beforeEach(() => {
+    _resetInitialViewportHeight();
+    vi.clearAllMocks();
+    mockUseChatRooms.mockReturnValue(defaultRoomsState);
+  });
+
+  it("renders CliChatSurface (transcript/terminal toggle) for a cli-backed session", () => {
+    mockUseChat.mockReturnValue(
+      chatState(makeSession({ cliExecutorAdapterId: "claude-code", cliSessionFile: "cli-native-1" })),
+    );
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    // CliChatSurface renders the transcript/terminal toggle tablist.
+    expect(screen.getByRole("tab", { name: /transcript/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /terminal/i })).toBeInTheDocument();
+    // The standard provider send button is NOT rendered as a top-level composer
+    // affordance for the cli surface's default (transcript) view it wraps the
+    // existing composer, but the distinguishing CLI toggle is present.
+  });
+
+  it("attaches the terminal to the native cli session id linkage", () => {
+    mockUseChat.mockReturnValue(
+      chatState(makeSession({ cliExecutorAdapterId: "claude-code", cliSessionFile: "cli-native-1" })),
+    );
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+    // Switch to the terminal tab to mount SessionTerminal.
+    fireEvent.click(screen.getByRole("tab", { name: /terminal/i }));
+    expect(screen.getByTestId("session-terminal").getAttribute("data-session-id")).toBe("cli-native-1");
+  });
+
+  it("generic-tier cli session renders terminal-only (no toggle)", () => {
+    mockUseChat.mockReturnValue(chatState(makeSession({ cliExecutorAdapterId: "generic" })));
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+    expect(screen.getByTestId("session-terminal")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /transcript/i })).toBeNull();
+  });
+
+  it("renders the normal provider composer for a regular (non-cli) session", () => {
+    mockUseChat.mockReturnValue(chatState(makeSession({ cliExecutorAdapterId: null })));
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+    // Normal composer present, CLI toggle absent.
+    expect(screen.getByPlaceholderText("Type a message...")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /transcript/i })).toBeNull();
+    expect(screen.queryByTestId("session-terminal")).toBeNull();
+  });
+});

@@ -800,6 +800,16 @@ export class ProjectEngine {
     return this.runtime.getSelfHealingManager();
   }
 
+  /**
+   * Get the bootstrapped CLI Agent Executor runtime (PTY manager + telemetry hub
+   * + adapter registry + resume coordinator), or undefined when the experimental
+   * flag is off. The dashboard reads this to resolve the project's TelemetryHub
+   * (hook route) and supply the cli-session transport dependency.
+   */
+  getCliAgentRuntime() {
+    return this.runtime.getCliAgentRuntime();
+  }
+
   /** Get the project working directory. */
   getWorkingDirectory(): string {
     return this.config.workingDirectory;

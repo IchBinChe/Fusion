@@ -21,7 +21,7 @@ const mockErrors = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   defaultGitOps: vi.fn(() => ({})),
   ExperimentFinalizeService: vi.fn(() => ({ previewPlan: previewPlanMock, finalize: finalizeMock })),
   ExperimentFinalizeStateError: mockErrors.StateError,

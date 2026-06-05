@@ -5,7 +5,8 @@
     "rootDir": "src",
     "types": ["node", "vitest/globals"],
     "paths": {
-      "@fusion/test-utils": ["../core/src/__test-utils__/workspace.ts"]
+      "@fusion/test-utils": ["../core/src/__test-utils__/workspace.ts"],
+      "node-pty": ["./src/types/node-pty/index.d.ts"]
     }
   },
   "include": ["src/**/*"]

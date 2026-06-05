@@ -34,7 +34,7 @@ vi.mock("@fusion/core", async () => {
 });
 
 vi.mock("@fusion/engine", () => ({
-  createWorkflowAuthoringTools: vi.fn(() => []),
+  listCliAdapterDescriptors: () => [],
   createFnAgent: vi.fn(async () => ({
     session: {
       state: { messages: [] as Array<{ role: string; content: string }> },

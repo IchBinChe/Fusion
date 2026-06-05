@@ -17,6 +17,8 @@ import { Scheduler } from "../scheduler.js";
 import type { PrMonitor, PrComment } from "../pr-monitor.js";
 import type { PrInfo } from "@fusion/core";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
+import { isExperimentalFeatureEnabled } from "@fusion/core";
+import { createCliAgentRuntime, type BootstrappedCliAgentRuntime } from "../cli-agent/runtime.js";
 import { WorktreePool, isGitRepository, type PoolInvariantViolation } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
 import { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "../agent-heartbeat.js";
@@ -98,6 +100,13 @@ export class InProcessRuntime
   private worktreePool!: WorktreePool;
   private globalSemaphore?: AgentSemaphore;
   private stuckTaskDetector?: StuckTaskDetector;
+  /**
+   * Per-project CLI Agent Executor runtime bundle (PTY manager + telemetry hub +
+   * adapter registry + resume coordinator). Built in `start()` when the
+   * `cliAgentExecutor` experimental flag is on; threaded into the executor +
+   * self-healing/stuck seams; disposed in `stop()`.
+   */
+  private cliAgentRuntime?: BootstrappedCliAgentRuntime;
   private usageLimitPauser?: UsageLimitPauser;
   private selfHealingManager?: SelfHealingManager;
   private leaseManager?: MeshLeaseManager;
@@ -385,8 +394,29 @@ export class InProcessRuntime
 
       await yieldEventLoop();
 
+      // 5a-cli. Initialize the CLI Agent Executor runtime (behind the
+      // `cliAgentExecutor` experimental flag). Reuses the project's existing core
+      // Database; predicates feed the self-healing + stuck-task seams below.
+      if (isExperimentalFeatureEnabled(settings, "cliAgentExecutor")) {
+        try {
+          this.cliAgentRuntime = createCliAgentRuntime({
+            fusionDir: this.taskStore.getFusionDir(),
+            db: this.taskStore.getDatabase(),
+            projectId: this.config.projectId,
+            hookEndpointUrl: this.resolveCliAgentHookEndpointUrl(),
+          });
+          runtimeLog.log("CLI Agent Executor runtime initialized");
+        } catch (cliErr) {
+          runtimeLog.warn(
+            `CLI Agent Executor runtime initialization failed (cli-agent nodes will report a config error):`,
+            cliErr instanceof Error ? cliErr.message : cliErr,
+          );
+        }
+      }
+
       // 5b. Initialize TaskExecutor
       this.stuckTaskDetector = new StuckTaskDetector(this.taskStore, {
+        isCliSessionWaitingOnInput: this.cliAgentRuntime?.isCliSessionWaitingOnInput,
         beforeRequeue: (taskId, reason, event) => this.selfHealingManager?.checkStuckBudget(taskId, reason, event) ?? Promise.resolve(true),
         onLoopDetected: (event) => this.executor?.handleLoopDetected(event) ?? Promise.resolve(false),
         onStuck: (event) => {
@@ -447,6 +477,7 @@ export class InProcessRuntime
         pool: this.worktreePool,
         usageLimitPauser: this.usageLimitPauser,
         stuckTaskDetector: this.stuckTaskDetector,
+        cliAgentRuntime: this.cliAgentRuntime?.bundle,
         pluginRunner: this.pluginRunner,
         messageStore: this.messageStore,
         missionStore,
@@ -729,6 +760,7 @@ export class InProcessRuntime
       this.selfHealingManager = new SelfHealingManager(this.taskStore, {
         rootDir: this.config.workingDirectory,
         agentStore: this.agentStore,
+        isWorktreeResumeReserved: this.cliAgentRuntime?.isWorktreeResumeReserved,
         recoverCompletedTask: (task) => this.executor.recoverCompletedTask(task),
         recoverFailedPreMergeStep: (task) => this.executor.recoverFailedPreMergeWorkflowStep(task),
         getExecutingTaskIds: () => this.executor.getExecutingTaskIds(),
@@ -845,6 +877,25 @@ export class InProcessRuntime
         runtimeLog.warn(`Failed to stamp engineActiveSinceMs on runtime start: ${message}`);
       }
 
+      // 15. CLI Agent Executor: recover orphaned-live sessions left by a prior
+      // engine death. Non-blocking; errors are logged, never thrown.
+      if (this.cliAgentRuntime) {
+        const cliRuntime = this.cliAgentRuntime;
+        void cliRuntime.resumeCoordinator
+          .recoverOnStart()
+          .then((results) => {
+            if (results.length > 0) {
+              runtimeLog.log(`CLI Agent Executor recovered ${results.length} orphaned session(s) on start`);
+            }
+          })
+          .catch((err) => {
+            runtimeLog.warn(
+              `CLI Agent Executor recoverOnStart failed (continuing):`,
+              err instanceof Error ? err.message : err,
+            );
+          });
+      }
+
       this.setStatus("active");
       runtimeLog.log(`InProcessRuntime started for project ${this.config.projectId}`);
     } catch (error) {
@@ -894,6 +945,21 @@ export class InProcessRuntime
       if (this.selfHealingManager) {
         this.selfHealingManager.stop();
         runtimeLog.log("SelfHealingManager stopped");
+      }
+
+      // 2c. Dispose the CLI Agent Executor runtime (scoped SIGKILL of this
+      // runtime's own PTYs only — never the dashboard / port 4040).
+      if (this.cliAgentRuntime) {
+        try {
+          this.cliAgentRuntime.dispose();
+          runtimeLog.log("CLI Agent Executor runtime disposed");
+        } catch (cliErr) {
+          runtimeLog.warn(
+            `CLI Agent Executor dispose failed:`,
+            cliErr instanceof Error ? cliErr.message : cliErr,
+          );
+        }
+        this.cliAgentRuntime = undefined;
       }
 
       // 2. Stop routine scheduler (stops new routine triggers; in-flight executions continue)
@@ -1212,6 +1278,28 @@ export class InProcessRuntime
 
   getSelfHealingManager(): SelfHealingManager | undefined {
     return this.selfHealingManager;
+  }
+
+  /**
+   * Get the bootstrapped CLI Agent Executor runtime (if the experimental flag is
+   * on and construction succeeded). The dashboard reads this to resolve the
+   * project's TelemetryHub (hook route) and supply the cli-session transport.
+   */
+  getCliAgentRuntime(): BootstrappedCliAgentRuntime | undefined {
+    return this.cliAgentRuntime;
+  }
+
+  /**
+   * Resolve the dashboard CLI-agent hook ingestion endpoint URL. Prefers the
+   * value threaded from server boot (once the listening port is known); falls
+   * back to a localhost URL derived from `FUSION_DASHBOARD_PORT` (default 4040).
+   */
+  private resolveCliAgentHookEndpointUrl(): string {
+    if (this.config.cliAgentHookEndpointUrl) {
+      return this.config.cliAgentHookEndpointUrl;
+    }
+    const port = Number(process.env.FUSION_DASHBOARD_PORT) || 4040;
+    return `http://127.0.0.1:${port}/api/cli-agent/hooks`;
   }
 
   /**

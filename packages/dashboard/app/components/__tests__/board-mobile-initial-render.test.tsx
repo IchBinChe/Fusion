@@ -4,7 +4,11 @@ import { render, cleanup, act } from "@testing-library/react";
 import { Board } from "../Board";
 import { loadAllAppCss } from "../../test/cssFixture";
 
+vi.mock("../../hooks/useCliSessions", () => ({
+  useCliSessions: () => ({ sessions: [], previews: {}, loading: false, refresh: () => {} }),
+}));
 vi.mock("../../api", () => ({
+  fetchCliSessions: vi.fn().mockResolvedValue([]),
   fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
   fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
 }));

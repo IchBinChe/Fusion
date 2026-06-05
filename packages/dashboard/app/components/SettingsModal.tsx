@@ -3,13 +3,10 @@ import { Globe, Folder, RefreshCw, Star, HelpCircle, Loader2 } from "lucide-reac
 import {
   AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
   getErrorMessage,
-  resolvePlanningSettingsModel,
-  resolveProjectDefaultModel,
-  resolveTitleSummarizerSettingsModel,
   normalizeMergeIntegrationWorktreeMode,
   normalizeMergeAdvanceAutoSyncMode,
 } from "@fusion/core";
-import type { AgentPermissionPolicyRules, Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset, AgentPromptsConfig } from "@fusion/core";
+import type { AgentPermissionPolicyRules, Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset } from "@fusion/core";
 import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, fetchRemoteStatus, installCloudflared, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
 import { splitSettingsSave } from "./settings/save-split";
@@ -27,6 +24,9 @@ import {
   OpenClawRuntimeSection,
   PaperclipRuntimeSection,
 } from "./settings/sections/RuntimesSections";
+import { MovedSettingsStub } from "./settings/sections/MovedSettingsStub";
+import { SecretsSection } from "./settings/sections/SecretsSection";
+import { PromptsSection } from "./settings/sections/PromptsSection";
 import { ProjectDefaultWorkflowField } from "./WorkflowSelector";
 import { useMemoryBackendStatus } from "../hooks/useMemoryBackendStatus";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -42,11 +42,9 @@ import { useModalResizePersist } from "../hooks/useModalResizePersist";
 const PluginManager = lazy(() => import("./PluginManager").then((m) => ({ default: m.PluginManager })));
 const PiExtensionsManager = lazy(() => import("./PiExtensionsManager").then((m) => ({ default: m.PiExtensionsManager })));
 import { PluginSlot } from "./PluginSlot";
-import { AgentPromptsManager } from "./AgentPromptsManager";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentPermissionPolicyEditor } from "./AgentPermissionPolicyEditor";
 import { AgentProvisioningPolicyEditor } from "./AgentProvisioningPolicyEditor";
-import { SecretsView } from "./SecretsView";
 import { applyPresetToSelection, generateUniquePresetId } from "../utils/modelPresets";
 import { copyTextToClipboard } from "../utils/copyToClipboard";
 import { appendTokenQuery, OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
@@ -255,8 +253,8 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global" },
   { id: "global-models", label: "Models", labelKey: "settings.nav.globalModels", scope: "global" },
   { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global" },
+  { id: "remote", label: "Remote Access & Node Sync", labelKey: "settings.nav.remote", scope: "global" },
   { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global" },
-  { id: "remote", label: "Remote Access", labelKey: "settings.nav.remote", scope: "global" },
 
   // Runtimes group (plugin runtimes with their own settings)
   { id: "__runtimes_header", label: "Runtimes", labelKey: "settings.nav.runtimesHeader", scope: undefined, isGroupHeader: true },
@@ -267,19 +265,19 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   // Project group (specific to this project)
   { id: "__project_header", label: "Project", labelKey: "settings.nav.projectHeader", scope: undefined, isGroupHeader: true },
   { id: "general", label: "Project General", labelKey: "settings.nav.projectGeneral", scope: "project" },
-  { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project" },
-  { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project" },
-  { id: "scheduling", label: "Scheduling", labelKey: "settings.nav.scheduling", scope: "project" },
+  { id: "commands", label: "Commands & Scripts", labelKey: "settings.nav.commands", scope: "project" },
+  { id: "worktrees", label: "Worktrees", labelKey: "settings.nav.worktrees", scope: "project" },
+  { id: "scheduling", label: "Scheduling & Capacity", labelKey: "settings.nav.scheduling", scope: "project" },
   { id: "scheduled-evals", label: "Scheduled Evals", labelKey: "settings.nav.scheduledEvals", scope: "project" },
   { id: "node-routing", label: "Node Routing", labelKey: "settings.nav.nodeRouting", scope: "project" },
-  { id: "worktrees", label: "Worktrees", labelKey: "settings.nav.worktrees", scope: "project" },
-  { id: "commands", label: "Commands", labelKey: "settings.nav.commands", scope: "project" },
   { id: "merge", label: "Merge", labelKey: "settings.nav.merge", scope: "project" },
-  { id: "agent-permissions", label: "Agent Permissions", labelKey: "settings.nav.agentPermissions", scope: "project" },
+  { id: "agent-permissions", label: "Agents & Permissions", labelKey: "settings.nav.agentPermissions", scope: "project" },
   { id: "memory", label: "Memory", labelKey: "settings.nav.memory", scope: "project" },
-  { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project" },
-  { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project" },
   { id: "backups", label: "Backups", labelKey: "settings.nav.backups", scope: "project" },
+  { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project" },
+  { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project" },
+  { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project" },
+  { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project" },
   { id: "plugins", label: "Plugins", labelKey: "settings.nav.plugins", scope: "project" },
 ];
 
@@ -378,6 +376,12 @@ interface SettingsModalProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open approvals/mailbox view. */
   onOpenApprovals?: (approvalId?: string) => void;
+  /**
+   * Closes this modal and opens the workflow node editor with its Settings panel
+   * pre-selected for the project's default workflow. Used by the moved-settings
+   * redirect stubs (U9 / KTD-5, R10). Optional so the modal renders standalone.
+   */
+  onOpenWorkflowSettings?: () => void;
 }
 
 export function SettingsModal({
@@ -393,6 +397,7 @@ export function SettingsModal({
   onDashboardFontScaleChange,
   onReopenOnboarding,
   onOpenApprovals,
+  onOpenWorkflowSettings,
 }: SettingsModalProps) {
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
@@ -2243,20 +2248,6 @@ export function SettingsModal({
               <small>New tasks inherit this custom workflow's steps (overridable per task)</small>
             </div>
             <div className="form-group">
-              <label htmlFor="requirePlanApproval" className="checkbox-label">
-                <input
-                  id="requirePlanApproval"
-                  type="checkbox"
-                  checked={form.requirePlanApproval || false}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, requirePlanApproval: e.target.checked }))
-                  }
-                />
-                Require plan approval
-              </label>
-              <small>When enabled, AI-generated task specifications require manual approval before moving to Todo</small>
-            </div>
-            <div className="form-group">
               <label htmlFor="ephemeralAgentsEnabled" className="checkbox-label">
                 <input
                   id="ephemeralAgentsEnabled"
@@ -2538,34 +2529,19 @@ export function SettingsModal({
         );
 
       case "secrets":
-        return (
-          <>
-            {renderScopeBanner()}
-            <h4 className="settings-section-heading">Secrets</h4>
-            <SecretsView addToast={addToast} />
-          </>
-        );
+        return <SecretsSection scopeBanner={renderScopeBanner()} addToast={addToast} />;
 
       case "project-models": {
         const presets = form.modelPresets || [];
         const presetOptions = presets.map((preset) => ({ id: preset.id, name: preset.name }));
         const inUsePresetIds = new Set(Object.values(form.defaultPresetBySize || {}).filter(Boolean));
 
-        // Filter model lanes to show in project scope.
-        // The "summarization" lane is intentionally excluded here — it has a
-        // dedicated picker further down ("AI Title and Git Commit Message
-        // Summarization") so the project tab doesn't surface the same model
-        // setting twice.
-        const projectModelLanes = MODEL_LANES.filter(
-          (lane) =>
-            lane.laneId === "default"
-            || lane.laneId === "execution"
-            || lane.laneId === "planning"
-            || lane.laneId === "validator",
-        );
-        const resolvedPlanningModel = resolvePlanningSettingsModel(form);
-        const resolvedDefaultModel = resolveProjectDefaultModel(form);
-        const resolvedTitleSummarizerModel = resolveTitleSummarizerSettingsModel(form);
+        // Only the project DEFAULT model lane survives in this modal. The
+        // per-phase execution/planning/validator lanes, their fallbacks, and the
+        // title-summarizer lane were hard-moved (U4) onto the workflow settings
+        // mechanism — they are no longer project settings keys and must never be
+        // renderable or savable here (redirect stub below).
+        const projectModelLanes = MODEL_LANES.filter((lane) => lane.laneId === "default");
         const getProjectLaneLabel = (lane: ModelLane) => lane.laneId === "default" ? "Project Default Model" : lane.label;
         const getProjectLaneHelperText = (lane: ModelLane) =>
           lane.laneId === "default"
@@ -2674,72 +2650,15 @@ export function SettingsModal({
               </>
             )}
 
-            {/* --- Fallback Models --- */}
-            <h4 className="settings-section-heading settings-section-heading--spaced">Fallback Models</h4>
-            {modelsLoading ? (
-              <div className="settings-empty-state">Loading available models…</div>
-            ) : availableModels.length === 0 ? (
-              <div className="settings-empty-state settings-muted">
-                No models available.
-              </div>
-            ) : (
-              <>
-                <div className="form-group">
-                  <label htmlFor="planningFallbackModel">Planning Fallback Model</label>
-                  <CustomModelDropdown
-                    id="planningFallbackModel"
-                    label="Planning Fallback Model"
-                    models={availableModels}
-                    value={form.planningFallbackProvider && form.planningFallbackModelId ? `${form.planningFallbackProvider}/${form.planningFallbackModelId}` : ""}
-                    onChange={(val) => {
-                      if (!val) {
-                        setForm((f) => ({ ...f, planningFallbackProvider: undefined, planningFallbackModelId: undefined }));
-                      } else {
-                        const slashIdx = val.indexOf("/");
-                        setForm((f) => ({
-                          ...f,
-                          planningFallbackProvider: val.slice(0, slashIdx),
-                          planningFallbackModelId: val.slice(slashIdx + 1),
-                        }));
-                      }
-                    }}
-                    placeholder="Use global fallback"
-                    favoriteProviders={favoriteProviders}
-                    onToggleFavorite={handleToggleFavorite}
-                    favoriteModels={favoriteModels}
-                    onToggleModelFavorite={handleToggleModelFavorite}
-                  />
-                  <small>Used if the planning model fails due to rate limits or provider overload. Defaults to the global fallback model.</small>
-                </div>
-                <div className="form-group">
-                  <label htmlFor="validatorFallbackModel">Reviewer Fallback Model</label>
-                  <CustomModelDropdown
-                    id="validatorFallbackModel"
-                    label="Reviewer Fallback Model"
-                    models={availableModels}
-                    value={form.validatorFallbackProvider && form.validatorFallbackModelId ? `${form.validatorFallbackProvider}/${form.validatorFallbackModelId}` : ""}
-                    onChange={(val) => {
-                      if (!val) {
-                        setForm((f) => ({ ...f, validatorFallbackProvider: undefined, validatorFallbackModelId: undefined }));
-                      } else {
-                        const slashIdx = val.indexOf("/");
-                        setForm((f) => ({
-                          ...f,
-                          validatorFallbackProvider: val.slice(0, slashIdx),
-                          validatorFallbackModelId: val.slice(slashIdx + 1),
-                        }));
-                      }
-                    }}
-                    placeholder="Use global fallback"
-                    favoriteProviders={favoriteProviders}
-                    onToggleFavorite={handleToggleFavorite}
-                    favoriteModels={favoriteModels}
-                    onToggleModelFavorite={handleToggleModelFavorite}
-                  />
-                  <small>Used if the reviewer model fails due to rate limits or provider overload. Defaults to the global fallback model.</small>
-                </div>
-              </>
-            )}
+            {/* --- Per-phase model lanes (MOVED to workflow settings) --- */}
+            <h4 className="settings-section-heading settings-section-heading--spaced">Per-phase model lanes</h4>
+            <MovedSettingsStub
+              message={t(
+                "settings.movedStub.modelLanes",
+                "Per-phase model lanes (execution, planning, reviewer, their fallbacks, and the title summarizer) now live on the workflow.",
+              )}
+              onOpenWorkflowSettings={onOpenWorkflowSettings}
+            />
 
             {/* --- Model Presets --- */}
             <h4 className="settings-section-heading settings-section-heading--spaced">Model Presets</h4>
@@ -2989,99 +2908,12 @@ export function SettingsModal({
             </div>
 
             {(form.autoSummarizeTitles || form.useAiMergeCommitSummary || form.githubTrackingEnabledByDefault || false) && (
-              <>
-                <div className="form-group">
-                  <label>Title, commit message, and GitHub tracking issue summarization model</label>
-                  {modelsLoading ? (
-                    <small>Loading available models...</small>
-                  ) : availableModels.length === 0 ? (
-                    <small>No models available. Configure authentication first.</small>
-                  ) : (
-                    <CustomModelDropdown
-                      id="titleSummarizerModel"
-                      label="Title, commit message, and GitHub tracking issue summarization model"
-                      models={availableModels}
-                      value={
-                        form.titleSummarizerProvider && form.titleSummarizerModelId
-                          ? `${form.titleSummarizerProvider}/${form.titleSummarizerModelId}`
-                          : ""
-                      }
-                      onChange={(val) => {
-                        if (!val) {
-                          setForm((f) => ({
-                            ...f,
-                            titleSummarizerProvider: undefined,
-                            titleSummarizerModelId: undefined,
-                          }));
-                          return;
-                        }
-                        const slashIdx = val.indexOf("/");
-                        setForm((f) => ({
-                          ...f,
-                          titleSummarizerProvider: val.slice(0, slashIdx),
-                          titleSummarizerModelId: val.slice(slashIdx + 1),
-                        }));
-                      }}
-                      placeholder="Use fallback model"
-                      favoriteProviders={favoriteProviders}
-                      onToggleFavorite={handleToggleFavorite}
-                      favoriteModels={favoriteModels}
-                      onToggleModelFavorite={handleToggleModelFavorite}
-                    />
-                  )}
-                  <small>
-                    Also used to summarize task descriptions into GitHub tracking issue titles when a task has no title yet.
-                  </small>
-                  <small>
-                    {form.titleSummarizerProvider && form.titleSummarizerModelId
-                      ? "Using explicitly configured model"
-                      : resolvedTitleSummarizerModel.provider && resolvedTitleSummarizerModel.modelId
-                        ? resolvedTitleSummarizerModel.provider === resolvedPlanningModel.provider
-                          && resolvedTitleSummarizerModel.modelId === resolvedPlanningModel.modelId
-                          ? "(using planning model)"
-                          : resolvedTitleSummarizerModel.provider === resolvedDefaultModel.provider
-                            && resolvedTitleSummarizerModel.modelId === resolvedDefaultModel.modelId
-                            ? form.defaultProviderOverride && form.defaultModelIdOverride
-                              ? "(using project default model)"
-                              : "(using global default model)"
-                            : "(using global summarization model)"
-                        : "(using automatic model selection)"}
-                  </small>
-                </div>
-
-                <div className="form-group">
-                  <div className="modal-actions settings-summarization-actions">
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          titleSummarizerProvider: resolvedPlanningModel.provider,
-                          titleSummarizerModelId: resolvedPlanningModel.modelId,
-                        }))
-                      }
-                      disabled={!resolvedPlanningModel.provider || !resolvedPlanningModel.modelId}
-                    >
-                      Use planning model
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          titleSummarizerProvider: resolvedDefaultModel.provider,
-                          titleSummarizerModelId: resolvedDefaultModel.modelId,
-                        }))
-                      }
-                      disabled={!resolvedDefaultModel.provider || !resolvedDefaultModel.modelId}
-                    >
-                      Use default model
-                    </button>
-                  </div>
-                </div>
-              </>
+              <p className="settings-description">
+                {t(
+                  "settings.movedStub.summarizerModelInline",
+                  "The model used for summarization now lives on the workflow (title summarizer lane). Open workflow settings to choose it.",
+                )}
+              </p>
             )}
           </>
         );
@@ -3401,36 +3233,13 @@ export function SettingsModal({
             <div className="settings-section-divider" />
 
             <h5 className="settings-section-heading">Step Execution</h5>
-            <div className="form-group">
-              <label htmlFor="runStepsInNewSessions" className="checkbox-label">
-                <input
-                  id="runStepsInNewSessions"
-                  type="checkbox"
-                  checked={form.runStepsInNewSessions || false}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, runStepsInNewSessions: e.target.checked }))
-                  }
-                />
-                Run each step in a new session
-              </label>
-              <small>Run each task step in its own fresh agent session for better isolation and error recovery. Failed steps can be retried individually.</small>
-            </div>
-            <div className="form-group">
-              <label htmlFor="maxParallelSteps">Maximum parallel steps</label>
-              <input
-                id="maxParallelSteps"
-                type="number"
-                min={1}
-                max={4}
-                value={form.maxParallelSteps ?? ""}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setForm((f) => ({ ...f, maxParallelSteps: val === "" ? undefined : Number(val) }));
-                }}
-                disabled={!form.runStepsInNewSessions}
-              />
-              <small>Maximum number of steps to run in parallel when file scopes don&apos;t overlap (1-4)</small>
-            </div>
+            <MovedSettingsStub
+              message={t(
+                "settings.movedStub.stepExecution",
+                "Step execution settings (run steps in new sessions, max parallel steps) now live on the workflow.",
+              )}
+              onOpenWorkflowSettings={onOpenWorkflowSettings}
+            />
           </>
         );
       case "scheduled-evals": {
@@ -4052,59 +3861,13 @@ export function SettingsModal({
                 <small>Forces all AI lanes to use the deterministic mock provider. No network calls, zero token cost.</small>
               </details>
             </div>
-            <div className="form-group">
-              <label htmlFor="workflowRevisionForkOnScopeMismatch" className="checkbox-label">
-                <input
-                  id="workflowRevisionForkOnScopeMismatch"
-                  type="checkbox"
-                  checked={form.workflowRevisionForkOnScopeMismatch !== false}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, workflowRevisionForkOnScopeMismatch: e.target.checked }))
-                  }
-                />
-                Fork scope-mismatched workflow revisions into follow-up tasks
-              </label>
-              <details className="settings-option-details">
-                <summary>More details</summary>
-                <small>
-                  When enabled, workflow revision feedback that explicitly names files outside the original task&apos;s declared File Scope is split into a dependent follow-up task instead of being appended to the current task&apos;s PROMPT.md.
-                </small>
-              </details>
-            </div>
-            <div className="form-group">
-              <label htmlFor="verificationFixRetries">Verification auto-fix retries</label>
-              <input
-                id="verificationFixRetries"
-                className="input"
-                type="number"
-                min={0}
-                max={3}
-                step={1}
-                value={form.verificationFixRetries ?? 3}
-                onChange={(e) => {
-                  const rawValue = e.target.value;
-                  if (rawValue === "") {
-                    setForm((f) => ({ ...f, verificationFixRetries: undefined } as SettingsFormState));
-                    return;
-                  }
-
-                  const parsedValue = Number.parseInt(rawValue, 10);
-                  if (!Number.isFinite(parsedValue)) {
-                    setForm((f) => ({ ...f, verificationFixRetries: undefined } as SettingsFormState));
-                    return;
-                  }
-
-                  const clampedValue = Math.max(0, Math.min(3, parsedValue));
-                  setForm((f) => ({ ...f, verificationFixRetries: clampedValue } as SettingsFormState));
-                }}
-              />
-              <details className="settings-option-details">
-                <summary>More details</summary>
-                <small>
-                  Controls auto-fix retry attempts after deterministic test/build verification failures — applies to both executor-time and in-merge verification (0-3).
-                </small>
-              </details>
-            </div>
+            <MovedSettingsStub
+              message={t(
+                "settings.movedStub.reviewVerification",
+                "Review, verification auto-fix, and scope-enforcement settings now live on the workflow.",
+              )}
+              onOpenWorkflowSettings={onOpenWorkflowSettings}
+            />
             <div className="form-group">
               <label htmlFor="mergeStrategy">Auto-completion mode</label>
               <select
@@ -4303,27 +4066,6 @@ export function SettingsModal({
                   </details>
                 </div>
               </>
-            )}
-            {form.mergeStrategy === "pull-request" && (
-              <div className="form-group">
-                <label htmlFor="requirePrApproval" className="checkbox-label">
-                  <input
-                    id="requirePrApproval"
-                    type="checkbox"
-                    checked={form.requirePrApproval ?? false}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, requirePrApproval: e.target.checked }))
-                    }
-                  />
-                  Wait for an approving review before merging the PR
-                </label>
-                <details className="settings-option-details">
-                  <summary>More details</summary>
-                  <small>
-                    When enabled, Fusion holds the PR in In Review until at least one approving GitHub review has been submitted. Useful on free private repos where GitHub&apos;s required-reviewer enforcement isn&apos;t available — without this, a fresh PR with no required checks is treated as immediately mergeable.
-                  </small>
-                </details>
-              </div>
             )}
             <h4 className="settings-section-heading settings-section-heading--spaced">GitHub Authentication</h4>
             <div className="form-group">
@@ -5386,28 +5128,7 @@ export function SettingsModal({
           />
         );
       case "prompts":
-        return (
-          <>
-            {renderScopeBanner()}
-            <h4 className="settings-section-heading">Prompts</h4>
-            <AgentPromptsManager
-              value={form.agentPrompts}
-              onChange={(agentPrompts: AgentPromptsConfig) => {
-                setForm((f) => ({
-                  ...f,
-                  agentPrompts,
-                }));
-              }}
-              promptOverrides={form.promptOverrides}
-              onPromptOverridesChange={(overrides) => {
-                setForm((f) => ({
-                  ...f,
-                  promptOverrides: overrides,
-                }));
-              }}
-            />
-          </>
-        );
+        return <PromptsSection scopeBanner={renderScopeBanner()} form={form} setForm={setForm} />;
       case "plugins":
         return (
           <>

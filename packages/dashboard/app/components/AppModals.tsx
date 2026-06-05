@@ -242,6 +242,10 @@ export function AppModals({
               onDashboardFontScaleChange={settings.setDashboardFontScalePct}
               onReopenOnboarding={onReopenOnboarding}
               onOpenApprovals={onOpenApprovals}
+              onOpenWorkflowSettings={() => {
+                handleSettingsClose();
+                modalManager.openWorkflowEditor("settings");
+              }}
             />
           </Suspense>
         </ModalErrorBoundary>
@@ -394,6 +398,7 @@ export function AppModals({
               onClose={modalManager.closeWorkflowEditor}
               addToast={addToast}
               projectId={projectId}
+              initialPanel={modalManager.workflowEditorInitialPanel}
             />
           </Suspense>
         </ModalErrorBoundary>

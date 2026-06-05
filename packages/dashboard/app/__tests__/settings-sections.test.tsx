@@ -16,7 +16,17 @@ import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 import { AppearanceSection } from "../components/settings/sections/AppearanceSection";
 import { NotificationsSection } from "../components/settings/sections/NotificationsSection";
 import { ExperimentalSection } from "../components/settings/sections/ExperimentalSection";
+import { MovedSettingsStub } from "../components/settings/sections/MovedSettingsStub";
+import { PromptsSection } from "../components/settings/sections/PromptsSection";
+import { SecretsSection } from "../components/settings/sections/SecretsSection";
 import type { SettingsFormState } from "../components/settings/sections/context";
+
+vi.mock("../components/AgentPromptsManager", () => ({
+  AgentPromptsManager: () => <div data-testid="agent-prompts-manager" />,
+}));
+vi.mock("../components/SecretsView", () => ({
+  SecretsView: () => <div data-testid="secrets-view" />,
+}));
 
 expect.extend(jestDomMatchers);
 afterEach(() => cleanup());
@@ -96,6 +106,42 @@ describe("NotificationsSection", () => {
       />,
     );
     expect(screen.getByLabelText("ntfy Topic")).toBeInTheDocument();
+  });
+});
+
+describe("SecretsSection", () => {
+  it("renders the scope banner, title, and the SecretsView card", () => {
+    render(
+      <SecretsSection scopeBanner={<div data-testid="scope-banner" />} addToast={vi.fn()} />,
+    );
+    expect(screen.getByTestId("scope-banner")).toBeInTheDocument();
+    expect(screen.getByText("Secrets")).toBeInTheDocument();
+    expect(screen.getByTestId("secrets-view")).toBeInTheDocument();
+  });
+});
+
+describe("PromptsSection", () => {
+  it("renders the title and mounts AgentPromptsManager", () => {
+    render(
+      <PromptsSection scopeBanner={null} form={emptyForm} setForm={vi.fn()} />,
+    );
+    expect(screen.getByText("Prompts")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-prompts-manager")).toBeInTheDocument();
+  });
+});
+
+describe("MovedSettingsStub", () => {
+  it("renders the message and fires the open-workflow-settings callback", () => {
+    const onOpen = vi.fn();
+    render(<MovedSettingsStub message="Step execution moved" onOpenWorkflowSettings={onOpen} />);
+    expect(screen.getByText("Step execution moved")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open workflow settings" }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the action when no handler is wired", () => {
+    render(<MovedSettingsStub message="Moved" />);
+    expect(screen.getByRole("button", { name: "Open workflow settings" })).toBeDisabled();
   });
 });
 

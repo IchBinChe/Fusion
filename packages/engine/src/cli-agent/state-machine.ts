@@ -9,6 +9,8 @@
  *   ready → busy                (prompt injected)
  *   busy → waitingOnInput       (permission / question signal)
  *   waitingOnInput → busy       (user answers)
+ *   busy → idle                 (heuristic quiet-window — generic tier; NEVER done)
+ *   idle → busy                 (output resumes)
  *   busy → done                 (POSITIVE completion signal — idle NEVER does this)
  *   done → busy                 (follow-up; resume first if the PTY was reaped)
  *   busy → dead                 (PTY end / engine death)
@@ -49,19 +51,29 @@ import type {
 // ── Public types ───────────────────────────────────────────────────────────
 
 /**
- * The machine's own state space. This is the U1 `CliAgentState` plus the
- * transient HTD `"resuming"` sub-state, which is NOT a persisted store enum
- * (U1's union has no `resuming`). When persisting, `resuming` maps onto the
- * `dead` store state while the resume-eligible termination reason
- * (crashed / engineDeath) carries the recovery intent. Surfaces that subscribe
- * to `onStateChange` see the richer machine state so the SSE bridge can render
- * "resuming…" without a schema change.
+ * The machine's own state space. This is the U1 `CliAgentState` plus two
+ * transient sub-states that are NOT persisted store enums (U1's union has
+ * neither):
+ * - `"resuming"` (HTD) maps onto the persisted `dead` store state while the
+ *   resume-eligible termination reason (crashed / engineDeath) carries the
+ *   recovery intent.
+ * - `"idle"` (generic heuristic tier, U6) maps onto the persisted `busy` store
+ *   state. The generic adapter has no native done signal; a quiet output window
+ *   yields an "looks idle — confirm to advance" affordance (origin R20) WITHOUT
+ *   advancing the pipeline. Persisting `busy` keeps the session honestly live —
+ *   idle NEVER reaches `done`; resumed output flips back to `busy`.
+ *
+ * Surfaces that subscribe to `onStateChange` see the richer machine state so the
+ * SSE bridge can render "resuming…" / the idle confirm-advance affordance
+ * without a schema change.
  */
-export type CliMachineState = CliAgentState | "resuming";
+export type CliMachineState = CliAgentState | "resuming" | "idle";
 
 /** Map a machine state onto the persisted U1 store enum. */
 export function toPersistedState(state: CliMachineState): CliAgentState {
-  return state === "resuming" ? "dead" : state;
+  if (state === "resuming") return "dead";
+  if (state === "idle") return "busy";
+  return state;
 }
 
 /** A throttled state-change notification handed to subscribers (e.g. the SSE bridge). */
@@ -290,11 +302,35 @@ export class CliSessionStateMachine {
   /**
    * Output progress / activity. Re-arms the inactivity watchdog. NEVER advances
    * state — idleness and activity are both gated away from `done`.
+   *
+   * From the generic-tier `idle` sub-state, fresh output means the agent resumed
+   * work → flip back to `busy` (the confirm-advance affordance is withdrawn).
    */
   signalOutputProgress(): void {
+    if (this.state === "idle") {
+      this.transition("busy");
+      this.armStallWatchdog();
+      return;
+    }
     if (this.state === "busy") {
       this.armStallWatchdog();
     }
+  }
+
+  /**
+   * busy → idle (generic heuristic quiet-window). The generic tier has no native
+   * done signal; a quiet output window past the configured threshold surfaces an
+   * "looks idle — confirm to advance" affordance (origin R20). This NEVER
+   * advances to `done` and persists as `busy` (the session stays honestly live).
+   * Clears the stall watchdog: a detected idle is expected quiet, so it must not
+   * also trip the stall backstop into needsAttention. Idempotent. From any state
+   * other than `busy` it is a no-op (idle is only meaningful mid-turn).
+   */
+  signalIdle(): void {
+    if (this.state === "idle") return; // idempotent
+    if (this.state !== "busy") return; // only busy turns can go idle
+    this.clearStallWatchdog();
+    this.transition("idle");
   }
 
   /**
@@ -311,13 +347,13 @@ export class CliSessionStateMachine {
     this.transition("waitingOnInput");
   }
 
-  /** waitingOnInput → busy (user answered). Re-arms the watchdog. */
+  /** waitingOnInput → busy (user answered) and idle → busy (output resumed). */
   signalBusy(): void {
     if (this.state === "busy") {
       this.armStallWatchdog();
       return;
     }
-    if (this.state !== "waitingOnInput") {
+    if (this.state !== "waitingOnInput" && this.state !== "idle") {
       throw new InvalidCliTransitionError(this.state, "signalBusy");
     }
     this.armStallWatchdog();
@@ -469,8 +505,8 @@ export class CliSessionStateMachine {
   private transition(next: CliMachineState, reason?: CliTerminationReason): void {
     this.state = next;
     if (reason !== undefined) this.terminationReason = reason;
-    if (next === "busy" || next === "ready") {
-      // Live again: clear any stale termination reason.
+    if (next === "busy" || next === "ready" || next === "idle") {
+      // Live again (idle persists as busy): clear any stale termination reason.
       this.terminationReason = null;
     }
     this.persistAndEmit(next, this.terminationReason);

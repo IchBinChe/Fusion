@@ -24,8 +24,12 @@
  *   still caught — uses `redactSecrets` from @fusion/core on the joined tail).
  * - Routing: maps a normalized event onto the session's state machine
  *   (sessionStart→ready, busy→signalBusy, waitingOnInput→signalWaitingOnInput +
- *   notification dispatch, done→signalDone, outputProgress→signalOutputProgress).
- *   Idle/output NEVER advances to done — that gating lives in the state machine.
+ *   notification dispatch, done→signalDone, outputProgress→signalOutputProgress,
+ *   idle→signalIdle). Idle/output NEVER advances to done — that gating lives in
+ *   the state machine. The `idle` kind is the generic heuristic tier's
+ *   quiet-window signal (U6): it surfaces the "looks idle — confirm to advance"
+ *   affordance (origin R20) and is mapped to a busy-equivalent idle sub-state,
+ *   never to `done`.
  */
 
 import { randomBytes } from "node:crypto";
@@ -55,6 +59,7 @@ export type TelemetryEventKind =
   | "busy"
   | "waitingOnInput"
   | "done"
+  | "idle"
   | "toolActivity"
   | "outputProgress"
   | "transcript";
@@ -265,7 +270,8 @@ export class TelemetryHub {
       event.kind === "sessionStart" ||
       event.kind === "busy" ||
       event.kind === "waitingOnInput" ||
-      event.kind === "done";
+      event.kind === "done" ||
+      event.kind === "idle";
     if (!isLifecycle) {
       if (entry.turnEventCount >= this.maxEventsPerTurn) {
         return undefined;
@@ -356,6 +362,13 @@ export class TelemetryHub {
       case "done": {
         // POSITIVE completion only. Idle / output progress never reach here.
         safeMachineCall(() => machine.signalDone());
+        break;
+      }
+      case "idle": {
+        // Generic heuristic quiet-window (U6). Surfaces the confirm-advance
+        // affordance via a busy-equivalent idle sub-state; NEVER advances to
+        // done. A no-op from any non-busy state (signalIdle guards internally).
+        safeMachineCall(() => machine.signalIdle());
         break;
       }
       case "toolActivity":

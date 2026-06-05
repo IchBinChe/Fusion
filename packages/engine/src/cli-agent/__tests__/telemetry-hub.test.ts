@@ -109,6 +109,18 @@ describe("TelemetryHub", () => {
     expect(hub.getStateMachine(a)?.getState()).toBe("done");
   });
 
+  it("idle event surfaces a busy-equivalent idle state, never done (R20)", () => {
+    const a = seed({ agentState: "busy" });
+    const hub = new TelemetryHub({ store });
+    hub.issueToken(a);
+    hub.ingest(a, { kind: "idle" });
+    expect(hub.getStateMachine(a)?.getState()).toBe("idle");
+    expect(store.getSession(a)?.agentState).toBe("busy"); // persists as busy
+    // Resumed output flips back to busy; never reaches done.
+    hub.ingest(a, { kind: "busy" });
+    expect(hub.getStateMachine(a)?.getState()).toBe("busy");
+  });
+
   it("AE2: waitingOnInput dispatches notification, state does not advance/fail", () => {
     const a = seed({ agentState: "busy" });
     const dispatched: unknown[] = [];

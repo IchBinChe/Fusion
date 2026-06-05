@@ -71,6 +71,9 @@ export type {
   WorkflowFieldType,
   WorkflowFieldOption,
   WorkflowFieldRender,
+  // CLI Agent Executor (U7): node-config executor typing.
+  WorkflowNodeExecutorKind,
+  WorkflowNodeExecutorConfig,
 } from "./workflow-ir-types.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";

@@ -76,6 +76,19 @@ import {
   executingTaskLock,
   reconcileSelfOwnedActiveSessionForRemoval,
 } from "./active-session-registry.js";
+// CLI Agent Executor (U7): task ↔ CLI session orchestration seam.
+import {
+  CliTaskSession,
+  launchCliTaskSession,
+  killLiveTaskSessions,
+  type CliTaskOutcome,
+  type ResolvedCliExecutorConfig,
+} from "./cli-agent/task-session.js";
+import type { CliSessionManager } from "./cli-agent/session-manager.js";
+import { CliConcurrencyLimitError } from "./cli-agent/session-manager.js";
+import type { TelemetryHub } from "./cli-agent/telemetry-hub.js";
+import type { CliAdapterRegistry } from "./cli-agent/adapter.js";
+import type { CliSessionStore } from "@fusion/core";
 import {
   StaleWorktreeIndexLockError,
   classifyStaleLock,
@@ -1116,6 +1129,35 @@ export interface TaskExecutorOptions {
   onAgentText?: (taskId: string, delta: string) => void;
   onAgentTool?: (taskId: string, toolName: string) => void;
   autoRecoveryDispatcher?: AutoRecoveryDispatcher;
+  /**
+   * CLI Agent Executor runtime (U7). When present, workflow nodes with
+   * `config.executor === "cli-agent"` drive an engine-owned CLI session via the
+   * task-session orchestration. Absent → cli-agent nodes report a clear config
+   * error (the runtime was not wired). Bundled so a single option threads the
+   * PTY manager + telemetry hub + adapter registry + hook endpoint together.
+   */
+  cliAgentRuntime?: CliAgentRuntime;
+}
+
+/** Bundled CLI Agent Executor runtime dependencies (U7). */
+export interface CliAgentRuntime {
+  /** Engine-owned PTY session manager (U2). */
+  manager: CliSessionManager;
+  /** In-process telemetry hub (U3) — owns per-session tokens + state machines. */
+  hub: TelemetryHub;
+  /** Adapter registry (U2) — resolves adapter id → adapter. */
+  registry: CliAdapterRegistry;
+  /** Durable session store (U1) — for re-entry / follow-up session lookups. */
+  store: CliSessionStore;
+  /** Project this runtime drives (the executor is per-project; `cli_sessions` needs it). */
+  projectId: string;
+  /**
+   * Absolute URL of the dashboard hook ingestion endpoint the hook scripts POST
+   * to (e.g. `http://127.0.0.1:4040/api/cli-agent/hooks`).
+   */
+  hookEndpointUrl: string;
+  /** Optional override for the hook scratch-dir root (tests). */
+  hookDirRoot?: string;
 }
 
 export class TaskExecutor {
@@ -1150,6 +1192,13 @@ export class TaskExecutor {
   private activeWorkflowStepSessions = new Map<string, AgentSession>();
   /** Active configured-command abort controllers keyed by task. */
   private activeConfiguredCommandControllers = new Map<string, Set<AbortController>>();
+  /**
+   * Active CLI agent task sessions per task (U7). Mirrors activeSessions for the
+   * cli-agent executor kind so the hard-cancel / abort path can SIGKILL the PTY
+   * and mark `killed` (never resume-eligible), and the in-review handoff can reap
+   * the PTY. A task has at most one live CLI session at a time.
+   */
+  private activeCliTaskSessions = new Map<string, CliTaskSession>();
   private readonlyWorkflowStepAuditDone = false;
   /**
    * Reviewer subagent sessions per task. Reviewers (`reviewer.ts`) create their
@@ -1790,6 +1839,16 @@ export class TaskExecutor {
       hadActiveSurface = true;
       this.disposeSubagentsForTask(taskId, reason);
     }
+    // CLI Agent Executor (U7): a cli-agent session is a hard-cancel surface like
+    // any API session. Claim it synchronously, then SIGKILL the PTY and mark
+    // `killed` (never resume-eligible) — the same dispose/abort contract API
+    // sessions honor. moveTask(in-progress→todo) routes here (AGENTS.md hard
+    // cancel), so this is what guarantees the PTY tree is reaped on column exit.
+    const claimedCliSession = this.activeCliTaskSessions.get(taskId);
+    if (claimedCliSession) {
+      hadActiveSurface = true;
+      this.activeCliTaskSessions.delete(taskId);
+    }
 
     if (claimedSession) {
       const { session } = claimedSession;
@@ -1834,6 +1893,12 @@ export class TaskExecutor {
       }
     }
 
+    if (claimedCliSession) {
+      await claimedCliSession.kill("killed").catch((err) => {
+        executorLog.warn(`Failed to kill CLI agent session for ${taskId}: ${err}`);
+      });
+    }
+
     this.loopRecoveryState.delete(taskId);
     this.spawnedAgents.delete(taskId);
     this.stuckAborted.delete(taskId);
@@ -1850,6 +1915,7 @@ export class TaskExecutor {
       ...this.activeWorkflowStepSessions.keys(),
       ...this.activeConfiguredCommandControllers.keys(),
       ...this.activeSubagentSessions.keys(),
+      ...this.activeCliTaskSessions.keys(),
     ]);
 
     for (const taskId of taskIds) {
@@ -4510,6 +4576,15 @@ export class TaskExecutor {
     }
 
     const executorKind = typeof cfg.executor === "string" ? cfg.executor : "model";
+
+    // CLI Agent Executor (U7): a `cli-agent` node drives an engine-owned CLI
+    // session through the task-session orchestration — NOT through the
+    // executeWorkflowStep / model machinery. It is write-capable (the agent edits
+    // the worktree), so it requires a task worktree like any coding node.
+    if (executorKind === "cli-agent") {
+      return this.runCliAgentNode(node, live, cfg);
+    }
+
     const scriptName = typeof cfg.scriptName === "string" && cfg.scriptName.trim() ? cfg.scriptName : undefined;
     const rawCliCommand = executorKind === "cli" && typeof cfg.cliCommand === "string" && cfg.cliCommand.trim()
       ? cfg.cliCommand.trim()
@@ -4641,6 +4716,166 @@ export class TaskExecutor {
       outcome: outcome.success || !blocking ? "success" : "failure",
       value: verdict ?? (outcome.success ? "passed" : "failed"),
     };
+  }
+
+  /**
+   * Resolve the cli-agent executor config off a workflow node (U7), snapshotting
+   * the launch-time values. A mid-run node-config edit therefore applies to the
+   * NEXT run only. Per-task overrides follow the existing per-task settings
+   * precedent: when reachable cheaply we read a task field; otherwise the node
+   * config is authoritative (documented hook point — `task.cliAdapterId` etc. are
+   * not modeled on TaskDetail in v1, so node config is the sole source here).
+   */
+  private resolveCliExecutorConfig(cfg: Record<string, unknown>): ResolvedCliExecutorConfig | null {
+    const cliAdapterId = typeof cfg.cliAdapterId === "string" && cfg.cliAdapterId.trim()
+      ? cfg.cliAdapterId.trim()
+      : undefined;
+    if (!cliAdapterId) return null;
+    const cliAutonomy = cfg.cliAutonomy && typeof cfg.cliAutonomy === "object"
+      ? (cfg.cliAutonomy as ResolvedCliExecutorConfig["cliAutonomy"])
+      : null;
+    const cliNotify = cfg.cliNotify && typeof cfg.cliNotify === "object"
+      ? (cfg.cliNotify as Record<string, unknown>)
+      : null;
+    const settings = cfg.cliSettings && typeof cfg.cliSettings === "object"
+      ? (cfg.cliSettings as Record<string, unknown>)
+      : undefined;
+    return { cliAdapterId, cliAutonomy, cliNotify, settings };
+  }
+
+  /**
+   * CLI Agent Executor seam (U7): run a `cli-agent` workflow node by driving an
+   * engine-owned CLI session through the task-session orchestration.
+   *
+   * Re-entry policy (KTD): a re-entry into execute launches a FRESH session — any
+   * prior live session for the task is killed first (context reset). The resolved
+   * config is snapshotted at launch.
+   *
+   * Outcome mapping (R20 positive-completion gating):
+   *   - success         → node success (pipeline advances; PTY reaped at handoff
+   *                       to in-review via reapCliTaskSessionForHandoff).
+   *   - needs-attention / user-exited / auth-failed → node failure (the graph
+   *     failure handler parks the task for a human — never a silent stall).
+   *   - killed          → node failure value "cli-agent-killed" (hard cancel
+   *     already moved the task; this just unwinds the graph walk).
+   *
+   * A CliConcurrencyLimitError at spawn surfaces as a clear typed error value
+   * ("cli-agent-at-capacity") rather than a hang.
+   */
+  private async runCliAgentNode(
+    node: WorkflowIrNode,
+    live: TaskDetail,
+    cfg: Record<string, unknown>,
+  ): Promise<WorkflowNodeResult> {
+    const runtime = this.options.cliAgentRuntime;
+    if (!runtime) {
+      await this.store.logEntry(
+        live.id,
+        `Workflow node '${node.id}' uses the cli-agent executor but no CLI agent runtime is wired`,
+        undefined,
+        this.getRunContextFor(live.id),
+      );
+      return { outcome: "failure", value: "cli-agent-runtime-unavailable" };
+    }
+    if (!live.worktree) {
+      await this.store.logEntry(
+        live.id,
+        `Workflow node '${node.id}' (cli-agent) is write-capable but no task worktree exists yet — place it after the execute seam`,
+        undefined,
+        this.getRunContextFor(live.id),
+      );
+      return { outcome: "failure", value: "no-worktree-for-write-node" };
+    }
+    const config = this.resolveCliExecutorConfig(cfg);
+    if (!config) {
+      await this.store.logEntry(
+        live.id,
+        `Workflow node '${node.id}' (cli-agent) is missing 'cliAdapterId'`,
+        undefined,
+        this.getRunContextFor(live.id),
+      );
+      return { outcome: "failure", value: "cli-agent-adapter-missing" };
+    }
+
+    const prompt = typeof cfg.prompt === "string" ? cfg.prompt : (live.prompt ?? "");
+
+    // Re-entry: kill any prior LIVE session for this task (RETHINK/replan context
+    // reset) before launching fresh.
+    killLiveTaskSessions(live.id, runtime.manager, runtime.store);
+
+    let session: CliTaskSession;
+    try {
+      session = await launchCliTaskSession({
+        taskId: live.id,
+        projectId: runtime.projectId,
+        worktreePath: live.worktree,
+        prompt,
+        config,
+        manager: runtime.manager,
+        hub: runtime.hub,
+        registry: runtime.registry,
+        hookEndpointUrl: runtime.hookEndpointUrl,
+        hookDirRoot: runtime.hookDirRoot,
+        log: (msg) => executorLog.log(`[cli-agent] ${msg}`),
+      });
+    } catch (err) {
+      if (err instanceof CliConcurrencyLimitError) {
+        await this.store.logEntry(
+          live.id,
+          `cli-agent session for node '${node.id}' rejected at PTY pool ceiling (${err.active}/${err.ceiling}) — queued`,
+          undefined,
+          this.getRunContextFor(live.id),
+        );
+        // A typed, surfaced state — NOT a silent stall. The graph failure handler
+        // parks the task; a later sweep / capacity opening re-runs it.
+        return { outcome: "failure", value: "cli-agent-at-capacity" };
+      }
+      throw err;
+    }
+
+    this.activeCliTaskSessions.set(live.id, session);
+    let outcome: CliTaskOutcome;
+    try {
+      outcome = await session.result();
+    } finally {
+      // Detach the live-session handle. Reaping (success) / killing (cancel) is
+      // handled per-outcome below or by the abort path.
+      if (this.activeCliTaskSessions.get(live.id) === session) {
+        this.activeCliTaskSessions.delete(live.id);
+      }
+    }
+
+    switch (outcome.kind) {
+      case "success":
+        // Reap the PTY at the execute→in-review handoff (autoMerge:false tasks
+        // don't hold slots): graceful kill, record terminationReason "completed".
+        await this.reapCliTaskSessionForHandoff(session, live.id);
+        return { outcome: "success", value: "cli-agent-done" };
+      case "killed":
+        // Hard cancel already moved the task + killed the PTY via the abort path;
+        // just unwind the graph walk.
+        return { outcome: "failure", value: "cli-agent-killed" };
+      case "auth-failed":
+        return { outcome: "failure", value: "cli-agent-auth-failed" };
+      case "user-exited":
+        return { outcome: "failure", value: "cli-agent-user-exited" };
+      case "needs-attention":
+      default:
+        return { outcome: "failure", value: "cli-agent-needs-attention" };
+    }
+  }
+
+  /**
+   * Reap a CLI task session at the execute→in-review handoff (U7). Graceful PTY
+   * kill recorded as `completed`. Best-effort: a reap failure must not block the
+   * pipeline advancement that the positive done already authorized.
+   */
+  private async reapCliTaskSessionForHandoff(session: CliTaskSession, taskId: string): Promise<void> {
+    try {
+      await session.reap();
+    } catch (err) {
+      executorLog.warn(`${taskId}: failed to reap cli-agent session at handoff: ${err}`);
+    }
   }
 
   /** Terminal failure of a graph run: record the error and park the task in

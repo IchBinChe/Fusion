@@ -646,3 +646,33 @@ export {
   type WriteSessionHookScriptsOptions,
   type WrittenHookScripts,
 } from "./cli-agent/hook-scripts.js";
+// CLI Agent Executor — PTY session manager + adapter registry (U2).
+export {
+  CliSessionManager,
+  CliConcurrencyLimitError,
+  UnknownCliSessionError,
+  neutralizeInjection,
+  DEFAULT_SCROLLBACK_BYTES,
+  DEFAULT_CONCURRENCY_CEILING,
+  type CliSessionManagerOptions,
+  type SpawnCliSessionOptions,
+  type CliSessionAttachment,
+} from "./cli-agent/session-manager.js";
+export {
+  CliAdapterRegistry,
+  defaultCliAdapterRegistry,
+  UnknownCliAdapterError,
+  DuplicateCliAdapterError,
+  type CliAgentAdapter,
+  type CliAdapterCapabilities,
+} from "./cli-agent/adapter.js";
+// CLI Agent Executor — task ↔ session orchestration (U7).
+export {
+  CliTaskSession,
+  launchCliTaskSession,
+  killLiveTaskSessions,
+  type CliTaskOutcome,
+  type CliTaskOutcomeKind,
+  type ResolvedCliExecutorConfig,
+  type LaunchCliTaskSessionOptions,
+} from "./cli-agent/task-session.js";

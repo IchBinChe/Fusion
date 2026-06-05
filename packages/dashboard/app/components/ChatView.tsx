@@ -37,6 +37,7 @@ import { AgentMentionPopup } from "./AgentMentionPopup";
 import { AgentAvatar } from "./AgentAvatar";
 import { FileMentionPopup } from "./FileMentionPopup";
 import { CreateRoomModal } from "./CreateRoomModal";
+import { CliChatSurface, type CliChatTier } from "./CliChatSurface";
 import { useFileMention } from "../hooks/useFileMention";
 import { useModelsCache } from "../hooks/useModelsCache";
 import { useDiscoveredSkillsCache } from "../hooks/useDiscoveredSkillsCache";
@@ -2623,6 +2624,300 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     containerEl.scrollTo({ top, behavior: prefersReducedMotion ? "auto" : "smooth" });
   }, []);
 
+  // ── CLI-backed chat mount (U12) ──────────────────────────────────────────
+  // When the active chat session selects a cli-agent executor, the message-pane
+  // + composer region is delegated to <CliChatSurface> (transcript + raw-terminal
+  // toggle for hybrid/native adapters, terminal-only for the generic adapter).
+  // The transcript renderer and composer renderer are the EXISTING ChatView JSX
+  // passed through as thunks so there is no parallel message/composer UI.
+  const cliAdapterId = activeSession?.cliExecutorAdapterId ?? null;
+  const cliChatActive = Boolean(cliAdapterId);
+  // Generic adapter has no structured transcript → terminal-only; every other
+  // bundled adapter exposes a transcript and gets the toggle (the authoritative
+  // tier is resolved server-side; this only needs the generic vs. non-generic
+  // split that drives the toggle's presence).
+  const cliChatTier: CliChatTier = cliAdapterId === "generic" ? "generic" : "hybrid";
+  // Terminal attach id: the native session linkage when known, else the chat id.
+  const cliTerminalSessionId = activeSession?.cliSessionFile || activeSession?.id || "";
+
+  // The session message pane and composer, captured once so both the normal
+  // provider path and the CLI-backed path (CliChatSurface thunks) render the
+  // exact same JSX — no parallel message/composer UI.
+  const renderSessionMessagesPane = () => (
+    <div className="chat-messages" ref={messagesContainerRef} onScroll={updateScrollState}>
+      <div ref={loadMoreSentinelRef} className="chat-load-more-sentinel">
+        {hasMoreMessages && messagesLoading && (
+          <div className="chat-loading-older">{t("chat.loadingOlderMessages", "Loading older messages…")}</div>
+        )}
+      </div>
+      {isStreaming ? (
+        <>
+          {messages.map((message) => (
+            <ChatMessageItem
+              key={message.id}
+              message={message}
+              forcePlain={showAllAsPlain}
+              agentName={agentName}
+              hideAssistantIdentity={hideAssistantIdentity}
+              showAssistantModelTag={showAssistantModelTag}
+              activeModelTag={activeModelTag}
+              activeModelProvider={activeModelProvider}
+              activeSessionId={activeSession?.id ?? null}
+              mentionAgentsByName={mentionAgentsByName}
+              roomContext={null}
+              copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
+              onScrollToTop={handleScrollMessageToTop}
+            />
+          ))}
+          <div className="chat-message chat-message--assistant chat-message--streaming">
+            {!hideAssistantIdentity && (
+              <div className="chat-message-avatar">
+                {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="sm" /> : <Bot size={14} />}
+                <span>{agentName}</span>
+                {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+              </div>
+            )}
+            {streamingText ? (
+              renderAssistantContent(streamingText, showAllAsPlain)
+            ) : (
+              <div className="chat-message-content chat-message-content--waiting">
+                {streamingThinking ? t("chat.thinkingStatus", "Thinking…") : t("chat.connectingStatus", "Connecting…")}
+              </div>
+            )}
+            {showProviderResponseCopy && streamingText && renderCopyAction("__streaming__", streamingText, "chat-copy-response-streaming")}
+            {renderToolCalls(streamingToolCalls, t)}
+            {streamingThinking && (
+              <details className="chat-message-thinking">
+                <summary>{t("chat.thinking", "Thinking")}</summary>
+                <pre className="chat-message-thinking-content">{linkifyFilePaths(streamingThinking)}</pre>
+              </details>
+            )}
+            <div className="chat-typing-indicator">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        </>
+      ) : messagesLoading ? (
+        <div className="chat-empty-state">{t("chat.loadingMessages", "Loading messages...")}</div>
+      ) : messages.length === 0 && !activeSession ? (
+        renderEmptyState()
+      ) : messages.length === 0 && activeSession ? (
+        <div className="chat-empty-state">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
+      ) : (
+        <>
+          {messages.map((message) => (
+            <ChatMessageItem
+              key={message.id}
+              message={message}
+              forcePlain={showAllAsPlain}
+              agentName={agentName}
+              hideAssistantIdentity={hideAssistantIdentity}
+              showAssistantModelTag={showAssistantModelTag}
+              activeModelTag={activeModelTag}
+              activeModelProvider={activeModelProvider}
+              activeSessionId={activeSession?.id ?? null}
+              mentionAgentsByName={mentionAgentsByName}
+              roomContext={null}
+              copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
+              onScrollToTop={handleScrollMessageToTop}
+            />
+          ))}
+        </>
+      )}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+
+  const renderSessionComposerPane = () => (
+    <div className="chat-input-area">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,.txt,.json,.yaml,.yml,.log,.csv,.xml,.md"
+        multiple
+        style={{ display: "none" }}
+        onChange={(event) => {
+          handleAttachmentFiles(event.target.files);
+          event.target.value = "";
+        }}
+      />
+      {showSkillMenu && (
+        <div className="chat-skill-menu" data-testid="chat-skill-menu" role="listbox" aria-label={t("chat.skillSuggestions", "Skill suggestions")}>
+          {skillsLoading ? (
+            <div className="chat-skill-menu-empty">{t("chat.loadingSkills", "Loading skills…")}</div>
+          ) : filteredSkills.length === 0 ? (
+            <div className="chat-skill-menu-empty">
+              {skillFilter ? t("chat.noSkillsFound", "No skills found") : t("chat.noSkillsAvailable", "No skills available")}
+            </div>
+          ) : (
+            filteredSkills.map((skill, index) => (
+              <button
+                key={skill.id}
+                type="button"
+                role="option"
+                aria-selected={index === highlightedSkillIndex}
+                className={`chat-skill-menu-item${index === highlightedSkillIndex ? " chat-skill-menu-item--highlighted" : ""}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHighlightedSkillIndex(index)}
+                onClick={() => handleSkillSelect(skill)}
+              >
+                <span className="chat-skill-menu-item-name">{skill.name}</span>
+                <span className="chat-skill-menu-item-description" title={skill.relativePath}>
+                  {skill.relativePath}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+      {pendingAttachments.length > 0 && (
+        <div className="chat-attachment-previews" data-testid="chat-attachment-previews">
+          {pendingAttachments.map((attachment, index) => (
+            <div
+              key={attachment.previewUrl || `${attachment.file.name}-${index}`}
+              className="chat-attachment-preview"
+              data-testid={`chat-attachment-preview-${index}`}
+            >
+              {attachment.previewUrl ? (
+                <img src={attachment.previewUrl} alt={attachment.file.name} />
+              ) : (
+                <span className="chat-attachment-preview-name">{attachment.file.name}</span>
+              )}
+              <button
+                type="button"
+                className="chat-attachment-remove"
+                onClick={() => removeAttachment(index)}
+                data-testid={`chat-attachment-remove-${index}`}
+                aria-label={`Remove ${attachment.file.name}`}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="chat-input-row">
+        <button
+          type="button"
+          className="btn-icon chat-attach-btn"
+          data-testid="chat-attach-btn"
+          aria-label={t("chat.attachFiles", "Attach files")}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Paperclip size={16} />
+        </button>
+        <div
+          className={`chat-input-wrapper${isDragOver ? " chat-input-wrapper--dragover" : ""}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setIsDragOver(false);
+            handleAttachmentFiles(event.dataTransfer.files);
+          }}
+        >
+          <textarea
+            ref={handleComposerRef}
+            className="chat-input-textarea"
+            placeholder={t("chat.typeMessage", "Type a message...")}
+            value={messageInput}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            onKeyUp={handleInputKeyUp}
+            onClick={handleInputSelectionChange}
+            onBlur={handleInputBlur}
+            onFocus={handleInputFocus}
+            onPaste={handlePaste}
+            onTouchStart={(event) => {
+              if (typeof window === "undefined") return;
+              if (window.innerWidth > 768) return;
+              if (!isIOS()) return;
+              if (document.activeElement === event.currentTarget) return;
+              event.preventDefault();
+              event.currentTarget.focus({ preventScroll: true });
+            }}
+            rows={1}
+            data-testid="chat-input"
+          />
+          <AgentMentionPopup
+            agents={mentionAgents}
+            filter={mentionFilter}
+            highlightedIndex={mentionHighlightIndex}
+            visible={mentionPopupVisible}
+            onSelect={handleMentionSelect}
+            position="below"
+            roomMemberIds={roomContext?.memberIds}
+            roomName={roomContext?.roomName}
+          />
+          <FileMentionPopup
+            visible={fileMention.mentionActive && !mentionPopupVisible}
+            position={fileMentionPosition}
+            tasks={fileMention.tasks}
+            files={fileMention.files}
+            selectedIndex={fileMention.selectedIndex}
+            onSelectTask={(task) => {
+              insertHashMention(fileMention.selectTask(task, messageInput), `#${task.id}`);
+            }}
+            onSelectFile={(file) => {
+              insertHashMention(fileMention.selectFile(file, messageInput), `#${file.path}`);
+            }}
+            loading={fileMention.loading}
+          />
+          {pendingMessage && (
+            <div className="chat-pending-message" data-testid="chat-pending-indicator">
+              <span>{t("chat.queuedMessage", "Queued: {{preview}}", { preview: pendingPreview })}</span>
+              <button
+                type="button"
+                className="chat-pending-message-dismiss"
+                aria-label={t("chat.dismissQueuedMessage", "Dismiss queued message")}
+                data-testid="chat-pending-dismiss"
+                onClick={clearPendingMessage}
+              >
+                ×
+              </button>
+            </div>
+          )}
+        </div>
+        {isStreaming ? (
+          <button
+            className="chat-input-stop"
+            onClick={stopStreaming}
+            aria-label={t("chat.stopGeneration", "Stop generation")}
+            data-testid="chat-stop-btn"
+          >
+            <Square size={14} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="chat-input-send"
+            onPointerDown={(event) => {
+              if (event.pointerType && event.pointerType !== "mouse") {
+                event.preventDefault();
+              }
+            }}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onClick={() => {
+              void handleSend();
+            }}
+            disabled={!messageInput.trim() && pendingAttachments.length === 0}
+            data-testid="chat-send-btn"
+            style={{ touchAction: "manipulation" }}
+          >
+            <Send size={16} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="chat-view">
       {/* Sidebar */}
@@ -3216,301 +3511,33 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
           </div>
         )}
 
-        {/* Messages */}
-        <div className="chat-messages" ref={messagesContainerRef} onScroll={updateScrollState}>
-          <div ref={loadMoreSentinelRef} className="chat-load-more-sentinel">
-            {hasMoreMessages && messagesLoading && (
-              <div className="chat-loading-older">{t("chat.loadingOlderMessages", "Loading older messages…")}</div>
-            )}
-          </div>
-          {isStreaming ? (
-            <>
-              {messages.map((message) => (
-                <ChatMessageItem
-                  key={message.id}
-                  message={message}
-                  forcePlain={showAllAsPlain}
-                  agentName={agentName}
-                  hideAssistantIdentity={hideAssistantIdentity}
-                  showAssistantModelTag={showAssistantModelTag}
-                  activeModelTag={activeModelTag}
-                  activeModelProvider={activeModelProvider}
-                  activeSessionId={activeSession?.id ?? null}
-                  mentionAgentsByName={mentionAgentsByName}
-                  roomContext={null}
-                  copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
-                  onScrollToTop={handleScrollMessageToTop}
-                />
-              ))}
-              <div className="chat-message chat-message--assistant chat-message--streaming">
-                {!hideAssistantIdentity && (
-                  <div className="chat-message-avatar">
-                    {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="sm" /> : <Bot size={14} />}
-                    <span>{agentName}</span>
-                    {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
-                  </div>
-                )}
-                {streamingText ? (
-                  renderAssistantContent(streamingText, showAllAsPlain)
-                ) : (
-                  <div className="chat-message-content chat-message-content--waiting">
-                    {streamingThinking ? t("chat.thinkingStatus", "Thinking…") : t("chat.connectingStatus", "Connecting…")}
-                  </div>
-                )}
-                {showProviderResponseCopy && streamingText && renderCopyAction("__streaming__", streamingText, "chat-copy-response-streaming")}
-                {renderToolCalls(streamingToolCalls, t)}
-                {streamingThinking && (
-                  <details className="chat-message-thinking">
-                    <summary>{t("chat.thinking", "Thinking")}</summary>
-                    <pre className="chat-message-thinking-content">{linkifyFilePaths(streamingThinking)}</pre>
-                  </details>
-                )}
-                <div className="chat-typing-indicator">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-            </>
-          ) : messagesLoading ? (
-            <div className="chat-empty-state">{t("chat.loadingMessages", "Loading messages...")}</div>
-          ) : messages.length === 0 && !activeSession ? (
-            renderEmptyState()
-          ) : messages.length === 0 && activeSession ? (
-            <div className="chat-empty-state">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
-          ) : (
-            <>
-              {messages.map((message) => (
-                <ChatMessageItem
-                  key={message.id}
-                  message={message}
-                  forcePlain={showAllAsPlain}
-                  agentName={agentName}
-                  hideAssistantIdentity={hideAssistantIdentity}
-                  showAssistantModelTag={showAssistantModelTag}
-                  activeModelTag={activeModelTag}
-                  activeModelProvider={activeModelProvider}
-                  activeSessionId={activeSession?.id ?? null}
-                  mentionAgentsByName={mentionAgentsByName}
-                  roomContext={null}
-                  copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
-                  onScrollToTop={handleScrollMessageToTop}
-                />
-              ))}
-            </>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-        {isUserScrolling && (
-          <button
-            type="button"
-            className="btn btn-sm chat-jump-to-latest"
-            data-testid="chat-jump-to-latest"
-            onClick={() => scrollToBottom("fab-click")}
-          >
-            <ChevronDown size={14} />
-            {t("chat.latest", "Latest")}
-          </button>
-        )}
-
-        {/* Input */}
-        {activeSession && (
-          <div className="chat-input-area">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.txt,.json,.yaml,.yml,.log,.csv,.xml,.md"
-              multiple
-              style={{ display: "none" }}
-              onChange={(event) => {
-                handleAttachmentFiles(event.target.files);
-                event.target.value = "";
-              }}
-            />
-            {showSkillMenu && (
-              <div className="chat-skill-menu" data-testid="chat-skill-menu" role="listbox" aria-label={t("chat.skillSuggestions", "Skill suggestions")}>
-                {skillsLoading ? (
-                  <div className="chat-skill-menu-empty">{t("chat.loadingSkills", "Loading skills…")}</div>
-                ) : filteredSkills.length === 0 ? (
-                  <div className="chat-skill-menu-empty">
-                    {skillFilter ? t("chat.noSkillsFound", "No skills found") : t("chat.noSkillsAvailable", "No skills available")}
-                  </div>
-                ) : (
-                  filteredSkills.map((skill, index) => (
-                    <button
-                      key={skill.id}
-                      type="button"
-                      role="option"
-                      aria-selected={index === highlightedSkillIndex}
-                      className={`chat-skill-menu-item${index === highlightedSkillIndex ? " chat-skill-menu-item--highlighted" : ""}`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onMouseEnter={() => setHighlightedSkillIndex(index)}
-                      onClick={() => handleSkillSelect(skill)}
-                    >
-                      <span className="chat-skill-menu-item-name">{skill.name}</span>
-                      <span className="chat-skill-menu-item-description" title={skill.relativePath}>
-                        {skill.relativePath}
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-            {pendingAttachments.length > 0 && (
-              <div className="chat-attachment-previews" data-testid="chat-attachment-previews">
-                {pendingAttachments.map((attachment, index) => (
-                  <div
-                    key={attachment.previewUrl || `${attachment.file.name}-${index}`}
-                    className="chat-attachment-preview"
-                    data-testid={`chat-attachment-preview-${index}`}
-                  >
-                    {attachment.previewUrl ? (
-                      <img src={attachment.previewUrl} alt={attachment.file.name} />
-                    ) : (
-                      <span className="chat-attachment-preview-name">{attachment.file.name}</span>
-                    )}
-                    <button
-                      type="button"
-                      className="chat-attachment-remove"
-                      onClick={() => removeAttachment(index)}
-                      data-testid={`chat-attachment-remove-${index}`}
-                      aria-label={`Remove ${attachment.file.name}`}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="chat-input-row">
+        {/* Messages + composer. CLI-backed chat sessions delegate this
+            region to <CliChatSurface> (transcript/raw-terminal toggle +
+            queued composer); generic-tier adapters render terminal-only. */}
+        {cliChatActive ? (
+          <CliChatSurface
+            cliSessionId={cliTerminalSessionId}
+            tier={cliChatTier}
+            projectId={projectId}
+            renderTranscript={renderSessionMessagesPane}
+            renderComposer={() => (activeSession ? renderSessionComposerPane() : null)}
+          />
+        ) : (
+          <>
+            {renderSessionMessagesPane()}
+            {isUserScrolling && (
               <button
                 type="button"
-                className="btn-icon chat-attach-btn"
-                data-testid="chat-attach-btn"
-                aria-label={t("chat.attachFiles", "Attach files")}
-                onClick={() => fileInputRef.current?.click()}
+                className="btn btn-sm chat-jump-to-latest"
+                data-testid="chat-jump-to-latest"
+                onClick={() => scrollToBottom("fab-click")}
               >
-                <Paperclip size={16} />
+                <ChevronDown size={14} />
+                {t("chat.latest", "Latest")}
               </button>
-              <div
-                className={`chat-input-wrapper${isDragOver ? " chat-input-wrapper--dragover" : ""}`}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setIsDragOver(true);
-                }}
-                onDragLeave={() => setIsDragOver(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setIsDragOver(false);
-                  handleAttachmentFiles(event.dataTransfer.files);
-                }}
-              >
-                <textarea
-                  ref={handleComposerRef}
-                  className="chat-input-textarea"
-                  placeholder={t("chat.typeMessage", "Type a message...")}
-                  value={messageInput}
-                  onChange={handleInputChange}
-                  onKeyDown={handleInputKeyDown}
-                  onKeyUp={handleInputKeyUp}
-                  onClick={handleInputSelectionChange}
-                  onBlur={handleInputBlur}
-                  onFocus={handleInputFocus}
-                  onPaste={handlePaste}
-                  onTouchStart={(event) => {
-                    if (typeof window === "undefined") return;
-                    if (window.innerWidth > 768) return;
-                    // iOS-only: see comment on the other chat-input touchstart
-                    // handler above. On Android, preventDefault blocks the
-                    // soft keyboard from opening.
-                    if (!isIOS()) return;
-                    if (document.activeElement === event.currentTarget) return;
-                    event.preventDefault();
-                    event.currentTarget.focus({ preventScroll: true });
-                  }}
-                  rows={1}
-                  data-testid="chat-input"
-                />
-                <AgentMentionPopup
-                  agents={mentionAgents}
-                  filter={mentionFilter}
-                  highlightedIndex={mentionHighlightIndex}
-                  visible={mentionPopupVisible}
-                  onSelect={handleMentionSelect}
-                  position="below"
-                  roomMemberIds={roomContext?.memberIds}
-                  roomName={roomContext?.roomName}
-                />
-                <FileMentionPopup
-                  visible={fileMention.mentionActive && !mentionPopupVisible}
-                  position={fileMentionPosition}
-                  tasks={fileMention.tasks}
-                  files={fileMention.files}
-                  selectedIndex={fileMention.selectedIndex}
-                  onSelectTask={(task) => {
-                    insertHashMention(fileMention.selectTask(task, messageInput), `#${task.id}`);
-                  }}
-                  onSelectFile={(file) => {
-                    insertHashMention(fileMention.selectFile(file, messageInput), `#${file.path}`);
-                  }}
-                  loading={fileMention.loading}
-                />
-                {pendingMessage && (
-                  <div className="chat-pending-message" data-testid="chat-pending-indicator">
-                    <span>{t("chat.queuedMessage", "Queued: {{preview}}", { preview: pendingPreview })}</span>
-                    <button
-                      type="button"
-                      className="chat-pending-message-dismiss"
-                      aria-label={t("chat.dismissQueuedMessage", "Dismiss queued message")}
-                      data-testid="chat-pending-dismiss"
-                      onClick={clearPendingMessage}
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-              </div>
-              {isStreaming ? (
-                <button
-                  className="chat-input-stop"
-                  onClick={stopStreaming}
-                  aria-label={t("chat.stopGeneration", "Stop generation")}
-                  data-testid="chat-stop-btn"
-                >
-                  <Square size={14} />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="chat-input-send"
-                  // Keep keyboard up when sending. preventDefault fires on
-                  // pointerdown for touch pointers (BEFORE iOS blurs the
-                  // textarea — the synthesized mousedown is too late on
-                  // iOS), and on mousedown for desktop. Crucially we do NOT
-                  // call preventDefault on touchstart and we do NOT run the
-                  // action here — both of those broke quick taps. Click
-                  // still fires from the iOS touch sequence and runs the
-                  // action reliably.
-                  onPointerDown={(event) => {
-                    if (event.pointerType && event.pointerType !== "mouse") {
-                      event.preventDefault();
-                    }
-                  }}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                  }}
-                  onClick={() => {
-                    void handleSend();
-                  }}
-                  disabled={!messageInput.trim() && pendingAttachments.length === 0}
-                  data-testid="chat-send-btn"
-                  style={{ touchAction: "manipulation" }}
-                >
-                  <Send size={16} />
-                </button>
-              )}
-            </div>
-          </div>
+            )}
+            {activeSession && renderSessionComposerPane()}
+          </>
         )}
       </div>
       )}

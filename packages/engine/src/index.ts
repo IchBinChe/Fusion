@@ -657,6 +657,7 @@ export {
   type TelemetryEventKind,
   type SanitizedTelemetryEvent,
   type NotificationDispatch,
+  type TelemetryEventListener,
 } from "./cli-agent/telemetry-hub.js";
 export {
   CliSessionStateMachine,

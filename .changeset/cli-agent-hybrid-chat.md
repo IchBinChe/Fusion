@@ -12,3 +12,9 @@ authoritative session state rather than trusting a cached busy flag. The chat
 surface gains a transcript ↔ raw-terminal toggle (terminal owns input, composer
 hidden in terminal mode); generic-tier sessions render terminal-only with no
 toggle. New per-session `cliExecutorAdapterId` linkage on chat_sessions.
+
+ChatView now mounts `CliChatSurface` for cli-backed sessions (the message-pane +
+composer region is delegated to it; regular sessions keep the standard composer),
+and the engine `TelemetryHub` gains a narrow optional `onEvent` tap (settable via
+`setEventListener`) so the chat transcript runner can observe the same sanitized
+events the hook route already feeds, without the hub becoming a subscriber bus.

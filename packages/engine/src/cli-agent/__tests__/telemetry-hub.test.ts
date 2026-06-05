@@ -230,4 +230,53 @@ describe("TelemetryHub", () => {
     const flushed = hub.flush(a) ?? "";
     expect(flushed).not.toContain("sk-zzzz0123456789abcd0123");
   });
+
+  // ── Sanitized-event tap (U12 chat transcript seam) ──────────────────────────
+
+  it("onEvent tap receives sanitized events after routing (constructor option)", () => {
+    const a = seed({ agentState: "busy" });
+    const seen: Array<{ sessionId: string; kind: string; text?: string }> = [];
+    const hub = new TelemetryHub({
+      store,
+      // No carry window so transcript text emits in the same event (the carry
+      // behavior is exercised by the redaction tests above).
+      chunkCarryChars: 0,
+      onEvent: (sessionId, event) => seen.push({ sessionId, kind: event.kind, text: event.text }),
+    });
+    hub.issueToken(a);
+    hub.ingest(a, { kind: "busy", payload: {} });
+    hub.ingest(a, { kind: "transcript", payload: { text: "hello world" } });
+    hub.ingest(a, { kind: "done", payload: {} });
+    expect(seen.map((e) => e.kind)).toEqual(["busy", "transcript", "done"]);
+    expect(seen.every((e) => e.sessionId === a)).toBe(true);
+    // Tap sees the SANITIZED text, not the raw payload.
+    expect(seen[1].text).toContain("hello world");
+  });
+
+  it("onEvent tap is settable post-construction and clearable", () => {
+    const a = seed({ agentState: "busy" });
+    const hub = new TelemetryHub({ store });
+    hub.issueToken(a);
+    const seen: string[] = [];
+    hub.setEventListener((_sessionId, event) => seen.push(event.kind));
+    hub.ingest(a, { kind: "busy", payload: {} });
+    hub.setEventListener(undefined);
+    hub.ingest(a, { kind: "done", payload: {} });
+    expect(seen).toEqual(["busy"]); // only the event ingested while the listener was set
+  });
+
+  it("a throwing onEvent listener never breaks ingest", () => {
+    const a = seed({ agentState: "busy" });
+    const hub = new TelemetryHub({
+      store,
+      chunkCarryChars: 0,
+      onEvent: () => {
+        throw new Error("listener boom");
+      },
+    });
+    hub.issueToken(a);
+    // ingest still returns the sanitized event despite the throwing tap.
+    const out = hub.ingest(a, { kind: "transcript", payload: { text: "still here" } });
+    expect(out?.text).toContain("still here");
+  });
 });

@@ -55,6 +55,7 @@ vi.mock("@fusion/core", async () => {
 });
 
 vi.mock("@fusion/engine", () => ({
+  listCliAdapterDescriptors: () => [],
   executeApprovedAgentProvisioning: vi.fn(async () => undefined),
 }));
 

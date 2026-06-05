@@ -94,10 +94,29 @@ export type NotificationDispatch = (info: {
   notification: Record<string, unknown> | undefined;
 }) => void;
 
+/**
+ * Narrow tap invoked synchronously for every successfully-ingested (sanitized)
+ * event, AFTER state-machine routing. This is the seam that lets a downstream
+ * consumer — e.g. the CLI-backed chat runner (U12) building a durable transcript
+ * — observe the same sanitized events the hub already produced, without the hub
+ * growing a full subscriber bus. It is best-effort: a throwing listener never
+ * breaks ingest (the listener error is swallowed; ingest still returns).
+ */
+export type TelemetryEventListener = (
+  sessionId: string,
+  event: SanitizedTelemetryEvent,
+) => void;
+
 export interface TelemetryHubOptions {
   store: CliSessionStore;
   /** Notification dispatch for waiting-on-input events (per node config). */
   onNotification?: NotificationDispatch;
+  /**
+   * Optional sanitized-event tap (e.g. the CLI-backed chat transcript runner).
+   * Invoked once per ingested event after routing; best-effort (never throws
+   * into ingest). May also be set later via {@link TelemetryHub.setEventListener}.
+   */
+  onEvent?: TelemetryEventListener;
   /** Per-event text cap. */
   maxEventChars?: number;
   /** Per-turn event count cap. */
@@ -143,6 +162,8 @@ interface SessionTelemetry {
 export class TelemetryHub {
   private readonly store: CliSessionStore;
   private readonly onNotification?: NotificationDispatch;
+  /** Sanitized-event tap; settable post-construction (narrow seam, not a bus). */
+  private onEvent?: TelemetryEventListener;
   private readonly maxEventChars: number;
   private readonly maxEventsPerTurn: number;
   private readonly chunkCarryChars: number;
@@ -156,6 +177,7 @@ export class TelemetryHub {
   constructor(opts: TelemetryHubOptions) {
     this.store = opts.store;
     this.onNotification = opts.onNotification;
+    this.onEvent = opts.onEvent;
     this.maxEventChars = opts.maxEventChars ?? DEFAULT_MAX_EVENT_CHARS;
     this.maxEventsPerTurn = opts.maxEventsPerTurn ?? DEFAULT_MAX_EVENTS_PER_TURN;
     this.chunkCarryChars = opts.chunkCarryChars ?? DEFAULT_CHUNK_CARRY_CHARS;
@@ -191,6 +213,15 @@ export class TelemetryHub {
   /** Get the state machine for a registered session (for the executor seam). */
   getStateMachine(sessionId: string): CliSessionStateMachine | undefined {
     return this.sessions.get(sessionId)?.machine;
+  }
+
+  /**
+   * Set (or clear) the sanitized-event tap after construction. Used to wire the
+   * CLI-backed chat transcript runner (U12) onto the same hub the hook route
+   * already feeds, without the hub becoming a general subscriber bus.
+   */
+  setEventListener(listener: TelemetryEventListener | undefined): void {
+    this.onEvent = listener;
   }
 
   // ── Token registry ─────────────────────────────────────────────────────────
@@ -281,6 +312,16 @@ export class TelemetryHub {
 
     const sanitized = this.sanitize(entry, event);
     this.route(entry, sanitized);
+    // Narrow tap: feed the sanitized event to a downstream observer (e.g. the
+    // chat transcript runner). Best-effort — a throwing listener must not break
+    // ingest or the authoritative state transition that already happened.
+    if (this.onEvent) {
+      try {
+        this.onEvent(sessionId, sanitized);
+      } catch {
+        // Swallow: telemetry observers are best-effort.
+      }
+    }
     return sanitized;
   }
 

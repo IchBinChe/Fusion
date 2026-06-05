@@ -25,6 +25,7 @@ const { mockCreateFnAgent } = vi.hoisted(() => ({
 
 // Mock the engine module to avoid dynamic import issues in tests
 vi.mock("@fusion/engine", () => ({
+  listCliAdapterDescriptors: () => [],
   createFnAgent: mockCreateFnAgent,
 }));
 

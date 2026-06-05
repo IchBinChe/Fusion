@@ -60,6 +60,7 @@ export type {
   WorkflowIrNodeKind,
   WorkflowIrColumn,
   WorkflowIrColumnTrait,
+  WorkflowColumnAgent,
   WorkflowHoldRelease,
   WorkflowJoinMode,
   WorkflowJoinBranchFailure,
@@ -71,6 +72,17 @@ export type {
   WorkflowFieldOption,
   WorkflowFieldRender,
 } from "./workflow-ir-types.js";
+export {
+  instanceNodeId,
+  parseInstanceNodeId,
+  resolveColumnAgentBinding,
+  resolveEffectiveAgent,
+} from "./column-agent-resolver.js";
+export type {
+  ParsedInstanceNodeId,
+  EffectiveAgentInput,
+  EffectiveAgentResult,
+} from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 

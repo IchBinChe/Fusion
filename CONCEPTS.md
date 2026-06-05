@@ -22,6 +22,9 @@ The tombstone allowlist (`MOVED_SETTINGS_KEYS`) of the step-execution, review/ap
 ### Three-Tier Setting
 The named persistence pattern for a user preference on the dashboard: a device-local cache for instant reads, a write-through to Global Settings so other Surfaces see it, and a hydrate-on-mount from the server when no local value exists. A local or in-flight user choice always wins over server hydration, and changes propagate to other open tabs.
 
+### Translation Placeholder
+An empty-string value for a catalog key in a non-English locale, marking "not yet translated." Placeholders are intentionally backfilled when keys are added; at runtime they are treated as missing (never rendered), falling back through the locale chain to English. A non-empty value — even an English one left in a non-en catalog — is rendered as-is.
+
 ### Supported Locale
 A language tag in the closed set Fusion ships translations for. Any external tag (browser, environment, flag) is normalized into this set or rejected — never passed through raw. Chinese tags route by script and region so Traditional-script users are never silently served Simplified, and the two Chinese variants never collapse into a generic base tag.
 
@@ -164,6 +167,14 @@ A first-class, workflow-defined unit of task state: an id, a display name, and a
 ### Trait
 Composable column configuration: declarative flags (e.g. `complete`, `archived`, `countsTowardWip`) plus optional lifecycle hooks (`guard`, `gate`, `onEnter`, `onExit`, `releaseCondition`). Built-in and plugin-contributed traits register through one registry. Sync `guard` hooks and the `complete`/`archived` flags are built-in-only; plugin traits get async hook points only. A column's effective flags are the merged flags of its traits; conflicting compositions are rejected at save (server-side and in the editor).
 
+### Column agent
+A permanent agent binding on a workflow-defined column — a registry agent plus a mode — staffing all session-running work attributable to that column (custom nodes, the execute seam's coding session, per-step sessions; foreach template nodes inherit the enclosing foreach's column unless they declare their own). `defer` makes the column agent the default, applying only when the work carries no own agent identity and no complete model pair; `override` supersedes node- and task-level agent/model settings wholesale.
+
+Requires both the workflow-columns and graph-executor flags; with either off, bindings are inert at execution time. A missing or deleted agent degrades to normal resolution without aborting a live session. Binding an agent whose permission policy is broader than the project default requires explicit confirmation at save time on every write surface.
+
+### Effective agent (execution principal)
+The agent identity that actually runs a piece of work after column-agent precedence resolves — and the principal every identity-keyed subsystem must consult: permission gating, heartbeat serialization in both directions, resume re-dispatch, and mid-flight change detection. It may differ from the task's assigned agent under an override binding, and one task may have multiple effective agents across concurrent branch sessions.
+
 ### Lane
 A horizontal row on the multi-lane board, one per workflow in use by visible cards. Each lane renders its own workflow's columns. Tasks with no workflow selection appear in the Default workflow's lane; every card appears in exactly one lane. Zero-card lanes are hidden; lanes are collapsible with persisted state.
 
@@ -196,6 +207,20 @@ A workflow-declared, typed task field (`string | text | number | boolean | enum 
 
 ### Schema-Version Sweep
 The named process performed atomically with any bump of the core schema-version counter: a repo-wide hunt for hard-coded assertions of the old version number, updated in the same commit as the bump. The sweep's scope is every workspace that can embed the core database — packages *and* plugins — because any package instantiating the core store observes the current version; scoping the hunt to one workspace silently strands assertions in the others. Downstream consumers should prefer asserting against the exported version constant instead of a literal, which removes them from the sweep entirely.
+## Testing
+
+### Merge Gate
+The minimal set of merge-blocking PR checks: lint, typecheck, build, a Boot Smoke, and a small curated engine test suite. The gate is the only test signal that can block a PR; all other tests run non-blocking after merge.
+
+Gate membership is an explicit allow-list, never a glob: a test earns its slot with evidence of value and never graduates in by default. A flake inside the gate is *evicted* — its allow-list entry is removed — which deliberately requires no green run from the flaky test itself, so the gate can always be repaired while red.
+
+### Boot Smoke
+The gate's "app starts and serves" proof: the CLI answers its help command and a real server boots on a throwaway port, answers its health endpoint, and shuts down cleanly on signal. A pass requires both that the shutdown signal was actually delivered and that the exit was clean — a crash after serving is a failed boot path, not a pass.
+
+### Deletion Ratchet
+The standing policy for flaky tests: a test observed failing without a corresponding real bug is quarantined on sight — a dated ledger entry plus exclusion from all runs, not retried, not patched — then deleted 2 weeks later unless rescued with evidence it catches real regressions plus a root-cause fix. Appeasement (widened timeouts, added retries, loosened assertions) is prohibited, for agents especially.
+
+A second quarantine in the same subsystem is a product-race smell: the flake may be a real bug, so the product code gets a look before the deletion clock runs out. Gate flakes exit by Merge Gate eviction rather than quarantine, unless they should also leave the non-blocking tier.
 
 ## Flagged ambiguities
 

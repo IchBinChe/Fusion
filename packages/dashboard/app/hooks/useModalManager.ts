@@ -53,7 +53,6 @@ export interface ModalManager {
   fileBrowserInitialFile: string | null;
   activityLogOpen: boolean;
   gitManagerOpen: boolean;
-  workflowStepsOpen: boolean;
   workflowEditorOpen: boolean;
   /** When the workflow editor opens, which internal panel to pre-select (U9 redirect stubs). */
   workflowEditorInitialPanel?: "settings";
@@ -119,8 +118,6 @@ export interface ModalManager {
   openGitManager: () => void;
   closeGitManager: () => void;
 
-  openWorkflowSteps: () => void;
-  closeWorkflowSteps: () => void;
   openWorkflowEditor: (initialPanel?: "settings") => void;
   closeWorkflowEditor: () => void;
 
@@ -179,7 +176,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [fileBrowserInitialFile, setFileBrowserInitialFile] = useState<string | null>(null);
   const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [gitManagerOpen, setGitManagerOpen] = useState(false);
-  const [workflowStepsOpen, setWorkflowStepsOpen] = useState(false);
   const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false);
   const [workflowEditorInitialPanel, setWorkflowEditorInitialPanel] = useState<"settings" | undefined>(undefined);
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -199,7 +195,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       todosOpen ||
       activityLogOpen ||
       gitManagerOpen ||
-      workflowStepsOpen ||
       workflowEditorOpen ||
       scriptsOpen ||
       agentsOpen ||
@@ -348,8 +343,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const openGitManager = useCallback(() => setGitManagerOpen(true), []);
   const closeGitManager = useCallback(() => setGitManagerOpen(false), []);
 
-  const openWorkflowSteps = useCallback(() => setWorkflowStepsOpen(true), []);
-  const closeWorkflowSteps = useCallback(() => setWorkflowStepsOpen(false), []);
   const openWorkflowEditor = useCallback((initialPanel?: "settings") => {
     setWorkflowEditorInitialPanel(initialPanel);
     setWorkflowEditorOpen(true);
@@ -423,7 +416,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     fileBrowserInitialFile,
     activityLogOpen,
     gitManagerOpen,
-    workflowStepsOpen,
     workflowEditorOpen,
     workflowEditorInitialPanel,
     agentsOpen,
@@ -468,8 +460,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     closeActivityLog,
     openGitManager,
     closeGitManager,
-    openWorkflowSteps,
-    closeWorkflowSteps,
     openWorkflowEditor,
     closeWorkflowEditor,
     openAgents,

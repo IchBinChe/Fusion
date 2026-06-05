@@ -27,6 +27,8 @@ export type TranscriptSource =
   | "hooks"
   /** A JSONL transcript / rollout file tailed from disk. */
   | "jsonl"
+  /** A per-session JSONL file tailed from disk for both telemetry + transcript (Pi). */
+  | "session-jsonl"
   /** A native machine-readable event stream (e.g. `--mode json`). */
   | "event-stream"
   /** No structured transcript — raw terminal only (generic tier). */

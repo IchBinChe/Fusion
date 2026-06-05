@@ -84,7 +84,7 @@ import { getCachedUpdateStatus, isUpdateCheckEnabled } from "../update-cache.js"
 import { resolveSelfExtension } from "./self-extension.js";
 import { ensureBundledDependencyGraphPluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
-import { refreshOpencodeGoModels, syncStartupModels } from "./startup-model-sync.js";
+import { handleOpencodeGoApiKeySaved, syncStartupModels } from "./startup-model-sync.js";
 import { DashboardTUI, DashboardLogSink, isTTYAvailable, type SystemInfo, type GitStatus, type GitCommit, type GitCommitDetail, type GitBranch, type GitWorktree, type FileEntry, type FileReadResult, type TaskStep as TUITaskStep, type TaskLogEntry as TUITaskLogEntry, type TaskDetailData, type TaskEvent } from "./dashboard-tui/index.js";
 import { DASHBOARD_STARTUP_STATUS, runTuiStartupPrelude } from "./dashboard-startup-chain.js";
 
@@ -1761,14 +1761,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         if (providerId !== "opencode" && providerId !== "opencode-go") {
           return undefined;
         }
-        const settings = await store.getSettings();
-        if (settings.opencodeGoModelSync === false) {
-          return { registeredCount: 0, reason: "disabled-by-settings" };
-        }
-        return await refreshOpencodeGoModels({
+        return await handleOpencodeGoApiKeySaved(
+          dashboardAuthStorage,
+          store,
           modelRegistry,
-          log: (scope, message) => logSink.log(message, scope),
-        });
+          (scope, message) => logSink.log(message, scope),
+        );
       },
       getClaudeCliExtensionStatus: () => {
         const r = getCachedClaudeCliResolution();
@@ -2082,14 +2080,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         if (providerId !== "opencode" && providerId !== "opencode-go") {
           return undefined;
         }
-        const settings = await store.getSettings();
-        if (settings.opencodeGoModelSync === false) {
-          return { registeredCount: 0, reason: "disabled-by-settings" };
-        }
-        return await refreshOpencodeGoModels({
+        return await handleOpencodeGoApiKeySaved(
+          dashboardAuthStorage,
+          store,
           modelRegistry,
-          log: (scope, message) => logSink.log(message, scope),
-        });
+          (scope, message) => logSink.log(message, scope),
+        );
       },
       getClaudeCliExtensionStatus: () => {
         const r = getCachedClaudeCliResolution();

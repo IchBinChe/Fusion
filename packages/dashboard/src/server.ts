@@ -1107,6 +1107,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     options?.pluginRunner,
     () => store.getSettings(),
     options?.engine?.getMessageStore(),
+    store,
   );
 
   const runAiSessionCleanup = (maxAgeMs: number, source: "initial" | "scheduled") => {

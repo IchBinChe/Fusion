@@ -382,6 +382,7 @@ describe("WorkflowNodeEditor — U5 auto-layout", () => {
 function stepwiseDef(): WorkflowDefinition {
   return {
     id: "WF-STEP",
+    kind: "workflow",
     name: "Stepwise",
     description: "",
     ir: {

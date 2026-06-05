@@ -1400,6 +1400,31 @@ export function createTraitListTool(): ToolDefinition {
   };
 }
 
+/**
+ * Assemble the full workflow-authoring tool surface for a single store-scoped
+ * lane (chat / planning / executor): the six `fn_workflow_*` tools plus
+ * `fn_trait_list` (trait vocabulary needed to author/update workflow IR).
+ *
+ * Centralizing the list keeps the chat and planning lanes from drifting away
+ * from the executor's set as new workflow tools are added. `currentTaskId` is
+ * the default task for `fn_workflow_select`; lanes with no ambient task pass a
+ * placeholder (an agent can still target any task via the `task_id` param).
+ */
+export function createWorkflowAuthoringTools(
+  store: TaskStore,
+  currentTaskId: string,
+): ToolDefinition[] {
+  return [
+    createWorkflowListTool(store),
+    createWorkflowGetTool(store),
+    createWorkflowSelectTool(store, currentTaskId),
+    createWorkflowCreateTool(store),
+    createWorkflowUpdateTool(store),
+    createWorkflowDeleteTool(store),
+    createTraitListTool(),
+  ];
+}
+
 export function createMemorySearchTool(rootDir: string, settings?: MemoryToolSettings, options?: MemoryToolOptions): ToolDefinition {
   return {
     name: "fn_memory_search",

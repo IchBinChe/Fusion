@@ -74,12 +74,16 @@ async function pollHealth(port, deadline) {
   const url = `http://127.0.0.1:${port}/api/health`;
   let lastError = "no response";
   while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 2_000);
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+      const res = await fetch(url, { signal: controller.signal });
       if (res.status === 200) return;
       lastError = `HTTP ${res.status}`;
     } catch (err) {
       lastError = err?.cause?.code ?? err?.name ?? String(err);
+    } finally {
+      clearTimeout(abortTimer);
     }
     await new Promise((r) => setTimeout(r, 500));
   }

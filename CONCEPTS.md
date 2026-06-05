@@ -134,6 +134,14 @@ The user's mid-stage feedback channel: free-text guidance attached to an answer,
 ### Rehydration
 Re-establishing a live agent handle for a paused CE Session by replaying its recorded conversation against the model. Replay is side-effect-suppressed: it reconstructs the agent's context without re-emitting events, re-streaming Live activity, or re-writing artifacts.
 
+## Testing
+
+### Merge Gate
+The minimal set of merge-blocking PR checks: typecheck, build, boot smoke, and a small curated core-engine suite. The gate is the only test signal that can block a PR; admission requires evidence of value, and tests never graduate into it by default. All other tests run non-blocking.
+
+### Deletion Ratchet
+The standing policy for flaky tests: a test observed failing without a corresponding real bug is quarantined on sight (removed from all runs, not retried, not patched), then deleted after 2 weeks unless rescued with evidence it catches real regressions. Rescue means fixing the flake at the root; appeasement (widened timeouts, added retries, loosened assertions) is prohibited, for agents especially.
+
 ## Flagged ambiguities
 
 - "Merging" a shared-branch-group Task had been used for both member integration and group promotion — these are distinct steps with independent gating and must not be conflated.

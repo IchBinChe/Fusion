@@ -124,7 +124,7 @@ test("shouldForceFullSuite: returns true when scripts/check-test-isolation.mjs c
 });
 
 test("shouldForceFullSuite: returns true when a GitHub workflow changed", () => {
-  assert.equal(shouldForceFullSuite([".github/workflows/ci.yml"]), true);
+  assert.equal(shouldForceFullSuite([".github/workflows/pr-checks.yml"]), true);
 });
 
 test("shouldForceFullSuite: returns false for .changeset/*.md summary files", () => {

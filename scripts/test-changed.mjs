@@ -1158,6 +1158,12 @@ export function main(argv = process.argv.slice(2)) {
   // Cache-fresh fast path: nothing to run. Emit a fast-path mode line, run only
   // the (now cheap) isolation guard, and skip skill-sync, artifact-ensure,
   // HOME creation, and prune.
+  //
+  // NOTE: this path is reachable only in CHANGED mode (gate mode sets hasWork
+  // above), and it intentionally skips the merge-gate suite too: an all-cache-
+  // fresh changed run means the engine/cli content feeding the gate suite is
+  // byte-identical to a previously green run. Any shared-infra change that
+  // could invalidate that reasoning routes to gate mode instead of here.
   if (!hasWork) {
     console.log("[test-changed] fast-path=cache-fresh (no packages to run).");
     console.log(

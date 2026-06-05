@@ -12,9 +12,13 @@ on:
   push:
     branches: [main]
 
+# Key the concurrency group by SHA, not ref: on push to main the ref is
+# always refs/heads/main, so a ref-keyed group with cancel-in-progress would
+# let consecutive merges cancel each other's runs — silently skipping the
+# only coverage for everything the gate dropped. Per-SHA groups never collide.
 concurrency:
-  group: full-suite-${{ github.ref }}
-  cancel-in-progress: true
+  group: full-suite-${{ github.sha }}
+  cancel-in-progress: false
 
 # FN-4863: Opt JavaScript actions into Node 24 ahead of GitHub's forced cutover on 2026-06-02.
 env:

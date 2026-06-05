@@ -12,6 +12,11 @@
  * (port-4040-allowlist: this file only ever AVOIDS the reserved ports — it
  * requests an ephemeral port and rejects reserved ones; it never binds,
  * probes, or kills them.)
+ * (process-supervisor-allowlist: raw spawn is intentional here — this is a
+ * standalone repo script outside the package graph, the child is attached
+ * (not detached), and lifecycle is bounded by the timeouts + signal handlers
+ * below; importing superviseSpawn from @fusion/core would invert the
+ * dependency direction for a build-time smoke check.)
  *   - Never binds or touches port 4040 / FUSION_RESERVED_PORTS — an ephemeral
  *     port is requested from the OS (listen on 0) and double-checked against
  *     the reserved list.
@@ -128,10 +133,26 @@ async function main() {
   child.stdout.on("data", (d) => (stderrBuf += d));
 
   const cleanup = () => {
-    if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
+    // 'exit' handlers cannot await: escalate straight to SIGKILL so a child
+    // that ignores SIGTERM is never orphaned holding the port/tmpdir. The
+    // graceful SIGTERM path below runs before this on the success path.
+    try {
+      if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+    } catch {
+      // ESRCH: child already reaped between the check and the kill — fine.
+    }
     rmSync(isolatedHome, { recursive: true, force: true });
   };
   process.on("exit", cleanup);
+  // Node does NOT fire 'exit' on signals by default. A cancelled CI job
+  // (timeout, manual cancel, runner eviction) sends SIGTERM — without these
+  // handlers the serve child would be orphaned.
+  for (const sig of ["SIGTERM", "SIGINT"]) {
+    process.on(sig, () => {
+      cleanup();
+      process.exit(sig === "SIGINT" ? 130 : 143);
+    });
+  }
 
   const exitedEarly = new Promise((resolve) => {
     child.once("exit", (code, signal) => resolve({ code, signal }));
@@ -150,7 +171,12 @@ async function main() {
   console.log(`boot-smoke: GET /api/health 200 on :${port}`);
 
   // 3. Clean shutdown of OUR child only.
-  child.kill("SIGTERM");
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    // ESRCH: server exited between the health check and the kill — the
+    // exitedEarly promise below already carries its exit code.
+  }
   const { code, signal } = await Promise.race([
     exitedEarly,
     new Promise((resolve) =>

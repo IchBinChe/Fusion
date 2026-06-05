@@ -4344,6 +4344,18 @@ export class Database {
       });
     }
 
+    // CLI Agent Executor (U12): per-chat-session selection of a cli-agent
+    // adapter. When set, the chat is CLI-backed — composer sends route through
+    // the inject path and adapter transcript events map to chat_messages rows.
+    // Null/empty means the chat uses the standard provider path.
+    if (version < 110) {
+      this.applyMigration(110, () => {
+        if (this.hasTable("chat_sessions")) {
+          this.addColumnIfMissing("chat_sessions", "cliExecutorAdapterId", "TEXT");
+        }
+      });
+    }
+
   }
 
   /**

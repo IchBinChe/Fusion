@@ -68,6 +68,13 @@ export interface ChatSession {
    * for sessions that have never produced an assistant reply.
    */
   cliSessionFile: string | null;
+  /**
+   * cli-agent adapter id backing this chat session (CLI Agent Executor, U12).
+   * When non-null the chat is CLI-backed: composer sends inject into a live
+   * CLI session and adapter transcript events map to chat_messages rows. Null
+   * means the chat uses the standard model-provider path.
+   */
+  cliExecutorAdapterId: string | null;
   /** Durable in-flight assistant snapshot used to recover streaming UI after refresh. */
   inFlightGeneration: ChatInFlightGenerationState | null;
 }
@@ -160,6 +167,8 @@ export interface ChatSessionCreateInput {
   modelProvider?: string | null;
   /** Optional model ID override */
   modelId?: string | null;
+  /** Optional cli-agent adapter id; when set the chat is CLI-backed (U12) */
+  cliExecutorAdapterId?: string | null;
 }
 
 /**

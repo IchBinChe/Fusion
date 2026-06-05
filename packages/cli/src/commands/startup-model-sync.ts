@@ -214,6 +214,10 @@ export function normalizeOpencodeGoModel(modelId: string): ModelConfig {
       ? trimmed.slice("opencode/".length)
       : trimmed;
 
+  if (!bareModel) {
+    throw new Error(`Invalid opencode-go model ID: "${modelId}" has no model name after provider prefix`);
+  }
+
   return {
     id: bareModel,
     name: bareModel,
@@ -290,7 +294,15 @@ export async function refreshOpencodeGoModels(options: {
       return { registeredCount: 0, reason: "no-models-from-cli" };
     }
 
-    const models = modelIds.map(normalizeOpencodeGoModel);
+    const normalized = modelIds.map(normalizeOpencodeGoModel);
+    // Deduplicate: CLI can emit both "opencode/foo" and "opencode-go/foo"
+    // which normalize to the same bare ID.
+    const seen = new Set<string>();
+    const models = normalized.filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
     modelRegistry.registerProvider("opencode-go", {
       baseUrl: "https://api.opencode.ai/v1",
       apiKey: "OPENCODE_API_KEY",
@@ -322,4 +334,24 @@ export async function syncStartupModels(options: StartupSyncOptions): Promise<vo
     const opencodeGoApiKey = await options.authStorage.getApiKey("opencode-go") ?? await options.authStorage.getApiKey("opencode");
     await refreshOpencodeGoModels({ modelRegistry: options.modelRegistry, log: options.log, apiKey: opencodeGoApiKey });
   }
+}
+
+/**
+ * Shared handler for the onApiKeySaved callback used by serve, daemon, and
+ * dashboard. Resolves the opencode-go API key from auth storage (falling back
+ * to the "opencode" provider ID) and triggers a model refresh, respecting the
+ * opencodeGoModelSync setting.
+ */
+export async function handleOpencodeGoApiKeySaved(
+  dashboardAuthStorage: AuthStorageLike,
+  store: { getSettings: () => Promise<SettingsLike> },
+  modelRegistry: ModelRegistryLike,
+  log: (scope: string, message: string) => void,
+): Promise<OpencodeGoRefreshResult | undefined> {
+  const settings = await store.getSettings();
+  if (settings.opencodeGoModelSync === false) {
+    return { registeredCount: 0, reason: "disabled-by-settings" };
+  }
+  const opencodeGoKey = await dashboardAuthStorage.getApiKey("opencode-go") ?? await dashboardAuthStorage.getApiKey("opencode");
+  return await refreshOpencodeGoModels({ modelRegistry, log, apiKey: opencodeGoKey });
 }

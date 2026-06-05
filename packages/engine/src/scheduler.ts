@@ -31,6 +31,7 @@ import { selectPermanentAgentForTask } from "./agent-assignment.js";
 import type { AutoClaimSnapshotManager } from "./auto-claim-snapshot.js";
 import { StaleTaskReporter } from "./stale-task-reporter.js";
 import { BacklogPressureReporter } from "./backlog-pressure-reporter.js";
+import { UnlinkedMissionsAdvisoryReporter } from "./unlinked-missions-advisory-reporter.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { isWorkflowColumnsEnabled, DEFAULT_WORKFLOW_POOL_ID } from "@fusion/core";
 import { runHoldReleaseSweep, type SlotReservation } from "./hold-release.js";
@@ -484,8 +485,10 @@ export class Scheduler {
   private lastAutoClaimFingerprint = new Map<string, string>();
   private readonly staleTaskReporter: StaleTaskReporter;
   private readonly backlogPressureReporter: BacklogPressureReporter;
+  private readonly unlinkedMissionsAdvisoryReporter: UnlinkedMissionsAdvisoryReporter;
   private lastStaleTaskReportAt = 0;
   private lastBacklogPressureReportAt = 0;
+  private lastUnlinkedMissionsAdvisoryReportAt = 0;
   private readonly lastHighOverlapFanoutWarningKey = new Map<string, string>();
 
   /**
@@ -501,6 +504,11 @@ export class Scheduler {
   ) {
     this.staleTaskReporter = new StaleTaskReporter({ store: this.store });
     this.backlogPressureReporter = new BacklogPressureReporter({
+      store: this.store,
+      projectId: this.store.getRootDir(),
+      logger: schedulerLog,
+    });
+    this.unlinkedMissionsAdvisoryReporter = new UnlinkedMissionsAdvisoryReporter({
       store: this.store,
       projectId: this.store.getRootDir(),
       logger: schedulerLog,
@@ -1935,6 +1943,16 @@ export class Scheduler {
           schedulerLog.warn("Backlog pressure reporter failed", error);
         } finally {
           this.lastBacklogPressureReportAt = Date.now();
+        }
+      }
+
+      if (Date.now() - this.lastUnlinkedMissionsAdvisoryReportAt >= 60_000) {
+        try {
+          await this.unlinkedMissionsAdvisoryReporter.report();
+        } catch (error) {
+          schedulerLog.warn("Unlinked missions advisory reporter failed", error);
+        } finally {
+          this.lastUnlinkedMissionsAdvisoryReportAt = Date.now();
         }
       }
     } catch (err) {

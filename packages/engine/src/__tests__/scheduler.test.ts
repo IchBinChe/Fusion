@@ -19,6 +19,7 @@ import { MissionExecutionLoop } from "../mission-execution-loop.js";
 
 const staleReporterReportMock = vi.fn();
 const backlogPressureReporterReportMock = vi.fn();
+const unlinkedMissionsAdvisoryReporterReportMock = vi.fn();
 
 // Mock fs modules
 vi.mock("node:fs", async (importOriginal) => {
@@ -59,6 +60,12 @@ vi.mock("../stale-task-reporter.js", () => ({
 vi.mock("../backlog-pressure-reporter.js", () => ({
   BacklogPressureReporter: vi.fn().mockImplementation(() => ({
     report: backlogPressureReporterReportMock,
+  })),
+}));
+
+vi.mock("../unlinked-missions-advisory-reporter.js", () => ({
+  UnlinkedMissionsAdvisoryReporter: vi.fn().mockImplementation(() => ({
+    report: unlinkedMissionsAdvisoryReporterReportMock,
   })),
 }));
 
@@ -446,6 +453,7 @@ describe("Scheduler", () => {
   beforeEach(() => {
     staleReporterReportMock.mockReset().mockResolvedValue({ surfaced: 0 });
     backlogPressureReporterReportMock.mockReset().mockResolvedValue({ alerted: false });
+    unlinkedMissionsAdvisoryReporterReportMock.mockReset().mockResolvedValue({ alerted: false });
   });
   // Helper to create mock MissionStore (shared across mission-related test suites)
   function createMockMissionStore(overrides = {}) {

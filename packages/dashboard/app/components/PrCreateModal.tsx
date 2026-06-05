@@ -395,6 +395,8 @@ export function PrCreateModal({
   const handleBaseChange = useCallback(async (nextBase: string) => {
     baseBranchTouchedRef.current = true;
     setBaseBranch(nextBase);
+    setPushBranchError(null);
+    setResolveConflictError(null);
     await loadPreflight(nextBase);
   }, [loadPreflight]);
 

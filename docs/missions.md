@@ -52,6 +52,8 @@ Mission ↔ goal links are created and removed deliberately as part of normal pl
 
 Mission Manager shows an **Unlinked** indicator on active mission cards when `linkedGoalCount` is zero. This is a read-only attention badge so operators can quickly find active missions that still need an explicit goal association.
 
+The engine also emits a workflow insight with advisory key `unlinked_missions_advisory` when it first observes one or more active missions with zero goal links. The insight is advisory only, includes only the affected mission ids plus a count, and is deduped to one stable row so it does not spam on every scheduler heartbeat.
+
 ### Task → Goal provenance
 
 When a mission feature is linked or triaged into a task, Fusion does **not** copy goal ids onto the task row. Instead, task goal provenance is always derived from the mission link owned by `MissionStore`:

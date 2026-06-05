@@ -758,9 +758,9 @@
     "pauseAllConfirm_other": "Pause {{count}} agents in this project?",
     "pauseAllTitle": "Pause All Agents",
     "pauseCountHint_one": "Pause {{count}} active/running agent",
-    "pauseCountHint_other": "Pause {{count}} active/running agents",
     "pauseCountHint_one_one": "",
     "pauseCountHint_one_other": "",
+    "pauseCountHint_other": "Pause {{count}} active/running agents",
     "pauseCountHint_other_one": "",
     "pauseCountHint_other_other": "",
     "pausedPast": "paused",
@@ -864,9 +864,9 @@
     "resumeAllConfirm_other": "Resume {{count}} agents in this project?",
     "resumeAllTitle": "Resume All Agents",
     "resumeCountHint_one": "Resume {{count}} paused agent",
-    "resumeCountHint_other": "Resume {{count}} paused agents",
     "resumeCountHint_one_one": "",
     "resumeCountHint_one_other": "",
+    "resumeCountHint_other": "Resume {{count}} paused agents",
     "resumeCountHint_other_one": "",
     "resumeCountHint_other_other": "",
     "resumedPast": "resumed",
@@ -6808,6 +6808,13 @@
     "reviewType": "Review type",
     "splitNote": "Branches run concurrently from this node. Execute and merge seams are not allowed inside a branch.",
     "stepExecuteLabel": "Step execute",
+    "summaryAwaitInput": "Waits for user input",
+    "summaryCodeDefault": "TypeScript",
+    "summaryGateAdvisory": "Advisory",
+    "summaryGateBlocks": "Gate (blocks)",
+    "summaryHoldRelease": "Release: {{release}}",
+    "summaryNotConfigured": "Not configured",
+    "summaryReviewType": "{{type}} review",
     "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
   },
   "workflows": {
@@ -6837,7 +6844,8 @@
     "readOnlyBuiltin": "Read-only built-in workflow",
     "saved": "Workflow saved",
     "savedNotCompilable": "Workflow saved but cannot be compiled",
-    "saveFailed": "Failed to save workflow"
+    "saveFailed": "Failed to save workflow",
+    "selectOrCreate": "Select or create a workflow to start editing."
   },
   "workflowSelector": {
     "switchActiveMessage": "This task has an active session. Switching workflows aborts it and re-homes the card into the new workflow's entry column. Continue?",

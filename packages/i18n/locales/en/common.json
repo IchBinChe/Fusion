@@ -1,4 +1,9 @@
 {
+  "actions": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "save": "Save"
+  },
   "agents": {
     "ratings": {
       "trendDeclining": "↓ Declining",
@@ -29,6 +34,7 @@
       "minutesAgo_other": "{{count}}m ago"
     }
   },
+  "archive": "Archive",
   "board": {
     "rejection": {
       "capacityExhausted": "That column is at capacity. Try again when a slot frees up.",
@@ -38,6 +44,7 @@
       "workflowMismatch": "Drag can't move a card between workflows. Use the workflow switcher instead."
     }
   },
+  "cancel": "Cancel",
   "chat": {
     "failedToGetResponse": "Failed to get response",
     "failureReferenceId": "ID",
@@ -47,15 +54,25 @@
     "openMailboxMessage": "Open mailbox message",
     "toolCallArgsPrefix": "args",
     "toolCallResultPrefix": "result",
-    "toolCallsCount_one": "{{count}} tool calls",
-    "toolCallsCount_other": "{{count}} tool calls",
-    "toolCallsHeader": "Tool calls",
     "toolCallStatusCompleted": "completed",
     "toolCallStatusError": "error",
     "toolCallStatusErrors": "errors",
     "toolCallStatusRunning": "running",
+    "toolCallsCount_one": "{{count}} tool calls",
+    "toolCallsCount_other": "{{count}} tool calls",
+    "toolCallsHeader": "Tool calls",
     "viewFailureDetails": "View failure details"
   },
+  "close": "Close",
+  "columns": {
+    "archived": "Archived",
+    "done": "Done",
+    "in-progress": "In Progress",
+    "in-review": "In Review",
+    "todo": "Todo",
+    "triage": "Planning"
+  },
+  "delete": "Delete",
   "health": {
     "anomaly": {
       "duplicateActiveId": "Duplicate active task ID",
@@ -93,6 +110,13 @@
       "modelSetToDefault": "{{label}} model set to default"
     }
   },
+  "nodeStatus": {
+    "connecting": "Connecting",
+    "error": "Error",
+    "offline": "Offline",
+    "online": "Online",
+    "unknown": "Unknown"
+  },
   "nodes": {
     "auth": {
       "differ": "Auth credentials differ",
@@ -113,13 +137,7 @@
       "stopped": "Stopped"
     }
   },
-  "nodeStatus": {
-    "connecting": "Connecting",
-    "error": "Error",
-    "offline": "Offline",
-    "online": "Online",
-    "unknown": "Unknown"
-  },
+  "refresh": "Refresh",
   "research": {
     "providerGitHub": "GitHub",
     "providerLlmSynthesis": "LLM Synthesis",
@@ -127,6 +145,7 @@
     "providerPageFetch": "Page Fetch",
     "providerWebSearch": "Web Search"
   },
+  "retry": "Retry",
   "routing": {
     "policyLabel": {
       "block": "Block execution",
@@ -186,6 +205,7 @@
       "zai": "GLM models by Zhipu AI — strong multilingual support"
     }
   },
+  "skip": "Skip",
   "taskForm": {
     "nodeStatusConnecting": "Connecting",
     "nodeStatusError": "Error",
@@ -200,6 +220,7 @@
     "refreshSourceInitialLoad": "Initial load",
     "refreshSourceManual": "Manual"
   },
+  "tryAgain": "Try Again",
   "workflow": {
     "postMerge": "Post-merge",
     "preMerge": "Pre-merge",
@@ -209,14 +230,5 @@
     "statusRunning": "Running…",
     "statusSkipped": "Skipped",
     "waitingForOutput": "Waiting for agent output…"
-  },
-  "workflowNodes": {
-    "summaryAwaitInput": "Waits for user input",
-    "summaryCodeDefault": "TypeScript",
-    "summaryGateAdvisory": "Advisory",
-    "summaryGateBlocks": "Gate (blocks)",
-    "summaryHoldRelease": "Release: {{release}}",
-    "summaryNotConfigured": "Not configured",
-    "summaryReviewType": "{{type}} review"
   }
 }

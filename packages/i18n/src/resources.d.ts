@@ -6810,6 +6810,13 @@ export default interface Resources {
       "reviewType": "Review type",
       "splitNote": "Branches run concurrently from this node. Execute and merge seams are not allowed inside a branch.",
       "stepExecuteLabel": "Step execute",
+      "summaryAwaitInput": "Waits for user input",
+      "summaryCodeDefault": "TypeScript",
+      "summaryGateAdvisory": "Advisory",
+      "summaryGateBlocks": "Gate (blocks)",
+      "summaryHoldRelease": "Release: {{release}}",
+      "summaryNotConfigured": "Not configured",
+      "summaryReviewType": "{{type}} review",
       "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
     },
     "workflowSelector": {
@@ -6845,7 +6852,8 @@ export default interface Resources {
       "readOnlyBuiltin": "Read-only built-in workflow",
       "saveFailed": "Failed to save workflow",
       "saved": "Workflow saved",
-      "savedNotCompilable": "Workflow saved but cannot be compiled"
+      "savedNotCompilable": "Workflow saved but cannot be compiled",
+      "selectOrCreate": "Select or create a workflow to start editing."
     },
     "workspace": {
       "projectRoot": "Project Root",
@@ -7091,6 +7099,11 @@ export default interface Resources {
     }
   },
   "common": {
+    "actions": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "save": "Save"
+    },
     "agents": {
       "ratings": {
         "trendDeclining": "↓ Declining",
@@ -7121,6 +7134,7 @@ export default interface Resources {
         "minutesAgo_other": "{{count}}m ago"
       }
     },
+    "archive": "Archive",
     "board": {
       "rejection": {
         "capacityExhausted": "That column is at capacity. Try again when a slot frees up.",
@@ -7130,6 +7144,7 @@ export default interface Resources {
         "workflowMismatch": "Drag can't move a card between workflows. Use the workflow switcher instead."
       }
     },
+    "cancel": "Cancel",
     "chat": {
       "failedToGetResponse": "Failed to get response",
       "failureReferenceId": "ID",
@@ -7148,6 +7163,16 @@ export default interface Resources {
       "toolCallsHeader": "Tool calls",
       "viewFailureDetails": "View failure details"
     },
+    "close": "Close",
+    "columns": {
+      "archived": "Archived",
+      "done": "Done",
+      "in-progress": "In Progress",
+      "in-review": "In Review",
+      "todo": "Todo",
+      "triage": "Planning"
+    },
+    "delete": "Delete",
     "health": {
       "anomaly": {
         "duplicateActiveId": "Duplicate active task ID",
@@ -7212,6 +7237,7 @@ export default interface Resources {
         "stopped": "Stopped"
       }
     },
+    "refresh": "Refresh",
     "research": {
       "providerGitHub": "GitHub",
       "providerLlmSynthesis": "LLM Synthesis",
@@ -7219,6 +7245,7 @@ export default interface Resources {
       "providerPageFetch": "Page Fetch",
       "providerWebSearch": "Web Search"
     },
+    "retry": "Retry",
     "routing": {
       "policyLabel": {
         "block": "Block execution",
@@ -7278,6 +7305,7 @@ export default interface Resources {
         "zai": "GLM models by Zhipu AI — strong multilingual support"
       }
     },
+    "skip": "Skip",
     "taskForm": {
       "nodeStatusConnecting": "Connecting",
       "nodeStatusError": "Error",
@@ -7292,6 +7320,7 @@ export default interface Resources {
       "refreshSourceInitialLoad": "Initial load",
       "refreshSourceManual": "Manual"
     },
+    "tryAgain": "Try Again",
     "workflow": {
       "postMerge": "Post-merge",
       "preMerge": "Pre-merge",
@@ -7301,15 +7330,6 @@ export default interface Resources {
       "statusRunning": "Running…",
       "statusSkipped": "Skipped",
       "waitingForOutput": "Waiting for agent output…"
-    },
-    "workflowNodes": {
-      "summaryAwaitInput": "Waits for user input",
-      "summaryCodeDefault": "TypeScript",
-      "summaryGateAdvisory": "Advisory",
-      "summaryGateBlocks": "Gate (blocks)",
-      "summaryHoldRelease": "Release: {{release}}",
-      "summaryNotConfigured": "Not configured",
-      "summaryReviewType": "{{type}} review"
     }
   },
   "errors": {

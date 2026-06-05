@@ -843,12 +843,14 @@ export {
   generateExportFilename,
   readExportFile,
   writeExportFile,
+  SETTINGS_EXPORT_VERSION,
 } from "./settings-export.js";
 export type {
   SettingsExportData,
   ExportSettingsOptions,
   ImportSettingsOptions,
   ImportResult,
+  WorkflowSettingsExportSection,
 } from "./settings-export.js";
 
 // ── AI Summarization ─────────────────────────────────────────────────────

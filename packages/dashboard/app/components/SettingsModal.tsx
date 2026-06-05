@@ -6678,6 +6678,14 @@ export function SettingsModal({
                 </div>
               </>
             )}
+            {/* KTD-8: workflow settings are not yet part of the cross-node sync
+                channel. Non-dismissible, informational only, no action affordance. */}
+            <p className="settings-sync-workflow-note text-muted" role="note">
+              {t(
+                "settings.nodeSync.workflowSettingsNotSynced",
+                "Workflow settings are not synced across nodes yet.",
+              )}
+            </p>
           </>
         );
       case "remote": {

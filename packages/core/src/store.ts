@@ -7074,6 +7074,66 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
   }
 
+  /**
+   * Enumerate every stored `workflow_settings` value row for THIS project
+   * (`getWorkflowSettingsProjectId()`), returned as `workflowId → values map`.
+   * Used by settings export v2 to carry the value table. Rows whose JSON is
+   * corrupt or non-object are skipped; rows with an empty values map are
+   * included as `{}` only if the row physically exists (callers that want to
+   * drop empties filter on their side).
+   */
+  listWorkflowSettingValuesForProject(): Record<string, Record<string, unknown>> {
+    const projectId = this.getWorkflowSettingsProjectId();
+    const rows = this.db
+      .prepare('SELECT workflowId, "values" FROM workflow_settings WHERE projectId = ?')
+      .all(projectId) as Array<{ workflowId: string; values: string }>;
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.values) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          out[row.workflowId] = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Skip corrupt row.
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Compute the write-target workflow ids for moved-setting values in THIS
+   * project: every distinct `task_workflow_selection.workflowId` in use ∪ the
+   * resolved project default, where an unset/empty/missing default normalizes to
+   * `builtin:coding`. Shared by the U4 hard-move migration and the U5 settings
+   * export v1→v2 upgrade so both write to exactly the same lanes.
+   */
+  async computeMovedSettingsTargetWorkflowIds(): Promise<Set<string>> {
+    const targetWorkflowIds = new Set<string>();
+    try {
+      const rows = this.db
+        .prepare("SELECT DISTINCT workflowId FROM task_workflow_selection WHERE workflowId IS NOT NULL AND workflowId != ''")
+        .all() as Array<{ workflowId: string }>;
+      for (const row of rows) {
+        if (row.workflowId && row.workflowId.trim()) targetWorkflowIds.add(row.workflowId);
+      }
+    } catch {
+      // No selections / table issue — fall through to the default below.
+    }
+    let defaultWorkflowId = "builtin:coding";
+    try {
+      const resolved = await this.getDefaultWorkflowId();
+      if (resolved && resolved.trim()) {
+        const exists = isBuiltinWorkflowId(resolved) || (await this.getWorkflowDefinition(resolved));
+        defaultWorkflowId = exists ? resolved : "builtin:coding";
+      }
+    } catch {
+      defaultWorkflowId = "builtin:coding";
+    }
+    targetWorkflowIds.add(defaultWorkflowId);
+    return targetWorkflowIds;
+  }
+
   /** Read the raw stored setting-value map for `(workflowId, projectId)`. Returns
    *  an empty object when no row exists. Raw (pre drop-on-orphan) — callers that
    *  need engine-effective values run {@link resolveEffectiveSettingValues}. */
@@ -11811,31 +11871,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
     }
 
-    // (2) Compute the write-target workflow ids.
-    const targetWorkflowIds = new Set<string>();
-    try {
-      const rows = this.db
-        .prepare("SELECT DISTINCT workflowId FROM task_workflow_selection WHERE workflowId IS NOT NULL AND workflowId != ''")
-        .all() as Array<{ workflowId: string }>;
-      for (const row of rows) {
-        if (row.workflowId && row.workflowId.trim()) targetWorkflowIds.add(row.workflowId);
-      }
-    } catch {
-      // No selections / table issue — fall through to the default below.
-    }
-    // Resolve the project default, normalizing unset/empty/missing → builtin:coding.
-    let defaultWorkflowId = "builtin:coding";
-    try {
-      const resolved = await this.getDefaultWorkflowId();
-      if (resolved && resolved.trim()) {
-        // A default pointing at a deleted/missing workflow degrades to builtin:coding.
-        const exists = isBuiltinWorkflowId(resolved) || (await this.getWorkflowDefinition(resolved));
-        defaultWorkflowId = exists ? resolved : "builtin:coding";
-      }
-    } catch {
-      defaultWorkflowId = "builtin:coding";
-    }
-    targetWorkflowIds.add(defaultWorkflowId);
+    // (2) Compute the write-target workflow ids (shared with the U5 v1→v2
+    //     import upgrade so both write to identical lanes).
+    const targetWorkflowIds = await this.computeMovedSettingsTargetWorkflowIds();
 
     // (3) Validate the snapshot per target workflow (async declaration resolution
     //     done HERE, before the synchronous transaction). Drop-and-log invalid

@@ -164,6 +164,7 @@ import {
   createWorkflowCreateTool as sharedCreateWorkflowCreateTool,
   createWorkflowUpdateTool as sharedCreateWorkflowUpdateTool,
   createWorkflowDeleteTool as sharedCreateWorkflowDeleteTool,
+  createWorkflowSettingsTool as sharedCreateWorkflowSettingsTool,
   createTraitListTool as sharedCreateTraitListTool,
 } from "./agent-tools.js";
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
@@ -5702,6 +5703,7 @@ export class TaskExecutor {
         this.createWorkflowCreateTool(),
         this.createWorkflowUpdateTool(),
         this.createWorkflowDeleteTool(),
+        this.createWorkflowSettingsTool(),
         this.createTraitListTool(),
         ...(isResearchToolSurfaceEnabled(settings)
           ? createResearchTools({
@@ -7590,6 +7592,10 @@ export class TaskExecutor {
 
   private createWorkflowDeleteTool(): ToolDefinition {
     return sharedCreateWorkflowDeleteTool(this.store);
+  }
+
+  private createWorkflowSettingsTool(): ToolDefinition {
+    return sharedCreateWorkflowSettingsTool(this.store);
   }
 
   private createTraitListTool(): ToolDefinition {

@@ -446,7 +446,7 @@ interface CliAgentSettingsEntry {
  * confirmation flow before the per-project approval is granted.
  */
 function CliAgentsSettingsSection({
-  projectId,
+  projectId: _projectId,
   addToast,
 }: {
   projectId?: string;

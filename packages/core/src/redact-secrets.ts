@@ -23,7 +23,7 @@ export function redactSecrets(text: string): string {
         "$1$2[REDACTED]$2",
       )
       // sk-/ghp_/github_pat_/xoxb-/AKIA-style long opaque tokens
-      .replace(/\b(sk-|ghp_|gho_|github_pat_|xox[abpr]-|AKIA)[A-Za-z0-9_\-]{8,}/g, "[REDACTED]")
+      .replace(/\b(sk-|ghp_|gho_|github_pat_|xox[abpr]-|AKIA)[A-Za-z0-9_-]{8,}/g, "[REDACTED]")
       // standalone long base64/hex secrets (>=32 chars)
       .replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, "[REDACTED]")
       .replace(/\b[0-9a-fA-F]{32,}\b/g, "[REDACTED]")

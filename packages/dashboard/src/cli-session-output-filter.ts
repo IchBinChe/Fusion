@@ -144,7 +144,7 @@ function isForgingQueryCsi(seq: string): boolean {
  * shared state.
  */
 export function neutralizeTerminalOutput(chunk: string, carry = ""): NeutralizeResult {
-  let input = carry + chunk;
+  const input = carry + chunk;
   let out = "";
   let i = 0;
 

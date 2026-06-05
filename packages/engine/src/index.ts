@@ -668,18 +668,7 @@ export {
   type WriteSessionHookScriptsOptions,
   type WrittenHookScripts,
 } from "./cli-agent/hook-scripts.js";
-// CLI Agent Executor — PTY session manager + adapter registry (U2).
-export {
-  CliSessionManager,
-  CliConcurrencyLimitError,
-  UnknownCliSessionError,
-  neutralizeInjection,
-  DEFAULT_SCROLLBACK_BYTES,
-  DEFAULT_CONCURRENCY_CEILING,
-  type CliSessionManagerOptions,
-  type SpawnCliSessionOptions,
-  type CliSessionAttachment,
-} from "./cli-agent/session-manager.js";
+// CLI Agent Executor — adapter registry (U2).
 export {
   CliAdapterRegistry,
   defaultCliAdapterRegistry,

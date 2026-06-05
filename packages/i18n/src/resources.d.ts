@@ -6869,7 +6869,15 @@ export default interface Resources {
       "saveFailed": "Failed to save workflow",
       "saved": "Workflow saved",
       "savedNotCompilable": "Workflow saved but cannot be compiled",
-      "selectOrCreate": "Select or create a workflow to start editing."
+      "selectOrCreate": "Select or create a workflow to start editing.",
+      "templateBlank": "Blank",
+      "templateBlankDescription": "Start from an empty start → end graph.",
+      "templateCopyName": "{{name}} copy",
+      "templateNodeCount_one": "{{count}} nodes",
+      "templateNodeCount_other": "{{count}} nodes",
+      "templatePickerLabel": "Start from",
+      "templateSectionBuiltin": "Built-in workflows",
+      "templateSectionYours": "Your workflows"
     },
     "workspace": {
       "projectRoot": "Project Root",

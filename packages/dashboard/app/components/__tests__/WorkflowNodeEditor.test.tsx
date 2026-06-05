@@ -76,7 +76,25 @@ function v2Def(): WorkflowDefinition {
 
 function builtinDef(): WorkflowDefinition {
   const d = v2Def();
-  return { ...d, id: "builtin:coding", name: "Default coding workflow" };
+  return { ...d, id: "builtin:coding", name: "Default coding workflow", description: "Ships with Fusion" };
+}
+
+function fragmentDef(): WorkflowDefinition {
+  return {
+    id: "WF-FRAG",
+    kind: "fragment",
+    name: "Lint fragment",
+    description: "A single lint step",
+    ir: {
+      version: "v1",
+      name: "Lint fragment",
+      nodes: [{ id: "lint", kind: "gate", config: { scriptName: "lint" } }],
+      edges: [],
+    },
+    layout: { lint: { x: 0, y: 0 } },
+    createdAt: "2026-06-03T00:00:00.000Z",
+    updatedAt: "2026-06-03T00:00:00.000Z",
+  };
 }
 
 function def(): WorkflowDefinition {
@@ -870,6 +888,119 @@ describe("WorkflowNodeEditor — U4 create dialog / delete / inline rename / dir
     // Dialog stays open; the typed name is preserved.
     expect(screen.getByTestId("wf-create-dialog")).toBeInTheDocument();
     expect((nameInput as HTMLInputElement).value).toBe("Dup");
+  });
+
+  // ── Template picker (U4/R7) ────────────────────────────────────────────────
+
+  it("shows Blank first (selected), built-ins, and user workflows; fragments absent", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef(), v2Def(), fragmentDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    // Open via the strip "New workflow" button (the empty CTA only shows with no
+    // workflows; here we have some, so use the toolbar button).
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+
+    const blank = screen.getByTestId("wf-template-option-blank");
+    expect(blank).toHaveAttribute("aria-checked", "true");
+    // Blank is the first radio in the group.
+    const group = screen.getByTestId("wf-template-list");
+    const options = within(group).getAllByRole("radio");
+    expect(options[0]).toBe(blank);
+
+    // Built-in + user workflow present; fragment excluded.
+    expect(screen.getByTestId("wf-template-option-builtin:coding")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-template-option-WF-002")).toBeInTheDocument();
+    expect(screen.queryByTestId("wf-template-option-WF-FRAG")).not.toBeInTheDocument();
+  });
+
+  it("renders node count text for template entries", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+    // v2Def has 3 IR nodes (start, step, end).
+    expect(screen.getByTestId("wf-template-option-WF-002")).toHaveTextContent("3 nodes");
+  });
+
+  it("with no user workflows lists Blank + built-ins only (no Your-workflows header)", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+    expect(screen.getByTestId("wf-template-option-blank")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-template-option-builtin:coding")).toBeInTheDocument();
+    expect(screen.queryByText("Your workflows")).not.toBeInTheDocument();
+  });
+
+  it("selecting a builtin template prefills '<name> copy' and inherits the description", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+
+    fireEvent.click(screen.getByTestId("wf-template-option-builtin:coding"));
+    expect((screen.getByTestId("wf-create-name") as HTMLInputElement).value).toBe(
+      "Default coding workflow copy",
+    );
+    expect((screen.getByTestId("wf-create-description") as HTMLTextAreaElement).value).toBe(
+      "Ships with Fusion",
+    );
+  });
+
+  it("submitting a template seeds a fresh-ID copy: same node count, all ids differ, description inherited", async () => {
+    const builtin = builtinDef();
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtin]);
+    vi.mocked(createWorkflow).mockResolvedValue({ ...v2Def(), id: "WF-NEW", name: "Default coding workflow copy" });
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+
+    fireEvent.click(screen.getByTestId("wf-template-option-builtin:coding"));
+    fireEvent.click(screen.getByTestId("wf-create-submit"));
+
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
+    const [input] = vi.mocked(createWorkflow).mock.calls[0];
+    const created = input as { name: string; description?: string; kind?: string; ir: { nodes: { id: string }[] } };
+    expect(created.kind).toBe("workflow");
+    expect(created.description).toBe("Ships with Fusion");
+    // Same node count as the source IR.
+    expect(created.ir.nodes).toHaveLength(builtin.ir.nodes.length);
+    // Every node id is fresh (none shared with the source).
+    const sourceIds = new Set(builtin.ir.nodes.map((n) => n.id));
+    for (const n of created.ir.nodes) {
+      expect(sourceIds.has(n.id)).toBe(false);
+    }
+  });
+
+  it("blank flow seeds an emptyWorkflowIr-shaped graph (start → end)", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    vi.mocked(createWorkflow).mockResolvedValue({ ...v2Def(), id: "WF-NEW", name: "Fresh" });
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+
+    // Blank is default-selected; just name + submit.
+    fireEvent.change(screen.getByTestId("wf-create-name"), { target: { value: "Fresh" } });
+    fireEvent.click(screen.getByTestId("wf-create-submit"));
+
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
+    const [input] = vi.mocked(createWorkflow).mock.calls[0];
+    const created = input as { ir: { nodes: { kind: string }[]; edges: unknown[] } };
+    expect(created.ir.nodes.map((n) => n.kind)).toEqual(["start", "end"]);
+    expect(created.ir.edges).toHaveLength(1);
+  });
+
+  it("ArrowDown moves the selected radio (keyboard a11y)", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByTestId("wf-new-workflow"));
+    await screen.findByTestId("wf-create-dialog");
+
+    const blank = screen.getByTestId("wf-template-option-blank");
+    expect(blank).toHaveAttribute("aria-checked", "true");
+    fireEvent.keyDown(blank, { key: "ArrowDown" });
+    expect(blank).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("wf-template-option-builtin:coding")).toHaveAttribute("aria-checked", "true");
   });
 
   // ── Delete confirm ─────────────────────────────────────────────────────────

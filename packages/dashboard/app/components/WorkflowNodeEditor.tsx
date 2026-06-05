@@ -46,6 +46,7 @@ import {
   flowToIr,
   emptyWorkflowIr,
   emptyWorkflowLayout,
+  copyIrWithFreshIds,
   columnsOf,
   fieldsOf,
   columnsToBandNodes,
@@ -170,16 +171,39 @@ const USER_NODE_KINDS: ReadonlySet<WorkflowEditorNodeKind> = new Set<WorkflowEdi
   "merge",
 ]);
 
+/** A pickable creation template: "Blank" (id null) or a copyable source
+ *  workflow (built-in or user kind="workflow"). U4/R7. */
+interface WorkflowCreateTemplate {
+  /** null = blank; otherwise the source definition's id. */
+  id: string | null;
+  name: string;
+  description: string;
+  /** Node count of the source IR (0 for blank). */
+  nodeCount: number;
+  /** Source definition for seeding via copyIrWithFreshIds (absent for blank). */
+  source?: WorkflowDefinition;
+  /** True for built-in sources (grouped separately). */
+  builtin: boolean;
+}
+
 /** Local create-workflow dialog (KTD-7). Built on the shared `.modal` primitives
- *  (precedent: NewTaskModal). Owns its own name/description/error state; the
- *  parent supplies an async `onCreate` that performs the createWorkflow call and
- *  throws on failure so the dialog can surface server rejections inline without
- *  losing the typed input. Escape/overlay close (no dirty state of its own). */
+ *  (precedent: NewTaskModal). Owns its own template/name/description/error state;
+ *  the parent supplies the candidate `workflows` (fragments filtered out here)
+ *  and an async `onCreate` that performs the createWorkflow call and throws on
+ *  failure so the dialog can surface server rejections inline without losing the
+ *  typed input. Escape/overlay close (no dirty state of its own).
+ *
+ *  U4/R7: a template step precedes the name/description fields — a
+ *  radiogroup-semantics option list (Blank default-selected + built-ins + user
+ *  workflows) navigable by ArrowUp/Down; selecting a template prefills the name
+ *  ("<source> copy") while untouched and inherits the source description. */
 function CreateWorkflowDialog({
+  workflows,
   onCreate,
   onClose,
 }: {
-  onCreate: (name: string, description: string) => Promise<void>;
+  workflows: WorkflowDefinition[];
+  onCreate: (name: string, description: string, template: WorkflowCreateTemplate) => Promise<void>;
   onClose: () => void;
 }) {
   const { t } = useTranslation("app");
@@ -187,11 +211,87 @@ function CreateWorkflowDialog({
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Tracks whether the user has edited the name; once true, selecting a template
+  // no longer overwrites it (R7: prefill only when untouched).
+  const [nameTouched, setNameTouched] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  // Build the option list: Blank first (default), then built-in workflows, then
+  // the user's own kind="workflow" definitions. Fragments are excluded entirely.
+  const templates = useMemo<WorkflowCreateTemplate[]>(() => {
+    const blank: WorkflowCreateTemplate = {
+      id: null,
+      name: t("workflows.templateBlank", "Blank"),
+      description: t("workflows.templateBlankDescription", "Start from an empty start → end graph."),
+      nodeCount: 0,
+      builtin: false,
+    };
+    const usable = workflows.filter((w) => w.kind !== "fragment");
+    const toTemplate = (w: WorkflowDefinition): WorkflowCreateTemplate => ({
+      id: w.id,
+      name: w.name,
+      description: w.description ?? "",
+      nodeCount: w.ir.nodes.length,
+      source: w,
+      builtin: isBuiltinWorkflowId(w.id),
+    });
+    const builtins = usable.filter((w) => isBuiltinWorkflowId(w.id)).map(toTemplate);
+    const yours = usable.filter((w) => !isBuiltinWorkflowId(w.id)).map(toTemplate);
+    return [blank, ...builtins, ...yours];
+  }, [workflows, t]);
+
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const selected = templates[selectedIndex] ?? templates[0];
 
   useEffect(() => {
     nameRef.current?.focus();
   }, []);
+
+  // Apply a template selection: move the radio focus state and (R7) prefill the
+  // name ("<source> copy") + description from the source, but only while the user
+  // has not edited the name.
+  const selectTemplate = useCallback(
+    (index: number) => {
+      const tmpl = templates[index];
+      if (!tmpl) return;
+      setSelectedIndex(index);
+      if (!nameTouched) {
+        if (tmpl.id === null) {
+          setName("");
+          setDescription("");
+        } else {
+          setName(t("workflows.templateCopyName", "{{name}} copy", { name: tmpl.name }));
+          setDescription(tmpl.description);
+        }
+      }
+      if (error) setError(null);
+    },
+    [templates, nameTouched, error, t],
+  );
+
+  // ArrowUp/Down move the radio selection; Enter confirms and shifts focus to
+  // the name input. Other keys (incl. Escape) bubble to the dialog handler.
+  const handleOptionKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const next = Math.min(selectedIndex + 1, templates.length - 1);
+        selectTemplate(next);
+        optionRefs.current[next]?.focus();
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const prev = Math.max(selectedIndex - 1, 0);
+        selectTemplate(prev);
+        optionRefs.current[prev]?.focus();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectTemplate(selectedIndex);
+        nameRef.current?.focus();
+      }
+    },
+    [selectedIndex, templates.length, selectTemplate],
+  );
 
   const overlayProps = useOverlayDismiss(onClose);
 
@@ -206,15 +306,20 @@ function CreateWorkflowDialog({
       setSubmitting(true);
       setError(null);
       try {
-        await onCreate(trimmed, description.trim());
+        await onCreate(trimmed, description.trim(), selected);
         // Success path closes the dialog from the parent.
       } catch (err) {
         setError(getErrorMessage(err) || t("workflows.createFailed", "Failed to create workflow"));
         setSubmitting(false);
       }
     },
-    [name, description, onCreate, t],
+    [name, description, selected, onCreate, t],
   );
+
+  // Section boundaries for group headers (built-ins / your workflows). Blank is
+  // always index 0; built-ins follow, then user workflows.
+  const firstBuiltinIndex = templates.findIndex((tmpl) => tmpl.id !== null && tmpl.builtin);
+  const firstYoursIndex = templates.findIndex((tmpl) => tmpl.id !== null && !tmpl.builtin);
 
   return (
     <div className="modal-overlay open wf-create-overlay" {...overlayProps}>
@@ -245,6 +350,59 @@ function CreateWorkflowDialog({
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
+            <div className="wf-field">
+              <span id="wf-template-label">{t("workflows.templatePickerLabel", "Start from")}</span>
+              <div
+                className="wf-template-list"
+                role="radiogroup"
+                aria-labelledby="wf-template-label"
+                data-testid="wf-template-list"
+              >
+                {templates.map((tmpl, index) => {
+                  const isSelected = index === selectedIndex;
+                  const optionKey = tmpl.id ?? "blank";
+                  return (
+                    <div key={optionKey}>
+                      {index === firstBuiltinIndex && firstBuiltinIndex >= 0 && (
+                        <p className="wf-template-section">
+                          {t("workflows.templateSectionBuiltin", "Built-in workflows")}
+                        </p>
+                      )}
+                      {index === firstYoursIndex && firstYoursIndex >= 0 && (
+                        <p className="wf-template-section">
+                          {t("workflows.templateSectionYours", "Your workflows")}
+                        </p>
+                      )}
+                      <div
+                        ref={(el) => {
+                          optionRefs.current[index] = el;
+                        }}
+                        role="radio"
+                        aria-checked={isSelected}
+                        tabIndex={isSelected ? 0 : -1}
+                        className={`wf-template-option${isSelected ? " selected" : ""}`}
+                        data-testid={tmpl.id === null ? "wf-template-option-blank" : `wf-template-option-${tmpl.id}`}
+                        onClick={() => {
+                          selectTemplate(index);
+                          optionRefs.current[index]?.focus();
+                        }}
+                        onKeyDown={handleOptionKeyDown}
+                      >
+                        <span className="wf-template-option-name">{tmpl.name}</span>
+                        {tmpl.description && (
+                          <span className="wf-template-option-desc">{tmpl.description}</span>
+                        )}
+                        {tmpl.id !== null && (
+                          <span className="wf-template-option-count">
+                            {t("workflows.templateNodeCount", "{{count}} nodes", { count: tmpl.nodeCount })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             <label className="wf-field">
               <span>{t("workflows.createName", "Name")}</span>
               <input
@@ -253,6 +411,7 @@ function CreateWorkflowDialog({
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
+                  setNameTouched(true);
                   if (error) setError(null);
                 }}
               />
@@ -828,13 +987,20 @@ function InnerEditor({
   // Perform the createWorkflow call. Throws on failure so the dialog surfaces
   // the server error (e.g. duplicate name) inline without losing the input.
   const handleCreateWorkflow = useCallback(
-    async (workflowName: string, workflowDescription: string) => {
+    async (workflowName: string, workflowDescription: string, template: WorkflowCreateTemplate) => {
+      // Blank → empty start→end graph; template → a fresh-ID copy of the source
+      // graph + layout (U4/R7, never a reference). Always created kind "workflow".
+      const seed =
+        template.source !== undefined
+          ? copyIrWithFreshIds(template.source.ir, template.source.layout)
+          : { ir: emptyWorkflowIr(workflowName), layout: emptyWorkflowLayout() };
       const created = await createWorkflow(
         {
           name: workflowName,
           description: workflowDescription || undefined,
-          ir: emptyWorkflowIr(workflowName),
-          layout: emptyWorkflowLayout(),
+          kind: "workflow",
+          ir: seed.ir,
+          layout: seed.layout,
         },
         projectId,
       );
@@ -2215,7 +2381,11 @@ function InnerEditor({
           )}
         </div>
         {createOpen && (
-          <CreateWorkflowDialog onCreate={handleCreateWorkflow} onClose={closeCreateDialog} />
+          <CreateWorkflowDialog
+            workflows={workflows}
+            onCreate={handleCreateWorkflow}
+            onClose={closeCreateDialog}
+          />
         )}
       </div>
     </div>

@@ -737,6 +737,71 @@
 }
 
 /* Create-workflow dialog (KTD-7). */
+/* Template picker (U4/R7): radiogroup of Blank + built-ins + user workflows. */
+.wf-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--space-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.wf-template-section {
+  margin: var(--space-xs) 0 var(--space-2xs);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.wf-template-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.wf-template-option:hover {
+  background: var(--bg-hover);
+}
+
+.wf-template-option.selected {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+
+.wf-template-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.wf-template-option-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.wf-template-option-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-template-option-count {
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+}
+
 .wf-create-error {
   margin: var(--space-xs) 0 0;
   font-size: 0.8rem;

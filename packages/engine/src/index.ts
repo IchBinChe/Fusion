@@ -8,6 +8,7 @@ export {
   createSendMessageTool,
   createReadMessagesTool,
   createWorkflowListTool,
+  createWorkflowGetTool,
   createWorkflowSelectTool,
   taskCreateParams,
   taskDocumentReadParams,
@@ -35,9 +36,15 @@ export {
 export {
   createDefaultNodeHandlers,
   createNoopLegacySeams,
+  createParseStepsHandler,
+  createCodeNodeHandler,
+  PARSE_STEPS_DEFAULT_ARTIFACT,
   type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
   type WorkflowSeamName,
+  type ParseStepsHandlerDeps,
+  type CodeNodeRunner,
+  type DefaultNodeHandlerDeps,
 } from "./workflow-node-handlers.js";
 export {
   WorkflowGraphTaskRunner,
@@ -474,6 +481,36 @@ export {
   PluginTraitHasDependentsError,
   type PluginTraitDependent,
 } from "./plugin-trait-adapter.js";
+// Step-inversion U12 (KTD-12): plugin step-parser adapter.
+export {
+  registerPluginStepParsers,
+  unregisterPluginStepParsers,
+  pluginParserRegistryId,
+  pluginParserToRegistryParser,
+  PluginParserError,
+  PLUGIN_PARSER_TIMEOUT_MS,
+  type PluginStepParserContribution,
+} from "./plugin-parser-adapter.js";
+// Step-inversion U14 (KTD-15): code-node runner + save-time validation helper.
+export {
+  runCodeNode,
+  createCodeNodeRunner,
+  compileCodeNodeSource,
+  validateCodeNodeSources,
+  buildCodeNodeTaskSubset,
+  resolveCodeNodeTimeout,
+  CodeNodeError,
+  CODE_NODE_DEFAULT_TIMEOUT_MS,
+  CODE_NODE_MAX_TIMEOUT_MS,
+  CODE_NODE_MAX_SOURCE_BYTES,
+  CODE_NODE_OUTPUT_CAP_BYTES,
+  type CodeNodeContext,
+  type CodeNodeResult,
+  type CodeNodeRunnerDeps,
+  type CodeNodeTaskSubset,
+  type CodeNodeFailureReason,
+  type RunCodeNodeOptions,
+} from "./code-node-runner.js";
 // Agent runtime abstraction
 export { type AgentRuntime, type AgentRuntimeOptions, type AgentSessionResult } from "./agent-runtime.js";
 export {
@@ -554,6 +591,21 @@ export {
 } from "./hold-release.js";
 export { StepSessionExecutor } from "./step-session-executor.js";
 export type { StepResult, ParallelWave, StepSessionExecutorOptions } from "./step-session-executor.js";
+export {
+  runTaskStep,
+  resetStepToBaseline,
+  makeAncestryBlastRadiusGuard,
+} from "./step-runner.js";
+export type {
+  RunTaskStepDeps,
+  RunTaskStepOptions,
+  RunTaskStepResult,
+  ResetStepDeps,
+  ResetStepResult,
+  RunSingleStep,
+  SessionRef,
+  StepRunnerTask,
+} from "./step-runner.js";
 // Multi-project runtime types
 export {
   type ProjectRuntime,

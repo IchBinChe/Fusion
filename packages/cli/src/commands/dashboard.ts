@@ -19,6 +19,7 @@ import {
   isWorkflowColumnsEnabled,
   resolveColumnFlags,
   BUILTIN_CODING_WORKFLOW_IR,
+  parseWorkflowIr,
   type WorkflowIrColumn,
   type TraitFlags,
 } from "@fusion/core";
@@ -2742,6 +2743,48 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
                   text: entry.outcome ? `${entry.action} → ${entry.outcome}` : entry.action,
                   source: entry.runContext?.agentId ? "agent" : "executor",
                 }));
+                // Card-placed custom fields → read-only bracketed labels
+                // (U13/KTD-14). Resolve the task's workflow IR, filter
+                // card-placed field defs, and render any present values.
+                // Best-effort: any resolution failure simply omits the chips.
+                let customFields: Array<{ label: string; value: string }> | undefined;
+                try {
+                  const values = (t as { customFields?: Record<string, unknown> }).customFields;
+                  if (values && Object.keys(values).length > 0) {
+                    const selection = projectStore.getTaskWorkflowSelection(t.id);
+                    const def = selection?.workflowId
+                      ? await projectStore.getWorkflowDefinition(selection.workflowId)
+                      : undefined;
+                    const ir = def
+                      ? (typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir)
+                      : BUILTIN_CODING_WORKFLOW_IR;
+                    const fields = ir.version === "v2" ? (ir.fields ?? []) : [];
+                    const chips: Array<{ label: string; value: string }> = [];
+                    for (const field of fields) {
+                      if (field.render?.placement !== "card") continue;
+                      const raw = values[field.id];
+                      if (raw === undefined || raw === null || raw === "") continue;
+                      const optLabel = (v: string): string =>
+                        field.options?.find((o) => o.value === v)?.label ?? v;
+                      let display: string;
+                      if (field.type === "boolean") {
+                        if (raw !== true) continue;
+                        display = field.name;
+                      } else if (field.type === "multi-enum" && Array.isArray(raw)) {
+                        if (raw.length === 0) continue;
+                        display = raw.map((v) => optLabel(String(v))).join(", ");
+                      } else if (field.type === "enum") {
+                        display = optLabel(String(raw));
+                      } else {
+                        display = String(raw);
+                      }
+                      chips.push({ label: field.name, value: display });
+                    }
+                    if (chips.length > 0) customFields = chips;
+                  }
+                } catch {
+                  customFields = undefined;
+                }
                 return {
                   id: t.id,
                   title: t.title,
@@ -2753,6 +2796,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
                   currentStepIndex: t.currentStep,
                   steps,
                   recentLogs,
+                  ...(customFields ? { customFields } : {}),
                 };
               } catch {
                 // Task not found (deleted/archived between selection and fetch).

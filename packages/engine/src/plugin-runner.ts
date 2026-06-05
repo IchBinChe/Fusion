@@ -49,6 +49,11 @@ import {
   PluginTraitHasDependentsError,
   type PluginTraitDependent,
 } from "./plugin-trait-adapter.js";
+import {
+  registerPluginStepParsers,
+  unregisterPluginStepParsers,
+  type PluginStepParserContribution,
+} from "./plugin-parser-adapter.js";
 
 // Type for the task store's event data
 interface TaskMovedEvent {
@@ -170,6 +175,9 @@ export class PluginRunner {
   private promptContributionsCacheVersion = 0;
   /** Map of pluginId → the registry trait ids it currently has registered. */
   private registeredPluginTraitIds = new Map<string, string[]>();
+  /** Map of pluginId → the step-parser registry ids it currently has registered
+   *  (U12, KTD-12; mirrors registeredPluginTraitIds). */
+  private registeredPluginParserIds = new Map<string, string[]>();
   /** The custom-node runner used to execute plugin trait hooks (set via
    *  setTraitHookRunner; mirrors how the executor wires runGraphCustomNode). */
   private traitHookRunner: WorkflowCustomNodeRunner | undefined;
@@ -467,6 +475,48 @@ export class PluginRunner {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.log.warn(`Failed to register traits for plugin '${pluginId}': ${msg}`);
+      }
+    }
+  }
+
+  /**
+   * Register all currently-loaded plugins' step-parser contributions into the
+   * core StepParserRegistry (plugin-namespaced ids, U12/KTD-12). Mirrors
+   * {@link syncPluginTraits}. Parsers for plugins no longer present are dropped.
+   * Reads contributions via the loader's optional `getPluginStepParsers` getter
+   * (graceful absence — a loader that predates parser contributions yields none).
+   * Fail-closed at registration is the adapter's concern; a registration error
+   * for one plugin is logged and never aborts the others.
+   */
+  syncPluginStepParsers(): void {
+    const loader = this.options.pluginLoader as unknown as {
+      getPluginStepParsers?: () => Array<{ pluginId: string; parser: PluginStepParserContribution }>;
+    };
+    const current = typeof loader.getPluginStepParsers === "function" ? loader.getPluginStepParsers() : [];
+
+    const byPlugin = new Map<string, PluginStepParserContribution[]>();
+    for (const { pluginId, parser } of current) {
+      const list = byPlugin.get(pluginId) ?? [];
+      list.push(parser);
+      byPlugin.set(pluginId, list);
+    }
+
+    // Drop parsers for plugins no longer present.
+    for (const [pluginId, ids] of [...this.registeredPluginParserIds.entries()]) {
+      if (!byPlugin.has(pluginId)) {
+        const parserIds = ids.map((id) => id.split(":")[2]).filter(Boolean);
+        unregisterPluginStepParsers(pluginId, parserIds);
+        this.registeredPluginParserIds.delete(pluginId);
+      }
+    }
+
+    for (const [pluginId, contributions] of byPlugin) {
+      try {
+        const ids = registerPluginStepParsers({ pluginId, contributions });
+        this.registeredPluginParserIds.set(pluginId, ids);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.warn(`Failed to register step parsers for plugin '${pluginId}': ${msg}`);
       }
     }
   }
@@ -1171,6 +1221,8 @@ export class PluginRunner {
     // Re-register/deregister plugin traits in the core registry to match the
     // newly-loaded/unloaded set (mirrors the workflow-step contribution flow).
     this.syncPluginTraits();
+    // Step parsers (U12, KTD-12) ride the same plugin lifecycle as traits.
+    this.syncPluginStepParsers();
   }
 
   private invalidatePromptContributionsCache(): void {

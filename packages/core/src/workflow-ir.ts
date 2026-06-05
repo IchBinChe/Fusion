@@ -7,6 +7,9 @@ import type {
   WorkflowIrV1,
   WorkflowIrV2,
   WorkflowHoldRelease,
+  WorkflowForeachConfig,
+  WorkflowFieldDefinition,
+  WorkflowFieldType,
 } from "./workflow-ir-types.js";
 
 export class WorkflowIrError extends Error {
@@ -25,8 +28,56 @@ const HOLD_RELEASE_KINDS: ReadonlySet<WorkflowHoldRelease> = new Set([
 ]);
 
 /** Seam config values that may not appear inside a parallel branch (KTD-11):
- *  one worktree/session per task and exclusive merge are physical constraints. */
-const SEAM_FORBIDDEN_IN_BRANCH: ReadonlySet<string> = new Set(["execute", "merge"]);
+ *  one worktree/session per task and exclusive merge are physical constraints.
+ *  Step-inversion (KTD-4) extends this posture: `step-execute` seam prompt nodes
+ *  may never appear in a split branch either. */
+const SEAM_FORBIDDEN_IN_BRANCH: ReadonlySet<string> = new Set([
+  "execute",
+  "merge",
+  "step-execute",
+]);
+
+/** Step-inversion field-type whitelist (KTD-13). */
+const WORKFLOW_FIELD_TYPES: ReadonlySet<WorkflowFieldType> = new Set([
+  "string",
+  "text",
+  "number",
+  "boolean",
+  "enum",
+  "multi-enum",
+  "date",
+  "url",
+]);
+
+const FIELD_RENDER_PLACEMENTS: ReadonlySet<string> = new Set([
+  "card",
+  "detail",
+  "detail-section",
+]);
+
+const FIELD_RENDER_WIDGETS: ReadonlySet<string> = new Set([
+  "select",
+  "radio",
+  "chips",
+  "input",
+  "textarea",
+  "toggle",
+]);
+
+/** Hard cap on a foreach `maxReworkCycles` (KTD-5: default 3, clamp >10 to 10,
+ *  reject <1). */
+const MAX_REWORK_CYCLES_CAP = 10;
+
+/** Parallel concurrency bounds (KTD-3): range 1..8. */
+const MAX_FOREACH_CONCURRENCY = 8;
+
+/** The implicit step-source artifact allowed when no artifacts are declared. */
+const IMPLICIT_DEFAULT_ARTIFACT = "PROMPT.md";
+
+/** True when a prompt node carries the `step-execute` seam (KTD-2/KTD-4). */
+function isStepExecuteNode(node: WorkflowIrNode): boolean {
+  return node.kind === "prompt" && node.config?.seam === "step-execute";
+}
 
 /** Default-workflow column ids in legacy enum order (KTD-1). */
 export const DEFAULT_WORKFLOW_COLUMN_IDS = [
@@ -180,6 +231,501 @@ function innerJoinNext(joinId: string, outgoing: Map<string, WorkflowIrEdge[]>):
   return (outgoing.get(joinId) ?? []).find((e) => e.condition !== "failure")?.to;
 }
 
+// ---------------------------------------------------------------------------
+// Step-inversion validation (FN step-inversion, U1)
+// ---------------------------------------------------------------------------
+
+/** True for a `rework`-kind edge (KTD-5). */
+function isReworkEdge(edge: WorkflowIrEdge): boolean {
+  return edge.kind === "rework";
+}
+
+/** Collect the set of node ids reachable from `start` following non-rework edges
+ *  (rework edges are intra-template back-edges; the top-level reachability /
+ *  dominance analysis ignores them). */
+function reachableFrom(
+  start: string,
+  outgoing: Map<string, WorkflowIrEdge[]>,
+): Set<string> {
+  const seen = new Set<string>();
+  const queue = [start];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const edge of outgoing.get(id) ?? []) {
+      if (isReworkEdge(edge)) continue;
+      if (!seen.has(edge.to)) queue.push(edge.to);
+    }
+  }
+  return seen;
+}
+
+/**
+ * Validate a foreach `template` subgraph recursively (KTD-3):
+ *  - non-empty;
+ *  - exactly one entry (no incoming template edges) and one exit (no outgoing);
+ *  - NO nested foreach;
+ *  - `step-execute` seam nodes are legal here but never inside a split branch
+ *    (SEAM_FORBIDDEN_IN_BRANCH already enforces this via validateParallelism);
+ *  - rework edges legal only when both endpoints are inside this template;
+ *  - step-review verdict routing rules (KTD-4).
+ */
+function validateForeach(node: WorkflowIrNode, topLevelNodeIds: Set<string>): void {
+  const cfg = node.config as Partial<WorkflowForeachConfig> | undefined;
+  if (!cfg || cfg.source !== "task-steps") {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' must declare source 'task-steps'`,
+    );
+  }
+  const template = cfg.template;
+  if (
+    !template ||
+    !Array.isArray(template.nodes) ||
+    !Array.isArray(template.edges)
+  ) {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' must declare a template with nodes and edges arrays`,
+    );
+  }
+  if (template.nodes.length === 0) {
+    throw new WorkflowIrError(`foreach node '${node.id}' template must be non-empty`);
+  }
+
+  // mode / isolation / concurrency (KTD-3).
+  const mode = cfg.mode ?? "sequential";
+  if (mode !== "sequential" && mode !== "parallel") {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' mode must be 'sequential' or 'parallel'`,
+    );
+  }
+  const isolation = cfg.isolation ?? (mode === "parallel" ? "worktree" : "shared");
+  if (isolation !== "shared" && isolation !== "worktree") {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' isolation must be 'shared' or 'worktree'`,
+    );
+  }
+  if (mode === "parallel" && isolation === "shared") {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' cannot combine mode 'parallel' with isolation 'shared' (concurrent writes in one worktree are unguardable races)`,
+    );
+  }
+  if (cfg.concurrency !== undefined) {
+    if (mode !== "parallel") {
+      throw new WorkflowIrError(
+        `foreach node '${node.id}' concurrency is only valid in 'parallel' mode`,
+      );
+    }
+    const c = cfg.concurrency;
+    if (typeof c !== "number" || !Number.isInteger(c) || c < 1 || c > MAX_FOREACH_CONCURRENCY) {
+      throw new WorkflowIrError(
+        `foreach node '${node.id}' concurrency must be an integer in 1..${MAX_FOREACH_CONCURRENCY}`,
+      );
+    }
+  }
+  if (cfg.maxReworkCycles !== undefined) {
+    const m = cfg.maxReworkCycles;
+    if (typeof m !== "number" || !Number.isInteger(m) || m < 1) {
+      throw new WorkflowIrError(
+        `foreach node '${node.id}' maxReworkCycles must be an integer >= 1`,
+      );
+    }
+    // >10 is clamped at parse time (clampForeachConfig); validation only rejects <1.
+  }
+
+  const templateNodes = template.nodes;
+  const templateIds = new Set(templateNodes.map((n) => n.id));
+  if (templateIds.size !== templateNodes.length) {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' template has duplicate node ids`,
+    );
+  }
+
+  // No nested foreach.
+  for (const inner of templateNodes) {
+    if (inner.kind === "foreach") {
+      throw new WorkflowIrError(
+        `foreach node '${node.id}' template may not contain a nested foreach ('${inner.id}')`,
+      );
+    }
+  }
+
+  // Edge endpoints must reference template nodes; rework edges must stay intra-template.
+  for (const edge of template.edges) {
+    const fromInside = templateIds.has(edge.from);
+    const toInside = templateIds.has(edge.to);
+    if (!fromInside || !toInside) {
+      if (isReworkEdge(edge)) {
+        throw new WorkflowIrError(
+          `rework edge '${edge.from}' -> '${edge.to}' in foreach '${node.id}' must have both endpoints inside the same template`,
+        );
+      }
+      throw new WorkflowIrError(
+        `foreach node '${node.id}' template edge '${edge.from}' -> '${edge.to}' references a node outside the template`,
+      );
+    }
+  }
+
+  // Single entry / single exit (ignoring rework back-edges, which intentionally
+  // create incoming edges to earlier template nodes).
+  const incoming = new Map<string, number>();
+  const outgoingCount = new Map<string, number>();
+  for (const edge of template.edges) {
+    if (isReworkEdge(edge)) continue;
+    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
+    outgoingCount.set(edge.from, (outgoingCount.get(edge.from) ?? 0) + 1);
+  }
+  const entries = templateNodes.filter((n) => (incoming.get(n.id) ?? 0) === 0);
+  const exits = templateNodes.filter((n) => (outgoingCount.get(n.id) ?? 0) === 0);
+  if (entries.length !== 1) {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' template must have exactly one entry node (found ${entries.length})`,
+    );
+  }
+  if (exits.length !== 1) {
+    throw new WorkflowIrError(
+      `foreach node '${node.id}' template must have exactly one exit node (found ${exits.length})`,
+    );
+  }
+
+  // Recurse: validate the template as its own region for parallelism + verdict
+  // routing. step-execute nodes legal here (they are not validated as forbidden
+  // at top level — that check lives in validateStepExecutePlacement).
+  const templateById = new Map(templateNodes.map((n) => [n.id, n]));
+  const templateOutgoing = buildOutgoing(template.edges);
+  validateParallelism(templateNodes, templateOutgoing, templateById);
+  validateStepReviewRouting(templateNodes, templateOutgoing, templateById, true);
+
+  // Defensive: top-level node ids and template node ids should not collide
+  // (instance identity is `<foreachId>#<i>:<templateNodeId>`, but a raw collision
+  // is still confusing).
+  for (const id of templateIds) {
+    if (topLevelNodeIds.has(id)) {
+      throw new WorkflowIrError(
+        `foreach node '${node.id}' template node id '${id}' collides with a top-level node id`,
+      );
+    }
+  }
+}
+
+/** step-execute seam nodes are legal ONLY inside a foreach template (KTD-4):
+ *  reject any at the top level. (Inside-split-branch rejection is handled by
+ *  SEAM_FORBIDDEN_IN_BRANCH within validateParallelism.) */
+function validateStepExecutePlacement(topLevelNodes: WorkflowIrNode[]): void {
+  for (const node of topLevelNodes) {
+    if (isStepExecuteNode(node)) {
+      throw new WorkflowIrError(
+        `step-execute seam node '${node.id}' is only legal inside a foreach template`,
+      );
+    }
+  }
+}
+
+/**
+ * step-review verdict routing (KTD-4). For each step-review node:
+ *  - it must have outgoing edges covering `outcome:approve` and `outcome:revise`;
+ *  - `outcome:rethink` optional (defaults to the revise target with reset semantics);
+ *  - `outcome:unavailable` optional;
+ *  - a step-review node inside a split branch is advisory-only: it must NOT carry
+ *    rework or `outcome:approve` routing.
+ */
+function validateStepReviewRouting(
+  nodes: WorkflowIrNode[],
+  outgoing: Map<string, WorkflowIrEdge[]>,
+  nodesById: Map<string, WorkflowIrNode>,
+  insideForeachTemplate: boolean,
+): void {
+  // Determine which nodes sit inside a split branch (advisory-only zone).
+  const inBranch = nodesInSplitBranches(nodes, outgoing, nodesById);
+
+  for (const node of nodes) {
+    if (node.kind !== "step-review") continue;
+    if (node.config?.type !== "plan" && node.config?.type !== "code") {
+      throw new WorkflowIrError(
+        `step-review node '${node.id}' must declare type 'plan' or 'code'`,
+      );
+    }
+    if (node.config.model !== undefined && typeof node.config.model !== "string") {
+      throw new WorkflowIrError(
+        `step-review node '${node.id}' model must be a string when present`,
+      );
+    }
+
+    const edges = outgoing.get(node.id) ?? [];
+    const conditions = new Set(edges.map((e) => e.condition));
+    const hasRework = edges.some(isReworkEdge);
+
+    if (inBranch.has(node.id)) {
+      // Advisory-only inside a split branch: no rework, no approve routing.
+      if (hasRework) {
+        throw new WorkflowIrError(
+          `step-review node '${node.id}' inside a split branch is advisory-only and may not have rework edges`,
+        );
+      }
+      if (conditions.has("outcome:approve")) {
+        throw new WorkflowIrError(
+          `step-review node '${node.id}' inside a split branch is advisory-only and may not carry outcome:approve routing`,
+        );
+      }
+      continue;
+    }
+
+    // Main-path step-review: must route approve and revise.
+    if (!conditions.has("outcome:approve")) {
+      throw new WorkflowIrError(
+        `step-review node '${node.id}' must route outcome:approve`,
+      );
+    }
+    if (!conditions.has("outcome:revise")) {
+      throw new WorkflowIrError(
+        `step-review node '${node.id}' must route outcome:revise`,
+      );
+    }
+    void insideForeachTemplate;
+  }
+}
+
+/** Compute the set of node ids that lie strictly inside some split..join branch
+ *  region. Walks each split's branches forward to the join. Lightweight; used
+ *  for the step-review advisory-only rule. */
+function nodesInSplitBranches(
+  nodes: WorkflowIrNode[],
+  outgoing: Map<string, WorkflowIrEdge[]>,
+  nodesById: Map<string, WorkflowIrNode>,
+): Set<string> {
+  const inBranch = new Set<string>();
+  const splits = nodes.filter((n) => n.kind === "split");
+  for (const split of splits) {
+    for (const edge of outgoing.get(split.id) ?? []) {
+      let cursor: string | undefined = edge.to;
+      const visited = new Set<string>();
+      while (cursor && !visited.has(cursor)) {
+        const id: string = cursor;
+        visited.add(id);
+        const n = nodesById.get(id);
+        if (!n || n.kind === "join") break;
+        inBranch.add(id);
+        const next: WorkflowIrEdge | undefined = (outgoing.get(id) ?? []).find(
+          (e) => !isReworkEdge(e) && e.condition !== "failure",
+        );
+        cursor = next?.to;
+      }
+    }
+  }
+  return inBranch;
+}
+
+/**
+ * Cycle detection across the top-level graph that EXEMPTS rework edges (KTD-5).
+ * Any non-rework cycle is rejected; rework edges (intra-template back-edges) are
+ * skipped. Run over the top-level graph; template internals are validated
+ * separately.
+ */
+function validateNoIllegalCycles(
+  nodes: WorkflowIrNode[],
+  outgoing: Map<string, WorkflowIrEdge[]>,
+): void {
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map<string, number>();
+  for (const n of nodes) color.set(n.id, WHITE);
+
+  const visit = (id: string): void => {
+    color.set(id, GRAY);
+    for (const edge of outgoing.get(id) ?? []) {
+      if (isReworkEdge(edge)) continue;
+      const c = color.get(edge.to);
+      if (c === GRAY) {
+        throw new WorkflowIrError(
+          `Workflow IR has an illegal cycle (edge '${edge.from}' -> '${edge.to}'); only rework edges may form cycles`,
+        );
+      }
+      if (c === WHITE) visit(edge.to);
+    }
+    color.set(id, BLACK);
+  };
+
+  for (const n of nodes) {
+    if (color.get(n.id) === WHITE) visit(n.id);
+  }
+}
+
+/**
+ * Dominance check (KTD-3): every `foreach(source:"task-steps")` must be dominated
+ * by a `parse-steps` node — a parse-steps node lies on EVERY path from start to
+ * the foreach. Implemented via the classic "removal disconnects start from
+ * target" definition, which is correct for DAGs: for each parse-steps node,
+ * check whether the foreach is still reachable from start with that node removed.
+ * The foreach is dominated iff some parse-steps node's removal disconnects it.
+ */
+function validateForeachDominance(
+  nodes: WorkflowIrNode[],
+  edges: WorkflowIrEdge[],
+  outgoing: Map<string, WorkflowIrEdge[]>,
+): void {
+  const startNode = nodes.find((n) => n.kind === "start");
+  if (!startNode) return; // parse-time guarantees exactly one start.
+  const foreaches = nodes.filter(
+    (n) => n.kind === "foreach" && (n.config as { source?: unknown } | undefined)?.source === "task-steps",
+  );
+  if (foreaches.length === 0) return;
+  const parseStepsNodes = nodes.filter((n) => n.kind === "parse-steps");
+
+  for (const fe of foreaches) {
+    // Reachable from start at all?
+    if (!reachableFrom(startNode.id, outgoing).has(fe.id)) {
+      throw new WorkflowIrError(
+        `foreach node '${fe.id}' is not reachable from the start node`,
+      );
+    }
+    const dominated = parseStepsNodes.some((ps) => {
+      if (ps.id === fe.id) return false;
+      // Build outgoing with ps removed (as both source and target).
+      const trimmed = buildOutgoing(
+        edges.filter((e) => e.from !== ps.id && e.to !== ps.id),
+      );
+      return !reachableFrom(startNode.id, trimmed).has(fe.id);
+    });
+    if (!dominated) {
+      throw new WorkflowIrError(
+        `foreach node '${fe.id}' (source:'task-steps') must be dominated by a parse-steps node on every path from start`,
+      );
+    }
+  }
+}
+
+/** Validate `parse-steps` node config (KTD-12). */
+function validateParseStepsNodes(ir: WorkflowIrV2): void {
+  const declaredArtifacts = new Set((ir.artifacts ?? []).map((a) => a.key));
+  const hasDeclaredArtifacts = (ir.artifacts ?? []).length > 0;
+
+  for (const node of ir.nodes) {
+    if (node.kind !== "parse-steps") continue;
+    const cfg = node.config as { artifact?: unknown; parser?: unknown } | undefined;
+    const artifact = cfg?.artifact;
+    const parser = cfg?.parser;
+    if (typeof parser !== "string" || parser.trim() === "") {
+      throw new WorkflowIrError(
+        `parse-steps node '${node.id}' must declare a non-empty parser`,
+      );
+    }
+    if (typeof artifact !== "string" || artifact.trim() === "") {
+      throw new WorkflowIrError(
+        `parse-steps node '${node.id}' must declare a non-empty artifact`,
+      );
+    }
+    if (hasDeclaredArtifacts) {
+      if (!declaredArtifacts.has(artifact)) {
+        throw new WorkflowIrError(
+          `parse-steps node '${node.id}' references undeclared artifact '${artifact}'`,
+        );
+      }
+    } else if (artifact !== IMPLICIT_DEFAULT_ARTIFACT) {
+      throw new WorkflowIrError(
+        `parse-steps node '${node.id}' references artifact '${artifact}', but only '${IMPLICIT_DEFAULT_ARTIFACT}' is allowed when no artifacts are declared`,
+      );
+    }
+  }
+}
+
+/** Validate `code` node config (KTD-15). TS is NOT compiled in core (esbuild
+ *  check is engine/editor side). */
+function validateCodeNodes(nodes: WorkflowIrNode[]): void {
+  const MAX_SOURCE = 65536;
+  for (const node of nodes) {
+    if (node.kind !== "code") continue;
+    const cfg = node.config as { source?: unknown; timeoutMs?: unknown } | undefined;
+    const source = cfg?.source;
+    if (typeof source !== "string" || source.length === 0) {
+      throw new WorkflowIrError(`code node '${node.id}' must declare a non-empty source`);
+    }
+    if (source.length > MAX_SOURCE) {
+      throw new WorkflowIrError(
+        `code node '${node.id}' source exceeds ${MAX_SOURCE} characters`,
+      );
+    }
+    if (cfg?.timeoutMs !== undefined) {
+      const t = cfg.timeoutMs;
+      if (typeof t !== "number" || !Number.isInteger(t) || t < 1000 || t > 300000) {
+        throw new WorkflowIrError(
+          `code node '${node.id}' timeoutMs must be an integer in 1000..300000`,
+        );
+      }
+    }
+  }
+}
+
+/** Validate `fields` declarations (KTD-13). */
+function validateFields(fields: WorkflowFieldDefinition[] | undefined): void {
+  if (fields === undefined) return;
+  if (!Array.isArray(fields)) {
+    throw new WorkflowIrError("Workflow IR fields must be an array");
+  }
+  const seen = new Set<string>();
+  for (const field of fields) {
+    if (!field || typeof field.id !== "string" || field.id === "") {
+      throw new WorkflowIrError("Workflow field must have a non-empty id");
+    }
+    if (seen.has(field.id)) {
+      throw new WorkflowIrError(`Workflow IR has duplicate field id '${field.id}'`);
+    }
+    seen.add(field.id);
+    if (typeof field.name !== "string" || field.name === "") {
+      throw new WorkflowIrError(`Workflow field '${field.id}' must have a non-empty name`);
+    }
+    if (!WORKFLOW_FIELD_TYPES.has(field.type)) {
+      throw new WorkflowIrError(
+        `Workflow field '${field.id}' has unknown type '${String(field.type)}'`,
+      );
+    }
+    const isEnum = field.type === "enum" || field.type === "multi-enum";
+    if (isEnum) {
+      if (!Array.isArray(field.options) || field.options.length === 0) {
+        throw new WorkflowIrError(
+          `Workflow field '${field.id}' of type '${field.type}' must declare non-empty options`,
+        );
+      }
+      const optSeen = new Set<string>();
+      for (const opt of field.options) {
+        if (!opt || typeof opt.value !== "string" || opt.value === "") {
+          throw new WorkflowIrError(
+            `Workflow field '${field.id}' option must have a non-empty value`,
+          );
+        }
+        if (typeof opt.label !== "string" || opt.label === "") {
+          throw new WorkflowIrError(
+            `Workflow field '${field.id}' option '${opt.value}' must have a non-empty label`,
+          );
+        }
+        if (optSeen.has(opt.value)) {
+          throw new WorkflowIrError(
+            `Workflow field '${field.id}' has duplicate option value '${opt.value}'`,
+          );
+        }
+        optSeen.add(opt.value);
+      }
+    } else if (field.options !== undefined) {
+      throw new WorkflowIrError(
+        `Workflow field '${field.id}' of type '${field.type}' must not declare options`,
+      );
+    }
+    if (field.render !== undefined) {
+      const r = field.render;
+      if (r.placement !== undefined && !FIELD_RENDER_PLACEMENTS.has(r.placement)) {
+        throw new WorkflowIrError(
+          `Workflow field '${field.id}' render.placement '${String(r.placement)}' is not allowed`,
+        );
+      }
+      if (r.widget !== undefined && !FIELD_RENDER_WIDGETS.has(r.widget)) {
+        throw new WorkflowIrError(
+          `Workflow field '${field.id}' render.widget '${String(r.widget)}' is not allowed`,
+        );
+      }
+    }
+  }
+}
+
 function validateColumns(ir: WorkflowIrV2): void {
   if (!Array.isArray(ir.columns)) {
     throw new WorkflowIrError("Workflow IR v2 columns must be an array");
@@ -223,6 +769,48 @@ function validateV2(ir: WorkflowIrV2): void {
 
   const outgoing = buildOutgoing(ir.edges);
   validateParallelism(ir.nodes, outgoing, nodesById);
+
+  // Step-inversion (U1) — additive validation. Order matters: validate node
+  // configs first, then structural rules.
+  const topLevelIds = new Set(ir.nodes.map((n) => n.id));
+  validateStepExecutePlacement(ir.nodes);
+  for (const node of ir.nodes) {
+    if (node.kind === "foreach") validateForeach(node, topLevelIds);
+  }
+  validateStepReviewRouting(ir.nodes, outgoing, nodesById, false);
+  validateParseStepsNodes(ir);
+  validateCodeNodes(ir.nodes);
+  validateFields(ir.fields);
+
+  // Rework edges are legal only intra-template; any rework edge at the top level
+  // is rejected (template rework edges are validated inside validateForeach and
+  // never appear in ir.edges).
+  for (const edge of ir.edges) {
+    if (isReworkEdge(edge)) {
+      throw new WorkflowIrError(
+        `rework edge '${edge.from}' -> '${edge.to}' is only legal inside a foreach template`,
+      );
+    }
+  }
+
+  validateNoIllegalCycles(ir.nodes, outgoing);
+  validateForeachDominance(ir.nodes, ir.edges, outgoing);
+}
+
+/** Clamp foreach `maxReworkCycles` > cap down to the cap, in place, mirroring the
+ *  maxRetries clamp posture (KTD-5). Reject-of-<1 happens in validation. */
+function clampForeachConfigs(ir: WorkflowIrV2): void {
+  for (const node of ir.nodes) {
+    if (node.kind !== "foreach") continue;
+    const cfg = node.config as Partial<WorkflowForeachConfig> | undefined;
+    if (
+      cfg &&
+      typeof cfg.maxReworkCycles === "number" &&
+      cfg.maxReworkCycles > MAX_REWORK_CYCLES_CAP
+    ) {
+      cfg.maxReworkCycles = MAX_REWORK_CYCLES_CAP;
+    }
+  }
 }
 
 export function parseWorkflowIr(input: string | WorkflowIr): WorkflowIr {
@@ -249,6 +837,7 @@ export function parseWorkflowIr(input: string | WorkflowIr): WorkflowIr {
     return upgradeV1ToV2(ir);
   }
 
+  clampForeachConfigs(ir);
   validateV2(ir);
   return ir;
 }
@@ -278,6 +867,11 @@ export function downgradeIrToV1IfPure(ir: WorkflowIr): WorkflowIr {
   // Any v2-only node kind means the graph cannot be represented in v1.
   for (const node of ir.nodes) {
     if (!V1_NODE_KINDS.has(node.kind)) return ir;
+  }
+
+  // Step-inversion declarations (artifacts/fields) are v2-only features.
+  if ((ir.artifacts && ir.artifacts.length > 0) || (ir.fields && ir.fields.length > 0)) {
+    return ir;
   }
 
   // Columns must be exactly the synthesized default set, same ids, same order,

@@ -48,4 +48,14 @@ export interface WorkflowDefinitionUpdate {
    * the `workflowColumns` flag is ON.
    */
   rehomeTo?: string;
+  /**
+   * U11/KTD-13: when an IR update changes a custom field's type incompatibly for
+   * tasks that already hold a value under that field, the update is blocked with
+   * a typed {@link import("./workflow-reconciliation.js").IncompatibleFieldChangeError}
+   * unless `coerce` is supplied. `"drop"` discards the now-incompatible stored
+   * values; `"keep-orphaned"` retains them as orphans (rendered under the
+   * orphaned-fields disclosure). Removing a field outright always orphans (never
+   * blocks). Mirrors the `rehomeTo` conflict-resolution posture for columns.
+   */
+  coerce?: "drop" | "keep-orphaned";
 }

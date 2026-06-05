@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import type { AgentStore, AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore } from "@fusion/core";
-import { listTraits } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -64,6 +64,14 @@ export const taskDocumentReadParams = Type.Object({
 });
 
 export const workflowListParams = Type.Object({});
+
+export const workflowGetParams = Type.Object({
+  workflow_id: Type.String({
+    description:
+      "The workflow definition ID to fetch (e.g. 'WF-003', or a 'builtin:*' id). " +
+      "Use fn_workflow_list to discover available IDs.",
+  }),
+});
 
 export const workflowSelectParams = Type.Object({
   workflow_id: Type.String({
@@ -1032,6 +1040,68 @@ export function createWorkflowListTool(store: TaskStore): ToolDefinition {
 }
 
 /**
+ * Create a `fn_workflow_get` tool that returns a single workflow definition by
+ * id — id/name/description, whether it is a read-only built-in, and the full
+ * resolved IR (nodes/edges/columns/artifacts/fields) as JSON. Agent-native
+ * read parity with the dashboard's workflow inspector; the companion read tool
+ * to fn_workflow_list. Read-only; an unknown id is reported as a tool error.
+ */
+export function createWorkflowGetTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_workflow_get",
+    label: "Get Workflow",
+    description:
+      "Fetch a single workflow definition by its ID — its name, description, whether it is a " +
+      "read-only built-in, and its full IR (nodes, edges, columns, artifacts, and custom fields) " +
+      "as JSON. Use fn_workflow_list to discover IDs first.",
+    parameters: workflowGetParams,
+    execute: async (_id: string, params: Static<typeof workflowGetParams>) => {
+      const workflowId = params.workflow_id?.trim();
+      if (!workflowId) {
+        return {
+          content: [{ type: "text" as const, text: "ERROR: workflow_id is required." }],
+          details: {},
+          isError: true,
+        };
+      }
+      try {
+        const def = await store.getWorkflowDefinition(workflowId);
+        if (!def) {
+          return {
+            content: [{ type: "text" as const, text: `ERROR: Unknown workflow id '${workflowId}'. Use fn_workflow_list to discover valid IDs.` }],
+            details: {},
+            isError: true,
+          };
+        }
+        const builtin = isBuiltinWorkflowId(def.id);
+        const payload = {
+          id: def.id,
+          name: def.name,
+          description: def.description,
+          builtin,
+          ir: def.ir,
+          // Preserve editor node positions so a read→modify→write cycle does not
+          // strip the layout. May be absent for older/built-in defs; only include
+          // when present to keep the payload tidy.
+          ...(def.layout ? { layout: def.layout } : {}),
+        };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+          details: { workflowId: def.id, builtin, ...(def.layout ? { layout: def.layout } : {}) },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to get workflow: ${err?.message ?? err}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  };
+}
+
+/**
  * Create a `fn_workflow_select` tool that assigns a workflow definition to a
  * task (defaulting to the current task). Mirrors the dashboard's per-task
  * workflow selection so an agent can set up a task the same way a user can.
@@ -1137,7 +1207,22 @@ export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
     label: "Create Workflow",
     description:
       "Create a new custom workflow definition from a name and a workflow graph (IR). " +
-      "The IR is validated server-side. Returns the new workflow ID.",
+      "The IR is validated server-side; a malformed graph rejects. Returns the new workflow ID.\n" +
+      "v2 IR supports step-inversion constructs (all additive, opt-in): " +
+      "`parse-steps` node {artifact, parser} writes the task step list from a declared artifact " +
+      "(built-in parsers: `step-headings`, `json-steps`; routable `no-steps`/`parse-error` outcomes) — " +
+      "it must precede any `foreach`; " +
+      "`foreach` node {source:'task-steps', template:{nodes,edges}, mode:'sequential'|'parallel', " +
+      "isolation:'shared'|'worktree', concurrency (parallel only, 1-8), maxReworkCycles (1-10)} " +
+      "instantiates its single-entry/exit template subgraph once per planned step " +
+      "(parallel+shared is rejected); a `step-execute` node is legal only inside a foreach template; " +
+      "`step-review` node {type:'plan'|'code', model?} surfaces verdicts as outcome edges " +
+      "(`outcome:approve|revise|rethink|unavailable`); edges may set `kind:'rework'` (the only legal cycles, " +
+      "back to step-execute within an instance; rethink edges trigger a reset-to-baseline); " +
+      "`code` node {source, timeoutMs?} runs sandboxed TypeScript returning {outcome?, contextPatch?, customFields?}. " +
+      "Declare task documents via `artifacts: [{key, title?, producedBy?, role?}]` and custom task fields via " +
+      "`fields: [{id, name, type, required?, default?, options?, render?}]` (types: string/text/number/boolean/" +
+      "enum/multi-enum/date/url; render.placement card|detail|detail-section, render.badge for card chips).",
     parameters: workflowCreateParams,
     execute: async (_id: string, params: Static<typeof workflowCreateParams>) => {
       try {
@@ -1178,7 +1263,10 @@ export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
     description:
       "Update a custom workflow definition (name/description/ir/layout). Built-ins cannot be edited. " +
       "If an IR change removes a column that still holds cards, the update is blocked and returns the " +
-      "occupied columns — retry with rehome_to set to a column id that survives in the new IR.",
+      "occupied columns — retry with rehome_to set to a column id that survives in the new IR. " +
+      "The IR accepts the same step-inversion constructs as fn_workflow_create (foreach with mode/isolation/" +
+      "concurrency, step-execute, step-review, parse-steps, code nodes, rework edges, artifacts, fields). " +
+      "Editing `fields` orphans (never destroys) existing task values for removed/incompatible fields.",
     parameters: workflowUpdateParams,
     execute: async (_id: string, params: Static<typeof workflowUpdateParams>) => {
       try {

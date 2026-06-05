@@ -158,6 +158,65 @@ describe("workflow routes (U4)", () => {
     expect(res.status).toBe(400);
   });
 
+  // ── Handoff (KTD-15): save-time code-node compile validation ────────────────
+  /** A v2 IR with a single `code` node whose `source` core accepts (non-empty,
+   *  under the size cap) but which esbuild may or may not compile. */
+  function codeNodeIr(source: string): WorkflowIr {
+    return {
+      version: "v2",
+      name: "code-wf",
+      columns: [{ id: "intake-col", name: "Intake", traits: [{ trait: "intake" }] }],
+      nodes: [
+        { id: "start", kind: "start", column: "intake-col" },
+        { id: "calc", kind: "code", column: "intake-col", config: { source } },
+        { id: "end", kind: "end", column: "intake-col" },
+      ],
+      edges: [
+        { from: "start", to: "calc", condition: "success" },
+        { from: "calc", to: "end", condition: "success" },
+      ],
+    } as WorkflowIr;
+  }
+
+  it("POST /workflows rejects an uncompilable code node with 400 + per-node errors", async () => {
+    // Valid TS (compiles) is accepted.
+    const ok = await post("/api/workflows", {
+      name: "GoodCode",
+      ir: codeNodeIr("export default async (ctx) => ({ outcome: 'success' });"),
+    });
+    expect(ok.status).toBe(201);
+
+    // A syntax error passes core's non-empty source check but fails esbuild.
+    const bad = await post("/api/workflows", {
+      name: "BadCode",
+      ir: codeNodeIr("export default async (ctx) => { return ((( }"),
+    });
+    expect(bad.status).toBe(400);
+    const details = (bad.body as { details?: { codeNodeErrors?: Array<{ nodeId: string; error: string }> } }).details;
+    expect(Array.isArray(details?.codeNodeErrors)).toBe(true);
+    expect(details?.codeNodeErrors?.some((e) => e.nodeId === "calc")).toBe(true);
+  });
+
+  it("PATCH /workflows/:id rejects an uncompilable code node with 400", async () => {
+    const created = await post("/api/workflows", {
+      name: "EditableCode",
+      ir: codeNodeIr("export default async (ctx) => ({});"),
+    });
+    expect(created.status).toBe(201);
+    const id = (created.body as { id: string }).id;
+
+    const res = await request(
+      app,
+      "PATCH",
+      `/api/workflows/${id}`,
+      JSON.stringify({ ir: codeNodeIr("export default async (ctx) => { return ((( }") }),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(400);
+    const details = (res.body as { details?: { codeNodeErrors?: unknown[] } }).details;
+    expect((details?.codeNodeErrors?.length ?? 0)).toBeGreaterThan(0);
+  });
+
   it("GET /workflows lists created workflows (ahead of read-only built-ins)", async () => {
     await post("/api/workflows", { name: "A", ir: linearIr() });
     const res = await get("/api/workflows");

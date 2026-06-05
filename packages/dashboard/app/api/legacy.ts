@@ -79,6 +79,10 @@ import type {
   TaskIdIntegrityReport,
   BranchGroup,
   BranchGroupPrState,
+  WorkflowFieldDefinition,
+  WorkflowFieldType,
+  WorkflowFieldOption,
+  WorkflowFieldRender,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -552,10 +556,17 @@ export interface BoardWorkflowColumn {
   flags: BoardWorkflowColumnFlags;
 }
 
+// WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender
+// are re-exported from @fusion/core above (KTD-13/14).
+export type { WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender };
+
 export interface BoardWorkflowDefinition {
   id: string;
   name: string;
   columns: BoardWorkflowColumn[];
+  /** Custom field definitions declared by this workflow (U13/KTD-14). Absent on
+   *  workflows with no fields, or from older servers. */
+  fields?: WorkflowFieldDefinition[];
 }
 
 export interface BoardWorkflowsPayload {
@@ -563,6 +574,31 @@ export interface BoardWorkflowsPayload {
   defaultWorkflowId: string;
   workflows: BoardWorkflowDefinition[];
   taskWorkflowIds: Record<string, string>;
+}
+
+/** A typed custom-field rejection surfaced by the PATCH endpoint (KTD-13). */
+export interface CustomFieldRejection {
+  code: "no-fields-defined" | "unknown-field" | "type-mismatch" | "enum-violation";
+  fieldId: string;
+  detail: string;
+}
+
+/**
+ * Patch a task's custom field values (U13/KTD-14). The server validates the
+ * patch against the task's workflow field schema and returns the updated task;
+ * a validation failure surfaces as a 400 carrying `{ fieldId, code, detail }`.
+ * A `null` value for a field deletes it.
+ */
+export function updateTaskCustomFields(
+  id: string,
+  customFields: Record<string, unknown>,
+  projectId?: string,
+): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/custom-fields`, projectId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customFields }),
+  });
 }
 
 /** Fetch the multi-lane board metadata (U9). When the flag is OFF the server
@@ -5019,6 +5055,16 @@ export function fetchTraits(projectId?: string): Promise<TraitCatalogEntry[]> {
   const path = withProjectId("/traits", projectId);
   return dedupe(path, () =>
     api<{ traits: TraitCatalogEntry[] }>(path).then((res) => res.traits),
+  );
+}
+
+/** Fetch the step-parser id catalog (built-ins + registered plugin parsers) for
+ *  the parse-steps node inspector (KTD-12). Registry-backed, read-only,
+ *  session-scoped. Mirrors fetchTraits. */
+export function fetchStepParsers(projectId?: string): Promise<string[]> {
+  const path = withProjectId("/step-parsers", projectId);
+  return dedupe(path, () =>
+    api<{ parsers: Array<{ id: string }> }>(path).then((res) => res.parsers.map((p) => p.id)),
   );
 }
 

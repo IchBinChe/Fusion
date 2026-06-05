@@ -63,8 +63,16 @@ export type {
   WorkflowHoldRelease,
   WorkflowJoinMode,
   WorkflowJoinBranchFailure,
+  // Step-inversion (KTD-3/12/13): foreach / artifacts / custom-field IR types.
+  WorkflowForeachConfig,
+  WorkflowIrArtifact,
+  WorkflowFieldDefinition,
+  WorkflowFieldType,
+  WorkflowFieldOption,
+  WorkflowFieldRender,
 } from "./workflow-ir-types.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 
 // ── Trait model (U2) ─────────────────────────────────────────────────
 export type {
@@ -104,6 +112,26 @@ export {
   registerBuiltinTraits,
 } from "./builtin-traits.js";
 export type { BuiltinTraitId } from "./builtin-traits.js";
+// Step-inversion U12 (KTD-12): step-parser registry + built-ins.
+export {
+  StepParserRegistry,
+  StepParserRegistrationError,
+  getStepParserRegistry,
+  registerStepParser,
+  getStepParser,
+  listStepParsers,
+  unregisterStepParser,
+  registerBuiltinStepParsers,
+  parseStepHeadings,
+  parseJsonSteps,
+  __resetStepParserRegistryForTests,
+} from "./step-parsers.js";
+export type {
+  StepParser,
+  StepParseResult,
+  ParsedStep,
+  StepParserRegistrationReason,
+} from "./step-parsers.js";
 export {
   registerDefaultWorkflowHooks,
   __resetDefaultWorkflowHooksForTests,
@@ -151,9 +179,11 @@ export type { ColumnCapacity } from "./workflow-capacity.js";
 export {
   OccupiedColumnsError,
   InvalidRehomeTargetError,
+  IncompatibleFieldChangeError,
   resolveEntryColumnId,
   resolveSwitchReconciliation,
   computeRemovedOccupiedColumns,
+  computeIncompatibleFieldChanges,
   assertRehomeTargetValid,
   setReconciliationAbort,
   runReconciliationAbort,
@@ -162,9 +192,24 @@ export {
 export type {
   SwitchReconciliation,
   ColumnOccupancy,
+  IncompatibleFieldChange,
   ReconciliationAbort,
   ReconciliationAbortContext,
 } from "./workflow-reconciliation.js";
+export {
+  validateCustomFieldPatch,
+  applyFieldDefaults,
+  reconcileFieldsOnWorkflowChange,
+  makeCustomFieldRejection,
+  CustomFieldRejectionError,
+  CUSTOM_FIELD_REJECTION_CODES,
+} from "./task-fields.js";
+export type {
+  CustomFieldRejection,
+  CustomFieldRejectionCode,
+  CustomFieldPatchResult,
+  FieldReconciliation,
+} from "./task-fields.js";
 export {
   readTransitionPending,
   writeTransitionPending,

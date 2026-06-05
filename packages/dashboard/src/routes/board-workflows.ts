@@ -28,7 +28,13 @@ import {
   type TraitFlags,
   type WorkflowIr,
   type WorkflowIrV2,
+  type WorkflowFieldDefinition,
 } from "@fusion/core";
+
+/** A workflow-defined custom task field as the board client needs it (U13/KTD-14).
+ *  Uses @fusion/core's WorkflowFieldDefinition directly now that it is exported
+ *  through the barrel. The payload is a verbatim pass-through of the IR's `fields` array. */
+export type BoardWorkflowField = WorkflowFieldDefinition;
 
 /** Stable id the client uses for the implicit default lane (null selection). */
 export const DEFAULT_WORKFLOW_LANE_ID = "builtin:coding";
@@ -45,6 +51,9 @@ export interface BoardWorkflowDefinition {
   id: string;
   name: string;
   columns: BoardWorkflowColumn[];
+  /** Custom field definitions declared by the workflow (U13/KTD-14). Absent
+   *  when the workflow declares no fields. */
+  fields?: BoardWorkflowField[];
 }
 
 /** The full board-workflows payload. `flagEnabled: false` short-circuits the
@@ -73,6 +82,16 @@ function describeColumns(ir: WorkflowIr): BoardWorkflowColumn[] {
   }));
 }
 
+/** Pass through the workflow's declared custom fields (U13/KTD-14). Returns
+ *  `undefined` when the workflow declares none, so the payload stays compact and
+ *  byte-identical for field-less workflows. */
+function describeFields(ir: WorkflowIr): BoardWorkflowField[] | undefined {
+  const v2 = toV2(ir);
+  const fields = v2?.fields;
+  if (!fields || fields.length === 0) return undefined;
+  return fields;
+}
+
 async function describeWorkflow(
   store: Pick<TaskStore, "getWorkflowDefinition">,
   workflowId: string,
@@ -82,7 +101,8 @@ async function describeWorkflow(
   if (isBuiltinWorkflowId(workflowId)) {
     const ir = await resolveWorkflowIrById(store, workflowId);
     const name = getBuiltinWorkflow(workflowId)?.name ?? ir.name;
-    return { id: workflowId, name, columns: describeColumns(ir) };
+    const fields = describeFields(ir);
+    return { id: workflowId, name, columns: describeColumns(ir), ...(fields ? { fields } : {}) };
   }
   // Custom workflow: fetch the definition once and derive both IR and name from
   // it (previously getWorkflowDefinition was called twice per workflow).
@@ -97,7 +117,8 @@ async function describeWorkflow(
   } catch {
     // fall through to the default IR/name
   }
-  return { id: workflowId, name, columns: describeColumns(ir) };
+  const fields = describeFields(ir);
+  return { id: workflowId, name, columns: describeColumns(ir), ...(fields ? { fields } : {}) };
 }
 
 /**

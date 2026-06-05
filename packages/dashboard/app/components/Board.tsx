@@ -379,6 +379,33 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     return result;
   }, [boardWorkflows, flagOn, tasks]);
 
+  // Card-placed field defs grouped by workflow id (U13/KTD-14). Only recomputes
+  // when the board-workflows payload changes, not on every SSE task tick.
+  const cardDefsByWorkflow = useMemo(() => {
+    const map = new Map<string, import("../api").WorkflowFieldDefinition[]>();
+    if (!boardWorkflows) return map;
+    for (const wf of boardWorkflows.workflows) {
+      const cardDefs = (wf.fields ?? []).filter((f) => f.render?.placement === "card");
+      if (cardDefs.length > 0) map.set(wf.id, cardDefs);
+    }
+    return map;
+  }, [boardWorkflows]);
+
+  // Per-task card field defs (U13/KTD-14). Recomputes on task list changes but
+  // reuses the stable cardDefsByWorkflow map so the inner loop is cheap.
+  const taskCardFieldDefs = useMemo(() => {
+    const map = new Map<string, import("../api").WorkflowFieldDefinition[]>();
+    if (cardDefsByWorkflow.size === 0) return map;
+    if (!boardWorkflows) return map;
+    const { taskWorkflowIds, defaultWorkflowId } = boardWorkflows;
+    for (const task of tasks) {
+      const workflowId = taskWorkflowIds[task.id] ?? defaultWorkflowId;
+      const defs = cardDefsByWorkflow.get(workflowId);
+      if (defs) map.set(task.id, defs);
+    }
+    return map;
+  }, [cardDefsByWorkflow, tasks, boardWorkflows]);
+
   // Drag pre-check (R17): adjacency + capacity from the lane's column metadata.
   // Cross-lane drag → workflow-mismatch. Deterministic rejections return a
   // messageKey (no-move); null = allowed.
@@ -467,6 +494,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
             onOpenMission={onOpenMission}
             lastFetchTimeMs={lastFetchTimeMs}
             workflowStepNameLookup={workflowStepNameLookup}
+            taskCardFieldDefs={taskCardFieldDefs}
             blockerFanoutMap={blockerFanoutMap}
             prAuthAvailable={prAuthAvailable}
           />
@@ -508,6 +536,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
             onOpenMission={onOpenMission}
             lastFetchTimeMs={lastFetchTimeMs}
             workflowStepNameLookup={workflowStepNameLookup}
+            taskCardFieldDefs={taskCardFieldDefs}
             blockerFanoutMap={blockerFanoutMap}
             prAuthAvailable={prAuthAvailable}
             autoMerge={autoMerge}

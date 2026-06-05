@@ -166,6 +166,19 @@ The built-in workflow (`builtin:coding`) that reproduces the legacy pipeline ver
 ### transitionPending
 A persisted crash-safe marker (`tasks.transitionPending`) written in the same transaction as a column change, recording the post-commit hooks (`hooksRemaining`) that still owe idempotent execution. Cleared once they complete. Recovery reads it exclusively from SQLite (the authoritative store); a crash mid-transition re-runs the idempotent hooks. A throwing or missing hook degrades (audit) and clears its entry — it never strands the card or wedges the task lock.
 
+## Step inversion
+
+*Behind the `experimentalFeatures.workflowGraphExecutor` flag (orthogonal to `workflowColumns`). With the flag off, and for the Default workflow always, step policy is the legacy engine-owned path (PROMPT.md parsing, in-session review verdicts, RETHINK reset) — unchanged.*
+
+### Step instance
+One runtime expansion of a `foreach` template subgraph, bound to a single planned step (`Task.steps[i]`). Identity is deterministic — `<foreachNodeId>#<stepIndex>:<templateNodeId>` — so resume reconstructs the full instance set from the pinned step count without persisting the expansion itself. Each instance carries its own run-state (current node, rework count, baseline/checkpoint, and in worktree mode its branch and integration status) in `workflow_run_step_instances` (schema v108). The step count is pinned at expansion; a later disagreement with the live step list is a `pin-mismatch` failure, never a silent re-expansion. An instance's lifecycle writes flow through `store.updateStep` so `Task.steps[]` stays the physical projection sink for every existing consumer.
+
+### parse-steps
+A workflow graph node that reads a declared Artifact and runs a registry parser to write the canonical step list (`Task.steps[]`) — the only graph-side writer of steps. Built-in parsers are `step-headings` (the `### Step N:` convention, extracted byte-identically from the legacy regex, including the `(depends: N,M)` annotation) and `json-steps`; plugins contribute parsers under `plugin:<pluginId>:<parserId>`. Parsing failures fail closed to a routable `outcome:parse-error` rather than crashing. A parse-steps node must dominate (precede on all paths) any `foreach(source:"task-steps")`, and running one after a foreach has already expanded trips pin protection (an audited failure) so re-plan loops cannot desynchronize an expanded region.
+
+### Custom task field
+A workflow-declared, typed task field (`string | text | number | boolean | enum | multi-enum | date | url`, with enum options and render hints) whose values live in `tasks.customFields`, keyed by field id. The task model is thereby recast as core fields (title, description) + standard metadata + these workflow-defined fields. Writes pass through a single store authority (`updateTaskCustomFields`) that validates each value against the resolving workflow's schema and returns typed rejections (offending `fieldId` + `code`); agents write them via `fn_task_update`'s `custom_fields` patch. Editing a workflow's fields or switching a task's workflow orphans (never destroys) values for removed or type-incompatible ids — orphans are retained and surfaced under a detail disclosure, excluded from cards. Same id means the same field within a project; there is no cross-workflow shared field namespace.
+
 ## Flagged ambiguities
 
 - "Merging" a shared-branch-group Task had been used for both member integration and group promotion — these are distinct steps with independent gating and must not be conflated.

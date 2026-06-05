@@ -32,7 +32,12 @@
  * is independently testable and reused identically across switch/edit/delete.
  */
 
-import type { WorkflowIr, WorkflowIrV2, WorkflowIrColumn } from "./workflow-ir-types.js";
+import type {
+  WorkflowIr,
+  WorkflowIrV2,
+  WorkflowIrColumn,
+  WorkflowFieldDefinition,
+} from "./workflow-ir-types.js";
 import { resolveColumnFlags } from "./trait-registry.js";
 import { workflowHasColumn } from "./workflow-transitions.js";
 
@@ -179,6 +184,90 @@ export function assertRehomeTargetValid(nextIr: WorkflowIr, rehomeTo: string): v
       rehomeTo,
     );
   }
+}
+
+// ── Custom-field schema-evolution reconciliation (U11/KTD-13) ────────────────
+
+/** A field whose type changed incompatibly while tasks hold values under it. */
+export interface IncompatibleFieldChange {
+  fieldId: string;
+  fromType: string;
+  toType: string;
+  /** Number of tasks (under this workflow) currently holding a value for it. */
+  occupantCount: number;
+}
+
+/**
+ * Thrown by the workflow update path when an IR edit changes one or more custom
+ * fields' types incompatibly for tasks that already hold a value, and no
+ * `coerce` option was supplied. Mirrors {@link OccupiedColumnsError}: a typed,
+ * conflict-signaling error the surface maps to a 409 prompting for a coercion
+ * choice (`drop` | `keep-orphaned`).
+ */
+export class IncompatibleFieldChangeError extends Error {
+  readonly workflowId: string;
+  readonly changes: IncompatibleFieldChange[];
+  constructor(workflowId: string, changes: IncompatibleFieldChange[]) {
+    const summary = changes
+      .map((c) => `${c.fieldId} (${c.fromType}→${c.toType}, ${c.occupantCount})`)
+      .join(", ");
+    super(
+      `Workflow '${workflowId}' edit changes field type(s) incompatibly: ${summary}. ` +
+        `Supply coerce ("drop" | "keep-orphaned") to proceed.`,
+    );
+    this.name = "IncompatibleFieldChangeError";
+    this.workflowId = workflowId;
+    this.changes = changes;
+  }
+}
+
+/** The v2 fields of an IR, or `[]` when absent (v1 or undeclared). */
+function fieldsOf(ir: WorkflowIr): WorkflowFieldDefinition[] {
+  const v2 = ir as WorkflowIrV2;
+  return Array.isArray(v2.fields) ? v2.fields : [];
+}
+
+/** Enum-kind sibling check (enum / multi-enum). */
+function sameEnumKind(a: string, b: string): boolean {
+  const enumKind = (t: string) => t === "enum" || t === "multi-enum";
+  return enumKind(a) && enumKind(b);
+}
+
+/**
+ * Compute which custom fields change type INCOMPATIBLY between `existingIr` and
+ * `nextIr` AND still have occupant tasks holding a value. A type is compatible
+ * with itself; enum↔multi-enum is treated as compatible-shape (values are
+ * re-validated against the new options at reconcile time — a value dropped by
+ * the new options orphans individually, not via a hard block). A field removed
+ * outright is NOT a conflict (removal always orphans, never blocks). Returns one
+ * entry per blocking change in the existing IR's field order.
+ *
+ * `occupantsByField` maps a field id to the count of tasks (under this workflow)
+ * currently holding a value for it.
+ */
+export function computeIncompatibleFieldChanges(
+  existingIr: WorkflowIr,
+  nextIr: WorkflowIr,
+  occupantsByField: Map<string, number>,
+): IncompatibleFieldChange[] {
+  const nextById = new Map(fieldsOf(nextIr).map((f) => [f.id, f]));
+  const changes: IncompatibleFieldChange[] = [];
+  for (const oldField of fieldsOf(existingIr)) {
+    const next = nextById.get(oldField.id);
+    if (!next) continue; // removed → orphan, not a block
+    if (next.type === oldField.type) continue; // identical type → fine
+    if (sameEnumKind(oldField.type, next.type)) continue; // enum↔multi-enum → soft
+    const occupantCount = occupantsByField.get(oldField.id) ?? 0;
+    if (occupantCount > 0) {
+      changes.push({
+        fieldId: oldField.id,
+        fromType: oldField.type,
+        toType: next.type,
+        occupantCount,
+      });
+    }
+  }
+  return changes;
 }
 
 // ── Abort-on-switch DI seam (core stays engine-free) ─────────────────────────

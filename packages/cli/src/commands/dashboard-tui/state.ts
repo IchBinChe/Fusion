@@ -230,6 +230,10 @@ export interface TaskDetailData {
   currentStepIndex?: number;
   steps: TaskStep[];
   recentLogs: TaskLogEntry[]; // last ~200 entries on initial load
+  /** Card-placed custom field values, pre-rendered as read-only bracketed
+   *  labels for the task detail view (U13/KTD-14). Absent/empty when the
+   *  workflow declares no card fields or none have values. */
+  customFields?: Array<{ label: string; value: string }>;
 }
 
 export type TaskEvent =

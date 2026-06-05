@@ -1247,6 +1247,25 @@ Tune sensitivity by adjusting the exported constants in `stalled-review-detector
 
 **Graduation.** The flag default-flip is gated by `computeWorkflowColumnsGraduationReport()` (`workflow-parity.ts`; store method `TaskStore.computeWorkflowColumnsGraduationReport`), aggregating: five-invariant dual-observe parity, default-workflow transition parity vs `VALID_TRANSITIONS` (`checkTransitionParity`), and the U6 dual-accept marker/column disagreement count. `ready` is true only when all gates pass over a non-empty observation window. The report is the gate; it does not flip the flag.
 
+### Step inversion: steps as workflow-modelable nodes (`experimentalFeatures.workflowGraphExecutor`)
+
+The columns/traits track moved *board* policy (transitions, capacity, hold, merge orchestration) onto the substrate/policy line. The **step-inversion** track extends the same inversion to *task steps* and to the *task shape itself*, riding the existing `workflowGraphExecutor` flag (orthogonal to `workflowColumns`). With the flag off — and for the default coding workflow always — step policy stays exactly as it is today (the monolithic `execute` seam, PROMPT.md `### Step N:` parsing, in-session `fn_review_step` verdicts, RETHINK git-reset/session-rewind). The default workflow is the byte-identical parity oracle; inversion is opt-in via custom workflows and a built-in stepwise coding workflow.
+
+**One new substrate seam pair.** The substrate gains exactly one new capability, expressed as two methods: `runTaskStep(task, stepIndex)` (run exactly one step inside the task's session and observe its `complete Step N` commit) and `resetStepToBaseline(task, stepIndex, baselineSha, checkpointId?)` (the RETHINK mechanics — git reset + session rewind + `updateStep(...,"pending")`). Both delegate to existing code (extracted from `StepSessionExecutor` and the legacy RETHINK block); neither reimplements step physics or authors commits. The substrate owns *how* a step runs and resets; the graph owns *when*. Baseline/checkpoint state, previously fragile in-memory Maps lost on restart, moves into persisted instance run-state (`workflow_run_step_instances`, schema v108).
+
+**Everything else becomes authored graph structure (policy).** Step granularity, per-step plan/code review, the verdict→action mapping, rework/escalation routing, parallelism, and even the existence of PROMPT.md stop being engine law:
+
+- A `parse-steps` node reads a workflow-declared **artifact** (PROMPT.md is just the default workflow's declared `step-source` artifact) and runs a registry **parser** (`step-headings`, `json-steps`, or a plugin-contributed parser) to write `Task.steps[]`. It is the only graph-side step-list writer and must dominate any `foreach`. Parsers fail closed to a routable `outcome:parse-error`.
+- A `foreach(source:"task-steps")` node instantiates an inline template subgraph once per planned step, with `mode` (sequential/parallel) and `isolation` (shared/worktree) as explicit axes and per-instance run-state pinned + persisted for crash-safe resume.
+- A `step-review` node surfaces reviewer verdicts (APPROVE/REVISE/RETHINK/UNAVAILABLE) as outcome edges; `rework` edges (the only legal graph cycles, bounded per instance) route REVISE/RETHINK back to `step-execute`, with RETHINK traversal triggering the reset seam.
+- A `code` node runs sandboxed TypeScript (esbuild + child process, clamped timeout, no store handle) for arbitrary computed routing/field logic — the same trust tier as project-local script steps.
+
+**`Task.steps[]` stays the physical projection sink.** Instance lifecycle transitions write *through* `store.updateStep` with explicit indices (projection-first ordering closes the merge-blocker race), so every existing consumer — the merge-blocker, dashboard/TUI step display, `reconcileStepsFromGitHistory`, lost-work reset — keeps working unchanged. Git reconcile remains authoritative over the instance rows (rows are corrected to match git, never the reverse).
+
+**Task shape recast.** The task model reduces to core fields (title, description) + standard metadata + **workflow-defined custom fields** (typed, enum options, render hints; values in `tasks.customFields`, validated through one store authority with typed rejections). Field-schema edits orphan rather than destroy values. This round ships the field *system*; recasting existing built-in fields (priority, labels) onto it is a deferred, additive follow-up.
+
+**Invariant bar.** The five lifecycle invariants (FN-5147 terminal-until-merged, hard-cancel, in-review stall, file-scope, squash) plus the lost-work guard trio remain the non-configurable correctness bar on the stepwise path. The v108 migration is additive; instance rows are prunable; flag-off rollback mid-task converges via the existing fell-back + git-reconcile recovery (the projection is always git-reconcilable).
+
 ## 10) Agent System
 
 Fusion has two complementary agent models:

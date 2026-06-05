@@ -1613,6 +1613,15 @@ function TaskDetailScreen({
             </Box>
           )}
 
+          {/* Card-placed custom fields (U13/KTD-14): read-only bracketed labels. */}
+          {detail.customFields && detail.customFields.length > 0 && (
+            <Box flexDirection="row" gap={1} flexWrap="wrap" flexShrink={0}>
+              {detail.customFields.map((f) => (
+                <Text key={f.label} color="magenta">[{f.label}: {f.value}]</Text>
+              ))}
+            </Box>
+          )}
+
           <Box height={1} flexShrink={0} />
 
           {/* Steps section */}

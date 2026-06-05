@@ -11,6 +11,9 @@ import {
   isColumnBandNode,
   validateColumnsClient,
   unplacedNodeIds,
+  foreachChildFlowId,
+  templateNodeIdFromChild,
+  shortConditionLabel,
   COLUMN_BAND_HEIGHT,
 } from "../workflow-flow-mapping";
 import type { WorkflowFlowNodeData } from "../nodes/WorkflowNodeTypes";
@@ -300,5 +303,137 @@ describe("workflow-flow-mapping validation helpers", () => {
 
   it("band height stays positive (geometry sanity)", () => {
     expect(COLUMN_BAND_HEIGHT).toBeGreaterThan(0);
+  });
+});
+
+// ── U8: step-inversion round-trip (foreach template, rework edges) ───────────
+
+describe("workflow-flow-mapping foreach + rework round-trip", () => {
+  const ir: WorkflowDefinition["ir"] = {
+    version: "v2",
+    name: "stepwise",
+    columns: [
+      { id: "plan", name: "Plan", traits: [] },
+      { id: "in-progress", name: "In progress", traits: [] },
+      { id: "done", name: "Done", traits: [] },
+    ],
+    nodes: [
+      { id: "start", kind: "start", column: "plan" },
+      { id: "parse", kind: "parse-steps", column: "plan", config: { artifact: "PROMPT.md", parser: "step-headings" } },
+      {
+        id: "loop",
+        kind: "foreach",
+        column: "in-progress",
+        config: {
+          source: "task-steps",
+          mode: "sequential",
+          isolation: "shared",
+          maxReworkCycles: 3,
+          template: {
+            nodes: [
+              { id: "exec", kind: "prompt", config: { seam: "step-execute", prompt: "do step" } },
+              { id: "review", kind: "step-review", config: { type: "code" } },
+            ],
+            edges: [
+              { from: "exec", to: "review", condition: "success" },
+              { from: "review", to: "exec", condition: "outcome:revise", kind: "rework" },
+            ],
+          },
+        },
+      },
+      { id: "end", kind: "end", column: "done" },
+    ],
+    edges: [
+      { from: "start", to: "parse", condition: "success" },
+      { from: "parse", to: "loop", condition: "success" },
+      { from: "loop", to: "end", condition: "success" },
+    ],
+  };
+
+  it("round-trips foreach template (children partitioned by parentId) losslessly", () => {
+    const def = makeDef(ir);
+    const { nodes, edges } = irToFlow(def);
+    const columns = columnsOf(def);
+
+    // The foreach group + its two template children render as parented nodes.
+    const group = nodes.find((n) => n.id === "loop");
+    expect(group?.type).toBe("foreach");
+    const children = nodes.filter((n) => n.parentId === "loop");
+    expect(children.map((c) => c.id).sort()).toEqual(
+      [foreachChildFlowId("loop", "exec"), foreachChildFlowId("loop", "review")].sort(),
+    );
+    // Template edges (incl. the rework edge) live inside the group's id-scope.
+    const reworkFlowEdge = edges.find((e) => e.data?.kind === "rework");
+    expect(reworkFlowEdge).toBeTruthy();
+    expect(reworkFlowEdge?.source).toBe(foreachChildFlowId("loop", "review"));
+
+    const { ir: out } = flowToIr("stepwise", nodes, edges, columns);
+    if (out.version !== "v2") throw new Error("expected v2");
+    const loop = out.nodes.find((n) => n.id === "loop");
+    expect(loop?.kind).toBe("foreach");
+    const cfg = loop?.config as Record<string, unknown>;
+    expect(cfg.source).toBe("task-steps");
+    expect(cfg.mode).toBe("sequential");
+    expect(cfg.maxReworkCycles).toBe(3);
+    const template = cfg.template as { nodes: unknown[]; edges: { from: string; to: string; condition?: string; kind?: string }[] };
+    // Template node ids are template-local (de-namespaced), not flow ids.
+    expect((template.nodes as { id: string }[]).map((n) => n.id).sort()).toEqual(["exec", "review"]);
+    // The rework edge survives with its kind and outcome condition.
+    const rework = template.edges.find((e) => e.kind === "rework");
+    expect(rework).toEqual({ from: "review", to: "exec", condition: "outcome:revise", kind: "rework" });
+    // The plain success edge has no kind.
+    const success = template.edges.find((e) => e.condition === "success");
+    expect(success?.kind).toBeUndefined();
+    // Top-level edges exclude the intra-template ones.
+    expect(out.edges.map((e) => `${e.from}->${e.to}`)).toEqual([
+      "start->parse",
+      "parse->loop",
+      "loop->end",
+    ]);
+    // parse-steps config preserved.
+    const parse = out.nodes.find((n) => n.id === "parse");
+    expect(parse?.config).toMatchObject({ artifact: "PROMPT.md", parser: "step-headings" });
+  });
+
+  it("round-trips a code node config (source + timeoutMs)", () => {
+    const codeIr: WorkflowDefinition["ir"] = {
+      version: "v1",
+      name: "wf",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "c1", kind: "code", config: { source: "export default async()=>({})", timeoutMs: 5000 } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "c1", condition: "success" },
+        { from: "c1", to: "end", condition: "success" },
+      ],
+    };
+    const { nodes, edges } = irToFlow(makeDef(codeIr));
+    const { ir: out } = flowToIr("wf", nodes, edges);
+    const c1 = out.nodes.find((n) => n.id === "c1");
+    expect(c1?.kind).toBe("code");
+    expect(c1?.config).toMatchObject({ source: "export default async()=>({})", timeoutMs: 5000 });
+  });
+
+  it("child id namespacing helpers are inverse", () => {
+    const fid = foreachChildFlowId("loop", "exec");
+    expect(templateNodeIdFromChild("loop", fid)).toBe("exec");
+    // A non-namespaced id passes through unchanged.
+    expect(templateNodeIdFromChild("loop", "other")).toBe("other");
+  });
+
+  it("shortens outcome:<verdict> edge labels", () => {
+    expect(shortConditionLabel("outcome:approve")).toBe("approve");
+    expect(shortConditionLabel("success")).toBe("success");
+  });
+
+  it("does not flag foreach template children as unplaced", () => {
+    const def = makeDef(ir);
+    const { nodes } = irToFlow(def);
+    const columns = columnsOf(def);
+    const ids = unplacedNodeIds(nodes, columns);
+    expect(ids).not.toContain(foreachChildFlowId("loop", "exec"));
+    expect(ids).not.toContain(foreachChildFlowId("loop", "review"));
   });
 });

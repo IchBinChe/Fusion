@@ -1,7 +1,7 @@
 import "./TaskCard.css";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
+import { memo, useCallback, useState, useRef, useEffect, useMemo, type ReactElement } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction } from "@fusion/core";
 import {
@@ -11,7 +11,7 @@ import {
   VALID_TRANSITIONS,
   getErrorMessage,
 } from "@fusion/core";
-import { fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent } from "../api";
+import { fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent, type WorkflowFieldDefinition } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { PrCreateModal } from "./PrCreateModal";
 import { ProviderIcon } from "./ProviderIcon";
@@ -299,6 +299,72 @@ export function formatElapsedDurationDone(elapsedMs: number): string {
 }
 
 
+/** Max number of card-placed custom fields rendered before an overflow chip
+ *  (KTD-14: "max 3 card fields rendered with a +N overflow indicator"). */
+const MAX_CARD_FIELDS = 3;
+
+/** Render a single card-placed custom field value as a badge/chip (U13/KTD-14).
+ *  Returns null for empty/unset values so absent fields take no card space. */
+function renderCardFieldBadge(
+  field: WorkflowFieldDefinition,
+  value: unknown,
+): ReactElement | null {
+  const colorOf = (v: string): string | undefined => field.options?.find((o) => o.value === v)?.color;
+  const labelOf = (v: string): string => field.options?.find((o) => o.value === v)?.label ?? v;
+
+  if (field.type === "boolean") {
+    // Boolean true → labeled chip; false/unset → nothing.
+    if (value !== true) return null;
+    return (
+      <span key={field.id} className="card-field-badge card-field-badge--boolean" title={field.name}>
+        {field.name}
+      </span>
+    );
+  }
+  if (field.type === "enum") {
+    if (typeof value !== "string" || value === "") return null;
+    const color = colorOf(value);
+    return (
+      <span
+        key={field.id}
+        className="card-field-badge card-field-badge--enum"
+        title={`${field.name}: ${labelOf(value)}`}
+        style={color ? { backgroundColor: color, borderColor: color, color: "white" } : undefined}
+      >
+        {labelOf(value)}
+      </span>
+    );
+  }
+  if (field.type === "multi-enum") {
+    const arr = Array.isArray(value) ? (value as string[]) : [];
+    if (arr.length === 0) return null;
+    return (
+      <span key={field.id} className="card-field-badge card-field-badge--multi" title={field.name}>
+        {arr.map((v) => {
+          const color = colorOf(v);
+          return (
+            <span
+              key={v}
+              className="card-field-badge-token"
+              style={color ? { backgroundColor: color, borderColor: color, color: "white" } : undefined}
+            >
+              {labelOf(v)}
+            </span>
+          );
+        })}
+      </span>
+    );
+  }
+  // string / text / number / date / url → simple labeled chip.
+  if (value === undefined || value === null || value === "") return null;
+  const display = field.type === "date" && typeof value === "string" ? value.slice(0, 10) : String(value);
+  return (
+    <span key={field.id} className="card-field-badge" title={`${field.name}: ${display}`}>
+      {display}
+    </span>
+  );
+}
+
 interface TaskCardProps {
   task: Task;
   projectId?: string;
@@ -338,6 +404,9 @@ interface TaskCardProps {
   prAuthAvailable?: boolean;
   /** Whether project-level auto-merge is enabled (hides manual Create PR quick action when true). */
   autoMergeEnabled?: boolean;
+  /** Card-placed custom field definitions for this task's workflow (U13/KTD-14).
+   *  Empty/undefined → no field badges render (card byte-identical to today). */
+  cardFieldDefs?: WorkflowFieldDefinition[];
 }
 
 function getTaskPrimaryPrInfo(task: Pick<Task, "prInfo" | "prInfos">): PrInfo | undefined {
@@ -471,6 +540,10 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.taskStuckTimeoutMs === next.taskStuckTimeoutMs &&
     previous.prAuthAvailable === next.prAuthAvailable &&
     previous.autoMergeEnabled === next.autoMergeEnabled &&
+    previous.cardFieldDefs === next.cardFieldDefs &&
+    (previous.cardFieldDefs == null && next.cardFieldDefs == null
+      ? true
+      : JSON.stringify(previousTask.customFields ?? null) === JSON.stringify(nextTask.customFields ?? null)) &&
     previous.onOpenDetail === next.onOpenDetail &&
     previous.onOpenGroupModal === next.onOpenGroupModal &&
     previous.addToast === next.addToast &&
@@ -584,6 +657,7 @@ function TaskCardComponent({
   fanout,
   prAuthAvailable,
   autoMergeEnabled = false,
+  cardFieldDefs,
 }: TaskCardProps) {
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
@@ -1947,6 +2021,30 @@ function TaskCardComponent({
       <div className="card-title" title={task.title || task.description || undefined}>
         {truncate(task.title, MAX_TITLE_LENGTH) || truncate(task.description, MAX_TITLE_LENGTH) || task.id}
       </div>
+      {(() => {
+        // Card-placed custom field badges (U13/KTD-14). Bounded to MAX_CARD_FIELDS
+        // with a "+N" overflow chip. Nothing renders when no card fields are
+        // defined or all values are empty — card stays byte-identical to today.
+        const cardDefs = (cardFieldDefs ?? []).filter((f) => f.render?.placement === "card");
+        if (cardDefs.length === 0) return null;
+        const values = task.customFields ?? {};
+        const badges = cardDefs
+          .map((f) => renderCardFieldBadge(f, values[f.id]))
+          .filter((b): b is ReactElement => b !== null);
+        if (badges.length === 0) return null;
+        const shown = badges.slice(0, MAX_CARD_FIELDS);
+        const overflow = badges.length - shown.length;
+        return (
+          <div className="card-field-badges" data-testid="card-field-badges">
+            {shown}
+            {overflow > 0 ? (
+              <span className="card-field-badge card-field-badge--overflow" data-testid="card-field-overflow">
+                +{overflow}
+              </span>
+            ) : null}
+          </div>
+        );
+      })()}
       {hasBranchMetadata && (
         <div className="card-branch-row" aria-label={t("tasks.branchMetadata", "Branch metadata")}>
           {branchMetadata.branch && (

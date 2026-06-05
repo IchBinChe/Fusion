@@ -21,6 +21,8 @@ import {
   OccupiedColumnsError,
   assertRehomeTargetValid,
   computeRemovedOccupiedColumns,
+  computeIncompatibleFieldChanges,
+  IncompatibleFieldChangeError,
   resolveEntryColumnId,
   resolveSwitchReconciliation,
   runReconciliationAbort,
@@ -43,10 +45,21 @@ import {
   reconcileHooksRemaining,
 } from "./transition-pending.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
-import type { WorkflowIr, WorkflowIrColumn } from "./workflow-ir-types.js";
+import type { WorkflowIr, WorkflowIrColumn, WorkflowFieldDefinition } from "./workflow-ir-types.js";
+import {
+  validateCustomFieldPatch,
+  applyFieldDefaults,
+  reconcileFieldsOnWorkflowChange,
+  CustomFieldRejectionError,
+  type CustomFieldRejection,
+} from "./task-fields.js";
 // Side-effect import: registers the 14 built-in trait DEFINITIONS into the
 // shared trait registry on load (the flag-ON path resolves traits by id).
 import "./builtin-traits.js";
+// Step-inversion U12 (KTD-12): the legacy `parseStepsFromPrompt` path resolves
+// the `step-headings` parser through the registry (proving the registry path),
+// staying byte-identical with the direct extracted function.
+import { getStepParser } from "./step-parsers.js";
 import type {
   WorkflowDefinition,
   WorkflowDefinitionInput,
@@ -207,6 +220,7 @@ interface TaskRow {
   executionCompletedAt: string | null;
   dependencies: string | null;
   steps: string | null;
+  customFields: string | null;
   log: string | null;
   attachments: string | null;
   steeringComments: string | null;
@@ -797,6 +811,12 @@ const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
   "changelog",
   "agents.md",
 ]);
+
+// `parseStepHeadings` (the `### Step N:` parser, step-inversion U1) was extracted
+// into `step-parsers.ts` as the `step-headings` built-in parser (U12, KTD-12).
+// It is re-exported here for back-compat with callers/tests that import it from
+// `store.ts`. `parseStepsFromPrompt` below delegates through the registry.
+export { parseStepHeadings } from "./step-parsers.js";
 
 export function isValidFileScopeEntry(token: string): boolean {
   const trimmed = token.trim();
@@ -1697,6 +1717,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       executionCompletedAt: row.executionCompletedAt || undefined,
       dependencies: fromJson<string[]>(row.dependencies) || [],
       steps: fromJson<import("./types.js").TaskStep[]>(row.steps) || [],
+      customFields: fromJson<Record<string, unknown>>(row.customFields) ?? undefined,
       log: fromJson<import("./types.js").TaskLogEntry[]>(row.log) || [],
       tokenBudgetSoftAlertedAt: row.tokenBudgetSoftAlertedAt || undefined,
       tokenBudgetHardAlertedAt: row.tokenBudgetHardAlertedAt || undefined,
@@ -1844,6 +1865,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: entry.dependencies ?? [],
       steps: entry.steps ?? [],
       currentStep: entry.currentStep ?? 0,
+      customFields: entry.customFields ?? undefined,
       size: entry.size,
       reviewLevel: entry.reviewLevel,
       prInfo: slim ? undefined : entry.prInfo,
@@ -1976,6 +1998,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: task.dependencies,
       steps: task.steps,
       currentStep: task.currentStep,
+      customFields: task.customFields,
       size: task.size,
       reviewLevel: task.reviewLevel,
       prInfo: task.prInfo,
@@ -2184,7 +2207,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
-      "dependencies", "steps", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
+      "dependencies", "steps", "customFields", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
       "attachments", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
       "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
@@ -2233,7 +2256,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
-      "dependencies", "steps", "attachments", "steeringComments",
+      "dependencies", "steps", "customFields", "attachments", "steeringComments",
       "comments", "review", "reviewState", "workflowStepResults", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
       "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
@@ -2335,6 +2358,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.executionCompletedAt ?? null,
       toJson(task.dependencies || []),
       toJson(task.steps || []),
+      toJson(task.customFields ?? {}),
       toJson(task.log || []),
       toJson(task.attachments || []),
       toJson(task.steeringComments || []),
@@ -2402,7 +2426,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, tokenBudgetSoftAlertedAt, tokenBudgetHardAlertedAt, tokenBudgetOverride, createdAt, updatedAt, columnMovedAt,
         firstExecutionAt, cumulativeActiveMs, executionStartedAt, executionCompletedAt,
-        dependencies, steps, log, attachments, steeringComments,
+        dependencies, steps, customFields, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
         mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
@@ -2429,7 +2453,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, tokenBudgetSoftAlertedAt, tokenBudgetHardAlertedAt, tokenBudgetOverride, createdAt, updatedAt, columnMovedAt,
         firstExecutionAt, cumulativeActiveMs, executionStartedAt, executionCompletedAt,
-        dependencies, steps, log, attachments, steeringComments,
+        dependencies, steps, customFields, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
         mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
@@ -2504,6 +2528,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         executionCompletedAt = excluded.executionCompletedAt,
         dependencies = excluded.dependencies,
         steps = excluded.steps,
+        customFields = excluded.customFields,
         log = excluded.log,
         attachments = excluded.attachments,
         steeringComments = excluded.steeringComments,
@@ -5214,6 +5239,103 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
   }
 
+  /**
+   * Persist (idempotent upsert) one step instance's run-state inside a foreach
+   * region (step-inversion U4, KTD-6). Keyed by (taskId, runId, foreachNodeId,
+   * stepIndex) — the table PK — so re-writing the same instance overwrites its
+   * single row with the latest currentNodeId/status/anchors. `updatedAt` is
+   * stamped server-side. Mirrors `saveWorkflowRunBranch`: additive, silently
+   * no-ops on a legacy/missing table.
+   */
+  saveWorkflowRunStepInstance(
+    state: import("./types.js").WorkflowRunStepInstance,
+  ): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO workflow_run_step_instances
+             (taskId, runId, foreachNodeId, stepIndex, pinnedStepCount, currentNodeId, status, baselineSha, checkpointId, reworkCount, branchName, integratedAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(taskId, runId, foreachNodeId, stepIndex) DO UPDATE SET
+             pinnedStepCount = excluded.pinnedStepCount,
+             currentNodeId = excluded.currentNodeId,
+             status = excluded.status,
+             baselineSha = excluded.baselineSha,
+             checkpointId = excluded.checkpointId,
+             reworkCount = excluded.reworkCount,
+             branchName = excluded.branchName,
+             integratedAt = excluded.integratedAt,
+             updatedAt = excluded.updatedAt`,
+        )
+        .run(
+          state.taskId,
+          state.runId,
+          state.foreachNodeId,
+          state.stepIndex,
+          state.pinnedStepCount,
+          state.currentNodeId ?? null,
+          state.status,
+          state.baselineSha ?? null,
+          state.checkpointId ?? null,
+          state.reworkCount ?? 0,
+          state.branchName ?? null,
+          state.integratedAt ?? null,
+          new Date().toISOString(),
+        );
+    } catch {
+      // Legacy/missing table — persistence is additive, so degrade silently.
+    }
+  }
+
+  /**
+   * Load persisted step-instance run-state for a run (crash-resume; KTD-6).
+   * Ordered by stepIndex so the executor can reconstruct the instance set in
+   * step order. Additive: returns [] on a legacy/missing table.
+   */
+  loadWorkflowRunStepInstances(
+    taskId: string,
+    runId: string,
+  ): import("./types.js").WorkflowRunStepInstance[] {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT taskId, runId, foreachNodeId, stepIndex, pinnedStepCount, currentNodeId, status, baselineSha, checkpointId, reworkCount, branchName, integratedAt, updatedAt
+             FROM workflow_run_step_instances
+            WHERE taskId = ? AND runId = ?
+            ORDER BY stepIndex ASC`,
+        )
+        .all(taskId, runId) as import("./types.js").WorkflowRunStepInstance[];
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Prune step-instance rows for a task (KTD-6, #1412 pattern). When `runId` is
+   * provided, deletes every row for `taskId` whose runId differs (bounding growth
+   * across a long-lived task's repeated runs — call on run start/completion).
+   * When `runId` is omitted, deletes all rows for the task (e.g. on archive).
+   * Additive: silently no-ops on a legacy/missing table.
+   */
+  clearWorkflowRunStepInstances(taskId: string, keepRunId?: string): void {
+    try {
+      if (keepRunId === undefined) {
+        this.db
+          .prepare(`DELETE FROM workflow_run_step_instances WHERE taskId = ?`)
+          .run(taskId);
+      } else {
+        this.db
+          .prepare(
+            `DELETE FROM workflow_run_step_instances WHERE taskId = ? AND runId != ?`,
+          )
+          .run(taskId, keepRunId);
+      }
+    } catch {
+      // Legacy/missing table — pruning is additive, so degrade silently.
+    }
+  }
+
   async listTasksForGithubTrackingReconcile(options?: { offset?: number; limit?: number }): Promise<{ tasks: Task[]; hasMore: boolean }> {
     const reconcileScanLimit = 200;
     const offset = Math.max(0, options?.offset ?? 0);
@@ -6784,10 +6906,62 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; customFields?: Record<string, unknown>; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, () => this.updateTaskUnlocked(id, updates, runContext));
+  }
+
+  /**
+   * Merge a validated/normalized custom-field patch into the existing values.
+   * `null` in the patch deletes that field's value (the delete sentinel from
+   * {@link validateCustomFieldPatch}); any other value overwrites. Returns a new
+   * object (never mutates the input) so the caller assigns it onto the task.
+   */
+  private mergeCustomFieldPatch(
+    current: Record<string, unknown> | undefined,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const next: Record<string, unknown> = { ...(current ?? {}) };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+    }
+    return next;
+  }
+
+  /**
+   * Single write authority for custom task fields (U11 / KTD-13).
+   *
+   * Resolves the task's workflow field definitions, validates `patch` against
+   * them via {@link validateCustomFieldPatch}, merges the normalized result into
+   * `Task.customFields` (delete-on-null), persists through the standard update
+   * path, and emits `task:updated` like every other task mutation. A workflow
+   * with no fields (e.g. the default) rejects any non-empty patch with
+   * `no-fields-defined`. Returns a typed result rather than throwing so callers
+   * (agent tools, HTTP routes) can surface the field path/code directly.
+   */
+  async updateTaskCustomFields(
+    taskId: string,
+    patch: Record<string, unknown>,
+    runContext?: RunMutationContext,
+  ): Promise<{ ok: true; task: Task } | { ok: false; rejection: CustomFieldRejection }> {
+    return this.withTaskLock(taskId, async () => {
+      const defs = this.resolveTaskCustomFieldDefsSync(taskId);
+      const result = validateCustomFieldPatch(defs, patch);
+      if (!result.ok) {
+        return { ok: false as const, rejection: result.rejection };
+      }
+      // Pass the validated PATCH through (with null delete-sentinels) — the
+      // merge-with-delete happens once, inside updateTaskUnlocked, against the
+      // freshly-read task. Pre-merging here would lose the delete semantics on
+      // the second merge.
+      const task = await this.updateTaskUnlocked(taskId, { customFields: result.normalized }, runContext);
+      return { ok: true as const, task };
+    });
   }
 
   /**
@@ -6898,6 +7072,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         }
       }
       if (updates.steps !== undefined) task.steps = updates.steps;
+      // U11/KTD-13: customFields writes are validated against the task's workflow
+      // field schema through the single authority (task-fields.ts). The patch is
+      // merged into the existing values (delete-on-null), mirroring
+      // updateTaskCustomFields. Backward-compat note: U4 round-tripped the object
+      // opaquely; the field system now enforces type/enum/unknown-id rules, so a
+      // write against a workflow with no fields (the default) is rejected with a
+      // typed CustomFieldRejectionError rather than silently persisted.
+      if (updates.customFields !== undefined) {
+        const defs = this.resolveTaskCustomFieldDefsSync(id);
+        const result = validateCustomFieldPatch(defs, updates.customFields);
+        if (!result.ok) throw new CustomFieldRejectionError(result.rejection);
+        task.customFields = this.mergeCustomFieldPatch(task.customFields, result.normalized);
+      }
       if (updates.currentStep !== undefined) task.currentStep = updates.currentStep;
       if (updates.status === null) {
         task.status = undefined;
@@ -7547,13 +7734,27 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     id: string,
     stepIndex: number,
     status: import("./types.js").StepStatus,
+    options?: { source?: "graph" },
   ): Promise<Task> {
+    // Step-inversion projection discipline (U6/KTD-7). A `source: "graph"` write
+    // is the workflow-graph executor projecting a foreach instance's lifecycle
+    // (in-progress / done / pending) onto Task.steps[] with EXPLICIT indices. Three
+    // behaviors diverge from the legacy (default) write:
+    //   (a) the out-of-order-done guard relaxes from strict index order to
+    //       DEPENDENCY order (a done write is legal when every dependsOn step —
+    //       default: the immediately-preceding step — is done/skipped, KTD-11);
+    //   (b) a guard that DOES suppress a graph write logs an audit warning loudly
+    //       (legacy stays silent — a graph suppression is a projection bug);
+    //   (c) the auto-reinit-from-PROMPT.md path is bypassed (the graph pinned the
+    //       step count at foreach expansion; re-parsing here would desync, KTD-3).
+    const graphSource = options?.source === "graph";
     return this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       const task = await this.readTaskJson(dir);
 
-      // Auto-initialize steps from PROMPT.md if empty
-      if (task.steps.length === 0) {
+      // Auto-initialize steps from PROMPT.md if empty. Bypassed for graph-source
+      // writes (U6/KTD-3): the graph owns explicit indices pinned at expansion.
+      if (task.steps.length === 0 && !graphSource) {
         task.steps = await this.parseStepsFromPrompt(id);
       }
 
@@ -7590,22 +7791,63 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       if (status === "done") {
-        for (let i = 0; i < stepIndex; i++) {
-          const priorStatus = task.steps[i].status;
-          if (priorStatus === "pending" || priorStatus === "in-progress") {
-            const ts = new Date().toISOString();
-            task.updatedAt = ts;
+        // The set of predecessor steps that must be done/skipped before this step
+        // may go done. Legacy: strict index order (every earlier step). Graph: the
+        // step's dependsOn list (default = the immediately-preceding step when the
+        // annotation is absent — preserving sequential behavior, KTD-11).
+        let blockingIndex = -1;
+        let blockingStatus: import("./types.js").StepStatus | undefined;
+        if (graphSource) {
+          const deps = task.steps[stepIndex]?.dependsOn;
+          const depIndices =
+            Array.isArray(deps) && deps.length > 0
+              ? deps
+              : stepIndex > 0
+              ? [stepIndex - 1]
+              : [];
+          for (const i of depIndices) {
+            const priorStatus = task.steps[i]?.status;
+            if (priorStatus === "pending" || priorStatus === "in-progress") {
+              blockingIndex = i;
+              blockingStatus = priorStatus;
+              break;
+            }
+          }
+        } else {
+          for (let i = 0; i < stepIndex; i++) {
+            const priorStatus = task.steps[i].status;
+            if (priorStatus === "pending" || priorStatus === "in-progress") {
+              blockingIndex = i;
+              blockingStatus = priorStatus;
+              break;
+            }
+          }
+        }
+        if (blockingIndex !== -1) {
+          const ts = new Date().toISOString();
+          task.updatedAt = ts;
+          const kind = graphSource ? "dependency-order" : "out-of-order";
+          task.log.push({
+            timestamp: ts,
+            action:
+              `Ignored ${kind} ${status} for step ${stepIndex} (${task.steps[stepIndex].name}) — ` +
+              `${graphSource ? "dependency" : "earlier"} step ${blockingIndex} (${task.steps[blockingIndex].name}) is still ${blockingStatus}`,
+          });
+          // Graph-source suppression is a projection bug — surface it loudly in
+          // the activity log (U6) rather than the legacy silent ignore.
+          if (graphSource) {
             task.log.push({
               timestamp: ts,
               action:
-                `Ignored out-of-order ${status} for step ${stepIndex} (${task.steps[stepIndex].name}) — ` +
-                `earlier step ${i} (${task.steps[i].name}) is still ${priorStatus}`,
+                `[integrity-warning] graph-source updateStep suppressed: step ${stepIndex} ` +
+                `(${task.steps[stepIndex].name}) → done blocked by unmet dependency ` +
+                `step ${blockingIndex} (${blockingStatus})`,
             });
-            await this.atomicWriteTaskJson(dir, task);
-            if (this.isWatching) this.taskCache.set(id, { ...task });
-            this.emit("task:updated", task);
-            return task;
           }
+          await this.atomicWriteTaskJson(dir, task);
+          if (this.isWatching) this.taskCache.set(id, { ...task });
+          this.emit("task:updated", task);
+          return task;
         }
       }
 
@@ -8537,13 +8779,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (!existsSync(promptPath)) return [];
 
     const content = await readFile(promptPath, "utf-8");
-    const steps: import("./types.js").TaskStep[] = [];
-    const stepRegex = /^###\s+Step\s+\d+[^:]*:\s*(.+)$/gm;
-    let match;
-    while ((match = stepRegex.exec(content)) !== null) {
-      steps.push({ name: match[1].trim(), status: "pending" });
+    // Step-inversion U12 (KTD-12): delegate to the registry's `step-headings`
+    // parser (resolved by id, not a direct import) so the registry path is
+    // proven and stays byte-identical to the extracted function. The parser
+    // yields `{ name, dependsOn? }`; re-apply the `pending` status here.
+    const parser = getStepParser("step-headings");
+    if (!parser) {
+      throw new Error("Step parser 'step-headings' is not registered");
     }
-    return steps;
+    return parser.parse(content).steps.map((s) =>
+      s.dependsOn
+        ? { name: s.name, status: "pending" as const, dependsOn: s.dependsOn }
+        : { name: s.name, status: "pending" as const },
+    );
   }
 
   /**
@@ -11455,6 +11703,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: entry.dependencies,
       steps: entry.steps,
       currentStep: entry.currentStep,
+      customFields: entry.customFields ?? undefined,
       size: entry.size,
       reviewLevel: entry.reviewLevel,
       prInfo: entry.prInfo,
@@ -12111,6 +12360,60 @@ ${stepsSection}`;
         pendingRehome = { rehomeTo: updates.rehomeTo, occupantTaskIds };
       }
     }
+
+    // U11/KTD-13: when the IR changes custom field types incompatibly for tasks
+    // that already hold values, block with a typed IncompatibleFieldChangeError
+    // unless `coerce` is supplied. Removed/added fields never block (removal
+    // orphans). Flag-independent: fields are orthogonal to the columns flag.
+    // Reconciliation runs per occupant task AFTER the IR save commits.
+    let pendingFieldReconcile:
+      | { oldFields: WorkflowFieldDefinition[]; newFields: WorkflowFieldDefinition[]; occupantTaskIds: string[]; coerce?: "drop" | "keep-orphaned" }
+      | undefined;
+    if (updates.ir !== undefined) {
+      const existingForFields = await this.getWorkflowDefinition(id);
+      if (!existingForFields) throw new Error(`Workflow '${id}' not found`);
+      const nextIrForFields = parseWorkflowIr(updates.ir);
+      const oldFields: WorkflowFieldDefinition[] =
+        existingForFields.ir.version === "v2" ? (existingForFields.ir.fields ?? []) : [];
+      const newFields: WorkflowFieldDefinition[] =
+        nextIrForFields.version === "v2" ? (nextIrForFields.fields ?? []) : [];
+      const fieldsChanged =
+        JSON.stringify(oldFields) !== JSON.stringify(newFields);
+      if (fieldsChanged) {
+        const occupantTaskIds = this.listWorkflowOccupantTaskIds(id, false);
+        const occupantsByField = new Map<string, number>();
+        for (const taskId of occupantTaskIds) {
+          const row = this.db.prepare("SELECT customFields FROM tasks WHERE id = ?").get(taskId) as
+            | { customFields: string | null }
+            | undefined;
+          const values = row?.customFields
+            ? (fromJson<Record<string, unknown>>(row.customFields) ?? {})
+            : {};
+          // Incompatible-change detection only blocks on occupants that already
+          // HOLD a value for a field, so count only those. Reconciliation itself
+          // must still touch every occupant so new required+default fields get
+          // backfilled onto tasks that currently have no custom field values.
+          if (Object.keys(values).length === 0) continue;
+          for (const key of Object.keys(values)) {
+            occupantsByField.set(key, (occupantsByField.get(key) ?? 0) + 1);
+          }
+        }
+        const incompatible = computeIncompatibleFieldChanges(
+          existingForFields.ir,
+          nextIrForFields,
+          occupantsByField,
+        );
+        if (incompatible.length > 0 && updates.coerce === undefined) {
+          throw new IncompatibleFieldChangeError(id, incompatible);
+        }
+        pendingFieldReconcile = {
+          oldFields,
+          newFields,
+          occupantTaskIds,
+          coerce: updates.coerce,
+        };
+      }
+    }
     const saved = await this.withConfigLock(async () => {
       const existing = await this.getWorkflowDefinition(id);
       if (!existing) throw new Error(`Workflow '${id}' not found`);
@@ -12157,6 +12460,23 @@ ${stepsSection}`;
         await this.rehomeOccupant(taskId, pendingRehome.rehomeTo, "workflow-edit-rehome", {
           workflowId: id,
         });
+      }
+    }
+
+    // U11/KTD-13: now that the new field schema is committed, reconcile each
+    // occupant task's stored values against it (orphan-not-delete by default;
+    // coerce:"drop" discards orphans). Each runs under its own task lock.
+    if (pendingFieldReconcile) {
+      const dropOrphans = pendingFieldReconcile.coerce === "drop";
+      for (const taskId of pendingFieldReconcile.occupantTaskIds) {
+        await this.withTaskLock(taskId, () =>
+          this.reconcileTaskCustomFieldsForSchema(
+            taskId,
+            pendingFieldReconcile!.oldFields,
+            pendingFieldReconcile!.newFields,
+            dropOrphans,
+          ),
+        );
       }
     }
     return saved;
@@ -12716,6 +13036,16 @@ ${stepsSection}`;
     return list;
   }
 
+  /**
+   * Resolve the custom-field definitions (KTD-13) governing a task, via its
+   * workflow selection. v1 IR and the default workflow declare none → `[]`.
+   * Pure DB read, safe inside transactions.
+   */
+  private resolveTaskCustomFieldDefsSync(taskId: string): WorkflowFieldDefinition[] {
+    const ir = this.resolveTaskWorkflowIrSync(taskId);
+    return ir.version === "v2" ? (ir.fields ?? []) : [];
+  }
+
   private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
     const selection = this.getTaskWorkflowSelection(taskId);
     const workflowId = selection?.workflowId;
@@ -12948,6 +13278,12 @@ ${stepsSection}`;
       // prior selection's rows, so a mid-flight failure never leaves the task
       // referencing already-deleted step ids.
       const priorSelection = this.getTaskWorkflowSelection(taskId);
+      // U11/KTD-13: capture the OLD field schema (from the prior selection's IR)
+      // before the selection row flips, so we can reconcile existing field values
+      // against the NEW workflow's schema below.
+      const oldFieldDefs = this.resolveTaskCustomFieldDefsSync(taskId);
+      const newFieldDefs: WorkflowFieldDefinition[] =
+        def.ir.version === "v2" ? (def.ir.fields ?? []) : [];
       const ids = await this.materializeWorkflowSteps(workflowId, inputs);
       try {
         await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
@@ -12973,8 +13309,54 @@ ${stepsSection}`;
         }
         this.workflowStepsCache = null;
       }
+
+      // U11/KTD-13: reconcile custom field values against the NEW workflow's
+      // schema. Same-id, type-compatible values are kept; incompatible/removed
+      // ids are orphaned — but RETAINED in storage (orphan-not-delete) so a later
+      // switch back, or the orphaned-fields disclosure, can still surface them.
+      // Then fill defaults for the new workflow's required+default fields that
+      // are absent. The merged object is written DIRECTLY (bypassing the
+      // validating patch path) because orphaned ids are by definition unknown to
+      // the new schema and would otherwise be rejected.
+      await this.reconcileTaskCustomFieldsForSchema(taskId, oldFieldDefs, newFieldDefs);
+
       return ids;
     });
+  }
+
+  /**
+   * U11/KTD-13: reconcile a task's stored custom field values when its governing
+   * field schema changes (workflow switch or definition edit). Values are
+   * partitioned by {@link reconcileFieldsOnWorkflowChange}; orphans are retained
+   * (never destroyed). Required+default fields absent from the result are filled.
+   * Writes the merged values directly onto task.json — orphaned ids are unknown
+   * to the new schema, so this deliberately bypasses the validating patch path.
+   * Assumes the caller already holds the per-task lock.
+   */
+  private async reconcileTaskCustomFieldsForSchema(
+    taskId: string,
+    oldFieldDefs: WorkflowFieldDefinition[],
+    newFieldDefs: WorkflowFieldDefinition[],
+    dropOrphans = false,
+  ): Promise<void> {
+    const dir = this.taskDir(taskId);
+    const task = await this.readTaskJson(dir);
+    const current = task.customFields ?? {};
+    const { kept, orphaned } = reconcileFieldsOnWorkflowChange(oldFieldDefs, newFieldDefs, current);
+    // Default (keep-orphaned): storage keeps everything (kept ∪ orphaned).
+    // coerce:"drop" discards the orphaned values entirely.
+    const base = dropOrphans ? { ...kept } : { ...kept, ...orphaned };
+    const reconciled = applyFieldDefaults(newFieldDefs, base);
+    // Skip the write when nothing changed (no defaults added, same keys/values).
+    const unchanged =
+      Object.keys(reconciled).length === Object.keys(current).length &&
+      Object.entries(reconciled).every(([k, v]) => current[k] === v);
+    if (unchanged) return;
+    task.customFields = reconciled;
+    task.updatedAt = new Date().toISOString();
+    await this.atomicWriteTaskJson(dir, task);
+    if (this.isWatching) this.taskCache.set(taskId, { ...task });
+    this.emitTaskLifecycleEventSafely("task:updated", [task]);
   }
 
   /**

@@ -3,9 +3,55 @@ import type {
   WorkflowIr,
   WorkflowIrV2,
   WorkflowIrColumn,
+  WorkflowIrNode,
+  WorkflowIrEdge,
   WorkflowDefinition,
+  WorkflowFieldDefinition,
 } from "@fusion/core";
 import type { WorkflowFlowNodeData, WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
+
+/** Local mirror of @fusion/core's WorkflowForeachConfig (KTD-3). The core index
+ *  barrel does not re-export it, and the dashboard build aliases @fusion/core to
+ *  a types-only entry, so we describe just the shape this mapping needs. */
+interface WorkflowForeachConfig {
+  source: "task-steps";
+  maxReworkCycles?: number;
+  mode?: "sequential" | "parallel";
+  concurrency?: number;
+  isolation?: "shared" | "worktree";
+  template: { nodes: WorkflowIrNode[]; edges: WorkflowIrEdge[] };
+}
+
+// WorkflowFieldDefinition is imported from @fusion/core above (KTD-13/14).
+// Re-exported so existing importers that reference WorkflowFieldDefinitionShape
+// can migrate; callers should prefer WorkflowFieldDefinition directly.
+export type { WorkflowFieldDefinition as WorkflowFieldDefinitionShape };
+
+// ── foreach template region (KTD-3, U8) ──────────────────────────────────────
+//
+// A `foreach` node is authored inline as a React Flow group node whose template
+// subgraph nodes are children with `parentId` set to the group id. To keep child
+// flow-node ids globally unique while preserving the *template-local* ids that
+// the IR's `config.template` stores, child flow ids are namespaced as
+// `<groupId>::<templateNodeId>`; flowToIr strips the prefix back out when it
+// reassembles the template. Geometry for the group + auto-layout for template
+// nodes lacking persisted layout data.
+export const FOREACH_GROUP_WIDTH = 520;
+export const FOREACH_GROUP_HEIGHT = 200;
+export const FOREACH_CHILD_X = 30;
+export const FOREACH_CHILD_Y = 56;
+export const FOREACH_CHILD_STEP_X = 170;
+
+const FOREACH_CHILD_SEP = "::";
+/** Compose a globally-unique flow-node id for a template child. */
+export function foreachChildFlowId(groupId: string, templateNodeId: string): string {
+  return `${groupId}${FOREACH_CHILD_SEP}${templateNodeId}`;
+}
+/** Recover the template-local node id from a namespaced child flow id. */
+export function templateNodeIdFromChild(groupId: string, childFlowId: string): string {
+  const prefix = `${groupId}${FOREACH_CHILD_SEP}`;
+  return childFlowId.startsWith(prefix) ? childFlowId.slice(prefix.length) : childFlowId;
+}
 
 /** Layout geometry for column swimlane bands. Bands stack vertically; each band
  *  is full-width and a node's `column` is derived by hit-testing the node's y
@@ -85,14 +131,52 @@ export function columnsToBandNodes(columns: WorkflowIrColumn[]): FlowNode<Workfl
   }));
 }
 
+/** Read a node's foreach template config, or undefined when it is not a foreach
+ *  node carrying a template. */
+function foreachConfigOf(node: WorkflowIrNode): WorkflowForeachConfig | undefined {
+  if (node.kind !== "foreach") return undefined;
+  const cfg = node.config as Partial<WorkflowForeachConfig> | undefined;
+  if (!cfg || !cfg.template) return undefined;
+  return cfg as WorkflowForeachConfig;
+}
+
+/** Build a React Flow edge from an IR edge. Rework edges (KTD-5) carry kind so
+ *  the editor renders them dashed in the accent color. */
+function irEdgeToFlow(edge: WorkflowIrEdge, index: number, idScope = ""): FlowEdge {
+  const condition = edge.condition ?? "success";
+  const isRework = edge.kind === "rework";
+  return {
+    id: `e-${idScope}${edge.from}-${edge.to}-${index}`,
+    source: idScope ? `${idScope}${edge.from}` : edge.from,
+    target: idScope ? `${idScope}${edge.to}` : edge.to,
+    label: isRework ? `${shortConditionLabel(condition)} (rework)` : shortConditionLabel(condition),
+    data: { condition, kind: isRework ? "rework" : undefined },
+    type: isRework ? "step" : undefined,
+    animated: isRework,
+    className: isRework ? "wf-edge-rework" : undefined,
+    markerEnd: undefined,
+  };
+}
+
+/** Short display label for an edge condition. `outcome:<verdict>` conditions
+ *  render as the verdict alone (KTD-4); everything else verbatim. */
+export function shortConditionLabel(condition: string): string {
+  if (condition.startsWith("outcome:")) return condition.slice("outcome:".length);
+  return condition;
+}
+
 /** Build React Flow nodes/edges from a stored workflow definition. v2 columns
- *  render as swimlane band group nodes; step nodes carry their `column`. */
+ *  render as swimlane band group nodes; step nodes carry their `column`. A
+ *  `foreach` node renders as a group whose template subgraph nodes are children
+ *  (parentId = the group id). */
 export function irToFlow(def: WorkflowDefinition): {
   nodes: FlowNode<WorkflowFlowNodeData>[];
   edges: FlowEdge[];
 } {
   const columns = isV2(def.ir) ? def.ir.columns : [];
   const bandNodes = columnsToBandNodes(columns);
+  const childNodes: FlowNode<WorkflowFlowNodeData>[] = [];
+  const childEdges: FlowEdge[] = [];
 
   const stepNodes = def.ir.nodes.map((node, index): FlowNode<WorkflowFlowNodeData> => {
     const pos = def.layout?.[node.id];
@@ -102,6 +186,51 @@ export function irToFlow(def: WorkflowDefinition): {
     // Default placement seeds the node inside its column band when no persisted
     // layout exists; otherwise we honor the saved absolute position.
     const fallbackY = colIndex >= 0 ? bandTop(colIndex) + 70 : 120;
+
+    const foreachCfg = foreachConfigOf(node);
+    if (foreachCfg) {
+      const template = foreachCfg.template;
+      // Render template nodes as children of this group (parentId = group id).
+      template.nodes.forEach((inner, innerIdx) => {
+        const childFlowId = foreachChildFlowId(node.id, inner.id);
+        // Template layout lives under namespaced keys; auto-layout otherwise.
+        const childPos =
+          def.layout?.[childFlowId] ?? {
+            x: FOREACH_CHILD_X + innerIdx * FOREACH_CHILD_STEP_X,
+            y: FOREACH_CHILD_Y,
+          };
+        const innerKind = editorKind(inner);
+        childNodes.push({
+          id: childFlowId,
+          type: innerKind,
+          position: childPos,
+          parentId: node.id,
+          extent: "parent",
+          data: { kind: innerKind, label: nodeLabel(inner), config: { ...(inner.config ?? {}) } },
+          deletable: true,
+        });
+      });
+      template.edges.forEach((edge, eIdx) => {
+        childEdges.push(irEdgeToFlow(edge, eIdx, `${node.id}${FOREACH_CHILD_SEP}`));
+      });
+      // Strip the template off the group node's own config (children carry it).
+      const { template: _t, ...restCfg } = (node.config ?? {}) as Record<string, unknown>;
+      return {
+        id: node.id,
+        type: "foreach",
+        position: pos ?? { x: 80 + index * 180, y: fallbackY },
+        data: {
+          kind: "foreach",
+          label: nodeLabel(node),
+          config: { ...restCfg },
+          column,
+          templateEmpty: template.nodes.length === 0,
+        },
+        style: { width: FOREACH_GROUP_WIDTH, height: FOREACH_GROUP_HEIGHT },
+        deletable: true,
+      };
+    }
+
     return {
       id: node.id,
       type: kind,
@@ -116,18 +245,10 @@ export function irToFlow(def: WorkflowDefinition): {
     };
   });
 
-  const edges = def.ir.edges.map((edge, index): FlowEdge => {
-    const condition = edge.condition ?? "success";
-    return {
-      id: `e-${edge.from}-${edge.to}-${index}`,
-      source: edge.from,
-      target: edge.to,
-      label: condition,
-      data: { condition },
-    };
-  });
+  const edges = def.ir.edges.map((edge, index): FlowEdge => irEdgeToFlow(edge, index));
 
-  return { nodes: [...bandNodes, ...stepNodes], edges };
+  // Group nodes must precede their children in the array for React Flow.
+  return { nodes: [...bandNodes, ...stepNodes, ...childNodes], edges: [...edges, ...childEdges] };
 }
 
 /** Sanitize a node config, applying the v1 round-trip name rules. */
@@ -157,49 +278,113 @@ export function flowToIr(
   nodes: FlowNode<WorkflowFlowNodeData>[],
   edges: FlowEdge[],
   columns?: WorkflowIrColumn[],
+  fields?: WorkflowFieldDefinition[],
 ): { ir: WorkflowIr; layout: Record<string, { x: number; y: number }> } {
-  const stepNodes = nodes.filter((n) => !isColumnBandNode(n.id) && n.type !== "group");
-  const v2 = Array.isArray(columns) && columns.length > 0;
+  const realNodes = nodes.filter((n) => !isColumnBandNode(n.id));
+  // Partition by parentId: foreach group children reassemble into that group's
+  // config.template; everything else (no parentId) is top-level. (Column band
+  // group nodes are already excluded above.)
+  const topNodes = realNodes.filter((n) => !n.parentId);
+  const childrenByGroup = new Map<string, FlowNode<WorkflowFlowNodeData>[]>();
+  for (const n of realNodes) {
+    if (n.parentId) {
+      const arr = childrenByGroup.get(n.parentId) ?? [];
+      arr.push(n);
+      childrenByGroup.set(n.parentId, arr);
+    }
+  }
+  const groupIds = new Set(topNodes.filter((n) => n.data.kind === "foreach").map((n) => n.id));
+  const hasFields = Array.isArray(fields) && fields.length > 0;
+  // Fields are a v2-only declaration: a workflow with fields but no custom
+  // columns still serializes as v2 (with the synthesized default columns).
+  const v2 = (Array.isArray(columns) && columns.length > 0) || hasFields;
+  const layout: Record<string, { x: number; y: number }> = {};
 
-  const irNodes: WorkflowIr["nodes"] = stepNodes.map((node) => {
+  /** Project one flow node (top-level or template child) into an IR node. */
+  function toIrNode(node: FlowNode<WorkflowFlowNodeData>, localId: string): WorkflowIrNode {
     const data = node.data;
     const config = nodeConfig(node);
-    // Derive column placement from the node's y position relative to the bands.
-    const column = v2 ? data.column ?? columnForY(node.position.y, columns!) : undefined;
     if (data.kind === "merge") {
-      const cfg = { ...(config ?? {}), seam: "merge" };
-      return { id: node.id, kind: "prompt" as const, ...(column ? { column } : {}), config: cfg };
+      return { id: localId, kind: "prompt", config: { ...(config ?? {}), seam: "merge" } };
+    }
+    if (data.kind === "foreach") {
+      // Reassemble the template from this group's children.
+      const children = childrenByGroup.get(node.id) ?? [];
+      const templateNodes: WorkflowIrNode[] = children.map((c) => {
+        const innerId = templateNodeIdFromChild(node.id, c.id);
+        layout[c.id] = { x: Math.round(c.position.x), y: Math.round(c.position.y) };
+        return toIrNode(c, innerId);
+      });
+      const childIdSet = new Set(children.map((c) => c.id));
+      const templateEdges: WorkflowIrEdge[] = edges
+        .filter((e) => childIdSet.has(e.source) && childIdSet.has(e.target))
+        .map((e) => flowEdgeToIr(e, node.id));
+      const baseCfg = (config ?? {}) as Record<string, unknown>;
+      return {
+        id: localId,
+        kind: "foreach",
+        config: { ...baseCfg, template: { nodes: templateNodes, edges: templateEdges } },
+      };
     }
     return {
-      id: node.id,
-      kind: data.kind,
-      ...(column ? { column } : {}),
+      id: localId,
+      kind: data.kind as WorkflowIrNode["kind"],
       config: config && Object.keys(config).length ? config : undefined,
     };
+  }
+
+  const hasColumns = Array.isArray(columns) && columns.length > 0;
+  const irNodes: WorkflowIr["nodes"] = topNodes.map((node) => {
+    const column = hasColumns ? node.data.column ?? columnForY(node.position.y, columns!) : undefined;
+    const base = toIrNode(node, node.id);
+    layout[node.id] = { x: Math.round(node.position.x), y: Math.round(node.position.y) };
+    return column ? { ...base, column } : base;
   });
 
-  const irEdges: WorkflowIr["edges"] = edges.map((edge) => {
-    const condition = (edge.data?.condition as string | undefined) ?? "success";
-    return { from: edge.source, to: edge.target, condition };
-  });
+  // Top-level edges: exclude any edge that lives entirely inside a foreach
+  // template (both endpoints are children of the same group) — those are folded
+  // into the group's template above.
+  const childIdToGroup = new Map<string, string>();
+  for (const [gid, kids] of childrenByGroup) for (const k of kids) childIdToGroup.set(k.id, gid);
+  const irEdges: WorkflowIr["edges"] = edges
+    .filter((e) => {
+      const sg = childIdToGroup.get(e.source);
+      const tg = childIdToGroup.get(e.target);
+      return !(sg && tg && sg === tg);
+    })
+    .map((e) => flowEdgeToIr(e));
 
-  const layout = stepNodes.reduce<Record<string, { x: number; y: number }>>((acc, node) => {
-    acc[node.id] = { x: Math.round(node.position.x), y: Math.round(node.position.y) };
-    return acc;
-  }, {});
+  void groupIds;
 
   if (v2) {
     const ir: WorkflowIrV2 = {
       version: "v2",
       name,
-      columns: columns!.map((c) => ({ id: c.id, name: c.name, traits: c.traits })),
+      columns: hasColumns ? columns!.map((c) => ({ id: c.id, name: c.name, traits: c.traits })) : [],
       nodes: irNodes,
       edges: irEdges,
     };
+    if (hasFields) {
+      // The IR's `fields` is typed against @fusion/core's concrete
+      // WorkflowFieldDefinition; the editor carries the array through opaquely
+      // and the server validator is the source of truth, so assign via unknown.
+      (ir as { fields?: unknown }).fields = fields!.map((f) => ({ ...f }));
+    }
     return { ir, layout };
   }
 
   return { ir: { version: "v1", name, nodes: irNodes, edges: irEdges }, layout };
+}
+
+/** Project a React Flow edge into an IR edge. Rework edges carry `kind`. When
+ *  `groupId` is given the endpoints are de-namespaced back to template-local
+ *  ids. */
+function flowEdgeToIr(edge: FlowEdge, groupId?: string): WorkflowIrEdge {
+  const condition = (edge.data?.condition as string | undefined) ?? "success";
+  const isRework = (edge.data?.kind as string | undefined) === "rework";
+  const from = groupId ? templateNodeIdFromChild(groupId, edge.source) : edge.source;
+  const to = groupId ? templateNodeIdFromChild(groupId, edge.target) : edge.target;
+  return { from, to, condition, ...(isRework ? { kind: "rework" as const } : {}) };
 }
 
 // ── Client-side validation (U10) ─────────────────────────────────────────────
@@ -321,6 +506,8 @@ export function unplacedNodeIds(
   const ids: string[] = [];
   for (const node of nodes) {
     if (isColumnBandNode(node.id) || node.type === "group") continue;
+    // foreach template children are placed by their parent group, not a column.
+    if (node.parentId) continue;
     if (node.data.kind === "start" || node.data.kind === "end") continue;
     // A node is placed if it carries a valid column id, or if its y falls
     // strictly within a band's extent. A node parked outside every band with
@@ -341,6 +528,18 @@ export function unplacedNodeIds(
  *  columns; v1 → empty, meaning "no custom columns authored yet"). */
 export function columnsOf(def: WorkflowDefinition): WorkflowIrColumn[] {
   return isV2(def.ir) ? def.ir.columns.map((c) => ({ ...c, traits: [...c.traits] })) : [];
+}
+
+/** Extract the editor's working custom-field list from a definition (KTD-13).
+ *  v2 with `fields` → a deep-ish copy; v1 or no fields → empty. */
+export function fieldsOf(def: WorkflowDefinition): WorkflowFieldDefinition[] {
+  const ir = def.ir as { fields?: WorkflowFieldDefinition[] };
+  if (!isV2(def.ir) || !Array.isArray(ir.fields)) return [];
+  return ir.fields.map((f) => ({
+    ...f,
+    options: f.options ? f.options.map((o) => ({ ...o })) : undefined,
+    render: f.render ? { ...f.render } : undefined,
+  }));
 }
 
 /** Seed graph for a brand-new workflow: start → end with room to insert steps. */

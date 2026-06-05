@@ -15,7 +15,7 @@ import {
   type Edge as FlowEdge,
 } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
-import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge } from "lucide-react";
+import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle, PauseCircle, Split, Merge, Repeat, ClipboardCheck, ListChecks, Code2 } from "lucide-react";
 import type { WorkflowDefinition, WorkflowIrColumn, TraitViolation } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
@@ -41,14 +41,23 @@ import {
   emptyWorkflowIr,
   emptyWorkflowLayout,
   columnsOf,
+  fieldsOf,
   columnsToBandNodes,
   strictColumnForY,
   validateColumnsClient,
   unplacedNodeIds,
   isColumnBandNode,
+  foreachChildFlowId,
+  shortConditionLabel,
+  FOREACH_GROUP_WIDTH,
+  FOREACH_GROUP_HEIGHT,
+  FOREACH_CHILD_X,
+  FOREACH_CHILD_Y,
 } from "./workflow-flow-mapping";
-import { fetchTraits, type TraitCatalogEntry } from "../api";
+import { fetchTraits, fetchStepParsers, type TraitCatalogEntry } from "../api";
 import { WorkflowColumnPanel } from "./WorkflowColumnPanel";
+import { WorkflowFieldsPanel } from "./WorkflowFieldsPanel";
+import type { WorkflowFieldDefinition } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 
 type ExecutorKind = "model" | "agent" | "skill" | "cli";
@@ -84,6 +93,15 @@ function newNodeId(): string {
   return `n-${Date.now().toString(36)}-${nodeSeq}`;
 }
 
+/** Built-in step parsers (KTD-12). Fallback list when the live catalog endpoint
+ *  (GET /api/step-parsers) is unreachable; the editor otherwise merges in any
+ *  registered plugin parsers fetched from the registry. */
+const BUILTIN_STEP_PARSERS = ["step-headings", "json-steps"] as const;
+
+/** Step-review verdict outcomes (KTD-4), authored as `outcome:<verdict>` edge
+ *  conditions and displayed as short labels. */
+const STEP_REVIEW_VERDICTS = ["approve", "revise", "rethink", "unavailable"] as const;
+
 const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof MessageSquare; presetConfig?: Record<string, unknown> }> = [
   { kind: "prompt", label: "Prompt", icon: MessageSquare },
   { kind: "prompt", label: "User input", icon: HelpCircle, presetConfig: { awaitInput: true } },
@@ -93,6 +111,11 @@ const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof
   { kind: "hold", label: "Hold", icon: PauseCircle, presetConfig: { release: "manual" } },
   { kind: "split", label: "Split", icon: Split },
   { kind: "join", label: "Join", icon: Merge, presetConfig: { mode: "all", onBranchFailure: "collect" } },
+  // Step-inversion (KTD-3/4/12/15).
+  { kind: "foreach", label: "For-each step", icon: Repeat, presetConfig: { source: "task-steps" } },
+  { kind: "step-review", label: "Step review", icon: ClipboardCheck, presetConfig: { type: "code" } },
+  { kind: "parse-steps", label: "Parse steps", icon: ListChecks, presetConfig: { artifact: "PROMPT.md", parser: "step-headings" } },
+  { kind: "code", label: "Code", icon: Code2, presetConfig: { source: "" } },
 ];
 
 function InnerEditor({
@@ -109,10 +132,17 @@ function InnerEditor({
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode<WorkflowFlowNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const { t } = useTranslation("app");
   // v2 columns the editor is authoring for the active workflow.
   const [columns, setColumns] = useState<WorkflowIrColumn[]>([]);
+  // v2 custom field definitions the editor is authoring (KTD-13/14, U13).
+  const [fields, setFields] = useState<WorkflowFieldDefinition[]>([]);
   const [traitCatalog, setTraitCatalog] = useState<TraitCatalogEntry[]>([]);
+  // Step-parser ids for the parse-steps inspector (KTD-12). Seeded with the
+  // built-in pair so the select is never empty; replaced by the live catalog
+  // (built-ins + plugin parsers) once GET /api/step-parsers resolves.
+  const [stepParsers, setStepParsers] = useState<string[]>([...BUILTIN_STEP_PARSERS]);
 
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
@@ -127,6 +157,23 @@ function InnerEditor({
       })
       .catch(() => {
         // Non-fatal: validation degrades to server-side parse on save.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Step-parser catalog (KTD-12) for the parse-steps inspector's parser select.
+  // Merges built-ins with any registered plugin parsers; falls back to the
+  // built-in pair if the fetch fails so the select always has options.
+  useEffect(() => {
+    let cancelled = false;
+    fetchStepParsers(projectId)
+      .then((ids) => {
+        if (!cancelled && ids.length > 0) setStepParsers(ids);
+      })
+      .catch(() => {
+        // Non-fatal: keep the built-in fallback already in state.
       });
     return () => {
       cancelled = true;
@@ -165,13 +212,16 @@ function InnerEditor({
       setNodes([]);
       setEdges([]);
       setColumns([]);
+      setFields([]);
       return;
     }
     const flow = irToFlow(activeWorkflow);
     setNodes(flow.nodes);
     setEdges(flow.edges);
     setColumns(columnsOf(activeWorkflow));
+    setFields(fieldsOf(activeWorkflow));
     setSelectedNodeId(null);
+    setSelectedEdgeId(null);
     setValidationError(null);
   }, [activeWorkflow, setNodes, setEdges]);
 
@@ -219,6 +269,41 @@ function InnerEditor({
       const label = nodeLabel ?? (kind === "merge" ? "Merge boundary" : kind.charAt(0).toUpperCase() + kind.slice(1));
       const baseConfig = kind === "gate" ? { gateMode: "gate" } : {};
       const config = presetConfig ? { ...baseConfig, ...presetConfig } : baseConfig;
+
+      if (kind === "foreach") {
+        // A foreach renders as a React Flow group node. It auto-populates ONE
+        // step-execute child (a prompt node with seam=step-execute) so the group
+        // is never confusingly empty (KTD-3 / U8). The group node must precede
+        // its child in the array for React Flow's parent extent to apply.
+        const childId = foreachChildFlowId(id, newNodeId());
+        setNodes((ns) => [
+          ...ns,
+          {
+            id,
+            type: "foreach",
+            position: { x: 200 + ns.length * 40, y: 240 + (ns.length % 3) * 70 },
+            data: { kind: "foreach", label, config, templateEmpty: false },
+            style: { width: FOREACH_GROUP_WIDTH, height: FOREACH_GROUP_HEIGHT },
+            deletable: true,
+          },
+          {
+            id: childId,
+            type: "prompt",
+            position: { x: FOREACH_CHILD_X, y: FOREACH_CHILD_Y },
+            parentId: id,
+            extent: "parent",
+            data: {
+              kind: "prompt",
+              label: t("workflowNodes.stepExecuteLabel", "Step execute"),
+              config: { seam: "step-execute" },
+            },
+            deletable: true,
+          },
+        ]);
+        setSelectedNodeId(id);
+        return;
+      }
+
       setNodes((ns) => [
         ...ns,
         {
@@ -231,7 +316,7 @@ function InnerEditor({
       ]);
       setSelectedNodeId(id);
     },
-    [setNodes],
+    [setNodes, t],
   );
 
   const updateSelectedData = useCallback(
@@ -267,6 +352,30 @@ function InnerEditor({
       );
     },
     [selectedNodeId, setNodes],
+  );
+
+  // Edge inspector (KTD-4/5): mutate the selected edge's condition + rework
+  // kind, keeping its display label in sync. Rework edges render dashed/animated.
+  const updateSelectedEdge = useCallback(
+    (patch: { condition?: string; rework?: boolean }) => {
+      if (!selectedEdgeId) return;
+      setEdges((eds) =>
+        eds.map((e) => {
+          if (e.id !== selectedEdgeId) return e;
+          const condition = patch.condition ?? (e.data?.condition as string | undefined) ?? "success";
+          const rework = patch.rework ?? (e.data?.kind as string | undefined) === "rework";
+          return {
+            ...e,
+            label: rework ? `${shortConditionLabel(condition)} (rework)` : shortConditionLabel(condition),
+            data: { ...(e.data ?? {}), condition, kind: rework ? "rework" : undefined },
+            type: rework ? "step" : undefined,
+            animated: rework,
+            className: rework ? "wf-edge-rework" : undefined,
+          };
+        }),
+      );
+    },
+    [selectedEdgeId, setEdges],
   );
 
   const handleCreateWorkflow = useCallback(async () => {
@@ -350,7 +459,13 @@ function InnerEditor({
     setValidationError(null);
     setServerNodeError(null);
     try {
-      const { ir, layout } = flowToIr(activeWorkflow.name, nodes, edges, columns.length ? columns : undefined);
+      const { ir, layout } = flowToIr(
+        activeWorkflow.name,
+        nodes,
+        edges,
+        columns.length ? columns : undefined,
+        fields.length ? fields : undefined,
+      );
       const updated = await updateWorkflow(activeWorkflow.id, { ir, layout }, projectId);
       setWorkflows((ws) => ws.map((w) => (w.id === updated.id ? updated : w)));
       // Validate by compiling — surfaces non-linear graphs as a banner.
@@ -376,23 +491,61 @@ function InnerEditor({
     } finally {
       setSaving(false);
     }
-  }, [activeWorkflow, nodes, edges, columns, unplaced, blockingViolationCount, projectId, addToast, t]);
+  }, [activeWorkflow, nodes, edges, columns, fields, unplaced, blockingViolationCount, projectId, addToast, t]);
 
   // Stamp the shared error-state badge onto offending nodes: unplaced step
   // nodes and any node the server flagged (seam-in-branch). One component
   // (WorkflowNodeErrorBadge) renders both, keyed off data.errorBadge.
   const nodesForRender = useMemo(() => {
     const unplacedSet = new Set(unplaced);
+    // Count current template children per foreach group so the empty-state hint
+    // (KTD-3 / U8) reflects live deletions even though the palette seeds one.
+    const childCount = new Map<string, number>();
+    for (const n of nodes) {
+      if (n.parentId) childCount.set(n.parentId, (childCount.get(n.parentId) ?? 0) + 1);
+    }
+    const emptyHint = t("workflowNodes.foreachEmptyHint", "Drag a step-execute node here");
     return nodes.map((n) => {
       let errorBadge: string | undefined;
       if (unplacedSet.has(n.id)) errorBadge = t("workflowColumns.nodeUnplaced", "Not placed in a column");
       if (serverNodeError?.nodeId === n.id) errorBadge = serverNodeError.message;
-      if (errorBadge === n.data.errorBadge) return n;
-      return { ...n, data: { ...n.data, errorBadge } };
+      const templateEmpty = n.data.kind === "foreach" ? (childCount.get(n.id) ?? 0) === 0 : undefined;
+      if (
+        errorBadge === n.data.errorBadge &&
+        (n.data.kind !== "foreach" || (templateEmpty === n.data.templateEmpty && n.data.emptyHint === emptyHint))
+      )
+        return n;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          errorBadge,
+          ...(n.data.kind === "foreach" ? { templateEmpty, emptyHint } : {}),
+        },
+      };
     });
   }, [nodes, unplaced, serverNodeError, t]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+  const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
+  // The edge inspector's verdict/rework controls apply only when the edge's
+  // source node is a step-review node (KTD-4).
+  const selectedEdgeSourceIsReview = useMemo(() => {
+    if (!selectedEdge) return false;
+    const src = nodes.find((n) => n.id === selectedEdge.source);
+    return src?.data.kind === "step-review";
+  }, [selectedEdge, nodes]);
+
+  // Artifacts the active workflow declares (KTD-12). The parse-steps inspector
+  // offers a select over these; when none are declared it falls back to a
+  // free-text input defaulting to PROMPT.md.
+  const declaredArtifacts = useMemo(() => {
+    const ir = activeWorkflow?.ir;
+    if (ir && ir.version === "v2" && Array.isArray(ir.artifacts)) {
+      return ir.artifacts.map((a) => a.key);
+    }
+    return [];
+  }, [activeWorkflow]);
 
   // Lazy-loaded executor resources
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -402,6 +555,13 @@ function InnerEditor({
   const currentExecutor = (selectedNode?.data.config?.executor as ExecutorKind | undefined) ?? "model";
 
   useEffect(() => {
+    // step-review offers an optional review model picker (KTD-4).
+    if (selectedNode?.data.kind === "step-review" && models.length === 0) {
+      fetchModels().then((res) => setModels(res.models)).catch((err) => {
+        addToast(getErrorMessage(err) || "Failed to load models", "error");
+      });
+      return;
+    }
     if (!selectedNode || (selectedNode.data.kind !== "prompt" && selectedNode.data.kind !== "gate")) return;
     if (currentExecutor === "model" && models.length === 0) {
       fetchModels().then((res) => setModels(res.models)).catch((err) => {
@@ -527,8 +687,18 @@ function InnerEditor({
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
                     onNodeDragStop={onNodeDragStop}
-                    onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-                    onPaneClick={() => setSelectedNodeId(null)}
+                    onNodeClick={(_, node) => {
+                      setSelectedNodeId(node.id);
+                      setSelectedEdgeId(null);
+                    }}
+                    onEdgeClick={(_, edge) => {
+                      setSelectedEdgeId(edge.id);
+                      setSelectedNodeId(null);
+                    }}
+                    onPaneClick={() => {
+                      setSelectedNodeId(null);
+                      setSelectedEdgeId(null);
+                    }}
                     fitView
                   >
                     <Background />
@@ -551,6 +721,15 @@ function InnerEditor({
               violations={columnViolations}
               readOnly={isBuiltin}
               projectId={projectId}
+              addToast={addToast}
+            />
+          )}
+
+          {activeWorkflow && (
+            <WorkflowFieldsPanel
+              fields={fields}
+              onChange={setFields}
+              readOnly={isBuiltin}
               addToast={addToast}
             />
           )}
@@ -837,6 +1016,263 @@ function InnerEditor({
                 </p>
               ) : null}
 
+              {selectedNode.data.kind === "foreach" ? (
+                (() => {
+                  const mode = String(selectedNode.data.config?.mode ?? "sequential");
+                  const isParallel = mode === "parallel";
+                  return (
+                    <>
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.foreachMode", "Mode")}</span>
+                        <select
+                          value={mode}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            // parallel+shared is rejected by the validator; flip
+                            // isolation to worktree when switching to parallel.
+                            updateSelectedData({
+                              config: (prev) => ({
+                                ...prev,
+                                mode: v,
+                                ...(v === "parallel" && prev.isolation === "shared"
+                                  ? { isolation: "worktree" }
+                                  : {}),
+                              }),
+                            });
+                          }}
+                        >
+                          <option value="sequential">{t("workflowNodes.foreachSequential", "Sequential")}</option>
+                          <option value="parallel">{t("workflowNodes.foreachParallel", "Parallel")}</option>
+                        </select>
+                      </label>
+
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.foreachIsolation", "Isolation")}</span>
+                        <select
+                          value={String(
+                            selectedNode.data.config?.isolation ?? (isParallel ? "worktree" : "shared"),
+                          )}
+                          onChange={(e) => updateSelectedData({ config: { isolation: e.target.value } })}
+                        >
+                          <option value="shared" disabled={isParallel}>
+                            {t("workflowNodes.foreachShared", "Shared worktree")}
+                          </option>
+                          <option value="worktree">{t("workflowNodes.foreachWorktree", "Per-step worktree")}</option>
+                        </select>
+                      </label>
+
+                      {isParallel && (
+                        <label className="wf-field">
+                          <span>{t("workflowNodes.foreachConcurrency", "Concurrency")}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={8}
+                            placeholder="2"
+                            value={
+                              selectedNode.data.config?.concurrency != null
+                                ? String(selectedNode.data.config.concurrency)
+                                : ""
+                            }
+                            onChange={(e) => {
+                              const val = e.target.value.trim();
+                              if (val === "") {
+                                updateSelectedData({
+                                  config: (prev) => {
+                                    const next = { ...prev };
+                                    delete next.concurrency;
+                                    return next;
+                                  },
+                                });
+                              } else {
+                                const num = parseInt(val, 10);
+                                if (!isNaN(num)) updateSelectedData({ config: { concurrency: num } });
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.foreachMaxRework", "Max rework cycles")}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          placeholder="3"
+                          value={
+                            selectedNode.data.config?.maxReworkCycles != null
+                              ? String(selectedNode.data.config.maxReworkCycles)
+                              : ""
+                          }
+                          onChange={(e) => {
+                            const val = e.target.value.trim();
+                            if (val === "") {
+                              updateSelectedData({
+                                config: (prev) => {
+                                  const next = { ...prev };
+                                  delete next.maxReworkCycles;
+                                  return next;
+                                },
+                              });
+                            } else {
+                              const num = parseInt(val, 10);
+                              if (!isNaN(num)) updateSelectedData({ config: { maxReworkCycles: num } });
+                            }
+                          }}
+                        />
+                      </label>
+                      <p className="wf-inspector-note wf-inspector-note--info">
+                        {t(
+                          "workflowNodes.foreachNote",
+                          "Expands once per planned step. Drop a step-execute node (and optional step-review) into the region.",
+                        )}
+                      </p>
+                    </>
+                  );
+                })()
+              ) : null}
+
+              {selectedNode.data.kind === "step-review" ? (
+                <>
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.reviewType", "Review type")}</span>
+                    <select
+                      value={String(selectedNode.data.config?.type ?? "code")}
+                      onChange={(e) => updateSelectedData({ config: { type: e.target.value } })}
+                    >
+                      <option value="plan">{t("workflowNodes.reviewPlan", "Plan review")}</option>
+                      <option value="code">{t("workflowNodes.reviewCode", "Code review")}</option>
+                    </select>
+                  </label>
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.reviewModel", "Review model (optional)")}</span>
+                    <CustomModelDropdown
+                      label={t("workflowNodes.reviewModel", "Review model (optional)")}
+                      models={models}
+                      value={getModelDropdownValue(
+                        String(selectedNode.data.config?.modelProvider ?? ""),
+                        String(selectedNode.data.config?.modelId ?? ""),
+                      )}
+                      onChange={(value) => {
+                        const { provider, modelId } = parseModelDropdownValue(value);
+                        updateSelectedData({
+                          config: {
+                            modelProvider: provider || undefined,
+                            modelId: modelId || undefined,
+                            model: value || undefined,
+                          },
+                        });
+                      }}
+                    />
+                  </label>
+                  <p className="wf-inspector-note wf-inspector-note--info">
+                    {t(
+                      "workflowNodes.reviewNote",
+                      "Verdicts route as outcome edges. Click an outgoing edge to set its verdict and rework behavior.",
+                    )}
+                  </p>
+                </>
+              ) : null}
+
+              {selectedNode.data.kind === "parse-steps" ? (
+                <>
+                  {declaredArtifacts.length > 0 ? (
+                    <label className="wf-field">
+                      <span>{t("workflowNodes.parseArtifact", "Artifact")}</span>
+                      <select
+                        value={String(selectedNode.data.config?.artifact ?? declaredArtifacts[0])}
+                        onChange={(e) => updateSelectedData({ config: { artifact: e.target.value } })}
+                      >
+                        {declaredArtifacts.map((a) => (
+                          <option key={a} value={a}>
+                            {a}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="wf-field">
+                      <span>{t("workflowNodes.parseArtifact", "Artifact")}</span>
+                      <input
+                        placeholder="PROMPT.md"
+                        value={String(selectedNode.data.config?.artifact ?? "PROMPT.md")}
+                        onChange={(e) => updateSelectedData({ config: { artifact: e.target.value } })}
+                      />
+                    </label>
+                  )}
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.parseParser", "Parser")}</span>
+                    {/* Sourced from the live parser registry via GET /api/step-parsers
+                        (built-ins + plugin parsers), with a built-in fallback. The
+                        node's current parser is always included so a plugin parser
+                        the catalog missed never silently drops out of the select. */}
+                    <select
+                      value={String(selectedNode.data.config?.parser ?? "step-headings")}
+                      onChange={(e) => updateSelectedData({ config: { parser: e.target.value } })}
+                    >
+                      {Array.from(
+                        new Set([String(selectedNode.data.config?.parser ?? "step-headings"), ...stepParsers]),
+                      ).map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
+
+              {selectedNode.data.kind === "code" ? (
+                <>
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.codeSource", "Source (TypeScript)")}</span>
+                    <textarea
+                      className="wf-code-source"
+                      rows={8}
+                      spellCheck={false}
+                      placeholder={"export default async (ctx) => ({ outcome: \"success\" });"}
+                      value={String(selectedNode.data.config?.source ?? "")}
+                      onChange={(e) => updateSelectedData({ config: { source: e.target.value } })}
+                    />
+                  </label>
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.codeTimeout", "Timeout (ms)")}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="30000"
+                      value={
+                        selectedNode.data.config?.timeoutMs != null
+                          ? String(selectedNode.data.config.timeoutMs)
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        if (val === "") {
+                          updateSelectedData({
+                            config: (prev) => {
+                              const next = { ...prev };
+                              delete next.timeoutMs;
+                              return next;
+                            },
+                          });
+                        } else {
+                          const num = parseInt(val, 10);
+                          if (!isNaN(num)) updateSelectedData({ config: { timeoutMs: num } });
+                        }
+                      }}
+                    />
+                  </label>
+                  <p className="wf-inspector-note wf-inspector-note--info">
+                    {t(
+                      "workflowNodes.codeNote",
+                      "Runs sandboxed TypeScript. Syntax is validated at save.",
+                    )}
+                  </p>
+                </>
+              ) : null}
+
               {selectedNode.data.kind === "prompt" ||
               selectedNode.data.kind === "gate" ||
               selectedNode.data.kind === "script" ? (
@@ -863,6 +1299,62 @@ function InnerEditor({
                   )}
                 </p>
               ) : null}
+              </fieldset>
+            </aside>
+          )}
+
+          {selectedEdge && (
+            <aside className="wf-editor-inspector" data-testid="wf-edge-inspector">
+              <h3>{t("workflowNodes.edgeInspector", "Edge")}</h3>
+              <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
+                {selectedEdgeSourceIsReview ? (
+                  <>
+                    <label className="wf-field">
+                      <span>{t("workflowNodes.edgeVerdict", "Review verdict")}</span>
+                      <select
+                        data-testid="wf-edge-verdict"
+                        value={(() => {
+                          const c = String(selectedEdge.data?.condition ?? "success");
+                          return c.startsWith("outcome:") ? c.slice("outcome:".length) : "";
+                        })()}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          updateSelectedEdge({ condition: v ? `outcome:${v}` : "success" });
+                        }}
+                      >
+                        <option value="">{t("workflowNodes.edgeNoVerdict", "— success (no verdict) —")}</option>
+                        {STEP_REVIEW_VERDICTS.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="wf-field wf-field--checkbox">
+                      <input
+                        type="checkbox"
+                        data-testid="wf-edge-rework"
+                        checked={(selectedEdge.data?.kind as string | undefined) === "rework"}
+                        onChange={(e) => updateSelectedEdge({ rework: e.target.checked })}
+                      />
+                      <span>{t("workflowNodes.edgeRework", "Rework edge (loop back, bounded)")}</span>
+                    </label>
+                    <p className="wf-inspector-note wf-inspector-note--info">
+                      {t(
+                        "workflowNodes.edgeReworkNote",
+                        "Rework edges are the only legal cycles — they loop back within the for-each step instance, bounded by Max rework cycles.",
+                      )}
+                    </p>
+                  </>
+                ) : (
+                  <p className="wf-inspector-note">
+                    {t(
+                      "workflowNodes.edgeConditionLabel",
+                      "Condition: {{condition}}",
+                      { condition: String(selectedEdge.data?.condition ?? "success") },
+                    )}
+                  </p>
+                )}
               </fieldset>
             </aside>
           )}

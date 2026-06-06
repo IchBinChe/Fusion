@@ -114,6 +114,12 @@ function isV2(ir: WorkflowIr): ir is WorkflowIrV2 {
 function editorKind(node: WorkflowIr["nodes"][number]): WorkflowEditorNodeKind {
   const seam = node.config?.seam;
   if (seam === "merge") return "merge";
+  // PR node kinds (pr-create/pr-respond/pr-merge) are graph node kinds but have
+  // no dedicated editor palette renderer yet; map them to the closest existing
+  // editor shape so the workflow editor renders them as recognizable nodes.
+  // (Dedicated PR-node editor rendering is a follow-up, not part of this work.)
+  if (node.kind === "pr-merge") return "merge";
+  if (node.kind === "pr-create" || node.kind === "pr-respond") return "prompt";
   return node.kind;
 }
 

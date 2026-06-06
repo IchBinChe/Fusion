@@ -1,3 +1,4 @@
+import { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
 import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 import type { WorkflowDefinition } from "./workflow-definition-types.js";
@@ -174,6 +175,41 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
       review: { x: 740, y: 160 },
       merge: { x: 910, y: 160 },
       end: { x: 1080, y: 160 },
+    },
+    createdAt: BUILTIN_TS,
+    updatedAt: BUILTIN_TS,
+  },
+  // The PR workflow (U9) — the unified PR-entity lifecycle wired end to end as
+  // first-class graph nodes/edges: pr-create → await-review (hold) → pr-respond
+  // (bounded rework loop) → auto-merge gate → pr-merge → end, with the await
+  // states modeled as hold columns the U4 reconcile advances via external-event
+  // releases. Authored directly as a v2 IR (the `linear` helper only builds
+  // simple pipelines); read-only like every built-in. Requires the
+  // `workflowGraphExecutor` flag at run time (pr-* node kinds, holds, and the
+  // top-level rework loop are interpreter-only).
+  //
+  // ADDITIVE: this is a NEW built-in alongside the unchanged default
+  // `builtin:coding`. Full retirement of the legacy comment/monitor PR path is
+  // deferred until the graph executor is the default (see the plan's "Deferred to
+  // follow-up work").
+  {
+    id: "builtin:pr-workflow",
+    name: "PR lifecycle (built-in)",
+    description:
+      "The unified PR lifecycle as graph nodes: create the PR, await review, respond to changes (bounded rework loop), gate on auto-merge, then merge — with GitHub reconciliation advancing the await holds. Requires the workflow graph executor.",
+    kind: "workflow",
+    ir: BUILTIN_PR_WORKFLOW_IR,
+    layout: {
+      start: { x: 60, y: 160 },
+      "pr-create": { x: 230, y: 160 },
+      failed: { x: 230, y: 320 },
+      "await-review": { x: 400, y: 160 },
+      "pr-respond": { x: 400, y: 320 },
+      "await-review-hold": { x: 570, y: 320 },
+      gate: { x: 570, y: 160 },
+      "await-rebase": { x: 740, y: 320 },
+      "pr-merge": { x: 740, y: 160 },
+      end: { x: 910, y: 160 },
     },
     createdAt: BUILTIN_TS,
     updatedAt: BUILTIN_TS,

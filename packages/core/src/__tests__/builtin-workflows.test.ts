@@ -3,14 +3,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, isBuiltinWorkflowId } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { compileWorkflowToSteps } from "../workflow-compiler.js";
-import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr } from "../workflow-ir.js";
+import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 describe("built-in workflows", () => {
   // Graph-only built-ins (step inversion, KTD-9) model branching/foreach/rework
   // structure the linear compiler cannot lower to a step list — they run only
   // under the workflow graph executor. They still must parse as valid IR.
-  const GRAPH_ONLY_BUILTIN_IDS = new Set(["builtin:stepwise-coding"]);
+  const GRAPH_ONLY_BUILTIN_IDS = new Set(["builtin:stepwise-coding", "builtin:pr-workflow"]);
 
   it("every built-in has a valid IR; linear built-ins compile without error", () => {
     expect(BUILTIN_WORKFLOWS.length).toBeGreaterThanOrEqual(4);
@@ -37,6 +37,45 @@ describe("built-in workflows", () => {
     ).template;
     expect(template.nodes.some((n) => n.kind === "step-review")).toBe(true);
     expect(template.nodes.some((n) => n.config?.seam === "step-execute")).toBe(true);
+  });
+
+  it("includes the PR lifecycle built-in wiring the PR nodes end to end (U9)", () => {
+    const pr = getBuiltinWorkflow("builtin:pr-workflow");
+    expect(pr).toBeDefined();
+    const ir = parseWorkflowIr(pr!.ir);
+    if (ir.version !== "v2") throw new Error("expected v2");
+
+    // The three PR node kinds plus the await holds are all present.
+    const kinds = ir.nodes.map((n) => n.kind);
+    expect(kinds).toContain("pr-create");
+    expect(kinds).toContain("pr-respond");
+    expect(kinds).toContain("pr-merge");
+    expect(ir.nodes.filter((n) => n.kind === "hold").length).toBeGreaterThanOrEqual(3);
+
+    // The auto-merge gate (U6) routes after approval.
+    expect(ir.nodes.some((n) => n.kind === "gate" && (n.config as { gate?: string })?.gate === "auto-merge")).toBe(true);
+
+    // await-review is the bounded-rework region head; pr-respond loops back to it.
+    const awaitReview = ir.nodes.find((n) => n.id === "await-review");
+    expect((awaitReview?.config as { reworkRegion?: boolean })?.reworkRegion).toBe(true);
+    expect((awaitReview?.config as { release?: string })?.release).toBe("external-event");
+    expect(
+      ir.edges.some((e) => e.from === "pr-respond" && e.to === "await-review" && e.kind === "rework"),
+    ).toBe(true);
+
+    // The create→await-review→gate→merge→end spine exists.
+    expect(ir.edges.some((e) => e.from === "pr-create" && e.to === "await-review")).toBe(true);
+    expect(ir.edges.some((e) => e.from === "await-review" && e.to === "gate")).toBe(true);
+    expect(ir.edges.some((e) => e.from === "gate" && e.to === "pr-merge")).toBe(true);
+    expect(ir.edges.some((e) => e.from === "pr-merge" && e.to === "end")).toBe(true);
+  });
+
+  it("the PR built-in IR round-trips through serialize → parse unchanged (U9)", () => {
+    const pr = getBuiltinWorkflow("builtin:pr-workflow")!;
+    const serialized = serializeWorkflowIr(pr.ir);
+    const reparsed = parseWorkflowIr(serialized);
+    // Re-serializing the reparsed IR yields the identical bytes (stable round-trip).
+    expect(serializeWorkflowIr(reparsed)).toBe(serialized);
   });
 
   it("default workflow column ids equal the legacy enum values, in legacy order (KTD-1)", () => {

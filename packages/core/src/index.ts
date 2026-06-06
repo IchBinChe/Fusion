@@ -85,6 +85,11 @@ export type {
   WorkflowNodeExecutorConfig,
 } from "./workflow-ir-types.js";
 export {
+  DEFAULT_MAX_REWORK_CYCLES,
+  MAX_REWORK_CYCLES_CAP,
+  resolveMaxReworkCycles,
+} from "./workflow-ir-types.js";
+export {
   instanceNodeId,
   parseInstanceNodeId,
   resolveColumnAgentBinding,
@@ -97,6 +102,7 @@ export type {
 } from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
+export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
 export { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 export {
   MOVED_SETTINGS_KEYS,
@@ -589,6 +595,24 @@ export {
   isBranchGroupMemberLanded,
   isBranchGroupComplete,
 } from "./branch-group-completion.js";
+export type {
+  PrEntity,
+  PrEntityCreateInput,
+  PrEntityUpdate,
+  PrEntityState,
+  PrEntitySourceType,
+  PrReviewDecision,
+  PrChecksRollup,
+  PrThreadState,
+  PrThreadOutcome,
+} from "./types.js";
+export {
+  isPrEntityActive,
+  isPrBacked,
+  isPrEntityActionable,
+  isPrEntityAutoMergeReady,
+  autoMergeGateReason,
+} from "./pr-entity.js";
 export {
   findVitestProcessIds,
   type FindVitestProcessIdsOptions,

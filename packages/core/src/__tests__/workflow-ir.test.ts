@@ -265,6 +265,39 @@ describe("parseWorkflowIr — hold release kinds", () => {
   });
 });
 
+describe("parseWorkflowIr — top-level rework region (U6/U9)", () => {
+  const cols = [{ id: "c", name: "C", traits: [] }];
+
+  // start → head(reworkRegion) → body → rework back to head; head also has a
+  // forward `outcome:rework-exhausted` edge out of the loop. This is the PR
+  // review-loop shape (await-review → pr-respond → rework back), generalized.
+  function reworkIr(headConfig: Record<string, unknown> | undefined): WorkflowIrV2 {
+    return v2(
+      cols,
+      [
+        { id: "start", kind: "start", column: "c" },
+        { id: "head", kind: "hold", column: "c", config: { release: "external-event", ...headConfig } },
+        { id: "body", kind: "prompt", column: "c" },
+        { id: "end", kind: "end", column: "c" },
+      ],
+      [
+        { from: "start", to: "head" },
+        { from: "head", to: "body", condition: "outcome:go" },
+        { from: "head", to: "end", condition: "outcome:rework-exhausted" },
+        { from: "body", to: "head", condition: "outcome:again", kind: "rework" },
+      ],
+    );
+  }
+
+  it("accepts a top-level rework edge into a reworkRegion head", () => {
+    expect(() => parseWorkflowIr(reworkIr({ reworkRegion: true, maxReworkCycles: 5 }))).not.toThrow();
+  });
+
+  it("rejects a top-level rework edge whose head is not a reworkRegion", () => {
+    expect(() => parseWorkflowIr(reworkIr(undefined))).toThrow(/only legal inside a foreach template/);
+  });
+});
+
 describe("parseWorkflowIr — split/join parallelism (KTD-11)", () => {
   const cols = [{ id: "c", name: "C", traits: [] }];
 

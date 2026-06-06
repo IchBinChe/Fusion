@@ -973,15 +973,23 @@ function validateV2(ir: WorkflowIrV2): void {
   validateFields(ir.fields);
   validateSettings(ir.settings);
 
-  // Rework edges are legal only intra-template; any rework edge at the top level
-  // is rejected (template rework edges are validated inside validateForeach and
-  // never appear in ir.edges).
+  // Rework edges are legal intra-template (foreach, KTD-5) and — since U6
+  // generalized the bounded-rework mechanism to the top-level walk — for a
+  // designated top-level rework region (the PR review loop: await-review →
+  // pr-respond → rework back to await-review). A top-level rework edge is legal
+  // ONLY when its target (the loop head) explicitly opts in via
+  // `config.reworkRegion === true`; the executor seeds the bound from that head's
+  // `config.maxReworkCycles` (shared default + clamp). This keeps every other
+  // top-level back-edge rejected (validateNoIllegalCycles below still throws for
+  // non-rework cycles), so the relaxation is narrow and opt-in.
   for (const edge of ir.edges) {
-    if (isReworkEdge(edge)) {
-      throw new WorkflowIrError(
-        `rework edge '${edge.from}' -> '${edge.to}' is only legal inside a foreach template`,
-      );
-    }
+    if (!isReworkEdge(edge)) continue;
+    const head = nodesById.get(edge.to);
+    if (head?.config?.reworkRegion === true) continue;
+    throw new WorkflowIrError(
+      `rework edge '${edge.from}' -> '${edge.to}' is only legal inside a foreach template ` +
+        `or into a top-level rework region head (config.reworkRegion: true)`,
+    );
   }
 
   validateNoIllegalCycles(ir.nodes, outgoing);

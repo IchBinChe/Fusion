@@ -56,6 +56,14 @@ export interface ProjectRuntimeConfig {
    */
   externalTaskStore?: TaskStore;
   /**
+   * PR-entity node GitHub ops (U3): the injected `createPr`/`mergePr`/`respond`
+   * callbacks (+ source resolver + audit) for the `pr-create`/`pr-respond`/
+   * `pr-merge` workflow nodes. Threaded from the CLI layer; the runtime binds the
+   * engine-owned store and hands the assembled deps to the executor. Absent → the
+   * pr-* node kinds fail closed.
+   */
+  prNodeGithubOps?: import("./pr-nodes.js").PrNodeGithubOps;
+  /**
    * Absolute URL of the dashboard's CLI-agent hook ingestion endpoint that
    * generated hook scripts POST to (e.g. `http://127.0.0.1:4040/api/cli-agent/hooks`).
    * Threaded from the dashboard boot once the listening port is known. When

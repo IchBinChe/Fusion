@@ -13,8 +13,10 @@ import { createDevServerRouter } from "../dev-server-routes.js";
 import type { AiSessionStore } from "../ai-session-store.js";
 import { createStashRecoveryRouter } from "./register-stash-recovery-routes.js";
 import { createBranchGroupsRouter } from "./register-branch-groups-routes.js";
+import { createPullRequestsRouter } from "./register-pull-requests-routes.js";
 import { GitHubClient, closeGroupPullRequest, reconcileGroupPullRequest } from "../github.js";
-import { reconcileBranchGroupPr } from "@fusion/engine";
+import { reconcileBranchGroupPr, releaseHeldTaskByEvent } from "@fusion/engine";
+import type { PrEntity } from "@fusion/core";
 
 interface IntegratedRoutersOptions {
   router: Router;
@@ -114,6 +116,29 @@ export function registerIntegratedRouters({
       });
       return store.getBranchGroup(group.id) ?? group;
     },
+  }));
+
+  // Unified PR entity view + user-controlled actions (U7, R11/R12/R13). Each
+  // side-effecting action maps to a manual hold-release: the workflow's
+  // user-controlled release edges own the GitHub side effects, so the route just
+  // releases the entity's source task with an action-specific event tag. The
+  // route layer already re-reads authoritative entity state before invoking these
+  // callbacks (never a stale client copy). The engine primitive is imported
+  // statically (FN-3049 — no runtime `await import`).
+  const releaseForPr = async (entity: PrEntity, eventTag: string): Promise<Record<string, unknown>> => {
+    // task-sourced entities release the task directly; branch-group-sourced
+    // entities release the group's representative task (the sourceId is the task
+    // id the workflow placed on the await hold in both cases).
+    const result = await releaseHeldTaskByEvent(store, entity.sourceId, eventTag);
+    return { released: result.released, toColumn: result.toColumn, rejection: result.rejection };
+  };
+
+  router.use("/pull-requests", createPullRequestsRouter(store, {
+    approvePr: ({ entity }) => releaseForPr(entity, "pr-approve"),
+    mergePr: ({ entity }) => releaseForPr(entity, "pr-merge"),
+    retryPr: ({ entity }) => releaseForPr(entity, "pr-retry"),
+    closePr: ({ entity }) => releaseForPr(entity, "pr-close"),
+    retryCreate: ({ entity }) => releaseForPr(entity, "pr-retry-create"),
   }));
 }
 

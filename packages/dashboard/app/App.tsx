@@ -118,6 +118,7 @@ const DevServerView = lazy(() => import("./components/DevServerView").then((m) =
 const _TodoView = lazy(() => import("./components/TodoView").then((m) => ({ default: m.TodoView })));
 const GoalsView = lazy(() => import("./components/GoalsView").then((m) => ({ default: m.GoalsView })));
 const StashRecoveryView = lazy(() => import("./components/StashRecoveryView").then((m) => ({ default: m.StashRecoveryView })));
+const PullRequestView = lazy(() => import("./components/PullRequestView").then((m) => ({ default: m.PullRequestView })));
 
 // Warm lazy chunks during browser idle so first navigation to each view is
 // instant. Each chunk is ~10–80 kB; total prefetch finishes well under a
@@ -147,6 +148,7 @@ function prefetchLazyViews() {
     void import("./components/TodoView");
     void import("./components/GoalsView");
     void import("./components/StashRecoveryView");
+    void import("./components/PullRequestView");
   });
 }
 
@@ -757,6 +759,11 @@ function AppInner() {
   const [missionResumeSessionId, setMissionResumeSessionId] = useState<string | undefined>(undefined);
   const [missionTargetId, setMissionTargetId] = useState<string | undefined>(undefined);
   const [goalAnchorId, setGoalAnchorId] = useState<string | undefined>(undefined);
+  const [selectedPrId, setSelectedPrId] = useState<string | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    const v = new URL(window.location.href).searchParams.get("pr");
+    return v ?? undefined;
+  });
   const [milestoneSliceResumeSessionId, setMilestoneSliceResumeSessionId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -764,6 +771,11 @@ function AppInner() {
       setGoalAnchorId(undefined);
     }
   }, [goalAnchorId, taskView]);
+  useEffect(() => {
+    if (taskView !== "pull-requests" && selectedPrId !== undefined) {
+      setSelectedPrId(undefined);
+    }
+  }, [selectedPrId, taskView]);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [authTokenRecoveryOpen, setAuthTokenRecoveryOpen] = useState(false);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResponse | null>(null);
@@ -1558,6 +1570,16 @@ function AppInner() {
         <PageErrorBoundary>
           <Suspense fallback={null}>
             <StashRecoveryView />
+          </Suspense>
+        </PageErrorBoundary>
+      );
+    }
+
+    if (taskView === "pull-requests") {
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <PullRequestView pullRequestId={selectedPrId} projectId={currentProject?.id} />
           </Suspense>
         </PageErrorBoundary>
       );

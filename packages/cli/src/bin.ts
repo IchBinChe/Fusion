@@ -119,7 +119,8 @@ async function loadCommandHandlers() {
   const { runServe } = await import("./commands/serve.js");
   const { runDaemon } = await import("./commands/daemon.js");
   const { runDesktop } = await import("./commands/desktop.js");
-  const { runTaskCreate, runTaskList, runTaskMove, runTaskMerge, runTaskUpdate, runTaskDeps, runTaskLog, runTaskLogs, runTaskShow, runTaskAttach, runTaskPause, runTaskUnpause, runTaskImportFromGitHub, runTaskDuplicate, runTaskArchive, runTaskUnarchive, runTaskRefine, runTaskPlan, runTaskDelete, runTaskRetry, runTaskComment, runTaskComments, runTaskSteer, runTaskSetNode, runTaskClearNode, runTaskPrCreate } = await import("./commands/task.js");
+  const { runTaskCreate, runTaskList, runTaskMove, runTaskMerge, runTaskUpdate, runTaskDeps, runTaskLog, runTaskLogs, runTaskShow, runTaskAttach, runTaskPause, runTaskUnpause, runTaskImportFromGitHub, runTaskDuplicate, runTaskArchive, runTaskUnarchive, runTaskRefine, runTaskPlan, runTaskDelete, runTaskRetry, runTaskComment, runTaskComments, runTaskSteer, runTaskSetNode, runTaskClearNode } = await import("./commands/task.js");
+  const { runPrCreate, runPrShow, runPrList, runPrRespond, runPrApprove, runPrRetry, runPrMerge, runPrClose, runPrAutomerge } = await import("./commands/pr.js");
   const { runSettingsShow, runSettingsSet } = await import("./commands/settings.js");
   const { runSettingsExport } = await import("./commands/settings-export.js");
   const { runSettingsImport } = await import("./commands/settings-import.js");
@@ -176,7 +177,15 @@ async function loadCommandHandlers() {
     runTaskSteer,
     runTaskSetNode,
     runTaskClearNode,
-    runTaskPrCreate,
+    runPrCreate,
+    runPrShow,
+    runPrList,
+    runPrRespond,
+    runPrApprove,
+    runPrRetry,
+    runPrMerge,
+    runPrClose,
+    runPrAutomerge,
     runSettingsShow,
     runSettingsSet,
     runSettingsExport,
@@ -309,13 +318,19 @@ Usage:
   fn task set-node <id> <node-name-or-id>  Set a per-task node override
   fn task clear-node <id>                Clear a per-task node override
   fn task retry <id>                  Retry a failed task (clears error, moves to todo)
-  fn task pr-create <id> [--title <title>] [--base <branch>] [--body <body>] [--draft] [--no-ai] [--reviewer <login>]
-                         Alias of: fn pr create
   fn task import <owner/repo> [opts]  Import GitHub issues as tasks
 
 PR:
   fn pr create <task-id> [--title <title>] [--base <branch>] [--body <body>] [--draft] [--no-ai] [--reviewer <login>]
                                       Create a GitHub PR for a task (default: AI-generated title/body)
+  fn pr list | ls                     List active PR entities with state + auto-merge
+  fn pr show <pr-id>                  Show a PR entity (state, checks, review, threads)
+  fn pr approve <pr-id>               Release the PR's review gate (approve)
+  fn pr respond <pr-id>               Request another review-response round
+  fn pr retry <pr-id>                 Retry the PR (rework release)
+  fn pr merge <pr-id>                 Force-merge the PR via its merge release
+  fn pr close <pr-id>                 Close the PR terminally
+  fn pr automerge <pr-id> [on|off]    Toggle auto-merge for the PR
   fn research create --query <text> [--wait] [--max-wait-ms <ms>] [--json]
                                       Create and optionally wait for a cited-research run (search/fetch/synthesis)
   fn research list | ls [--status <status>] [--limit <n>] [--json]
@@ -643,7 +658,15 @@ async function main() {
     runTaskSteer,
     runTaskSetNode,
     runTaskClearNode,
-    runTaskPrCreate,
+    runPrCreate,
+    runPrShow,
+    runPrList,
+    runPrRespond,
+    runPrApprove,
+    runPrRetry,
+    runPrMerge,
+    runPrClose,
+    runPrAutomerge,
     runSettingsShow,
     runSettingsSet,
     runSettingsExport,
@@ -842,12 +865,45 @@ async function main() {
               console.error("Usage: fn pr create <task-id> [--title <title>] [--base <branch>] [--body <body>] [--draft] [--no-ai] [--reviewer <login>]");
               process.exit(1);
             }
-            await runTaskPrCreate(id, parsePrCreateOptions(args.slice(3)), projectName);
+            await runPrCreate(id, parsePrCreateOptions(args.slice(3)), projectName);
+            break;
+          }
+          case "list":
+          case "ls":
+            await runPrList(projectName);
+            break;
+          case "show":
+            await runPrShow(args[2], projectName);
+            break;
+          case "approve":
+            await runPrApprove(args[2], projectName);
+            break;
+          case "respond":
+            await runPrRespond(args[2], projectName);
+            break;
+          case "retry":
+            await runPrRetry(args[2], projectName);
+            break;
+          case "merge":
+            await runPrMerge(args[2], projectName);
+            break;
+          case "close":
+            await runPrClose(args[2], projectName);
+            break;
+          case "automerge": {
+            const toggle = args[3];
+            const enabled =
+              toggle === "on" || toggle === "true"
+                ? true
+                : toggle === "off" || toggle === "false"
+                  ? false
+                  : undefined;
+            await runPrAutomerge(args[2], enabled, projectName);
             break;
           }
           default:
             console.error(`Unknown subcommand: pr ${subcommand || ""}`);
-            console.error("Usage: fn pr create <task-id> [--title <title>] [--base <branch>] [--body <body>] [--draft] [--no-ai] [--reviewer <login>]");
+            console.error("Try: fn pr create <task-id> | list | show <id> | approve <id> | respond <id> | retry <id> | merge <id> | close <id> | automerge <id> [on|off]");
             process.exit(1);
         }
         break;
@@ -1338,16 +1394,6 @@ async function main() {
               process.exit(1);
             }
             await runTaskRetry(id, projectName);
-            break;
-          }
-          case "pr-create": {
-            const id = args[2];
-            if (!id) {
-              console.error("Usage: fn task pr-create <id> [--title <title>] [--base <branch>] [--body <body>] [--draft] [--no-ai] [--reviewer <login>]");
-              process.exit(1);
-            }
-
-            await runTaskPrCreate(id, parsePrCreateOptions(args.slice(3)), projectName);
             break;
           }
           case "import": {

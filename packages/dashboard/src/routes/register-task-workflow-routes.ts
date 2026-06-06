@@ -45,6 +45,7 @@ import { createTrackingIssueForTask } from "../github-tracking-hook.js";
 import { parseGitHubBadgeUrl } from "./register-git-github.js";
 import { planTaskWorktreePath, promoteHeldTask } from "@fusion/engine";
 import { buildBoardWorkflowsPayload } from "./board-workflows.js";
+import { isBackwardMoveBlockedByOpenPr, PR_OPEN_BLOCKS_MOVE_BACK_MESSAGE } from "./register-pull-requests-routes.js";
 import type { RunAuditEventInput } from "@fusion/core";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
@@ -1381,6 +1382,35 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
       if (preserveProgress != null && typeof preserveProgress !== "boolean") {
         throw badRequest("preserveProgress must be a boolean");
+      }
+
+      // R16: block moving a PR-await task "backward" (e.g. in-review → in-progress)
+      // while it still has an open PR entity. The PR's lifecycle is workflow-owned;
+      // dragging the card back would orphan the open GitHub PR. The user must
+      // merge or close the PR first (a user-controlled release advances it
+      // forward; this guard only rejects backward drags). Once the entity is
+      // terminal (merged/closed/failed) the move is allowed.
+      const moveTarget = column as Column;
+      const guardTask = await scopedStore.getTask(req.params.id);
+      if (guardTask) {
+        const activePrEntity =
+          scopedStore.getActivePrEntityBySource?.("task", guardTask.id) ??
+          (guardTask.branchContext?.groupId
+            ? scopedStore.getActivePrEntityBySource?.("branch-group", guardTask.branchContext.groupId)
+            : null);
+        if (
+          isBackwardMoveBlockedByOpenPr({
+            fromIndex: COLUMNS.indexOf(guardTask.column as Column),
+            toIndex: COLUMNS.indexOf(moveTarget),
+            activePrEntity,
+          })
+        ) {
+          throw new ApiError(409, PR_OPEN_BLOCKS_MOVE_BACK_MESSAGE, {
+            code: "pr-open-blocks-move-back",
+            messageKey: "board.rejection.prOpenBlocksMoveBack",
+            retryable: false,
+          });
+        }
       }
 
       // When manually promoting to in-progress, supply an allocator so

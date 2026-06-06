@@ -124,7 +124,7 @@ export function DirectoryPicker({ value, onChange, placeholder, onInputKeyDown, 
     if (trimmedName.includes("/") || trimmedName.includes("\\") || trimmedName.includes("..")) {
       setBrowser((prev) => ({
         ...prev,
-        createFolderError: "Folder name cannot contain path separators or '..'",
+        createFolderError: t("dirPicker.createFolderError", "Folder name cannot contain path separators or '..'"),
       }));
       return;
     }

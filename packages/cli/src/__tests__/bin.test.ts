@@ -37,7 +37,16 @@ const commandMocks = vi.hoisted(() => ({
   runTaskSteer: vi.fn(),
   runTaskSetNode: vi.fn(),
   runTaskClearNode: vi.fn(),
-  runTaskPrCreate: vi.fn(),
+
+  runPrCreate: vi.fn(),
+  runPrShow: vi.fn(),
+  runPrList: vi.fn(),
+  runPrRespond: vi.fn(),
+  runPrApprove: vi.fn(),
+  runPrRetry: vi.fn(),
+  runPrMerge: vi.fn(),
+  runPrClose: vi.fn(),
+  runPrAutomerge: vi.fn(),
 
   runSettingsShow: vi.fn(),
   runSettingsSet: vi.fn(),
@@ -173,7 +182,18 @@ vi.mock("../commands/task.js", () => ({
   runTaskSteer: commandMocks.runTaskSteer,
   runTaskSetNode: commandMocks.runTaskSetNode,
   runTaskClearNode: commandMocks.runTaskClearNode,
-  runTaskPrCreate: commandMocks.runTaskPrCreate,
+}));
+
+vi.mock("../commands/pr.js", () => ({
+  runPrCreate: commandMocks.runPrCreate,
+  runPrShow: commandMocks.runPrShow,
+  runPrList: commandMocks.runPrList,
+  runPrRespond: commandMocks.runPrRespond,
+  runPrApprove: commandMocks.runPrApprove,
+  runPrRetry: commandMocks.runPrRetry,
+  runPrMerge: commandMocks.runPrMerge,
+  runPrClose: commandMocks.runPrClose,
+  runPrAutomerge: commandMocks.runPrAutomerge,
 }));
 
 vi.mock("../commands/settings.js", () => ({
@@ -878,23 +898,29 @@ describe("bin command routing and fallbacks", () => {
       expected: { draft: true, ai: false, reviewers: ["alice", "bob"] },
     },
     {
-      args: ["task", "pr-create", "FN-001", "--draft"],
+      args: ["pr", "create", "FN-001", "--draft"],
       expected: { draft: true, ai: true },
     },
   ])("routes PR creation variants %#", async ({ args, expected }) => {
     await runBin(args);
-    expect(commandMocks.runTaskPrCreate).toHaveBeenCalledWith(
+    expect(commandMocks.runPrCreate).toHaveBeenCalledWith(
       "FN-001",
       expect.objectContaining(expected),
       undefined,
     );
   });
 
+  it("no longer dispatches the retired `fn task pr-create`", async () => {
+    await expect(runBin(["task", "pr-create", "FN-001"])).rejects.toThrow("process.exit:1");
+    expect(commandMocks.runPrCreate).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Unknown subcommand: task pr-create"));
+  });
+
   it("errors on missing pr subcommand", async () => {
     await expect(runBin(["pr"]))
       .rejects.toThrow("process.exit:1");
     expect(errorSpy).toHaveBeenCalledWith("Unknown subcommand: pr ");
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Usage: fn pr create <task-id>"));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Try: fn pr create <task-id>"));
   });
 
   it("routes task delete with allow-resurrection flag", async () => {

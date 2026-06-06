@@ -7,9 +7,7 @@ import { watchFile, unwatchFile, statSync, existsSync, readFileSync } from "node
 import { basename, join } from "node:path";
 import * as dashboard from "@fusion/dashboard";
 import {
-  classifyGhError,
   getGhErrorMessage,
-  getCurrentRepo,
   isGhAuthenticated,
   isGhAvailable,
   runGhJsonAsync,
@@ -31,17 +29,6 @@ try {
   dashboard.registerGithubTrackingHook?.();
 } catch {
   // Some tests partially mock @fusion/dashboard and omit the hook export.
-}
-
-function formatGhErrorForCli(err: unknown): string {
-  const structured = classifyGhError(err);
-  const lines = [`GitHub error: ${structured.message}`];
-  if (structured.hint) lines.push(`  Hint: ${structured.hint}`);
-  if (structured.action?.kind === "shell") lines.push(`  Action: run \`${structured.action.command}\``);
-  if (structured.action?.kind === "open") lines.push(`  Action: open ${structured.action.url}`);
-  if (structured.action?.kind === "retry") lines.push("  Action: retry the command");
-  if (structured.retryable) lines.push("  (retryable — re-run `fn pr create <task-id>` to try again)");
-  return `${lines.join("\n")}\n`;
 }
 
 function getGitHubIssueUrl(sourceMetadata: unknown): string | undefined {
@@ -1511,154 +1498,15 @@ export async function runTaskSteer(id: string, message?: string, projectName?: s
 }
 
 // ── PR Creation ─────────────────────────────────────────────────────────────
-
-export interface PrCreateOptions {
-  title?: string;
-  base?: string;
-  body?: string;
-  draft?: boolean;
-  /** When true (default), call generatePrMetadata for title/body unless user provided both. */
-  ai?: boolean;
-  /** Repeatable --reviewer flag values. */
-  reviewers?: string[];
-}
-
-export async function runTaskPrCreate(id: string, options: PrCreateOptions = {}, projectName?: string) {
-  const store = await getStore(projectName);
-
-  // Fetch task and validate it exists
-  let task;
-  try {
-    task = await store.getTask(id);
-  } catch (err) {
-    if (typeof err === "object" && err !== null && (err as Record<string, unknown>).code === "ENOENT") {
-      console.error(`Error: Task ${id} not found`);
-      process.exit(1);
-    }
-    throw err;
-  }
-
-  // Validate task is in 'in-review' column
-  if (task.column !== "in-review") {
-    console.error(`Error: Task must be in 'in-review' column to create a PR (current: ${task.column})`);
-    process.exit(1);
-  }
-
-  // Check if task already has PR info
-  if (task.prInfo) {
-    console.error(`Error: Task already has PR #${task.prInfo.number}: ${task.prInfo.url}`);
-    process.exit(1);
-  }
-
-  // Determine owner/repo from GITHUB_REPOSITORY env or git remote
-  let owner: string;
-  let repo: string;
-
-  const envRepo = process.env.GITHUB_REPOSITORY;
-  if (envRepo) {
-    const [o, r] = envRepo.split("/");
-    if (!o || !r) {
-      console.error("Error: GITHUB_REPOSITORY format is invalid (expected: owner/repo)");
-      process.exit(1);
-    }
-    owner = o;
-    repo = r;
-  } else {
-    const projectPath = await getProjectPath(projectName);
-    const gitRepo = getCurrentRepo(projectPath);
-    if (!gitRepo) {
-      console.error("Error: Could not determine GitHub repository. Set GITHUB_REPOSITORY env var or configure git remote.");
-      process.exit(1);
-    }
-    owner = gitRepo.owner;
-    repo = gitRepo.repo;
-  }
-
-  // Validate GitHub auth
-  if (!isGhAvailable() || !isGhAuthenticated()) {
-    console.error("Error: GitHub CLI (gh) is not available or not authenticated. Run 'gh auth login'.");
-    process.exit(1);
-  }
-
-  // Build branch name using the established project convention
-  const branchName = `fusion/${id.toLowerCase()}`;
-
-  // Build deterministic fallback PR title
-  const fallbackTitle = options.title
-    ? options.title
-    : task.title
-      ? task.title
-      : (() => {
-        const desc = task.description.trim();
-        let derived = desc.charAt(0).toUpperCase() + desc.slice(1, 50);
-        if (desc.length > 50) {
-          derived += "…";
-        }
-        return derived;
-      })();
-
-  let resolvedTitle = fallbackTitle;
-  let resolvedBody = options.body;
-
-  const shouldUseAi = options.ai !== false && !(options.title && options.body);
-  if (shouldUseAi) {
-    try {
-      const repoRoot = await getProjectPath(projectName);
-      const settings = ("getSettings" in store
-        ? await store.getSettings()
-        : {}) as Parameters<typeof dashboard.generatePrMetadata>[0]["settings"];
-      const generated = await dashboard.generatePrMetadata({ task, repoRoot, settings });
-      if (!options.title) {
-        resolvedTitle = generated.title;
-      }
-      if (!options.body) {
-        resolvedBody = generated.body;
-      }
-      console.log("  → Using AI-generated title/body (use --no-ai to skip)");
-    } catch (err) {
-      process.stderr.write(`AI metadata generation failed; using fallback PR metadata. ${getGhErrorMessage(err)}\n`);
-    }
-  }
-
-  // Create PR via GitHubClient
-  const client = new dashboard.GitHubClient();
-
-  try {
-    const prInfo = await client.createPr({
-      owner,
-      repo,
-      title: resolvedTitle,
-      body: resolvedBody,
-      head: branchName,
-      base: options.base,
-      draft: options.draft,
-      reviewers: options.reviewers,
-    });
-
-    // Store PR info
-    await store.updatePrInfo(task.id, prInfo);
-    await store.logEntry(task.id, "Created PR", `PR #${prInfo.number}: ${prInfo.url}`);
-
-    console.log();
-    console.log(`  ✓ Created PR for ${task.id}`);
-    console.log(`    PR #${prInfo.number}: ${prInfo.url}`);
-    console.log(`    Branch: ${branchName} → ${prInfo.baseBranch}`);
-    console.log();
-  } catch (err) {
-    // Handle specific error cases
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("already exists")) {
-      console.error(`Error: A pull request already exists for ${owner}/${repo}:${branchName}`);
-      process.exit(1);
-    } else if (msg.includes("No commits between")) {
-      console.error(`Error: No commits between ${options.base || "default base"} and ${branchName}. Push changes before creating PR.`);
-      process.exit(1);
-    } else {
-      process.stderr.write(formatGhErrorForCli(err));
-      process.exit(1);
-    }
-  }
-}
+//
+// The PR-creation implementation moved to commands/pr.ts as `runPrCreate` when
+// the per-task `fn task pr-create` command was retired in favor of the unified
+// `fn pr` namespace (U8, R13). These re-exports are kept ONLY so existing
+// importers/tests that referenced the old symbols keep resolving; `fn task
+// pr-create` no longer dispatches from bin.ts. Prefer `runPrCreate` / `fn pr
+// create` for new code.
+export type { PrCreateOptions } from "./pr.js";
+export { runPrCreate as runTaskPrCreate } from "./pr.js";
 
 // ── Planning Mode ───────────────────────────────────────────────────────────
 

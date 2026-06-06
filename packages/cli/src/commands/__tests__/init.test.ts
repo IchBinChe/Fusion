@@ -388,4 +388,34 @@ describe("init command", () => {
     );
     expect(logs.join("\n")).not.toContain("Not a git repository");
   });
+
+  it("logs when shared registration initializes git without --git", async () => {
+    mockEnsureProjectForPath.mockResolvedValueOnce({
+      outcome: "registered",
+      gitRepository: "initialized",
+      project: {
+        id: "proj_test",
+        name: "test-project",
+        path: tempProjectDir,
+        isolationMode: "in-process",
+        status: "initializing",
+        createdAt: "",
+        updatedAt: "",
+      },
+    });
+
+    const originalLog = console.log;
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => {
+      logs.push(args.join(" "));
+    };
+
+    try {
+      await runInit({ path: tempProjectDir });
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(logs.join("\n")).toContain("Initialized git repository");
+  });
 });

@@ -403,6 +403,32 @@ describe("project commands", () => {
       expect(output).toContain("Memory: initialized");
     });
 
+    it("shows git initialized message when shared registration creates a git repository", async () => {
+      mockListProjects.mockResolvedValue([]);
+      mockRegisterProject.mockResolvedValue({
+        id: "proj-1",
+        name: "demo",
+        path: "/fake/demo",
+        isolationMode: "in-process",
+      });
+      mockEnsureProjectForPath.mockResolvedValueOnce({
+        outcome: "registered",
+        gitRepository: "initialized",
+        project: {
+          id: "proj-1",
+          name: "demo",
+          path: "/fake/demo",
+          isolationMode: "in-process",
+        },
+      });
+
+      const { runProjectAdd } = await import("../project.js");
+      await runProjectAdd("demo", testPath, { force: true });
+
+      const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(output).toContain("Git: initialized");
+    });
+
     it("does not show memory message when memory files already exist", async () => {
       mockListProjects.mockResolvedValue([]);
       mockRegisterProject.mockResolvedValue({

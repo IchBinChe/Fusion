@@ -167,6 +167,9 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
 
     maybeInstallClaudeSkillForNewProject(cwd);
 
+    if (ensured.gitRepository === "initialized") {
+      console.log(`  ✓ Initialized git repository`);
+    }
     console.log(`  ✓ Registered in central database`);
     console.log(`\n✓ Project "${project.name}" initialized successfully!`);
     console.log(`\n  Next steps:`);

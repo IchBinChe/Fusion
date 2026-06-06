@@ -9,6 +9,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Connection,
   type Node as FlowNode,
   type Edge as FlowEdge,
@@ -750,6 +751,8 @@ function InnerEditor({
       // localStorage unavailable (private mode / SSR): non-fatal.
     }
   }, [settingsCollapsed]);
+  // React Flow instance for programmatic viewport control (auto-layout on load).
+  const { setViewport } = useReactFlow();
   // Wrapper around <ReactFlow> so keyboard deletion can return focus to the
   // canvas container (R6) instead of leaving it on a now-removed node.
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1070,11 +1073,15 @@ function InnerEditor({
       return;
     }
     const flow = irToFlow(activeWorkflow);
-    setNodes(flow.nodes);
-    setEdges(flow.edges);
     const loadedColumns = columnsOf(activeWorkflow);
     const loadedFields = fieldsOf(activeWorkflow);
     const loadedSettings = settingsOf(activeWorkflow);
+    // Auto-layout on load: compute tidy positions and apply them before the
+    // first render so nodes are visible in the top-left viewport.
+    const layoutPositions = autoLayout(flow.nodes, flow.edges, loadedColumns);
+    const laidOutNodes = applyAutoLayout(flow.nodes, layoutPositions);
+    setNodes(laidOutNodes);
+    setEdges(flow.edges);
     setColumns(loadedColumns);
     setFields(loadedFields);
     setSettings(loadedSettings);
@@ -1087,7 +1094,7 @@ function InnerEditor({
     loadedSnapshotRef.current = serializeGraph(
       activeWorkflow.name,
       activeWorkflow.description ?? "",
-      flow.nodes,
+      laidOutNodes,
       flow.edges,
       loadedColumns,
       loadedFields,
@@ -1096,6 +1103,8 @@ function InnerEditor({
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setValidationError(null);
+    // Position viewport at top-left so the laid-out nodes are visible.
+    setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 });
     // Honor a pending AI interpreter-only flag exactly once for the workflow it
     // just activated; otherwise the banner clears on load (U10/R11).
     if (pendingInterpreterOnlyRef.current) {
@@ -1104,7 +1113,7 @@ function InnerEditor({
     } else {
       setInterpreterOnly(false);
     }
-  }, [activeWorkflow, setNodes, setEdges]);
+  }, [activeWorkflow, setNodes, setEdges, setViewport]);
 
   // `?panel=settings` deep link (U6/U9 redirect stubs): once the active workflow
   // has loaded, scroll the settings panel into view. Runs once per editor open.

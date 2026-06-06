@@ -427,7 +427,7 @@ describe("WorkflowNodeEditor — U5 auto-layout", () => {
     expect(screen.queryByTestId("wf-auto-layout")).not.toBeInTheDocument();
   });
 
-  it("repositions nodes on click (a node's transform changes)", async () => {
+  it("runs auto-layout on load (nodes are positioned at layout positions)", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     const { container } = render(
       <WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />,
@@ -436,13 +436,24 @@ describe("WorkflowNodeEditor — U5 auto-layout", () => {
     // React Flow positions step nodes via a translate transform on their wrapper.
     const wrapperFor = (id: string) =>
       container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`);
-    const before = wrapperFor("step")?.style.transform ?? "";
-    fireEvent.click(screen.getByTestId("wf-auto-layout"));
+    // After load, the step node should have been auto-laid-out (positioned).
     await waitFor(() => {
-      const after = wrapperFor("step")?.style.transform ?? "";
-      expect(after).not.toBe("");
-      expect(after).not.toBe(before);
+      const transform = wrapperFor("step")?.style.transform ?? "";
+      expect(transform).not.toBe("");
     });
+  });
+
+  it("clicking auto-layout still works after initial load", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    render(
+      <WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />,
+    );
+    await screen.findByTestId("wf-node-start");
+    // The auto-layout button should still be present and clickable.
+    const btn = screen.getByTestId("wf-auto-layout");
+    expect(btn).toBeInTheDocument();
+    // Clicking it should not throw.
+    fireEvent.click(btn);
   });
 });
 

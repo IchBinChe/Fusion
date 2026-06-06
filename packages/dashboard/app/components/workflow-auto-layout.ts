@@ -37,8 +37,8 @@ export const WF_AUTO_LAYOUT_BAND_PADDING = 16;
 export const WF_AUTO_LAYOUT_SPACING = WF_CARD_MAX_WIDTH + WF_AUTO_LAYOUT_GAP_X;
 
 /** Left/top origin for the laid-out graph. */
-const ORIGIN_X = 40;
-const ORIGIN_Y = 40;
+const ORIGIN_X = 0;
+const ORIGIN_Y = 0;
 
 /** Row height for a stacked card (card + vertical gap). */
 const ROW_HEIGHT = WF_CARD_HEIGHT + WF_AUTO_LAYOUT_GAP_Y;

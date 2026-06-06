@@ -74,13 +74,12 @@ export function DirectoryPicker({ value, onChange, placeholder, onInputKeyDown, 
     });
   }, []);
 
-  // Fetch when browser opens
+  // Fetch when browser opens (only for the initial open before any path has been fetched)
   useEffect(() => {
-    if (browser.isOpen && !browser.loading && browser.entries.length === 0 && !browser.error) {
-      // Use browser.currentPath if available (user has navigated), otherwise fall back to value prop
-      fetchEntries(browser.currentPath || value || undefined, browser.showHidden);
+    if (browser.isOpen && !browser.loading && !browser.currentPath && !browser.error) {
+      fetchEntries(value || undefined, browser.showHidden);
     }
-  }, [browser.isOpen, browser.loading, browser.entries.length, browser.error, value, browser.showHidden, fetchEntries, nodeId, localNodeId]);
+  }, [browser.isOpen, browser.loading, browser.currentPath, browser.error, value, browser.showHidden, fetchEntries, nodeId, localNodeId]);
 
   const handleNavigate = useCallback(
     (path: string) => {
@@ -106,7 +105,8 @@ export function DirectoryPicker({ value, onChange, placeholder, onInputKeyDown, 
     if (browser.isOpen && browser.currentPath) {
       fetchEntries(browser.currentPath, browser.showHidden);
     }
-  }, [browser.showHidden]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browser.showHidden, fetchEntries]);
 
   const handleToggleCreateFolder = useCallback(() => {
     setBrowser((prev) => ({
@@ -120,12 +120,22 @@ export function DirectoryPicker({ value, onChange, placeholder, onInputKeyDown, 
   const handleCreateFolder = useCallback(async () => {
     if (!newFolderName.trim() || !browser.currentPath) return;
 
+    // Validate folder name doesn't contain path separators or traversal
+    const trimmedName = newFolderName.trim();
+    if (trimmedName.includes("/") || trimmedName.includes("\\") || trimmedName.includes("..")) {
+      setBrowser((prev) => ({
+        ...prev,
+        createFolderError: "Folder name cannot contain path separators or '..'",
+      }));
+      return;
+    }
+
     // Normalize path separator for the current platform by using the same
     // separator already present in currentPath
     const sep = browser.currentPath.includes("\\") ? "\\" : "/";
     const folderPath = browser.currentPath.endsWith(sep)
-      ? browser.currentPath + newFolderName.trim()
-      : browser.currentPath + sep + newFolderName.trim();
+      ? browser.currentPath + trimmedName
+      : browser.currentPath + sep + trimmedName;
 
     setBrowser((prev) => ({ ...prev, loading: true, createFolderError: null }));
     try {
@@ -287,7 +297,7 @@ export function DirectoryPicker({ value, onChange, placeholder, onInputKeyDown, 
                   type="button"
                   className="btn btn-sm btn-primary"
                   onClick={handleCreateFolder}
-                  disabled={!newFolderName.trim()}
+                  disabled={!newFolderName.trim() || browser.loading}
                 >
                   {t("dirPicker.createFolderConfirm", "Create")}
                 </button>

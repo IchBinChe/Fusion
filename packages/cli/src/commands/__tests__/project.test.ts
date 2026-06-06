@@ -164,7 +164,12 @@ describe("project commands", () => {
     const { runProjectAdd } = await import("../project.js");
     await runProjectAdd("demo", ".", { force: true });
 
-    expect(mockRegisterProject).toHaveBeenCalled();
+    expect(mockEnsureProjectForPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "demo",
+        path: process.cwd(),
+      }),
+    );
     const lines = consoleSpy.mock.calls.map((call) => String(call[0]));
     expect(lines.some((line) => line.includes("Registered project 'demo'"))).toBe(true);
     expect(lines.some((line) => line.includes("Location:"))).toBe(true);
@@ -339,9 +344,9 @@ describe("project commands", () => {
     expect(output).toContain("Completed: 10");
   });
 
-  it("validation exits on missing required args for runProjectAdd", async () => {
+  it("validation exits on invalid project name for runProjectAdd", async () => {
     const { runProjectAdd } = await import("../project.js");
-    await expect(runProjectAdd("", "/tmp")).rejects.toThrow("process.exit:1");
+    await expect(runProjectAdd("bad name", "/tmp")).rejects.toThrow("process.exit:1");
   });
 
   it("validation exits on missing required args for runProjectRemove", async () => {
@@ -396,6 +401,32 @@ describe("project commands", () => {
 
       const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
       expect(output).toContain("Memory: initialized");
+    });
+
+    it("shows git initialized message when shared registration creates a git repository", async () => {
+      mockListProjects.mockResolvedValue([]);
+      mockRegisterProject.mockResolvedValue({
+        id: "proj-1",
+        name: "demo",
+        path: "/fake/demo",
+        isolationMode: "in-process",
+      });
+      mockEnsureProjectForPath.mockResolvedValueOnce({
+        outcome: "registered",
+        gitRepository: "initialized",
+        project: {
+          id: "proj-1",
+          name: "demo",
+          path: "/fake/demo",
+          isolationMode: "in-process",
+        },
+      });
+
+      const { runProjectAdd } = await import("../project.js");
+      await runProjectAdd("demo", testPath, { force: true });
+
+      const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(output).toContain("Git: initialized");
     });
 
     it("does not show memory message when memory files already exist", async () => {

@@ -112,6 +112,16 @@ export {
   stripMovedSettingsKeys,
   patchContainsMovedKey,
 } from "./moved-settings.js";
+export {
+  ensureGitRepositoryForProjectPath,
+  GitRepositoryInitializationError,
+} from "./git-repository.js";
+export type {
+  GitRepositoryCommandResult,
+  GitRepositoryCommandRunner,
+  GitRepositoryEnsureOutcome,
+  EnsureGitRepositoryOptions,
+} from "./git-repository.js";
 
 // ── Trait model (U2) ─────────────────────────────────────────────────
 export type {

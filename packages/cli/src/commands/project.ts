@@ -394,6 +394,9 @@ export async function runProjectAdd(
     console.log(`    Location: ${formatDisplayPath(project.path)}`);
     console.log(`    ID: ${project.id}`);
     console.log(`    Isolation: ${project.isolationMode}`);
+    if (ensured.gitRepository === "initialized") {
+      console.log(`    Git: initialized`);
+    }
     if (memoryInitialized) {
       console.log(`    Memory: initialized`);
     }

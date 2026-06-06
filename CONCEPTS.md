@@ -49,6 +49,17 @@ The smallest unit of mission work: a single deliverable evaluated against its Co
 ### Fix Feature
 A Feature auto-generated from a failed Validator Run to carry the remediation work for the assertions that failed, linked back to the Feature it descends from.
 
+## Projects
+
+### Project
+A registered workspace that Fusion can operate on: it has a canonical local path, project-scoped settings and data, and must be backed by a usable Git work tree before task execution can create worktrees from it.
+
+### Project Identity
+The durable identity a registered Project carries locally so it can be reattached to the central registry after central state is lost or rebuilt, preserving rows keyed by the same project id instead of minting a replacement.
+
+### Project Registration
+The process that creates or reattaches a Project in Fusion's central registry for a local path. Registration is a readiness boundary: it should complete only when the path satisfies the invariants later execution depends on, such as being a Git work tree.
+
 ## Mission execution
 
 ### Autopilot

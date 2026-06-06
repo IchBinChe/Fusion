@@ -2,7 +2,7 @@ import "./TaskCard.css";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useMemo, type ReactElement } from "react";
-import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest } from "lucide-react";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
@@ -407,6 +407,12 @@ interface TaskCardProps {
   /** Card-placed custom field definitions for this task's workflow (U13/KTD-14).
    *  Empty/undefined → no field badges render (card byte-identical to today). */
   cardFieldDefs?: WorkflowFieldDefinition[];
+  /** Unified PR entity node-state for this task's work, surfaced on the card (R12).
+   *  When present, the card shows a node-state badge linking to the PR view. The
+   *  `failed` state renders a DISTINCT error badge (not the open-PR badge). */
+  prNode?: { id: string; state: "creating" | "open" | "responding" | "merged" | "closed" | "failed"; prNumber?: number };
+  /** Called when the PR node badge is clicked — opens the dedicated PR view (R12). */
+  onOpenPullRequest?: (prEntityId: string) => void;
 }
 
 function getTaskPrimaryPrInfo(task: Pick<Task, "prInfo" | "prInfos">): PrInfo | undefined {
@@ -540,6 +546,10 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.taskStuckTimeoutMs === next.taskStuckTimeoutMs &&
     previous.prAuthAvailable === next.prAuthAvailable &&
     previous.autoMergeEnabled === next.autoMergeEnabled &&
+    previous.onOpenPullRequest === next.onOpenPullRequest &&
+    previous.prNode?.id === next.prNode?.id &&
+    previous.prNode?.state === next.prNode?.state &&
+    previous.prNode?.prNumber === next.prNode?.prNumber &&
     previous.cardFieldDefs === next.cardFieldDefs &&
     (previous.cardFieldDefs == null && next.cardFieldDefs == null
       ? true
@@ -658,6 +668,8 @@ function TaskCardComponent({
   prAuthAvailable,
   autoMergeEnabled = false,
   cardFieldDefs,
+  prNode,
+  onOpenPullRequest,
 }: TaskCardProps) {
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
@@ -1874,6 +1886,41 @@ function TaskCardComponent({
               />
             ) : null}
           </>
+        )}
+        {prNode && (
+          prNode.state === "failed" ? (
+            <button
+              type="button"
+              className="card-status-badge card-pr-node-badge card-pr-node-badge--failed"
+              data-testid="pr-node-badge-failed"
+              title={t("tasks.prNodeFailedTitle", "PR creation failed — open the PR view")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPullRequest?.(prNode.id);
+              }}
+            >
+              <AlertTriangle size={10} aria-hidden="true" />
+              <span>{t("tasks.prNodeFailed", "PR failed")}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`card-status-badge card-pr-node-badge card-pr-node-badge--${prNode.state}`}
+              data-testid={`pr-node-badge-${prNode.state}`}
+              title={t("tasks.prNodeTitle", "PR {{state}} — open the PR view", { state: prNode.state })}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPullRequest?.(prNode.id);
+              }}
+            >
+              <GitPullRequest size={10} aria-hidden="true" />
+              <span>
+                {prNode.prNumber != null
+                  ? t("tasks.prNodeWithNumber", "PR #{{number}} · {{state}}", { number: prNode.prNumber, state: prNode.state })
+                  : t("tasks.prNodeState", "PR · {{state}}", { state: prNode.state })}
+              </span>
+            </button>
+          )
         )}
         {isAgentCreated && (
           <span

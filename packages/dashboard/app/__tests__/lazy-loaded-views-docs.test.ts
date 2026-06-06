@@ -18,6 +18,7 @@ const EXPECTED_DOCUMENTED_VIEWS = new Set([
   "TodoView",
   "GoalsView",
   "StashRecoveryView",
+  "PullRequestView",
   "SetupWizardModal",
   "PluginManager",
   "PiExtensionsManager",
@@ -40,6 +41,7 @@ const EXPECTED_APP_LEVEL_VIEWS = new Set([
   "TodoView",
   "GoalsView",
   "StashRecoveryView",
+  "PullRequestView",
 ]);
 
 function extractLazyLoadedSection(agentsDoc: string): string {
@@ -81,11 +83,11 @@ describe("AGENTS lazy-loaded views inventory", () => {
     const section = extractLazyLoadedSection(agentsDoc);
     const countMatch = section.match(/These\s+(\d+)\s+views\s+are lazy-loaded/);
     expect(countMatch).toBeTruthy();
-    expect(Number(countMatch?.[1])).toBe(19);
+    expect(Number(countMatch?.[1])).toBe(20);
 
     const documentedViews = extractBacktickedNamesFromBullets(section);
     expect(new Set(documentedViews)).toEqual(EXPECTED_DOCUMENTED_VIEWS);
-    expect(documentedViews).toHaveLength(19);
+    expect(documentedViews).toHaveLength(20);
 
     expect(section).toContain("`ResearchView`");
     expect(section).toContain("`TodoView`");

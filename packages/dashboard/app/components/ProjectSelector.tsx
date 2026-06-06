@@ -20,7 +20,7 @@ import { useProjectBookmarks } from "../hooks/useProjectBookmarks";
 export interface ProjectSelectorProps {
   projects: ProjectInfo[];
   currentProject: ProjectInfo | null;
-  onSelect: (project: ProjectInfo) => void;
+  onSelect?: (project: ProjectInfo) => void;
   onViewAll: () => void;
   recentProjectIds?: string[];
 }
@@ -154,12 +154,16 @@ export function ProjectSelector({
   const exactMatch = useMemo((): ProjectInfo | null => {
     if (!searchQuery.trim()) return null;
     const query = searchQuery.toLowerCase();
-    const nameMatches = filteredProjects.filter(
+    // Exclude current project — it's not shown in the dropdown
+    const candidates = filteredProjects.filter(
+      (p) => p.id !== currentProject?.id
+    );
+    const nameMatches = candidates.filter(
       (p) => p.name.toLowerCase() === query
     );
     if (nameMatches.length === 1) return nameMatches[0];
     return null;
-  }, [filteredProjects, searchQuery]);
+  }, [filteredProjects, searchQuery, currentProject]);
 
   // Organize projects for display: bookmarked first, then recent, then others
   const displayProjects = useMemo(() => {
@@ -239,7 +243,7 @@ export function ProjectSelector({
             setSearchQuery("");
           } else if (exactMatch) {
             // Auto-select exact match on Enter when nothing is highlighted
-            onSelect(exactMatch);
+            onSelect?.(exactMatch);
             setIsOpen(false);
             setSearchQuery("");
           }

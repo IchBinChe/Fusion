@@ -7,7 +7,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PluginRunner, type PluginRunnerOptions } from "../plugin-runner.js";
-import type { PluginLoader, PluginStore, PluginInstallation } from "@fusion/core";
+import {
+  __resetWorkflowExtensionRegistryForTests,
+  getWorkflowExtensionRegistry,
+  workflowExtensionRegistryId,
+  type PluginLoader,
+  type PluginStore,
+  type PluginInstallation,
+} from "@fusion/core";
 import type { FusionPlugin, PluginToolDefinition } from "@fusion/core";
 import { createLogger } from "../logger.js";
 
@@ -154,6 +161,7 @@ describe("PluginRunner", () => {
   });
 
   afterEach(() => {
+    __resetWorkflowExtensionRegistryForTests();
     vi.clearAllMocks();
   });
 
@@ -899,6 +907,31 @@ describe("PluginRunner", () => {
       expect(pluginRunner.getPluginWorkflowStepTemplates()).toEqual(templates);
       expect(pluginRunner.getPluginPromptContributions()).toEqual(prompts);
       expect(pluginRunner.getPluginSetupInfo()).toEqual(setups);
+    });
+
+    it("syncPluginWorkflowExtensions preserves force-degraded definitions across cache invalidation", async () => {
+      const extensions = [{
+        pluginId: "test-plugin",
+        extension: {
+          extensionId: "move-policy",
+          name: "Move Policy",
+          kind: "move-policy",
+          schemaVersion: 1,
+          fallback: "degradeToDefault",
+        },
+      }];
+      mockPluginLoader.getPluginWorkflowExtensions.mockReturnValue(extensions);
+      const id = workflowExtensionRegistryId("test-plugin", "move-policy");
+
+      pluginRunner.syncPluginWorkflowExtensions();
+      const degraded = pluginRunner.disablePluginWorkflowExtensions("test-plugin", { force: true });
+      (pluginRunner as unknown as { invalidateWorkflowExtensionsCache: () => void }).invalidateWorkflowExtensionsCache();
+      pluginRunner.syncPluginWorkflowExtensions();
+
+      expect(degraded.degraded).toEqual([id]);
+      expect(getWorkflowExtensionRegistry().get(id)?.degraded).toMatchObject({
+        reason: "force-disabled",
+      });
     });
 
     it("getPromptContributionsForSurface filters by surface", async () => {

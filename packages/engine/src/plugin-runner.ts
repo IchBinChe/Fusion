@@ -39,6 +39,7 @@ import {
   getTraitRegistry,
   getWorkflowExtensionRegistry,
   resolveWorkflowIrForTask,
+  workflowExtensionRegistryId,
 } from "@fusion/core";
 import { createLogger, executorLog } from "./logger.js";
 import type { WorkflowCustomNodeRunner } from "./workflow-node-handlers.js";
@@ -415,13 +416,8 @@ export class PluginRunner {
 
   getPluginWorkflowExtensions(): Array<{ pluginId: string; extension: WorkflowExtensionContribution }> {
     if (!this.cachedWorkflowExtensions || this.cachedWorkflowExtensions.version !== this.workflowExtensionsCacheVersion) {
-      const loader = this.options.pluginLoader as unknown as {
-        getPluginWorkflowExtensions?: () => Array<{ pluginId: string; extension: WorkflowExtensionContribution }>;
-      };
       this.cachedWorkflowExtensions = {
-        extensions: typeof loader.getPluginWorkflowExtensions === "function"
-          ? loader.getPluginWorkflowExtensions()
-          : [],
+        extensions: this.options.pluginLoader.getPluginWorkflowExtensions(),
         version: this.workflowExtensionsCacheVersion,
       };
     }
@@ -531,8 +527,6 @@ export class PluginRunner {
 
     for (const [pluginId, contributions] of byPlugin) {
       try {
-        const previous = this.registeredPluginWorkflowExtensionIds.get(pluginId);
-        if (previous) unregisterPluginWorkflowExtensions(registry, previous);
         const ids = registerPluginWorkflowExtensions({ registry, pluginId, contributions });
         this.registeredPluginWorkflowExtensionIds.set(pluginId, ids);
       } catch (err) {
@@ -580,7 +574,7 @@ export class PluginRunner {
     if (tracked && tracked.length > 0) return tracked;
     return this.getPluginWorkflowExtensions()
       .filter((entry) => entry.pluginId === pluginId)
-      .map((entry) => `plugin:${pluginId}:${entry.extension.extensionId}`);
+      .map((entry) => workflowExtensionRegistryId(pluginId, entry.extension.extensionId));
   }
 
   /**

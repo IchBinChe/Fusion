@@ -185,6 +185,68 @@ describe("transition-parity — store flag-ON scenarios", () => {
     expect(seen).toEqual([{ actorKind: "human", source: "board-drag" }]);
   });
 
+  it("move-policy extensions run before the task lock is held", async () => {
+    getWorkflowExtensionRegistry().register("policy-plugin", {
+      extensionId: "preflight-update",
+      name: "Preflight update",
+      kind: "move-policy",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+      evaluate: async ({ task }) => {
+        await store.updateTask(task.id, { summary: "policy evaluated outside lock" });
+        return { allowed: true };
+      },
+    });
+
+    const task = await seedInColumn("triage");
+    const moved = await store.moveTask(task.id, "todo", { moveSource: "user" });
+
+    expect(moved.column).toBe("todo");
+    expect((await store.getTask(task.id))?.summary).toBe("policy evaluated outside lock");
+  });
+
+  it("move-policy extensions cannot veto user hard-cancel moves", async () => {
+    const task = await seedInColumn("in-progress");
+    getWorkflowExtensionRegistry().register("policy-plugin", {
+      extensionId: "block-todo",
+      name: "Block todo",
+      kind: "move-policy",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+      evaluate: ({ toColumn }) => {
+        if (toColumn === "todo") return { allowed: false, reason: "todo blocked", message: "Todo is blocked" };
+        return { allowed: true };
+      },
+    });
+
+    const moved = await store.moveTask(task.id, "todo", { moveSource: "user" });
+
+    expect(moved.column).toBe("todo");
+    expect(moved.userPaused).toBe(true);
+  });
+
+  it("degrades faulting move-policy extensions when fallback is degradeToDefault", async () => {
+    getWorkflowExtensionRegistry().register("policy-plugin", {
+      extensionId: "faulty",
+      name: "Faulty",
+      kind: "move-policy",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "degradeToDefault",
+      evaluate: () => {
+        throw new Error("boom");
+      },
+    });
+
+    const task = await seedInColumn("triage");
+    const moved = await store.moveTask(task.id, "todo", { moveSource: "user" });
+
+    expect(moved.column).toBe("todo");
+    expect(getWorkflowExtensionRegistry().get("plugin:policy-plugin:faulty")?.degraded).toMatchObject({
+      reason: "runtime-fault",
+      message: "boom",
+    });
+  });
+
   it("handoffToReview maps skipMergeBlocker onto bypassGuards and enqueues exactly once", async () => {
     const task = await seedInColumn("in-progress");
     await store.handoffToReview(task.id, {

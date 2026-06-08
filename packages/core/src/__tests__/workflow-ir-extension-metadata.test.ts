@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   downgradeIrToV1IfPure,
   parseWorkflowIr,
 } from "../workflow-ir.js";
+import {
+  __resetWorkflowExtensionRegistryForTests,
+  getWorkflowExtensionRegistry,
+} from "../workflow-extension-registry.js";
+import { WORKFLOW_EXTENSION_SCHEMA_VERSION } from "../workflow-extension-types.js";
 import type { WorkflowIrV2 } from "../workflow-ir-types.js";
 
 function ir(overrides: Partial<WorkflowIrV2> = {}): WorkflowIrV2 {
@@ -20,6 +25,10 @@ function ir(overrides: Partial<WorkflowIrV2> = {}): WorkflowIrV2 {
 }
 
 describe("workflow IR extension metadata", () => {
+  afterEach(() => {
+    __resetWorkflowExtensionRegistryForTests();
+  });
+
   it("accepts plugin-namespaced column and node extension metadata", () => {
     const parsed = parseWorkflowIr(ir({
       columns: [
@@ -80,6 +89,54 @@ describe("workflow IR extension metadata", () => {
         ],
       })),
     ).toThrow(/metadata must be an object/);
+  });
+
+  it("requires enum extension fields to declare enumValues", () => {
+    getWorkflowExtensionRegistry().register("workflow-pack", {
+      extensionId: "role",
+      name: "Role",
+      kind: "column-metadata",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+      configSchema: { fields: [{ key: "role", type: "enum" }] },
+    });
+
+    expect(() =>
+      parseWorkflowIr(ir({
+        columns: [
+          {
+            id: "todo",
+            name: "todo",
+            traits: [],
+            extensions: { "plugin:workflow-pack:role": { role: "lead" } },
+          },
+        ],
+      })),
+    ).toThrow(/field 'role' is enum but has no enumValues defined/);
+  });
+
+  it("rejects enum extension field values outside enumValues", () => {
+    getWorkflowExtensionRegistry().register("workflow-pack", {
+      extensionId: "role",
+      name: "Role",
+      kind: "column-metadata",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+      configSchema: { fields: [{ key: "role", type: "enum", enumValues: ["lead", "executor"] }] },
+    });
+
+    expect(() =>
+      parseWorkflowIr(ir({
+        columns: [
+          {
+            id: "todo",
+            name: "todo",
+            traits: [],
+            extensions: { "plugin:workflow-pack:role": { role: "reviewer" } },
+          },
+        ],
+      })),
+    ).toThrow(/must be one of: lead, executor/);
   });
 
   it("keeps v2 when otherwise-pure workflows carry extension metadata", () => {

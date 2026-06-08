@@ -12,9 +12,7 @@ export function registerPluginWorkflowExtensions(params: {
   const registered: string[] = [];
   for (const contribution of params.contributions) {
     const id = workflowExtensionRegistryId(params.pluginId, contribution.extensionId);
-    if (!params.registry.get(id)) {
-      params.registry.register(params.pluginId, contribution);
-    }
+    params.registry.upsert(params.pluginId, contribution);
     registered.push(id);
   }
   return registered;

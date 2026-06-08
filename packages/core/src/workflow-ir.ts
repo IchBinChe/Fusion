@@ -980,7 +980,12 @@ function validateExtensionFieldValue(
       );
     }
     const enumValue: string = value;
-    if (field.enumValues && !field.enumValues.includes(enumValue)) {
+    if (!field.enumValues || field.enumValues.length === 0) {
+      throw new WorkflowIrError(
+        `${owner} extension '${key}' field '${field.key}' is enum but has no enumValues defined`,
+      );
+    }
+    if (!field.enumValues.includes(enumValue)) {
       throw new WorkflowIrError(
         `${owner} extension '${key}' field '${field.key}' must be one of: ${field.enumValues.join(", ")}`,
       );

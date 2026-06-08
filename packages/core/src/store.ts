@@ -1218,7 +1218,13 @@ interface MoveTaskInternalOptions {
   ownerAgentId?: string | null;
   evidence?: HandoffToReviewOptions["evidence"];
   now?: string;
+  movePolicyPreflight?: {
+    fromColumn: string;
+    toColumn: string;
+  };
 }
+
+const WORKFLOW_MOVE_POLICY_TIMEOUT_MS = 5000;
 
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private static readonly ACTIVE_TASKS_WHERE = '"deletedAt" IS NULL';
@@ -6279,7 +6285,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // ColumnId admits workflow-defined custom column ids (KTD-1). Both paths
     // runtime-validate: flag-ON against the task's resolved workflow, flag-OFF
     // via the VALID_TRANSITIONS lookup (non-legacy ids reject as before).
-    return this.withTaskLock(id, () => this.moveTaskInternal(id, toColumn, options, { fromHandoff: false }));
+    const movePolicyPreflight = await this.prepareWorkflowMovePolicyPreflight(id, toColumn, options, { fromHandoff: false });
+    return this.withTaskLock(id, () => this.moveTaskInternal(id, toColumn, options, { fromHandoff: false, movePolicyPreflight }));
   }
 
   async handoffToReview(taskId: string, opts: HandoffToReviewOptions): Promise<Task> {
@@ -6346,6 +6353,65 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return { kind: "engine" };
   }
 
+  private resolveWorkflowBypassGuards(
+    moveSource: NonNullable<MoveTaskOptions["moveSource"]>,
+    options?: MoveTaskOptions,
+  ): boolean {
+    return options?.recoveryRehome === true ||
+      (options?.bypassGuards ??
+        (moveSource === "engine" || moveSource === "scheduler" || options?.skipMergeBlocker === true));
+  }
+
+  private shouldSkipWorkflowMovePolicies(params: {
+    fromColumn: string;
+    toColumn: string;
+    moveSource: NonNullable<MoveTaskOptions["moveSource"]>;
+    bypassGuards: boolean;
+    options?: MoveTaskOptions;
+  }): boolean {
+    if (params.bypassGuards) return true;
+    if (params.options?.recoveryRehome === true) return true;
+    return params.moveSource === "user" && params.fromColumn === "in-progress" && params.toColumn === "todo";
+  }
+
+  private async prepareWorkflowMovePolicyPreflight(
+    id: string,
+    toColumn: ColumnId,
+    options: MoveTaskOptions | undefined,
+    internal: MoveTaskInternalOptions,
+  ): Promise<MoveTaskInternalOptions["movePolicyPreflight"]> {
+    const task = await this.readTaskForMove(id);
+    const moveSource = options?.moveSource ?? "engine";
+    const mergedSettingsForMove = await this.getSettingsFast();
+    if (!isWorkflowColumnsEnabled(mergedSettingsForMove)) return undefined;
+    if (task.column === toColumn) return undefined;
+
+    const workflowIr = this.resolveTaskWorkflowIrSync(id);
+    const bypassGuards = this.resolveWorkflowBypassGuards(moveSource, options);
+    const fromColumn = task.column;
+    if (this.shouldSkipWorkflowMovePolicies({ fromColumn, toColumn, moveSource, bypassGuards, options })) {
+      return undefined;
+    }
+
+    const recoveryToLegacy =
+      options?.recoveryRehome === true && (COLUMNS as readonly string[]).includes(toColumn);
+    if (!workflowHasColumn(workflowIr, toColumn) && !recoveryToLegacy) return undefined;
+
+    const allowed = resolveAllowedColumns(workflowIr, fromColumn);
+    if (options?.recoveryRehome !== true && !allowed.includes(toColumn)) return undefined;
+
+    await this.evaluateWorkflowMovePolicies({
+      task,
+      workflow: workflowIr,
+      fromColumn,
+      toColumn,
+      actor: this.resolveWorkflowMoveActor(moveSource, internal, options),
+      source: options?.workflowMoveSource ?? moveSource,
+      metadata: options?.workflowMoveMetadata,
+    });
+    return { fromColumn, toColumn };
+  }
+
   private async evaluateWorkflowMovePolicies(input: WorkflowMovePolicyInput): Promise<void> {
     const policies = getWorkflowExtensionRegistry().list("move-policy");
     for (const definition of policies) {
@@ -6354,7 +6420,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
       let decision: Awaited<ReturnType<NonNullable<typeof extension.evaluate>>>;
       try {
-        decision = await extension.evaluate(input);
+        decision = await new Promise<Awaited<ReturnType<NonNullable<typeof extension.evaluate>>>>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error(`timed out after ${WORKFLOW_MOVE_POLICY_TIMEOUT_MS}ms`));
+          }, WORKFLOW_MOVE_POLICY_TIMEOUT_MS);
+          Promise.resolve(extension.evaluate?.(input))
+            .then((value) => {
+              clearTimeout(timer);
+              resolve(value as Awaited<ReturnType<NonNullable<typeof extension.evaluate>>>);
+            })
+            .catch((error) => {
+              clearTimeout(timer);
+              reject(error);
+            });
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         storeLog.warn("Workflow move-policy extension faulted", {
@@ -6364,7 +6443,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           fallback: extension.fallback,
           error: message,
         });
-        if (extension.fallback === "degradeToDefault") continue;
+        if (extension.fallback === "degradeToDefault") {
+          getWorkflowExtensionRegistry().degrade([definition.id], "runtime-fault", message);
+          continue;
+        }
         throw new TransitionRejectionError(
           makeTransitionRejection(
             "guard-rejected",
@@ -6417,10 +6499,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // call sites map onto it. Capacity (KTD-10) is NEVER bypassed by this — the
     // capacity check is not a guard (U6 fills the enforcement; U4 leaves a
     // pass-through slot). An explicit option value wins; otherwise derive it.
-    const bypassGuards =
-      options?.recoveryRehome === true ||
-      (options?.bypassGuards ??
-        (moveSource === "engine" || moveSource === "scheduler" || options?.skipMergeBlocker === true));
+    const bypassGuards = this.resolveWorkflowBypassGuards(moveSource, options);
     const workflowIr: WorkflowIr | undefined = useWorkflow
       ? this.resolveTaskWorkflowIrSync(id)
       : undefined;
@@ -6526,15 +6605,29 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             `Valid targets: ${allowed.join(", ") || "none"}`,
         );
       }
-      await this.evaluateWorkflowMovePolicies({
-        task,
-        workflow: workflowIr,
+      const skipWorkflowMovePolicies = this.shouldSkipWorkflowMovePolicies({
         fromColumn,
         toColumn,
-        actor: this.resolveWorkflowMoveActor(moveSource, internal, options),
-        source: options?.workflowMoveSource ?? moveSource,
-        metadata: options?.workflowMoveMetadata,
+        moveSource,
+        bypassGuards,
+        options,
       });
+      if (!skipWorkflowMovePolicies) {
+        if (
+          internal.movePolicyPreflight?.fromColumn !== fromColumn ||
+          internal.movePolicyPreflight?.toColumn !== toColumn
+        ) {
+          throw new TransitionRejectionError(
+            makeTransitionRejection(
+              "guard-rejected",
+              "transition.rejected.workflowMovePolicy",
+              true,
+              "Workflow move policy preflight is stale; retry the move",
+            ),
+            `Cannot move ${id} to '${toColumn}': workflow move policy preflight is stale`,
+          );
+        }
+      }
       // 3. Sync trait guards (in-lock). Skipped entirely when bypassGuards
       //    (engine/recovery moves, KTD-9). The default workflow's merge-blocker
       //    trait reads the same getTaskMergeBlocker.

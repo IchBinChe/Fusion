@@ -24,7 +24,7 @@ export interface WorkflowExtensionDefinition {
   pluginId: string;
   extension: WorkflowExtensionContribution;
   degraded?: {
-    reason: "force-disabled" | "plugin-unloaded";
+    reason: "force-disabled" | "plugin-unloaded" | "runtime-fault";
     message: string;
   };
 }
@@ -59,6 +59,16 @@ export class WorkflowExtensionRegistry {
     const definition = { id, pluginId, extension };
     this.definitions.set(id, definition);
     return definition;
+  }
+
+  upsert(pluginId: string, extension: WorkflowExtensionContribution): WorkflowExtensionDefinition {
+    const id = workflowExtensionRegistryId(pluginId, extension.extensionId);
+    const existing = this.definitions.get(id);
+    if (existing) {
+      existing.extension = extension;
+      return existing;
+    }
+    return this.register(pluginId, extension);
   }
 
   unregister(id: string): boolean {

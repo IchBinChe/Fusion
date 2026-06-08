@@ -8159,14 +8159,18 @@ export async function aiMergeTask(
     const providerManualRoute =
       autoMergeFacts.route === "manual-required" ||
       autoMergeFacts.route === "blocked";
-    const initialState = task.autoMerge === false || providerManualRoute ? "manual-required" : "queued";
+    const autoMergeManuallyGated =
+      task.autoMerge === false ||
+      (settings.autoMerge === false && task.autoMerge !== true) ||
+      providerManualRoute;
+    const initialState = autoMergeManuallyGated ? "manual-required" : "queued";
     const existingRecord = store.getMergeRequestRecord(task.id);
     const currentState = existingRecord?.state ?? initialState;
     if (!existingRecord) {
       store.upsertMergeRequestRecord(task.id, { state: initialState });
     }
 
-    if (task.autoMerge !== false) {
+    if (!autoMergeManuallyGated) {
       if (currentState === "retrying") {
         store.transitionMergeRequestState(task.id, "queued");
         store.transitionMergeRequestState(task.id, "running");

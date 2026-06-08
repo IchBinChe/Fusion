@@ -5,11 +5,14 @@ import {
 } from "../workflow-extension-registry.js";
 import type { WorkflowExtensionContribution } from "../workflow-extension-types.js";
 
-function extension(extensionId = "move-policy"): WorkflowExtensionContribution {
+function extension(
+  extensionId = "move-policy",
+  kind: WorkflowExtensionContribution["kind"] = "move-policy",
+): WorkflowExtensionContribution {
   return {
     extensionId,
     name: "Move Policy",
-    kind: "move-policy",
+    kind,
     schemaVersion: 1,
     fallback: "degradeToDefault",
   };
@@ -37,7 +40,7 @@ describe("WorkflowExtensionRegistry", () => {
   it("unregisters all extensions for a plugin", () => {
     const registry = new WorkflowExtensionRegistry();
     registry.register("plugin-a", extension("move-policy"));
-    registry.register("plugin-a", extension("work-engine"));
+    registry.register("plugin-a", extension("work-engine", "work-engine"));
     registry.register("plugin-b", extension("move-policy"));
 
     expect(registry.unregisterPlugin("plugin-a")).toEqual([

@@ -494,7 +494,7 @@ export class WorkflowGraphExecutor {
     }
     return {
       outcome: "success",
-      value: result.outcome.slice("outcome:".length),
+      value: result.value ?? result.outcome.slice("outcome:".length),
       contextPatch: result.contextPatch,
     };
   }
@@ -525,7 +525,19 @@ export class WorkflowGraphExecutor {
         });
         return this.normalizePluginNodeResult(result);
       } catch (error) {
-        if (extension.fallback === "degradeToDefault") continue;
+        if (extension.fallback === "degradeToDefault") {
+          try {
+            registry.degrade(
+              [definition.id],
+              "runtime-fault",
+              error instanceof Error ? error.message : String(error),
+            );
+          } catch {
+            // Degradation is best-effort; falling through to the default node
+            // handler is still the correct fallback for this invocation.
+          }
+          continue;
+        }
         return {
           outcome: "failure",
           value: "plugin-node-handler-error",

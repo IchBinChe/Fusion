@@ -512,6 +512,38 @@ describe("aiMergeTask pre-merge fetch + fast-forward (smart strategies)", () => 
     expect(store.upsertMergeRequestRecord).toHaveBeenCalledWith("FN-5741-MANUAL", { state: "manual-required" });
     expect(store.transitionMergeRequestState).not.toHaveBeenCalledWith("FN-5741-MANUAL", "running");
   });
+
+  it("keeps globally disabled auto-merge records in manual-required unless the task opts in", async () => {
+    const store = createMockStore({ id: "FN-5741-GLOBAL-MANUAL", worktree: "/tmp/root", autoMerge: undefined });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      mergeRequestContractShadowEnabled: true,
+      autoMerge: false,
+    });
+    setupSyncMock({ behind: 0, ahead: 0 });
+
+    await aiMergeTask(store, "/tmp/root", "FN-5741-GLOBAL-MANUAL");
+
+    expect(store.upsertMergeRequestRecord).toHaveBeenCalledWith("FN-5741-GLOBAL-MANUAL", { state: "manual-required" });
+    expect(store.transitionMergeRequestState).not.toHaveBeenCalledWith("FN-5741-GLOBAL-MANUAL", "running");
+  });
+
+  it("allows task-level autoMerge true to opt into shadow merge when global auto-merge is disabled", async () => {
+    const store = createMockStore({ id: "FN-5741-TASK-OPT-IN", worktree: "/tmp/root", autoMerge: true });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      mergeRequestContractShadowEnabled: true,
+      autoMerge: false,
+    });
+    setupSyncMock({ behind: 0, ahead: 0 });
+
+    await aiMergeTask(store, "/tmp/root", "FN-5741-TASK-OPT-IN");
+
+    expect(store.upsertMergeRequestRecord).toHaveBeenCalledWith("FN-5741-TASK-OPT-IN", { state: "queued" });
+    expect(store.transitionMergeRequestState).toHaveBeenCalledWith("FN-5741-TASK-OPT-IN", "running");
+  });
 });
 
 
@@ -3218,5 +3250,4 @@ describe("aiMergeTask post-squash audit gate", () => {
     ).toBe(false);
   });
 });
-
 

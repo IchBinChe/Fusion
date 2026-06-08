@@ -1567,24 +1567,28 @@ export function ListView({
   };
 
   const renderWorkflowSelector = () => {
-    if (!workflowMode || workflowOptions.length <= 1 || !selectedWorkflow) return null;
+    if (!workflowMode) return null;
+    const showSelect = workflowOptions.length > 1 && selectedWorkflow;
+    if (!showSelect && !onCreateWorkflow) return null;
     return (
       <div className="list-workflow-control">
-        <label className="list-workflow-selector">
-          <span>{t("listView.workflowLabel", "Workflow")}</span>
-          <select
-            className="select list-workflow-select"
-            value={selectedWorkflow.id}
-            onChange={(event) => setSelectedWorkflowId(event.target.value)}
-            aria-label={t("listView.workflowSelectLabel", "Select workflow")}
-          >
-            {workflowOptions.map((workflow) => (
-              <option key={workflow.id} value={workflow.id}>
-                {workflow.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {showSelect && (
+          <label className="list-workflow-selector">
+            <span>{t("listView.workflowLabel", "Workflow")}</span>
+            <select
+              className="select list-workflow-select"
+              value={selectedWorkflow!.id}
+              onChange={(event) => setSelectedWorkflowId(event.target.value)}
+              aria-label={t("listView.workflowSelectLabel", "Select workflow")}
+            >
+              {workflowOptions.map((workflow) => (
+                <option key={workflow.id} value={workflow.id}>
+                  {workflow.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {onCreateWorkflow && (
           <button
             type="button"

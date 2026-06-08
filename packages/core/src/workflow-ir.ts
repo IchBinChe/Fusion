@@ -8,6 +8,7 @@ import type {
   WorkflowIrV2,
   WorkflowHoldRelease,
   WorkflowForeachConfig,
+  WorkflowLoopConfig,
   WorkflowFieldDefinition,
   WorkflowFieldType,
   WorkflowSettingDefinition,
@@ -95,6 +96,8 @@ const MAX_REWORK_CYCLES_CAP = 10;
 
 /** Parallel concurrency bounds (KTD-3): range 1..8. */
 const MAX_FOREACH_CONCURRENCY = 8;
+const MAX_LOOP_ITERATIONS_CAP = 50;
+const MAX_LOOP_TIMEOUT_MS = 3_600_000;
 const WORKFLOW_EXTENSION_KEY_PATTERN = /^plugin:[a-z0-9]([a-z0-9-]*[a-z0-9])?:[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /** The implicit step-source artifact allowed when no artifacts are declared. */
@@ -440,6 +443,141 @@ function validateForeach(
     if (topLevelNodeIds.has(id)) {
       throw new WorkflowIrError(
         `foreach node '${node.id}' template node id '${id}' collides with a top-level node id`,
+      );
+    }
+  }
+}
+
+function validateLoop(
+  node: WorkflowIrNode,
+  topLevelNodeIds: Set<string>,
+  columnIds: Set<string>,
+): void {
+  const cfg = node.config as Partial<WorkflowLoopConfig> | undefined;
+  const template = cfg?.template;
+  if (
+    !cfg ||
+    !template ||
+    !Array.isArray(template.nodes) ||
+    !Array.isArray(template.edges)
+  ) {
+    throw new WorkflowIrError(
+      `loop node '${node.id}' must declare a template with nodes and edges arrays`,
+    );
+  }
+  if (template.nodes.length === 0) {
+    throw new WorkflowIrError(`loop node '${node.id}' template must be non-empty`);
+  }
+  if (cfg.maxIterations !== undefined) {
+    const m = cfg.maxIterations;
+    if (typeof m !== "number" || !Number.isInteger(m) || m < 1) {
+      throw new WorkflowIrError(`loop node '${node.id}' maxIterations must be an integer >= 1`);
+    }
+  }
+  if (cfg.timeoutMs !== undefined) {
+    const t = cfg.timeoutMs;
+    if (typeof t !== "number" || !Number.isInteger(t) || t < 1 || t > MAX_LOOP_TIMEOUT_MS) {
+      throw new WorkflowIrError(
+        `loop node '${node.id}' timeoutMs must be an integer in 1..${MAX_LOOP_TIMEOUT_MS}`,
+      );
+    }
+  }
+
+  const exitWhen = cfg.exitWhen as WorkflowLoopConfig["exitWhen"] | undefined;
+  if (!exitWhen || typeof exitWhen !== "object") {
+    throw new WorkflowIrError(`loop node '${node.id}' must declare exitWhen`);
+  }
+  if (exitWhen.type === "output-contains") {
+    if (typeof exitWhen.value !== "string" || exitWhen.value.length === 0) {
+      throw new WorkflowIrError(`loop node '${node.id}' exitWhen.value must be a non-empty string`);
+    }
+  } else if (exitWhen.type === "output-matches") {
+    if (typeof exitWhen.pattern !== "string" || exitWhen.pattern.length === 0) {
+      throw new WorkflowIrError(`loop node '${node.id}' exitWhen.pattern must be a non-empty string`);
+    }
+    if (exitWhen.flags !== undefined && typeof exitWhen.flags !== "string") {
+      throw new WorkflowIrError(`loop node '${node.id}' exitWhen.flags must be a string when present`);
+    }
+    try {
+      new RegExp(exitWhen.pattern, exitWhen.flags);
+    } catch (err) {
+      throw new WorkflowIrError(
+        `loop node '${node.id}' exitWhen.pattern is invalid: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  } else {
+    throw new WorkflowIrError(`loop node '${node.id}' exitWhen.type must be output-contains or output-matches`);
+  }
+
+  const templateNodes = template.nodes;
+  const templateIds = new Set(templateNodes.map((n) => n.id));
+  if (templateIds.size !== templateNodes.length) {
+    throw new WorkflowIrError(`loop node '${node.id}' template has duplicate node ids`);
+  }
+  if (exitWhen.nodeId !== undefined && !templateIds.has(exitWhen.nodeId)) {
+    throw new WorkflowIrError(
+      `loop node '${node.id}' exitWhen.nodeId '${exitWhen.nodeId}' is not in the template`,
+    );
+  }
+  for (const inner of templateNodes) {
+    if (inner.kind === "loop" || inner.kind === "foreach") {
+      throw new WorkflowIrError(
+        `loop node '${node.id}' template may not contain nested loop/foreach ('${inner.id}')`,
+      );
+    }
+    if (isStepExecuteNode(inner)) {
+      throw new WorkflowIrError(
+        `step-execute seam node '${inner.id}' is only legal inside a foreach template`,
+      );
+    }
+    if (inner.column !== undefined && !columnIds.has(inner.column)) {
+      throw new WorkflowIrError(
+        `Workflow node '${inner.id}' references undefined column '${inner.column}'`,
+      );
+    }
+  }
+  for (const edge of template.edges) {
+    const fromInside = templateIds.has(edge.from);
+    const toInside = templateIds.has(edge.to);
+    if (!fromInside || !toInside) {
+      throw new WorkflowIrError(
+        `loop node '${node.id}' template edge '${edge.from}' -> '${edge.to}' references a node outside the template`,
+      );
+    }
+    if (isReworkEdge(edge)) {
+      throw new WorkflowIrError(`loop node '${node.id}' template may not contain rework edges`);
+    }
+  }
+
+  const incoming = new Map<string, number>();
+  const outgoingCount = new Map<string, number>();
+  for (const edge of template.edges) {
+    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
+    outgoingCount.set(edge.from, (outgoingCount.get(edge.from) ?? 0) + 1);
+  }
+  const entries = templateNodes.filter((n) => (incoming.get(n.id) ?? 0) === 0);
+  const exits = templateNodes.filter((n) => (outgoingCount.get(n.id) ?? 0) === 0);
+  if (entries.length !== 1) {
+    throw new WorkflowIrError(
+      `loop node '${node.id}' template must have exactly one entry node (found ${entries.length})`,
+    );
+  }
+  if (exits.length !== 1) {
+    throw new WorkflowIrError(
+      `loop node '${node.id}' template must have exactly one exit node (found ${exits.length})`,
+    );
+  }
+
+  const templateById = new Map(templateNodes.map((n) => [n.id, n]));
+  const templateOutgoing = buildOutgoing(template.edges);
+  validateNoIllegalCycles(templateNodes, templateOutgoing);
+  validateParallelism(templateNodes, templateOutgoing, templateById);
+  validateStepReviewRouting(templateNodes, templateOutgoing, templateById, false);
+
+  for (const id of templateIds) {
+    if (topLevelNodeIds.has(id)) {
+      throw new WorkflowIrError(
+        `loop node '${node.id}' template node id '${id}' collides with a top-level node id`,
       );
     }
   }
@@ -1049,6 +1187,7 @@ function validateV2(ir: WorkflowIrV2): void {
   validateStepExecutePlacement(ir.nodes);
   for (const node of ir.nodes) {
     if (node.kind === "foreach") validateForeach(node, topLevelIds, columnIds);
+    if (node.kind === "loop") validateLoop(node, topLevelIds, columnIds);
   }
   validateStepReviewRouting(ir.nodes, outgoing, nodesById, false);
   validateParseStepsNodes(ir);
@@ -1083,6 +1222,17 @@ function validateV2(ir: WorkflowIrV2): void {
  *  maxRetries clamp posture (KTD-5). Reject-of-<1 happens in validation. */
 function clampForeachConfigs(ir: WorkflowIrV2): void {
   for (const node of ir.nodes) {
+    if (node.kind === "loop") {
+      const cfg = node.config as Partial<WorkflowLoopConfig> | undefined;
+      if (
+        cfg &&
+        typeof cfg.maxIterations === "number" &&
+        cfg.maxIterations > MAX_LOOP_ITERATIONS_CAP
+      ) {
+        cfg.maxIterations = MAX_LOOP_ITERATIONS_CAP;
+      }
+      continue;
+    }
     if (node.kind !== "foreach") continue;
     const cfg = node.config as Partial<WorkflowForeachConfig> | undefined;
     if (

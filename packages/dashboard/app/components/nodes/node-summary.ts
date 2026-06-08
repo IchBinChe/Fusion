@@ -158,6 +158,24 @@ export function nodeConfigSummary(
       const isolation = str(config.isolation) || (mode === "parallel" ? "worktree" : "shared");
       return `${mode} · ${isolation}`;
     }
+    case "loop": {
+      const exitWhen = config.exitWhen as unknown;
+      const exit =
+        exitWhen && typeof exitWhen === "object"
+          ? (() => {
+              const condition = exitWhen as Record<string, unknown>;
+              const type = str(condition.type);
+              if (type === "output-matches") return `until matches /${str(condition.pattern)}/`;
+              if (type === "output-contains") return `until contains "${str(condition.value)}"`;
+              return "";
+            })()
+          : "";
+      const maxIterations =
+        typeof config.maxIterations === "number" && Number.isFinite(config.maxIterations)
+          ? `${config.maxIterations}x`
+          : "3x";
+      return exit ? `${exit} · ${maxIterations}` : maxIterations;
+    }
     case "step-review": {
       const reviewType = str(config.type) || "code";
       return t("workflowNodes.summaryReviewType", "{{type}} review", { type: reviewType });

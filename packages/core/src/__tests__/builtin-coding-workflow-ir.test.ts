@@ -6,6 +6,17 @@ import {
   serializeWorkflowIr,
 } from "../index.js";
 
+const EXECUTE_NODE_MAX_RETRIES = 2;
+
+function executeNodeConfig(ir = BUILTIN_CODING_WORKFLOW_IR): Record<string, unknown> {
+  const executeNodes = ir.nodes.filter((node) => node.id === "execute" && node.config?.seam === "execute");
+  expect(executeNodes).toHaveLength(1);
+  const config = executeNodes[0].config;
+  expect(config).toBeDefined();
+  expect(Object.keys(config ?? {})).not.toHaveLength(0);
+  return config ?? {};
+}
+
 describe("builtin coding workflow ir", () => {
   it("parses and round-trips", () => {
     const parsed = parseWorkflowIr(BUILTIN_CODING_WORKFLOW_IR);
@@ -64,5 +75,25 @@ describe("builtin coding workflow ir", () => {
     expect(byId.get("execute")?.config?.name).toBe("Execute");
     expect(byId.get("review")?.config?.name).toBe("Review");
     expect(byId.get("merge")?.config?.name).toBe("Merge boundary");
+  });
+
+  it("declares a bounded retry budget only on the execute seam", () => {
+    const config = executeNodeConfig();
+    expect(config.maxRetries).toBe(EXECUTE_NODE_MAX_RETRIES);
+    expect(Number.isInteger(config.maxRetries)).toBe(true);
+    expect(config.maxRetries).toBeGreaterThanOrEqual(1);
+    expect(config.maxRetries).toBeLessThanOrEqual(10);
+
+    const byId = new Map(BUILTIN_CODING_WORKFLOW_IR.nodes.map((n) => [n.id, n]));
+    expect(byId.get("review")?.config?.name).toBe("Review");
+    expect(byId.get("merge")?.config?.name).toBe("Merge boundary");
+    expect(byId.get("review")?.config?.maxRetries).toBeUndefined();
+    expect(byId.get("merge")?.config?.maxRetries).toBeUndefined();
+  });
+
+  it("preserves the execute retry declaration through parse/serialize round-trip", () => {
+    const reparsed = parseWorkflowIr(serializeWorkflowIr(BUILTIN_CODING_WORKFLOW_IR));
+    const config = executeNodeConfig(reparsed);
+    expect(config.maxRetries).toBe(EXECUTE_NODE_MAX_RETRIES);
   });
 });

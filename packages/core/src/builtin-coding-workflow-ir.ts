@@ -47,7 +47,12 @@ const RAW_BUILTIN_CODING_WORKFLOW_IR: WorkflowIr = {
   ],
   nodes: [
     { id: "start", kind: "start", column: "triage" },
-    { id: "execute", kind: "prompt", column: "in-progress", config: builtinPromptConfig("execute", "Execute") },
+    {
+      id: "execute",
+      kind: "prompt",
+      column: "in-progress",
+      config: { ...builtinPromptConfig("execute", "Execute"), maxRetries: 2 },
+    },
     { id: "review", kind: "prompt", column: "in-review", config: builtinPromptConfig("review", "Review") },
     { id: "merge", kind: "prompt", column: "in-review", config: builtinPromptConfig("merge", "Merge boundary") },
     { id: "end", kind: "end", column: "done" },

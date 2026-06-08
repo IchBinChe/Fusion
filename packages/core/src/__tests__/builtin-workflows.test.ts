@@ -7,6 +7,8 @@ import { compileWorkflowToSteps } from "../workflow-compiler.js";
 import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
+const EXECUTE_NODE_MAX_RETRIES = 2;
+
 describe("built-in workflows", () => {
   // Graph-only built-ins (step inversion, KTD-9) model branching/foreach/rework
   // structure the linear compiler cannot lower to a step list — they run only
@@ -85,6 +87,31 @@ describe("built-in workflows", () => {
     expect(BUILTIN_CODING_WORKFLOW_IR.columns.map((c) => c.id)).toEqual([
       ...DEFAULT_WORKFLOW_COLUMN_IDS,
     ]);
+  });
+
+  it("builtin:coding exposes execute retries after registry lookup and parse round-trip", () => {
+    const coding = getBuiltinWorkflow("builtin:coding");
+    expect(coding).toBeDefined();
+    const ir = parseWorkflowIr(coding!.ir);
+    const reparsed = parseWorkflowIr(serializeWorkflowIr(ir));
+
+    for (const candidate of [ir, reparsed]) {
+      const executeNodes = candidate.nodes.filter((node) => node.id === "execute" && node.config?.seam === "execute");
+      expect(executeNodes).toHaveLength(1);
+      const executeConfig = executeNodes[0].config;
+      expect(executeConfig).toBeDefined();
+      expect(Object.keys(executeConfig ?? {})).not.toHaveLength(0);
+      expect(executeConfig?.maxRetries).toBe(EXECUTE_NODE_MAX_RETRIES);
+      expect(Number.isInteger(executeConfig?.maxRetries)).toBe(true);
+      expect(executeConfig?.maxRetries).toBeGreaterThanOrEqual(1);
+      expect(executeConfig?.maxRetries).toBeLessThanOrEqual(10);
+
+      const byId = new Map(candidate.nodes.map((node) => [node.id, node]));
+      expect(byId.get("review")?.config?.name).toBe("Review");
+      expect(byId.get("merge")?.config?.name).toBe("Merge boundary");
+      expect(byId.get("review")?.config?.maxRetries).toBeUndefined();
+      expect(byId.get("merge")?.config?.maxRetries).toBeUndefined();
+    }
   });
 
   it("builtin:coding exposes merge-blocker and human-review traits on in-review", () => {

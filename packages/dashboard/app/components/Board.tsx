@@ -551,7 +551,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
                 prAuthAvailable={prAuthAvailable}
                 autoMerge={autoMerge}
                 {...(isCreateColumn ? { onQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
-                {...(columnDef.flags.mergeBlocker ? { onToggleAutoMerge } : {})}
+                {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge } : {})}
               />
             );
           })}

@@ -48,10 +48,10 @@ const columnRenderCounts: Record<string, number> = {};
 
 // Mock child components so we only test Board's own rendering
 vi.mock("../Column", () => ({
-  Column: React.memo(({ column, tasks, onToggleCollapse, onQuickCreate, onNewTask, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, workflowStepNameLookup }: { column: string; tasks: Task[]; onToggleCollapse?: () => void; onQuickCreate?: unknown; onNewTask?: unknown; favoriteProviders?: string[]; favoriteModels?: string[]; onToggleFavorite?: (provider: string) => void; onToggleModelFavorite?: (modelId: string) => void; isSearchActive?: boolean; workflowStepNameLookup?: ReadonlyMap<string, string> }) => {
+  Column: React.memo(({ column, tasks, onToggleCollapse, onQuickCreate, onNewTask, onToggleAutoMerge, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, workflowStepNameLookup }: { column: string; tasks: Task[]; onToggleCollapse?: () => void; onQuickCreate?: unknown; onNewTask?: unknown; onToggleAutoMerge?: () => void; favoriteProviders?: string[]; favoriteModels?: string[]; onToggleFavorite?: (provider: string) => void; onToggleModelFavorite?: (modelId: string) => void; isSearchActive?: boolean; workflowStepNameLookup?: ReadonlyMap<string, string> }) => {
     columnRenderCounts[column] = (columnRenderCounts[column] ?? 0) + 1;
     return (
-      <div data-testid={`column-${column}`} data-tasks={JSON.stringify(tasks)} data-has-quick-create={onQuickCreate ? "yes" : "no"} data-has-new-task={onNewTask ? "yes" : "no"} data-favorite-providers={JSON.stringify(favoriteProviders ?? [])} data-favorite-models={JSON.stringify(favoriteModels ?? [])} data-has-toggle-favorite={onToggleFavorite ? "yes" : "no"} data-has-toggle-model-favorite={onToggleModelFavorite ? "yes" : "no"} data-is-search-active={isSearchActive ? "true" : "false"} data-workflow-lookup-size={String(workflowStepNameLookup?.size ?? 0)}>
+      <div data-testid={`column-${column}`} data-tasks={JSON.stringify(tasks)} data-has-quick-create={onQuickCreate ? "yes" : "no"} data-has-new-task={onNewTask ? "yes" : "no"} data-has-auto-merge-toggle={onToggleAutoMerge ? "yes" : "no"} data-favorite-providers={JSON.stringify(favoriteProviders ?? [])} data-favorite-models={JSON.stringify(favoriteModels ?? [])} data-has-toggle-favorite={onToggleFavorite ? "yes" : "no"} data-has-toggle-model-favorite={onToggleModelFavorite ? "yes" : "no"} data-is-search-active={isSearchActive ? "true" : "false"} data-workflow-lookup-size={String(workflowStepNameLookup?.size ?? 0)}>
         {onToggleCollapse && <button onClick={onToggleCollapse}>toggle-{column}</button>}
       </div>
     );
@@ -969,6 +969,22 @@ describe("Board", () => {
       expect(screen.getByTestId("column-queue").getAttribute("data-has-quick-create")).toBe("no");
       expect(screen.getByTestId("column-idea").getAttribute("data-has-new-task")).toBe("yes");
       expect(screen.getByTestId("column-idea").getAttribute("data-has-quick-create")).toBe("yes");
+    });
+
+    it("passes auto-merge toggle to selected workflow human-review columns", async () => {
+      const workflow = {
+        ...DEFAULT_WORKFLOW,
+        columns: [
+          { id: "triage", name: "Triage", flags: { intake: true } },
+          { id: "review", name: "Review", flags: { humanReview: true } },
+          { id: "done", name: "Done", flags: { complete: true } },
+        ],
+      };
+      enableFlag({ "FN-1": workflow.id }, [workflow]);
+      renderBoard({ tasks: [mkTask({ id: "FN-1", column: "review" })] });
+
+      await waitFor(() => expect(screen.getByTestId("column-review")).toBeDefined());
+      expect(screen.getByTestId("column-review").getAttribute("data-has-auto-merge-toggle")).toBe("yes");
     });
 
     it("keeps workflow create and edit actions visible when only one workflow exists", async () => {

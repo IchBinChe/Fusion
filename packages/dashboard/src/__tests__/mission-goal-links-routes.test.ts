@@ -104,7 +104,10 @@ describe("mission goal linkage routes", () => {
       { "content-type": "application/json" },
     );
 
-    expect(missingResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(400);
+    expect(missingResponse.body).toMatchObject({
+      details: { code: "GOAL_NOT_FOUND", goalId: "G-404" },
+    });
   });
 
   it("replaces linked goals via patch, clears with [], and ignores undefined goalIds", async () => {
@@ -176,7 +179,10 @@ describe("mission goal linkage routes", () => {
       JSON.stringify({ goalIds: [goalB.id, "G-404"] }),
       { "content-type": "application/json" },
     );
-    expect(missingResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(400);
+    expect(missingResponse.body).toMatchObject({
+      details: { code: "GOAL_NOT_FOUND", goalId: "G-404" },
+    });
     expect(store.getMissionStore().listGoalIdsForMission(mission.id)).toEqual([goalA.id]);
   });
 
@@ -221,7 +227,10 @@ describe("mission goal linkage routes", () => {
       JSON.stringify({ goalIds: [goalA.id, "G-404"] }),
       { "content-type": "application/json" },
     );
-    expect(missingResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(400);
+    expect(missingResponse.body).toMatchObject({
+      details: { code: "GOAL_NOT_FOUND", goalId: "G-404" },
+    });
     expect(store.getMissionStore().listGoalIdsForMission(mission.id)).toEqual([goalB.id, goalC.id]);
   });
 
@@ -247,7 +256,10 @@ describe("mission goal linkage routes", () => {
     expect(store.getMissionStore().listGoalIdsForMission(mission.id)).toEqual([goal.id]);
 
     const missingResponse = await request(app, "POST", `/api/missions/${mission.id}/goals/G-404`);
-    expect(missingResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(400);
+    expect(missingResponse.body).toMatchObject({
+      details: { code: "GOAL_NOT_FOUND", goalId: "G-404" },
+    });
   });
 
   it("removes a linked archived goal idempotently", async () => {
@@ -305,7 +317,7 @@ describe("mission goal linkage routes", () => {
     expect(deleteBad.status).toBe(400);
   });
 
-  it("returns 404 for missing mission or goal", async () => {
+  it("returns 404 for missing missions and unlinking unknown goals", async () => {
     const mission = store.getMissionStore().createMission({ title: "Ship mission" });
     const goal = store.getGoalStore().createGoal({ title: "Goal A" });
 
@@ -325,7 +337,10 @@ describe("mission goal linkage routes", () => {
     expect(missingMissionPatch.status).toBe(404);
 
     const missingGoalAdd = await request(app, "POST", `/api/missions/${mission.id}/goals/G-404`);
-    expect(missingGoalAdd.status).toBe(404);
+    expect(missingGoalAdd.status).toBe(400);
+    expect(missingGoalAdd.body).toMatchObject({
+      details: { code: "GOAL_NOT_FOUND", goalId: "G-404" },
+    });
 
     const missingGoalSet = await request(
       app,
@@ -334,7 +349,10 @@ describe("mission goal linkage routes", () => {
       JSON.stringify({ goalIds: [goal.id, "G-404"] }),
       { "content-type": "application/json" },
     );
-    expect(missingGoalSet.status).toBe(404);
+    expect(missingGoalSet.status).toBe(400);
+    expect(missingGoalSet.body).toMatchObject({
+      details: { code: "GOAL_NOT_FOUND", goalId: "G-404" },
+    });
 
     const missingGoalDelete = await request(app, "DELETE", `/api/missions/${mission.id}/goals/G-404`);
     expect(missingGoalDelete.status).toBe(404);

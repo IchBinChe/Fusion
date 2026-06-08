@@ -332,7 +332,14 @@ export function createMissionRouter(
   }
 
   function requireLinkableGoal(goalId: string): Goal {
-    const goal = requireGoal(goalId);
+    if (!validateGoalId(goalId)) {
+      throw badRequest("Invalid goal ID format");
+    }
+
+    const goal = getScopedGoalStore().getGoal(goalId);
+    if (!goal) {
+      throw badRequest("Goal not found", { code: "GOAL_NOT_FOUND", goalId });
+    }
     if (goal.status === "archived") {
       throw badRequest("Cannot link an archived goal", { code: "GOAL_ARCHIVED", goalId });
     }

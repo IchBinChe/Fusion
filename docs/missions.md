@@ -146,7 +146,7 @@ Fusion surfaces the persisted mission↔goal linkage through REST, CLI, and pi-e
 | `POST /api/missions/:missionId/goals/:goalId` | Idempotently link one goal to a mission. |
 | `DELETE /api/missions/:missionId/goals/:goalId` | Idempotently unlink one goal from a mission. |
 
-The mission detail payload keeps `linkedGoals` separate from the milestone tree so read paths can surface strategy context without traversing slices/features. All goal-link write endpoints preserve the same invariant: missing goals return `404`, archived goals reject with `400 { code: "GOAL_ARCHIVED" }`, duplicate/relinked ids are no-ops, and unlink remains allowed even after a goal is archived.
+The mission detail payload keeps `linkedGoals` separate from the milestone tree so read paths can surface strategy context without traversing slices/features. All goal-link write endpoints preserve the same invariant: missing goals on link write paths (`POST /api/missions`, `PATCH /api/missions/:missionId`, `PUT /api/missions/:missionId/goals`, `POST /api/missions/:missionId/goals/:goalId`) reject with `400 { code: "GOAL_NOT_FOUND" }`, archived goals reject with `400 { code: "GOAL_ARCHIVED" }`, duplicate/relinked ids are no-ops, and the `DELETE /api/missions/:missionId/goals/:goalId` unlink path treats unknown goals as a `404` while remaining allowed even after a goal is archived.
 
 ### CLI
 

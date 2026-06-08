@@ -139,18 +139,31 @@ describe("DependencyGraph", () => {
     expect(screen.getByText(/No active tasks/i)).toBeTruthy();
   });
 
-  it("fills its flex parent in the empty state", () => {
-    const graph = renderInProjectContent([], "100%");
+  it.each([
+    { label: "empty desktop-width surface", tasks: [], width: "100%", expectedNodeIds: [] },
+    { label: "empty mobile-width surface", tasks: [], width: "375px", expectedNodeIds: [] },
+    {
+      label: "populated desktop-width surface",
+      tasks: [createTask("A", "todo"), createTask("B", "todo", ["A"])],
+      width: "100%",
+      expectedNodeIds: ["A", "B"],
+    },
+    {
+      label: "populated mobile-width surface",
+      tasks: [createTask("A", "todo"), createTask("B", "todo", ["A"])],
+      width: "375px",
+      expectedNodeIds: ["A", "B"],
+    },
+  ])("fills its flex parent in the $label", ({ tasks, width, expectedNodeIds }) => {
+    const graph = renderInProjectContent(tasks, width);
 
-    expect(screen.getByText(/No active tasks/i)).toBeTruthy();
-    expectGraphToFillFlexParent(graph);
-  });
-
-  it("fills its flex parent with populated tasks on a mobile-width surface", () => {
-    const graph = renderInProjectContent([createTask("A", "todo"), createTask("B", "todo", ["A"])], "375px");
-
-    expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
-    expect(screen.getByTestId("graph-task-node-B")).toBeTruthy();
+    if (expectedNodeIds.length === 0) {
+      expect(screen.getByText(/No active tasks/i)).toBeTruthy();
+    } else {
+      for (const nodeId of expectedNodeIds) {
+        expect(screen.getByTestId(`graph-task-node-${nodeId}`)).toBeTruthy();
+      }
+    }
     expectGraphToFillFlexParent(graph);
   });
 

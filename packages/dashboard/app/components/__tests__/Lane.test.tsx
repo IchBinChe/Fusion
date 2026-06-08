@@ -33,6 +33,7 @@ const WORKFLOW: BoardWorkflowDefinition = {
     { id: "triage", name: "Triage", flags: { intake: true } },
     { id: "todo", name: "Todo", flags: { hold: true } },
     { id: "in-progress", name: "In progress", flags: { countsTowardWip: true } },
+    { id: "in-review", name: "In review", flags: { humanReview: true } },
     { id: "done", name: "Done", flags: { complete: true } },
     { id: "archived", name: "Archived", flags: { archived: true } },
   ],
@@ -86,6 +87,7 @@ describe("Lane", () => {
     expect(headings).toContain("Triage");
     expect(headings).toContain("Todo");
     expect(headings).toContain("In progress");
+    expect(headings).toContain("In review");
     expect(headings).toContain("Done");
     // Archived column is hidden.
     expect(headings).not.toContain("Archived");
@@ -110,6 +112,11 @@ describe("Lane", () => {
     render(<Lane {...props} />);
     fireEvent.click(screen.getByTestId("lane-toggle-builtin:coding"));
     expect(props.onToggleCollapse).toHaveBeenCalledWith("builtin:coding");
+  });
+
+  it("shows the auto-merge toggle for human-review workflow columns", () => {
+    render(<Lane {...baseProps()} autoMerge={false} onToggleAutoMerge={vi.fn()} />);
+    expect(screen.getByText("Auto-merge")).toBeDefined();
   });
 
   it("shows a Promote button on hold-column cards and calls onPromote", async () => {

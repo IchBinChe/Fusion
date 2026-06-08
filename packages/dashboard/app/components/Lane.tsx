@@ -205,7 +205,7 @@ function LaneComponent(props: LaneProps) {
               prAuthAvailable={props.prAuthAvailable}
               autoMerge={props.autoMerge}
               {...(isCreateColumn ? { onQuickCreate: props.onQuickCreate, onNewTask: props.onNewTask, onPlanningMode: props.onPlanningMode, onSubtaskBreakdown: props.onSubtaskBreakdown } : {})}
-              {...(col.flags.mergeBlocker ? { onToggleAutoMerge: props.onToggleAutoMerge } : {})}
+              {...((col.flags.mergeBlocker || col.flags.humanReview) && props.onToggleAutoMerge ? { onToggleAutoMerge: props.onToggleAutoMerge } : {})}
             />
             );
           })}

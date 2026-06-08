@@ -27,8 +27,9 @@ import { builtinPromptConfig } from "./builtin-workflow-prompts.js";
  *     → merge seam
  *
  * The columns/traits are identical to the default builtin so the full lifecycle
- * (merge-blocker, capacity, hold, complete, archived) behaves exactly as it does
- * for the default workflow — only the in-progress step modeling differs.
+ * (merge-blocker, human review, capacity, hold, complete, archived) behaves
+ * exactly as it does for the default workflow — only the in-progress step
+ * modeling differs.
  *
  * It declares its step-source artifact (KTD-12): PROMPT.md produced by the
  * planning seam. The IR is v2-only (foreach/step-review/parse-steps are v2 node
@@ -53,7 +54,7 @@ const RAW_BUILTIN_STEPWISE_CODING_WORKFLOW_IR: WorkflowIr = {
     {
       id: "in-review",
       name: "In review",
-      traits: [{ trait: "merge-blocker" }, { trait: "stall-detection" }, { trait: "merge" }],
+      traits: [{ trait: "merge-blocker" }, { trait: "human-review" }, { trait: "stall-detection" }, { trait: "merge" }],
     },
     { id: "done", name: "Done", traits: [{ trait: "complete" }] },
     { id: "archived", name: "Archived", traits: [{ trait: "archived" }] },

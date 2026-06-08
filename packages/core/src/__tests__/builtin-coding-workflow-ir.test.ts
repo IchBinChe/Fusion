@@ -44,7 +44,7 @@ describe("builtin coding workflow ir", () => {
     expect(traitsFor("triage")).toEqual(["intake"]);
     expect(traitsFor("todo")).toEqual(["hold", "reset-on-entry"]);
     expect(traitsFor("in-progress")).toEqual(["wip", "abort-on-exit", "timing"]);
-    expect(traitsFor("in-review")).toEqual(["merge-blocker", "stall-detection", "merge"]);
+    expect(traitsFor("in-review")).toEqual(["merge-blocker", "human-review", "stall-detection", "merge"]);
     expect(traitsFor("done")).toEqual(["complete"]);
     expect(traitsFor("archived")).toEqual(["archived"]);
     // todo's hold is capacity-released (legacy "pull from todo when a slot frees").

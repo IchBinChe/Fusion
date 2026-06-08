@@ -107,6 +107,12 @@ export {
   type WorkflowGraphTaskRunResult,
   type WorkflowGraphTaskRunnerDeps,
 } from "./workflow-graph-task-runner.js";
+export {
+  WorkflowTaskRuntime,
+  type WorkflowTaskRuntimeDeps,
+  type WorkflowTaskRuntimeDisposition,
+  type WorkflowTaskRuntimeResult,
+} from "./workflow-task-runtime.js";
 export { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
 export { Scheduler, type SchedulerOptions } from "./scheduler.js";
 export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";

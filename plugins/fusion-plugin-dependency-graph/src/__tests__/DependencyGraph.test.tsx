@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Task } from "@fusion/core";
@@ -16,6 +17,9 @@ const setGraphBounds = vi.fn();
 const clearSavedPositions = vi.fn();
 let mockSavedPositions: NodePositions | null = null;
 let resizeObserverCallbacks: ResizeObserverCallback[] = [];
+let cssStyleElement: HTMLStyleElement | null = null;
+
+const dependencyGraphCss = readFileSync("src/DependencyGraph.css", "utf8");
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
   TaskCard: ({ task, onOpenDetail, disableDrag }: { task: Task; onOpenDetail: (task: Task) => void; disableDrag?: boolean }) => (
@@ -71,6 +75,26 @@ function readNodePosition(taskId: string): { left: number; top: number } {
   };
 }
 
+function renderInProjectContent(tasks: Task[], width = "100%"): HTMLElement {
+  const { container } = render(
+    <div className="project-content" style={{ display: "flex", width }}>
+      <DependencyGraph tasks={tasks} onOpenTaskDetail={vi.fn()} />
+    </div>,
+  );
+  const graph = container.querySelector(".dependency-graph") as HTMLElement | null;
+  if (!graph) throw new Error("missing dependency graph");
+  return graph;
+}
+
+function expectGraphToFillFlexParent(graph: HTMLElement): void {
+  const style = getComputedStyle(graph);
+  expect(style.flexGrow).toBe("1");
+  expect(style.flexShrink).toBe("1");
+  expect(style.flexBasis).toBe("auto");
+  expect(style.minWidth).toBe("0px");
+  expect(style.boxSizing).toBe("border-box");
+}
+
 describe("DependencyGraph", () => {
   beforeEach(() => {
     fitToGraph.mockReset();
@@ -85,6 +109,9 @@ describe("DependencyGraph", () => {
     clearSavedPositions.mockReset();
     mockSavedPositions = null;
     resizeObserverCallbacks = [];
+    cssStyleElement = document.createElement("style");
+    cssStyleElement.textContent = dependencyGraphCss;
+    document.head.appendChild(cssStyleElement);
 
     vi.stubGlobal(
       "ResizeObserver",
@@ -102,12 +129,29 @@ describe("DependencyGraph", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    cssStyleElement?.remove();
+    cssStyleElement = null;
     cleanup();
   });
 
   it("renders empty state for empty list", () => {
     render(<DependencyGraph tasks={[]} onOpenTaskDetail={vi.fn()} />);
     expect(screen.getByText(/No active tasks/i)).toBeTruthy();
+  });
+
+  it("fills its flex parent in the empty state", () => {
+    const graph = renderInProjectContent([], "100%");
+
+    expect(screen.getByText(/No active tasks/i)).toBeTruthy();
+    expectGraphToFillFlexParent(graph);
+  });
+
+  it("fills its flex parent with populated tasks on a mobile-width surface", () => {
+    const graph = renderInProjectContent([createTask("A", "todo"), createTask("B", "todo", ["A"])], "375px");
+
+    expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
+    expect(screen.getByTestId("graph-task-node-B")).toBeTruthy();
+    expectGraphToFillFlexParent(graph);
   });
 
   it("renders only triage/todo/in-progress/in-review nodes from mixed columns", () => {

@@ -1,5 +1,8 @@
 .dependency-graph {
   position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
   height: 100%;
   padding: var(--space-md);
 }

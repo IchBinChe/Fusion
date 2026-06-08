@@ -1,18 +1,28 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { WorkflowResultsTab } from "../WorkflowResultsTab";
-import { fetchWorkflowSteps } from "../../api";
+import { fetchWorkflow, fetchWorkflows, fetchWorkflowSteps } from "../../api";
 import { useAgentLogs } from "../../hooks/useAgentLogs";
 import { loadAllAppCss, loadAllAppCssBaseOnly } from "../../test/cssFixture";
-import type { AgentLogEntry, WorkflowStep, WorkflowStepResult } from "@fusion/core";
+import type { AgentLogEntry, Settings, Task, WorkflowDefinition, WorkflowStep, WorkflowStepResult } from "@fusion/core";
 
 vi.mock("../../api", () => ({
   fetchWorkflowSteps: vi.fn(),
-  fetchTaskWorkflow: vi.fn().mockResolvedValue({ workflowId: null }),
-  selectTaskWorkflow: vi.fn().mockResolvedValue({ workflowId: null, enabledWorkflowSteps: [] }),
+  fetchTaskWorkflow: vi.fn().mockResolvedValue({ workflowId: "WF-001" }),
+  selectTaskWorkflow: vi.fn().mockResolvedValue({ workflowId: "WF-001", enabledWorkflowSteps: [] }),
   fetchWorkflows: vi.fn().mockResolvedValue([]),
+  fetchWorkflow: vi.fn(),
   submitTaskWorkflowInput: vi.fn().mockResolvedValue({ ok: true }),
   approveTaskWorkflowCli: vi.fn().mockResolvedValue({ approved: "ok" }),
+}));
+
+vi.mock("@xyflow/react", () => ({
+  ReactFlow: ({ nodes = [], edges = [] }: { nodes?: unknown[]; edges?: unknown[] }) => (
+    <div data-testid="react-flow-mock">nodes:{nodes.length};edges:{edges.length}</div>
+  ),
+  ReactFlowProvider: ({ children }: { children: unknown }) => <>{children}</>,
+  Handle: () => <span data-testid="react-flow-handle" />,
+  Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
 }));
 
 vi.mock("../../hooks/useAgentLogs", () => ({
@@ -20,6 +30,8 @@ vi.mock("../../hooks/useAgentLogs", () => ({
 }));
 
 const mockedFetchWorkflowSteps = vi.mocked(fetchWorkflowSteps);
+const mockedFetchWorkflow = vi.mocked(fetchWorkflow);
+const mockedFetchWorkflows = vi.mocked(fetchWorkflows);
 const mockedUseAgentLogs = vi.mocked(useAgentLogs);
 
 describe("WorkflowResultsTab", () => {
@@ -60,9 +72,67 @@ describe("WorkflowResultsTab", () => {
     },
   ];
 
+  const selectedWorkflow: WorkflowDefinition = {
+    id: "WF-001",
+    name: "Custom Delivery Workflow",
+    description: "Custom workflow",
+    ir: {
+      version: 1,
+      nodes: [
+        { id: "start", kind: "start", config: {} },
+        { id: "prompt-1", kind: "prompt", config: { name: "Run checks" } },
+        { id: "end", kind: "end", config: {} },
+      ],
+      edges: [
+        { from: "start", to: "prompt-1" },
+        { from: "prompt-1", to: "end" },
+      ],
+    },
+  } as WorkflowDefinition;
+
+  const baseTask: Task = {
+    id: "FN-001",
+    title: "Task",
+    status: "todo",
+    column: "todo",
+    createdAt: "2026-04-01T00:00:00Z",
+    updatedAt: "2026-04-01T00:00:00Z",
+    modelProvider: "openai",
+    modelId: "gpt-4.1",
+    validatorModelProvider: "anthropic",
+    validatorModelId: "claude-3-7-sonnet",
+    planningModelProvider: "google",
+    planningModelId: "gemini-2.5-pro",
+    thinkingLevel: "high",
+    dependencies: [],
+    outputBranch: null,
+    prompt: "",
+    baseBranch: null,
+    assignee: null,
+    labels: [],
+    priority: "normal",
+    autoMerge: false,
+    autoMergeMode: "squash",
+    paused: false,
+    userPaused: false,
+  } as Task;
+
+  const mockSettings: Settings = {
+    modelProvider: "openai",
+    model: "gpt-4.1-mini",
+    validatorModelProvider: "anthropic",
+    validatorModel: "claude-3-5-haiku",
+    planningModelProvider: "google",
+    planningModel: "gemini-2.5-flash",
+  } as Settings;
+
   beforeEach(() => {
     mockedFetchWorkflowSteps.mockReset();
     mockedFetchWorkflowSteps.mockResolvedValue(mockWorkflowSteps);
+    mockedFetchWorkflow.mockReset();
+    mockedFetchWorkflow.mockResolvedValue(selectedWorkflow);
+    mockedFetchWorkflows.mockReset();
+    mockedFetchWorkflows.mockResolvedValue([selectedWorkflow]);
     mockedUseAgentLogs.mockReset();
     mockedUseAgentLogs.mockReturnValue({
       entries: [],
@@ -115,13 +185,135 @@ describe("WorkflowResultsTab", () => {
   ];
 
   it("renders list of workflow step results", () => {
-    render(<WorkflowResultsTab taskId="FN-001" results={mockResults} />);
+    render(<WorkflowResultsTab taskId="FN-001" results={mockResults} task={baseTask} settings={mockSettings} />);
 
     expect(screen.getByTestId("workflow-results-list")).toBeInTheDocument();
     expect(screen.getByText("QA Check")).toBeInTheDocument();
     expect(screen.getByText("Security Audit")).toBeInTheDocument();
     expect(screen.getByText("Documentation Review")).toBeInTheDocument();
     expect(screen.getByText("Performance Check")).toBeInTheDocument();
+  });
+
+  it("renders workflow state summary with workflow name and aggregate result", async () => {
+    render(<WorkflowResultsTab taskId="FN-001" task={baseTask} settings={mockSettings} results={mockResults} />);
+
+    await waitFor(() => expect(screen.getByTestId("workflow-state-summary-name")).toHaveTextContent("Custom Delivery Workflow"));
+    expect(screen.getByTestId("workflow-aggregate-badge-failed")).toHaveTextContent("Failed");
+    expect(screen.getByTestId("workflow-state-summary-count")).toHaveTextContent("3 of 4 steps completed");
+  });
+
+  it.each([
+    { name: "not started", task: { ...baseTask, status: "todo", column: "todo" } as Task, results: [] as WorkflowStepResult[], testId: "workflow-phase-badge-not-started", text: "Not started" },
+    { name: "in progress", task: { ...baseTask, status: "in-progress", column: "in-progress" } as Task, results: [{ workflowStepId: "WS-004", workflowStepName: "Performance Check", phase: "pre-merge", status: "pending" }] as WorkflowStepResult[], testId: "workflow-phase-badge-pre-merge", text: "Pre-merge steps running" },
+    { name: "paused", task: { ...baseTask, status: "paused", column: "in-progress" } as Task, results: [] as WorkflowStepResult[], testId: "workflow-phase-badge-paused", text: "Paused" },
+    { name: "completed", task: { ...baseTask, status: "done", column: "done" } as Task, results: [{ workflowStepId: "WS-001", workflowStepName: "QA Check", phase: "pre-merge", status: "passed" }] as WorkflowStepResult[], testId: "workflow-phase-badge-completed", text: "Completed" },
+  ])("shows correct workflow phase for $name", async ({ task, results, testId, text }) => {
+    render(<WorkflowResultsTab taskId="FN-001" task={task} settings={mockSettings} results={results} taskStatus={task.status} />);
+    await waitFor(() => expect(screen.getByTestId(testId)).toHaveTextContent(text));
+  });
+
+  it("uses failed aggregate priority over advisory", async () => {
+    render(
+      <WorkflowResultsTab
+        taskId="FN-001"
+        task={baseTask}
+        settings={mockSettings}
+        results={[
+          { workflowStepId: "WS-001", workflowStepName: "QA Check", phase: "pre-merge", status: "advisory_failure" },
+          { workflowStepId: "WS-002", workflowStepName: "Security Audit", phase: "pre-merge", status: "failed" },
+        ]}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("workflow-aggregate-badge-failed")).toBeInTheDocument());
+    expect(screen.queryByTestId("workflow-aggregate-badge-advisory")).not.toBeInTheDocument();
+  });
+
+  it("keeps the graph collapsed by default and lazily fetches on expand", async () => {
+    render(<WorkflowResultsTab taskId="FN-001" task={baseTask} settings={mockSettings} results={mockResults} />);
+
+    expect(screen.queryByTestId("react-flow-mock")).not.toBeInTheDocument();
+    expect(mockedFetchWorkflow).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("workflow-graph-toggle"));
+
+    await waitFor(() => expect(mockedFetchWorkflow).toHaveBeenCalledWith("WF-001", undefined));
+    expect(await screen.findByTestId("react-flow-mock")).toBeInTheDocument();
+  });
+
+  it("shows no workflow assigned when none is selected", async () => {
+    mockedFetchWorkflows.mockResolvedValueOnce([]);
+    const { fetchTaskWorkflow } = await import("../../api");
+    vi.mocked(fetchTaskWorkflow).mockResolvedValueOnce({ workflowId: null });
+
+    render(<WorkflowResultsTab taskId="FN-001" task={baseTask} settings={mockSettings} results={mockResults} />);
+    fireEvent.click(screen.getByTestId("workflow-graph-toggle"));
+
+    expect(await screen.findByTestId("workflow-graph-empty")).toHaveTextContent("No workflow assigned");
+  });
+
+  it("shows edit workflow affordance only when editable and workflow selected", async () => {
+    const onEditWorkflow = vi.fn();
+    const { rerender } = render(
+      <WorkflowResultsTab
+        taskId="FN-001"
+        task={baseTask}
+        settings={mockSettings}
+        results={mockResults}
+        canEdit={false}
+        onWorkflowStepsChange={vi.fn()}
+        onEditWorkflow={onEditWorkflow}
+      />,
+    );
+
+    expect(screen.queryByTestId("workflow-edit-button")).not.toBeInTheDocument();
+
+    rerender(
+      <WorkflowResultsTab
+        taskId="FN-001"
+        task={baseTask}
+        settings={mockSettings}
+        results={mockResults}
+        canEdit
+        onWorkflowStepsChange={vi.fn()}
+        onEditWorkflow={onEditWorkflow}
+      />,
+    );
+
+    const button = await screen.findByTestId("workflow-edit-button");
+    fireEvent.click(button);
+    expect(onEditWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows effective model settings and default fallbacks", async () => {
+    const { rerender } = render(
+      <WorkflowResultsTab taskId="FN-001" task={baseTask} settings={mockSettings} results={mockResults} />,
+    );
+
+    await screen.findByTestId("workflow-state-summary-name");
+    fireEvent.click(screen.getByTestId("workflow-model-settings-toggle"));
+    await waitFor(() => expect(screen.getByTestId("workflow-model-setting-executor")).toHaveTextContent("openai/gpt-4.1"));
+    expect(screen.getByTestId("workflow-model-setting-reviewer")).toHaveTextContent("anthropic/claude-3-7-sonnet");
+    expect(screen.getByTestId("workflow-model-setting-planning")).toHaveTextContent("google/gemini-2.5-pro");
+    expect(screen.getByTestId("workflow-model-setting-thinking")).toHaveTextContent("high");
+
+    rerender(
+      <WorkflowResultsTab
+        taskId="FN-001"
+        task={{ ...baseTask, modelProvider: null, modelId: null, validatorModelProvider: null, validatorModelId: null, planningModelProvider: null, planningModelId: null, thinkingLevel: null } as Task}
+        settings={undefined}
+        results={mockResults}
+      />,
+    );
+
+    await screen.findByTestId("workflow-state-summary-name");
+    if (!screen.queryByTestId("workflow-model-setting-executor")) {
+      fireEvent.click(screen.getByTestId("workflow-model-settings-toggle"));
+    }
+    await waitFor(() => expect(screen.getByTestId("workflow-model-setting-executor")).toHaveTextContent("Default"));
+    expect(screen.getByTestId("workflow-model-setting-reviewer")).toHaveTextContent("Default");
+    expect(screen.getByTestId("workflow-model-setting-planning")).toHaveTextContent("Default");
+    expect(screen.getByTestId("workflow-model-setting-thinking")).toHaveTextContent("Default");
   });
 
   it("renders correct status badges for each result", () => {
@@ -994,6 +1186,13 @@ describe("WorkflowResultsTab", () => {
 
       expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-output-modal-controls\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/);
       expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-configured-header \.workflow-results-edit-toggle\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*center;/);
+    });
+
+    it("stacks workflow summary cards on mobile", () => {
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/\.workflow-state-summary__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+      expect(css).toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.workflow-state-summary__grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
     });
 
     it("applies fullscreen modal dimensions on mobile", () => {

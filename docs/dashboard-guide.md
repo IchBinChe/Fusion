@@ -33,7 +33,7 @@ Use deep links to open a specific task directly from notifications, chat, or ext
 File paths in dashboard text are automatically rendered as inline links. Clicking a linked path opens the Files browser modal at that path (including line/column targets when available) so you can inspect the file and use editor actions where supported.
 
 Current surfaces include:
-- Task detail modal content (description markdown, **Review** tab, and **Workflow Results** tab output)
+- Task detail modal content (description markdown, **Review** tab, and **Workflow Results** tab output plus workflow overview/graph/model settings)
 - Chat view messages/tool output
 - Agent log viewer
 - Activity log modal

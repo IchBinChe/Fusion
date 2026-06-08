@@ -368,6 +368,7 @@ export interface TaskDetailModalProps {
   onTaskUpdated?: (task: Task) => void;
   addToast: (message: string, type?: ToastType) => void;
   prAuthAvailable?: boolean;
+  onOpenWorkflowEditor?: () => void;
   /** Open the modal with this tab active instead of "definition" */
   initialTab?: TabId;
   /** Mobile-only header affordance mode. */
@@ -548,6 +549,7 @@ export function TaskDetailContent({
   onTaskUpdated,
   addToast,
   prAuthAvailable,
+  onOpenWorkflowEditor,
   initialTab = "definition",
   mobileHeaderMode = "close",
   embedded = false,
@@ -3038,6 +3040,7 @@ export function TaskDetailContent({
             <div className="detail-section">
               <WorkflowResultsTab
                 taskId={task.id}
+                task={task}
                 results={workflowResults}
                 loading={workflowResultsLoading}
                 enabledWorkflowSteps={workflowEnabledSteps}
@@ -3055,6 +3058,8 @@ export function TaskDetailContent({
                 onWorkflowReconciled={handleWorkflowReconciled}
                 taskStatus={task.status}
                 taskPausedReason={task.pausedReason}
+                settings={settings}
+                onEditWorkflow={onOpenWorkflowEditor}
               />
             </div>
           ) : activeTab === "model" ? (

@@ -203,6 +203,7 @@ export function AppModals({
             onTaskUpdated={modalManager.updateDetailTask}
             addToast={addToast}
             prAuthAvailable={settings.prAuthAvailable}
+            onOpenWorkflowEditor={() => modalManager.openWorkflowEditor()}
             initialTab={modalManager.detailTaskInitialTab}
           />
         </ModalErrorBoundary>

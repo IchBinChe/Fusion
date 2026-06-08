@@ -135,6 +135,105 @@
   gap: var(--space-md);
 }
 
+.workflow-state-summary,
+.workflow-disclosure,
+.workflow-management {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.workflow-state-summary__header,
+.workflow-management__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.workflow-state-summary__header h4,
+.workflow-management__header h4 {
+  margin: 0;
+  color: var(--text);
+}
+
+.workflow-state-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+.workflow-state-summary__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.workflow-state-summary__label {
+  color: var(--text-muted);
+  font-size: calc(var(--space-sm) + var(--space-xs));
+}
+
+.workflow-state-summary__value,
+.workflow-model-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.workflow-disclosure__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.workflow-disclosure__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-weight: 600;
+}
+
+.workflow-disclosure__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.workflow-disclosure__empty {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.workflow-graph-preview {
+  height: calc(var(--space-xl) * 8);
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.workflow-graph-preview .react-flow__renderer,
+.workflow-graph-preview .react-flow__container,
+.workflow-graph-preview .react-flow__viewport {
+  background: var(--surface);
+}
+
 .workflow-results-edit-header {
   display: flex;
   align-items: center;
@@ -685,6 +784,20 @@
 }
 
 @media (max-width: 768px) {
+  .workflow-state-summary__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-management__header,
+  .workflow-state-summary__header {
+    align-items: flex-start;
+  }
+
+  .workflow-management__header .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
   /* Workflow results edit toggle: touch target on mobile */
   .workflow-results-edit-toggle {
     min-width: calc(var(--space-lg) * 2 + var(--space-xs));

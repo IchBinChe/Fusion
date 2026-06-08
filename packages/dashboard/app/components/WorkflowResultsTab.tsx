@@ -1,14 +1,19 @@
+import "@xyflow/react/dist/style.css";
 import "./WorkflowResultsTab.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, ChevronUp, Maximize2, Pencil, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Maximize2, Pencil, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentLogEntry, WorkflowStep, WorkflowStepResult } from "@fusion/core";
-import { getErrorMessage } from "@fusion/core";
-import { fetchWorkflowSteps, fetchTaskWorkflow, selectTaskWorkflow, submitTaskWorkflowInput, approveTaskWorkflowCli } from "../api";
+import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
+import type { AgentLogEntry, Settings, Task, TaskDetail, WorkflowDefinition, WorkflowStep, WorkflowStepResult } from "@fusion/core";
+import { getErrorMessage, resolveTaskExecutionModel, resolveTaskPlanningModel, resolveTaskValidatorModel } from "@fusion/core";
+import { approveTaskWorkflowCli, fetchWorkflow, fetchWorkflows, fetchWorkflowSteps, fetchTaskWorkflow, selectTaskWorkflow, submitTaskWorkflowInput } from "../api";
 import { WorkflowSelector } from "./WorkflowSelector";
 import { useAgentLogs } from "../hooks/useAgentLogs";
+import { ProviderIcon } from "./ProviderIcon";
+import { irToFlow } from "./workflow-flow-mapping";
+import { workflowNodeTypes } from "./nodes/WorkflowNodeTypes";
 import type { Components } from "react-markdown";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 
@@ -37,6 +42,7 @@ const markdownComponents: Components = {
 
 interface WorkflowResultsTabProps {
   taskId: string;
+  task?: Task | TaskDetail;
   results: WorkflowStepResult[];
   loading?: boolean;
   enabledWorkflowSteps?: string[];
@@ -46,6 +52,8 @@ interface WorkflowResultsTabProps {
   onWorkflowStepsChange?: (steps: string[]) => void;
   taskStatus?: string;
   taskPausedReason?: string;
+  settings?: Settings;
+  onEditWorkflow?: () => void;
   /** U5 (R20): called after a workflow switch re-homed the card to a new column
    *  (reconciliation present and not preserved) so the board can refresh before
    *  the SSE catch-up arrives. */
@@ -130,6 +138,77 @@ function phaseBadge(phase: "pre-merge" | "post-merge", id: string, prefix: strin
       {phase === "post-merge" ? t("workflow.postMerge", "Post-merge") : t("workflow.preMerge", "Pre-merge")}
     </span>
   );
+}
+
+function getWorkflowName(
+  selectedWorkflowId: string | null,
+  workflows: WorkflowDefinition[],
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (!selectedWorkflowId) return t("workflow.defaultWorkflow", "Default");
+  const match = workflows.find((workflow) => workflow.id === selectedWorkflowId);
+  return match?.name || t("workflow.customWorkflowFallback", "Custom workflow");
+}
+
+function getAggregateWorkflowResult(
+  results: WorkflowStepResult[],
+  t: ReturnType<typeof useTranslation>["t"],
+): { label: string; badgeClass: string; testId: string } {
+  if (results.some((result) => result.status === "failed")) {
+    return { label: t("workflow.statusFailed", "Failed"), badgeClass: "workflow-result-badge--failed", testId: "failed" };
+  }
+  if (results.some((result) => result.status === "advisory_failure")) {
+    return { label: t("workflow.statusAdvisory", "Advisory"), badgeClass: "workflow-result-badge--advisory_failure", testId: "advisory" };
+  }
+  if (results.some((result) => result.status === "pending")) {
+    return { label: t("workflow.aggregateInProgress", "In progress"), badgeClass: "workflow-result-badge--pending", testId: "pending" };
+  }
+  if (results.length === 0) {
+    return { label: t("workflow.aggregateNoResults", "No results"), badgeClass: "workflow-result-badge--skipped", testId: "no-results" };
+  }
+  return { label: t("workflow.aggregateAllPassed", "All passed"), badgeClass: "workflow-result-badge--passed", testId: "passed" };
+}
+
+function getExecutionPhase(
+  task: Task | TaskDetail | undefined,
+  taskStatus: string | undefined,
+  taskPausedReason: string | undefined,
+  results: WorkflowStepResult[],
+  t: ReturnType<typeof useTranslation>["t"],
+): { label: string; badgeClass: string; testId: string } {
+  if (taskStatus === "awaiting-user-input") {
+    return { label: t("workflow.executionAwaitingInput", "Awaiting input"), badgeClass: "workflow-result-badge--pending", testId: "awaiting-input" };
+  }
+  if (taskStatus === "awaiting-cli-approval") {
+    return { label: t("workflow.executionAwaitingCliApproval", "Awaiting CLI approval"), badgeClass: "workflow-result-badge--pending", testId: "awaiting-cli-approval" };
+  }
+  if (taskStatus === "paused" || taskPausedReason) {
+    return { label: t("workflow.executionPaused", "Paused"), badgeClass: "workflow-result-badge--pending", testId: "paused" };
+  }
+
+  const pendingResult = results.find((result) => result.status === "pending");
+  if (pendingResult) {
+    const isPostMerge = (pendingResult.phase || "pre-merge") === "post-merge";
+    return {
+      label: isPostMerge
+        ? t("workflow.executionPostMerge", "Post-merge steps running")
+        : t("workflow.executionPreMerge", "Pre-merge steps running"),
+      badgeClass: "workflow-result-badge--pending",
+      testId: isPostMerge ? "post-merge" : "pre-merge",
+    };
+  }
+
+  const hasTerminalResults = results.length > 0 && results.every((result) => ["passed", "failed", "advisory_failure", "skipped"].includes(result.status));
+  if (hasTerminalResults || taskStatus === "done" || task?.column === "done" || task?.column === "in-review") {
+    return { label: t("workflow.executionCompleted", "Completed"), badgeClass: "workflow-result-badge--passed", testId: "completed" };
+  }
+
+  return { label: t("workflow.executionNotStarted", "Not started"), badgeClass: "workflow-result-badge--pending", testId: "not-started" };
+}
+
+function formatModelValue(selection: { provider?: string; modelId?: string } | undefined): string {
+  if (!selection?.provider || !selection.modelId) return "Default";
+  return `${selection.provider}/${selection.modelId}`;
 }
 
 /**
@@ -222,6 +301,7 @@ function LiveAgentLogOutput({
 
 export function WorkflowResultsTab({
   taskId,
+  task,
   results,
   loading,
   enabledWorkflowSteps,
@@ -231,6 +311,8 @@ export function WorkflowResultsTab({
   onWorkflowStepsChange,
   taskStatus,
   taskPausedReason,
+  settings,
+  onEditWorkflow,
   onWorkflowReconciled,
 }: WorkflowResultsTabProps) {
   const { t } = useTranslation("app");
@@ -241,9 +323,14 @@ export function WorkflowResultsTab({
   const [submitted, setSubmitted] = useState(false);
   const [expandedViewStepId, setExpandedViewStepId] = useState<string | null>(null);
   const [allWorkflowSteps, setAllWorkflowSteps] = useState<WorkflowStep[]>([]);
+  const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [graphExpanded, setGraphExpanded] = useState(false);
+  const [workflowGraphCache, setWorkflowGraphCache] = useState<Record<string, WorkflowDefinition>>({});
+  const [workflowGraphLoading, setWorkflowGraphLoading] = useState(false);
+  const [modelSettingsExpanded, setModelSettingsExpanded] = useState(false);
 
   // Reset the paused-action UI whenever the blocked node/task changes, so a new
   // awaiting-user-input / awaiting-cli-approval pause starts with fresh controls
@@ -283,6 +370,41 @@ export function WorkflowResultsTab({
     },
     [taskId, projectId, onWorkflowStepsChange, onWorkflowReconciled],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWorkflows(projectId)
+      .then((definitions) => {
+        if (!cancelled) setWorkflowDefinitions(definitions);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkflowDefinitions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!graphExpanded || !selectedWorkflowId || workflowGraphCache[selectedWorkflowId]) return;
+    let cancelled = false;
+    setWorkflowGraphLoading(true);
+    fetchWorkflow(selectedWorkflowId, projectId)
+      .then((definition) => {
+        if (!cancelled) {
+          setWorkflowGraphCache((prev) => ({ ...prev, [selectedWorkflowId]: definition }));
+        }
+      })
+      .catch(() => {
+        /* graph preview is optional; leave empty state */
+      })
+      .finally(() => {
+        if (!cancelled) setWorkflowGraphLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [graphExpanded, selectedWorkflowId, projectId, workflowGraphCache]);
 
   // Check if any result has pending status
   const hasPendingStep = results.some((r) => r.status === "pending");
@@ -418,6 +540,16 @@ export function WorkflowResultsTab({
       } as WorkflowStepOption;
     });
   }, [selectedWorkflowSteps, workflowStepLookup, t]);
+
+  const workflowName = useMemo(() => getWorkflowName(selectedWorkflowId, workflowDefinitions, t), [selectedWorkflowId, workflowDefinitions, t]);
+  const executionPhase = useMemo(() => getExecutionPhase(task, taskStatus, taskPausedReason, results, t), [task, taskStatus, taskPausedReason, results, t]);
+  const aggregateResult = useMemo(() => getAggregateWorkflowResult(results, t), [results, t]);
+  const completedStepCount = useMemo(() => results.filter((result) => ["passed", "skipped", "failed", "advisory_failure"].includes(result.status)).length, [results]);
+  const graphWorkflow = selectedWorkflowId ? workflowGraphCache[selectedWorkflowId] : undefined;
+  const graphFlow = useMemo(() => (graphWorkflow ? irToFlow(graphWorkflow) : null), [graphWorkflow]);
+  const effectiveExecutor = useMemo(() => (task ? resolveTaskExecutionModel(task, settings) : undefined), [task, settings]);
+  const effectiveValidator = useMemo(() => (task ? resolveTaskValidatorModel(task, settings) : undefined), [task, settings]);
+  const effectivePlanning = useMemo(() => (task ? resolveTaskPlanningModel(task, settings) : undefined), [task, settings]);
 
   const renderEditor = () => {
     if (!canEdit || !isEditing || loading) {
@@ -803,16 +935,139 @@ export function WorkflowResultsTab({
           )}
         </div>
       )}
-      {canEdit && onWorkflowStepsChange && (
-        <div className="workflow-selector-row">
-          <WorkflowSelector
-            value={selectedWorkflowId}
-            onChange={handleWorkflowSelect}
-            projectId={projectId}
-            label="Custom workflow"
-          />
+      <section className="card workflow-state-summary" data-testid="workflow-state-summary">
+        <div className="workflow-state-summary__header">
+          <h4>{t("workflow.overview", "Workflow overview")}</h4>
         </div>
-      )}
+        <div className="workflow-state-summary__grid">
+          <div className="workflow-state-summary__item" data-testid="workflow-state-summary-name">
+            <span className="workflow-state-summary__label">{t("workflow.workflowName", "Workflow")}</span>
+            <span className="workflow-state-summary__value">{workflowName}</span>
+          </div>
+          <div className="workflow-state-summary__item" data-testid="workflow-state-summary-phase">
+            <span className="workflow-state-summary__label">{t("workflow.executionPhase", "Execution phase")}</span>
+            <span className={`workflow-result-badge ${executionPhase.badgeClass}`} data-testid={`workflow-phase-badge-${executionPhase.testId}`}>
+              {executionPhase.label}
+            </span>
+          </div>
+          <div className="workflow-state-summary__item" data-testid="workflow-state-summary-aggregate">
+            <span className="workflow-state-summary__label">{t("workflow.aggregateResult", "Aggregate result")}</span>
+            <span className={`workflow-result-badge ${aggregateResult.badgeClass}`} data-testid={`workflow-aggregate-badge-${aggregateResult.testId}`}>
+              {aggregateResult.label}
+            </span>
+          </div>
+          <div className="workflow-state-summary__item" data-testid="workflow-state-summary-count">
+            <span className="workflow-state-summary__label">{t("workflow.stepProgress", "Step count")}</span>
+            <span className="workflow-state-summary__value">{t("workflow.stepProgressValue", "{{completed}} of {{total}} steps completed", { completed: completedStepCount, total: results.length })}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="card workflow-disclosure" data-testid="workflow-graph-section">
+        <button
+          type="button"
+          className="workflow-disclosure__toggle"
+          onClick={() => setGraphExpanded((prev) => !prev)}
+          data-testid="workflow-graph-toggle"
+        >
+          <span className="workflow-disclosure__title">
+            {graphExpanded ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
+            {t("workflow.graph", "Workflow graph")}
+          </span>
+        </button>
+        {graphExpanded && (
+          <div className="workflow-disclosure__content">
+            {!selectedWorkflowId ? (
+              <p className="workflow-disclosure__empty" data-testid="workflow-graph-empty">
+                {t("workflow.noWorkflowAssigned", "No workflow assigned")}
+              </p>
+            ) : workflowGraphLoading && !graphWorkflow ? (
+              <div className="workflow-results-loading" data-testid="workflow-graph-loading">
+                <div className="workflow-results-spinner" />
+                <span>{t("workflow.loadingGraph", "Loading workflow graph…")}</span>
+              </div>
+            ) : graphFlow ? (
+              <div className="workflow-graph-preview" data-testid="workflow-graph-preview">
+                <ReactFlowProvider>
+                  <ReactFlow
+                    nodes={graphFlow.nodes}
+                    edges={graphFlow.edges}
+                    nodeTypes={workflowNodeTypes}
+                    fitView
+                    nodesDraggable={false}
+                    nodesConnectable={false}
+                    elementsSelectable={false}
+                    zoomOnScroll={false}
+                    panOnDrag={false}
+                    preventScrolling={false}
+                    attributionPosition="bottom-left"
+                  />
+                </ReactFlowProvider>
+              </div>
+            ) : (
+              <p className="workflow-disclosure__empty" data-testid="workflow-graph-unavailable">
+                {t("workflow.graphUnavailable", "Workflow graph unavailable")}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="card workflow-management" data-testid="workflow-management-section">
+        <div className="workflow-management__header">
+          <h4>{t("workflow.workflowName", "Workflow")}</h4>
+          {canEdit && selectedWorkflowId && onEditWorkflow && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={onEditWorkflow}
+              data-testid="workflow-edit-button"
+            >
+              <Pencil aria-hidden />
+              {t("workflow.editWorkflow", "Edit workflow")}
+            </button>
+          )}
+        </div>
+        <WorkflowSelector
+          value={selectedWorkflowId}
+          onChange={handleWorkflowSelect}
+          projectId={projectId}
+          label="Custom workflow"
+          disabled={!canEdit}
+        />
+      </section>
+
+      <section className="card workflow-disclosure" data-testid="workflow-model-settings-section">
+        <button
+          type="button"
+          className="workflow-disclosure__toggle"
+          onClick={() => setModelSettingsExpanded((prev) => !prev)}
+          data-testid="workflow-model-settings-toggle"
+        >
+          <span className="workflow-disclosure__title">
+            {modelSettingsExpanded ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
+            {t("workflow.modelSettings", "Model settings")}
+          </span>
+        </button>
+        {modelSettingsExpanded && (
+          <div className="workflow-disclosure__content workflow-state-summary__grid" data-testid="workflow-model-settings-content">
+            {[
+              { key: "executor", label: t("models.targetLabels.executor", "Executor"), value: formatModelValue(effectiveExecutor), provider: effectiveExecutor?.provider },
+              { key: "reviewer", label: t("models.targetLabels.validator", "Reviewer"), value: formatModelValue(effectiveValidator), provider: effectiveValidator?.provider },
+              { key: "planning", label: t("models.targetLabels.planning", "Planning"), value: formatModelValue(effectivePlanning), provider: effectivePlanning?.provider },
+              { key: "thinking", label: t("workflow.thinkingLevel", "Thinking level"), value: task?.thinkingLevel || "Default" },
+            ].map((item) => (
+              <div className="workflow-state-summary__item" key={item.key} data-testid={`workflow-model-setting-${item.key}`}>
+                <span className="workflow-state-summary__label">{item.label}</span>
+                <span className="workflow-state-summary__value workflow-model-value">
+                  {item.provider ? <ProviderIcon provider={item.provider} size="sm" /> : null}
+                  {item.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
       {showConfiguredStepsState ? (
         <div className="workflow-configured-steps" data-testid="workflow-configured-steps">
           <div className="workflow-configured-header" data-testid="workflow-configured-header">

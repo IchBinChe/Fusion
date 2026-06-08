@@ -199,7 +199,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": {
+      "^/api(?!/.*\\.ts$)(/|$)": {
         target: `http://localhost:${process.env.FUSION_API_PORT ?? "4040"}`,
         changeOrigin: true,
         ws: true,

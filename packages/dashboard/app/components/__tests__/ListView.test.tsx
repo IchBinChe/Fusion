@@ -237,6 +237,20 @@ const clickInAct = (element: Element) => {
   });
 };
 
+const clickAndFlush = async (element: Element) => {
+  await act(async () => {
+    fireEvent.click(element);
+    await Promise.resolve();
+  });
+};
+
+const keyDownAndFlush = async (element: Element, init: Parameters<typeof fireEvent.keyDown>[1]) => {
+  await act(async () => {
+    fireEvent.keyDown(element, init);
+    await Promise.resolve();
+  });
+};
+
 const enterBulkEditMode = () => {
   clickInAct(screen.getByRole("button", { name: "Bulk Edit" }));
 };
@@ -2289,6 +2303,7 @@ describe("ListView Hide Done Tasks", () => {
 describe("ListView Quick Entry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchBoardWorkflows).mockImplementation(() => new Promise(() => {}));
   });
 
   it("renders QuickEntryBox when onQuickCreate is provided", () => {
@@ -2454,16 +2469,18 @@ describe("ListView Quick Entry", () => {
     renderListView({ onQuickCreate: mockOnQuickCreate });
 
     const input = screen.getByTestId("quick-entry-input");
-    fireEvent.keyDown(input, { key: "Enter" });
+    await keyDownAndFlush(input, { key: "Enter" });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(mockOnQuickCreate).not.toHaveBeenCalled();
   });
 
-  it("QuickEntryBox textarea spans full container width in list view (FN-1579)", () => {
+  it("QuickEntryBox textarea spans full container width in list view (FN-1579)", async () => {
     mockDesktopViewport();
     const mockOnQuickCreate = vi.fn().mockResolvedValue(undefined);
     renderListView({ onQuickCreate: mockOnQuickCreate });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const quickEntryBox = screen.getByTestId("quick-entry-box");
     const input = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
@@ -2485,10 +2502,11 @@ describe("ListView Quick Entry", () => {
 describe("ListView Collapsible Sections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchBoardWorkflows).mockImplementation(() => new Promise(() => {}));
     localStorage.clear();
   });
 
-  it("clicking section header toggles collapse and hides task rows", () => {
+  it("clicking section header toggles collapse and hides task rows", async () => {
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Planning Task 1" }),
       createMockTask({ id: "FN-002", column: "triage", title: "Planning Task 2" }),
@@ -2505,7 +2523,7 @@ describe("ListView Collapsible Sections", () => {
       r.className.includes("list-section-header") && r.textContent?.includes("Planning")
     );
     expect(triageHeader).toBeDefined();
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Tasks should be hidden after collapse
     expect(screen.queryByText("FN-001")).toBeNull();
@@ -2519,7 +2537,7 @@ describe("ListView Collapsible Sections", () => {
     expect(chevron?.className).not.toContain("list-section-chevron--expanded");
   });
 
-  it("clicking again expands section and shows task rows", () => {
+  it("clicking again expands section and shows task rows", async () => {
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Planning Task" }),
     ];
@@ -2532,13 +2550,16 @@ describe("ListView Collapsible Sections", () => {
     );
 
     // Click to collapse
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Task should be hidden
     expect(screen.queryByText("FN-001")).toBeNull();
 
     // Click again to expand
-    fireEvent.click(triageHeader!);
+    triageHeader = screen.getAllByRole("row").find(r =>
+      r.className.includes("list-section-header") && r.textContent?.includes("Planning")
+    );
+    await clickAndFlush(triageHeader!);
 
     // Task should be visible again
     expect(screen.getByText("FN-001")).toBeDefined();
@@ -2555,7 +2576,7 @@ describe("ListView Collapsible Sections", () => {
     expect(triageHeader?.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("collapse state persists to localStorage", () => {
+  it("collapse state persists to localStorage", async () => {
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Planning Task" }),
     ];
@@ -2566,7 +2587,7 @@ describe("ListView Collapsible Sections", () => {
     const triageHeader = screen.getAllByRole("row").find(r =>
       r.className.includes("list-section-header") && r.textContent?.includes("Planning")
     );
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Verify localStorage was updated
     const saved = localStorage.getItem(scopedStorageKey("kb-dashboard-list-collapsed"));
@@ -2599,7 +2620,7 @@ describe("ListView Collapsible Sections", () => {
     expect(triageHeader?.className).toContain("list-section-header--collapsed");
   });
 
-  it("multiple sections can be collapsed independently", () => {
+  it("multiple sections can be collapsed independently", async () => {
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Planning Task" }),
       createMockTask({ id: "FN-002", column: "todo", title: "Todo Task" }),
@@ -2616,10 +2637,10 @@ describe("ListView Collapsible Sections", () => {
     const todoHeader = allHeaders.find(h => h.textContent?.includes("Todo"));
 
     // Collapse triage section
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Collapse todo section
-    fireEvent.click(todoHeader!);
+    await clickAndFlush(todoHeader!);
 
     // Planning and todo tasks should be hidden
     expect(screen.queryByText("FN-001")).toBeNull();
@@ -2640,7 +2661,7 @@ describe("ListView Collapsible Sections", () => {
     expect(parsed).not.toContain("in-progress");
   });
 
-  it("sorting still works with collapsed sections", () => {
+  it("sorting still works with collapsed sections", async () => {
     const tasks = [
       createMockTask({ id: "FN-003", column: "triage", title: "Charlie" }),
       createMockTask({ id: "FN-001", column: "triage", title: "Alpha" }),
@@ -2653,14 +2674,17 @@ describe("ListView Collapsible Sections", () => {
     const triageHeader = screen.getAllByRole("row").find(r =>
       r.className.includes("list-section-header") && r.textContent?.includes("Planning")
     );
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Expand triage section
-    fireEvent.click(triageHeader!);
+    const collapsedTriageHeader = screen.getAllByRole("row").find(r =>
+      r.className.includes("list-section-header") && r.textContent?.includes("Planning")
+    );
+    await clickAndFlush(collapsedTriageHeader!);
 
     // Sort by title
     const titleHeader = screen.getByRole("columnheader", { name: /title/i });
-    fireEvent.click(titleHeader);
+    await clickAndFlush(titleHeader);
 
     // Get sorted rows and verify sorting still works
     const rows = screen.getAllByRole("row").filter(r => r.getAttribute("data-id"));
@@ -2669,7 +2693,7 @@ describe("ListView Collapsible Sections", () => {
     expect(rows[2].textContent).toContain("FN-003"); // Charlie
   });
 
-  it("filtering still works with collapsed sections", () => {
+  it("filtering still works with collapsed sections", async () => {
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Alpha Task" }),
       createMockTask({ id: "FN-002", column: "triage", title: "Beta Task" }),
@@ -2681,17 +2705,20 @@ describe("ListView Collapsible Sections", () => {
     const triageHeader = screen.getAllByRole("row").find(r =>
       r.className.includes("list-section-header") && r.textContent?.includes("Planning")
     );
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Expand triage section by clicking again
-    fireEvent.click(triageHeader!);
+    const collapsedTriageHeader = screen.getAllByRole("row").find(r =>
+      r.className.includes("list-section-header") && r.textContent?.includes("Planning")
+    );
+    await clickAndFlush(collapsedTriageHeader!);
 
     // Only Alpha task should be visible (filter is applied via prop)
     expect(screen.getByText("FN-001")).toBeDefined();
     expect(screen.queryByText("FN-002")).toBeNull();
   });
 
-  it("section header has aria-expanded attribute for accessibility", () => {
+  it("section header has aria-expanded attribute for accessibility", async () => {
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Planning Task" }),
     ];
@@ -2707,13 +2734,13 @@ describe("ListView Collapsible Sections", () => {
     expect(triageHeader?.getAttribute("aria-expanded")).toBe("true");
 
     // Click to collapse
-    fireEvent.click(triageHeader!);
+    await clickAndFlush(triageHeader!);
 
     // Should have aria-expanded="false" when collapsed
     expect(triageHeader?.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("collapsed section hides No tasks placeholder", () => {
+  it("collapsed section hides No tasks placeholder", async () => {
     // Create tasks in one column, leave another column empty
     const tasks = [
       createMockTask({ id: "FN-001", column: "triage", title: "Planning Task" }),
@@ -2730,7 +2757,7 @@ describe("ListView Collapsible Sections", () => {
       r.className.includes("list-section-header") && r.textContent?.includes("Todo")
     );
     expect(todoHeader).toBeDefined();
-    fireEvent.click(todoHeader!);
+    await clickAndFlush(todoHeader!);
 
     // When collapsed, the section header should have collapsed class
     expect(todoHeader?.className).toContain("list-section-header--collapsed");

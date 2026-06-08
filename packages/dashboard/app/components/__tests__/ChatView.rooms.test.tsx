@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { ChatView } from "../ChatView";
 import * as useChatModule from "../../hooks/useChat";
@@ -37,6 +37,14 @@ vi.mock("../../api", async (importOriginal) => {
     ]),
   };
 });
+
+async function renderWithAct(ui: Parameters<typeof rtlRender>[0]) {
+  let result: ReturnType<typeof rtlRender> | undefined;
+  await act(async () => {
+    result = rtlRender(ui);
+  });
+  return result!;
+}
 
 const mockUseChat = vi.mocked(useChatModule.useChat);
 const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
@@ -249,7 +257,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
     setup({}, { rooms: [roomA, roomB], selectRoom });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     expect(screen.getByTestId("chat-sidebar-scope-direct")).toBeInTheDocument();
     expect(screen.getByTestId("chat-sidebar-scope-rooms")).toBeInTheDocument();
@@ -267,7 +275,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       ],
     });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     await waitFor(() => {
       expect(screen.queryByTestId("chat-message-rmsg-skip")).not.toBeInTheDocument();
@@ -275,10 +283,10 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     });
   });
 
-  it("shows Create room in mobile footer for Rooms scope and hides New Chat + rooms header", () => {
+  it("shows Create room in mobile footer for Rooms scope and hides New Chat + rooms header", async () => {
     const viewportSpy = mockMobileViewport();
 
-    const { container } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    const { container } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const createRoomButton = screen.getByTestId("chat-create-room-btn");
     expect(createRoomButton.closest(".chat-sidebar-footer")).toBeInTheDocument();
@@ -288,10 +296,10 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     viewportSpy.mockRestore();
   });
 
-  it("keeps Create room in rooms header on desktop and omits rooms footer", () => {
+  it("keeps Create room in rooms header on desktop and omits rooms footer", async () => {
     const viewportSpy = mockDesktopViewport();
 
-    const { container } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    const { container } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const createRoomButton = screen.getByTestId("chat-create-room-btn");
     expect(createRoomButton.closest(".chat-sidebar-rooms-header")).toBeInTheDocument();
@@ -303,7 +311,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
   it.each([
     { memberCount: 1, expectedText: "1 member" },
     { memberCount: 2, expectedText: "2 members" },
-  ])("shows active room member count ($expectedText) and hides inactive meta", ({ memberCount, expectedText }) => {
+  ])("shows active room member count ($expectedText) and hides inactive meta", async ({ memberCount, expectedText }) => {
     const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
     const activeMembers = Array.from({ length: memberCount }, (_, index) => ({
       roomId: roomA.id,
@@ -314,7 +322,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
 
     setup({}, { rooms: [roomA, roomB], activeRoom: roomA, activeRoomMembers: activeMembers });
 
-    const { container } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    const { container } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const activeRow = screen.getByTestId("chat-room-item-room-a");
     const inactiveRow = screen.getByTestId("chat-room-item-room-b");
@@ -331,7 +339,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
     setup({}, { createRoom, sendRoomMessage });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     await userEvent.click(screen.getByTestId("chat-create-room-btn"));
     await userEvent.type(screen.getByLabelText("Room name"), "room-new");
@@ -359,7 +367,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "Room upload{enter}");
@@ -378,7 +386,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockReturnValue(sendPromise);
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "single send");
@@ -404,7 +412,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       .mockRejectedValueOnce(new RoomMessageDeliveredButReplyFailedError("No active room responders available", "room-a"));
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "Will retry{enter}");
@@ -423,7 +431,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockRejectedValueOnce(new Error("POST failed"));
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "Will retry{enter}");
@@ -441,7 +449,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "Delivered{enter}");
@@ -462,7 +470,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockReturnValue(sendPromise);
     setup({}, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "Optimistic clear{enter}");
@@ -484,7 +492,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
     setup({}, { clearRoom, sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "  /clear  {enter}");
@@ -500,7 +508,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
     setup({}, { clearRoom, sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "  /new  {enter}");
@@ -516,7 +524,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
     setup({}, { clearRoom, sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "/clear now{enter}");
@@ -532,7 +540,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const clearRoom = vi.fn().mockRejectedValue(new Error("clear failed"));
     setup({}, { clearRoom, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     await userEvent.type(textarea, "/clear{enter}");
@@ -555,7 +563,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       .mockReturnValueOnce({ ...defaultRoomsState, deleteRoom })
       .mockReturnValue(rerenderedRooms);
 
-    const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    const { rerender } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     await userEvent.click(screen.getByTestId("chat-room-delete-room-a"));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -571,11 +579,11 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     expect(screen.getByText("Updated room reply")).toBeInTheDocument();
   });
 
-  it("shows mobile back button in room thread view", () => {
+  it("shows mobile back button in room thread view", async () => {
     const mediaSpy = mockMobileViewport();
     setup();
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
     mediaSpy.mockRestore();
@@ -594,7 +602,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       },
     );
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const roomInput = screen.getByTestId("chat-input") as HTMLTextAreaElement;
     const roomFocusSpy = vi.spyOn(roomInput, "focus");
@@ -633,7 +641,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         },
       );
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       const input = screen.getByTestId("chat-input") as HTMLTextAreaElement;
       await act(async () => {
@@ -689,7 +697,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         ],
       });
 
-      const { unmount } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      const { unmount } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       await waitFor(() => {
         expect(metrics.getScrollTop()).toBe(960);
@@ -698,7 +706,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       metrics.setScrollTop(0);
       unmount();
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       await waitFor(() => {
         expect(metrics.getScrollTop()).toBe(960);
@@ -718,7 +726,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         activeRoom: roomA,
         messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
       });
-      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      const { rerender } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
       metrics.setScrollTop(980);
@@ -750,7 +758,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         activeRoom: roomA,
         messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
       });
-      const { rerender } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      const { rerender } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
       metrics.setScrollTop(720);
@@ -784,7 +792,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
       });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
       fireEvent(document, new Event("visibilitychange"));
@@ -813,7 +821,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
       });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       metrics.setScrollTop(300);
       fireEvent(window, new Event("pageshow"));
@@ -837,7 +845,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
         messages: [{ id: "rmsg-1", roomId: roomA.id, role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z", senderAgentId: "agent-1", mentions: [] }],
       });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       metrics.setScrollTop(300);
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
@@ -854,10 +862,10 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
   });
 
   describe("room switcher dropdown", () => {
-    it("renders trigger with active room and menu semantics", () => {
+    it("renders trigger with active room and menu semantics", async () => {
       setup({}, { activeRoom: roomA, rooms: [roomA] });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       const trigger = screen.getByTestId("chat-room-switcher-trigger");
       expect(trigger).toHaveTextContent("#Room A");
@@ -868,7 +876,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
       setup({}, { activeRoom: roomA, rooms: [roomA, roomB] });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
 
@@ -883,7 +891,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       const selectRoom = vi.fn();
       setup({}, { activeRoom: roomA, rooms: [roomA, roomB], selectRoom });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
       await userEvent.click(screen.getByTestId("chat-room-switcher-option-room-b"));
@@ -896,7 +904,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
       setup({}, { activeRoom: roomA, rooms: [roomA, roomB] });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
       fireEvent.keyDown(document, { key: "Escape" });
@@ -908,7 +916,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
       setup({}, { activeRoom: roomA, rooms: [roomA, roomB] });
 
-      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
       await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
       fireEvent.mouseDown(screen.getByText("Room hello"));
@@ -944,7 +952,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       selectSession,
     });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     expect(screen.queryByTestId("chat-unread-dot-session-a")).toBeNull();
     expect(screen.getByTestId("chat-unread-dot-session-b")).toBeInTheDocument();
@@ -954,7 +962,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     expect(localStorage.getItem("kb:proj-123:fusion:chat-unread:direct")).toContain("session-b");
   });
 
-  it("renders unread dots for unread rooms", () => {
+  it("renders unread dots for unread rooms", async () => {
     localStorage.setItem("fusion:chat-scope", "rooms");
     localStorage.setItem("kb:proj-123:fusion:chat-unread:rooms", JSON.stringify({ "room-a": "2026-04-08T00:00:00.000Z" }));
 
@@ -968,7 +976,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
 
     setup({}, { rooms: [roomA, roomB], activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     expect(screen.queryByTestId("chat-unread-dot-room-a")).toBeNull();
     expect(screen.getByTestId("chat-unread-dot-room-b")).toBeInTheDocument();
@@ -981,7 +989,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     const sendRoomMessage = vi.fn().mockRejectedValue(new Error("Room backend failed"));
     setup({ sendMessage }, { sendRoomMessage, activeRoom: roomA });
 
-    render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
+    await renderWithAct(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
 
     const textarea = screen.getByTestId("chat-input");
     await userEvent.type(textarea, "Direct hello{enter}");

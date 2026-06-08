@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { ChatView } from "../ChatView";
 import * as useChatModule from "../../hooks/useChat";
@@ -29,6 +29,14 @@ vi.mock("../../api", async (importOriginal) => {
     searchFiles: vi.fn().mockResolvedValue({ files: [] }),
   };
 });
+
+async function renderWithAct(ui: Parameters<typeof rtlRender>[0]) {
+  let result: ReturnType<typeof rtlRender> | undefined;
+  await act(async () => {
+    result = rtlRender(ui);
+  });
+  return result!;
+}
 
 const mockUseChat = vi.mocked(useChatModule.useChat);
 const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
@@ -124,8 +132,8 @@ function mockDesktopViewport() {
   }));
 }
 
-function renderChatView() {
-  return render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+async function renderChatView() {
+  return await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 }
 
 describe("ChatView draft persistence", () => {
@@ -138,7 +146,7 @@ describe("ChatView draft persistence", () => {
   });
 
   it("writes direct-session drafts to localStorage while typing", async () => {
-    renderChatView();
+    await renderChatView();
 
     await userEvent.type(screen.getByPlaceholderText("Type a message..."), "hello draft");
 
@@ -147,14 +155,14 @@ describe("ChatView draft persistence", () => {
     });
   });
 
-  it("restores the persisted direct-session draft when remounted", () => {
+  it("restores the persisted direct-session draft when remounted", async () => {
     localStorage.setItem("fusion:chat-draft:direct:session-001", "saved draft");
 
-    const { unmount } = renderChatView();
+    const { unmount } = await renderChatView();
     expect(screen.getByPlaceholderText("Type a message...")).toHaveValue("saved draft");
 
     unmount();
-    renderChatView();
+    await renderChatView();
 
     expect(screen.getByPlaceholderText("Type a message...")).toHaveValue("saved draft");
   });
@@ -162,7 +170,7 @@ describe("ChatView draft persistence", () => {
   it("swaps the visible draft when the active direct session changes", async () => {
     localStorage.setItem("fusion:chat-draft:direct:session-002", "session two draft");
 
-    const { rerender } = renderChatView();
+    const { rerender } = await renderChatView();
     expect(screen.getByPlaceholderText("Type a message...")).toHaveValue("");
 
     setup({
@@ -181,7 +189,7 @@ describe("ChatView draft persistence", () => {
     const sendMessage = vi.fn();
     setup({ sendMessage });
 
-    renderChatView();
+    await renderChatView();
 
     await userEvent.type(screen.getByPlaceholderText("Type a message..."), "send me");
     await userEvent.click(screen.getAllByTestId("chat-send-btn")[0]);
@@ -194,7 +202,7 @@ describe("ChatView draft persistence", () => {
   });
 
   it("removes the storage key when the draft becomes empty", async () => {
-    renderChatView();
+    await renderChatView();
 
     const textarea = screen.getByPlaceholderText("Type a message...");
     await userEvent.type(textarea, "temporary");
@@ -214,7 +222,7 @@ describe("ChatView draft persistence", () => {
     localStorage.setItem("fusion:chat-draft:direct:session-001", "direct draft");
     localStorage.setItem("fusion:chat-draft:rooms:room-001", "room draft");
 
-    renderChatView();
+    await renderChatView();
 
     const textarea = screen.getByPlaceholderText("Type a message...");
     expect(textarea).toHaveValue("room draft");

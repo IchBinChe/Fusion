@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TaskReviewTab } from "../TaskReviewTab";
 import { makeTask } from "./TaskDetailModal.test-helpers";
 import { loadAllAppCss } from "../../test/cssFixture";
@@ -20,6 +20,14 @@ vi.mock("../../api", () => ({
   updateTask: apiMocks.updateTask,
 }));
 
+async function renderWithAct(ui: Parameters<typeof rtlRender>[0]) {
+  let result: ReturnType<typeof rtlRender> | undefined;
+  await act(async () => {
+    result = rtlRender(ui);
+  });
+  return result!;
+}
+
 describe("TaskReviewTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -33,7 +41,7 @@ describe("TaskReviewTab", () => {
       emptyMessage: "No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.",
     });
 
-    render(<TaskReviewTab task={makeTask({ reviewState: undefined })} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={makeTask({ reviewState: undefined })} addToast={vi.fn()} />);
     expect(await screen.findByText("No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Request revision" })).toBeDisabled();
   });
@@ -52,7 +60,7 @@ describe("TaskReviewTab", () => {
       },
       automationStatus: null,
     });
-    render(<TaskReviewTab task={task} addToast={addToast} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={addToast} />);
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
     expect(apiMocks.refreshTaskReview).toHaveBeenCalledWith(task.id, undefined);
     expect(await screen.findByText("APPROVED")).toBeInTheDocument();
@@ -70,7 +78,7 @@ describe("TaskReviewTab", () => {
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
     apiMocks.refreshTaskReview.mockReturnValue(refreshPromise as Promise<never>);
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
     expect(screen.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
@@ -93,7 +101,7 @@ describe("TaskReviewTab", () => {
       prInfo: task.prInfo,
     });
 
-    render(<TaskReviewTab task={task} addToast={addToast} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={addToast} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
@@ -112,7 +120,7 @@ describe("TaskReviewTab", () => {
     });
 
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     expect(await screen.findByText("No review items yet.")).toBeInTheDocument();
   });
@@ -120,7 +128,7 @@ describe("TaskReviewTab", () => {
   it("shows load error when initial review fetch fails", async () => {
     apiMocks.fetchTaskReview.mockRejectedValue(new Error("boom"));
 
-    render(<TaskReviewTab task={makeTask()} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={makeTask()} addToast={vi.fn()} />);
 
     expect(await screen.findByText("Failed to load review data.")).toBeInTheDocument();
   });
@@ -145,7 +153,7 @@ describe("TaskReviewTab", () => {
     });
 
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
-    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     await screen.findByText("CHANGES_REQUESTED");
     expect(screen.getByText("failed").className).toContain("task-review-tab__status--failed");
@@ -181,7 +189,7 @@ describe("TaskReviewTab", () => {
     window.localStorage.setItem(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, "false");
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     const checkbox = await screen.findByRole("checkbox");
     expect(checkbox).not.toBeChecked();
@@ -215,7 +223,7 @@ describe("TaskReviewTab", () => {
     window.localStorage.setItem(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, "true");
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     const checkbox = await screen.findByRole("checkbox");
     const link = await screen.findByRole("link", { name: "example" });
@@ -247,9 +255,10 @@ describe("TaskReviewTab", () => {
     window.localStorage.setItem(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, "false");
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     await screen.findByText("Plain mode item");
+    await act(async () => {});
     const body = container.querySelector("pre.task-review-tab__body");
     expect(body).not.toBeNull();
     expect(body?.closest("label")).toBeNull();
@@ -275,7 +284,7 @@ describe("TaskReviewTab", () => {
 
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { container, unmount } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container, unmount } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     await screen.findByText("Markdown body");
     expect(container.querySelector("strong")?.textContent).toBe("bold");
@@ -287,7 +296,7 @@ describe("TaskReviewTab", () => {
     expect(container.querySelector("strong")).toBeNull();
 
     unmount();
-    const rerendered = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const rerendered = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     await screen.findByText("Markdown body");
     await waitFor(() => expect(rerendered.container.querySelector("pre.task-review-tab__body")?.textContent).toContain("**bold**"));
@@ -320,10 +329,12 @@ describe("TaskReviewTab", () => {
     apiMocks.reviseTaskReviewItems.mockResolvedValue({ task, reviewState: task.reviewState });
     apiMocks.refreshTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
+    });
 
     expect(apiMocks.reviseTaskReviewItems).toHaveBeenCalledWith(task.id, [expect.objectContaining({
       id: "ri-1",
@@ -372,7 +383,7 @@ describe("TaskReviewTab", () => {
       automationStatus: null,
     });
 
-    render(<TaskReviewTab task={task} addToast={addToast} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={addToast} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
@@ -405,7 +416,7 @@ describe("TaskReviewTab", () => {
       emptyMessage: null,
     });
 
-    const { container } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
     expect(await screen.findByText("code review Step 2: REVISE")).toBeInTheDocument();
     expect(screen.getAllByText("REVISE").length).toBeGreaterThan(0);
     expect(container.querySelector(".task-review-tab__item-header")).not.toBeNull();
@@ -454,7 +465,7 @@ describe("TaskReviewTab", () => {
       emptyMessage: null,
     });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     expect(await screen.findByText("queued item")).toBeInTheDocument();
     expect(screen.getByText("in progress item")).toBeInTheDocument();
@@ -494,7 +505,7 @@ describe("TaskReviewTab", () => {
       emptyMessage: null,
     });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
     expect(await screen.findByText("Fix edge case")).toBeInTheDocument();
     expect(screen.getByText(/Error: Patch failed/)).toBeInTheDocument();
   });
@@ -593,7 +604,7 @@ describe("TaskReviewTab", () => {
       .mockResolvedValueOnce(cases[2].response)
       .mockResolvedValueOnce(cases[3].response);
 
-    const { container, rerender } = render(<TaskReviewTab task={cases[0].task} addToast={vi.fn()} />);
+    const { container, rerender } = await renderWithAct(<TaskReviewTab task={cases[0].task} addToast={vi.fn()} />);
 
     for (const [index, testCase] of cases.entries()) {
       if (index > 0) {
@@ -646,7 +657,7 @@ describe("TaskReviewTab", () => {
     const task = makeTask({ column: "in-review", prInfo: undefined, autoMerge: taskAutoMerge });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    render(
+    await renderWithAct(
       <TaskReviewTab
         task={task}
         addToast={vi.fn()}
@@ -672,7 +683,7 @@ describe("TaskReviewTab", () => {
     const task = makeTask({ column: "todo", prInfo: undefined });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} />);
 
     await screen.findByRole("button", { name: "Refresh" });
     expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
@@ -692,7 +703,7 @@ describe("TaskReviewTab", () => {
     });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} />);
 
     await screen.findByRole("button", { name: "Refresh" });
     expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
@@ -702,7 +713,7 @@ describe("TaskReviewTab", () => {
     const task = makeTask({ column: "in-review", prInfo: undefined });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable={false} onRequestCreatePr={vi.fn()} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable={false} onRequestCreatePr={vi.fn()} />);
 
     await screen.findByRole("button", { name: "Refresh" });
     expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
@@ -712,7 +723,7 @@ describe("TaskReviewTab", () => {
     const task = makeTask({ column: "in-review", prInfo: undefined, autoMerge: undefined });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} autoMergeEnabled />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} prAuthAvailable onRequestCreatePr={vi.fn()} autoMergeEnabled />);
 
     await screen.findByRole("button", { name: "Refresh" });
     expect(screen.queryByTestId("task-review-create-pr")).toBeNull();
@@ -732,9 +743,11 @@ describe("TaskReviewTab", () => {
     });
     apiMocks.reviseTaskReviewItems.mockResolvedValue({ task: makeTask(), reviewState: { source: "reviewer-agent", items: [], addressing: [] } });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
+    });
 
     expect(apiMocks.reviseTaskReviewItems).toHaveBeenCalledWith(task.id, [expect.objectContaining({ id: "reviewer-code-1", source: "reviewer-agent" })], undefined);
   });
@@ -748,7 +761,7 @@ describe("TaskReviewTab", () => {
     apiMocks.updateTask.mockResolvedValueOnce({ ...task, autoMerge: false });
     apiMocks.updateTask.mockResolvedValueOnce({ ...task, autoMerge: undefined });
 
-    render(<TaskReviewTab task={task} addToast={vi.fn()} onTaskUpdated={onTaskUpdated} />);
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} onTaskUpdated={onTaskUpdated} />);
 
     const select = await screen.findByTestId("task-review-auto-merge-select");
     fireEvent.change(select, { target: { value: "on" } });
@@ -767,7 +780,7 @@ describe("TaskReviewTab", () => {
     const inReviewTask = makeTask({ column: "in-review", autoMerge: undefined, reviewState: { source: "pull-request", items: [], addressing: [] } });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: inReviewTask.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { rerender } = render(<TaskReviewTab task={inReviewTask} addToast={vi.fn()} autoMergeEnabled />);
+    const { rerender } = await renderWithAct(<TaskReviewTab task={inReviewTask} addToast={vi.fn()} autoMergeEnabled />);
     expect(await screen.findByTestId("task-review-auto-merge-effective-hint")).toHaveTextContent("Effective: Auto-merge on — frozen on entry to review");
 
     rerender(<TaskReviewTab task={inReviewTask} addToast={vi.fn()} autoMergeEnabled={false} />);
@@ -778,7 +791,7 @@ describe("TaskReviewTab", () => {
     const inReviewTask = makeTask({ column: "in-review", autoMerge: undefined, reviewState: { source: "pull-request", items: [], addressing: [] } });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: inReviewTask.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { rerender } = render(
+    const { rerender } = await renderWithAct(
       <TaskReviewTab
         task={inReviewTask}
         addToast={vi.fn()}
@@ -819,7 +832,7 @@ describe("TaskReviewTab", () => {
     const task = makeTask({ autoMerge: true, reviewState: { source: "pull-request", items: [], addressing: [] } });
     apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
 
-    const { rerender } = render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+    const { rerender } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
     expect(await screen.findByTestId("task-review-auto-merge-select")).toHaveValue("on");
 
     rerender(<TaskReviewTab task={makeTask({ autoMerge: false, reviewState: { source: "pull-request", items: [], addressing: [] } })} addToast={vi.fn()} />);

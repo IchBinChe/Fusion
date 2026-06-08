@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { ChatView } from "../ChatView";
 import * as useChatModule from "../../hooks/useChat";
 import * as useChatRoomsModule from "../../hooks/useChatRooms";
@@ -35,6 +35,14 @@ vi.mock("lucide-react", async (importOriginal) => {
     ArrowUpToLine: (props: any) => <svg data-testid="icon-arrow-up-to-line" {...props} />,
   };
 });
+
+async function renderWithAct(ui: Parameters<typeof rtlRender>[0]) {
+  let result: ReturnType<typeof rtlRender> | undefined;
+  await act(async () => {
+    result = rtlRender(ui);
+  });
+  return result!;
+}
 
 const mockUseChat = vi.mocked(useChatModule.useChat);
 const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
@@ -103,10 +111,10 @@ const defaultRoomsState: UseChatRoomsResult = {
   refreshRooms: vi.fn(),
 };
 
-function setup(chatOverrides: Partial<UseChatReturn> = {}, roomsOverrides: Partial<UseChatRoomsResult> = {}, experimentalFeatures?: Record<string, boolean>) {
+async function setup(chatOverrides: Partial<UseChatReturn> = {}, roomsOverrides: Partial<UseChatRoomsResult> = {}, experimentalFeatures?: Record<string, boolean>) {
   mockUseChat.mockReturnValue({ ...defaultChatState, ...chatOverrides });
   mockUseChatRooms.mockReturnValue({ ...defaultRoomsState, ...roomsOverrides });
-  return render(<ChatView addToast={vi.fn()} experimentalFeatures={experimentalFeatures} />);
+  return await renderWithAct(<ChatView addToast={vi.fn()} experimentalFeatures={experimentalFeatures} />);
 }
 
 describe("ChatView scroll-to-top message affordance", () => {
@@ -132,8 +140,8 @@ describe("ChatView scroll-to-top message affordance", () => {
     });
   });
 
-  it("renders on assistant messages and not on user or failed assistant messages", () => {
-    setup({
+  it("renders on assistant messages and not on user or failed assistant messages", async () => {
+    await setup({
       messages: [
         { id: "assistant-ok", sessionId: activeSession.id, role: "assistant", content: "hello", createdAt: "2026-04-08T00:00:00.000Z" },
         { id: "assistant-failed", sessionId: activeSession.id, role: "assistant", content: "failed", createdAt: "2026-04-08T00:00:01.000Z", failureInfo: { summary: "oops" } },
@@ -146,8 +154,8 @@ describe("ChatView scroll-to-top message affordance", () => {
     expect(screen.queryByTestId("chat-message-scroll-to-top-user-1")).toBeNull();
   });
 
-  it("scrolls container to message top with smooth behavior", () => {
-    setup({
+  it("scrolls container to message top with smooth behavior", async () => {
+    await setup({
       messages: [
         { id: "assistant-ok", sessionId: activeSession.id, role: "assistant", content: "hello", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -164,7 +172,7 @@ describe("ChatView scroll-to-top message affordance", () => {
     expect(container.scrollTo).toHaveBeenCalledWith({ top: 180, behavior: "smooth" });
   });
 
-  it("uses auto behavior when reduced motion is preferred", () => {
+  it("uses auto behavior when reduced motion is preferred", async () => {
     vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
       matches: query === "(prefers-reduced-motion: reduce)",
       media: query,
@@ -176,7 +184,7 @@ describe("ChatView scroll-to-top message affordance", () => {
       dispatchEvent: vi.fn(),
     }));
 
-    setup({
+    await setup({
       messages: [
         { id: "assistant-ok", sessionId: activeSession.id, role: "assistant", content: "hello", createdAt: "2026-04-08T00:00:00.000Z" },
       ],
@@ -195,8 +203,8 @@ describe("ChatView scroll-to-top message affordance", () => {
     expect(container.scrollTo).toHaveBeenCalledWith({ top: 120, behavior: "auto" });
   });
 
-  it("renders the affordance for room assistant messages", () => {
-    setup(
+  it("renders the affordance for room assistant messages", async () => {
+    await setup(
       {
         sessions: [activeSession],
         activeSession,
@@ -214,7 +222,7 @@ describe("ChatView scroll-to-top message affordance", () => {
     expect(screen.getByTestId("chat-message-scroll-to-top-room-assistant-1")).toBeInTheDocument();
   });
 
-  it("does not reset to top when a stale zero snapshot is captured while user is reading older messages", () => {
+  it("does not reset to top when a stale zero snapshot is captured while user is reading older messages", async () => {
     const state: UseChatReturn = {
       ...defaultChatState,
       messages: [
@@ -226,7 +234,7 @@ describe("ChatView scroll-to-top message affordance", () => {
     mockUseChat.mockImplementation(() => state);
     mockUseChatRooms.mockReturnValue(defaultRoomsState);
 
-    const { rerender } = render(<ChatView addToast={vi.fn()} />);
+    const { rerender } = await renderWithAct(<ChatView addToast={vi.fn()} />);
     const container = document.querySelector(".chat-messages") as HTMLDivElement;
 
     let scrollTopValue = 600;

@@ -258,7 +258,6 @@ const qualityAppBackfillTests = ["app/**/*.test.{ts,tsx}"];
 const backfillApiExclude = [
   ...qualityApiTests,
   ...skipListDashboardGlobs.filter((file) => file.startsWith("src/")),
-  "src/__tests__/chat-manager.test.ts",
 ];
 const qualityApiBackfillTests = ["src/**/*.test.{ts,tsx}"];
 
@@ -450,7 +449,7 @@ export default defineConfig({
           name: "dashboard-api",
           environment: "node",
           include: ["src/**/*.test.{ts,tsx}"],
-          exclude: ["src/__tests__/chat-manager.test.ts"],
+          exclude: [],
           css: { include: [] },
         },
       },

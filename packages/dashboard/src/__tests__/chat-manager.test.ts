@@ -1987,7 +1987,12 @@ describe("ChatManager generation isolation", () => {
     const chatManager = createChatManager();
 
     let resolvePrompt: (() => void) | undefined;
+    let promptCreatedResolve!: () => void;
+    let promptCreated: Promise<void>;
     let promptCallCount = 0;
+    promptCreated = new Promise<void>((resolve) => {
+      promptCreatedResolve = resolve;
+    });
     __setCreateFnAgent(async () => {
       promptCallCount += 1;
       const callIndex = promptCallCount;
@@ -1996,7 +2001,10 @@ describe("ChatManager generation isolation", () => {
           prompt: vi.fn().mockImplementation(() => {
             // First call hangs until we resolve it; second resolves immediately.
             if (callIndex === 1) {
-              return new Promise<void>((resolve) => { resolvePrompt = resolve; });
+              return new Promise<void>((resolve) => {
+                resolvePrompt = resolve;
+                promptCreatedResolve();
+              });
             }
             return Promise.resolve();
           }),
@@ -2008,10 +2016,8 @@ describe("ChatManager generation isolation", () => {
 
     // Kick off generation #1 — it will hang inside prompt().
     const sendOne = chatManager.sendMessage("chat-001", "first");
-    // Yield enough microtasks for sendOne to set its activeGenerations entry.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Wait until generation #1 has actually reached its hanging prompt.
+    await promptCreated;
     expect(chatManager.isGenerating("chat-001")).toBe(true);
 
     // Cancel #1 (so its prompt() will eventually unwind via the abort path).

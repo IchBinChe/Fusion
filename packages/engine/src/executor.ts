@@ -3637,9 +3637,9 @@ export class TaskExecutor {
   private static processWideGraphRouting = new Set<string>();
 
   /** Wired by the runtime to ProjectEngine.onMerge — resolves with the merge outcome. */
-  private mergeRequester?: (taskId: string) => Promise<MergeResult>;
+  private mergeRequester?: (taskId: string, options?: { signal?: AbortSignal }) => Promise<MergeResult>;
 
-  setMergeRequester(requestMerge: (taskId: string) => Promise<MergeResult>): void {
+  setMergeRequester(requestMerge: (taskId: string, options?: { signal?: AbortSignal }) => Promise<MergeResult>): void {
     this.mergeRequester = requestMerge;
   }
 
@@ -3678,8 +3678,14 @@ export class TaskExecutor {
       let selection: { workflowId: string; stepIds: string[] } | undefined;
       try {
         selection = this.store.getTaskWorkflowSelection?.(task.id);
-      } catch {
-        selection = undefined;
+      } catch (err) {
+        await this.handleGraphFailure(task, {
+          disposition: "failed",
+          outcome: "failure",
+          reason: `workflow-selection-failed: ${err instanceof Error ? err.message : String(err)}`,
+          visitedNodeIds: [],
+        });
+        return true;
       }
       selection ??= { workflowId: "builtin:coding", stepIds: [] };
 
@@ -3737,7 +3743,8 @@ export class TaskExecutor {
           getTaskWorkflowSelection: (taskId: string) =>
             this.store.getTaskWorkflowSelection?.(taskId) ?? { workflowId: "builtin:coding", stepIds: [] },
           getWorkflowDefinition: async (id: string) =>
-            (await this.store.getWorkflowDefinition?.(id)) ?? getBuiltinWorkflow("builtin:coding"),
+            (await this.store.getWorkflowDefinition?.(id))
+              ?? (id === "builtin:coding" ? getBuiltinWorkflow("builtin:coding") : undefined),
         },
         runId: resolvedRunId,
         primitives: this.createAuthoritativeWorkflowPrimitives(settings),
@@ -4454,13 +4461,23 @@ export class TaskExecutor {
    * interceptor makes execute() stop at the completion boundary instead of
    * running workflow steps and the review handoff.
    */
-  private async runImplementationPhase(task: Task): Promise<{ taskDone: boolean; modifiedFiles: string[] }> {
+  private async runImplementationPhase(
+    task: Task,
+    prepared?: PreparedWorktree,
+  ): Promise<{ taskDone: boolean; modifiedFiles: string[] }> {
     let captured: { taskDone: boolean; modifiedFiles: string[] } = { taskDone: false, modifiedFiles: [] };
     this.graphCompletionInterceptors.set(task.id, (info) => {
       captured = { taskDone: true, modifiedFiles: info.modifiedFiles };
     });
+    const executionTask = prepared
+      ? {
+          ...task,
+          worktree: prepared.worktreePath || task.worktree,
+          branch: prepared.branchName || task.branch,
+        }
+      : task;
     try {
-      await this.execute(task);
+      await this.execute(executionTask);
     } finally {
       this.graphCompletionInterceptors.delete(task.id);
     }
@@ -4633,14 +4650,14 @@ export class TaskExecutor {
         approved: true,
         artifactKeys: [],
       } }),
-      runCodingSession: async (ctx, task) => {
+      runCodingSession: async (ctx, task, prepared) => {
         const governingNodeId = ctx.node.context?.[SEAM_GOVERNING_NODE_CONTEXT_KEY];
         if (typeof governingNodeId === "string") {
           this.graphSeamGoverningNodeId.set(task.id, governingNodeId);
         }
         let result: { taskDone: boolean; modifiedFiles: string[] };
         try {
-          result = await this.runImplementationPhase(task);
+          result = await this.runImplementationPhase(task, prepared);
         } finally {
           this.graphSeamGoverningNodeId.delete(task.id);
         }
@@ -4779,13 +4796,17 @@ export class TaskExecutor {
           return { outcome: "failure", value: "merge-unavailable", data: { status: "failed", reason: "merge-unavailable" } };
         }
         const GRAPH_MERGE_TIMEOUT_MS = 30 * 60 * 1000;
+        const controller = new AbortController();
         let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
         const timeout = new Promise<"timeout">((resolve) => {
-          timeoutHandle = setTimeout(() => resolve("timeout"), GRAPH_MERGE_TIMEOUT_MS);
+          timeoutHandle = setTimeout(() => {
+            controller.abort();
+            resolve("timeout");
+          }, GRAPH_MERGE_TIMEOUT_MS);
           timeoutHandle.unref?.();
         });
         try {
-          const result = await Promise.race([this.mergeRequester(task.id), timeout]);
+          const result = await Promise.race([this.mergeRequester(task.id, { signal: controller.signal }), timeout]);
           if (result === "timeout") {
             executorLog.warn(`${task.id}: workflow merge primitive timed out after ${GRAPH_MERGE_TIMEOUT_MS}ms`);
             return { outcome: "failure", value: "merge-timeout", data: { status: "timeout" } };

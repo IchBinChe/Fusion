@@ -14,7 +14,7 @@ import type { TaskExecutor } from "./executor.js";
 import { executorLog } from "./logger.js";
 import { WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from "./workflow-parity-observer.js";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
-import type { WorkflowLegacySeams } from "./workflow-node-handlers.js";
+import type { StepReviewSeamResult, WorkflowLegacySeams } from "./workflow-node-handlers.js";
 import type { PreparedWorktree, WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 
 const AUTHORITATIVE_WORKFLOW_ID = "workflow-interpreter-authoritative";
@@ -52,6 +52,21 @@ function buildAuthoritativeSettings(settings: Settings): Settings {
 }
 
 function primitivesFromLegacySeams(seams: WorkflowLegacySeams): WorkflowRuntimePrimitives {
+  const mapStepReviewValue = (verdict: StepReviewSeamResult["verdict"] | undefined): string => {
+    switch (verdict) {
+      case "APPROVE":
+        return "approve";
+      case "REVISE":
+        return "revise";
+      case "RETHINK":
+        return "rethink";
+      default:
+        return "unavailable";
+    }
+  };
+
+  // Legacy seams do not consume PreparedWorktree; filesystem/session state is
+  // still owned inside the seam implementation they delegate to.
   const prepared: PreparedWorktree = { worktreePath: "" };
   return {
     prepareWorktree: async () => ({ outcome: "success", data: prepared }),
@@ -78,7 +93,7 @@ function primitivesFromLegacySeams(seams: WorkflowLegacySeams): WorkflowRuntimeP
         const result = await seams.stepReview?.(task, ctx.node.context ?? {}, { type: input.type });
         return {
           outcome: "success",
-          value: result?.verdict === "APPROVE" ? "approve" : result?.verdict === "REVISE" ? "revise" : result?.verdict === "RETHINK" ? "rethink" : "unavailable",
+          value: mapStepReviewValue(result?.verdict),
           data: result ?? { verdict: "UNAVAILABLE" },
         };
       }

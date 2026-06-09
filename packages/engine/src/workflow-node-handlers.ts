@@ -311,7 +311,13 @@ export function createPrimitivePromptLikeHandler(
           };
         }
         const result = await primitives.runCodingSession(primitiveCtx, context.task, prepared.data);
-        return { outcome: result.outcome, value: result.value, contextPatch: result.contextPatch };
+        const contextPatch = prepared.contextPatch || result.contextPatch
+          ? {
+              ...(prepared.contextPatch ?? {}),
+              ...(result.contextPatch ?? {}),
+            }
+          : undefined;
+        return { outcome: result.outcome, value: result.value, contextPatch };
       }
       if (seam === "review") {
         const result = await primitives.runReview(primitiveCtx, context.task, { type: "code" });
@@ -467,6 +473,7 @@ export function createPrimitiveStepReviewHandler(primitives: WorkflowRuntimePrim
     let result: StepReviewSeamResult = {
       verdict: "UNAVAILABLE",
     };
+    let primitivePatch: Record<string, unknown> | undefined;
     for (let attempt = 0; attempt <= STEP_REVIEW_UNAVAILABLE_RETRY_CAP; attempt++) {
       const primitiveResult = await primitives.runReview(
         primitiveContextForNode(node, ctx.task, ctx.context, attempt + 1),
@@ -477,6 +484,14 @@ export function createPrimitiveStepReviewHandler(primitives: WorkflowRuntimePrim
           baselineSha: config.type === "code" ? active.baselineSha : undefined,
         },
       );
+      if (primitiveResult.outcome !== "success") {
+        return {
+          outcome: primitiveResult.outcome,
+          value: primitiveResult.value,
+          contextPatch: primitiveResult.contextPatch,
+        };
+      }
+      primitivePatch = primitiveResult.contextPatch;
       result = primitiveResult.data ?? { verdict: "UNAVAILABLE" as const };
       if (result.verdict !== "UNAVAILABLE") break;
     }
@@ -485,6 +500,7 @@ export function createPrimitiveStepReviewHandler(primitives: WorkflowRuntimePrim
       active.verdict = result.verdict;
     }
     const patch: Record<string, unknown> = {
+      ...(primitivePatch ?? {}),
       [FOREACH_ACTIVE_CONTEXT_KEY]: active,
       [`node:${node.id}:verdict`]: result.verdict,
     };

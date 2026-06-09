@@ -40,11 +40,11 @@ export interface WorkflowTaskRuntimeDeps extends Omit<WorkflowGraphExecutorDeps,
 /**
  * WorkflowTaskRuntime is the workflow-engine execution facade.
  *
- * It always resolves a task to a workflow IR: explicit selections resolve to
- * their selected workflow, and tasks without a selection resolve to the built-in
- * coding workflow. This is intentionally
- * different from `WorkflowGraphTaskRunner`, whose current contract still models
- * "no selection" as legacy fallback.
+ * It always resolves a task to a workflow IR: explicit selections resolve only
+ * to their selected workflow, and tasks without a selection resolve to the
+ * built-in coding workflow. This is intentionally different from
+ * `WorkflowGraphTaskRunner`, whose current contract still models "no selection"
+ * as legacy fallback.
  */
 export class WorkflowTaskRuntime {
   public constructor(private readonly deps: WorkflowTaskRuntimeDeps) {}
@@ -118,27 +118,23 @@ export class WorkflowTaskRuntime {
     let workflowId: string | undefined;
     try {
       workflowId = this.deps.store.getTaskWorkflowSelection(taskId)?.workflowId;
-    } catch {
-      return builtinCodingTarget();
+    } catch (err) {
+      throw new Error(`workflow-selection-failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (!workflowId) return builtinCodingTarget();
 
     if (isBuiltinWorkflowId(workflowId)) {
       const builtin = getBuiltinWorkflow(workflowId);
-      if (!builtin) return builtinCodingTarget();
+      if (!builtin) throw new Error(`workflow-missing: ${workflowId}`);
       const ir = typeof builtin.ir === "string" ? parseWorkflowIr(builtin.ir) : builtin.ir;
       return { workflowId, ir };
     }
 
-    try {
-      const def = await this.deps.store.getWorkflowDefinition(workflowId);
-      if (!def) return builtinCodingTarget();
-      const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
-      return { workflowId, ir };
-    } catch {
-      return builtinCodingTarget();
-    }
+    const def = await this.deps.store.getWorkflowDefinition(workflowId);
+    if (!def) throw new Error(`workflow-missing: ${workflowId}`);
+    const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
+    return { workflowId, ir };
   }
 
   private recordingHandlers(invoked: string[]): Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>> {

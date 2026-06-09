@@ -131,7 +131,7 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
         nextExpectedSeamIndex += 1;
       }
       if (expectedSeamOrder[nextExpectedSeamIndex] !== seam) {
-        return new WorkflowCompileError("seams must follow the execute -> review -> merge order");
+        return new WorkflowCompileError("seams must follow the planning -> execute -> review -> merge order");
       }
       seenSeams.add(seam);
       nextExpectedSeamIndex += 1;

@@ -29,13 +29,19 @@ function selectedIr(): WorkflowIr {
 
 function recordingPrimitives(
   calls: string[],
-  overrides: Partial<Record<"execute", WorkflowNodeResult>> = {},
+  overrides: Partial<Record<"prepare" | "execute", WorkflowNodeResult>> = {},
+  observed: { prepared?: PreparedWorktree } = {},
 ): WorkflowRuntimePrimitives {
   const prepared: PreparedWorktree = { worktreePath: "/tmp/fusion-worktree" };
   return {
     prepareWorktree: async () => {
       calls.push("prepare-worktree");
-      return { outcome: "success", data: prepared };
+      return {
+        outcome: overrides.prepare?.outcome ?? "success",
+        value: overrides.prepare?.value,
+        contextPatch: overrides.prepare?.contextPatch,
+        data: overrides.prepare?.outcome === "failure" ? undefined : prepared,
+      };
     },
     readArtifact: async () => undefined,
     writeArtifact: async (_ctx, _task, key) => ({ outcome: "success", data: { key } }),
@@ -43,8 +49,9 @@ function recordingPrimitives(
       calls.push("planning");
       return { outcome: "success", data: { approved: true, artifactKeys: [] } };
     },
-    runCodingSession: async () => {
+    runCodingSession: async (_ctx, _task, preparedWorktree) => {
       calls.push("execute");
+      observed.prepared = preparedWorktree;
       const override = overrides.execute;
       return {
         outcome: override?.outcome ?? "success",
@@ -94,6 +101,7 @@ describe("WorkflowTaskRuntime", () => {
 
   it("runs a selected workflow through the graph engine", async () => {
     const calls: string[] = [];
+    const observed: { prepared?: PreparedWorktree } = {};
     let workflowSelectionReads = 0;
     const runtime = new WorkflowTaskRuntime({
       store: {
@@ -103,7 +111,14 @@ describe("WorkflowTaskRuntime", () => {
         },
         getWorkflowDefinition: async () => ({ ir: selectedIr() }),
       },
-      primitives: recordingPrimitives(calls),
+      primitives: recordingPrimitives(
+        calls,
+        {
+          prepare: { outcome: "success", contextPatch: { preparedKey: "from-prepare" } },
+          execute: { outcome: "success", contextPatch: { executeKey: "from-execute" } },
+        },
+        observed,
+      ),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
@@ -115,6 +130,9 @@ describe("WorkflowTaskRuntime", () => {
     expect(result.disposition).toBe("completed");
     expect(calls).toEqual(["custom:prepare", "prepare-worktree", "execute"]);
     expect(result.visitedNodeIds).toEqual(["start", "prepare", "execute"]);
+    expect(observed.prepared).toEqual({ worktreePath: "/tmp/fusion-worktree" });
+    expect(result.context.preparedKey).toBe("from-prepare");
+    expect(result.context.executeKey).toBe("from-execute");
     expect(workflowSelectionReads).toBe(1);
   });
 
@@ -139,9 +157,8 @@ describe("WorkflowTaskRuntime", () => {
     expect(result.visitedNodeIds).toEqual(["start", "planning", "execute", "review", "merge"]);
   });
 
-  it("turns selected workflow lookup failures into the built-in workflow target", async () => {
+  it("fails selected workflow lookup misses instead of running the built-in workflow", async () => {
     const calls: string[] = [];
-    const observedRunIds: string[] = [];
     const runtime = new WorkflowTaskRuntime({
       store: {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-MISSING", stepIds: [] }),
@@ -149,25 +166,17 @@ describe("WorkflowTaskRuntime", () => {
       },
       primitives: recordingPrimitives(calls),
       runCustomNode: async () => ({ outcome: "success" }),
-      branchPersistence: {
-        loadBranchStates: (_taskId, runId) => {
-          observedRunIds.push(runId);
-          return [];
-        },
-      },
     });
 
     const result = await runtime.run(task, flagOff);
 
-    expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
-    expect(observedRunIds).toContain("FN-9002:builtin:coding");
-    expect(observedRunIds).not.toContain("FN-9002:WF-MISSING");
+    expect(result.disposition).toBe("failed");
+    expect(result.reason).toContain("workflow-resolution-error: workflow-missing: WF-MISSING");
+    expect(calls).toEqual([]);
   });
 
-  it("turns corrupt selected workflow definitions into the built-in workflow target", async () => {
+  it("fails corrupt selected workflow definitions instead of running the built-in workflow", async () => {
     const calls: string[] = [];
-    const observedRunIds: string[] = [];
     const runtime = new WorkflowTaskRuntime({
       store: {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-CORRUPT", stepIds: [] }),
@@ -175,20 +184,13 @@ describe("WorkflowTaskRuntime", () => {
       },
       primitives: recordingPrimitives(calls),
       runCustomNode: async () => ({ outcome: "success" }),
-      branchPersistence: {
-        loadBranchStates: (_taskId, runId) => {
-          observedRunIds.push(runId);
-          return [];
-        },
-      },
     });
 
     const result = await runtime.run(task, flagOff);
 
-    expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
-    expect(observedRunIds).toContain("FN-9002:builtin:coding");
-    expect(observedRunIds).not.toContain("FN-9002:WF-CORRUPT");
+    expect(result.disposition).toBe("failed");
+    expect(result.reason).toContain("workflow-resolution-error:");
+    expect(calls).toEqual([]);
   });
 
   it("forces only the graph executor flag while preserving other settings", async () => {

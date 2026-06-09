@@ -142,7 +142,10 @@ export class InProcessRuntime
    * before `start()` via `setMergeEnqueuer`.
    */
   private mergeEnqueuer?: (taskId: string) => boolean;
-  private mergeRequester?: (taskId: string) => Promise<import("@fusion/core").MergeResult>;
+  private mergeRequester?: (
+    taskId: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<import("@fusion/core").MergeResult>;
   private clearMergeActive?: (taskId: string) => void;
   private activeMergeTaskIdProvider?: () => string | null;
   /** Tracks whether startup recovery was intentionally deferred due to pause state. */
@@ -1140,7 +1143,12 @@ export class InProcessRuntime
    * forwards immediately when the executor already exists, and is re-applied at
    * executor construction during start().
    */
-  setMergeRequester(requestMerge: (taskId: string) => Promise<import("@fusion/core").MergeResult>): void {
+  setMergeRequester(
+    requestMerge: (
+      taskId: string,
+      options?: { signal?: AbortSignal },
+    ) => Promise<import("@fusion/core").MergeResult>,
+  ): void {
     this.mergeRequester = requestMerge;
     this.executor?.setMergeRequester(requestMerge);
   }

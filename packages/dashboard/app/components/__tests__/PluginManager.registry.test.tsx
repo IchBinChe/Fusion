@@ -126,6 +126,8 @@ afterEach(() => {
 });
 
 describe("PluginManager registry browsing", () => {
+  // GAP: The API supports ?category= filtering but the UI does not expose a category selector.
+  // A future task should add category filter UI and tests.
   it("renders registry entries with metadata", async () => {
     await renderRegistry();
 
@@ -163,6 +165,32 @@ describe("PluginManager registry browsing", () => {
 
     expect(installPlugin).toHaveBeenCalledWith({ path: "./plugins/registry-installable" }, undefined);
     expect(fetchPlugins).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces install rejection without unmounting registry results", async () => {
+    vi.mocked(installPlugin).mockRejectedValueOnce(new Error("install rejected"));
+    await renderRegistry();
+
+    const installable = screen.getByText("Installable Registry").closest(".plugin-registry-item") as HTMLElement;
+    const installButton = within(installable).getByRole("button", { name: "Install" });
+    fireEvent.click(installButton);
+    expect(within(installable).getByRole("button", { name: "Installing..." })).toBeDisabled();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(addToast).toHaveBeenCalledWith(expect.stringContaining("install rejected"), "error");
+    expect(screen.getByRole("region", { name: "Browse Registry" })).toBeInTheDocument();
+    expect(screen.getByText("Installable Registry")).toBeInTheDocument();
+    expect(within(installable).getByRole("button", { name: "Install" })).toBeEnabled();
+
+    const searchInput = screen.getByPlaceholderText("Search registry plugins");
+    fireEvent.change(searchInput, { target: { value: "still interactive" } });
+    expect(searchInput).toHaveValue("still interactive");
   });
 
   it("opens detail management for installed entries", async () => {
@@ -225,6 +253,42 @@ describe("PluginManager registry browsing", () => {
       await Promise.resolve();
     });
     expect(fetchPluginRegistry).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders very long registry metadata inside the registry item container", async () => {
+    const longName = `Very Long Registry Plugin ${"Name".repeat(140)}`;
+    const longDescription = `Description ${"with lengthy details ".repeat(40)}`;
+    await renderRegistry([
+      {
+        id: "registry-long-metadata",
+        name: longName,
+        description: longDescription,
+        version: "9.9.9",
+        author: "Fusion Labs",
+        category: "integration",
+        path: "./plugins/registry-long-metadata",
+        installed: false,
+        canInstall: true,
+      },
+    ]);
+
+    const item = screen.getByText(longName).closest(".plugin-registry-item") as HTMLElement;
+    expect(item).toBeInTheDocument();
+    expect(item).toHaveClass("plugin-registry-item");
+    expect(within(item).getByText(longName)).toBeInTheDocument();
+    expect(item).toHaveTextContent(longDescription.trim());
+  });
+
+  it("renders registry browsing controls at narrow viewport widths", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 360 });
+    window.dispatchEvent(new Event("resize"));
+
+    await renderRegistry();
+
+    const section = screen.getByRole("region", { name: "Browse Registry" });
+    expect(within(section).getByPlaceholderText("Search registry plugins")).toBeInTheDocument();
+    expect(within(section).getByLabelText("Registry plugin results")).toBeInTheDocument();
+    expect(within(section).getByText("Installable Registry")).toBeInTheDocument();
   });
 
   it("shows empty state when no registry entries match", async () => {

@@ -130,6 +130,44 @@ describe("GET /api/plugins/registry", () => {
 
     await expect(buildRegistryPluginEntries({}, pluginStore)).resolves.toEqual([]);
     await expect(buildRegistryPluginEntries({ plugins: [] }, pluginStore)).resolves.toEqual([]);
+    await expect(buildRegistryPluginEntries({ plugins: "not-an-array" }, pluginStore)).resolves.toEqual([]);
+  });
+
+  it("filters invalid manifest entry shapes", async () => {
+    const pluginStore = createMockPluginStore();
+
+    await expect(
+      buildRegistryPluginEntries({ plugins: [null, undefined, "string-entry", 42] }, pluginStore),
+    ).resolves.toEqual([]);
+    await expect(
+      buildRegistryPluginEntries({ plugins: [{ id: 123, name: null }] }, pluginStore),
+    ).resolves.toEqual([]);
+  });
+
+  describe("input sanitization", () => {
+    it.each([
+      ["HTML/script injection", "<script>alert(1)</script>"],
+      ["SQL-injection-like text", "' OR 1=1 --"],
+      ["extremely long text", "x".repeat(10_001)],
+      ["regex-special characters", "[.*+]"],
+    ])("treats %s in q as plain search text", async (_label, query) => {
+      const pluginStore = createMockPluginStore();
+      const res = await performGet(buildApp(pluginStore), `/api/plugins/registry?q=${encodeURIComponent(query)}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ plugins: [] });
+    });
+
+    it.each(["nonexistent", "../../etc", "runtime<script>"])(
+      "treats invalid category %s as a non-matching literal filter",
+      async (category) => {
+        const pluginStore = createMockPluginStore();
+        const res = await performGet(buildApp(pluginStore), `/api/plugins/registry?category=${encodeURIComponent(category)}`);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ plugins: [] });
+      },
+    );
   });
 
   it("uses the project-scoped plugin store when projectId is provided", async () => {
@@ -152,5 +190,35 @@ describe("GET /api/plugins/registry", () => {
     expect((res.body as { plugins: Array<{ id: string; installed: boolean }> }).plugins).toEqual([
       expect.objectContaining({ id: "fusion-plugin-reports", installed: true }),
     ]);
+  });
+
+  describe("project-scoped store failures", () => {
+    it("returns 500 when resolving the project store fails", async () => {
+      const globalStore = createMockPluginStore();
+      const getOrCreateProjectStore = vi
+        .spyOn(projectStoreResolver, "getOrCreateProjectStore")
+        .mockRejectedValue(new Error("store unavailable"));
+
+      const res = await performGet(buildApp(globalStore), "/api/plugins/registry?projectId=bad-project");
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: "store unavailable" });
+      expect(getOrCreateProjectStore).toHaveBeenCalledWith("bad-project");
+    });
+
+    it("returns 500 when the scoped store cannot provide a plugin store", async () => {
+      const globalStore = createMockPluginStore();
+      const getPluginStore = vi.fn(() => {
+        throw new Error("plugin store unavailable");
+      });
+      vi.spyOn(projectStoreResolver, "getOrCreateProjectStore").mockResolvedValue({ getPluginStore } as any);
+
+      const res = await performGet(buildApp(globalStore), "/api/plugins/registry?projectId=bad-project");
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: "plugin store unavailable" });
+      expect(getPluginStore).toHaveBeenCalled();
+      expect(globalStore.getPlugin).not.toHaveBeenCalled();
+    });
   });
 });

@@ -9,6 +9,7 @@ const BUILTIN_SEAM_PROMPTS: Record<string, string> = {
   execute: DEFAULT_EXECUTOR_PROMPT,
   planning: DEFAULT_TRIAGE_PROMPT,
   "step-execute": DEFAULT_EXECUTOR_PROMPT,
+  "workflow-step": DEFAULT_REVIEWER_PROMPT,
   review: DEFAULT_REVIEWER_PROMPT,
   merge: DEFAULT_MERGER_PROMPT,
 };

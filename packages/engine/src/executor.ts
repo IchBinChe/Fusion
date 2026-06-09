@@ -9,7 +9,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -30,10 +30,17 @@ import { observeWorkflowParity, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from ".
 import {
   FOREACH_ACTIVE_CONTEXT_KEY,
   SEAM_GOVERNING_NODE_CONTEXT_KEY,
+  SPLIT_ACTIVE_CONTEXT_KEY,
   type ForeachActiveContext,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
+import type {
+  AuditPrimitiveInput,
+  PreparedWorktree,
+  WorkflowPrimitiveContext,
+  WorkflowRuntimePrimitives,
+} from "./runtime-primitives.js";
 import {
   ApprovalRequestStore,
   buildExecutionMemoryInstructions,
@@ -3630,9 +3637,9 @@ export class TaskExecutor {
   private static processWideGraphRouting = new Set<string>();
 
   /** Wired by the runtime to ProjectEngine.onMerge — resolves with the merge outcome. */
-  private mergeRequester?: (taskId: string) => Promise<MergeResult>;
+  private mergeRequester?: (taskId: string, options?: { signal?: AbortSignal }) => Promise<MergeResult>;
 
-  setMergeRequester(requestMerge: (taskId: string) => Promise<MergeResult>): void {
+  setMergeRequester(requestMerge: (taskId: string, options?: { signal?: AbortSignal }) => Promise<MergeResult>): void {
     this.mergeRequester = requestMerge;
   }
 
@@ -3649,19 +3656,38 @@ export class TaskExecutor {
       let settings: Settings;
       try {
         settings = await this.store.getSettings();
-      } catch {
-        return false;
+      } catch (err) {
+        await this.handleGraphFailure(task, {
+          disposition: "failed",
+          outcome: "failure",
+          reason: `settings-load-failed: ${err instanceof Error ? err.message : String(err)}`,
+          visitedNodeIds: [],
+        });
+        return true;
       }
-      if (!isExperimentalFeatureEnabled(settings, "workflowGraphExecutor")) return false;
-      if (typeof this.store.getTaskWorkflowSelection !== "function") return false;
-
+      const hasWorkflowResolver = typeof this.store.getTaskWorkflowSelection === "function";
+      const explicitlyEnabled = isExperimentalFeatureEnabled(settings, "workflowGraphExecutor");
+      if (!hasWorkflowResolver && !explicitlyEnabled) return false;
+      settings = {
+        ...settings,
+        experimentalFeatures: {
+          ...(settings.experimentalFeatures ?? {}),
+          workflowGraphExecutor: true,
+        },
+      };
       let selection: { workflowId: string; stepIds: string[] } | undefined;
       try {
-        selection = this.store.getTaskWorkflowSelection(task.id);
-      } catch {
-        return false;
+        selection = this.store.getTaskWorkflowSelection?.(task.id);
+      } catch (err) {
+        await this.handleGraphFailure(task, {
+          disposition: "failed",
+          outcome: "failure",
+          reason: `workflow-selection-failed: ${err instanceof Error ? err.message : String(err)}`,
+          visitedNodeIds: [],
+        });
+        return true;
       }
-      if (!selection) return false;
+      selection ??= { workflowId: "builtin:coding", stepIds: [] };
 
       // Resolve the production run id ONCE, here, so it is the single source of
       // truth shared by the runner AND the executor-side persistence deps
@@ -3673,7 +3699,9 @@ export class TaskExecutor {
       // prior behavior — so this never strands a task.
       let resolvedRunId: string | undefined;
       try {
-        const definition = await this.store.getWorkflowDefinition?.(selection.workflowId);
+        const definition = selection.workflowId === "builtin:coding"
+          ? { id: "builtin:coding" }
+          : await this.store.getWorkflowDefinition?.(selection.workflowId);
         if (definition) resolvedRunId = `${task.id}:${definition.id}`;
       } catch {
         // Definition load failure — leave undefined; deps/runner use fallbacks.
@@ -3710,8 +3738,16 @@ export class TaskExecutor {
       }
 
       const runner = new WorkflowGraphTaskRunner({
-        store: this.store,
+        store: {
+          ...this.store,
+          getTaskWorkflowSelection: (taskId: string) =>
+            this.store.getTaskWorkflowSelection?.(taskId) ?? { workflowId: "builtin:coding", stepIds: [] },
+          getWorkflowDefinition: async (id: string) =>
+            (await this.store.getWorkflowDefinition?.(id))
+              ?? (id === "builtin:coding" ? getBuiltinWorkflow("builtin:coding") : undefined),
+        },
         runId: resolvedRunId,
+        primitives: this.createAuthoritativeWorkflowPrimitives(settings),
         seams: this.createAuthoritativeWorkflowSeams(settings),
         runCustomNode: (node, nodeTask) =>
           this.runGraphCustomNode(node, nodeTask, settings, resolveBindingForNode(node.id)),
@@ -3758,16 +3794,26 @@ export class TaskExecutor {
         const detail = await this.store.getTask(task.id);
         result = await runner.run(detail, settings);
       } catch (err) {
-        // A thrown interpreter error must not strand the task in-progress: fall
-        // back to the legacy pipeline so the normal executor lock + flow runs.
         executorLog.error(
-          `[workflow-graph] ${task.id} interpreter threw — falling back to legacy pipeline: ${err instanceof Error ? err.message : String(err)}`,
+          `[workflow-graph] ${task.id} interpreter threw — parking task as workflow failure: ${err instanceof Error ? err.message : String(err)}`,
         );
-        return false;
+        await this.handleGraphFailure(task, {
+          disposition: "failed",
+          outcome: "failure",
+          reason: `interpreter-error: ${err instanceof Error ? err.message : String(err)}`,
+          visitedNodeIds: [],
+        });
+        return true;
       }
       if (result.disposition === "fell-back") {
-        executorLog.log(`[workflow-graph] ${task.id} fell back to legacy pipeline: ${result.reason}`);
-        return false;
+        executorLog.warn(`[workflow-graph] ${task.id} could not resolve workflow — parking task instead of legacy fallback: ${result.reason}`);
+        await this.handleGraphFailure(task, {
+          ...result,
+          disposition: "failed",
+          outcome: "failure",
+          reason: result.reason ?? "workflow-resolution-failed",
+        });
+        return true;
       }
       if (result.disposition === "failed") {
         await this.handleGraphFailure(task, result);
@@ -4415,13 +4461,23 @@ export class TaskExecutor {
    * interceptor makes execute() stop at the completion boundary instead of
    * running workflow steps and the review handoff.
    */
-  private async runImplementationPhase(task: Task): Promise<{ taskDone: boolean; modifiedFiles: string[] }> {
+  private async runImplementationPhase(
+    task: Task,
+    prepared?: PreparedWorktree,
+  ): Promise<{ taskDone: boolean; modifiedFiles: string[] }> {
     let captured: { taskDone: boolean; modifiedFiles: string[] } = { taskDone: false, modifiedFiles: [] };
     this.graphCompletionInterceptors.set(task.id, (info) => {
       captured = { taskDone: true, modifiedFiles: info.modifiedFiles };
     });
+    const executionTask = prepared
+      ? {
+          ...task,
+          worktree: prepared.worktreePath || task.worktree,
+          branch: prepared.branchName || task.branch,
+        }
+      : task;
     try {
-      await this.execute(task);
+      await this.execute(executionTask);
     } finally {
       this.graphCompletionInterceptors.delete(task.id);
     }
@@ -4553,6 +4609,304 @@ export class TaskExecutor {
 
   /** Public authoritative-driver seam factory: exposes the same real lifecycle
    * seams the internal graph runner uses, without changing legacy behavior. */
+  public createAuthoritativeWorkflowPrimitives(settings: Settings): WorkflowRuntimePrimitives {
+    const logAudit = async (taskId: string | undefined, input: AuditPrimitiveInput): Promise<void> => {
+      if (!taskId) return;
+      try {
+        await this.store.logEntry(taskId, input.message, input.metadata ? JSON.stringify(input.metadata) : undefined);
+      } catch {
+        // Audit is diagnostic-only and must not affect workflow execution.
+      }
+    };
+
+    return {
+      prepareWorktree: async (_ctx, task) => {
+        const live = await this.store.getTask(task.id);
+        const prepared: PreparedWorktree = {
+          worktreePath: live.worktree || this.rootDir,
+          branchName: live.branch,
+        };
+        return { outcome: "success", value: "worktree-ready", data: prepared };
+      },
+      readArtifact: async (_ctx, task, key) => {
+        const deps = this.buildParseStepsDeps(`${task.id}:artifact-read`);
+        return deps.readArtifact(task, key);
+      },
+      writeArtifact: async (ctx, task, key, content) => {
+        const writer = (this.store as unknown as {
+          writeTaskDocument?: (taskId: string, key: string, content: string) => Promise<void>;
+        }).writeTaskDocument;
+        if (!writer) {
+          await logAudit(task.id, {
+            type: "artifact-write-unavailable",
+            message: `Workflow node ${ctx.node.node.id} could not write artifact ${key}: store writer unavailable`,
+          });
+          return { outcome: "failure", value: "artifact-write-unavailable" };
+        }
+        await writer.call(this.store, task.id, key, content);
+        return { outcome: "success", value: "artifact-written", data: { key } };
+      },
+      runPlanningSession: async () => ({ outcome: "success", value: "pre-specified", data: {
+        approved: true,
+        artifactKeys: [],
+      } }),
+      runCodingSession: async (ctx, task, prepared) => {
+        const governingNodeId = ctx.node.context?.[SEAM_GOVERNING_NODE_CONTEXT_KEY];
+        if (typeof governingNodeId === "string") {
+          this.graphSeamGoverningNodeId.set(task.id, governingNodeId);
+        }
+        let result: { taskDone: boolean; modifiedFiles: string[] };
+        try {
+          result = await this.runImplementationPhase(task, prepared);
+        } finally {
+          this.graphSeamGoverningNodeId.delete(task.id);
+        }
+        if (result.taskDone) {
+          return { outcome: "success", value: "implemented", data: result };
+        }
+        let paused = this.pausedAborted.has(task.id);
+        if (!paused) {
+          try {
+            paused = Boolean((await this.store.getTask(task.id)).paused);
+          } catch {
+            // Best-effort pause probe; fall through to the failure value.
+          }
+        }
+        return {
+          outcome: "failure",
+          value: paused ? "implementation-paused" : "implementation-incomplete",
+          data: result,
+        };
+      },
+      runTaskStep: async (ctx, task, stepIndex) => {
+        const context = ctx.node.context ?? {};
+        const active = context[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext | undefined;
+        if (!active || typeof active.stepIndex !== "number") {
+          return { outcome: "failure" };
+        }
+        const live = await this.store.getTask(task.id);
+        const worktreePath = active.worktreePath || live.worktree || this.rootDir;
+        this.graphStepActiveContext.set(this.graphActiveContextKey(task.id, active.instanceId), active);
+        const stepGoverningNodeId = context[SEAM_GOVERNING_NODE_CONTEXT_KEY];
+        return await runTaskStep(
+          {
+            store: this.store,
+            worktreePath,
+            runStep: (idx) =>
+              this.runGraphTaskStep(
+                task,
+                idx,
+                active.instanceId,
+                typeof stepGoverningNodeId === "string" ? stepGoverningNodeId : undefined,
+              ),
+          },
+          { id: task.id, steps: live.steps },
+          stepIndex,
+          { markDoneOnSuccess: active.deferDoneToReview !== true },
+        );
+      },
+      resetTaskStep: async (ctx, task, stepIndex, baselineSha, checkpointId) => {
+        const active = ctx.node.context?.[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext | undefined;
+        const branchScoped = typeof active?.worktreePath === "string" && active.worktreePath.length > 0;
+        let worktreePath = active?.worktreePath ?? this.rootDir;
+        if (!branchScoped) {
+          try {
+            worktreePath = (await this.store.getTask(task.id)).worktree || this.rootDir;
+          } catch {
+            // Best-effort worktree resolution; fall back to rootDir.
+          }
+        }
+        const liveSteps = await this.store.getTask(task.id).then((t) => t.steps).catch(() => []);
+        return await resetStepToBaseline(
+          {
+            store: this.store,
+            worktreePath,
+            sessionRef: { current: null },
+            reviewType: "code",
+            blastRadiusGuard: branchScoped
+              ? undefined
+              : makeAncestryBlastRadiusGuard({
+                  worktreePath,
+                  task: { id: task.id, steps: liveSteps },
+                  stepIndex,
+                }),
+          },
+          { id: task.id, steps: liveSteps },
+          stepIndex,
+          baselineSha,
+          checkpointId,
+        );
+      },
+      runReview: async (ctx, task, input) => {
+        if (typeof input.stepIndex === "number") {
+          const context = ctx.node.context ?? {};
+          const active = context[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext | undefined;
+          if (!active || typeof active.stepIndex !== "number") {
+            return {
+              outcome: "success",
+              value: "unavailable",
+              data: { verdict: "UNAVAILABLE", review: "no active step instance" },
+            };
+          }
+          const config = {
+            type: input.type,
+            advisory: context[SPLIT_ACTIVE_CONTEXT_KEY] === true,
+          } as const;
+          const seamResult = await this.createAuthoritativeWorkflowSeams(settings).stepReview?.(
+            task,
+            context,
+            config,
+          );
+          return {
+            outcome: "success",
+            value: seamResult?.verdict === "APPROVE" ? "approve" : seamResult?.verdict === "REVISE" ? "revise" : seamResult?.verdict === "RETHINK" ? "rethink" : "unavailable",
+            data: seamResult ?? { verdict: "UNAVAILABLE", review: "step review unavailable" },
+          };
+        }
+        const live = await this.store.getTask(task.id);
+        await this.persistTokenUsage(task.id);
+        await this.handoffTaskToReview(live, "workflow-graph-review");
+        return {
+          outcome: "success",
+          value: "in-review",
+          data: { verdict: "APPROVE", summary: "Task handed off for merge review" },
+        };
+      },
+      runVerification: async () => ({ outcome: "success", value: "verification-skipped", data: {
+        verdict: "skipped",
+      } }),
+      runWorkflowStep: async (_ctx, task, input) => {
+        if (input.phase !== "pre-merge") {
+          return { outcome: "success", value: "workflow-step-skipped", data: { allPassed: true } };
+        }
+        const live = await this.store.getTask(task.id);
+        if (live.executionMode === "fast") {
+          executorLog.log(`${task.id}: fast mode — skipping pre-merge workflow steps`);
+          await this.store.logEntry(task.id, "Fast mode — pre-merge workflow steps skipped", undefined, this.getRunContextFor(task.id));
+          return { outcome: "success", value: "workflow-step-skipped", data: { allPassed: true } };
+        }
+        if (await this.shouldDeferCompletionForGlobalPause(task.id, "before workflow steps after task completion")) {
+          return { outcome: "success", value: "deferred-paused", data: { allPassed: false } };
+        }
+        const worktreePath = input.worktreePath || live.worktree || this.rootDir;
+        const workflowResult = await this.runWorkflowSteps(live, worktreePath, settings, undefined);
+        if (workflowResult === "deferred-paused") {
+          if (await this.parkTaskAfterWorkflowStepPause(task.id)) {
+            this.pausedAborted.delete(task.id);
+          } else if (this.pausedAborted.has(task.id)) {
+            this.pausedAborted.delete(task.id);
+          }
+          return { outcome: "success", value: "deferred-paused", data: { allPassed: false } };
+        }
+        if (!workflowResult.allPassed) {
+          const feedback = workflowResult.feedback || "Workflow step failed";
+          const stepName = workflowResult.stepName || "Unknown";
+          if (workflowResult.revisionRequested) {
+            const rerunScheduled = await this.handleWorkflowRevisionRequest(
+              live,
+              worktreePath,
+              feedback,
+              stepName,
+              settings,
+            );
+            if (!rerunScheduled) {
+              return {
+                outcome: "failure",
+                value: "workflow-step-revision-unhandled",
+                data: workflowResult,
+              };
+            }
+          } else {
+            const retried = await this.handleWorkflowStepFailure(
+              live,
+              worktreePath,
+              feedback,
+              stepName,
+            );
+            if (!retried) {
+              await this.sendTaskBackForFix(
+                live,
+                worktreePath,
+                feedback,
+                stepName,
+                "Workflow step failed",
+              );
+            }
+          }
+          return { outcome: "success", value: "remediation-scheduled", data: workflowResult };
+        }
+        await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
+        return { outcome: "success", value: "workflow-steps-passed", data: workflowResult };
+      },
+      updateSteps: async (_ctx, task, steps) => {
+        await this.store.updateTask(task.id, { steps });
+        return { outcome: "success", value: "steps-updated", data: { count: steps.length } };
+      },
+      transitionTask: async (_ctx, task, input) => {
+        const patch: Partial<TaskDetail> = {};
+        if (input.column !== undefined) patch.column = input.column;
+        if (input.status !== undefined && input.status !== null) patch.status = input.status;
+        if (Object.keys(patch).length > 0) {
+          await this.store.updateTask(task.id, patch);
+        }
+        return { outcome: "success", value: input.reason };
+      },
+      requestMerge: async (ctx, task) => {
+        if (!this.mergeRequester) {
+          return { outcome: "failure", value: "merge-unavailable", data: { status: "failed", reason: "merge-unavailable" } };
+        }
+        const GRAPH_MERGE_TIMEOUT_MS = 30 * 60 * 1000;
+        const controller = new AbortController();
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<"timeout">((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            controller.abort();
+            resolve("timeout");
+          }, GRAPH_MERGE_TIMEOUT_MS);
+          timeoutHandle.unref?.();
+        });
+        try {
+          const result = await Promise.race([this.mergeRequester(task.id, { signal: controller.signal }), timeout]);
+          if (result === "timeout") {
+            executorLog.warn(`${task.id}: workflow merge primitive timed out after ${GRAPH_MERGE_TIMEOUT_MS}ms`);
+            return { outcome: "failure", value: "merge-timeout", data: { status: "timeout" } };
+          }
+          if (result.merged || result.noOp) {
+            return {
+              outcome: "success",
+              value: result.noOp ? "merge-noop" : "merged",
+              data: { status: "merged", noOp: result.noOp },
+            };
+          }
+          return {
+            outcome: "failure",
+            value: result.reason ?? result.error ?? "merge-failed",
+            data: { status: "failed", reason: result.reason ?? result.error ?? "merge-failed" },
+          };
+        } finally {
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          await logAudit(task.id, {
+            type: "merge-requested",
+            message: `Workflow node ${ctx.node.node.id} requested merge`,
+          });
+        }
+      },
+      abortRun: async (_ctx, task, input) => {
+        if (input.hardCancel) {
+          this.pausedAborted.add(task.id);
+        }
+        await this.store.updateTask(task.id, {
+          paused: true,
+          pausedReason: input.reason,
+        } as Partial<TaskDetail>);
+        return { outcome: "success", value: "aborted" };
+      },
+      audit: async (ctx: WorkflowPrimitiveContext, input) => {
+        await logAudit(ctx.run.taskId, input);
+      },
+    };
+  }
+
   public createAuthoritativeWorkflowSeams(_settings: Settings): WorkflowLegacySeams {
     return {
       // Built-in triage/spec generation runs upstream of the interpreter today,
@@ -4592,6 +4946,58 @@ export class TaskExecutor {
           outcome: "failure",
           value: paused ? "implementation-paused" : "implementation-incomplete",
         };
+      },
+      workflowStep: async (seamTask) => {
+        const live = await this.store.getTask(seamTask.id);
+        if (live.executionMode === "fast") {
+          executorLog.log(`${seamTask.id}: fast mode — skipping pre-merge workflow steps`);
+          await this.store.logEntry(seamTask.id, "Fast mode — pre-merge workflow steps skipped", undefined, this.getRunContextFor(seamTask.id));
+          return { outcome: "success", value: "workflow-step-skipped" };
+        }
+        const worktreePath = live.worktree || this.rootDir;
+        const settings = await this.store.getSettings();
+        const workflowResult = await this.runWorkflowSteps(live, worktreePath, settings, undefined);
+        if (workflowResult === "deferred-paused") {
+          if (await this.parkTaskAfterWorkflowStepPause(seamTask.id)) {
+            this.pausedAborted.delete(seamTask.id);
+          } else if (this.pausedAborted.has(seamTask.id)) {
+            this.pausedAborted.delete(seamTask.id);
+          }
+          return { outcome: "success", value: "deferred-paused" };
+        }
+        if (!workflowResult.allPassed) {
+          const feedback = workflowResult.feedback || "Workflow step failed";
+          const stepName = workflowResult.stepName || "Unknown";
+          if (workflowResult.revisionRequested) {
+            const rerunScheduled = await this.handleWorkflowRevisionRequest(
+              live,
+              worktreePath,
+              feedback,
+              stepName,
+              settings,
+            );
+            if (!rerunScheduled) return { outcome: "failure", value: "workflow-step-revision-unhandled" };
+          } else {
+            const retried = await this.handleWorkflowStepFailure(
+              live,
+              worktreePath,
+              feedback,
+              stepName,
+            );
+            if (!retried) {
+              await this.sendTaskBackForFix(
+                live,
+                worktreePath,
+                feedback,
+                stepName,
+                "Workflow step failed",
+              );
+            }
+          }
+          return { outcome: "success", value: "remediation-scheduled" };
+        }
+        await this.store.updateTask(seamTask.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
+        return { outcome: "success", value: "workflow-steps-passed" };
       },
       review: async (seamTask) => {
         // The legacy "review" stage is the in-review handoff: per-step AI review
@@ -5710,10 +6116,10 @@ export class TaskExecutor {
         executorLog.log(`execute() called for ${task.id} while graph routing is active — skipping duplicate`);
         return;
       }
-      const authoritativeOwned = await this.options.workflowAuthoritativeDispatch?.(task);
-      if (authoritativeOwned) return;
       const graphOwned = await this.maybeExecuteWorkflowGraph(task);
       if (graphOwned) return;
+      const authoritativeOwned = await this.options.workflowAuthoritativeDispatch?.(task);
+      if (authoritativeOwned) return;
     }
 
     // FN-4811 follow-up (FN-4814/FN-4809/FN-4811 production failure): claim a

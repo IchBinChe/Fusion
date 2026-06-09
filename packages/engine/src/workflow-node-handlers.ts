@@ -3,8 +3,20 @@ import type { TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
 
 import type { WorkflowNodeHandler, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import { createPrNodeHandlers, createAutoMergeGateHandler, type PrNodeDeps } from "./pr-nodes.js";
+import {
+  primitiveNodeContext,
+  type WorkflowPrimitiveContext,
+  type WorkflowRuntimePrimitives,
+} from "./runtime-primitives.js";
 
-export type WorkflowSeamName = "planning" | "execute" | "review" | "merge" | "schedule" | "step-execute";
+export type WorkflowSeamName =
+  | "planning"
+  | "execute"
+  | "workflow-step"
+  | "review"
+  | "merge"
+  | "schedule"
+  | "step-execute";
 
 export interface WorkflowLegacySeams {
   /** Planning/spec stage. Built-in triage runs upstream of the interpreter
@@ -12,6 +24,7 @@ export interface WorkflowLegacySeams {
    *  custom planning behavior is expressed as a custom prompt node. */
   planning: (task: TaskDetail, context: Record<string, unknown>) => Promise<WorkflowNodeResult>;
   execute: (task: TaskDetail, context: Record<string, unknown>) => Promise<WorkflowNodeResult>;
+  workflowStep?: (task: TaskDetail, context: Record<string, unknown>) => Promise<WorkflowNodeResult>;
   review: (task: TaskDetail, context: Record<string, unknown>) => Promise<WorkflowNodeResult>;
   merge: (task: TaskDetail, context: Record<string, unknown>) => Promise<WorkflowNodeResult>;
   schedule: (task: TaskDetail, context: Record<string, unknown>) => Promise<WorkflowNodeResult>;
@@ -104,6 +117,12 @@ export const SPLIT_ACTIVE_CONTEXT_KEY = "split:active";
  */
 export const INTEGRATION_CONFLICT_CONTEXT_KEY = "integration:conflict";
 
+/** Reserved graph context key for the current workflow run id. */
+export const WORKFLOW_RUN_ID_CONTEXT_KEY = "workflow:run-id";
+
+/** Reserved graph context key for the current workflow id. */
+export const WORKFLOW_ID_CONTEXT_KEY = "workflow:id";
+
 /** Shape of the value stored under {@link FOREACH_ACTIVE_CONTEXT_KEY}. */
 export interface ForeachActiveContext {
   foreachNodeId: string;
@@ -149,6 +168,34 @@ export type WorkflowCustomNodeRunner = (
   context: Record<string, unknown>,
 ) => Promise<WorkflowNodeResult>;
 
+function primitiveContextForNode(
+  node: WorkflowIrNode,
+  task: TaskDetail,
+  context: Record<string, unknown>,
+  attempt?: number,
+): WorkflowPrimitiveContext {
+  return primitiveNodeContext(
+    {
+      runId: typeof context[WORKFLOW_RUN_ID_CONTEXT_KEY] === "string"
+        ? context[WORKFLOW_RUN_ID_CONTEXT_KEY]
+        : `${task.id}:workflow`,
+      taskId: task.id,
+      workflowId: typeof context[WORKFLOW_ID_CONTEXT_KEY] === "string"
+        ? context[WORKFLOW_ID_CONTEXT_KEY]
+        : "unknown",
+    },
+    node,
+    {
+      attempt,
+      context,
+      effectivePrincipalId:
+        typeof context["workflow:effective-principal-id"] === "string"
+          ? context["workflow:effective-principal-id"]
+          : undefined,
+    },
+  );
+}
+
 /** Resolve a node's seam name, or undefined for custom (non-seam) nodes. */
 export function resolveSeamName(node: { config?: Record<string, unknown> }): WorkflowSeamName | undefined {
   const seam = node.config?.seam;
@@ -156,6 +203,7 @@ export function resolveSeamName(node: { config?: Record<string, unknown> }): Wor
   if (
     seam === "planning" ||
     seam === "execute" ||
+    seam === "workflow-step" ||
     seam === "review" ||
     seam === "merge" ||
     seam === "schedule" ||
@@ -211,7 +259,112 @@ export function createPromptLikeHandler(
       // IS the seam node, so its declared column drives the binding. (Other seams
       // — planning/review/merge/schedule — stamp it too; only execute reads it.)
       context.context[SEAM_GOVERNING_NODE_CONTEXT_KEY] = node.id;
+      if (seam === "workflow-step") {
+        return seams.workflowStep
+          ? seams.workflowStep(context.task, context.context)
+          : { outcome: "success", value: "workflow-step-skipped" };
+      }
       return seams[seam]!(context.task, context.context);
+    }
+    if (!runCustomNode) {
+      throw new WorkflowIrError(`No custom-node runner registered for node: ${node.id}`);
+    }
+    return runCustomNode(node, context.task, context.context);
+  };
+}
+
+export function createPrimitivePromptLikeHandler(
+  primitives: WorkflowRuntimePrimitives,
+  runCustomNode?: WorkflowCustomNodeRunner,
+): WorkflowNodeHandler {
+  return async (node, context) => {
+    const seam = resolveSeamName(node);
+    if (seam === "step-execute") {
+      const active = context.context[FOREACH_ACTIVE_CONTEXT_KEY] as
+        | ForeachActiveContext
+        | undefined;
+      if (!active || typeof active.stepIndex !== "number") {
+        throw new WorkflowIrError(
+          `step-execute node '${node.id}' reached without an active foreach instance context`,
+        );
+      }
+      context.context[SEAM_GOVERNING_NODE_CONTEXT_KEY] = instanceNodeId(
+        active.foreachNodeId,
+        active.stepIndex,
+        node.id,
+      );
+      const result = await primitives.runTaskStep(
+        primitiveContextForNode(node, context.task, context.context),
+        context.task,
+        active.stepIndex,
+      );
+      active.baselineSha = result.baselineSha;
+      active.checkpointId = result.checkpointId;
+      return {
+        outcome: result.outcome,
+        value: result.outcome === "success" ? "step-done" : "step-failed",
+        contextPatch: {
+          [FOREACH_ACTIVE_CONTEXT_KEY]: active,
+        },
+      };
+    }
+    if (seam) {
+      context.context[SEAM_GOVERNING_NODE_CONTEXT_KEY] = node.id;
+      const primitiveCtx = primitiveContextForNode(node, context.task, context.context);
+      if (seam === "planning") {
+        const result = await primitives.runPlanningSession(primitiveCtx, context.task);
+        return { outcome: result.outcome, value: result.value, contextPatch: result.contextPatch };
+      }
+      if (seam === "execute") {
+        const prepared = await primitives.prepareWorktree(primitiveCtx, context.task);
+        if (prepared.outcome !== "success" || !prepared.data) {
+          return {
+            outcome: prepared.outcome === "success" ? "failure" : prepared.outcome,
+            value: prepared.value ?? "prepare-worktree-failed",
+            contextPatch: prepared.contextPatch,
+          };
+        }
+        const result = await primitives.runCodingSession(primitiveCtx, context.task, prepared.data);
+        const contextPatch = prepared.contextPatch || result.contextPatch
+          ? {
+              ...(prepared.contextPatch ?? {}),
+              ...(result.contextPatch ?? {}),
+            }
+          : undefined;
+        return {
+          outcome: result.outcome,
+          value: result.value,
+          contextPatch: {
+            ...(contextPatch ?? {}),
+            "workflow:worktree-path": prepared.data.worktreePath,
+          },
+        };
+      }
+      if (seam === "workflow-step") {
+        const worktreePath = typeof context.context["workflow:worktree-path"] === "string"
+          ? context.context["workflow:worktree-path"]
+          : undefined;
+        const result = await primitives.runWorkflowStep(primitiveCtx, context.task, {
+          phase: "pre-merge",
+          worktreePath,
+        });
+        return { outcome: result.outcome, value: result.value, contextPatch: result.contextPatch };
+      }
+      if (seam === "review") {
+        const result = await primitives.runReview(primitiveCtx, context.task, { type: "code" });
+        return { outcome: result.outcome, value: result.value, contextPatch: result.contextPatch };
+      }
+      if (seam === "merge") {
+        const result = await primitives.requestMerge(primitiveCtx, context.task);
+        return { outcome: result.outcome, value: result.value, contextPatch: result.contextPatch };
+      }
+      if (seam === "schedule") {
+        const result = await primitives.transitionTask(primitiveCtx, context.task, {
+          reason: "workflow-schedule",
+          preserveProgress: true,
+        });
+        return { outcome: result.outcome, value: result.value, contextPatch: result.contextPatch };
+      }
     }
     if (!runCustomNode) {
       throw new WorkflowIrError(`No custom-node runner registered for node: ${node.id}`);
@@ -320,6 +473,65 @@ export function createStepReviewHandler(seams: WorkflowLegacySeams): WorkflowNod
       active.verdict = result.verdict;
     }
     const patch: Record<string, unknown> = {
+      [FOREACH_ACTIVE_CONTEXT_KEY]: active,
+      [`node:${node.id}:verdict`]: result.verdict,
+    };
+
+    const value =
+      result.verdict === "APPROVE"
+        ? "approve"
+        : result.verdict === "REVISE"
+        ? "revise"
+        : result.verdict === "RETHINK"
+        ? "rethink"
+        : "unavailable";
+
+    return { outcome: "success", value, contextPatch: patch };
+  };
+}
+
+export function createPrimitiveStepReviewHandler(primitives: WorkflowRuntimePrimitives): WorkflowNodeHandler {
+  return async (node, ctx) => {
+    const active = ctx.context[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext | undefined;
+    if (!active || typeof active.stepIndex !== "number") {
+      throw new WorkflowIrError(
+        `step-review node '${node.id}' reached without an active foreach instance context`,
+      );
+    }
+
+    const advisory = ctx.context[SPLIT_ACTIVE_CONTEXT_KEY] === true;
+    const config = resolveStepReviewConfig(node, advisory);
+    let result: StepReviewSeamResult = {
+      verdict: "UNAVAILABLE",
+    };
+    let primitivePatch: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt <= STEP_REVIEW_UNAVAILABLE_RETRY_CAP; attempt++) {
+      const primitiveResult = await primitives.runReview(
+        primitiveContextForNode(node, ctx.task, ctx.context, attempt + 1),
+        ctx.task,
+        {
+          type: config.type,
+          stepIndex: active.stepIndex,
+          baselineSha: config.type === "code" ? active.baselineSha : undefined,
+        },
+      );
+      if (primitiveResult.outcome !== "success") {
+        return {
+          outcome: primitiveResult.outcome,
+          value: primitiveResult.value,
+          contextPatch: primitiveResult.contextPatch,
+        };
+      }
+      primitivePatch = primitiveResult.contextPatch;
+      result = primitiveResult.data ?? { verdict: "UNAVAILABLE" as const };
+      if (result.verdict !== "UNAVAILABLE") break;
+    }
+
+    if (!advisory) {
+      active.verdict = result.verdict;
+    }
+    const patch: Record<string, unknown> = {
+      ...(primitivePatch ?? {}),
       [FOREACH_ACTIVE_CONTEXT_KEY]: active,
       [`node:${node.id}:verdict`]: result.verdict,
     };
@@ -542,6 +754,8 @@ export function createCodeNodeHandler(runCode?: CodeNodeRunner): WorkflowNodeHan
 }
 
 export interface DefaultNodeHandlerDeps {
+  /** Workflow-native runtime primitives. When present they replace legacy seams. */
+  primitives?: WorkflowRuntimePrimitives;
   /** parse-steps node deps (U12). When absent, a parse-steps node fails cleanly. */
   parseSteps?: ParseStepsHandlerDeps;
   /** code node runner (U14). When absent, a code node fails cleanly. */
@@ -566,7 +780,9 @@ export function createDefaultNodeHandlers(
   | "pr-merge",
   WorkflowNodeHandler
 > {
-  const promptLike = createPromptLikeHandler(seams, runCustomNode);
+  const promptLike = deps?.primitives
+    ? createPrimitivePromptLikeHandler(deps.primitives, runCustomNode)
+    : createPromptLikeHandler(seams, runCustomNode);
   // parse-steps without deps fails closed (would otherwise have no handler at
   // all and throw "No handler registered"); a clean failure is the safe posture.
   const parseSteps: WorkflowNodeHandler = deps?.parseSteps
@@ -596,7 +812,9 @@ export function createDefaultNodeHandlers(
     prompt: promptLike,
     script: promptLike,
     gate,
-    "step-review": createStepReviewHandler(seams),
+    "step-review": deps?.primitives
+      ? createPrimitiveStepReviewHandler(deps.primitives)
+      : createStepReviewHandler(seams),
     "parse-steps": parseSteps,
     code: createCodeNodeHandler(deps?.runCode),
     ...prNodes,
@@ -611,6 +829,7 @@ export function createNoopLegacySeams(): WorkflowLegacySeams {
   return {
     planning: success,
     execute: success,
+    workflowStep: success,
     review: success,
     merge: success,
     schedule: success,

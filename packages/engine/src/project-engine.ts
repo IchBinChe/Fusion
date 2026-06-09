@@ -331,6 +331,14 @@ export class ProjectEngine {
     else this.manualMergeResolvers.set(taskId, [r]);
   }
 
+  private removeMergeResolver(taskId: string, resolver: MergeResolver): void {
+    const list = this.manualMergeResolvers.get(taskId);
+    if (!list) return;
+    const next = list.filter((candidate) => candidate !== resolver);
+    if (next.length > 0) this.manualMergeResolvers.set(taskId, next);
+    else this.manualMergeResolvers.delete(taskId);
+  }
+
   /** Remove and return all waiters for a task (empty array if none). */
   private takeMergeResolvers(taskId: string): MergeResolver[] {
     const list = this.manualMergeResolvers.get(taskId);
@@ -426,7 +434,7 @@ export class ProjectEngine {
     // Workflow-graph interpreter merge seam: routes through the auto-merge
     // eligibility gate (requestInterpreterMerge), NOT the human "merge now"
     // bypass, so a graph merge node can't override an autoMerge-off project.
-    this.runtime.setMergeRequester?.((taskId) => this.requestInterpreterMerge(taskId));
+    this.runtime.setMergeRequester?.((taskId, options) => this.requestInterpreterMerge(taskId, options));
   }
 
   getActiveMergeTaskId(): string | null {
@@ -1072,21 +1080,56 @@ export class ProjectEngine {
    * Returns the full MergeResult so it can be used as the `onMerge` callback
    * in createServer().
    */
-  async onMerge(taskId: string): Promise<MergeResult> {
-    // If this task is already queued or actively merging, wait for the
-    // existing merge to finish rather than starting a second one.
-    if (this.mergeActive.has(taskId)) {
-      return new Promise<MergeResult>((resolve, reject) => {
-        this.addMergeResolver(taskId, { resolve, reject });
-        // Don't re-enqueue — the task is already in the queue/active
-      });
+  async onMerge(taskId: string, options: { signal?: AbortSignal } = {}): Promise<MergeResult> {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      throw new Error(`Merge request for ${taskId} aborted`);
     }
 
     return new Promise<MergeResult>((resolve, reject) => {
-      this.addMergeResolver(taskId, { resolve, reject });
+      let settled = false;
+      let abort: () => void = () => undefined;
+      const cleanup = () => {
+        signal?.removeEventListener("abort", abort);
+      };
+      const resolver: MergeResolver = {
+        resolve: (result) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(result);
+        },
+        reject: (err) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err);
+        },
+      };
+      abort = () => {
+        this.removeMergeResolver(taskId, resolver);
+        if (this.activeMergeTaskId === taskId) {
+          this.mergeAbortController?.abort();
+          this.mergeAbortController = null;
+          this.activeMergeSession?.dispose();
+          this.activeMergeSession = null;
+        } else if (!this.hasMergeResolvers(taskId)) {
+          this.mergeQueue = this.mergeQueue.filter((queuedTaskId) => queuedTaskId !== taskId);
+          this.mergeActive.delete(taskId);
+        }
+        resolver.reject(new Error(`Merge request for ${taskId} aborted`));
+      };
+
+      signal?.addEventListener("abort", abort, { once: true });
+      this.addMergeResolver(taskId, resolver);
+
+      // If this task is already queued or actively merging, wait for the
+      // existing merge to finish rather than starting a second one.
+      if (this.mergeActive.has(taskId)) return;
+
       if (!this.internalEnqueueMerge(taskId)) {
-        // Drop just-added waiter(s) for this task and fail them.
-        this.rejectMergeResolvers(taskId, new Error(`Merge enqueue rejected for ${taskId}`));
+        this.removeMergeResolver(taskId, resolver);
+        resolver.reject(new Error(`Merge enqueue rejected for ${taskId}`));
       }
     });
   }
@@ -1099,7 +1142,7 @@ export class ProjectEngine {
    * it as "manual merge required" and parks the task in review — preserving the
    * contract that autoMerge-off leaves in-review terminal until a human merges.
    */
-  async requestInterpreterMerge(taskId: string): Promise<MergeResult> {
+  async requestInterpreterMerge(taskId: string, options: { signal?: AbortSignal } = {}): Promise<MergeResult> {
     let task: Task | null = null;
     let settings: Settings | undefined;
     try {
@@ -1135,7 +1178,7 @@ export class ProjectEngine {
       } as MergeResult;
     }
     // Eligible: route through the normal serialized merge path.
-    return this.onMerge(taskId);
+    return this.onMerge(taskId, options);
   }
 
   private setRestoreDiagnostics(

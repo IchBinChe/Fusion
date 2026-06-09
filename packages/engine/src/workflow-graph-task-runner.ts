@@ -16,6 +16,7 @@ import type {
 } from "./workflow-graph-branches.js";
 import type { ForeachEnvironment, WorkflowStepInstancePersistence } from "./workflow-graph-foreach.js";
 import type { PrNodeDeps } from "./pr-nodes.js";
+import type { WorkflowPrimitiveContext, WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 // (Both types are also used as values in the side-effect tracking wrappers below.)
 
 /**
@@ -46,6 +47,7 @@ export interface WorkflowGraphRunnerStore {
 export interface WorkflowGraphTaskRunnerDeps {
   store: WorkflowGraphRunnerStore;
   seams: WorkflowLegacySeams;
+  primitives?: WorkflowRuntimePrimitives;
   runCustomNode: WorkflowCustomNodeRunner;
   maxRetriesPerNode?: number;
   /** Optional diagnostics hook (audit/log emission). Never throws into the run. */
@@ -169,6 +171,11 @@ export class WorkflowGraphTaskRunner {
     const wrappedSeams: WorkflowLegacySeams = {
       planning: (t, c) => ((sideEffectsRan = true), invoked.push("planning"), seams.planning(t, c)),
       execute: (t, c) => ((sideEffectsRan = true), invoked.push("execute"), seams.execute(t, c)),
+      workflowStep: (t, c) => {
+        sideEffectsRan = true;
+        invoked.push("workflow-step");
+        return seams.workflowStep?.(t, c) ?? Promise.resolve({ outcome: "success", value: "workflow-step-skipped" });
+      },
       review: (t, c) => ((sideEffectsRan = true), invoked.push("review"), seams.review(t, c)),
       merge: (t, c) => ((sideEffectsRan = true), invoked.push("merge"), seams.merge(t, c)),
       schedule: (t, c) => ((sideEffectsRan = true), invoked.push("schedule"), seams.schedule(t, c)),
@@ -186,10 +193,25 @@ export class WorkflowGraphTaskRunner {
       invoked.push(node.id);
       return this.deps.runCustomNode(node, t, c);
     };
+    const wrappedPrimitives = this.deps.primitives
+      ? new Proxy(this.deps.primitives, {
+          get: (target, prop, receiver) => {
+            const value = Reflect.get(target, prop, receiver);
+            if (typeof value !== "function") return value;
+            return (...args: unknown[]) => {
+              sideEffectsRan = true;
+              const ctx = args[0] as WorkflowPrimitiveContext | undefined;
+              invoked.push(ctx?.node?.node?.id ?? String(prop));
+              return value.apply(target, args);
+            };
+          },
+        }) as WorkflowRuntimePrimitives
+      : undefined;
 
     try {
       const executor = new WorkflowGraphExecutor({
         seams: wrappedSeams,
+        primitives: wrappedPrimitives,
         runCustomNode: wrappedRunCustomNode,
         maxRetriesPerNode: this.deps.maxRetriesPerNode,
         branchPersistence: this.deps.branchPersistence,

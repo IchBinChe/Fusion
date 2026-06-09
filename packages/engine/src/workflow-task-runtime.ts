@@ -15,9 +15,10 @@ import {
 } from "./workflow-graph-executor.js";
 import {
   createDefaultNodeHandlers,
+  createNoopLegacySeams,
   type WorkflowCustomNodeRunner,
-  type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
+import type { WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 
 export type WorkflowTaskRuntimeDisposition = "completed" | "failed";
 
@@ -31,7 +32,7 @@ export interface WorkflowTaskRuntimeResult {
 
 export interface WorkflowTaskRuntimeDeps extends Omit<WorkflowGraphExecutorDeps, "seams" | "runCustomNode"> {
   store: WorkflowIrResolverStore;
-  seams: WorkflowLegacySeams;
+  primitives: WorkflowRuntimePrimitives;
   runCustomNode: WorkflowCustomNodeRunner;
   onEvent?: (event: { type: "start" | "terminal"; taskId: string; detail: string }) => void;
 }
@@ -39,11 +40,11 @@ export interface WorkflowTaskRuntimeDeps extends Omit<WorkflowGraphExecutorDeps,
 /**
  * WorkflowTaskRuntime is the workflow-engine execution facade.
  *
- * It always resolves a task to a workflow IR: explicit selections resolve to
- * their selected workflow, and tasks without a selection resolve to the built-in
- * coding workflow. This is intentionally
- * different from `WorkflowGraphTaskRunner`, whose current contract still models
- * "no selection" as legacy fallback.
+ * It always resolves a task to a workflow IR: explicit selections resolve only
+ * to their selected workflow, and tasks without a selection resolve to the
+ * built-in coding workflow. This is intentionally different from
+ * `WorkflowGraphTaskRunner`, whose current contract still models "no selection"
+ * as legacy fallback.
  */
 export class WorkflowTaskRuntime {
   public constructor(private readonly deps: WorkflowTaskRuntimeDeps) {}
@@ -80,6 +81,7 @@ export class WorkflowTaskRuntime {
     const invoked: string[] = [];
     const executor = new WorkflowGraphExecutor({
       ...this.deps,
+      primitives: this.deps.primitives,
       handlers: this.recordingHandlers(invoked),
       // WorkflowTaskRuntime is the execution engine, so internally the graph
       // executor is authoritative even before the old feature flag plumbing is
@@ -116,31 +118,28 @@ export class WorkflowTaskRuntime {
     let workflowId: string | undefined;
     try {
       workflowId = this.deps.store.getTaskWorkflowSelection(taskId)?.workflowId;
-    } catch {
-      return builtinCodingTarget();
+    } catch (err) {
+      throw new Error(`workflow-selection-failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (!workflowId) return builtinCodingTarget();
 
     if (isBuiltinWorkflowId(workflowId)) {
       const builtin = getBuiltinWorkflow(workflowId);
-      if (!builtin) return builtinCodingTarget();
+      if (!builtin) throw new Error(`workflow-missing: ${workflowId}`);
       const ir = typeof builtin.ir === "string" ? parseWorkflowIr(builtin.ir) : builtin.ir;
       return { workflowId, ir };
     }
 
-    try {
-      const def = await this.deps.store.getWorkflowDefinition(workflowId);
-      if (!def) return builtinCodingTarget();
-      const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
-      return { workflowId, ir };
-    } catch {
-      return builtinCodingTarget();
-    }
+    const def = await this.deps.store.getWorkflowDefinition(workflowId);
+    if (!def) throw new Error(`workflow-missing: ${workflowId}`);
+    const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
+    return { workflowId, ir };
   }
 
   private recordingHandlers(invoked: string[]): Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>> {
-    const defaultHandlers = createDefaultNodeHandlers(this.deps.seams, this.deps.runCustomNode, {
+    const defaultHandlers = createDefaultNodeHandlers(createNoopLegacySeams(), this.deps.runCustomNode, {
+      primitives: this.deps.primitives,
       parseSteps: this.deps.parseStepsDeps,
       runCode: this.deps.runCode,
       prNodes: this.deps.prNodes,

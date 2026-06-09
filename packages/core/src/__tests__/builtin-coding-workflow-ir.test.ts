@@ -36,7 +36,7 @@ describe("builtin coding workflow ir", () => {
     const seams = BUILTIN_CODING_WORKFLOW_IR.nodes
       .map((node) => String(node.config?.seam ?? ""))
       .filter((seam) => seam.length > 0);
-    expect(seams).toEqual(expect.arrayContaining(["execute", "review", "merge"]));
+    expect(seams).toEqual(expect.arrayContaining(["execute", "workflow-step", "review", "merge"]));
     expect(seams).not.toContain("triage");
   });
 
@@ -66,13 +66,15 @@ describe("builtin coding workflow ir", () => {
   it("places seam nodes in their columns", () => {
     const byId = new Map(BUILTIN_CODING_WORKFLOW_IR.nodes.map((n) => [n.id, n]));
     expect(byId.get("execute")?.column).toBe("in-progress");
+    expect(byId.get("workflow-step")?.column).toBe("in-progress");
     expect(byId.get("review")?.column).toBe("in-review");
     expect(byId.get("merge")?.column).toBe("in-review");
   });
 
-  it("assigns descriptive names to execute/review/merge seam nodes", () => {
+  it("assigns descriptive names to execute/workflow-step/review/merge seam nodes", () => {
     const byId = new Map(BUILTIN_CODING_WORKFLOW_IR.nodes.map((n) => [n.id, n]));
     expect(byId.get("execute")?.config?.name).toBe("Execute");
+    expect(byId.get("workflow-step")?.config?.name).toBe("Pre-merge workflow steps");
     expect(byId.get("review")?.config?.name).toBe("Review");
     expect(byId.get("merge")?.config?.name).toBe("Merge boundary");
   });
@@ -85,8 +87,10 @@ describe("builtin coding workflow ir", () => {
     expect(config.maxRetries).toBeLessThanOrEqual(10);
 
     const byId = new Map(BUILTIN_CODING_WORKFLOW_IR.nodes.map((n) => [n.id, n]));
+    expect(byId.get("workflow-step")?.config?.name).toBe("Pre-merge workflow steps");
     expect(byId.get("review")?.config?.name).toBe("Review");
     expect(byId.get("merge")?.config?.name).toBe("Merge boundary");
+    expect(byId.get("workflow-step")?.config?.maxRetries).toBeUndefined();
     expect(byId.get("review")?.config?.maxRetries).toBeUndefined();
     expect(byId.get("merge")?.config?.maxRetries).toBeUndefined();
   });

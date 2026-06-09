@@ -138,6 +138,7 @@ export const DEFAULT_WORKFLOW_COLUMN_IDS = [
 function defaultColumnForNode(node: WorkflowIrNode): string {
   const seam = node.config?.seam;
   if (seam === "execute") return "in-progress";
+  if (seam === "workflow-step") return "in-progress";
   if (seam === "review") return "in-review";
   if (seam === "merge") return "in-review";
   return "todo";

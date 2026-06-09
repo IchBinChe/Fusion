@@ -16,8 +16,9 @@ export class WorkflowCompileError extends Error {
 }
 
 /** Seam anchor kinds, encoded on IR nodes as `config.seam`. These map to the
- *  fixed execute → review → merge pipeline and are not emitted as steps. */
-const SEAM_NAMES = new Set(["execute", "review", "merge"]);
+ *  fixed planning → execute → workflow-step → review → merge pipeline and are
+ *  not emitted as steps. */
+const SEAM_NAMES = new Set(["planning", "execute", "workflow-step", "review", "merge"]);
 
 function seamOf(node: WorkflowIrNode): string | undefined {
   const seam = node.config?.seam;
@@ -77,7 +78,8 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
     const seam = seamOf(node);
     if (seam) {
       const failureEdges = outs.filter((edge) => edge.condition === "failure");
-      const mainEdges = outs.filter((edge) => edge.condition !== "failure");
+      const mainEdges = outs.filter((edge) => !edge.condition || edge.condition === "success");
+      const outcomeEdges = outs.filter((edge) => edge.condition?.startsWith("outcome:"));
       if (mainEdges.length !== 1) {
         return new WorkflowCompileError(`seam '${node.id}' must have exactly one success path`);
       }
@@ -86,6 +88,10 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
       }
       if (failureEdges[0] && failureEdges[0].to !== endNode.id) {
         return new WorkflowCompileError(`seam '${node.id}' failure edge must target the end node`);
+      }
+      const nonTerminalOutcomeEdge = outcomeEdges.find((edge) => edge.to !== endNode.id);
+      if (nonTerminalOutcomeEdge) {
+        return new WorkflowCompileError(`seam '${node.id}' outcome edge must target the end node`);
       }
       continue;
     }
@@ -106,12 +112,12 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
   }
 
   // Reachability: the single main path must reach end and cover every node.
-  // While walking, enforce the canonical seam pipeline: each of execute/review/
-  // merge may appear at most once and only in that order. The compiler treats
-  // seams as a fixed execute → review → merge boundary (merge flips pre- to
-  // post-merge), so out-of-order or duplicate seams would compile inconsistently
-  // with the runtime contract.
-  const expectedSeamOrder = ["execute", "review", "merge"] as const;
+  // While walking, enforce the canonical seam pipeline: each of planning/
+  // execute/workflow-step/review/merge may appear at most once and only in that
+  // order. The compiler treats seams as a fixed lifecycle boundary (merge flips
+  // pre- to post-merge), so out-of-order or duplicate seams would compile
+  // inconsistently with the runtime contract.
+  const expectedSeamOrder = ["planning", "execute", "workflow-step", "review", "merge"] as const;
   const seenSeams = new Set<string>();
   let nextExpectedSeamIndex = 0;
   const visited = new Set<string>();
@@ -131,7 +137,9 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
         nextExpectedSeamIndex += 1;
       }
       if (expectedSeamOrder[nextExpectedSeamIndex] !== seam) {
-        return new WorkflowCompileError("seams must follow the execute -> review -> merge order");
+        return new WorkflowCompileError(
+          "seams must follow the planning -> execute -> workflow-step -> review -> merge order",
+        );
       }
       seenSeams.add(seam);
       nextExpectedSeamIndex += 1;

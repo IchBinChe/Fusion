@@ -28,23 +28,21 @@ Out of scope for v1:
 - Execution history/runtime traces
 - Migration tooling for future schema versions (future versions should use explicit `schemaVersion` migrations)
 
-### Workflow Graph Executor (interpreter scaffold)
+### Workflow Runtime
 
-FN-5766 adds a **flagged-off** interpreter scaffold in `@fusion/engine` (`WorkflowGraphExecutor`) plus a built-in coding lifecycle IR in `@fusion/core` (`BUILTIN_CODING_WORKFLOW_IR`).
+The workflow runtime is the authoritative execution path for task lifecycle work. `WorkflowGraphExecutor` owns graph traversal and routing; node handlers call runtime primitives supplied by `TaskExecutor` for side-effecting operations such as planning, coding sessions, review, step execution/reset, merge requests, transitions, and audit.
 
-- Feature flag key: `experimentalFeatures.workflowGraphExecutor`
-- Default: **OFF**
-- OFF behavior is strict no-op (no task mutations, no session/git side effects), so the legacy imperative pipeline remains authoritative.
+The engine remains the substrate for scheduler dispatch, routing claims, persistence, concurrency limits, process supervision, storage, and audit plumbing. Lifecycle policy belongs in built-in or custom workflows.
 
-The default built-in catalog entry `builtin:coding` is backed by the canonical `BUILTIN_CODING_WORKFLOW_IR`, which is also the resolver/runtime fallback for tasks with no workflow selection, an explicit default selection, or a missing/corrupt custom selection. That IR currently encodes the legacy lifecycle path as graph stages:
+The default built-in catalog entry `builtin:coding` is backed by the canonical `BUILTIN_CODING_WORKFLOW_IR`, which is also the resolver/runtime fallback for tasks with no workflow selection or an explicit default selection. Missing/corrupt explicit custom selections fail closed as workflow-resolution failures instead of silently running the default. The built-in IR encodes the legacy lifecycle path as graph stages:
 
-- `triage` → `execute` → `review` → `merge` → `end`
+- `triage/planning` → `execute` → `workflow-step` → `review` → `merge` → `end`
 
-`builtin:stepwise-coding` is a separate opt-in graph-mode variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review as authored graph structure, and requires the `workflowGraphExecutor` flag at runtime.
+`builtin:stepwise-coding` is a separate graph variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review/rework as authored graph structure.
 
-#### Interpreter-parity gating criterion
+#### Runtime invariant criterion
 
-Interpreter authority is gated on parity: interpreter-driven coding runs must match legacy behavior for observable task transitions and reliability invariants (file-scope guards including `FileScopeViolationError`, squash/merge contract, self-healing expectations, `autoMerge:false` terminal-until-merged, and `moveTask(in-progress→todo)` hard-cancel semantics).
+Workflow-driven coding runs must preserve observable task transitions and reliability invariants: file-scope guards including `FileScopeViolationError`, squash/merge contract, recovery expectations, `autoMerge:false` terminal-until-merged, and `moveTask(in-progress→todo)` hard-cancel semantics.
 
 For grouped branch flows (`branch_groups`), auto-merge precedence is split: per-task `autoMerge` controls member→group-integration landing, while group `autoMerge` controls group→default-branch promotion eligibility.
 
@@ -485,13 +483,14 @@ Prompt-mode workflow agents should emit a trailing JSON object:
 - Backward compatibility remains for legacy prose-only responses via heuristic fallback (`REQUEST REVISION` and approval keywords).
 - If neither structured JSON nor fallback prose can be interpreted, output is recorded as `malformed` (no inferable verdict) instead of hard-failing the task.
 
-## Workflow Graph Executor (interpreter)
+## Workflow Graph Executor
 
-The experimental `workflowGraphExecutor` path remains **default OFF** and only runs when `settings.experimentalFeatures.workflowGraphExecutor = true`.
+Workflow graph execution is the task lifecycle runtime. `TaskExecutor` pins `workflowGraphExecutor` for the run and unselected tasks resolve to `builtin:coding`.
 
-When enabled, interpreter nodes dispatch through DI-backed legacy seams:
-- `prompt` / `script` nodes with `config.seam` dispatch to `execute`, `review`, `merge`, or `schedule`
-- `gate` nodes evaluate context-key expectations and return success/failure outcomes
+Default node dispatch:
+- `prompt` / `script` nodes with `config.seam` dispatch through workflow runtime primitives (`planning`, `execute`, `workflow-step`, `review`, `merge`, `schedule`, `step-execute`)
+- `step-review`, `parse-steps`, `code`, and PR nodes use their dedicated primitive/dependency adapters
+- `gate` nodes evaluate context-key expectations or run configured executable checks
 
 Traversal semantics:
 - edge with no condition or `success` routes on success
@@ -500,18 +499,13 @@ Traversal semantics:
 - unsupported conditions throw `WorkflowIrError`
 - per-node retries are bounded and deterministic
 
-Parity coverage includes flag-OFF no-op behavior, lifecycle ordering parity vs legacy seams, merge/file-scope-like failure routing, and downstream halt behavior for hard-cancel/self-healing style failures.
+Coverage includes lifecycle ordering, primitive invocation, merge/file-scope failure routing, and downstream halt behavior for hard-cancel/recovery style failures.
 
-### Interpreter-authoritative cutover
+### Workflow-native Cutover
 
-A second default-OFF flag, `experimentalFeatures.workflowInterpreterAuthoritative`, promotes the interpreter from shadow/selected-workflow sequencing to the **authoritative** lifecycle driver for default coding tasks.
+`TaskExecutor.execute()` gives graph routing first claim. The graph runtime resolves a workflow selection, using `builtin:coding` for unselected/default tasks, failing closed for missing explicit custom workflows, and parking interpreter failures as workflow failures instead of re-running the old imperative lifecycle.
 
-The cutover stays opt-in, guarded, and reversible:
-- **Default OFF:** legacy executor/reviewer/merger/scheduler flow remains authoritative.
-- **Guarded ON:** the engine only routes through the authoritative driver when `evaluateInterpreterCutoverReadiness(...)` reports ready. The guard consumes explicit rollout evidence (cutover flag enabled, dual-observe enabled, non-empty parity observations, zero unresolved drift).
-- **Rollback:** turning `workflowInterpreterAuthoritative` back OFF immediately restores the legacy path; no migration or cleanup step is required.
-
-When the guard passes, the runtime binds real DI seams from `TaskExecutor` into the built-in coding IR and drives `BUILTIN_CODING_WORKFLOW_IR` through `WorkflowGraphExecutor`. The interpreter does **not** reimplement lifecycle behavior: it delegates execute/review/merge to the same legacy seams already used by the imperative path.
+The legacy seam adapter remains as a compatibility layer for older tests and callers, but authoritative node execution uses `WorkflowRuntimePrimitives`. The built-in coding workflow now includes explicit planning and pre-merge workflow-step gates before review/merge.
 
 Reliability invariants preserved under authoritative mode:
 - file-scope enforcement including `FileScopeViolationError`

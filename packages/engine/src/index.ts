@@ -40,10 +40,14 @@ export {
 } from "./workflow-graph-branches.js";
 export {
   createDefaultNodeHandlers,
+  createPrimitivePromptLikeHandler,
+  createPrimitiveStepReviewHandler,
   createNoopLegacySeams,
   createParseStepsHandler,
   createCodeNodeHandler,
   PARSE_STEPS_DEFAULT_ARTIFACT,
+  WORKFLOW_ID_CONTEXT_KEY,
+  WORKFLOW_RUN_ID_CONTEXT_KEY,
   type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
   type WorkflowSeamName,
@@ -51,6 +55,28 @@ export {
   type CodeNodeRunner,
   type DefaultNodeHandlerDeps,
 } from "./workflow-node-handlers.js";
+export {
+  markSideEffectsStarted,
+  primitiveNodeContext,
+  type RuntimePrimitiveName,
+  type WorkflowRuntimeRunContext,
+  type WorkflowRuntimeNodeContext,
+  type WorkflowPrimitiveContext,
+  type RuntimePrimitiveResult,
+  type PreparedWorktree,
+  type PlanningSessionResult,
+  type CodingSessionResult,
+  type ReviewPrimitiveResult,
+  type VerificationPrimitiveResult,
+  type WorkflowStepPrimitiveInput,
+  type WorkflowStepPrimitiveResult,
+  type TransitionPrimitiveInput,
+  type MergePrimitiveInput,
+  type MergePrimitiveResult,
+  type AbortPrimitiveInput,
+  type AuditPrimitiveInput,
+  type WorkflowRuntimePrimitives,
+} from "./runtime-primitives.js";
 export {
   createPrNodeHandlers,
   createAutoMergeGateHandler,

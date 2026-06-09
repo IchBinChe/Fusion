@@ -133,6 +133,7 @@ describe("built-in workflows", () => {
 
     const byId = new Map(ir.nodes.map((node) => [node.id, node]));
     expect(byId.get("execute")?.column).toBe("in-progress");
+    expect(byId.get("workflow-step")?.column).toBe("in-progress");
     expect(byId.get("review")?.column).toBe("in-review");
     expect(byId.get("merge")?.column).toBe("in-review");
     expect(ir.settings).toEqual(BUILTIN_WORKFLOW_SETTINGS);
@@ -169,8 +170,10 @@ describe("built-in workflows", () => {
       expect(executeConfig?.maxRetries).toBeLessThanOrEqual(10);
 
       const byId = new Map(candidate.nodes.map((node) => [node.id, node]));
+      expect(byId.get("workflow-step")?.config?.name).toBe("Pre-merge workflow steps");
       expect(byId.get("review")?.config?.name).toBe("Review");
       expect(byId.get("merge")?.config?.name).toBe("Merge boundary");
+      expect(byId.get("workflow-step")?.config?.maxRetries).toBeUndefined();
       expect(byId.get("review")?.config?.maxRetries).toBeUndefined();
       expect(byId.get("merge")?.config?.maxRetries).toBeUndefined();
     }

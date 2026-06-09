@@ -69,6 +69,7 @@ function recordingSeams(calls: string[], overrides: Partial<Record<string, Workf
   return {
     planning: seam("planning"),
     execute: seam("execute"),
+    workflowStep: seam("workflow-step"),
     review: seam("review"),
     merge: seam("merge"),
     schedule: seam("schedule"),
@@ -236,7 +237,7 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     const result = await runner.run(task, flagOn);
 
     expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["execute", "review", "merge"]);
+    expect(calls).toEqual(["planning", "execute", "workflow-step", "review", "merge"]);
     expect(result.reason).toBeUndefined();
     expect(getWorkflowDefinition).not.toHaveBeenCalled();
   });

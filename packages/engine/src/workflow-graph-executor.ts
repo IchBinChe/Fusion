@@ -5,12 +5,15 @@ import {
   createDefaultNodeHandlers,
   createNoopLegacySeams,
   SPLIT_ACTIVE_CONTEXT_KEY,
+  WORKFLOW_ID_CONTEXT_KEY,
+  WORKFLOW_RUN_ID_CONTEXT_KEY,
   type CodeNodeRunner,
   type ForeachActiveContext,
   type ParseStepsHandlerDeps,
   type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
+import type { WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 import type { PrNodeDeps } from "./pr-nodes.js";
 import {
   runSplitJoin,
@@ -48,6 +51,9 @@ export type WorkflowNodeHandler = (node: WorkflowIrNode, context: WorkflowNodeEx
 
 export interface WorkflowGraphExecutorDeps {
   handlers?: Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>>;
+  /** Workflow-native runtime primitives. When present, default nodes call these
+   *  directly instead of legacy executor/reviewer/merge seams. */
+  primitives?: WorkflowRuntimePrimitives;
   seams?: WorkflowLegacySeams;
   /** Executes custom (non-seam) prompt/script/gate nodes. */
   runCustomNode?: WorkflowCustomNodeRunner;
@@ -150,6 +156,7 @@ export class WorkflowGraphExecutor {
     this.maxRetriesPerNode = Math.max(1, Math.floor(deps.maxRetriesPerNode ?? 2));
     this.handlers = {
       ...createDefaultNodeHandlers(deps.seams ?? createNoopLegacySeams(), deps.runCustomNode, {
+        primitives: deps.primitives,
         parseSteps: deps.parseStepsDeps,
         runCode: deps.runCode,
         prNodes: deps.prNodes,
@@ -181,10 +188,13 @@ export class WorkflowGraphExecutor {
       outgoingMap.set(edge.from, list);
     }
 
-    const context: Record<string, unknown> = {};
+    const runId = this.deps.runId ?? `${task.id}:run`;
+    const context: Record<string, unknown> = {
+      [WORKFLOW_RUN_ID_CONTEXT_KEY]: runId,
+      [WORKFLOW_ID_CONTEXT_KEY]: ir.name || "unknown",
+    };
     const visitedNodeIds: string[] = [];
     const inStack = new Set<string>();
-    const runId = this.deps.runId ?? `${task.id}:run`;
 
     // Bounded-rework generalization (U6). A `kind: "rework"` edge is the only
     // legal cycle: it loops back to a "rework region head" (the edge's `to` node).
@@ -420,7 +430,12 @@ export class WorkflowGraphExecutor {
         return sourceResult;
       }
 
-      const matching = edges.filter((edge) => this.shouldTraverseEdge(edge, sourceResult));
+      const outcomeMatching = edges.filter((edge) =>
+        edge.condition?.startsWith("outcome:") && this.shouldTraverseEdge(edge, sourceResult)
+      );
+      const matching = outcomeMatching.length > 0
+        ? outcomeMatching
+        : edges.filter((edge) => this.shouldTraverseEdge(edge, sourceResult));
       if (matching.length === 0) {
         return sourceResult;
       }

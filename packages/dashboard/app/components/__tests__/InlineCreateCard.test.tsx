@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { InlineCreateCard } from "../InlineCreateCard";
 import type { Task, Column } from "@fusion/core";
-import { fetchModels, fetchSettings, fetchAgents, checkDuplicateTasks } from "../../api";
+import { fetchModels, fetchSettings, fetchAgents, checkDuplicateTasks, fetchWorkflows } from "../../api";
 import { useNodes } from "../../hooks/useNodes";
 import type { ModelInfo } from "../../api";
 import { scopedKey } from "../../utils/projectStorage";
@@ -20,6 +20,7 @@ vi.mock("lucide-react", () => ({
   ListTree: () => null,
   Zap: () => null,
   ChevronDown: () => null,
+  ChevronRight: () => null,
   ChevronUp: () => null,
   Bot: () => null,
   Server: () => null,
@@ -134,6 +135,8 @@ vi.mock("../../api", () => ({
 
 const TEST_PROJECT_ID = "proj-123";
 const INLINE_CREATE_STORAGE_KEY = scopedKey("kb-inline-create-text", TEST_PROJECT_ID);
+const WORKFLOW_SELECTOR_STORAGE_KEY = "kb-board-workflow-selector-collapsed";
+const SCOPED_WORKFLOW_SELECTOR_STORAGE_KEY = scopedKey(WORKFLOW_SELECTOR_STORAGE_KEY, TEST_PROJECT_ID);
 
 const MOCK_MODELS: ModelInfo[] = [
   {
@@ -226,6 +229,58 @@ beforeEach(() => {
     pollIntervalMs: 30000,
     groupOverlappingFiles: true,
     autoMerge: true,
+  });
+  vi.mocked(fetchWorkflows).mockResolvedValue([
+    { id: "wf-a", name: "Workflow A" },
+    { id: "wf-b", name: "Workflow B" },
+  ]);
+});
+
+describe("InlineCreateCard workflow selector", () => {
+  it("opts the board inline-create workflow selector into collapsible mode by default", async () => {
+    renderCard();
+    expandCard();
+
+    expect(screen.getByRole("button", { name: /Collapse workflow selector/i })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("combobox", { name: /Workflow/i })).toBeDefined();
+    await waitFor(() => expect(screen.getByRole("option", { name: "Workflow A" })).toBeDefined());
+  });
+
+  it("restores persisted collapsed workflow selector state for the current project", () => {
+    localStorage.setItem(SCOPED_WORKFLOW_SELECTOR_STORAGE_KEY, "true");
+
+    renderCard();
+    expandCard();
+
+    const collapsedButton = screen.getByRole("button", { name: /^Workflow$/i });
+    expect(collapsedButton).toHaveAttribute("aria-expanded", "false");
+    expect(collapsedButton).toHaveClass("workflow-selector-collapsed-button");
+    expect(screen.queryByRole("combobox", { name: /Workflow/i })).toBeNull();
+  });
+
+  it("persists collapsed and expanded workflow selector state under the project-scoped key", () => {
+    renderCard();
+    expandCard();
+
+    fireEvent.click(screen.getByRole("button", { name: /Collapse workflow selector/i }));
+
+    expect(localStorage.getItem(SCOPED_WORKFLOW_SELECTOR_STORAGE_KEY)).toBe("true");
+    expect(screen.getByRole("button", { name: /^Workflow$/i })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Workflow$/i }));
+
+    expect(localStorage.getItem(SCOPED_WORKFLOW_SELECTOR_STORAGE_KEY)).toBe("false");
+    expect(screen.getByRole("combobox", { name: /Workflow/i })).toBeDefined();
+  });
+
+  it("keeps project workflow selector preferences isolated between projects", () => {
+    localStorage.setItem(SCOPED_WORKFLOW_SELECTOR_STORAGE_KEY, "true");
+
+    renderCard([], { projectId: "other-project" });
+    expandCard();
+
+    expect(screen.getByRole("combobox", { name: /Workflow/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /^Workflow$/i })).toBeNull();
   });
 });
 

@@ -1,12 +1,13 @@
 import "./WorkflowSelector.css";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Workflow as WorkflowIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Workflow as WorkflowIcon } from "lucide-react";
 import type { WorkflowDefinition } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import { fetchWorkflow, fetchWorkflows, fetchProjectDefaultWorkflow, setProjectDefaultWorkflow } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
+import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 
 interface WorkflowSelectorProps {
   /** Currently selected workflow id, or null for none. */
@@ -19,6 +20,12 @@ interface WorkflowSelectorProps {
   label?: string;
   /** Optional affordance to open the graph editor. */
   onManage?: () => void;
+  /** Render an opt-in collapsed/expanded shell around the selector. */
+  collapsible?: boolean;
+  /** Base projectStorage key used to persist collapsible state. */
+  collapseStorageKey?: string;
+  /** Label shown when the selector is collapsed. */
+  collapsedLabel?: string;
   /**
    * U9: when the task whose workflow is being switched has an active session,
    * switching aborts that session and re-homes the card into the new workflow's
@@ -36,13 +43,40 @@ export function WorkflowSelector({
   disabled,
   label = "Workflow",
   onManage,
+  collapsible = false,
+  collapseStorageKey,
+  collapsedLabel = "Workflow",
   hasActiveSession,
 }: WorkflowSelectorProps) {
   const { t } = useTranslation("app");
+  const selectId = useId();
   const { confirm } = useConfirm();
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (!collapsible || !collapseStorageKey) return false;
+    return getScopedItem(collapseStorageKey, projectId) === "true";
+  });
+
+  useEffect(() => {
+    if (!collapsible || !collapseStorageKey) {
+      setCollapsed(false);
+      return;
+    }
+
+    setCollapsed(getScopedItem(collapseStorageKey, projectId) === "true");
+  }, [collapsible, collapseStorageKey, projectId]);
+
+  const setPersistedCollapsed = useCallback(
+    (nextCollapsed: boolean) => {
+      setCollapsed(nextCollapsed);
+      if (collapsible && collapseStorageKey) {
+        setScopedItem(collapseStorageKey, nextCollapsed ? "true" : "false", projectId);
+      }
+    },
+    [collapsible, collapseStorageKey, projectId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -100,13 +134,46 @@ export function WorkflowSelector({
     [onChange, addToast, hasActiveSession, confirm, t],
   );
 
+  if (collapsible && collapsed) {
+    return (
+      <div className="workflow-selector workflow-selector--collapsed" data-testid="workflow-selector">
+        <button
+          type="button"
+          className="btn btn-sm workflow-selector-toggle workflow-selector-collapsed-button"
+          aria-expanded="false"
+          aria-controls={selectId}
+          onClick={() => setPersistedCollapsed(false)}
+        >
+          <ChevronRight size={14} aria-hidden />
+          <WorkflowIcon size={14} aria-hidden />
+          {collapsedLabel}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="workflow-selector" data-testid="workflow-selector">
-      <label className="workflow-selector-label">
-        <span className="workflow-selector-label-text">
-          <WorkflowIcon size={14} aria-hidden /> {label}
-        </span>
+      <div className="workflow-selector-label">
+        <div className="workflow-selector-label-text">
+          {collapsible && (
+            <button
+              type="button"
+              className="btn btn-icon btn-sm workflow-selector-toggle"
+              aria-expanded="true"
+              aria-controls={selectId}
+              aria-label={t("workflowSelector.collapse", "Collapse workflow selector")}
+              onClick={() => setPersistedCollapsed(true)}
+            >
+              <ChevronDown size={14} aria-hidden />
+            </button>
+          )}
+          <label htmlFor={selectId} className="workflow-selector-title">
+            <WorkflowIcon size={14} aria-hidden /> {label}
+          </label>
+        </div>
         <select
+          id={selectId}
           value={value ?? ""}
           disabled={disabled || loading || applying}
           onChange={(e) => void handleChange(e.target.value)}
@@ -118,7 +185,7 @@ export function WorkflowSelector({
             </option>
           ))}
         </select>
-      </label>
+      </div>
       {onManage && (
         <button type="button" className="workflow-selector-manage" onClick={onManage}>
           Manage…

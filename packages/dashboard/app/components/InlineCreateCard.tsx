@@ -18,6 +18,7 @@ import { WorkflowSelector } from "./WorkflowSelector";
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const STORAGE_KEY = "kb-inline-create-text";
+const WORKFLOW_SELECTOR_COLLAPSE_STORAGE_KEY = "kb-board-workflow-selector-collapsed";
 
 interface PendingImage {
   file: File;
@@ -1036,6 +1037,8 @@ export function InlineCreateCard({
               addToast={addToast}
               label="Workflow"
               disabled={submitting}
+              collapsible
+              collapseStorageKey={WORKFLOW_SELECTOR_COLLAPSE_STORAGE_KEY}
             />
 
             <label className="inline-create-priority-wrap" htmlFor="inline-create-priority-select">

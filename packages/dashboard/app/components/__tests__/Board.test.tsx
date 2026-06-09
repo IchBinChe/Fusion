@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "../Board";
 import { COLUMNS } from "@fusion/core";
@@ -72,6 +72,8 @@ vi.mock("../Lane", () => ({
   ),
 }));
 
+const BOARD_WORKFLOW_COLLAPSED_KEY = "kb-dashboard-board-workflow-collapsed";
+
 const DEFAULT_WORKFLOW = {
   id: "builtin:coding",
   name: "Coding (built-in)",
@@ -88,6 +90,14 @@ const DEFAULT_WORKFLOW = {
 const noop = () => {};
 const noopAsync = () => Promise.resolve({} as any);
 
+function clearBoardTestStorage() {
+  try {
+    window.localStorage.clear();
+  } catch {
+    /* jsdom localStorage */
+  }
+}
+
 beforeEach(() => {
   fetchBatchMock.mockReset();
   fetchWorkflowStepsMock.mockReset();
@@ -97,14 +107,14 @@ beforeEach(() => {
   for (const key of Object.keys(sseHandlers)) delete sseHandlers[key];
   fetchBoardWorkflowsMock.mockReset();
   fetchBoardWorkflowsMock.mockImplementation(pendingBoardWorkflows);
-  try {
-    window.localStorage.clear();
-  } catch {
-    /* jsdom localStorage */
-  }
+  clearBoardTestStorage();
   for (const key of Object.keys(columnRenderCounts)) {
     delete columnRenderCounts[key];
   }
+});
+
+afterEach(() => {
+  clearBoardTestStorage();
 });
 
 function createBoardProps(overrides = {}) {
@@ -1034,6 +1044,85 @@ describe("Board", () => {
       expect(workflowToolbarActionNames()).toEqual(["Edit workflows"]);
       fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
       expect(onOpenWorkflowEditor).toHaveBeenCalledTimes(1);
+    });
+
+    describe("workflow toolbar collapsible", () => {
+      function renderWorkflowToolbarBoard() {
+        const onCreateWorkflow = vi.fn();
+        const onOpenWorkflowEditor = vi.fn();
+        enableFlag(
+          { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
+          [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
+        );
+        renderBoard({
+          tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "intake" })],
+          onCreateWorkflow,
+          onOpenWorkflowEditor,
+        });
+        return { onCreateWorkflow, onOpenWorkflowEditor };
+      }
+
+      it("defaults to expanded (not collapsed)", async () => {
+        renderWorkflowToolbarBoard();
+
+        expect(await screen.findByLabelText("Select workflow")).toBeDefined();
+        expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
+        expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
+        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("true");
+      });
+
+      it("clicking the toggle collapses the toolbar", async () => {
+        renderWorkflowToolbarBoard();
+        await screen.findByLabelText("Select workflow");
+
+        fireEvent.click(screen.getByTestId("board-workflow-collapse-toggle"));
+
+        expect(screen.queryByLabelText("Select workflow")).toBeNull();
+        expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Edit workflows" })).toBeNull();
+        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("false");
+        expect(screen.getByText("Workflow")).toBeDefined();
+      });
+
+      it("clicking the toggle again expands the toolbar", async () => {
+        renderWorkflowToolbarBoard();
+        await screen.findByLabelText("Select workflow");
+        const toggle = screen.getByTestId("board-workflow-collapse-toggle");
+
+        fireEvent.click(toggle);
+        expect(screen.queryByLabelText("Select workflow")).toBeNull();
+        fireEvent.click(toggle);
+
+        expect(screen.getByLabelText("Select workflow")).toBeDefined();
+        expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
+        expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
+        expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      });
+
+      it("persists collapsed state to localStorage", async () => {
+        renderWorkflowToolbarBoard();
+        await screen.findByLabelText("Select workflow");
+        const toggle = screen.getByTestId("board-workflow-collapse-toggle");
+
+        fireEvent.click(toggle);
+        expect(window.localStorage.getItem(BOARD_WORKFLOW_COLLAPSED_KEY)).toBe("1");
+
+        fireEvent.click(toggle);
+        expect(window.localStorage.getItem(BOARD_WORKFLOW_COLLAPSED_KEY)).toBe("0");
+      });
+
+      it("reads collapsed state from localStorage on mount", async () => {
+        window.localStorage.setItem(BOARD_WORKFLOW_COLLAPSED_KEY, "1");
+
+        renderWorkflowToolbarBoard();
+        await waitFor(() => expect(screen.getByTestId("board-workflow-collapse-toggle")).toBeDefined());
+
+        expect(screen.queryByLabelText("Select workflow")).toBeNull();
+        expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Edit workflows" })).toBeNull();
+        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("false");
+        expect(screen.getByText("Workflow")).toBeDefined();
+      });
     });
 
     it("renders one selected workflow at a time and switches workflows from the dropdown", async () => {

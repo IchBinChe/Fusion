@@ -5,11 +5,12 @@ import { Column } from "./Column";
 import "./Lane.css";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { Pencil, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
 import { MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
+import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 import { subscribeSse } from "../sse-bus";
 import { getBoardCanDropTaskRejection } from "./boardCanDropTask";
 
@@ -92,6 +93,7 @@ function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next
 
 export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
+  const [workflowToolbarCollapsed, setWorkflowToolbarCollapsed] = useState<boolean>(() => getScopedItem("kb-dashboard-board-workflow-collapsed", projectId) === "1");
   const archivedLoadedRef = useRef(false);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
   const boardRef = useRef<HTMLElement | null>(null);
@@ -108,6 +110,12 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     done: [],
     archived: [],
   });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setScopedItem("kb-dashboard-board-workflow-collapsed", workflowToolbarCollapsed ? "1" : "0", projectId);
+    }
+  }, [workflowToolbarCollapsed, projectId]);
 
   useEffect(() => {
     recordResumeEvent({
@@ -461,45 +469,61 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     return (
       <div className="board-workflow-view">
         {(workflowOptions.length > 1 || onCreateWorkflow || onOpenWorkflowEditor) && (
-          <div className="board-workflow-toolbar">
-            {workflowOptions.length > 1 && (
-              <label className="list-workflow-selector board-workflow-selector">
-                <span>Workflow</span>
-                <select
-                  className="select list-workflow-select"
-                  value={selectedWorkflow.id}
-                  onChange={(event) => setSelectedWorkflowId(event.target.value)}
-                  aria-label="Select workflow"
-                >
-                  {workflowOptions.map((workflow) => (
-                    <option key={workflow.id} value={workflow.id}>
-                      {workflow.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {onOpenWorkflowEditor && (
-              <button
-                type="button"
-                className="btn btn-icon btn-sm board-workflow-edit-btn"
-                onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
-                title="Edit workflows"
-                aria-label="Edit workflows"
-              >
-                <Pencil size={15} />
-              </button>
-            )}
-            {onCreateWorkflow && (
-              <button
-                type="button"
-                className="btn btn-icon btn-sm board-workflow-create-btn"
-                onClick={onCreateWorkflow}
-                title="New workflow"
-                aria-label="New workflow"
-              >
-                <Plus size={15} />
-              </button>
+          <div className="board-workflow-toolbar" data-collapsed={workflowToolbarCollapsed || undefined}>
+            <button
+              type="button"
+              className="btn btn-icon btn-sm board-workflow-collapse-toggle"
+              onClick={() => setWorkflowToolbarCollapsed((c) => !c)}
+              aria-expanded={!workflowToolbarCollapsed}
+              aria-label={workflowToolbarCollapsed ? "Expand workflow toolbar" : "Collapse workflow toolbar"}
+              data-testid="board-workflow-collapse-toggle"
+            >
+              {workflowToolbarCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {workflowToolbarCollapsed ? (
+              <span className="board-workflow-collapsed-label">Workflow</span>
+            ) : (
+              <>
+                {workflowOptions.length > 1 && (
+                  <label className="list-workflow-selector board-workflow-selector">
+                    <span>Workflow</span>
+                    <select
+                      className="select list-workflow-select"
+                      value={selectedWorkflow.id}
+                      onChange={(event) => setSelectedWorkflowId(event.target.value)}
+                      aria-label="Select workflow"
+                    >
+                      {workflowOptions.map((workflow) => (
+                        <option key={workflow.id} value={workflow.id}>
+                          {workflow.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {onOpenWorkflowEditor && (
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-sm board-workflow-edit-btn"
+                    onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
+                    title="Edit workflows"
+                    aria-label="Edit workflows"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                )}
+                {onCreateWorkflow && (
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-sm board-workflow-create-btn"
+                    onClick={onCreateWorkflow}
+                    title="New workflow"
+                    aria-label="New workflow"
+                  >
+                    <Plus size={15} />
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

@@ -141,6 +141,11 @@
   min-width: 0;
 }
 
+.inline-create-controls .workflow-selector {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .inline-create-actions {
   display: flex;
   align-items: center;
@@ -286,6 +291,10 @@
   .inline-create-controls {
     flex-wrap: wrap;
     gap: var(--space-xs);
+  }
+
+  .inline-create-controls .workflow-selector {
+    width: 100%;
   }
 
   .inline-create-controls .btn {

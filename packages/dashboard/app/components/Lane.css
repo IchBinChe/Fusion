@@ -36,6 +36,21 @@
   background: var(--surface);
 }
 
+.board-workflow-toolbar[data-collapsed] {
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+}
+
+.board-workflow-collapse-toggle {
+  flex: 0 0 auto;
+}
+
+.board-workflow-collapsed-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .board-workflow-selector {
   margin-left: auto;
 }
@@ -158,5 +173,13 @@
     overflow-x: auto;
     overflow-y: hidden;
     scroll-snap-type: x proximity;
+  }
+}
+
+@media (max-width: 768px) {
+  .board-workflow-toolbar[data-collapsed] {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
   }
 }

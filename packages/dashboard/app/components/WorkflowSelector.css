@@ -76,6 +76,11 @@
     width: 100%;
   }
 
+  .workflow-selector select,
+  .workflow-selector-manage {
+    width: 100%;
+  }
+
   .workflow-selector-manage {
     text-align: center;
   }

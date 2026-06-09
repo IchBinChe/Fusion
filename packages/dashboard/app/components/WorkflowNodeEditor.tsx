@@ -82,8 +82,11 @@ import { WorkflowFieldsPanel } from "./WorkflowFieldsPanel";
 import { WorkflowSettingsPanel } from "./WorkflowSettingsPanel";
 import type { WorkflowFieldDefinition, WorkflowSettingDefinition } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { MobileWorkflowGraphView } from "./MobileWorkflowGraphView";
+import { buildMobileWorkflowGraph } from "./workflow-mobile-graph";
 
 type ExecutorKind = "model" | "agent" | "skill" | "cli" | "cli-agent";
+type MobileWorkflowPanel = "graph" | "add" | "settings" | "fields" | "columns" | "actions";
 
 function builtinSeamPrompt(config: Record<string, unknown> | undefined): string {
   const seam = typeof config?.seam === "string" ? config.seam : "";
@@ -690,6 +693,9 @@ function InnerEditor({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<MobileWorkflowPanel>(() =>
+    initialPanel === "settings" ? "settings" : "graph",
+  );
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   // Create-workflow dialog (KTD-7) open state + focus-return ref to the
@@ -931,6 +937,10 @@ function InnerEditor({
   useEffect(() => {
     if (selectedNodeId) setInspectorCollapsed(false);
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    if (initialPanel === "settings") setMobilePanel("settings");
+  }, [initialPanel]);
 
   // U9/R8: fragment definitions surface from the loaded workflow list (kind ===
   // "fragment"); they are excluded from the sidebar workflow list elsewhere.
@@ -1324,11 +1334,11 @@ function InnerEditor({
   // offset from the canvas origin.
   const handleInsertFragment = useCallback(
     (fragment: WorkflowDefinition) => {
-      if (isBuiltin) return;
+      if (isBuiltin) return false;
       const conflicts = fragmentSeamConflicts(fragment.ir, nodes);
       if (conflicts.length > 0) {
         setTemplateConflict(conflicts.join(", "));
-        return;
+        return false;
       }
       setTemplateConflict(null);
       const result = insertFragment(
@@ -1341,6 +1351,7 @@ function InnerEditor({
       setNodes(result.nodes);
       setEdges(result.edges);
       setSelectedNodeId(result.insertedNodeIds[0] ?? null);
+      return true;
     },
     [isBuiltin, nodes, edges, setNodes, setEdges],
   );
@@ -1931,6 +1942,10 @@ function InnerEditor({
     }),
     [models, agents, skills],
   );
+  const mobileGraphRows = useMemo(
+    () => buildMobileWorkflowGraph(nodesForRender, edges, columns, catalogs, t),
+    [nodesForRender, edges, columns, catalogs, t],
+  );
 
   const currentExecutor = (selectedNode?.data.config?.executor as ExecutorKind | undefined) ?? "model";
 
@@ -2208,7 +2223,7 @@ function InnerEditor({
                 workflow is active (read-only gating preserved via isBuiltin). The
                 disclosure button serves as the section header; the panels' own
                 internal <h3> is suppressed via CSS to avoid a double header. */}
-            {activeWorkflow && (
+            {activeWorkflow && !isMobileViewport && (
               <div className="wf-sidebar-panels">
                 <section className="wf-sidebar-section" data-testid="wf-sidebar-columns-section">
                   <button
@@ -2378,6 +2393,282 @@ function InnerEditor({
                     </button>
                   )}
                 </div>
+                {isMobileViewport && (
+                  <div className="wf-mobile-shell" data-testid="wf-mobile-shell">
+                    <nav className="wf-mobile-tabs" aria-label={t("workflows.mobileEditorNav", "Workflow editor sections")}>
+                      {([
+                        ["graph", t("workflowNodes.mobileGraph", "Graph")],
+                        ["add", t("workflowNodes.mobileAdd", "Add")],
+                        ["settings", t("workflowSettings.title", "Settings")],
+                        ["fields", t("workflowFields.title", "Fields")],
+                        ["columns", t("workflowColumns.title", "Columns")],
+                        ["actions", t("workflowNodes.mobileActions", "Actions")],
+                      ] as Array<[MobileWorkflowPanel, string]>).map(([panel, label]) => (
+                        <button
+                          key={panel}
+                          type="button"
+                          className={`wf-mobile-tab${mobilePanel === panel ? " wf-mobile-tab--active" : ""}`}
+                          aria-current={mobilePanel === panel ? "page" : undefined}
+                          data-testid={`wf-mobile-tab-${panel}`}
+                          onClick={() => setMobilePanel(panel)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </nav>
+
+                    <div className="wf-mobile-panel" data-testid={`wf-mobile-panel-${mobilePanel}`}>
+                      {mobilePanel === "graph" && (
+                        <MobileWorkflowGraphView
+                          rows={mobileGraphRows}
+                          selectedNodeId={selectedNodeId}
+                          selectedEdgeId={selectedEdgeId}
+                          onSelectNode={(id) => {
+                            setSelectedNodeId(id);
+                            setSelectedEdgeId(null);
+                          }}
+                          onSelectEdge={(id) => {
+                            setSelectedEdgeId(id);
+                            setSelectedNodeId(null);
+                          }}
+                        />
+                      )}
+
+                      {mobilePanel === "add" && (
+                        <div className="wf-mobile-add">
+                          {isBuiltin ? (
+                            <p className="wf-inspector-note wf-inspector-note--info">
+                              {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                            </p>
+                          ) : (
+                            <>
+                              <section className="wf-mobile-add-section">
+                                <h3>{t("workflowNodes.mobileNodeKinds", "Node types")}</h3>
+                                <div className="wf-mobile-add-grid">
+                                  {PALETTE.map(({ kind, label, icon: Icon, presetConfig }) => (
+                                    <button
+                                      key={label}
+                                      type="button"
+                                      className="wf-mobile-add-option"
+                                      data-testid={`wf-mobile-add-${kind}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                                      onClick={() => {
+                                        addNode(kind, label, presetConfig);
+                                        setMobilePanel("graph");
+                                      }}
+                                    >
+                                      <Icon size={16} aria-hidden />
+                                      <span>{label}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </section>
+
+                              {hasAnyTemplate && (
+                                <section className="wf-mobile-add-section">
+                                  <h3>{t("workflowNodes.templatesSection", "Templates")}</h3>
+                                  {templateTotalCount > 8 && (
+                                    <input
+                                      type="text"
+                                      className="wf-templates-filter wf-mobile-template-filter"
+                                      data-testid="wf-mobile-template-filter"
+                                      value={templateFilter}
+                                      onChange={(e) => setTemplateFilter(e.target.value)}
+                                      placeholder={t("workflowNodes.templateFilterPlaceholder", "Filter templates")}
+                                      aria-label={t("workflowNodes.templateFilterLabel", "Filter templates")}
+                                    />
+                                  )}
+                                  {templateConflict && (
+                                    <div className="wf-templates-conflict" role="alert" data-testid="wf-mobile-tpl-conflict">
+                                      {t(
+                                        "workflowNodes.templateSeamConflict",
+                                        'This fragment duplicates the "{{seam}}" seam already on the canvas, so it can\'t be inserted.',
+                                        { seam: templateConflict },
+                                      )}
+                                    </div>
+                                  )}
+                                  {templateGroups.fragmentEntries.length > 0 && (
+                                    <div className="wf-mobile-template-group">
+                                      <h4>{t("workflowNodes.templatesFragments", "Fragments")}</h4>
+                                      {templateGroups.fragmentEntries.map((f) => (
+                                        <button
+                                          key={f.id}
+                                          type="button"
+                                          className="wf-mobile-template-option"
+                                          data-testid={`wf-mobile-tpl-fragment-${f.id}`}
+                                          onClick={() => {
+                                            if (handleInsertFragment(f)) setMobilePanel("graph");
+                                          }}
+                                        >
+                                          {f.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {templateGroups.stepEntries.length > 0 && (
+                                    <div className="wf-mobile-template-group">
+                                      <h4>{t("workflowNodes.templatesBuiltinSteps", "Built-in steps")}</h4>
+                                      {templateGroups.stepEntries.map((s) => (
+                                        <button
+                                          key={s.id}
+                                          type="button"
+                                          className="wf-mobile-template-option"
+                                          data-testid={`wf-mobile-tpl-step-${s.id}`}
+                                          onClick={() => {
+                                            handleInsertStepTemplate(s);
+                                            setMobilePanel("graph");
+                                          }}
+                                        >
+                                          {s.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {templateGroups.pluginEntries.length > 0 && (
+                                    <div className="wf-mobile-template-group">
+                                      <h4>{t("workflowNodes.templatesPluginSteps", "Plugin steps")}</h4>
+                                      {templateGroups.pluginEntries.map(({ pluginId, template }) => (
+                                        <button
+                                          key={`${pluginId}:${template.id}`}
+                                          type="button"
+                                          className="wf-mobile-template-option"
+                                          data-testid={`wf-mobile-tpl-plugin-${template.id}`}
+                                          onClick={() => {
+                                            handleInsertStepTemplate(template);
+                                            setMobilePanel("graph");
+                                          }}
+                                        >
+                                          <span>{template.name}</span>
+                                          <span className="wf-templates-badge">{pluginId}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </section>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {mobilePanel === "settings" && activeWorkflow && (
+                        <div ref={settingsPanelRef} className="wf-mobile-destination">
+                          <WorkflowSettingsPanel
+                            workflowId={activeWorkflow.id}
+                            settings={settings}
+                            onChange={setSettings}
+                            readOnly={isBuiltin}
+                            projectId={projectId}
+                            addToast={addToast}
+                            initialTab="values"
+                          />
+                        </div>
+                      )}
+
+                      {mobilePanel === "fields" && (
+                        <div className="wf-mobile-destination">
+                          <WorkflowFieldsPanel
+                            fields={fields}
+                            onChange={setFields}
+                            readOnly={isBuiltin}
+                            addToast={addToast}
+                          />
+                        </div>
+                      )}
+
+                      {mobilePanel === "columns" && (
+                        <div className="wf-mobile-destination">
+                          <WorkflowColumnPanel
+                            columns={columns}
+                            onChange={setColumns}
+                            violations={columnViolations}
+                            readOnly={isBuiltin}
+                            projectId={projectId}
+                            addToast={addToast}
+                            columnAgentsEnabled={columnAgentsEnabled}
+                          />
+                        </div>
+                      )}
+
+                      {mobilePanel === "actions" && (
+                        <div className="wf-mobile-actions">
+                          {isBuiltin ? (
+                            <>
+                              <p className="wf-inspector-note wf-inspector-note--info">
+                                {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                              </p>
+                              <button className="wf-editor-action" data-testid="wf-mobile-export" onClick={handleExport}>
+                                <Download size={15} /> {t("workflows.export", "Export")}
+                              </button>
+                              <button className="wf-editor-save wf-editor-duplicate-primary" data-testid="wf-mobile-duplicate" onClick={handleDuplicate}>
+                                <Plus size={15} /> {t("workflows.duplicateToCustomize", "Duplicate to customize")}
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="wf-editor-save" data-testid="wf-mobile-save" onClick={handleSave} disabled={saving}>
+                                {saving ? <Loader2 size={15} className="wf-spin" /> : <Save size={15} />}
+                                {t("common.save", "Save")}
+                              </button>
+                              <button className="wf-editor-action" data-testid="wf-mobile-ai-edit" onClick={() => setAiPanelOpen((o) => !o)}>
+                                <Sparkles size={15} /> {t("workflows.aiEdit", "Design with AI")}
+                              </button>
+                              {aiPanelOpen && (
+                                <div className="wf-ai-panel wf-mobile-ai-panel" data-testid="wf-mobile-ai-panel" role="dialog" aria-busy={aiEditBusy}>
+                                  <textarea
+                                    className="wf-ai-prompt"
+                                    data-testid="wf-mobile-ai-edit-prompt"
+                                    rows={4}
+                                    value={aiEditPrompt}
+                                    disabled={aiEditBusy}
+                                    placeholder={t(
+                                      "workflows.aiPromptPlaceholder",
+                                      "e.g. Run lint and tests before merge, then post a changelog comment after merge",
+                                    )}
+                                    onChange={(e) => {
+                                      setAiEditPrompt(e.target.value);
+                                      if (aiEditError) setAiEditError(null);
+                                    }}
+                                  />
+                                  {aiEditError && (
+                                    <p className="wf-create-error" role="alert" data-testid="wf-mobile-ai-edit-error">
+                                      {aiEditError}
+                                    </p>
+                                  )}
+                                  <div className="wf-ai-actions">
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary wf-ai-submit"
+                                      data-testid="wf-mobile-ai-edit-submit"
+                                      disabled={aiEditBusy}
+                                      onClick={() => void handleAiEditSubmit()}
+                                    >
+                                      {aiEditBusy ? <Loader2 size={13} className="wf-spin" /> : <Sparkles size={13} />}
+                                      {t("workflows.aiSubmit", "Design with AI")}
+                                    </button>
+                                    {aiEditBusy && (
+                                      <button type="button" className="btn wf-ai-cancel" onClick={handleAiEditCancel}>
+                                        {t("common.cancel", "Cancel")}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              <button className="wf-editor-action" data-testid="wf-mobile-auto-layout" onClick={handleAutoLayout}>
+                                <LayoutGrid size={15} /> {t("workflowNodes.autoLayout", "Auto-layout")}
+                              </button>
+                              <button className="wf-editor-action" data-testid="wf-mobile-export" onClick={handleExport} disabled={isDirty}>
+                                <Download size={15} /> {t("workflows.export", "Export")}
+                              </button>
+                              <button className="wf-editor-delete" data-testid="wf-mobile-delete" onClick={handleDeleteWorkflow}>
+                                <Trash2 size={15} /> {t("common.delete", "Delete")}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {isBuiltin ? (
                   // Read-only built-in: a banner *replaces* the save/edit toolbar
                   // (not an overlay); the canvas below stays inspectable.

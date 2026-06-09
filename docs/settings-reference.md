@@ -189,7 +189,9 @@ workflow; they do not restore the old project settings keys.
 
 For step execution, review/approval policy, fallbacks, title summarization, and
 custom workflow settings, open the **workflow editor** (the workflow node editor in
-the dashboard) and select the **Settings** panel. It has two tabs:
+the dashboard) and select the **Settings** panel. On mobile, Settings is a
+dedicated workflow editor destination beside Graph, Add, Fields, Columns, and
+Actions. It has two tabs:
 
 - **Definitions** — the typed declarations and defaults (read-only for the built-in
   `builtin:coding` workflow; editable for custom workflows).

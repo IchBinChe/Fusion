@@ -545,6 +545,10 @@
   position: relative;
 }
 
+.wf-mobile-shell {
+  display: none;
+}
+
 .wf-editor-inspector {
   display: flex;
   flex-direction: column;
@@ -1325,6 +1329,122 @@
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
+  }
+
+  .wf-editor-body--editor-stage .wf-editor-readonly-banner:not(.wf-mobile-shell),
+  .wf-editor-body--editor-stage .wf-editor-toolbar:not(.wf-mobile-shell),
+  .wf-editor-body--editor-stage .wf-templates:not(.wf-mobile-shell),
+  .wf-editor-body--editor-stage .wf-editor-canvas:not(.wf-mobile-shell) {
+    display: none;
+  }
+
+  .wf-mobile-shell {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .wf-mobile-tabs {
+    display: flex;
+    gap: var(--space-xs);
+    padding: var(--space-sm);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wf-mobile-tab {
+    flex: 0 0 auto;
+    min-height: var(--wf-editor-touch-target);
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .wf-mobile-tab--active {
+    border-color: var(--accent, var(--ws-info));
+    background: var(--bg-tertiary);
+  }
+
+  .wf-mobile-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .wf-mobile-add,
+  .wf-mobile-actions,
+  .wf-mobile-destination {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+  }
+
+  .wf-mobile-add-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .wf-mobile-add-section h3,
+  .wf-mobile-template-group h4 {
+    margin: 0;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+
+  .wf-mobile-add-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-xs);
+  }
+
+  .wf-mobile-add-option,
+  .wf-mobile-template-option {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-xs);
+    min-width: 0;
+    min-height: var(--wf-editor-touch-target);
+    padding: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  .wf-mobile-template-filter {
+    width: 100%;
+  }
+
+  .wf-mobile-template-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+
+  .wf-mobile-actions .wf-editor-action,
+  .wf-mobile-actions .wf-editor-delete,
+  .wf-mobile-actions .wf-editor-save {
+    justify-content: center;
+    min-height: var(--wf-editor-touch-target);
+  }
+
+  .wf-mobile-ai-panel {
+    position: static;
+    inset: auto;
+    width: 100%;
+    box-shadow: none;
   }
 
   .wf-editor-canvas .react-flow,

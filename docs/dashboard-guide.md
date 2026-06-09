@@ -113,6 +113,8 @@ Behavior:
 - The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; those dropdown controls write workflow setting values for the active default workflow.
 - On desktop, the editor uses a multi-panel layout for editing the graph and adjacent workflow metadata
 - On viewports `<=768px`, the editor switches to a full-screen mobile sheet. Global workflow entry points open to the workflow list with no workflow preselected and prompt users to select a workflow to edit; the board workflow toolbar edit button opens directly to the selected workflow editor when that selected workflow is available.
+- Mobile editing uses a graph outline instead of making the canvas the primary control. The outline shows nodes, branch/rework edges, column placement, and foreach/loop template children as tappable rows and chips that open the same node and edge detail editors as desktop.
+- Mobile authoring exposes dedicated destinations for **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions**. Add includes the node palette plus fragments, built-in step templates, and plugin step templates; Settings keeps the Definitions/Values tab split.
 - The create-workflow dialog and workflow AI authoring popover follow the same mobile full-screen/sheet pattern so they are not clipped by the editor canvas on narrow screens
 
 ## Planning Mode

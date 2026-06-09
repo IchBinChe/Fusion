@@ -37,8 +37,10 @@ vi.mock("../ModelSelectionModal", () => ({
     models,
     executorValue,
     validatorValue,
+    planningValue,
     onExecutorChange,
     onValidatorChange,
+    onPlanningChange,
     modelsLoading,
     modelsError,
     onRetry,
@@ -53,8 +55,10 @@ vi.mock("../ModelSelectionModal", () => ({
     models: typeof MOCK_MODELS;
     executorValue: string;
     validatorValue: string;
+    planningValue: string;
     onExecutorChange: (value: string) => void;
     onValidatorChange: (value: string) => void;
+    onPlanningChange: (value: string) => void;
     modelsLoading: boolean;
     modelsError: string | null;
     onRetry: () => void;
@@ -69,6 +73,7 @@ vi.mock("../ModelSelectionModal", () => ({
       <div data-testid="model-selection-modal">
         <div data-testid="modal-props-executor-value">{executorValue}</div>
         <div data-testid="modal-props-validator-value">{validatorValue}</div>
+        <div data-testid="modal-props-planning-value">{planningValue}</div>
         <div data-testid="modal-props-loading">{modelsLoading ? "loading" : "not-loading"}</div>
         <div data-testid="modal-props-error">{modelsError || "no-error"}</div>
         <div data-testid="modal-props-favorite-models">{JSON.stringify(favoriteModels ?? [])}</div>
@@ -79,8 +84,10 @@ vi.mock("../ModelSelectionModal", () => ({
         <button data-testid="modal-close" onClick={onClose}>Close</button>
         <button data-testid="modal-select-executor" onClick={() => onExecutorChange("anthropic/claude-sonnet-4-5")}>Select Executor</button>
         <button data-testid="modal-select-validator" onClick={() => onValidatorChange("openai/gpt-4o")}>Select Reviewer</button>
+        <button data-testid="modal-select-planning" onClick={() => onPlanningChange("anthropic/claude-sonnet-4-5")}>Select Planning</button>
         <button data-testid="modal-clear-executor" onClick={() => onExecutorChange("")}>Clear Executor</button>
         <button data-testid="modal-clear-validator" onClick={() => onValidatorChange("")}>Clear Reviewer</button>
+        <button data-testid="modal-clear-planning" onClick={() => onPlanningChange("")}>Clear Planning</button>
         <button data-testid="modal-retry" onClick={onRetry}>Retry</button>
       </div>
     );
@@ -456,6 +463,29 @@ describe("InlineCreateCard model selector", () => {
     expect(screen.getByTestId("modal-props-executor-value").textContent).toBe("");
   });
 
+  it("omits model fields from the submit payload when no overrides are selected", async () => {
+    const { props } = renderCard();
+    expandCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    fireEvent.change(textarea, { target: { value: "Task using model defaults" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(props.onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Task using model defaults",
+          modelProvider: undefined,
+          modelId: undefined,
+          validatorModelProvider: undefined,
+          validatorModelId: undefined,
+          planningModelProvider: undefined,
+          planningModelId: undefined,
+        }),
+      );
+    });
+  });
+
   it("omits model fields from the submit payload after clearing back to default", async () => {
     const { props } = renderCard();
     expandCard();
@@ -477,6 +507,8 @@ describe("InlineCreateCard model selector", () => {
           modelId: undefined,
           validatorModelProvider: undefined,
           validatorModelId: undefined,
+          planningModelProvider: undefined,
+          planningModelId: undefined,
         }),
       );
     });
@@ -493,26 +525,55 @@ describe("InlineCreateCard model selector", () => {
     expect(saveButton.className).toContain("btn-task-create");
   });
 
-  it("includes selected models in the submit payload", async () => {
+  it("includes the selected planning model in the submit payload", async () => {
     const { props } = renderCard();
     expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
-    fireEvent.change(textarea, { target: { value: "Task with model overrides" } });
+    fireEvent.change(textarea, { target: { value: "Task with planning model override" } });
     openModelModal();
-    fireEvent.click(screen.getByTestId("modal-select-executor"));
-    fireEvent.click(screen.getByTestId("modal-select-validator"));
+    fireEvent.click(screen.getByTestId("modal-select-planning"));
     fireEvent.click(screen.getByTestId("modal-close"));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(props.onSubmit).toHaveBeenCalledWith(
         expect.objectContaining({
-          description: "Task with model overrides",
+          description: "Task with planning model override",
+          modelProvider: undefined,
+          modelId: undefined,
+          validatorModelProvider: undefined,
+          validatorModelId: undefined,
+          planningModelProvider: "anthropic",
+          planningModelId: "claude-sonnet-4-5",
+        }),
+      );
+    });
+  });
+
+  it("includes all selected model pairs in the submit payload", async () => {
+    const { props } = renderCard();
+    expandCard();
+    const textarea = screen.getByPlaceholderText("What needs to be done?");
+
+    fireEvent.change(textarea, { target: { value: "Task with all model overrides" } });
+    openModelModal();
+    fireEvent.click(screen.getByTestId("modal-select-executor"));
+    fireEvent.click(screen.getByTestId("modal-select-validator"));
+    fireEvent.click(screen.getByTestId("modal-select-planning"));
+    fireEvent.click(screen.getByTestId("modal-close"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(props.onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Task with all model overrides",
           modelProvider: "anthropic",
           modelId: "claude-sonnet-4-5",
           validatorModelProvider: "openai",
           validatorModelId: "gpt-4o",
+          planningModelProvider: "anthropic",
+          planningModelId: "claude-sonnet-4-5",
         }),
       );
     });

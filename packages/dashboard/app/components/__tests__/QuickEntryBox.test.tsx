@@ -1575,35 +1575,64 @@ describe("QuickEntryBox", () => {
       }
     });
 
-    it("includes selected models in submit payload", async () => {
+    it("includes all three selected model pairs in submit payload", async () => {
       const { props } = renderQuickEntryBox({});
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
 
-      fireEvent.change(textarea, { target: { value: "Task with model" } });
+      fireEvent.change(textarea, { target: { value: "Task with model overrides" } });
       openModelMenu();
 
-      // Menu should be open
-      expect(screen.getByTestId("model-nested-menu")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("model-menu-plan"));
+      fireEvent.click(screen.getByTestId("dropdown-select-plan model"));
+      fireEvent.click(screen.getByTestId("model-submenu-back"));
 
-      // Navigate to executor submenu
       fireEvent.click(screen.getByTestId("model-menu-executor"));
-
-      // Select executor model via mocked dropdown
       fireEvent.click(screen.getByTestId("dropdown-select-executor model"));
+      fireEvent.click(screen.getByTestId("model-submenu-back"));
 
-      // Close the menu via Escape
+      fireEvent.click(screen.getByTestId("model-menu-validator"));
+      fireEvent.click(screen.getByTestId("dropdown-select-validator model"));
+
+      // Close the submenu, then close the menu before submitting.
+      fireEvent.keyDown(textarea, { key: "Escape" });
       fireEvent.keyDown(textarea, { key: "Escape" });
 
-      // Submit the task
       fireEvent.keyDown(textarea, { key: "Enter" });
 
       await waitFor(() => {
         expect(props.onCreate).toHaveBeenCalledWith(
           expect.objectContaining({
-            description: "Task with model",
+            description: "Task with model overrides",
             modelProvider: "anthropic",
             modelId: "claude-sonnet-4-5",
+            validatorModelProvider: "anthropic",
+            validatorModelId: "claude-sonnet-4-5",
+            planningModelProvider: "anthropic",
+            planningModelId: "claude-sonnet-4-5",
+          }),
+        );
+      });
+    });
+
+    it("omits model fields from submit payload when no overrides are selected", async () => {
+      const { props } = renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task without model overrides" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(props.onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            description: "Task without model overrides",
+            modelProvider: undefined,
+            modelId: undefined,
+            validatorModelProvider: undefined,
+            validatorModelId: undefined,
+            planningModelProvider: undefined,
+            planningModelId: undefined,
           }),
         );
       });

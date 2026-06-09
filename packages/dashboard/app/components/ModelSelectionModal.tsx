@@ -13,8 +13,10 @@ interface ModelSelectionModalProps {
   models: ModelInfo[];
   executorValue: string;
   validatorValue: string;
+  planningValue?: string;
   onExecutorChange: (value: string) => void;
   onValidatorChange: (value: string) => void;
+  onPlanningChange?: (value: string) => void;
   modelsLoading: boolean;
   modelsError: string | null;
   onRetry: () => void;
@@ -46,8 +48,10 @@ export function ModelSelectionModal({
   models,
   executorValue,
   validatorValue,
+  planningValue = "",
   onExecutorChange,
   onValidatorChange,
+  onPlanningChange,
   modelsLoading,
   modelsError,
   onRetry,
@@ -95,6 +99,7 @@ export function ModelSelectionModal({
         onPresetChange(undefined);
         onExecutorChange("");
         onValidatorChange("");
+        onPlanningChange?.("");
         return;
       }
       if (value === "custom") {
@@ -134,10 +139,22 @@ export function ModelSelectionModal({
     [onPresetChange, selectedPresetId, onValidatorChange],
   );
 
+  const handlePlanningChange = useCallback(
+    (value: string) => {
+      // Manual model selection clears preset mode
+      if (onPresetChange && selectedPresetId) {
+        onPresetChange(undefined);
+      }
+      onPlanningChange?.(value);
+    },
+    [onPresetChange, selectedPresetId, onPlanningChange],
+  );
+
   if (!isOpen) return null;
 
   const hasExecutorOverride = Boolean(executorValue);
   const hasValidatorOverride = Boolean(validatorValue);
+  const hasPlanningOverride = Boolean(planningValue);
 
   return (
     <div className="modal-overlay open" onClick={handleOverlayClick} role="dialog" aria-modal="true" data-testid="model-selection-modal">
@@ -210,6 +227,34 @@ export function ModelSelectionModal({
                       </div>
                     </div>
                   )}
+
+                  {onPlanningChange ? (
+                    <div className="task-detail-section">
+                      <div className="inline-create-model-row">
+                        <label htmlFor="model-selection-planning" className="inline-create-model-label">
+                          {t("modelSelection.planningModel", "Planning Model")}
+                        </label>
+                        <span
+                          className={`model-badge ${hasPlanningOverride ? "model-badge-custom" : "model-badge-default"}`}
+                          data-testid="planning-badge"
+                        >
+                          {getModelBadgeLabel(models, planningValue, t)}
+                        </span>
+                        <CustomModelDropdown
+                          id="model-selection-planning"
+                          label={t("modelSelection.planningModel", "Planning Model")}
+                          value={planningValue}
+                          onChange={handlePlanningChange}
+                          models={models}
+                          placeholder={t("modelSelection.planningPlaceholder", "Select planning model…")}
+                          favoriteProviders={favoriteProviders}
+                          onToggleFavorite={onToggleFavorite}
+                          favoriteModels={favoriteModels}
+                          onToggleModelFavorite={onToggleModelFavorite}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="task-detail-section">
                     <div className="inline-create-model-row">

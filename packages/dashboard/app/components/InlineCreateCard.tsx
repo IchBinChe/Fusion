@@ -108,6 +108,8 @@ export function InlineCreateCard({
   const [executorModelId, setExecutorModelId] = useState<string | undefined>(undefined);
   const [validatorProvider, setValidatorProvider] = useState<string | undefined>(undefined);
   const [validatorModelId, setValidatorModelId] = useState<string | undefined>(undefined);
+  const [planningProvider, setPlanningProvider] = useState<string | undefined>(undefined);
+  const [planningModelId, setPlanningModelId] = useState<string | undefined>(undefined);
   const [browserVerification, setBrowserVerification] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -254,12 +256,14 @@ export function InlineCreateCard({
 
   const executorSelectionValue = getModelSelectionValue(executorProvider, executorModelId);
   const validatorSelectionValue = getModelSelectionValue(validatorProvider, validatorModelId);
+  const planningSelectionValue = getModelSelectionValue(planningProvider, planningModelId);
   const availablePresets = settings?.modelPresets || [];
   const selectedPreset = availablePresets.find((preset) => preset.id === selectedPresetId);
 
   const hasExecutorOverride = Boolean(executorProvider && executorModelId);
   const hasValidatorOverride = Boolean(validatorProvider && validatorModelId);
-  const selectedModelCount = Number(hasExecutorOverride) + Number(hasValidatorOverride);
+  const hasPlanningOverride = Boolean(planningProvider && planningModelId);
+  const selectedModelCount = Number(hasExecutorOverride) + Number(hasValidatorOverride) + Number(hasPlanningOverride);
 
   // Track focus-out for conditional cancel behavior and justResetRef cleanup.
   useEffect(() => {
@@ -383,6 +387,8 @@ export function InlineCreateCard({
       setExecutorModelId(undefined);
       setValidatorProvider(undefined);
       setValidatorModelId(undefined);
+      setPlanningProvider(undefined);
+      setPlanningModelId(undefined);
       setBrowserVerification(false);
       setPriority(DEFAULT_TASK_PRIORITY);
       setDependencies([]);
@@ -434,6 +440,8 @@ export function InlineCreateCard({
       modelId: hasExecutorOverride ? executorModelId : undefined,
       validatorModelProvider: hasValidatorOverride ? validatorProvider : undefined,
       validatorModelId: hasValidatorOverride ? validatorModelId : undefined,
+      planningModelProvider: hasPlanningOverride ? planningProvider : undefined,
+      planningModelId: hasPlanningOverride ? planningModelId : undefined,
       enabledWorkflowSteps: browserVerification ? ["browser-verification"] : undefined,
       priority,
       nodeId,
@@ -451,7 +459,7 @@ export function InlineCreateCard({
     }
 
     await submitTask(input);
-  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, browserVerification, priority, nodeId, projectId, addToast, submitTask]);
+  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, hasPlanningOverride, planningProvider, planningModelId, browserVerification, priority, nodeId, projectId, addToast, submitTask]);
 
   const handleDuplicateProceed = useCallback(async () => {
     const matches = duplicateMatches;
@@ -595,6 +603,12 @@ export function InlineCreateCard({
     setValidatorModelId(next.modelId);
   }, []);
 
+  const handlePlanningModelChange = useCallback((value: string) => {
+    const next = parseModelSelection(value);
+    setPlanningProvider(next.provider);
+    setPlanningModelId(next.modelId);
+  }, []);
+
   const handleToggleFavorite = useCallback(async (provider: string) => {
     const currentFavorites = favoriteProviders;
     const isFavorite = currentFavorites.includes(provider);
@@ -655,6 +669,8 @@ export function InlineCreateCard({
     setExecutorModelId(undefined);
     setValidatorProvider(undefined);
     setValidatorModelId(undefined);
+    setPlanningProvider(undefined);
+    setPlanningModelId(undefined);
     setBrowserVerification(false);
     setSelectedPresetId(undefined);
     setSelectedAgentId(null);
@@ -681,6 +697,8 @@ export function InlineCreateCard({
     setExecutorModelId(undefined);
     setValidatorProvider(undefined);
     setValidatorModelId(undefined);
+    setPlanningProvider(undefined);
+    setPlanningModelId(undefined);
     setBrowserVerification(false);
     setSelectedPresetId(undefined);
     setSelectedAgentId(null);
@@ -1088,6 +1106,8 @@ export function InlineCreateCard({
                       setExecutorModelId(undefined);
                       setValidatorProvider(undefined);
                       setValidatorModelId(undefined);
+                      setPlanningProvider(undefined);
+                      setPlanningModelId(undefined);
                       setShowPresets(false);
                     }}
                   >
@@ -1163,8 +1183,10 @@ export function InlineCreateCard({
               models={loadedModels}
               executorValue={executorSelectionValue}
               validatorValue={validatorSelectionValue}
+              planningValue={planningSelectionValue}
               onExecutorChange={handleExecutorChange}
               onValidatorChange={handleValidatorChange}
+              onPlanningChange={handlePlanningModelChange}
               modelsLoading={modelsLoading}
               modelsError={modelsError}
               onRetry={loadModels}

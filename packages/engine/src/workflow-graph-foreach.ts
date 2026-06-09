@@ -413,6 +413,19 @@ export async function runForeach(
       return { outcome: "failure", value: "aborted", visitedNodeIds };
     }
 
+    /**
+     * Engine restart resume semantics: shared-isolation foreach replays the
+     * graph from the foreach node, but task steps already persisted as terminal
+     * must not re-run their step-execute instance handlers.
+     */
+    const stepStatus = env.steps[stepIndex]?.status;
+    if (stepStatus === "done" || stepStatus === "skipped") {
+      schedulerLog.log(
+        `foreach ${foreachNode.id} for task ${env.task.id}: skipping step ${stepIndex} — already ${stepStatus}`,
+      );
+      continue;
+    }
+
     const instanceResult = await runInstance(
       foreachNode,
       stepIndex,

@@ -20,6 +20,15 @@ function taskWithSteps(n: number): TaskDetail {
   return { id: "FN-FOREACH", steps } as unknown as TaskDetail;
 }
 
+/** Build a TaskDetail with explicit persisted step statuses. */
+function taskWithStepStatuses(statuses: TaskStep["status"][]): TaskDetail {
+  const steps: TaskStep[] = statuses.map((status, i) => ({
+    name: `Step ${i + 1}`,
+    status,
+  }));
+  return { id: "FN-FOREACH", steps } as unknown as TaskDetail;
+}
+
 /**
  * Build a graph: start → foreach → end. The foreach template is provided inline.
  * Extra edges from the foreach node (e.g. outcome:rework-exhausted) are appended.
@@ -96,6 +105,82 @@ describe("WorkflowGraphExecutor foreach (U3)", () => {
     expect(exec).not.toHaveBeenCalled();
     expect(result.visitedNodeIds).toContain("fe");
     expect(result.visitedNodeIds.some((id) => id.startsWith("fe#"))).toBe(false);
+  });
+
+  it("resume skips all instances when every step is already done", async () => {
+    const exec = vi.fn(async () => ({ outcome: "success" as const, value: "step-done" }));
+    const seams = baseSeams({ stepExecute: exec });
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(
+      taskWithStepStatuses(["done", "done", "done"]),
+      settingsOn(),
+      foreachIr(singleExecuteTemplate()),
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(exec).not.toHaveBeenCalled();
+    expect(result.visitedNodeIds).toContain("fe");
+    expect(result.visitedNodeIds.some((id) => id.startsWith("fe#"))).toBe(false);
+  });
+
+  it("resume skips done instances and runs the first pending step", async () => {
+    const executedStepIndexes: number[] = [];
+    const seams = baseSeams({
+      stepExecute: async (_t, ctx) => {
+        const active = ctx[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext;
+        executedStepIndexes.push(active.stepIndex);
+        return { outcome: "success", value: "step-done" };
+      },
+    });
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(
+      taskWithStepStatuses(["done", "done", "done", "pending"]),
+      settingsOn(),
+      foreachIr(singleExecuteTemplate()),
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(executedStepIndexes).toEqual([3]);
+  });
+
+  it("resume skips mixed done and skipped instances and runs pending steps only", async () => {
+    const executedStepIndexes: number[] = [];
+    const seams = baseSeams({
+      stepExecute: async (_t, ctx) => {
+        const active = ctx[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext;
+        executedStepIndexes.push(active.stepIndex);
+        return { outcome: "success", value: "step-done" };
+      },
+    });
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(
+      taskWithStepStatuses(["done", "skipped", "done", "pending"]),
+      settingsOn(),
+      foreachIr(singleExecuteTemplate()),
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(executedStepIndexes).toEqual([3]);
+  });
+
+  it("resume re-runs in-progress steps instead of treating them as terminal", async () => {
+    const executedStepIndexes: number[] = [];
+    const seams = baseSeams({
+      stepExecute: async (_t, ctx) => {
+        const active = ctx[FOREACH_ACTIVE_CONTEXT_KEY] as ForeachActiveContext;
+        executedStepIndexes.push(active.stepIndex);
+        return { outcome: "success", value: "step-done" };
+      },
+    });
+    const executor = new WorkflowGraphExecutor({ seams });
+    const result = await executor.run(
+      taskWithStepStatuses(["done", "done", "in-progress", "pending"]),
+      settingsOn(),
+      foreachIr(singleExecuteTemplate()),
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(executedStepIndexes).toEqual([2, 3]);
   });
 
   it("revise-style rework loops twice then completes (custom node routes a rework edge)", async () => {

@@ -104,6 +104,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [isDisclosureExpanded, setIsDisclosureExpanded] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const touchButtonRef = useRef<HTMLButtonElement | null>(null);
   const justResetRef = useRef(false);
   const previousProjectIdRef = useRef(projectId);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -1478,7 +1479,34 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       >
         {/* All quick-create actions behind single disclosure toggle */}
         {showExpandedControls && !isSubmitting && (
-          <div className="quick-entry-actions" data-testid="quick-entry-actions">
+          <div
+            className="quick-entry-actions"
+            data-testid="quick-entry-actions"
+            onTouchStart={(e: React.TouchEvent) => {
+              const target = e.target;
+              if (!(target instanceof HTMLElement)) return;
+              const button = target.closest("button");
+              if (button && !button.disabled) {
+                e.preventDefault();
+                touchButtonRef.current = button;
+              }
+            }}
+            onTouchEnd={() => {
+              const button = touchButtonRef.current;
+              touchButtonRef.current = null;
+              if (button && !button.disabled) {
+                button.click();
+                window.setTimeout(() => {
+                  window.setTimeout(() => {
+                    textareaRef.current?.focus({ preventScroll: true });
+                  }, 0);
+                }, 0);
+              }
+            }}
+            onTouchCancel={() => {
+              touchButtonRef.current = null;
+            }}
+          >
             <button
               type="button"
               className="btn btn-sm"
@@ -1642,7 +1670,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                   <input
                     className="dep-dropdown-search"
                     placeholder={t("tasks.searchTasksPlaceholder", "Search tasks…")}
-                    autoFocus
+                    autoFocus={typeof document === "undefined" || document.activeElement !== textareaRef.current}
                     value={depSearch}
                     onChange={(e) => setDepSearch(e.target.value)}
                     onClick={(e) => e.stopPropagation()}

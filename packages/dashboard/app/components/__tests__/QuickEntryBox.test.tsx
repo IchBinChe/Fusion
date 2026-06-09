@@ -243,6 +243,39 @@ function mockDesktopViewport() {
   }));
 }
 
+function mockMobileViewport() {
+  Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches: query.includes("max-width") || query.includes("768"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+const QUICK_ENTRY_ACTION_BUTTONS = [
+  ["Plan", "plan-button"],
+  ["Subtask", "subtask-button"],
+  ["Refine", "refine-button"],
+  ["Deps", "quick-entry-deps"],
+  ["Attach", "quick-entry-attach"],
+  ["Models", "quick-entry-models"],
+  ["Node", "quick-entry-node-button"],
+  ["Agent", "quick-entry-agent-button"],
+  ["Priority", "quick-entry-priority-button"],
+  ["Fast", "quick-entry-fast-toggle"],
+  ["GitHub", "quick-entry-github-toggle"],
+  ["Save", "quick-entry-save"],
+] as const;
+
 describe("QuickEntryBox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -406,6 +439,96 @@ describe("QuickEntryBox", () => {
             expect(document.activeElement).toBe(textarea);
           });
         }
+      }
+    });
+  });
+
+  describe("button focus preservation — mobile touch (FN-6128)", () => {
+    async function renderMobileQuickEntryWithEnabledActions(props = {}) {
+      mockMobileViewport();
+      vi.mocked(fetchSettings).mockResolvedValueOnce({
+        githubTrackingEnabledByDefault: true,
+      } as any);
+      renderQuickEntryBox(props);
+      expandQuickEntry();
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-entry-github-toggle")).not.toBeDisabled();
+      });
+    }
+
+    function focusTextareaWithValue(value: string) {
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      textarea.focus();
+      fireEvent.focus(textarea);
+      fireEvent.change(textarea, { target: { value } });
+      textarea.focus();
+      expect(document.activeElement).toBe(textarea);
+      return textarea;
+    }
+
+    function fireCancelableTouchStart(target: HTMLElement) {
+      const event = new Event("touchstart", { bubbles: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+      fireEvent(target, event);
+      return { preventDefaultSpy };
+    }
+
+    async function touchActionButton(button: HTMLElement) {
+      const { preventDefaultSpy } = fireCancelableTouchStart(button);
+      expect(preventDefaultSpy).toHaveBeenCalled();
+      await act(async () => {
+        fireEvent(button, new Event("touchend", { bubbles: true, cancelable: true }));
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+    }
+
+    it.each(QUICK_ENTRY_ACTION_BUTTONS)("keeps textarea focused during mobile touch on %s", async (_label, testId) => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const textarea = focusTextareaWithValue(`Mobile touch preserves focus for ${testId}`);
+      const button = screen.getByTestId(testId);
+
+      expect(screen.getByTestId("quick-entry-actions").contains(button)).toBe(true);
+      const { preventDefaultSpy } = fireCancelableTouchStart(button);
+      expect(preventDefaultSpy).toHaveBeenCalled();
+      expect(document.activeElement).toBe(textarea);
+      await act(async () => {
+        fireEvent(button, new Event("touchend", { bubbles: true, cancelable: true }));
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it("does not fire disabled button actions via touch", async () => {
+      const onPlanningMode = vi.fn();
+      mockMobileViewport();
+      renderQuickEntryBox({ onPlanningMode });
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      textarea.focus();
+      expect(document.activeElement).toBe(textarea);
+      const planButton = screen.getByTestId("plan-button");
+      expect(planButton).toBeDisabled();
+
+      const { preventDefaultSpy } = fireCancelableTouchStart(planButton);
+      expect(preventDefaultSpy).not.toHaveBeenCalled();
+      fireEvent(planButton, new Event("touchend", { bubbles: true, cancelable: true }));
+
+      expect(onPlanningMode).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it("preserves textarea focus for the complete quick-entry actions surface", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const actionsContainer = screen.getByTestId("quick-entry-actions");
+      const buttons = Array.from(actionsContainer.querySelectorAll("button"));
+      expect(buttons).toHaveLength(QUICK_ENTRY_ACTION_BUTTONS.length);
+
+      for (const button of buttons) {
+        const textarea = focusTextareaWithValue(`Full mobile surface focus for ${button.dataset.testid ?? button.textContent}`);
+        await touchActionButton(button);
+        expect(document.activeElement).toBe(textarea);
       }
     });
   });

@@ -1073,6 +1073,13 @@ describe("Board", () => {
         expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("true");
       });
 
+      it("does not render a chevron icon in the workflow toolbar collapse toggle", async () => {
+        renderWorkflowToolbarBoard();
+
+        await screen.findByLabelText("Select workflow");
+        expect(screen.getByTestId("board-workflow-collapse-toggle").querySelector("svg")).toBeNull();
+      });
+
       it("clicking the toggle collapses the toolbar", async () => {
         renderWorkflowToolbarBoard();
         await screen.findByLabelText("Select workflow");

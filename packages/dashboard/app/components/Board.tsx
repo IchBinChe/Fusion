@@ -5,7 +5,7 @@ import { Column } from "./Column";
 import "./Lane.css";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
 import { MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
@@ -481,9 +481,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
               aria-expanded={!workflowToolbarCollapsed}
               aria-label={workflowToolbarCollapsed ? "Expand workflow toolbar" : "Collapse workflow toolbar"}
               data-testid="board-workflow-collapse-toggle"
-            >
-              {workflowToolbarCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-            </button>
+            />
             {workflowToolbarCollapsed ? (
               <span className="board-workflow-collapsed-label">Workflow</span>
             ) : (

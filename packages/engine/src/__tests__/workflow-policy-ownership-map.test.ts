@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const DOC_PATH = resolve(process.cwd(), "../../docs/workflow-policy-ownership-map.md");
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const DOC_PATH = resolve(__dirname, "../../../../docs/workflow-policy-ownership-map.md");
 
 const REQUIRED_SOURCE_FILES = [
   "packages/engine/src/project-engine.ts",

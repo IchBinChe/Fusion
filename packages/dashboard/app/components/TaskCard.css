@@ -797,7 +797,9 @@
 .card-promote-action {
   display: inline-flex;
   align-items: center;
+  gap: var(--space-xs);
   flex-shrink: 0;
+  padding: var(--space-xs) var(--space-sm);
   height: var(--card-chip-height);
   min-height: var(--card-chip-height);
   white-space: nowrap;
@@ -1294,6 +1296,8 @@
 }
 
 .card-promote-action.card-send-back-btn {
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
   border: var(--btn-border-width) solid color-mix(in srgb, var(--text-muted) 30%, transparent);
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   color: var(--text);

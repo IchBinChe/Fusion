@@ -4339,19 +4339,31 @@ describe("TaskCard mission badge", () => {
 
   it("renders a promote action when onPromote is provided", () => {
     const onPromote = vi.fn().mockResolvedValue(undefined);
+    const style = document.createElement("style");
+    style.textContent = loadAllAppCss();
+    document.head.appendChild(style);
 
-    render(
-      <TaskCard
-        task={makeTask({ id: "FN-777", column: "todo" })}
-        onOpenDetail={noop}
-        addToast={noop}
-        onPromote={onPromote}
-      />,
-    );
+    try {
+      render(
+        <TaskCard
+          task={makeTask({ id: "FN-777", column: "todo" })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onPromote={onPromote}
+        />,
+      );
 
-    const promoteButton = screen.getByTestId("card-promote-FN-777");
-    expect(promoteButton).toBeDefined();
-    expect(promoteButton.textContent).toContain("Promote");
+      const promoteButton = screen.getByTestId("card-promote-FN-777");
+      expect(promoteButton).toBeDefined();
+      expect(promoteButton).toHaveClass("card-promote-action");
+      expect(promoteButton.textContent).toContain("Promote");
+
+      const styles = getComputedStyle(promoteButton);
+      expect(styles.gap).toBe("var(--space-xs)");
+      expect(styles.padding).toBe("var(--space-xs) var(--space-sm)");
+    } finally {
+      style.remove();
+    }
   });
 
   it("calls onPromote without opening the card when promote is clicked", () => {

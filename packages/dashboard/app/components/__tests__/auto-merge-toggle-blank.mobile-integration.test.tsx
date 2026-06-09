@@ -92,33 +92,73 @@ function ensureMatchMedia() {
   }
 }
 
-function mockViewport(width: number, height = 812) {
+const TABLET_MEDIA_QUERY = "(min-width: 769px) and (max-width: 1024px)";
+
+type ViewportSpy = ReturnType<typeof vi.spyOn> & {
+  setViewport: (width: number, height?: number) => void;
+  dispatchChange: (query: string) => void;
+};
+
+function mockViewport(width: number, height = 812): ViewportSpy {
   ensureMatchMedia();
-  Object.defineProperty(window, "innerWidth", { value: width, configurable: true });
-  Object.defineProperty(window, "innerHeight", { value: height, configurable: true });
-  return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-    matches:
-      query === MOBILE_MEDIA_QUERY
-        ? width <= 768 || height <= 480
-        : query === "(min-width: 769px) and (max-width: 1024px)"
-          ? width >= 769 && width <= 1024
-          : false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }));
+  let viewportWidth = width;
+  let viewportHeight = height;
+  const listeners = new Map<string, Set<() => void>>();
+
+  const matchesQuery = (query: string) => {
+    if (query === MOBILE_MEDIA_QUERY) return viewportWidth <= 768 || viewportHeight <= 480;
+    if (query === TABLET_MEDIA_QUERY) return viewportWidth >= 769 && viewportWidth <= 1024;
+    return false;
+  };
+
+  const setWindowSize = () => {
+    Object.defineProperty(window, "innerWidth", { value: viewportWidth, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: viewportHeight, configurable: true });
+  };
+
+  setWindowSize();
+
+  const spy = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const queryListeners = listeners.get(query) ?? new Set<() => void>();
+    listeners.set(query, queryListeners);
+    return {
+      get matches() {
+        return matchesQuery(query);
+      },
+      media: query,
+      onchange: null,
+      addListener: vi.fn((listener: () => void) => queryListeners.add(listener)),
+      removeListener: vi.fn((listener: () => void) => queryListeners.delete(listener)),
+      addEventListener: vi.fn((event: string, listener: () => void) => {
+        if (event === "change") queryListeners.add(listener);
+      }),
+      removeEventListener: vi.fn((event: string, listener: () => void) => {
+        if (event === "change") queryListeners.delete(listener);
+      }),
+      dispatchEvent: vi.fn(() => true),
+    };
+  }) as ViewportSpy;
+
+  spy.setViewport = (nextWidth: number, nextHeight = viewportHeight) => {
+    viewportWidth = nextWidth;
+    viewportHeight = nextHeight;
+    setWindowSize();
+  };
+  spy.dispatchChange = (query: string) => {
+    for (const listener of [...(listeners.get(query) ?? [])]) listener();
+  };
+
+  return spy;
 }
 
-function createVisualViewport(scale = 1) {
+function createVisualViewport(scale = 1, width = window.innerWidth, height = window.innerHeight) {
   const resizeListeners = new Set<() => void>();
   return {
     scale,
     offsetTop: 0,
-    height: 812,
+    offsetLeft: 0,
+    width,
+    height,
     addEventListener: vi.fn((event: string, listener: () => void) => {
       if (event === "resize") {
         resizeListeners.add(listener);
@@ -129,6 +169,9 @@ function createVisualViewport(scale = 1) {
         resizeListeners.delete(listener);
       }
     }),
+    setSize: (nextWidth: number, nextHeight: number) => {
+      Object.assign(window.visualViewport ?? {}, { width: nextWidth, height: nextHeight });
+    },
     dispatchResize: () => {
       for (const listener of [...resizeListeners]) {
         listener();
@@ -522,6 +565,68 @@ describe("auto-merge toggle mobile integration regression", () => {
     expect(document.querySelector("main.board")).toBeNull();
 
     consoleErrorSpy.mockRestore();
+    viewportSpy.mockRestore();
+  });
+
+  it("reflows the App shell from mobile to tablet without leaving mobile chrome or a blank strip", async () => {
+    const { viewportSpy, visualViewport } = renderAppShellHarness({
+      width: 375,
+      height: 812,
+      tasks: createInReviewAndWorktreeTasks(),
+      autoMerge: false,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+    expect(document.querySelector(".project-content.project-content--with-mobile-nav")).not.toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeInTheDocument();
+
+    act(() => {
+      viewportSpy.setViewport(834, 1112);
+      visualViewport.setSize(834, 1112);
+      viewportSpy.dispatchChange(MOBILE_MEDIA_QUERY);
+      visualViewport.dispatchResize();
+      window.dispatchEvent(new Event("resize"));
+      vi.advanceTimersByTime(1);
+    });
+
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+    const projectContent = document.querySelector(".project-content");
+    expect(projectContent).not.toBeNull();
+    expect(projectContent).not.toHaveClass("project-content--with-mobile-nav");
+    expect(projectContent).not.toHaveStyle({ width: "375px" });
+    expect(screen.queryByTestId("mobile-nav-tab-tasks")).toBeNull();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+
+    viewportSpy.mockRestore();
+  });
+
+  it("keeps short landscape phones in mobile mode with mobile chrome", async () => {
+    const { viewportSpy, visualViewport } = renderAppShellHarness({
+      width: 844,
+      height: 390,
+      tasks: [createTask("FN-LANDSCAPE", "in-review")],
+      autoMerge: false,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      visualViewport.dispatchResize();
+      vi.advanceTimersByTime(1);
+    });
+
+    expectBoardVisible(["FN-LANDSCAPE"]);
+    expect(document.querySelector(".project-content.project-content--with-mobile-nav")).not.toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeInTheDocument();
+
     viewportSpy.mockRestore();
   });
 

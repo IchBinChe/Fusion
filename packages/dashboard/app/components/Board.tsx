@@ -203,10 +203,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   // `overflow-anchor: none`) and only stabilize via reflow + scroll offset
   // normalization; do NOT reintroduce `scroll-snap-type: x mandatory`.
   useEffect(() => {
-    if (!window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
-      return;
-    }
-
+    const mobileQuery = window.matchMedia(MOBILE_MEDIA_QUERY);
     let rafId: number | null = null;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -214,7 +211,9 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
       const boardEl = boardRef.current;
       if (!boardEl) return;
       void boardEl.offsetWidth;
-      boardEl.scrollLeft = 0;
+      if (mobileQuery.matches) {
+        boardEl.scrollLeft = 0;
+      }
     };
 
     const scheduleStabilization = () => {
@@ -250,14 +249,38 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
       scheduleStabilization();
     };
 
+    const addChangeListener = (query: MediaQueryList, listener: () => void) => {
+      if (typeof query.addEventListener === "function") {
+        query.addEventListener("change", listener);
+        return;
+      }
+      if (typeof query.addListener === "function") {
+        query.addListener(listener);
+      }
+    };
+
+    const removeChangeListener = (query: MediaQueryList, listener: () => void) => {
+      if (typeof query.removeEventListener === "function") {
+        query.removeEventListener("change", listener);
+        return;
+      }
+      if (typeof query.removeListener === "function") {
+        query.removeListener(listener);
+      }
+    };
+
     scheduleStabilization();
     window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("resize", handleViewportResize);
+    addChangeListener(mobileQuery, handleViewportResize);
     if (typeof visualViewport?.addEventListener === "function") {
       visualViewport.addEventListener("resize", handleViewportResize);
     }
 
     return () => {
       window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("resize", handleViewportResize);
+      removeChangeListener(mobileQuery, handleViewportResize);
       if (typeof visualViewport?.removeEventListener === "function") {
         visualViewport.removeEventListener("resize", handleViewportResize);
       }

@@ -25,13 +25,7 @@ export function useViewportMode(): ViewportMode {
     const tabletQuery = window.matchMedia("(min-width: 769px) and (max-width: 1024px)");
 
     const updateMode = () => {
-      if (mobileQuery.matches) {
-        setMode("mobile");
-      } else if (tabletQuery.matches) {
-        setMode("tablet");
-      } else {
-        setMode("desktop");
-      }
+      setMode(getViewportMode());
     };
 
     const addChangeListener = (query: MediaQueryList, listener: () => void) => {
@@ -56,9 +50,22 @@ export function useViewportMode(): ViewportMode {
 
     addChangeListener(mobileQuery, updateMode);
     addChangeListener(tabletQuery, updateMode);
+    window.addEventListener("resize", updateMode);
+    window.addEventListener("orientationchange", updateMode);
+    const visualViewport = window.visualViewport;
+    if (typeof visualViewport?.addEventListener === "function") {
+      visualViewport.addEventListener("resize", updateMode);
+    }
+    updateMode();
+
     return () => {
       removeChangeListener(mobileQuery, updateMode);
       removeChangeListener(tabletQuery, updateMode);
+      window.removeEventListener("resize", updateMode);
+      window.removeEventListener("orientationchange", updateMode);
+      if (typeof visualViewport?.removeEventListener === "function") {
+        visualViewport.removeEventListener("resize", updateMode);
+      }
     };
   }, []);
 

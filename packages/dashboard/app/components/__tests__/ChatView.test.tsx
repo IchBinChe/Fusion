@@ -4315,7 +4315,9 @@ describe("ChatView mobile behavior", () => {
       await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
       await waitFor(() => {
-        expect(mockVV.addEventListener).not.toHaveBeenCalled();
+        expect(mockVV.addEventListener).toHaveBeenCalledTimes(1);
+        expect(mockVV.addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+        expect(mockVV.addEventListener).not.toHaveBeenCalledWith("scroll", expect.any(Function));
       });
     } finally {
       restoreMatchMedia.mockRestore();

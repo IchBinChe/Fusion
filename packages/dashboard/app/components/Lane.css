@@ -95,6 +95,17 @@
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.lane-header:hover {
+  background: var(--surface-hover, var(--surface));
+}
+
+.lane-header:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--color-primary));
+  outline-offset: -2px;
 }
 
 .lane-name {

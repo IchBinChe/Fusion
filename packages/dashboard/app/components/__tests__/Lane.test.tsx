@@ -113,16 +113,43 @@ describe("Lane", () => {
     expect(screen.queryByText("Triage")).toBeNull();
   });
 
-  it("invokes onToggleCollapse with the workflow id", () => {
+  it("invokes onToggleCollapse with the workflow id from the lane header", () => {
     const props = baseProps();
     render(<Lane {...props} />);
-    fireEvent.click(screen.getByTestId("lane-toggle-builtin:coding"));
+    fireEvent.click(screen.getByTestId("lane-header-builtin:coding"));
     expect(props.onToggleCollapse).toHaveBeenCalledWith("builtin:coding");
   });
 
-  it("does not render a chevron icon in the lane toggle", () => {
+  it("exposes the lane header as the accessible collapse toggle", () => {
     render(<Lane {...baseProps()} />);
-    expect(screen.getByTestId("lane-toggle-builtin:coding").querySelector("svg")).toBeNull();
+    const header = screen.getByRole("button", { name: "Collapse Coding (built-in) lane" });
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(header.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("toggles the lane header with Enter and Space", () => {
+    const props = baseProps();
+    render(<Lane {...props} />);
+    const header = screen.getByTestId("lane-header-builtin:coding");
+
+    fireEvent.keyDown(header, { key: "Enter" });
+    fireEvent.keyDown(header, { key: " " });
+
+    expect(props.onToggleCollapse).toHaveBeenCalledTimes(2);
+    expect(props.onToggleCollapse).toHaveBeenNthCalledWith(1, "builtin:coding");
+    expect(props.onToggleCollapse).toHaveBeenNthCalledWith(2, "builtin:coding");
+  });
+
+  it("does not render a chevron icon in the lane header", () => {
+    render(<Lane {...baseProps()} />);
+    expect(screen.getByTestId("lane-header-builtin:coding").querySelector("svg")).toBeNull();
+  });
+
+  it("does not render an empty btn-icon toggle in the lane header", () => {
+    render(<Lane {...baseProps()} />);
+    const header = screen.getByTestId("lane-header-builtin:coding");
+    expect(header.querySelector(".btn-icon")).toBeNull();
+    expect(screen.queryByTestId("lane-toggle-builtin:coding")).toBeNull();
   });
 
   it("shows the auto-merge toggle for human-review workflow columns", () => {

@@ -1,5 +1,5 @@
 import "./Lane.css";
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput, GithubIssueAction } from "@fusion/core";
 import { Column } from "./Column";
@@ -134,6 +134,11 @@ function LaneComponent(props: LaneProps) {
   }, []);
 
   const handleToggle = useCallback(() => onToggleCollapse(workflow.id), [onToggleCollapse, workflow.id]);
+  const handleHeaderKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    handleToggle();
+  }, [handleToggle]);
 
   const makeCanDrop = useCallback(
     (targetColumnId: string) => (taskId: string) => props.canDropTask(taskId, targetColumnId, workflow.id),
@@ -142,17 +147,18 @@ function LaneComponent(props: LaneProps) {
 
   return (
     <section className="lane" data-lane={workflow.id} aria-label={workflow.name}>
-      <div className="lane-header">
-        <button
-          type="button"
-          className="lane-collapse-toggle btn btn-icon btn-sm"
-          onClick={handleToggle}
-          aria-expanded={!collapsed}
-          aria-label={collapsed
-            ? t("lane.expand", "Expand {{name}} lane", { name: workflow.name })
-            : t("lane.collapse", "Collapse {{name}} lane", { name: workflow.name })}
-          data-testid={`lane-toggle-${workflow.id}`}
-        />
+      <div
+        className="lane-header"
+        role="button"
+        tabIndex={0}
+        onClick={handleToggle}
+        onKeyDown={handleHeaderKeyDown}
+        aria-expanded={!collapsed}
+        aria-label={collapsed
+          ? t("lane.expand", "Expand {{name}} lane", { name: workflow.name })
+          : t("lane.collapse", "Collapse {{name}} lane", { name: workflow.name })}
+        data-testid={`lane-header-${workflow.id}`}
+      >
         <h2 className="lane-name">{workflow.name}</h2>
         <span className="lane-count" data-testid={`lane-count-${workflow.id}`}>{tasks.length}</span>
       </div>

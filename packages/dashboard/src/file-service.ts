@@ -40,11 +40,12 @@ export interface SaveFileResponse {
 }
 
 /**
- * File operation response for copy/move/delete/rename operations.
+ * File operation response for copy/move/delete/rename/create operations.
  */
 export interface FileOperationResponse {
   success: true;
   message?: string;
+  path?: string;
 }
 
 /**
@@ -465,7 +466,71 @@ export async function writeWorkspaceFile(
   return writeFileForBasePath(workspaceBase, filePath, content);
 }
 
-// ── Workspace File Operations (Copy, Move, Delete, Rename) ─────────
+// ── Workspace File Operations (Create, Copy, Move, Delete, Rename) ─────────
+
+/**
+ * Create a directory within a workspace.
+ *
+ * @param store - The TaskStore instance
+ * @param workspace - Workspace identifier ("project" or task ID)
+ * @param dirPath - Relative directory path within the workspace
+ * @returns FileOperationResponse indicating success with the created path
+ * @throws FileServiceError on validation or filesystem errors
+ */
+export async function createWorkspaceDirectory(
+  store: TaskStore,
+  workspace: WorkspaceId,
+  dirPath: string,
+): Promise<FileOperationResponse> {
+  if (!dirPath || !dirPath.trim()) {
+    throw new FileServiceError("Directory path is required", "EINVAL");
+  }
+
+  const workspaceBase = await getWorkspaceBasePath(store, workspace);
+  const resolvedPath = validatePath(workspaceBase, dirPath);
+
+  try {
+    await stat(resolvedPath);
+    throw new FileServiceError(`Path already exists: ${dirPath}`, "EEXIST");
+  } catch (err: unknown) {
+    const error = err as Error & { code?: string };
+    if (error.code !== "ENOENT") {
+      if (err instanceof FileServiceError) throw err;
+      throw err;
+    }
+  }
+
+  const parentDir = dirname(resolvedPath);
+  try {
+    const parentStats = await stat(parentDir);
+    if (!parentStats.isDirectory()) {
+      throw new FileServiceError(`Parent is not a directory: ${dirPath}`, "ENOENT");
+    }
+  } catch (err: unknown) {
+    const error = err as Error & { code?: string };
+    if (error.code === "ENOENT") {
+      throw new FileServiceError(`Parent directory does not exist: ${dirPath}`, "ENOENT");
+    }
+    throw err;
+  }
+
+  try {
+    await mkdir(resolvedPath);
+    return { success: true, path: dirPath };
+  } catch (err: unknown) {
+    const error = err as Error & { code?: string };
+    if (error.code === "EEXIST") {
+      throw new FileServiceError(`Path already exists: ${dirPath}`, "EEXIST");
+    }
+    if (error.code === "ENOENT") {
+      throw new FileServiceError(`Parent directory does not exist: ${dirPath}`, "ENOENT");
+    }
+    if (error.code === "EACCES" || error.code === "EPERM") {
+      throw new FileServiceError(`Permission denied: ${dirPath}`, "EACCES");
+    }
+    throw err;
+  }
+}
 
 /**
  * Validate that both source and destination paths are within the allowed workspace.

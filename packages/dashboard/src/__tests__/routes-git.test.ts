@@ -1647,6 +1647,61 @@ describe("Workspace File Routes", () => {
     });
   });
 
+  describe("POST /files/mkdir", () => {
+    let rootDir: string;
+
+    beforeEach(() => {
+      rootDir = mkdtempSync(join(tmpdir(), "kb-mkdir-route-"));
+      store = createMockStore({ getRootDir: vi.fn().mockReturnValue(rootDir) });
+    });
+
+    afterEach(() => {
+      rmSync(rootDir, { recursive: true, force: true });
+    });
+
+    it("creates a directory in the workspace", async () => {
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/files/mkdir?workspace=project",
+        JSON.stringify({ path: "docs" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, path: "docs" });
+      expect(existsSync(join(rootDir, "docs"))).toBe(true);
+    });
+
+    it("rejects duplicate directories with 409", async () => {
+      mkdirSync(join(rootDir, "docs"));
+
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/files/mkdir?workspace=project",
+        JSON.stringify({ path: "docs" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain("already exists");
+    });
+
+    it("rejects missing parent directories with 404", async () => {
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/files/mkdir?workspace=project",
+        JSON.stringify({ path: "missing/child" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain("Parent directory does not exist");
+    });
+  });
+
   describe("Generic write route still enforces content validation", () => {
     it("POST /files/{*filepath} still requires content for actual writes", async () => {
       // Make sure the generic write route still validates content correctly

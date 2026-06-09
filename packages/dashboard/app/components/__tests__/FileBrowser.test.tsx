@@ -21,10 +21,14 @@ vi.mock("lucide-react", async () => {
     Pencil: (props: any) => <span data-testid="icon-pencil" {...props} />,
     Download: (props: any) => <span data-testid="icon-download" {...props} />,
     Archive: (props: any) => <span data-testid="icon-archive" {...props} />,
+    FilePlus2: (props: any) => <span data-testid="icon-file-plus" {...props} />,
+    FolderPlus: (props: any) => <span data-testid="icon-folder-plus" {...props} />,
   };
 });
 
 const mockCopyFile = vi.fn();
+const mockCreateWorkspaceDirectory = vi.fn();
+const mockCreateWorkspaceFile = vi.fn();
 const mockMoveFile = vi.fn();
 const mockDeleteFile = vi.fn();
 const mockRenameFile = vi.fn();
@@ -37,6 +41,8 @@ const mockDownloadZipUrl = vi.fn((_workspace: string, filePath: string) =>
 
 vi.mock("../../api", () => ({
   copyFile: (...args: any[]) => mockCopyFile(...args),
+  createWorkspaceDirectory: (...args: any[]) => mockCreateWorkspaceDirectory(...args),
+  createWorkspaceFile: (...args: any[]) => mockCreateWorkspaceFile(...args),
   moveFile: (...args: any[]) => mockMoveFile(...args),
   deleteFile: (...args: any[]) => mockDeleteFile(...args),
   renameFile: (...args: any[]) => mockRenameFile(...args),
@@ -159,6 +165,92 @@ describe("FileBrowser", () => {
   it("shows empty directory message when no entries", () => {
     renderFileBrowser({ entries: [] });
     expect(screen.getByText("(empty directory)")).toBeDefined();
+  });
+
+  it("renders New File button in header when workspace is provided", () => {
+    renderFileBrowser();
+    expect(screen.getByRole("button", { name: /New File/i })).toBeDefined();
+  });
+
+  it("renders New Folder button in header when workspace is provided", () => {
+    renderFileBrowser();
+    expect(screen.getByRole("button", { name: /New Folder/i })).toBeDefined();
+  });
+
+  it("disables create buttons when no workspace is provided", () => {
+    renderFileBrowser({ workspace: undefined });
+    expect(screen.getByRole("button", { name: /New File/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /New Folder/i })).toBeDisabled();
+  });
+
+  it("clicking New File opens a dialog with name input", () => {
+    renderFileBrowser();
+    fireEvent.click(screen.getByRole("button", { name: /New File/i }));
+    expect(document.querySelector(".file-browser-dialog-title")?.textContent).toBe("New File");
+    expect(screen.getByPlaceholderText("File name")).toBeDefined();
+  });
+
+  it("clicking New Folder opens a dialog with name input", () => {
+    renderFileBrowser();
+    fireEvent.click(screen.getByRole("button", { name: /New Folder/i }));
+    expect(document.querySelector(".file-browser-dialog-title")?.textContent).toBe("New Folder");
+    expect(screen.getByPlaceholderText("Folder name")).toBeDefined();
+  });
+
+  it("creating a file calls createWorkspaceFile, refreshes, and selects the file", async () => {
+    mockCreateWorkspaceFile.mockResolvedValue({ success: true });
+    const onRefresh = vi.fn();
+    const onSelectFile = vi.fn();
+    renderFileBrowser({ currentPath: "docs", onRefresh, onSelectFile });
+    fireEvent.click(screen.getByRole("button", { name: /New File/i }));
+    fireEvent.change(screen.getByPlaceholderText("File name"), { target: { value: "notes.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(mockCreateWorkspaceFile).toHaveBeenCalledWith("test-ws", "docs/notes.md", "project-1");
+      expect(onRefresh).toHaveBeenCalled();
+      expect(onSelectFile).toHaveBeenCalledWith("docs/notes.md");
+    });
+  });
+
+  it("creating a folder calls createWorkspaceDirectory and refreshes", async () => {
+    mockCreateWorkspaceDirectory.mockResolvedValue({ success: true });
+    const onRefresh = vi.fn();
+    renderFileBrowser({ currentPath: "docs", onRefresh });
+    fireEvent.click(screen.getByRole("button", { name: /New Folder/i }));
+    fireEvent.change(screen.getByPlaceholderText("Folder name"), { target: { value: "drafts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(mockCreateWorkspaceDirectory).toHaveBeenCalledWith("test-ws", "docs/drafts", "project-1");
+      expect(onRefresh).toHaveBeenCalled();
+    });
+  });
+
+  it("shows create error state in dialog", async () => {
+    mockCreateWorkspaceDirectory.mockRejectedValue(new Error("Already exists"));
+    renderFileBrowser();
+    fireEvent.click(screen.getByRole("button", { name: /New Folder/i }));
+    fireEvent.change(screen.getByPlaceholderText("Folder name"), { target: { value: "src" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Already exists")).toBeDefined();
+    });
+  });
+
+  it("cancels create dialog on Cancel", () => {
+    renderFileBrowser();
+    fireEvent.click(screen.getByRole("button", { name: /New File/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByPlaceholderText("File name")).toBeNull();
+  });
+
+  it("closes create dialog on Escape", () => {
+    renderFileBrowser();
+    fireEvent.click(screen.getByRole("button", { name: /New Folder/i }));
+    fireEvent.keyDown(screen.getByPlaceholderText("Folder name"), { key: "Escape" });
+    expect(screen.queryByPlaceholderText("Folder name")).toBeNull();
   });
 
   it("shows loading state", () => {

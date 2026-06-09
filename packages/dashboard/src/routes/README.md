@@ -52,8 +52,8 @@ The context provides core cross-cutting plumbing:
 - `register-file-workspace-routes.ts` — task/workspace file domain:
   - Task files: `/tasks/:id/files`, `/tasks/:id/files/{*filepath}` (read/write)
   - Workspace discovery/files: `/workspaces`, `/files`, `/files/markdown-list`, `/files/search`, `/files/{*filepath}`
-  - File operations: `/files/{*filepath}/copy|move|delete|rename`, `/files/{*filepath}/download`, `/files/{*filepath}/download-zip`
-  - Generic wildcard write: `/files/{*filepath}` (must remain after operation routes)
+  - File operations: `/files/{*filepath}/copy|move|delete|rename`, `/files/mkdir`, `/files/{*filepath}/download`, `/files/{*filepath}/download-zip`
+  - Generic wildcard write: `/files/{*filepath}` (must remain after operation routes, including `/files/mkdir`)
   - Project markdown search: `/project-files/md`
 - `register-session-diff-routes.ts` — task session/diff domain:
   - Session changed-file list: `/tasks/:id/session-files`
@@ -110,8 +110,8 @@ Compatibility re-exports that must remain on `routes.ts` for tests and existing 
 Express matches in registration order. Keep registrar and in-registrar route ordering stable:
 
 1. **Specific operation routes before generic parameterized routes** (`/runs`, `/runs/:id`, `/copy`, `/delete` before `/:id` style handlers)
-2. **Specific operation routes before wildcard paths** (`/files/{*filepath}/copy|move|delete|rename|download|download-zip` before `POST /files/{*filepath}`)
-   - Why: Express route matching is first-win. If the wildcard write route is registered first, paths like `/files/somefolder/delete` will be treated as file writes instead of delete operations.
+2. **Specific operation routes before wildcard paths** (`/files/{*filepath}/copy|move|delete|rename|download|download-zip` and `/files/mkdir` before `POST /files/{*filepath}`)
+   - Why: Express route matching is first-win. If the wildcard write route is registered first, paths like `/files/somefolder/delete` or `/files/mkdir` will be treated as file writes instead of file operations.
 3. **Do not move proxy/script/message/file wildcards ahead of specific routes**
    - For proxy routes specifically, keep all explicit `GET /proxy/:nodeId/*` handlers ahead of `ALL /proxy/:nodeId/{*splat}` and keep proxy registration last in `createApiRoutes()`.
 4. **Project/node/sync/discovery ordering constraints must stay intact**:

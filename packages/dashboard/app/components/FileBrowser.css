@@ -150,6 +150,22 @@
   font-size: var(--space-md);
   color: var(--text-muted);
   margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-browser .file-browser-header-actions {
+  margin-left: var(--space-sm);
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.file-browser .file-browser-header-actions .btn-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
 }
 
 .file-browser-list {
@@ -386,6 +402,22 @@
     flex-shrink: 0;
     justify-content: flex-end;
     flex-wrap: wrap;
+  }
+
+  .file-browser .file-browser-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .file-browser .file-browser-path {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .file-browser .file-browser-header-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
   }
 
   .file-editor-toolbar {

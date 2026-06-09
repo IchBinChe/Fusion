@@ -3242,12 +3242,37 @@ export function searchFiles(query: string, workspace?: string, projectId?: strin
   return api<FileSearchResult>(`/files/search?${params.toString()}`);
 }
 
-// --- Workspace File Operations API (Copy, Move, Delete, Rename, Download) ---
+// --- Workspace File Operations API (Create, Copy, Move, Delete, Rename, Download) ---
 
-/** File operation response for copy/move/delete/rename operations */
+/** File operation response for create/copy/move/delete/rename operations */
 export interface FileOperationResponse {
   success: true;
   message?: string;
+  path?: string;
+}
+
+/** Create a directory within a workspace. */
+export function createWorkspaceDirectory(workspace: string, dirPath: string, projectId?: string): Promise<FileOperationResponse> {
+  const query = new URLSearchParams({ workspace });
+  if (projectId) {
+    query.set("projectId", projectId);
+  }
+  return api<FileOperationResponse>(`/files/mkdir?${query.toString()}`, {
+    method: "POST",
+    body: JSON.stringify({ path: dirPath }),
+  });
+}
+
+/** Create an empty file within a workspace. */
+export function createWorkspaceFile(workspace: string, filePath: string, projectId?: string): Promise<FileOperationResponse> {
+  const query = new URLSearchParams({ workspace });
+  if (projectId) {
+    query.set("projectId", projectId);
+  }
+  return api<FileOperationResponse>(`/files/${encodeURIComponent(filePath)}?${query.toString()}`, {
+    method: "POST",
+    body: JSON.stringify({ content: "" }),
+  });
 }
 
 /** Copy a file or directory to a new location within a workspace. */

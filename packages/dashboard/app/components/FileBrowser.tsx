@@ -1,9 +1,9 @@
 import "./FileBrowser.css";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Folder, File, ChevronRight, Loader2, Copy, Move, Trash2, Pencil, Download, Archive } from "lucide-react";
+import { Folder, File, ChevronRight, Loader2, Copy, Move, Trash2, Pencil, Download, Archive, FilePlus2, FolderPlus } from "lucide-react";
 import type { FileNode } from "../api";
-import { copyFile, moveFile, deleteFile, renameFile, downloadFileUrl, downloadZipUrl } from "../api";
+import { copyFile, createWorkspaceDirectory, createWorkspaceFile, moveFile, deleteFile, renameFile, downloadFileUrl, downloadZipUrl } from "../api";
 import { appendTokenQuery } from "../auth";
 import { getErrorMessage } from "@fusion/core";
 import { getParentDisplayPath, joinDisplayPath, normalizeDisplayPath } from "../utils/pathDisplay";
@@ -62,7 +62,7 @@ const INITIAL_CONTEXT_MENU: ContextMenuState = {
 
 // ── Operation Dialog Types ──────────────────────────────────────────────
 
-type DialogType = "copy" | "move" | "rename" | "delete" | null;
+type DialogType = "copy" | "move" | "rename" | "delete" | "create-file" | "create-folder" | null;
 
 interface DialogState {
   type: DialogType;
@@ -192,7 +192,7 @@ function FileContextMenu({ x, y, entry, onAction, onClose }: FileContextMenuProp
 
 interface OperationDialogProps {
   type: DialogType;
-  entry: FileNode;
+  entry: FileNode | null;
   entryFullPath: string;
   onConfirm: (value: string) => void;
   onCancel: () => void;
@@ -203,7 +203,7 @@ interface OperationDialogProps {
 function OperationDialog({ type, entry, entryFullPath, onConfirm, onCancel, loading, error }: OperationDialogProps) {
   const { t } = useTranslation("app");
   const inputRef = useRef<HTMLInputElement>(null);
-  const defaultValue = type === "rename" ? entry.name : "";
+  const defaultValue = type === "rename" && entry ? entry.name : "";
   const [value, setValue] = useState(defaultValue);
 
   // Focus input on mount
@@ -213,7 +213,7 @@ function OperationDialog({ type, entry, entryFullPath, onConfirm, onCancel, load
 
   // Select filename without extension for rename
   useEffect(() => {
-    if (type === "rename" && inputRef.current) {
+    if (type === "rename" && entry && inputRef.current) {
       const dotIndex = entry.name.lastIndexOf(".");
       if (dotIndex > 0) {
         inputRef.current.setSelectionRange(0, dotIndex);
@@ -221,7 +221,7 @@ function OperationDialog({ type, entry, entryFullPath, onConfirm, onCancel, load
         inputRef.current.select();
       }
     }
-  }, [type, entry.name]);
+  }, [type, entry]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && value.trim()) {
@@ -232,7 +232,7 @@ function OperationDialog({ type, entry, entryFullPath, onConfirm, onCancel, load
     }
   };
 
-  if (type === "delete") {
+  if (type === "delete" && entry) {
     return (
       <div className="context-menu-overlay" onClick={onCancel}>
         <div className="file-browser-dialog" onClick={(e) => e.stopPropagation()}>
@@ -263,6 +263,8 @@ function OperationDialog({ type, entry, entryFullPath, onConfirm, onCancel, load
     copy: { title: t("fileBrowser.copyTitle", "Copy"), placeholder: t("fileBrowser.copyPlaceholder", "Destination path"), confirm: t("fileBrowser.copy", "Copy") },
     move: { title: t("fileBrowser.moveTitle", "Move"), placeholder: t("fileBrowser.movePlaceholder", "Destination path"), confirm: t("fileBrowser.move", "Move") },
     rename: { title: t("fileBrowser.renameTitle", "Rename"), placeholder: t("fileBrowser.renamePlaceholder", "New name"), confirm: t("fileBrowser.rename", "Rename") },
+    "create-file": { title: t("fileBrowser.newFile", "New File"), placeholder: t("fileBrowser.fileNamePlaceholder", "File name"), confirm: t("fileBrowser.create", "Create") },
+    "create-folder": { title: t("fileBrowser.newFolder", "New Folder"), placeholder: t("fileBrowser.folderNamePlaceholder", "Folder name"), confirm: t("fileBrowser.create", "Create") },
   };
 
   const config = labels[type!];
@@ -271,9 +273,11 @@ function OperationDialog({ type, entry, entryFullPath, onConfirm, onCancel, load
     <div className="context-menu-overlay" onClick={onCancel}>
       <div className="file-browser-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="file-browser-dialog-title">{config.title}</div>
-        <div className="file-browser-dialog-info">
-          {type === "rename" ? entry.name : entryFullPath}
-        </div>
+        {entry && (
+          <div className="file-browser-dialog-info">
+            {type === "rename" ? entry.name : entryFullPath}
+          </div>
+        )}
         <input
           ref={inputRef}
           className="file-browser-dialog-input"
@@ -441,6 +445,16 @@ export function FileBrowser({
     openContextMenuAt(e.clientX, e.clientY, entry, entryPath(currentPath, entry.name));
   }, [cancelLongPress, currentPath, openContextMenuAt]);
 
+  const openCreateDialog = useCallback((type: "create-file" | "create-folder") => {
+    if (!workspace) return;
+    setDialog({
+      type,
+      entry: null,
+      entryFullPath: currentPath,
+    });
+    setOperationError(null);
+  }, [currentPath, workspace]);
+
   const handleContextAction = useCallback((action: string) => {
     if (!contextMenu.entry) return;
 
@@ -476,7 +490,7 @@ export function FileBrowser({
   }, [contextMenu, workspace, projectId]);
 
   const handleDialogConfirm = useCallback(async (value: string) => {
-    if (!dialog.type || !dialog.entry || !workspace) return;
+    if (!dialog.type || !workspace) return;
 
     setOperationLoading(true);
     setOperationError(null);
@@ -484,16 +498,29 @@ export function FileBrowser({
     try {
       switch (dialog.type) {
         case "copy":
+          if (!dialog.entry) return;
           await copyFile(workspace, dialog.entryFullPath, value, projectId);
           break;
         case "move":
+          if (!dialog.entry) return;
           await moveFile(workspace, dialog.entryFullPath, value, projectId);
           break;
         case "rename":
+          if (!dialog.entry) return;
           await renameFile(workspace, dialog.entryFullPath, value, projectId);
           break;
         case "delete":
+          if (!dialog.entry) return;
           await deleteFile(workspace, dialog.entryFullPath, projectId);
+          break;
+        case "create-file": {
+          const newFilePath = joinDisplayPath(dialog.entryFullPath, value);
+          await createWorkspaceFile(workspace, newFilePath, projectId);
+          onSelectFile(newFilePath);
+          break;
+        }
+        case "create-folder":
+          await createWorkspaceDirectory(workspace, joinDisplayPath(dialog.entryFullPath, value), projectId);
           break;
       }
 
@@ -504,7 +531,7 @@ export function FileBrowser({
     } finally {
       setOperationLoading(false);
     }
-  }, [dialog, workspace, onRefresh, projectId]);
+  }, [dialog, workspace, onRefresh, onSelectFile, projectId, t]);
 
   const handleDialogCancel = useCallback(() => {
     setDialog(INITIAL_DIALOG);
@@ -563,6 +590,26 @@ export function FileBrowser({
           </button>
         )}
         <span className="file-browser-path">{currentPath === "." ? t("fileBrowser.root", "Root") : normalizeDisplayPath(currentPath)}</span>
+        <div className="file-browser-header-actions">
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => openCreateDialog("create-file")}
+            disabled={!workspace}
+          >
+            <FilePlus2 size={14} />
+            {t("fileBrowser.newFile", "New File")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => openCreateDialog("create-folder")}
+            disabled={!workspace}
+          >
+            <FolderPlus size={14} />
+            {t("fileBrowser.newFolder", "New Folder")}
+          </button>
+        </div>
       </div>
 
       <div className="file-browser-list">
@@ -619,7 +666,7 @@ export function FileBrowser({
       )}
 
       {/* Operation Dialog */}
-      {dialog.type && dialog.entry && (
+      {dialog.type && (
         <OperationDialog
           type={dialog.type}
           entry={dialog.entry}

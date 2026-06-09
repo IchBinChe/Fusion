@@ -4,6 +4,7 @@ import type { Request } from "express";
 import { ApiError, badRequest } from "../api-error.js";
 import {
   copyWorkspaceFile,
+  createWorkspaceDirectory,
   deleteWorkspaceFile,
   FileServiceError,
   getWorkspaceFileForDownload,
@@ -423,7 +424,38 @@ export function registerFileWorkspaceRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
-  // Must remain after copy/move/delete/rename/download routes.
+  // MUST be before generic wildcard write route.
+  router.post("/files/mkdir", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const workspace = typeof req.query.workspace === "string" && req.query.workspace.length > 0
+        ? req.query.workspace
+        : "project";
+      const { path } = req.body;
+
+      if (!path || typeof path !== "string") {
+        throw badRequest("path is required and must be a string");
+      }
+
+      const result = await createWorkspaceDirectory(scopedStore, workspace, path);
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if (err instanceof FileServiceError) {
+        const status = err.code === "ENOTASK" ? 404
+          : err.code === "ENOENT" ? 404
+          : err.code === "EEXIST" ? 409
+          : err.code === "EACCES" ? 403
+          : 400;
+        throw new ApiError(status, err.message, { code: err.code });
+      }
+      rethrowAsApiError(err, "Internal server error");
+    }
+  });
+
+  // Must remain after copy/move/delete/rename/download/mkdir routes.
   router.post("/files/{*filepath}", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);

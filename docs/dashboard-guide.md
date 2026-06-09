@@ -421,6 +421,7 @@ For the full research workflow, provider setup, CLI commands, API reference, and
 
 The Files modal provides a workspace-aware file browser and editor.
 
+- Use **New File** or **New Folder** in the browser header to create entries in the current folder; new files open in the editor after creation
 - Source/text editing supports a **Line #** header toggle to show or hide line numbers in the editor gutter
 - The line-number preference is saved per project and restored automatically when you switch projects
 

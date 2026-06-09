@@ -126,8 +126,6 @@ afterEach(() => {
 });
 
 describe("PluginManager registry browsing", () => {
-  // GAP: The API supports ?category= filtering but the UI does not expose a category selector.
-  // A future task should add category filter UI and tests.
   it("renders registry entries with metadata", async () => {
     await renderRegistry();
 
@@ -225,6 +223,105 @@ describe("PluginManager registry browsing", () => {
     expect(fetchPluginRegistry).toHaveBeenCalledWith("slack", undefined, undefined);
   });
 
+  it("filters registry results by selected category", async () => {
+    await renderRegistry();
+    vi.mocked(fetchPluginRegistry).mockImplementation(async (_query, category) => (
+      category ? registryEntries.filter((entry) => entry.category === category) : registryEntries
+    ));
+    vi.mocked(fetchPluginRegistry).mockClear();
+
+    fireEvent.change(screen.getByLabelText("Registry category"), { target: { value: "runtime" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const section = screen.getByRole("region", { name: "Browse Registry" });
+    expect(fetchPluginRegistry).toHaveBeenLastCalledWith("", "runtime", undefined);
+    expect(within(section).getByText("Installed Registry")).toBeInTheDocument();
+    expect(within(section).queryByText("Installable Registry")).not.toBeInTheDocument();
+    expect(within(section).queryByText("Coming Soon Registry")).not.toBeInTheDocument();
+  });
+
+  it("clears category filtering when All Categories is selected", async () => {
+    await renderRegistry();
+    vi.mocked(fetchPluginRegistry).mockImplementation(async (_query, category) => (
+      category ? registryEntries.filter((entry) => entry.category === category) : registryEntries
+    ));
+    vi.mocked(fetchPluginRegistry).mockClear();
+
+    const categorySelect = screen.getByLabelText("Registry category");
+    fireEvent.change(categorySelect, { target: { value: "runtime" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.change(categorySelect, { target: { value: "" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const section = screen.getByRole("region", { name: "Browse Registry" });
+    expect(fetchPluginRegistry).toHaveBeenLastCalledWith("", undefined, undefined);
+    expect(within(section).getByText("Installable Registry")).toBeInTheDocument();
+    expect(within(section).getByText("Installed Registry")).toBeInTheDocument();
+    expect(within(section).getByText("Coming Soon Registry")).toBeInTheDocument();
+  });
+
+  it("combines category filtering with the registry search query", async () => {
+    await renderRegistry();
+    vi.mocked(fetchPluginRegistry).mockClear();
+
+    const searchInput = screen.getByPlaceholderText("Search registry plugins");
+    const categorySelect = screen.getByLabelText("Registry category");
+
+    fireEvent.change(searchInput, { target: { value: "whatsapp" } });
+    fireEvent.change(categorySelect, { target: { value: "integration" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchPluginRegistry).toHaveBeenLastCalledWith("whatsapp", "integration", undefined);
+
+    fireEvent.change(categorySelect, { target: { value: "runtime" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchPluginRegistry).toHaveBeenLastCalledWith("whatsapp", "runtime", undefined);
+  });
+
+  it("debounces category changes before fetching registry results", async () => {
+    await renderRegistry();
+    vi.mocked(fetchPluginRegistry).mockClear();
+
+    fireEvent.change(screen.getByLabelText("Registry category"), { target: { value: "integration" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299);
+    });
+    expect(fetchPluginRegistry).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchPluginRegistry).toHaveBeenLastCalledWith("", "integration", undefined);
+  });
+
   it("shows loading state while registry fetch is pending", async () => {
     vi.mocked(fetchPlugins).mockResolvedValue([]);
     vi.mocked(fetchPluginRegistry).mockReturnValue(new Promise(() => undefined));
@@ -286,6 +383,7 @@ describe("PluginManager registry browsing", () => {
     await renderRegistry();
 
     const section = screen.getByRole("region", { name: "Browse Registry" });
+    expect(within(section).getByLabelText("Registry category")).toBeInTheDocument();
     expect(within(section).getByPlaceholderText("Search registry plugins")).toBeInTheDocument();
     expect(within(section).getByLabelText("Registry plugin results")).toBeInTheDocument();
     expect(within(section).getByText("Installable Registry")).toBeInTheDocument();
@@ -318,6 +416,7 @@ describe("PluginManager registry CSS", () => {
     const css = loadAllAppCss();
     expect(css).toContain("@media (max-width: 768px)");
     expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.plugin-registry-item[\s\S]*flex-direction: column/);
+    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.plugin-registry-controls[\s\S]*flex-direction: column/);
     expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.plugin-registry-action,[\s\S]*\.plugin-registry-retry[\s\S]*min-height: 36px/);
     expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.plugin-registry-list[\s\S]*overflow-y: auto/);
   });

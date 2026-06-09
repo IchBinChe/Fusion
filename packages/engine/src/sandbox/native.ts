@@ -1,5 +1,3 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import { superviseSpawn } from "@fusion/core";
 
 import type {
@@ -12,7 +10,8 @@ import type {
   SandboxStreamingResult,
 } from "./types.js";
 
-const execAsync = promisify(exec);
+const FORCE_KILL_DELAY_MS = 5_000;
+const NORMAL_CLEANUP_FORCE_KILL_DELAY_MS = 500;
 
 export class NativeSandboxBackend implements SandboxBackend {
   capabilities(): SandboxCapabilities {
@@ -30,48 +29,110 @@ export class NativeSandboxBackend implements SandboxBackend {
   }
 
   async run(command: string, options: SandboxRunOptions): Promise<SandboxRunResult> {
-    try {
-      const execOptions: Parameters<typeof exec>[1] = {
-        cwd: options.cwd,
-        timeout: options.timeoutMs,
-        maxBuffer: options.maxBuffer,
-        ...(options.encoding !== undefined && { encoding: options.encoding }),
-        ...(typeof options.shell === "string" && { shell: options.shell }),
-        ...(options.env !== undefined && { env: options.env }),
-        ...(options.signal !== undefined && { signal: options.signal }),
-      };
-      const { stdout, stderr } = await execAsync(command, execOptions);
-
+    if (options.signal?.aborted) {
       return {
-        stdout: stdout?.toString?.() ?? "",
-        stderr: stderr?.toString?.() ?? "",
-        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        exitCode: null,
         signal: null,
         timedOut: false,
         bufferExceeded: false,
-      };
-    } catch (error) {
-      const errObj = error as Record<string, unknown>;
-      const code = errObj.code;
-      const status = typeof errObj.status === "number" ? errObj.status : null;
-      const exitCode = typeof code === "number" ? code : status;
-      const message = String(errObj.message ?? "");
-
-      return {
-        stdout: typeof (errObj.stdout as { toString?: unknown })?.toString === "function" ? String(errObj.stdout) : "",
-        stderr: typeof (errObj.stderr as { toString?: unknown })?.toString === "function" ? String(errObj.stderr) : "",
-        exitCode,
-        signal: (errObj.signal as NodeJS.Signals | null | undefined) ?? null,
-        bufferExceeded:
-          code === "ENOBUFS"
-          || code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
-          || message.includes("maxBuffer"),
-        timedOut:
-          code === "ETIMEDOUT"
-          || (errObj.killed === true && (errObj.signal === "SIGTERM" || message.includes("timed out"))),
-        spawnError: code === "ENOENT" || code === "EACCES" ? (error as Error) : undefined,
+        spawnError: new Error("Command aborted before start"),
       };
     }
+
+    return await new Promise((resolve) => {
+      const supervised = superviseSpawn(command, [], {
+        cwd: options.cwd,
+        shell: options.shell ?? true,
+        stdio: ["ignore", "pipe", "pipe"],
+        ...(options.env !== undefined && { env: options.env }),
+        maxLifetimeMs: options.timeoutMs > 0 ? options.timeoutMs + FORCE_KILL_DELAY_MS + 1_000 : undefined,
+      });
+      const child = supervised.child;
+
+      const encoding = options.encoding ?? "utf-8";
+      let stdout = "";
+      let stderr = "";
+      let bufferExceeded = false;
+      let timedOut = false;
+      let settled = false;
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const killTree = (signal: NodeJS.Signals): void => {
+        supervised.kill(signal);
+      };
+
+      const scheduleForceKill = (delayMs = FORCE_KILL_DELAY_MS): void => {
+        if (forceKillTimer) return;
+        forceKillTimer = setTimeout(() => {
+          killTree("SIGKILL");
+        }, delayMs);
+        forceKillTimer.unref();
+      };
+
+      const killTreeForCommandFailure = (): void => {
+        killTree("SIGTERM");
+        scheduleForceKill();
+      };
+
+      const append = (current: string, chunk: Buffer): string => {
+        if (bufferExceeded) return current;
+        const text = chunk.toString(encoding);
+        if (current.length + text.length <= options.maxBuffer) {
+          return current + text;
+        }
+        bufferExceeded = true;
+        const remaining = Math.max(0, options.maxBuffer - current.length);
+        killTreeForCommandFailure();
+        return current + text.slice(0, remaining);
+      };
+
+      const timeout = options.timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            killTreeForCommandFailure();
+          }, options.timeoutMs)
+        : null;
+      timeout?.unref();
+
+      const onAbort = (): void => {
+        killTreeForCommandFailure();
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+
+      const finish = (spawnError: Error | null, exitCode: number | null, signal: NodeJS.Signals | null): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        options.signal?.removeEventListener("abort", onAbort);
+
+        if (!spawnError) {
+          killTree("SIGTERM");
+          scheduleForceKill(NORMAL_CLEANUP_FORCE_KILL_DELAY_MS);
+        }
+
+        resolve({
+          stdout,
+          stderr,
+          exitCode,
+          signal,
+          timedOut,
+          bufferExceeded,
+          ...(spawnError ? { spawnError } : {}),
+        });
+      };
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout = append(stdout, chunk);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = append(stderr, chunk);
+      });
+      child.on("error", (error) => finish(error, null, null));
+      child.on("close", (code, signal) => finish(null, code, signal));
+    });
   }
 
   async runStreaming(command: string, options: SandboxRunStreamingOptions): Promise<SandboxStreamingResult> {
@@ -105,28 +166,31 @@ export class NativeSandboxBackend implements SandboxBackend {
       let timedOut = false;
       let aborted = false;
       let settled = false;
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
 
       const killTree = (sig: NodeJS.Signals) => {
         supervised.kill(sig);
       };
 
+      const scheduleForceKill = (delayMs = FORCE_KILL_DELAY_MS): void => {
+        if (forceKillTimer) return;
+        forceKillTimer = setTimeout(() => {
+          killTree("SIGKILL");
+        }, delayMs);
+        forceKillTimer.unref();
+      };
+
       const timer = setTimeout(() => {
         timedOut = true;
         killTree("SIGTERM");
-        setTimeout(() => {
-          if (settled) return;
-          killTree("SIGKILL");
-        }, 5_000).unref();
+        scheduleForceKill();
       }, options.timeout);
       timer.unref();
 
       const onAbort = () => {
         aborted = true;
         killTree("SIGTERM");
-        setTimeout(() => {
-          if (settled) return;
-          killTree("SIGKILL");
-        }, 5_000).unref();
+        scheduleForceKill();
       };
       options.signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -154,6 +218,7 @@ export class NativeSandboxBackend implements SandboxBackend {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         options.signal?.removeEventListener("abort", onAbort);
 
         if (aborted) {
@@ -172,6 +237,8 @@ export class NativeSandboxBackend implements SandboxBackend {
         }
 
         if (code === 0) {
+          killTree("SIGTERM");
+          scheduleForceKill(NORMAL_CLEANUP_FORCE_KILL_DELAY_MS);
           resolve({
             outcome: "success",
             stdout,

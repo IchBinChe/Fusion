@@ -315,6 +315,40 @@ interface ConcurrencyGateDiagnostic {
   perColumnGates?: PerColumnCapacityGate[];
 }
 
+const IDLE_SEMAPHORE_LEAK_REPAIR_MS = 5_000;
+
+function persistedTopLevelAgentSlots(tasks: Task[]): number {
+  return tasks.filter((task) => (
+    task.column === "in-progress"
+    || (task.column === "triage" && task.status === "planning" && !task.paused)
+    || (task.column === "in-review" && ["merging", "reviewing", "fixing"].includes(String(task.status ?? "")))
+  )).length;
+}
+
+function recoverIdleSemaphoreLeak(
+  semaphore: AgentSemaphore | undefined,
+  tasks: Task[],
+  source: string,
+  candidateSinceMs: number | null,
+): number | null {
+  if (!semaphore) return null;
+  const persistedActive = persistedTopLevelAgentSlots(tasks);
+  if (persistedActive !== 0 || semaphore.activeCount <= 0) return null;
+
+  const now = Date.now();
+  if (candidateSinceMs === null) return now;
+  if (now - candidateSinceMs < IDLE_SEMAPHORE_LEAK_REPAIR_MS) return candidateSinceMs;
+
+  const result = semaphore.reconcileActiveCount(0);
+  if (result.changed) {
+    schedulerLog.warn(
+      `${source}: recovered stale semaphore active count ${result.before} -> ${result.after} ` +
+      "(no persisted in-progress/planning/review agent work)",
+    );
+  }
+  return null;
+}
+
 function computeConcurrencyGateDiagnostic(params: {
   agentSlots: number;
   maxConcurrent: number;
@@ -495,6 +529,7 @@ export class Scheduler {
   private lastStaleTaskReportAt = 0;
   private lastBacklogPressureReportAt = 0;
   private lastUnlinkedMissionsAdvisoryReportAt = 0;
+  private idleSemaphoreLeakCandidateSince: number | null = null;
   private readonly lastHighOverlapFanoutWarningKey = new Map<string, string>();
 
   /**
@@ -1208,6 +1243,12 @@ export class Scheduler {
       const settings = await this.store.getSettings();
       const maxConcurrent = settings.maxConcurrent ?? this.options.maxConcurrent ?? 2;
       const maxWorktrees = settings.maxWorktrees ?? this.options.maxWorktrees ?? 4;
+      this.idleSemaphoreLeakCandidateSince = recoverIdleSemaphoreLeak(
+        this.options.semaphore,
+        tasks,
+        "scheduler",
+        this.idleSemaphoreLeakCandidateSince,
+      );
 
       // Refresh the poll interval if the persisted setting has changed
       this.refreshPollInterval(settings.pollIntervalMs);

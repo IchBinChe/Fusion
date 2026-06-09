@@ -6,7 +6,9 @@ import type { Task } from "@fusion/core";
 
 vi.mock("lucide-react", () => {
   const Stub = () => null;
-  return new Proxy({}, { get: () => Stub });
+  return new Proxy({}, {
+    get: (_target, prop) => prop === "then" ? undefined : Stub,
+  });
 });
 
 vi.mock("../ProviderIcon", () => ({

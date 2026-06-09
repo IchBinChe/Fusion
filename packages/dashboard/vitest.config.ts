@@ -209,9 +209,7 @@ const batchedQualityAppComponentTestsA = batchedQualityAppComponentTests.slice(0
 const batchedQualityAppComponentTestsB = batchedQualityAppComponentTests.slice(batchedQualityAppSplitIndex);
 
 function buildComponentQualityInclude(testNames: readonly string[]): string[] {
-  return testNames.length > 0
-    ? [`app/components/__tests__/{${testNames.join(",")}}.test.{ts,tsx}`]
-    : [];
+  return testNames.map((testName) => `app/components/__tests__/${testName}.test.{ts,tsx}`);
 }
 
 const qualityAppTests = [

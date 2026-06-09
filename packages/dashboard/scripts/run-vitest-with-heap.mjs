@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global clearInterval, console, process, setInterval */
+/* global clearInterval, clearTimeout, console, process, setInterval, setTimeout */
 
 import { spawn } from "node:child_process";
 
@@ -16,6 +16,8 @@ if (vitestArgs.length === 0) {
 const nodeOptions = [`--max-old-space-size=${heapMb}`, process.env.NODE_OPTIONS || ""]
   .join(" ")
   .trim();
+const timeoutMs = Number.parseInt(process.env.FUSION_RUN_VITEST_TIMEOUT_MS || "900000", 10);
+const forceKillGraceMs = Number.parseInt(process.env.FUSION_RUN_VITEST_KILL_GRACE_MS || "5000", 10);
 
 function resolveSpawnCommand() {
   const override = process.env.FUSION_RUN_VITEST_SPAWN_OVERRIDE;
@@ -51,9 +53,29 @@ const child = spawn(command, args, {
 const heartbeat = setInterval(() => {
   console.log(`[dashboard-vitest] still running: ${vitestArgs.join(" ")}`);
 }, 5_000);
+let timeoutExitCode = null;
+let forceKillTimer = null;
+const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
+  ? setTimeout(() => {
+      timeoutExitCode = 124;
+      console.error(`[dashboard-vitest] timeout after ${timeoutMs}ms: ${vitestArgs.join(" ")}`);
+      forwardSignal("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        forwardSignal("SIGKILL");
+      }, Math.max(1, forceKillGraceMs));
+      forceKillTimer.unref();
+    }, timeoutMs)
+  : null;
+timeout?.unref();
 
 function clearHeartbeat() {
   clearInterval(heartbeat);
+}
+
+function clearTimers() {
+  clearHeartbeat();
+  if (timeout) clearTimeout(timeout);
+  if (forceKillTimer) clearTimeout(forceKillTimer);
 }
 
 function forwardSignal(signal) {
@@ -86,7 +108,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 }
 
 process.on("exit", () => {
-  clearHeartbeat();
+  clearTimers();
   try {
     process.kill(-child.pid, "SIGTERM");
   } catch (error) {
@@ -101,13 +123,16 @@ process.on("exit", () => {
 });
 
 child.on("error", (error) => {
-  clearHeartbeat();
+  clearTimers();
   console.error(error);
   process.exit(1);
 });
 
 child.on("close", (code, signal) => {
-  clearHeartbeat();
+  clearTimers();
+  if (timeoutExitCode !== null) {
+    process.exit(timeoutExitCode);
+  }
   if (signal) {
     process.kill(process.pid, signal);
     return;

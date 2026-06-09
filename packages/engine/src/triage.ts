@@ -634,6 +634,7 @@ export class TriageProcessor {
   private processingSince = new Map<string, number>();
   private wasGlobalPaused = false;
   private wasEnginePaused = false;
+  private idleSemaphoreLeakCandidateSince: number | null = null;
   /** Active agent sessions per task, used to terminate on pause. */
   private activeSessions = new Map<string, { dispose: () => void }>();
   /**
@@ -997,6 +998,31 @@ export class TriageProcessor {
       // Fetch all tasks (not just triage) to count active agents across columns.
       const allTasks = await this.store.listTasks({ slim: true, includeArchived: false });
       const now = Date.now();
+
+      if (this.options.semaphore) {
+        const persistedActive = allTasks.filter((task) => (
+          task.column === "in-progress"
+          || (task.column === "triage" && task.status === "planning" && !task.paused)
+          || (task.column === "in-review" && ["merging", "reviewing", "fixing"].includes(String(task.status ?? "")))
+        )).length;
+        if (persistedActive === 0 && this.options.semaphore.activeCount > 0 && this.processing.size === 0) {
+          if (this.idleSemaphoreLeakCandidateSince === null) {
+            this.idleSemaphoreLeakCandidateSince = now;
+          } else if (now - this.idleSemaphoreLeakCandidateSince >= 5_000) {
+            const result = this.options.semaphore.reconcileActiveCount(0);
+            if (result.changed) {
+              planLog.warn(
+                `triage: recovered stale semaphore active count ${result.before} -> ${result.after} ` +
+                "(no persisted in-progress/planning/review agent work)",
+              );
+            }
+            this.idleSemaphoreLeakCandidateSince = null;
+          }
+        } else {
+          this.idleSemaphoreLeakCandidateSince = null;
+        }
+      }
+
       const eligibleTriageTasks = allTasks.filter(
         (t) => t.column === "triage" && !this.processing.has(t.id) && !t.paused
           // Skip tasks awaiting manual plan approval — they should not be auto-discovered
@@ -1043,8 +1069,17 @@ export class TriageProcessor {
       const maxToStart = Math.min(perProjectAvailable, semaphoreAvailable);
 
       if (maxToStart <= 0 && triageTasks.length > 0) {
+        const semaphoreSnapshot = this.options.semaphore?.snapshot();
+        const semaphoreDetail = semaphoreSnapshot
+          ? `, semaphore active=${semaphoreSnapshot.activeCount}/${semaphoreSnapshot.limit}, available=${semaphoreSnapshot.availableCount}, waiting=${semaphoreSnapshot.waitingCount}`
+          : ", semaphore unavailable";
+        const processingIds = [...this.processing].slice(0, 5);
+        const eligibleIds = triageTasks.slice(0, 5).map((t) => t.id);
+        const blockedBy = perProjectAvailable <= 0 ? "triage concurrency" : "global semaphore";
         planLog.log(
-          `Plan throttled: ${activeAgents} planning agents, limit ${maxTriageConcurrent}`,
+          `Plan throttled by ${blockedBy}: eligible=${triageTasks.length} [${eligibleIds.join(", ")}], ` +
+          `planning=${activeAgents}/${maxTriageConcurrent}, processing=${this.processing.size}` +
+          `${processingIds.length > 0 ? ` [${processingIds.join(", ")}]` : ""}${semaphoreDetail}`,
         );
       }
 

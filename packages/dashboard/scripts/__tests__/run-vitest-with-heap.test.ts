@@ -127,6 +127,56 @@ async function spawnWrapperTree(signal: NodeJS.Signals) {
   await waitFor(() => !isProcessAlive(pids!.childPid) && !isProcessAlive(pids!.grandchildPid));
 }
 
+async function spawnWrapperTreeUntilTimeout() {
+  const { pidFile, childPath, grandchildPath } = createStubProcessTree();
+  const wrapper = spawn(
+    process.execPath,
+    [wrapperPath, "--heap=6144", "run", "--project", "dashboard-api-quality"],
+    {
+      cwd: dashboardRoot,
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        FUSION_RUN_VITEST_TIMEOUT_MS: "100",
+        FUSION_RUN_VITEST_KILL_GRACE_MS: "50",
+        FUSION_RUN_VITEST_SPAWN_OVERRIDE: JSON.stringify({
+          command: process.execPath,
+          args: [childPath, pidFile, grandchildPath],
+        }),
+      },
+    },
+  );
+  activeWrappers.add(wrapper);
+
+  let pids: { childPid: number; grandchildPid: number } | null = null;
+  await waitFor(() => {
+    try {
+      pids = JSON.parse(readFileSync(pidFile, "utf8")) as { childPid: number; grandchildPid: number };
+      return Boolean(
+        pids &&
+          Number.isInteger(pids.childPid) &&
+          Number.isInteger(pids.grandchildPid) &&
+          isProcessAlive(pids.childPid) &&
+          isProcessAlive(pids.grandchildPid),
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  registerGroupLeader(pids!.childPid);
+  registerPid(pids!.grandchildPid);
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    wrapper.once("error", reject);
+    wrapper.once("close", (code) => resolve(code));
+  });
+  activeWrappers.delete(wrapper);
+
+  expect(exitCode).toBe(124);
+  await waitFor(() => !isProcessAlive(pids!.childPid) && !isProcessAlive(pids!.grandchildPid));
+}
+
 afterEach(async () => {
   for (const wrapper of activeWrappers) {
     wrapper.kill("SIGKILL");
@@ -168,5 +218,9 @@ describe("run-vitest-with-heap", () => {
 
   it("reaps the spawned process group on SIGINT", async () => {
     await spawnWrapperTree("SIGINT");
+  });
+
+  it("times out and reaps the spawned process group", async () => {
+    await spawnWrapperTreeUntilTimeout();
   });
 });

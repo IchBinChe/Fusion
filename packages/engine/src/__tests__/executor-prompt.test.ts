@@ -207,31 +207,30 @@ describe("buildExecutionPrompt", () => {
     expect(result).toContain("- **Build:** `pnpm build`");
   });
 
-  it("tells executors to fix quality-gate failures even outside initial file scope", () => {
+  it("tells executors to split unrelated broad-suite failures into follow-up work", () => {
     const task = createMockTaskDetail();
     const result = buildExecutionPrompt(task, "/home/user/project", {
       testCommand: "pnpm test",
       buildCommand: "pnpm build",
     } as any);
 
-    expect(result).toContain("fix failures even when that requires edits outside the original File Scope");
+    expect(result).toContain("caused-by-this-task failures are blocking");
+    expect(result).toContain("unrelated or pre-existing failures should be logged and split into a follow-up");
     expect(result).toContain("If the repo has a typecheck command, run it before `fn_task_done()`");
-    expect(result).toContain("not for fixes required to get tests, build, or typecheck back to green");
+    expect(result).toContain("including unrelated/pre-existing broad-suite failures");
   });
 
-  it("requires resolving ALL test failures, including unrelated or pre-existing ones", () => {
+  it("warns against repeated broad workspace verification loops", () => {
     const task = createMockTaskDetail();
     const result = buildExecutionPrompt(task, "/home/user/project", {
       testCommand: "pnpm test",
       buildCommand: "pnpm build",
     } as any);
 
-    // The stricter language must be present to prevent "unrelated failure" deferrals
-    expect(result).toContain("Resolve ALL test failures");
-    expect(result).toContain("even if they appear unrelated or pre-existing");
-    expect(result).toContain("accumulate technical debt");
-    expect(result).toContain("Investigate and fix or suppress them");
-    expect(result).toContain("do not defer them to a separate task");
+    expect(result).toContain("Do not repeatedly rerun a broad failing or hanging workspace command");
+    expect(result).toContain("without a new hypothesis and a narrower confirming command");
+    expect(result).toContain("unrelated or pre-existing failures should be logged and split into a follow-up");
+    expect(result).not.toContain("Resolve ALL test failures");
   });
 
   it("includes source issue reference in commit instruction when task has github sourceIssue", () => {
@@ -2571,4 +2570,3 @@ describe("fn_task_update bare-call guard (P1 api-contract)", () => {
     expect(text).not.toContain("fn_task_update requires at least one of");
   });
 });
-

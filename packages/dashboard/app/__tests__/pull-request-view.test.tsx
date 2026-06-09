@@ -5,7 +5,18 @@ import { PullRequestView, type PrDetail } from "../components/PullRequestView";
 // Icons → simple stubs so assertions key on text/testids, not SVG internals.
 vi.mock("lucide-react", () => {
   const Stub = () => <span />;
-  return new Proxy({}, { get: () => Stub });
+  return {
+    AlertTriangle: Stub,
+    CheckCircle: Stub,
+    Clock: Stub,
+    ExternalLink: Stub,
+    GitMerge: Stub,
+    GitPullRequest: Stub,
+    MessageSquare: Stub,
+    RotateCcw: Stub,
+    ThumbsUp: Stub,
+    XCircle: Stub,
+  };
 });
 
 function makeSummary(over: Partial<PrDetail["summary"]> = {}): PrDetail["summary"] {

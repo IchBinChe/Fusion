@@ -66,6 +66,38 @@ export class AgentSemaphore {
     return this._active;
   }
 
+  /** Number of callers currently queued for a semaphore slot. */
+  get waitingCount(): number {
+    return this._waiters.length;
+  }
+
+  /** Snapshot of current semaphore pressure for diagnostics. */
+  snapshot(): { activeCount: number; waitingCount: number; availableCount: number; limit: number } {
+    return {
+      activeCount: this.activeCount,
+      waitingCount: this.waitingCount,
+      availableCount: this.availableCount,
+      limit: this.limit,
+    };
+  }
+
+  /**
+   * Clamp stale active-slot accounting to a persisted upper bound.
+   *
+   * This is a recovery valve for crash/abort paths where the task/session that
+   * acquired a slot is gone but the in-memory semaphore did not observe its
+   * normal `finally` release. The caller owns the persisted-state judgment.
+   */
+  reconcileActiveCount(maxActive: number): { before: number; after: number; changed: boolean } {
+    const bounded = Math.max(0, Math.floor(maxActive));
+    const before = this._active;
+    if (before > bounded) {
+      this._active = bounded;
+      this._drain();
+    }
+    return { before, after: this._active, changed: before !== this._active };
+  }
+
   /** Number of slots available for immediate acquisition. May be 0 or negative
    *  if the limit was reduced below the current active count.
    *  Returns 0 when the limit is not a valid positive number (defensive guard). */

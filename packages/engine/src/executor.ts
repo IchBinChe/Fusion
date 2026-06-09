@@ -1074,12 +1074,12 @@ If a project build command is listed in the prompt, it is a hard completion gate
 - If the build fails, do NOT call \`fn_task_done()\`; keep working until it passes
 
 Lint, tests, and typecheck are also hard quality gates:
-- Keep fixing failures until lint, the configured/full test suite, and typecheck all pass
-- If the repository exposes a typecheck command, run it and keep fixing failures until it passes
-- Do not stop at "out of scope" if additional fixes are required to restore green lint, tests, build, or typecheck
-- When tests fail, first identify whether the failure is caused by your change, a pre-existing defect, or an outdated test expectation; then fix code or tests accordingly so behavior and assertions match
-- Update tests when intended behavior changed; fix implementation when behavior regressed unintentionally
-- **CRITICAL: Resolve ALL lint failures and test failures before completing the task, even if they appear unrelated or pre-existing.** Unrelated failures left unfixed accumulate technical debt and block future integrations. Investigate and fix or suppress them — do not defer them to a separate task.
+- Keep fixing failures caused by your change until lint, targeted tests, build, and typecheck pass.
+- If the repository exposes a typecheck command, run it and fix failures caused by your change.
+- When tests fail, first identify whether the failure is caused by your change, a pre-existing defect, an unrelated flaky test, or an outdated test expectation.
+- Update tests when intended behavior changed; fix implementation when behavior regressed unintentionally.
+- If broad workspace verification fails on unrelated or pre-existing failures after targeted checks pass, do NOT expand this task by fixing unrelated areas. Log the evidence, quarantine flakes per project policy, or create/link a follow-up task.
+- Do not repeatedly rerun a broad failing or hanging workspace command without a new hypothesis and a narrower confirming command.
 
 ## Verification commands — use fn_run_verification
 
@@ -1088,7 +1088,7 @@ The tool prevents your session from being killed by the inactivity watchdog duri
 
 - Prefer **package-scoped** verification first: e.g. \`pnpm --filter @fusion/<pkg> test\` with \`scope: "package"\`. This is faster and isolated.
 - For file-specific package tests, use direct Vitest execution with package-relative paths: \`pnpm --filter @fusion/<pkg> exec vitest run src/path/to/test.ts --silent=passed-only --reporter=dot\`. Do not use \`pnpm --filter @fusion/<pkg> test -- --run <files>\`; package test scripts can expand into broad quality suites before the filter is applied.
-- Only run **workspace-scoped** verification (\`pnpm test\`, \`pnpm lint\`, \`pnpm build\` from root) at the FINAL integration step, when you are about to call \`fn_task_done\`.
+- Run **workspace-scoped** verification (\`pnpm test\`, \`pnpm lint\`, \`pnpm build\` from root) only when it is explicitly required by the task/workflow or after impacted/package-scoped checks pass and you are doing final integration.
 - If you need to run \`pnpm install\` (e.g. you added a new package), use \`fn_run_verification\` with \`scope: "workspace"\` and \`timeoutSec: 600\`.
 - If a verification command times out, do NOT blindly retry — investigate. Check for hung subprocesses, infinite test loops, or tests waiting on missing dependencies. Use \`node_modules/.modules.yaml\` presence to confirm bootstrap.
 
@@ -5549,15 +5549,25 @@ export class TaskExecutor {
         await this.store.logEntry(task.id, `${message} (task paused — not parked)`, undefined, this.getRunContextFor(task.id));
         return;
       }
+      if (live.column !== "in-progress") {
+        executorLog.log(
+          `${task.id}: graph run ended after task moved to '${live.column}' - preserving recovered lifecycle state`,
+        );
+        await this.store.logEntry(
+          task.id,
+          `${message} (task already ${live.column} - preserving recovered lifecycle state)`,
+          undefined,
+          this.getRunContextFor(task.id),
+        );
+        return;
+      }
       await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
       // status "failed" doubles as the self-healing exemption: review-task
       // revival sweeps skip tasks carrying a non-null status, preventing the
       // FN-5704-style loop of re-running the graph from scratch.
       await this.store.updateTask(task.id, { error: message, status: "failed" }, this.getRunContextFor(task.id));
-      if (live.column === "in-progress") {
-        await this.persistTokenUsage(task.id);
-        await this.handoffTaskToReview(live, "workflow-graph-failed");
-      }
+      await this.persistTokenUsage(task.id);
+      await this.handoffTaskToReview(live, "workflow-graph-failed");
     } catch (err) {
       executorLog.error(
         `${task.id}: failed to park graph-failed task: ${err instanceof Error ? err.message : String(err)}`,
@@ -6089,8 +6099,8 @@ export class TaskExecutor {
 
         if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
           await this.store.updateTask(task.id, {
-            status: "failed",
-            error: failureMessage,
+            status: "queued",
+            error: null,
             worktree: null,
             branch: null,
             sessionFile: null,
@@ -6669,7 +6679,12 @@ export class TaskExecutor {
                     executorLog.warn(`${task.id}: worktree removal failed during stuck-requeue cleanup (${worktreePath}): ${msg}`);
                   }
                 }
-                await this.store.updateTask(task.id, { status: "stuck-killed", worktree: null, branch: null });
+                await this.store.updateTask(task.id, {
+                  status: "queued",
+                  error: null,
+                  worktree: null,
+                  branch: null,
+                });
                 if (latestTask.column !== "todo") {
                   await this.store.moveTask(task.id, "todo", preserveProgress ? { preserveProgress: true } : undefined);
                   executorLog.log(`${task.id} moved to todo for retry after stuck kill${preserveProgress ? " (progress preserved)" : ""}`);
@@ -7576,8 +7591,8 @@ export class TaskExecutor {
 
               if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
                 await this.store.updateTask(task.id, {
-                  status: "failed",
-                  error: errorMessage,
+                  status: "queued",
+                  error: null,
                   taskDoneRetryCount: nextRequeueCount,
                 });
                 await this.store.logEntry(
@@ -8338,7 +8353,12 @@ export class TaskExecutor {
                 executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErrMessage}`);
               }
             }
-            await this.store.updateTask(task.id, { status: "stuck-killed", worktree: null, branch: null });
+            await this.store.updateTask(task.id, {
+              status: "queued",
+              error: null,
+              worktree: null,
+              branch: null,
+            });
             // Only move to todo if not already there. Use the freshly-read
             // latestTask.column rather than the stale captured task.column —
             // the captured snapshot can be hours old and would race against
@@ -9095,8 +9115,8 @@ export class TaskExecutor {
     const nextRequeueCount = priorRequeues + 1;
     if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
       await this.store.updateTask(task.id, {
-        status: "failed",
-        error: refusal.message,
+        status: "queued",
+        error: null,
         taskDoneRetryCount: nextRequeueCount,
         paused: false,
         pausedByAgentId: null,
@@ -9190,8 +9210,8 @@ export class TaskExecutor {
           const nextRequeueCount = priorRequeues + 1;
           if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
             await store.updateTask(taskId, {
-              status: "failed",
-              error: refusalMessage,
+              status: "queued",
+              error: null,
               taskDoneRetryCount: nextRequeueCount,
               paused: false,
               pausedByAgentId: null,
@@ -9248,8 +9268,8 @@ export class TaskExecutor {
           const nextRequeueCount = priorRequeues + 1;
           if (priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES) {
             await store.updateTask(taskId, {
-              status: "failed",
-              error: refusalMessage,
+              status: "queued",
+              error: null,
               taskDoneRetryCount: nextRequeueCount,
               paused: false,
               pausedByAgentId: null,
@@ -13364,7 +13384,12 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
             taskId,
             `Force-requeued after stuck-kill: executor did not unwind within ${FORCE_REQUEUE_GRACE_MS / 1000}s (hung subprocess)${preserveProgress ? " — progress preserved" : ""}`,
           );
-          await this.store.updateTask(taskId, { status: "stuck-killed", worktree: null, branch: null });
+          await this.store.updateTask(taskId, {
+            status: "queued",
+            error: null,
+            worktree: null,
+            branch: null,
+          });
           await this.store.moveTask(taskId, "todo", preserveProgress ? { preserveProgress: true } : undefined);
           // Remove from executing so the scheduler can re-dispatch normally.
           // The old Promise is still running but the executing guard is cleared so
@@ -13974,19 +13999,19 @@ ${hasProgress
     : "Start with Step 0 (Preflight). Work through each step in order."}
 Use \`fn_task_update\` to report progress on every step transition.
 Use \`fn_task_log\` for important actions and decisions.
-Use \`fn_task_create\` for truly separate follow-up work, not for fixes required to get tests, build, or typecheck back to green.
+Use \`fn_task_create\` for truly separate follow-up work, including unrelated/pre-existing broad-suite failures.
 Commit at step boundaries: \`git commit -m "feat(${task.id}): complete Step N — <short summary>"${sourceIssueRef ? ` -m "Ref: ${sourceIssueRef}"` : ""}${authorArg}\`
 The \`<short summary>\` is required — replace it with a concrete 5–10 word description of what the step changed.
 When all steps are complete: call \`fn_task_done()\`
 
 If a build command is configured, run that exact command in this worktree before calling \`fn_task_done()\`.
 Treat a non-zero exit code as a blocking failure. Do not claim success without a real passing run.
-Run the configured/full test suite and fix failures even when that requires edits outside the original File Scope.
+Run impacted/package-scoped tests before completion. Run the configured workspace test command only when the task/workflow explicitly requires it or after impacted checks pass for final integration. If any broad command fails, classify the failure before editing: caused-by-this-task failures are blocking; unrelated or pre-existing failures should be logged and split into a follow-up instead of expanding this task.
 If the repo has a lint command (e.g. \`pnpm lint\`, \`npm run lint\`), run it before \`fn_task_done()\` and fix any failures it reports.
 If the repo has a typecheck command, run it before \`fn_task_done()\` and fix any failures it reports.
-Use \`fn_task_create\` for truly separate follow-up work, not for fixes required to get tests, build, or typecheck back to green.
+Use \`fn_task_create\` for truly separate follow-up work, including unrelated/pre-existing broad-suite failures.
 If lint is configured and failing, fix that too before completion.
-**CRITICAL: Resolve ALL test failures (and any lint/typecheck failures) before completing the task, even if they appear unrelated or pre-existing.** Unrelated failures left unfixed accumulate technical debt and block future integrations. Investigate and fix or suppress them — do not defer them to a separate task.`;
+Do not repeatedly rerun a broad failing or hanging workspace command without a new hypothesis and a narrower confirming command.`;
 }
 
 /**

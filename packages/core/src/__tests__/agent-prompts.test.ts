@@ -127,15 +127,16 @@ describe("resolveAgentPrompt", () => {
     expect(result).toContain("task execution agent");
   });
 
-  it("built-in executor prompt requires resolving ALL lint and test failures including unrelated", () => {
+  it("built-in executor prompt limits fixes to impacted failures and follow-ups unrelated broad-suite failures", () => {
     const result = resolveAgentPrompt("executor");
-    // The stricter language must be present to prevent "unrelated failure" deferrals
-    expect(result).toContain("Resolve ALL lint failures and test failures");
-    expect(result).toContain("even if they appear unrelated or pre-existing");
-    expect(result).toContain("do not defer them to a separate task");
+    expect(result).toContain("Keep fixing failures caused by your change");
+    expect(result).toContain("impacted tests");
+    expect(result).toContain("unrelated or pre-existing failures");
+    expect(result).toContain("create/link a follow-up task");
+    expect(result).not.toContain("Resolve ALL lint failures and test failures");
   });
 
-  it("senior-engineer prompt requires resolving ALL lint and test failures including unrelated", () => {
+  it("senior-engineer prompt limits fixes to impacted failures and follow-ups unrelated broad-suite failures", () => {
     const config: AgentPromptsConfig = {
       roleAssignments: {
         executor: "senior-engineer",
@@ -143,9 +144,10 @@ describe("resolveAgentPrompt", () => {
     };
 
     const result = resolveAgentPrompt("executor", config);
-    expect(result).toContain("Resolve ALL lint failures and test failures");
-    expect(result).toContain("even if they appear unrelated or pre-existing");
-    expect(result).toContain("do not defer them to a separate task");
+    expect(result).toContain("Lint, tests, and typecheck are also hard quality gates for failures caused by this task");
+    expect(result).toContain("unrelated or pre-existing broad-suite failures");
+    expect(result).toContain("create/link follow-up work");
+    expect(result).not.toContain("Resolve ALL lint failures and test failures");
   });
 
   it("built-in executor prompt includes worktree boundary guidance", () => {

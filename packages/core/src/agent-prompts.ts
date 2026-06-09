@@ -188,10 +188,11 @@ If a project build command is listed in the prompt, it is a hard completion gate
 - If the build fails, do NOT call \`task_done()\`; keep working until it passes
 
 Lint, tests, and typecheck are also hard quality gates:
-- Keep fixing failures until lint, the configured/full test suite, and typecheck all pass
-- If the repository exposes a typecheck command, run it and keep fixing failures until it passes
-- Do not stop at "out of scope" if additional fixes are required to restore green lint, tests, build, or typecheck
-- **CRITICAL: Resolve ALL lint failures and test failures before completing the task, even if they appear unrelated or pre-existing.** Unrelated failures left unfixed accumulate technical debt and block future integrations. Investigate and fix or suppress them — do not defer them to a separate task.
+- Keep fixing failures caused by your change until lint, impacted tests, build, and typecheck pass.
+- If the repository exposes a typecheck command, run it and fix failures caused by your change.
+- When tests fail, classify whether the failure is caused by your change, a pre-existing defect, an unrelated flaky test, or an outdated test expectation.
+- If broad workspace verification fails on unrelated or pre-existing failures after impacted checks pass, do NOT expand this task by fixing unrelated areas. Log the evidence, quarantine flakes per project policy, or create/link a follow-up task.
+- Do not repeatedly rerun a broad failing or hanging workspace command without a new hypothesis and a narrower confirming command.
 
 ## Verification commands — use fn_run_verification
 
@@ -200,7 +201,7 @@ The tool prevents your session from being killed by the inactivity watchdog duri
 
 - Prefer **package-scoped** verification first: e.g. \`pnpm --filter @fusion/<pkg> test\` with \`scope: "package"\`. This is faster and isolated.
 - For file-specific package tests, use direct Vitest execution with package-relative paths: \`pnpm --filter @fusion/<pkg> exec vitest run src/path/to/test.ts --silent=passed-only --reporter=dot\`. Do not use \`pnpm --filter @fusion/<pkg> test -- --run <files>\`; package test scripts can expand into broad quality suites before the filter is applied.
-- Only run **workspace-scoped** verification (\`pnpm test\`, \`pnpm lint\`, \`pnpm build\` from root) at the FINAL integration step, when you are about to call \`task_done()\`.
+- Run **workspace-scoped** verification (\`pnpm test\`, \`pnpm lint\`, \`pnpm build\` from root) only when it is explicitly required by the task/workflow or after impacted/package-scoped checks pass and you are doing final integration.
 - If you need to run \`pnpm install\` (e.g. you added a new package), use \`fn_run_verification\` with \`scope: "workspace"\` and \`timeoutSec: 600\`.
 - If a verification command times out, do NOT blindly retry — investigate. Check for hung subprocesses, infinite test loops, or tests waiting on missing dependencies. Use \`node_modules/.modules.yaml\` presence to confirm bootstrap.`;
 
@@ -283,7 +284,7 @@ For bug-fix tasks, paste and fill in this checklist in the \`## Surface Enumerat
 > If keeping lint/tests/build/typecheck green requires edits outside the initial File Scope, make those fixes as part of this task.
 
 - [ ] Run lint check (\`pnpm lint\`)
-- [ ] Run full test suite
+- [ ] Run impacted tests
 - [ ] Run project typecheck if available
 - [ ] Fix all failures
 - [ ] Build passes
@@ -727,8 +728,8 @@ Call \`task_done()\` to signal completion.
 \`\`\`
 
 If a project build command is listed in the prompt, it is a hard completion gate.
-Lint, tests, and typecheck are also hard quality gates — keep fixing until green.
-**CRITICAL: Resolve ALL lint failures and test failures before completing the task, even if they appear unrelated or pre-existing.** Unrelated failures left unfixed accumulate technical debt and block future integrations. Investigate and fix or suppress them — do not defer them to a separate task.`;
+Lint, tests, and typecheck are also hard quality gates for failures caused by this task.
+If unrelated or pre-existing broad-suite failures remain after impacted checks pass, log the evidence and create/link follow-up work instead of expanding the task.`;
 
 const STRICT_REVIEWER_PROMPT_TEXT = `You are a strict code and plan reviewer with rigorous standards.
 

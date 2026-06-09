@@ -116,8 +116,8 @@ describe("Workflow Steps Execution", () => {
 
     // Retries still didn't call fn_task_done, so it fails and requeues immediately.
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
-      status: "failed",
-      error: "Agent finished without calling fn_task_done (after 3 retries)",
+      status: "queued",
+      error: null,
       taskDoneRetryCount: 1,
     });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
@@ -242,8 +242,9 @@ describe("Workflow Steps Execution", () => {
 
       expect(mockedCreateFnAgent).toHaveBeenCalledTimes(4);
       expect(store.updateTask).toHaveBeenCalledWith("FN-5436-A", expect.objectContaining({
-        status: "failed",
-        error: "Agent finished without calling fn_task_done (after 3 retries)",
+        status: "queued",
+        error: null,
+        taskDoneRetryCount: 1,
       }));
       expect(store.moveTask).toHaveBeenCalledWith("FN-5436-A", "todo", { preserveProgress: true });
       expect(store.moveTask).not.toHaveBeenCalledWith("FN-5436-A", "in-review");
@@ -335,8 +336,8 @@ describe("Workflow Steps Execution", () => {
 
       expect(mockedCreateFnAgent).toHaveBeenCalledTimes(4);
       expect(store.updateTask).toHaveBeenCalledWith("FN-5436-C", {
-        status: "failed",
-        error: "Agent finished without calling fn_task_done (after 3 retries)",
+        status: "queued",
+        error: null,
         taskDoneRetryCount: 1,
       });
     });
@@ -1224,7 +1225,7 @@ describe("Workflow Steps Execution", () => {
     store.getSettings.mockResolvedValue({
       maxConcurrent: 2,
       maxWorktrees: 4,
-      scripts: { test: "echo 'all tests passed'" },
+      scripts: { test: `node -e "if (process.env.FN3968_SCRIPT_ENV !== 'workflow-script-env') process.exit(42)"` },
     });
 
     store.getTask.mockResolvedValue({
@@ -1252,14 +1253,6 @@ describe("Workflow Steps Execution", () => {
       enabled: true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    });
-
-    // Mock execSync to succeed for the script command
-    mockedExecSync.mockImplementation((cmd: string | string[]) => {
-      if (typeof cmd === "string" && cmd.includes("echo")) {
-        return Buffer.from("all tests passed\n");
-      }
-      return Buffer.from("");
     });
 
     // Main agent with fn_task_done
@@ -1308,13 +1301,6 @@ describe("Workflow Steps Execution", () => {
         ]),
       }),
     );
-    const updatePayloads = store.updateTask.mock.calls.map((call: any[]) => call[1]);
-    expect(JSON.stringify(updatePayloads)).not.toContain("all tests passed");
-
-    const scriptExecCall = mockedExecSync.mock.calls.find(
-      (call: any[]) => typeof call[0] === "string" && call[0].includes("echo 'all tests passed'")
-    );
-    expect(scriptExecCall?.[1]?.env?.FN3968_SCRIPT_ENV).toBe("workflow-script-env");
     delete process.env.FN3968_SCRIPT_ENV;
   });
 

@@ -1,10 +1,24 @@
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { cwd } from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { NativeSandboxBackend } from "../native.js";
 
 describe("NativeSandboxBackend", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "fusion-native-sandbox-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
   it("returns stdout on success", async () => {
     const backend = new NativeSandboxBackend();
     const result = await backend.run("node -e 'process.stdout.write(\"ok\")'", {
@@ -32,6 +46,67 @@ describe("NativeSandboxBackend", () => {
     expect(result.exitCode).toBeNull();
     expect(result.timedOut).toBe(true);
     expect(result.signal).toBe("SIGTERM");
+  });
+
+  it.skipIf(process.platform === "win32")("times out and terminates descendant processes in the command process group", async () => {
+    const backend = new NativeSandboxBackend();
+    const markerPath = join(tempDir, "descendant-survived.txt");
+    const parentScriptPath = join(tempDir, "spawn-descendant.cjs");
+    await writeFile(
+      parentScriptPath,
+      `
+const { spawn } = require("node:child_process");
+spawn(process.execPath, [
+  "-e",
+  "setTimeout(() => require('node:fs').writeFileSync(process.env.MARKER, 'survived'), 450)",
+], {
+  env: { ...process.env, MARKER: process.argv[2] },
+  stdio: "ignore",
+}).unref();
+setInterval(() => {}, 1000);
+`,
+      "utf-8",
+    );
+
+    const result = await backend.run(
+      `${JSON.stringify(process.execPath)} ${JSON.stringify(parentScriptPath)} ${JSON.stringify(markerPath)}`,
+      {
+        cwd: tempDir,
+        timeoutMs: 75,
+        maxBuffer: 1024 * 1024,
+        encoding: "utf-8",
+      },
+    );
+
+    expect(result.timedOut).toBe(true);
+    await delay(700);
+    await expect(access(markerPath)).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === "win32")("cleans up background children after successful commands", async () => {
+    const backend = new NativeSandboxBackend();
+    const markerPath = join(tempDir, "success-descendant-survived.txt");
+    const parentScript = [
+      "const { spawn } = require('node:child_process');",
+      `spawn(process.execPath, ['-e', ${JSON.stringify("setTimeout(() => require('node:fs').writeFileSync(process.env.MARKER, 'survived'), 450)")}], { env: { ...process.env, MARKER: process.env.MARKER }, stdio: 'ignore' }).unref();`,
+      "process.stdout.write('parent-done');",
+    ].join(" ");
+
+    const result = await backend.run(
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(parentScript)}`,
+      {
+        cwd: tempDir,
+        timeoutMs: 5_000,
+        maxBuffer: 1024 * 1024,
+        encoding: "utf-8",
+        env: { ...process.env, MARKER: markerPath },
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("parent-done");
+    await delay(700);
+    await expect(access(markerPath)).rejects.toThrow();
   });
 
   it("maps non-zero exits", async () => {

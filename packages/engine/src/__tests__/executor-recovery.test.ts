@@ -465,7 +465,12 @@ describe("TaskExecutor bounded recovery retries", () => {
     );
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "in-review");
     // Executor now handles the requeue in its finally block
-    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "stuck-killed", worktree: null, branch: null });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+      status: "queued",
+      error: null,
+      worktree: null,
+      branch: null,
+    });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
   });
 
@@ -499,7 +504,11 @@ describe("TaskExecutor bounded recovery retries", () => {
 
     // Should NOT requeue or mark as failed (budget handler already did that)
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "todo");
-    expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", { status: "stuck-killed", worktree: null, branch: null });
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", expect.objectContaining({
+      status: "queued",
+      worktree: null,
+      branch: null,
+    }));
     expect(store.updateTask).not.toHaveBeenCalledWith(
       "FN-001",
       expect.objectContaining({ status: "failed" }),
@@ -553,6 +562,48 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.updateTask).not.toHaveBeenCalledWith(
       "FN-001",
       { status: "stuck-killed", worktree: null, branch: null },
+    );
+  });
+
+  it("does not let a late graph failure clobber a retryable requeue", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    store.getTask.mockResolvedValue({
+      ...task,
+      column: "todo",
+      status: "queued",
+      error: null,
+    });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+
+    await (executor as any).handleGraphFailure(task, {
+      visitedNodeIds: ["execute"],
+    });
+
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ status: "failed" }),
+      expect.anything(),
+    );
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "in-review", expect.anything());
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Workflow graph terminated with failure at node 'execute' (task already todo - preserving recovered lifecycle state)",
+      undefined,
+      undefined,
     );
   });
 
@@ -1465,8 +1516,8 @@ describe("Invalid transition error handling", () => {
     // then throws the Invalid transition error,
     // which is caught by the outer handler.
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
-      status: "failed",
-      error: "Agent finished without calling fn_task_done (after 3 retries)",
+      status: "queued",
+      error: null,
       taskDoneRetryCount: 1,
     });
 

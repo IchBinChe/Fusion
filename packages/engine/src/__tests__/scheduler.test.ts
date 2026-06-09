@@ -1527,6 +1527,34 @@ describe("Scheduler", () => {
       expect(String(call?.[1])).toContain("semaphore slots may include triage/merge agents outside in-progress");
     });
 
+    it("recovers an idle leaked semaphore slot before dispatching", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const semaphore = new AgentSemaphore(1);
+      await semaphore.acquire();
+      const task = createMockTask({ id: "FN-A", column: "todo", dependencies: [] });
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue([task]),
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 10, maxWorktrees: 10 }),
+      });
+
+      const scheduler = new Scheduler(store, { semaphore });
+      (scheduler as any).running = true;
+      (scheduler as any).idleSemaphoreLeakCandidateSince = Date.now() - 6_000;
+      await scheduler.schedule();
+
+      expect(semaphore.activeCount).toBe(0);
+      expect(schedulerLog.warn).toHaveBeenCalledWith(
+        expect.stringContaining("scheduler: recovered stale semaphore active count 1 -> 0"),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith(
+        "FN-A",
+        "in-progress",
+        expect.objectContaining({ moveSource: "scheduler" }),
+      );
+    });
+
     it("lists tied binding gates in stable order", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFile).mockResolvedValue("# Task\nDo something");

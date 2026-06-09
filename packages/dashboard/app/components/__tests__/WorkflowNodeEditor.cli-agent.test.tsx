@@ -13,6 +13,14 @@ vi.mock("../../api", () => ({
   fetchModels: vi.fn(),
   fetchAgents: vi.fn(),
   fetchDiscoveredSkills: vi.fn(),
+  fetchWorkflowStepTemplates: vi.fn().mockResolvedValue({ templates: [] }),
+  fetchPluginWorkflowStepTemplates: vi.fn().mockResolvedValue({ templates: [] }),
+  fetchConfig: vi.fn(),
+  fetchSettings: vi.fn(),
+  updateSettings: vi.fn(),
+  updateGlobalSettings: vi.fn(),
+  fetchWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
+  updateWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
 }));
 
 import {
@@ -21,6 +29,8 @@ import {
   fetchStepParsers,
   updateWorkflow,
   fetchModels,
+  fetchConfig,
+  fetchSettings,
 } from "../../api";
 import type { TraitCatalogEntry } from "../../api";
 import { WorkflowNodeEditor } from "../WorkflowNodeEditor";
@@ -68,6 +78,8 @@ describe("WorkflowNodeEditor — cli-agent executor (U15)", () => {
     vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
     vi.mocked(fetchStepParsers).mockResolvedValue([]);
     vi.mocked(fetchModels).mockResolvedValue({ models: [] });
+    vi.mocked(fetchConfig).mockResolvedValue({ maxConcurrent: 2, rootDir: "/tmp/project" });
+    vi.mocked(fetchSettings).mockResolvedValue({ autoMerge: true });
     vi.mocked(updateWorkflow).mockResolvedValue(promptDef());
     // Stub the adapter-catalog fetch.
     vi.stubGlobal(

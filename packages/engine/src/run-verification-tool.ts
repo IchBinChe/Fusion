@@ -18,7 +18,7 @@
  * without a full agent session.
  */
 
-import { spawn } from "node:child_process";
+import { superviseSpawn, type SupervisedChild } from "@fusion/core";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { Type, type Static } from "@earendil-works/pi-ai";
@@ -218,20 +218,8 @@ export function normalizeVerificationCommand(command: string, rootDir: string): 
   return { command: normalizedCommand, warnings };
 }
 
-function killVerificationProcess(child: ReturnType<typeof spawn>, signal: NodeJS.Signals): void {
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Fall back to killing the immediate child below.
-    }
-  }
-  try {
-    child.kill(signal);
-  } catch {
-    // The process may already have exited.
-  }
+function killVerificationProcess(supervised: SupervisedChild, signal: NodeJS.Signals): void {
+  supervised.kill(signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,10 +364,7 @@ export async function runVerificationCommand(
   const stderrBuf = createBuffer();
 
   return new Promise<VerificationResult>((resolve) => {
-    // Use shell: true so Node picks the platform default — /bin/sh on POSIX,
-    // cmd.exe on Windows. SIGTERM/SIGKILL semantics still apply on POSIX;
-    // on Windows the kill signals map to TerminateProcess.
-    const child = spawn(command, {
+    const supervised = superviseSpawn(command, [], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
@@ -390,8 +375,10 @@ export async function runVerificationCommand(
         COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
       },
       shell: true,
-      detached: process.platform !== "win32",
+      killGraceMs: SIGKILL_GRACE_MS,
+      maxLifetimeMs: timeoutMs + SIGKILL_GRACE_MS + 1_000,
     });
+    const child = supervised.child;
 
     let timedOut = false;
     let killed = false;
@@ -417,14 +404,14 @@ export async function runVerificationCommand(
       executorLog.warn(
         `[fn_run_verification] hard timeout (${timeoutMs / 1000}s) — sending SIGTERM to: ${command}`,
       );
-      killVerificationProcess(child, "SIGTERM");
+      killVerificationProcess(supervised, "SIGTERM");
 
       killTimer = setTimeout(() => {
         if (!settled) {
           executorLog.warn(
             `[fn_run_verification] SIGTERM ignored — sending SIGKILL to: ${command}`,
           );
-          killVerificationProcess(child, "SIGKILL");
+          killVerificationProcess(supervised, "SIGKILL");
           killed = true;
         }
       }, SIGKILL_GRACE_MS);
@@ -432,7 +419,7 @@ export async function runVerificationCommand(
 
     // ── stdout ───────────────────────────────────────────────────────────────
     let stdoutRemainder = "";
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       const text = stdoutRemainder + chunk.toString("utf8");
       const lines = text.split("\n");
       stdoutRemainder = lines.pop() ?? "";
@@ -447,7 +434,7 @@ export async function runVerificationCommand(
 
     // ── stderr ───────────────────────────────────────────────────────────────
     let stderrRemainder = "";
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       const text = stderrRemainder + chunk.toString("utf8");
       const lines = text.split("\n");
       stderrRemainder = lines.pop() ?? "";

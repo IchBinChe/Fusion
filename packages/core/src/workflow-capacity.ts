@@ -71,10 +71,12 @@ function isDefaultWorkflowColumns(ir: WorkflowIr): boolean {
  *
  * Limit resolution order:
  *   1. An explicit numeric `limit` in the column's `wip` trait config wins.
- *   2. Otherwise, for the DEFAULT workflow's `in-progress` column, read through
+ *   2. A `limitSetting: "maxConcurrent"` declaration reads through to the
+ *      project setting, making the built-in workflow's capacity policy explicit.
+ *   3. Otherwise, for the DEFAULT workflow's `in-progress` column, read through
  *      to `settings.maxConcurrent` (default 2) so the legacy knob keeps working
  *      and flag-ON default-workflow scheduling matches flag-OFF (legacy parity).
- *   3. Otherwise the column has a capacity trait but no resolvable finite limit
+ *   4. Otherwise the column has a capacity trait but no resolvable finite limit
  *      → `Infinity` (does not gate; the trait is inert until configured).
  */
 export function resolveColumnCapacity(
@@ -91,6 +93,7 @@ export function resolveColumnCapacity(
   // The capacity trait config (the `wip` trait carries `limit` + `countPending`).
   // Find the first trait config whose trait sets countsTowardWip.
   let configLimit: number | undefined;
+  let limitSetting: string | undefined;
   let countPending = true;
   for (const ct of column.traits) {
     const def = getTraitRegistry().getTrait(ct.trait);
@@ -98,6 +101,9 @@ export function resolveColumnCapacity(
     const cfg = ct.config ?? {};
     if (typeof cfg.limit === "number" && Number.isFinite(cfg.limit)) {
       configLimit = cfg.limit;
+    }
+    if (typeof cfg.limitSetting === "string") {
+      limitSetting = cfg.limitSetting;
     }
     if (typeof cfg.countPending === "boolean") {
       countPending = cfg.countPending;
@@ -108,6 +114,9 @@ export function resolveColumnCapacity(
   let limit: number;
   if (configLimit !== undefined) {
     limit = configLimit;
+  } else if (limitSetting === "maxConcurrent") {
+    const maxConcurrent = settings?.maxConcurrent;
+    limit = typeof maxConcurrent === "number" && Number.isFinite(maxConcurrent) ? maxConcurrent : 2;
   } else if (columnId === DEFAULT_WIP_COLUMN_ID && isDefaultWorkflowColumns(ir)) {
     // Read-through: legacy maxConcurrent maps onto the default workflow's
     // in-progress WIP limit (U6 scheduler integration).

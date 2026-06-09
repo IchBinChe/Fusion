@@ -37,7 +37,11 @@ const RAW_BUILTIN_CODING_WORKFLOW_IR: WorkflowIr = {
     {
       id: "in-progress",
       name: "In progress",
-      traits: [{ trait: "wip" }, { trait: "abort-on-exit" }, { trait: "timing" }],
+      traits: [
+        { trait: "wip", config: { limitSetting: "maxConcurrent", countPending: true } },
+        { trait: "abort-on-exit" },
+        { trait: "timing" },
+      ],
     },
     {
       id: "in-review",

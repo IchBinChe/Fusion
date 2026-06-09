@@ -77,7 +77,13 @@ export const BUILTIN_TRAIT_DEFINITIONS: TraitDefinition[] = [
     flags: { countsTowardWip: true },
     configSchema: {
       fields: [
-        { key: "limit", type: "number", required: true, description: "Max concurrent cards" },
+        { key: "limit", type: "number", description: "Max concurrent cards" },
+        {
+          key: "limitSetting",
+          type: "enum",
+          enumValues: ["maxConcurrent"],
+          description: "Project setting that supplies the capacity limit",
+        },
         { key: "countPending", type: "boolean", description: "Count mid-transition cards" },
       ],
     },

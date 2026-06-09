@@ -325,10 +325,20 @@ export function createPrimitivePromptLikeHandler(
           };
         }
         const result = await primitives.runCodingSession(primitiveCtx, context.task, prepared.data);
-        const contextPatch = prepared.contextPatch || result.contextPatch
+        const sessionPatch: Record<string, unknown> = {};
+        if (result.data?.modifiedFiles && result.data.modifiedFiles.length > 0) {
+          sessionPatch.modifiedFiles = result.data.modifiedFiles;
+        } else if (prepared.data.modifiedFiles && prepared.data.modifiedFiles.length > 0) {
+          sessionPatch.modifiedFiles = prepared.data.modifiedFiles;
+        }
+        if (result.data?.summary) {
+          sessionPatch.summary = result.data.summary;
+        }
+        const contextPatch = prepared.contextPatch || result.contextPatch || Object.keys(sessionPatch).length > 0
           ? {
               ...(prepared.contextPatch ?? {}),
               ...(result.contextPatch ?? {}),
+              ...sessionPatch,
             }
           : undefined;
         return {

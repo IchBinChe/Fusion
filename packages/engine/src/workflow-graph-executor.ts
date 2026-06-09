@@ -38,6 +38,18 @@ export interface WorkflowNodeResult {
   contextPatch?: Record<string, unknown>;
 }
 
+export interface WorkflowTaskProjection {
+  modifiedFiles?: string[];
+  mergeDetails?: Record<string, unknown>;
+  summary?: string;
+  review?: Record<string, unknown>;
+  reviewState?: Record<string, unknown>;
+  workflowStepResults?: unknown[];
+  tokenUsage?: Record<string, unknown>;
+  error?: string | null;
+  status?: string | null;
+}
+
 export interface WorkflowNodeExecutionContext {
   task: TaskDetail;
   settings: Pick<Settings, "experimentalFeatures"> | undefined;
@@ -131,6 +143,10 @@ export interface WorkflowGraphExecutorDeps {
   resumeReconcile?: ForeachEnvironment["resumeReconcile"];
   /** FIX 4 (context gap): task-level log sink for integration-conflict rework. */
   logTaskEntry?: ForeachEnvironment["logTaskEntry"];
+  /** Project node-published task metadata onto the task row for dispatcher/UI. */
+  publishTaskProjection?: (taskId: string, patch: WorkflowTaskProjection, source: { nodeId: string; nodeKind: WorkflowIrNode["kind"] }) => void | Promise<void>;
+  /** @deprecated use publishTaskProjection. Kept for older callers. */
+  publishTouchedFiles?: (taskId: string, files: string[], source: { nodeId: string; nodeKind: WorkflowIrNode["kind"] }) => void | Promise<void>;
 }
 
 export interface WorkflowGraphExecutorResult {
@@ -146,6 +162,59 @@ const TERMINAL_FAILURE: WorkflowGraphExecutorResult = {
   context: {},
   visitedNodeIds: [],
 };
+
+function normalizeTouchedFile(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim().replaceAll("\\", "/").replace(/^\.\//, "");
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (value && typeof value === "object" && "path" in value) {
+    return normalizeTouchedFile((value as { path?: unknown }).path);
+  }
+  return undefined;
+}
+
+function extractTouchedFiles(contextPatch: Record<string, unknown> | undefined): string[] {
+  if (!contextPatch) return [];
+  const raw = contextPatch.modifiedFiles ?? contextPatch.touchedFiles ?? contextPatch.changedFiles;
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map(normalizeTouchedFile).filter((file): file is string => file !== undefined))].sort();
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function extractTaskProjection(contextPatch: Record<string, unknown> | undefined): WorkflowTaskProjection {
+  if (!contextPatch) return {};
+  const patch: WorkflowTaskProjection = {};
+  const files = extractTouchedFiles(contextPatch);
+  if (files.length > 0) patch.modifiedFiles = files;
+
+  const mergeDetails = objectRecord(contextPatch.mergeDetails);
+  if (mergeDetails) patch.mergeDetails = mergeDetails;
+  if (typeof contextPatch.filesChanged === "number" && Number.isFinite(contextPatch.filesChanged)) {
+    patch.mergeDetails = { ...(patch.mergeDetails ?? {}), filesChanged: contextPatch.filesChanged };
+  }
+
+  if (typeof contextPatch.summary === "string") patch.summary = contextPatch.summary;
+  const review = objectRecord(contextPatch.review);
+  if (review) patch.review = review;
+  const reviewState = objectRecord(contextPatch.reviewState);
+  if (reviewState) patch.reviewState = reviewState;
+  if (Array.isArray(contextPatch.workflowStepResults)) patch.workflowStepResults = contextPatch.workflowStepResults;
+  const tokenUsage = objectRecord(contextPatch.tokenUsage);
+  if (tokenUsage) patch.tokenUsage = tokenUsage;
+  if (typeof contextPatch.error === "string" || contextPatch.error === null) patch.error = contextPatch.error;
+  if (typeof contextPatch.status === "string" || contextPatch.status === null) patch.status = contextPatch.status;
+  return patch;
+}
+
+function hasTaskProjection(patch: WorkflowTaskProjection): boolean {
+  return Object.keys(patch).length > 0;
+}
 
 export class WorkflowGraphExecutor {
   private readonly maxRetriesPerNode: number;
@@ -611,11 +680,16 @@ export class WorkflowGraphExecutor {
       if (signal?.aborted) return { outcome: "failure", value: "aborted" };
       try {
         const pluginResult = await this.executePluginNodeHandler(node, task, workflow, context, signal);
-        if (pluginResult) return pluginResult;
+        if (pluginResult) {
+          await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
+          return pluginResult;
+        }
         if (!handler) {
           throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
         }
-        return await handler(node, { task, settings, context, signal });
+        const result = await handler(node, { task, settings, context, signal });
+        await this.publishTaskProjectionFromResult(task.id, node, result);
+        return result;
       } catch (error) {
         lastError = error;
       }
@@ -628,5 +702,19 @@ export class WorkflowGraphExecutor {
         [`node:${node.id}:error`]: lastError instanceof Error ? lastError.message : String(lastError),
       },
     };
+  }
+
+  private async publishTaskProjectionFromResult(
+    taskId: string,
+    node: WorkflowIrNode,
+    result: WorkflowNodeResult,
+  ): Promise<void> {
+    const patch = extractTaskProjection(result.contextPatch);
+    if (!hasTaskProjection(patch)) return;
+    const source = { nodeId: node.id, nodeKind: node.kind };
+    await this.deps.publishTaskProjection?.(taskId, patch, source);
+    if (patch.modifiedFiles && patch.modifiedFiles.length > 0) {
+      await this.deps.publishTouchedFiles?.(taskId, patch.modifiedFiles, source);
+    }
   }
 }

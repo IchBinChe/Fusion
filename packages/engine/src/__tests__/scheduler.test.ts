@@ -584,6 +584,48 @@ describe("Scheduler", () => {
       expect(onMoves).toContainEqual(["FN-1", "in-progress"]);
     });
 
+    it("re-reads tasks after flag-ON hold-release sweep before legacy dispatch", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+      const tasks = new Map<string, Task>(
+        Array.from({ length: 6 }, (_, index) => {
+          const id = `FN-${String(index + 1).padStart(3, "0")}`;
+          return [id, createMockTask({ id, column: "todo", dependencies: [] })];
+        }),
+      );
+      const moveTask = vi.fn(async (taskId: string, column: Task["column"]) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        if (column === "in-progress") {
+          const inProgressCount = [...tasks.values()].filter((task) => task.column === "in-progress").length;
+          if (inProgressCount >= 3) {
+            throw new Error("capacity-exhausted");
+          }
+        }
+        const updated = { ...current, column } as Task;
+        tasks.set(taskId, updated);
+        return updated;
+      });
+      const store = createMockStore({
+        listTasks: vi.fn(async () => [...tasks.values()]),
+        getTask: vi.fn(async (taskId: string) => tasks.get(taskId) ?? null),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 3,
+          maxWorktrees: 10,
+          experimentalFeatures: { workflowColumns: true },
+        }),
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as unknown as { running: boolean }).running = true;
+      await scheduler.schedule();
+
+      expect([...tasks.values()].filter((task) => task.column === "in-progress")).toHaveLength(3);
+      expect(moveTask.mock.calls.filter((call) => call[1] === "in-progress")).toHaveLength(6);
+      expect(vi.mocked(store.listTasks).mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
     it("flag-OFF: todo dispatch is tagged as scheduler-sourced for redispatch guards", async () => {
       const off = setupTodoStore(false);
       await off.scheduler.schedule();

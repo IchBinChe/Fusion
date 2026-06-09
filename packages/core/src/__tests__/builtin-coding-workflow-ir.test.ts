@@ -58,6 +58,10 @@ describe("builtin coding workflow ir", () => {
     expect(traitsFor("in-review")).toEqual(["merge-blocker", "human-review", "stall-detection", "merge"]);
     expect(traitsFor("done")).toEqual(["complete"]);
     expect(traitsFor("archived")).toEqual(["archived"]);
+    // in-progress owns the legacy execution concurrency policy in workflow data:
+    // the limit is supplied by the project maxConcurrent setting.
+    const wip = byId.get("in-progress")!.traits.find((t) => t.trait === "wip");
+    expect(wip?.config).toEqual({ limitSetting: "maxConcurrent", countPending: true });
     // todo's hold is capacity-released (legacy "pull from todo when a slot frees").
     const hold = byId.get("todo")!.traits.find((t) => t.trait === "hold");
     expect(hold?.config?.release).toBe("capacity");

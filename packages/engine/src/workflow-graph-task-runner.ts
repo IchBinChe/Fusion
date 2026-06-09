@@ -1,7 +1,7 @@
 import type { Settings, TaskDetail, WorkflowDefinition } from "@fusion/core";
 import { getBuiltinWorkflow, isBuiltinWorkflowId, isExperimentalFeatureEnabled } from "@fusion/core";
 
-import { WorkflowGraphExecutor, type WorkflowNodeOutcome } from "./workflow-graph-executor.js";
+import { WorkflowGraphExecutor, type WorkflowNodeOutcome, type WorkflowTaskProjection } from "./workflow-graph-executor.js";
 import type {
   CodeNodeRunner,
   ForeachActiveContext,
@@ -85,6 +85,10 @@ export interface WorkflowGraphTaskRunnerDeps {
   resumeReconcile?: ForeachEnvironment["resumeReconcile"];
   /** FIX 4 (context gap): task-level log sink for integration-conflict rework. */
   logTaskEntry?: ForeachEnvironment["logTaskEntry"];
+  /** Project node-published task metadata onto the task row for dispatcher/UI. */
+  publishTaskProjection?: (taskId: string, patch: WorkflowTaskProjection, source: { nodeId: string; nodeKind: string }) => void | Promise<void>;
+  /** @deprecated use publishTaskProjection. */
+  publishTouchedFiles?: (taskId: string, files: string[], source: { nodeId: string; nodeKind: string }) => void | Promise<void>;
   /**
    * Step-inversion (KTD-6): the production run id, threaded from the caller so it
    * is the SINGLE source of truth shared with the executor-side persistence deps
@@ -229,6 +233,8 @@ export class WorkflowGraphTaskRunner {
         semaphoreAvailability: this.deps.semaphoreAvailability,
         resumeReconcile: this.deps.resumeReconcile,
         logTaskEntry: this.deps.logTaskEntry,
+        publishTaskProjection: this.deps.publishTaskProjection,
+        publishTouchedFiles: this.deps.publishTouchedFiles,
         // Single source of truth (KTD-6): prefer the caller-threaded run id so the
         // executor's persistence deps probe/flip rows under the SAME id; fall back
         // to the canonical derivation when unthreaded.

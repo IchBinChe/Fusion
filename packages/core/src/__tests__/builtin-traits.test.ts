@@ -109,6 +109,14 @@ describe("default workflow columns validate cleanly", () => {
     expect(flags.timing).toBe(true);
   });
 
+  it("wip trait schema supports explicit settings-backed limits", () => {
+    const r = freshRegistry();
+    const fields = r.getTrait("wip")?.configSchema?.fields ?? [];
+    const limitSetting = fields.find((field) => field.key === "limitSetting");
+    expect(limitSetting?.type).toBe("enum");
+    expect(limitSetting?.enumValues).toEqual(["maxConcurrent"]);
+  });
+
   it("the default workflow's in-review column resolves review and merge flags", () => {
     const r = freshRegistry();
     const ir = BUILTIN_CODING_WORKFLOW_IR as WorkflowIrV2;

@@ -1225,10 +1225,8 @@ export class Scheduler {
     this.scheduling = true;
 
     try {
-      const tasks = await this.store.listTasks({ slim: true, includeArchived: false });
-      const settings = await this.store.getSettings();
-      const maxConcurrent = settings.maxConcurrent ?? this.options.maxConcurrent ?? 2;
-      const maxWorktrees = settings.maxWorktrees ?? this.options.maxWorktrees ?? 4;
+      let tasks = await this.store.listTasks({ slim: true, includeArchived: false });
+      let settings = await this.store.getSettings();
       this.idleSemaphoreLeakCandidateSince = recoverIdleSemaphoreLeak(
         this.options.semaphore,
         tasks,
@@ -1275,7 +1273,12 @@ export class Scheduler {
       // workflow hold handling and the generalized capacity-release path.
       if (isWorkflowColumnsEnabled(settings)) {
         await this.runHoldReleaseSweepPass();
+        tasks = await this.store.listTasks({ slim: true, includeArchived: false });
+        settings = await this.store.getSettings();
       }
+
+      const maxConcurrent = settings.maxConcurrent ?? this.options.maxConcurrent ?? 2;
+      const maxWorktrees = settings.maxWorktrees ?? this.options.maxWorktrees ?? 4;
 
       // Count only in-progress tasks toward the worktree limit.
       // In-review tasks with worktrees are idle (waiting to merge) and

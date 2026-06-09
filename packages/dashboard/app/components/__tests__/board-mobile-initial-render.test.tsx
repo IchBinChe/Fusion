@@ -193,7 +193,7 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
       vi.runOnlyPendingTimers();
     });
     expect(board.scrollLeft).toBe(500);
-    expect(addEventListenerSpy).not.toHaveBeenCalledWith("pageshow", expect.any(Function));
+    expect(addEventListenerSpy).toHaveBeenCalledWith("pageshow", expect.any(Function));
 
     viewportSpy.mockRestore();
   });

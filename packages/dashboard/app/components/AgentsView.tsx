@@ -1599,6 +1599,17 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                         {health.icon}{healthSummary.label ? ` ${healthSummary.label}` : ""}
                       </div>
                     </div>
+                    {(agent.state === "idle" || agent.state === "paused" || agent.state === "error") && (
+                      <div className="agent-board-actions">
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => void handleDelete(agent.id, agent.name)}
+                          title={t("agents.delete", "Delete")}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })

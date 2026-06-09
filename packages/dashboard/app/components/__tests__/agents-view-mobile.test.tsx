@@ -114,10 +114,13 @@ const mockAgents: Agent[] = [
   },
 ];
 
-const eventSourceFactory = vi.fn(() => ({
-  addEventListener: vi.fn(),
-  close: vi.fn(),
-}));
+const eventSourceFactory = vi.fn().mockImplementation(function (this: {
+  addEventListener: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+}) {
+  this.addEventListener = vi.fn();
+  this.close = vi.fn();
+}) as unknown as typeof EventSource;
 
 describe("AgentsView mobile adaptations", () => {
   beforeEach(() => {

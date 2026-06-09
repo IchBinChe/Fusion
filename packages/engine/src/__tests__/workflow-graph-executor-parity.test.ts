@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PARITY SUBJECT (test-file ownership, U7 / KTD-9):
 //   This suite owns DEFAULT-WORKFLOW BYTE-IDENTITY parity — it proves the graph
-//   executor reproduces the legacy monolithic execute → review → merge seam
+//   executor reproduces the workflow-native planning → execute → review → merge seam
 //   sequence exactly (the parity ORACLE per KTD-1). It deliberately does NOT
 //   cover per-step / updateStep-trajectory parity.
 //
@@ -26,6 +26,9 @@ const task = { id: "FN-5767" } as TaskDetail;
 function runLegacy(seams: WorkflowLegacySeams) {
   return async () => {
     const events: string[] = [];
+    const planning = await seams.planning(task, {});
+    events.push(`planning:${planning.outcome}`);
+    if (planning.outcome !== "success") return events;
     const execute = await seams.execute(task, {});
     events.push(`execute:${execute.outcome}`);
     if (execute.outcome !== "success") return events;
@@ -47,7 +50,7 @@ describe("WorkflowGraphExecutor interpreter-parity", () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
-  it("matches legacy execute-review-merge success path", async () => {
+  it("matches default planning-execute-review-merge success path", async () => {
     const events: string[] = [];
     const seams: WorkflowLegacySeams = {
       planning: async () => ({ outcome: "success" }),
@@ -82,7 +85,7 @@ describe("WorkflowGraphExecutor interpreter-parity", () => {
     const executor = new WorkflowGraphExecutor({ seams });
     const result = await executor.run(task, { experimentalFeatures: { workflowGraphExecutor: true } });
     expect(result.outcome).toBe("failure");
-    expect(legacyEvents).toEqual(["execute:success", "review:success", "merge:failure"]);
+    expect(legacyEvents).toEqual(["planning:success", "execute:success", "review:success", "merge:failure"]);
   });
 
   it("preserves autoMerge:false terminal in-review semantics via review failure", async () => {
@@ -182,13 +185,16 @@ describe("column-agent feature is invisible when unbound (U7 / R9)", () => {
     // Bind the invariant to actual executor behavior (PR #1432 review): the
     // observation below derives from the run-captured seam sequence, so seam
     // drift fails here instead of being masked by a hard-coded literal.
-    expect(stages).toEqual(["execute", "review", "merge"]);
+    expect(stages).toEqual(["planning", "execute", "review", "merge"]);
 
     // Legacy authoritative observation: a clean run that lands in `done`/merged.
-    const legacyObs = buildWorkflowObservationFromTask(
-      { column: "done", status: "done", review: { verdict: "approve" } },
-      { columnSequence: ["todo", "in-progress", "in-review", "done"] },
-    );
+    const legacyObs = buildWorkflowObservation({
+      stageTransitions: ["triage", "planning", "execute", "review", "merge"],
+      terminalColumn: "done",
+      terminalStatus: "done",
+      reviewVerdict: "approve",
+      mergeOutcome: "merged",
+    });
     // Interpreter (binding-free) observation assembled from the same run.
     const interpreterObs = buildWorkflowObservation({
       stageTransitions: ["triage", ...stages] as WorkflowStage[],

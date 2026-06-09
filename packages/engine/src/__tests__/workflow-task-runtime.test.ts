@@ -3,7 +3,7 @@ import type { Settings, TaskDetail, WorkflowIr } from "@fusion/core";
 
 import { WorkflowTaskRuntime, type WorkflowTaskRuntimeDeps } from "../workflow-task-runtime.js";
 import type { WorkflowNodeResult } from "../workflow-graph-executor.js";
-import type { WorkflowLegacySeams } from "../workflow-node-handlers.js";
+import type { PreparedWorktree, WorkflowRuntimePrimitives } from "../runtime-primitives.js";
 
 const task = { id: "FN-9002" } as TaskDetail;
 const flagOff = { experimentalFeatures: {} } as unknown as Pick<Settings, "experimentalFeatures">;
@@ -27,31 +27,69 @@ function selectedIr(): WorkflowIr {
   };
 }
 
-function recordingSeams(calls: string[], overrides: Partial<Record<string, WorkflowNodeResult>> = {}): WorkflowLegacySeams {
-  const seam = (name: keyof WorkflowLegacySeams) => async (): Promise<WorkflowNodeResult> => {
-    calls.push(name);
-    return overrides[name] ?? { outcome: "success" };
-  };
+function recordingPrimitives(
+  calls: string[],
+  overrides: Partial<Record<"execute", WorkflowNodeResult>> = {},
+): WorkflowRuntimePrimitives {
+  const prepared: PreparedWorktree = { worktreePath: "/tmp/fusion-worktree" };
   return {
-    planning: seam("planning"),
-    execute: seam("execute"),
-    review: seam("review"),
-    merge: seam("merge"),
-    schedule: seam("schedule"),
+    prepareWorktree: async () => {
+      calls.push("prepare-worktree");
+      return { outcome: "success", data: prepared };
+    },
+    readArtifact: async () => undefined,
+    writeArtifact: async (_ctx, _task, key) => ({ outcome: "success", data: { key } }),
+    runPlanningSession: async () => {
+      calls.push("planning");
+      return { outcome: "success", data: { approved: true, artifactKeys: [] } };
+    },
+    runCodingSession: async () => {
+      calls.push("execute");
+      const override = overrides.execute;
+      return {
+        outcome: override?.outcome ?? "success",
+        value: override?.value ?? "implemented",
+        contextPatch: override?.contextPatch,
+        data: { taskDone: override?.outcome !== "failure", modifiedFiles: [] },
+      };
+    },
+    runTaskStep: async () => ({ outcome: "success" }),
+    resetTaskStep: async () => ({ ok: true }),
+    runReview: async (_ctx, _task, input) => {
+      calls.push(input.stepIndex === undefined ? "review" : "step-review");
+      return {
+        outcome: "success",
+        value: input.stepIndex === undefined ? "in-review" : "approve",
+        data: { verdict: "APPROVE" },
+      };
+    },
+    runVerification: async () => ({ outcome: "success", data: { verdict: "skipped" } }),
+    runWorkflowStep: async () => ({ outcome: "success", data: { allPassed: true } }),
+    updateSteps: async (_ctx, _task, steps) => ({ outcome: "success", data: { count: steps.length } }),
+    transitionTask: async () => {
+      calls.push("schedule");
+      return { outcome: "success" };
+    },
+    requestMerge: async () => {
+      calls.push("merge");
+      return { outcome: "success", value: "merged", data: { status: "merged" } };
+    },
+    abortRun: async () => ({ outcome: "success" }),
+    audit: () => undefined,
   };
 }
 
 describe("WorkflowTaskRuntime", () => {
   it("requires execution wiring at the type boundary", () => {
-    // @ts-expect-error WorkflowTaskRuntime is an execution entry point, so seams are required.
-    const missingSeams: WorkflowTaskRuntimeDeps = {
+    // @ts-expect-error WorkflowTaskRuntime is an execution entry point, so primitives are required.
+    const missingPrimitives: WorkflowTaskRuntimeDeps = {
       store: {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
       },
       runCustomNode: async () => ({ outcome: "success" }),
     };
-    expect(missingSeams).toBeDefined();
+    expect(missingPrimitives).toBeDefined();
   });
 
   it("runs a selected workflow through the graph engine", async () => {
@@ -65,7 +103,7 @@ describe("WorkflowTaskRuntime", () => {
         },
         getWorkflowDefinition: async () => ({ ir: selectedIr() }),
       },
-      seams: recordingSeams(calls),
+      primitives: recordingPrimitives(calls),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
@@ -75,7 +113,7 @@ describe("WorkflowTaskRuntime", () => {
     const result = await runtime.run(task, flagOff);
 
     expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["custom:prepare", "execute"]);
+    expect(calls).toEqual(["custom:prepare", "prepare-worktree", "execute"]);
     expect(result.visitedNodeIds).toEqual(["start", "prepare", "execute"]);
     expect(workflowSelectionReads).toBe(1);
   });
@@ -87,7 +125,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
       },
-      seams: recordingSeams(calls),
+      primitives: recordingPrimitives(calls),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
@@ -97,8 +135,8 @@ describe("WorkflowTaskRuntime", () => {
     const result = await runtime.run(task, flagOff);
 
     expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["execute", "review", "merge"]);
-    expect(result.visitedNodeIds).toEqual(["start", "execute", "review", "merge"]);
+    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
+    expect(result.visitedNodeIds).toEqual(["start", "planning", "execute", "review", "merge"]);
   });
 
   it("turns selected workflow lookup failures into the built-in workflow target", async () => {
@@ -109,7 +147,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-MISSING", stepIds: [] }),
         getWorkflowDefinition: async () => undefined,
       },
-      seams: recordingSeams(calls),
+      primitives: recordingPrimitives(calls),
       runCustomNode: async () => ({ outcome: "success" }),
       branchPersistence: {
         loadBranchStates: (_taskId, runId) => {
@@ -122,7 +160,7 @@ describe("WorkflowTaskRuntime", () => {
     const result = await runtime.run(task, flagOff);
 
     expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["execute", "review", "merge"]);
+    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
     expect(observedRunIds).toContain("FN-9002:builtin:coding");
     expect(observedRunIds).not.toContain("FN-9002:WF-MISSING");
   });
@@ -135,7 +173,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-CORRUPT", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: "not a workflow ir" }),
       },
-      seams: recordingSeams(calls),
+      primitives: recordingPrimitives(calls),
       runCustomNode: async () => ({ outcome: "success" }),
       branchPersistence: {
         loadBranchStates: (_taskId, runId) => {
@@ -148,7 +186,7 @@ describe("WorkflowTaskRuntime", () => {
     const result = await runtime.run(task, flagOff);
 
     expect(result.disposition).toBe("completed");
-    expect(calls).toEqual(["execute", "review", "merge"]);
+    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
     expect(observedRunIds).toContain("FN-9002:builtin:coding");
     expect(observedRunIds).not.toContain("FN-9002:WF-CORRUPT");
   });
@@ -160,7 +198,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: selectedIr() }),
       },
-      seams: recordingSeams([]),
+      primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
       handlers: {
         prompt: async (_node, context) => {
@@ -189,7 +227,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: selectedIr() }),
       },
-      seams: recordingSeams([]),
+      primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
       branchPersistence: {
         loadBranchStates: (_taskId, runId) => {
@@ -211,7 +249,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
       },
-      seams: recordingSeams([]),
+      primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
       branchPersistence: {
         loadBranchStates: (_taskId, runId) => {
@@ -233,7 +271,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: selectedIr() }),
       },
-      seams: recordingSeams(calls, { execute: { outcome: "failure", value: "implementation-incomplete" } }),
+      primitives: recordingPrimitives(calls, { execute: { outcome: "failure", value: "implementation-incomplete" } }),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
@@ -244,7 +282,7 @@ describe("WorkflowTaskRuntime", () => {
 
     expect(result.disposition).toBe("failed");
     expect(result.outcome).toBe("failure");
-    expect(calls).toEqual(["custom:prepare", "execute"]);
+    expect(calls).toEqual(["custom:prepare", "prepare-worktree", "execute"]);
   });
 
   it("converts interpreter throws into workflow-engine failures", async () => {
@@ -262,7 +300,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: badIr }),
       },
-      seams: recordingSeams([]),
+      primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
     });
 
@@ -292,7 +330,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: cyclicIr }),
       },
-      seams: recordingSeams([]),
+      primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
     });
 
@@ -309,7 +347,7 @@ describe("WorkflowTaskRuntime", () => {
         getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
         getWorkflowDefinition: async () => ({ ir: selectedIr() }),
       },
-      seams: recordingSeams([]),
+      primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
       onEvent: () => {
         throw new Error("diagnostics failed");

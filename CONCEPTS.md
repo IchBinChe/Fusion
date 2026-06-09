@@ -79,6 +79,18 @@ A Feature's position in the execution loop (being implemented, awaiting or under
 ### Task
 The core board entity: a unit of work that moves through columns (triage, todo, in-progress, in-review, done, archived) and is executed by agents. A Task carries its own per-task settings that can override project-level defaults.
 
+### Workflow Runtime
+The authoritative task lifecycle runtime. It resolves a Task to workflow IR, walks the graph, routes node outcomes, and invokes runtime primitives for side effects. The engine substrate still owns scheduling, routing claims, persistence, concurrency, process supervision, storage, and audit plumbing; lifecycle policy lives in workflow nodes and built-in workflow IR.
+
+### Runtime Primitive
+A named, injected operation a workflow node can call to perform side effects without depending on `executor.ts` lifecycle branches. Examples include planning session, coding session, step execution/reset, review, verification, workflow step, transition, merge request, abort, and audit. Primitives are the boundary between workflow policy and engine substrate.
+
+### Built-in Lifecycle Node
+A node in a built-in workflow that expresses default Fusion behavior, such as planning, execute, review, merge, parse-steps, step-review, or PR lifecycle actions. Built-in lifecycle nodes are the compatibility layer for existing behavior: changing default execution means changing the built-in workflow and its primitive wiring, not adding hidden imperative branches.
+
+### Recovery Event
+A workflow-observable condition that requires recovery policy, such as implementation incomplete, review unavailable, merge timeout, manual merge required, integration conflict, or hard cancel. Recovery may use engine primitives for aborting processes, writing audit entries, resetting steps, or parking tasks, but the routing decision belongs to workflow logic.
+
 ### Auto-merge
 The named process that automatically lands a completed Task's branch onto its merge target once the Task reaches In-review and passes its merge blockers. Gated twice: a project-level setting enables it globally, and each Task may carry an explicit per-task override.
 

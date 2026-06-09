@@ -14,6 +14,8 @@ import type { TaskExecutor } from "./executor.js";
 import { executorLog } from "./logger.js";
 import { WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from "./workflow-parity-observer.js";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
+import type { WorkflowLegacySeams } from "./workflow-node-handlers.js";
+import type { PreparedWorktree, WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 
 const AUTHORITATIVE_WORKFLOW_ID = "workflow-interpreter-authoritative";
 
@@ -26,7 +28,7 @@ export interface WorkflowAuthoritativeDriverStore {
 
 export interface WorkflowAuthoritativeDriverDeps {
   store: WorkflowAuthoritativeDriverStore;
-  executor: Pick<TaskExecutor, "createAuthoritativeWorkflowSeams">;
+  executor: Pick<TaskExecutor, "createAuthoritativeWorkflowSeams"> & Partial<Pick<TaskExecutor, "createAuthoritativeWorkflowPrimitives">>;
   minimumObservedRuns?: number;
 }
 
@@ -46,6 +48,58 @@ function buildAuthoritativeSettings(settings: Settings): Settings {
       workflowGraphExecutor: true,
       [WORKFLOW_INTERPRETER_AUTHORITATIVE_FLAG]: true,
     },
+  };
+}
+
+function primitivesFromLegacySeams(seams: WorkflowLegacySeams): WorkflowRuntimePrimitives {
+  const prepared: PreparedWorktree = { worktreePath: "" };
+  return {
+    prepareWorktree: async () => ({ outcome: "success", data: prepared }),
+    readArtifact: async () => undefined,
+    writeArtifact: async (_ctx, _task, key) => ({ outcome: "success", data: { key } }),
+    runPlanningSession: async (ctx, task) => {
+      const result = await seams.planning(task, ctx.node.context ?? {});
+      return { ...result, data: { approved: result.outcome === "success", artifactKeys: [] } };
+    },
+    runCodingSession: async (ctx, task) => {
+      const result = await seams.execute(task, ctx.node.context ?? {});
+      return {
+        ...result,
+        data: { taskDone: result.outcome === "success", modifiedFiles: [] },
+      };
+    },
+    runTaskStep: async (ctx, task) => {
+      const result = await seams.stepExecute?.(task, ctx.node.context ?? {});
+      return { outcome: result?.outcome ?? "failure" };
+    },
+    resetTaskStep: async () => ({ ok: true }),
+    runReview: async (ctx, task, input) => {
+      if (typeof input.stepIndex === "number") {
+        const result = await seams.stepReview?.(task, ctx.node.context ?? {}, { type: input.type });
+        return {
+          outcome: "success",
+          value: result?.verdict === "APPROVE" ? "approve" : result?.verdict === "REVISE" ? "revise" : result?.verdict === "RETHINK" ? "rethink" : "unavailable",
+          data: result ?? { verdict: "UNAVAILABLE" },
+        };
+      }
+      const result = await seams.review(task, ctx.node.context ?? {});
+      return { ...result, data: { verdict: result.outcome === "success" ? "APPROVE" : "REVISE" } };
+    },
+    runVerification: async () => ({ outcome: "success", data: { verdict: "skipped" } }),
+    runWorkflowStep: async () => ({ outcome: "success", data: { allPassed: true } }),
+    updateSteps: async (_ctx, _task, steps) => ({ outcome: "success", data: { count: steps.length } }),
+    transitionTask: async (ctx, task) => seams.schedule(task, ctx.node.context ?? {}),
+    requestMerge: async (ctx, task) => {
+      const result = await seams.merge(task, ctx.node.context ?? {});
+      return {
+        ...result,
+        data: result.outcome === "success"
+          ? { status: "merged" as const }
+          : { status: "failed" as const, reason: result.value ?? "merge-failed" },
+      };
+    },
+    abortRun: async () => ({ outcome: "success" }),
+    audit: () => undefined,
   };
 }
 
@@ -114,6 +168,7 @@ export class WorkflowAuthoritativeDriver {
         readinessReasons: [],
       };
     }
+    const seams = this.deps.executor.createAuthoritativeWorkflowSeams(settings);
     const runner = new WorkflowGraphTaskRunner({
       store: {
         getTaskWorkflowSelection: () => ({ workflowId: AUTHORITATIVE_WORKFLOW_ID, stepIds: [] }),
@@ -123,7 +178,8 @@ export class WorkflowAuthoritativeDriver {
           ir: BUILTIN_CODING_WORKFLOW_IR,
         } satisfies Pick<WorkflowDefinition, "id" | "name" | "ir"> as WorkflowDefinition),
       },
-      seams: this.deps.executor.createAuthoritativeWorkflowSeams(settings),
+      primitives: this.deps.executor.createAuthoritativeWorkflowPrimitives?.(settings) ?? primitivesFromLegacySeams(seams),
+      seams,
       runCustomNode: async (node) => {
         throw new Error(`unexpected custom node in builtin authoritative workflow: ${node.id}`);
       },

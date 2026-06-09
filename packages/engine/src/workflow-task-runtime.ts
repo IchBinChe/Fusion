@@ -15,9 +15,10 @@ import {
 } from "./workflow-graph-executor.js";
 import {
   createDefaultNodeHandlers,
+  createNoopLegacySeams,
   type WorkflowCustomNodeRunner,
-  type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
+import type { WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 
 export type WorkflowTaskRuntimeDisposition = "completed" | "failed";
 
@@ -31,7 +32,7 @@ export interface WorkflowTaskRuntimeResult {
 
 export interface WorkflowTaskRuntimeDeps extends Omit<WorkflowGraphExecutorDeps, "seams" | "runCustomNode"> {
   store: WorkflowIrResolverStore;
-  seams: WorkflowLegacySeams;
+  primitives: WorkflowRuntimePrimitives;
   runCustomNode: WorkflowCustomNodeRunner;
   onEvent?: (event: { type: "start" | "terminal"; taskId: string; detail: string }) => void;
 }
@@ -80,6 +81,7 @@ export class WorkflowTaskRuntime {
     const invoked: string[] = [];
     const executor = new WorkflowGraphExecutor({
       ...this.deps,
+      primitives: this.deps.primitives,
       handlers: this.recordingHandlers(invoked),
       // WorkflowTaskRuntime is the execution engine, so internally the graph
       // executor is authoritative even before the old feature flag plumbing is
@@ -140,7 +142,8 @@ export class WorkflowTaskRuntime {
   }
 
   private recordingHandlers(invoked: string[]): Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>> {
-    const defaultHandlers = createDefaultNodeHandlers(this.deps.seams, this.deps.runCustomNode, {
+    const defaultHandlers = createDefaultNodeHandlers(createNoopLegacySeams(), this.deps.runCustomNode, {
+      primitives: this.deps.primitives,
       parseSteps: this.deps.parseStepsDeps,
       runCode: this.deps.runCode,
       prNodes: this.deps.prNodes,

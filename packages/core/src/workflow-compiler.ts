@@ -17,7 +17,7 @@ export class WorkflowCompileError extends Error {
 
 /** Seam anchor kinds, encoded on IR nodes as `config.seam`. These map to the
  *  fixed execute → review → merge pipeline and are not emitted as steps. */
-const SEAM_NAMES = new Set(["execute", "review", "merge"]);
+const SEAM_NAMES = new Set(["planning", "execute", "review", "merge"]);
 
 function seamOf(node: WorkflowIrNode): string | undefined {
   const seam = node.config?.seam;
@@ -111,7 +111,7 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
   // seams as a fixed execute → review → merge boundary (merge flips pre- to
   // post-merge), so out-of-order or duplicate seams would compile inconsistently
   // with the runtime contract.
-  const expectedSeamOrder = ["execute", "review", "merge"] as const;
+  const expectedSeamOrder = ["planning", "execute", "review", "merge"] as const;
   const seenSeams = new Set<string>();
   let nextExpectedSeamIndex = 0;
   const visited = new Set<string>();

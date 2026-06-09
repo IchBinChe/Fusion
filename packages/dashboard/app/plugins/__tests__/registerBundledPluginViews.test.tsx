@@ -7,12 +7,17 @@ import {
 } from "../registerBundledPluginViews";
 
 const MockDependencyGraphDashboardView = () => createElement("div", { "data-testid": "dep-graph-view" });
+const MockCompoundEngineeringDashboardView = () => createElement("div", { "data-testid": "ce-view" });
 const MockRoadmapDashboardView = () => createElement("div", { "data-testid": "roadmap-view" });
 const MockCliPrintingPressWizardView = () => createElement("div", { "data-testid": "cli-printing-press-view" });
 const MockCliPrintingPressManageView = () => createElement("div", { "data-testid": "cli-printing-press-manage-view" });
 
 vi.mock("@fusion-plugin-examples/dependency-graph/dashboard-view", () => ({
   DependencyGraphDashboardView: (...args: unknown[]) => MockDependencyGraphDashboardView(...args),
+}));
+
+vi.mock("@fusion-plugin-examples/compound-engineering/dashboard-view", () => ({
+  CompoundEngineeringDashboardView: (...args: unknown[]) => MockCompoundEngineeringDashboardView(...args),
 }));
 
 vi.mock("@fusion-plugin-examples/fusion-plugin-roadmap/dashboard-view", () => ({
@@ -36,13 +41,15 @@ describe("registerBundledPluginViews", () => {
     __test_resetBundledPluginViewRegistration();
   });
 
-  it("registers dependency graph, roadmap, and cli printing press bundled views", () => {
+  it("registers dependency graph, compound engineering, roadmap, and cli printing press bundled views", () => {
     registerBundledPluginViews();
 
     // This registration is independent of engine-side plugin load success; the
     // dashboard can still render the Graph view while the plugin install row is errored.
     expect(isPluginViewRegistered("fusion-plugin-dependency-graph", "graph")).toBe(true);
     expect(getPluginViewComponent("fusion-plugin-dependency-graph", "graph")).toBeTruthy();
+    expect(isPluginViewRegistered("fusion-plugin-compound-engineering", "compound-engineering")).toBe(true);
+    expect(getPluginViewComponent("fusion-plugin-compound-engineering", "compound-engineering")).toBeTruthy();
     expect(getPluginViewComponent("fusion-plugin-roadmap", "roadmaps")).toBeTruthy();
     expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "wizard")).toBeTruthy();
     expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "manage")).toBeTruthy();
@@ -62,6 +69,7 @@ describe("registerBundledPluginViews", () => {
     registerBundledPluginViews();
 
     expect(isPluginViewRegistered("fusion-plugin-dependency-graph", "graph")).toBe(true);
+    expect(isPluginViewRegistered("fusion-plugin-compound-engineering", "compound-engineering")).toBe(true);
     expect(isPluginViewRegistered("fusion-plugin-roadmap", "roadmaps")).toBe(true);
     expect(isPluginViewRegistered("fusion-plugin-cli-printing-press", "wizard")).toBe(true);
     expect(isPluginViewRegistered("fusion-plugin-cli-printing-press", "manage")).toBe(true);

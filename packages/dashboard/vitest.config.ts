@@ -302,6 +302,14 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-dependency-graph/src/index.ts",
       ),
+      "@fusion-plugin-examples/compound-engineering/dashboard-view": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-compound-engineering/src/dashboard-view.tsx",
+      ),
+      "@fusion-plugin-examples/compound-engineering": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-compound-engineering/src/index.ts",
+      ),
     },
   },
   test: {

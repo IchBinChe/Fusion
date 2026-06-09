@@ -42,13 +42,26 @@
   padding: var(--space-xs) var(--space-md);
 }
 
-.board-workflow-collapse-toggle {
-  flex: 0 0 auto;
+.board-workflow-toolbar:not([data-collapsed]),
+.board-workflow-collapsed-label {
+  cursor: pointer;
+}
+
+.board-workflow-toolbar:focus-visible,
+.board-workflow-collapsed-label:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
 .board-workflow-collapsed-label {
-  font-size: 0.8rem;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.board-workflow-collapsed-label:hover,
+.board-workflow-collapsed-label:focus-visible {
+  color: var(--text);
 }
 
 .board-workflow-selector {

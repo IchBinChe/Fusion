@@ -4,7 +4,7 @@ import { sortTasksForDisplayColumn } from "./taskSorting";
 import { Column } from "./Column";
 import "./Lane.css";
 import type { ToastType } from "../hooks/useToast";
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
@@ -116,6 +116,23 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
       setScopedItem("kb-dashboard-board-workflow-collapsed", workflowToolbarCollapsed ? "1" : "0", projectId);
     }
   }, [workflowToolbarCollapsed, projectId]);
+
+  const toggleWorkflowToolbarCollapsed = useCallback(() => {
+    setWorkflowToolbarCollapsed((collapsed) => !collapsed);
+  }, []);
+
+  const handleWorkflowToolbarKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleWorkflowToolbarCollapsed();
+    }
+  }, [toggleWorkflowToolbarCollapsed]);
+
+  const handleExpandedWorkflowToolbarClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) {
+      toggleWorkflowToolbarCollapsed();
+    }
+  }, [toggleWorkflowToolbarCollapsed]);
 
   useEffect(() => {
     recordResumeEvent({
@@ -473,17 +490,29 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     return (
       <div className="board-workflow-view">
         {(workflowOptions.length > 1 || onCreateWorkflow || onOpenWorkflowEditor) && (
-          <div className="board-workflow-toolbar" data-collapsed={workflowToolbarCollapsed || undefined}>
-            <button
-              type="button"
-              className="btn btn-icon btn-sm board-workflow-collapse-toggle"
-              onClick={() => setWorkflowToolbarCollapsed((c) => !c)}
-              aria-expanded={!workflowToolbarCollapsed}
-              aria-label={workflowToolbarCollapsed ? "Expand workflow toolbar" : "Collapse workflow toolbar"}
-              data-testid="board-workflow-collapse-toggle"
-            />
+          <div
+            className="board-workflow-toolbar"
+            data-collapsed={workflowToolbarCollapsed || undefined}
+            onClick={workflowToolbarCollapsed ? undefined : handleExpandedWorkflowToolbarClick}
+            onKeyDown={workflowToolbarCollapsed ? undefined : handleWorkflowToolbarKeyDown}
+            tabIndex={workflowToolbarCollapsed ? undefined : 0}
+            aria-expanded={workflowToolbarCollapsed ? undefined : true}
+            aria-label={workflowToolbarCollapsed ? undefined : "Collapse workflow toolbar"}
+            data-testid={workflowToolbarCollapsed ? undefined : "board-workflow-collapse-toggle"}
+          >
             {workflowToolbarCollapsed ? (
-              <span className="board-workflow-collapsed-label">Workflow</span>
+              <span
+                className="board-workflow-collapsed-label"
+                role="button"
+                tabIndex={0}
+                onClick={toggleWorkflowToolbarCollapsed}
+                onKeyDown={handleWorkflowToolbarKeyDown}
+                aria-expanded={false}
+                aria-label="Expand workflow toolbar"
+                data-testid="board-workflow-collapse-toggle"
+              >
+                Workflow
+              </span>
             ) : (
               <>
                 {workflowOptions.length > 1 && (

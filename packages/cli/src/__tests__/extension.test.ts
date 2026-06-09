@@ -28,6 +28,7 @@ vi.mock("../commands/task.js", () => ({
 
 import kbExtension from "../extension.js";
 import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES } from "@fusion/core";
+import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { runTaskPlan } from "../commands/task.js";
 
@@ -92,6 +93,47 @@ async function seedAgent(
     metadata: overrides.ephemeral ? { agentKind: "task-worker" } : {},
   });
   return agent.id;
+}
+
+function linearWorkflowIr(name: string): WorkflowIr {
+  return {
+    version: "v1",
+    name,
+    nodes: [
+      { id: "start", kind: "start" },
+      { id: "lint", kind: "gate", config: { name: "Lint", scriptName: "lint" } },
+      { id: "spec", kind: "prompt", config: { name: "Spec", prompt: "check" } },
+      { id: "end", kind: "end" },
+    ],
+    edges: [
+      { from: "start", to: "lint", condition: "success" },
+      { from: "lint", to: "spec", condition: "success" },
+      { from: "spec", to: "end", condition: "success" },
+    ],
+  };
+}
+
+async function seedWorkflow(cwd: string, name = "QA workflow"): Promise<string> {
+  const store = new TaskStore(cwd);
+  await store.init();
+  try {
+    const workflow = await store.createWorkflowDefinition({ name, ir: linearWorkflowIr(name) });
+    return workflow.id;
+  } finally {
+    store.close();
+  }
+}
+
+async function readTaskWorkflowState(cwd: string, taskId: string) {
+  const store = new TaskStore(cwd);
+  await store.init();
+  try {
+    const task = await store.getTask(taskId);
+    const selection = store.getTaskWorkflowSelection(taskId);
+    return { task, selection };
+  } finally {
+    store.close();
+  }
 }
 
 async function removeDirWithRetries(path: string) {
@@ -332,6 +374,47 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       expect(show.details.task.priority).toBe("urgent");
     });
 
+    it("creates a task with workflow_id selected and materialized", async () => {
+      const workflowId = await seedWorkflow(tmpDir, "Explicit create workflow");
+      const tool = api.tools.get("fn_task_create")!;
+      const result = await tool.execute(
+        "call-workflow",
+        { description: "Workflow task", workflow_id: workflowId },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.content[0].text).toContain(`(workflow: ${workflowId})`);
+      const { task, selection } = await readTaskWorkflowState(tmpDir, result.details.taskId);
+      expect(selection?.workflowId).toBe(workflowId);
+      expect(task.enabledWorkflowSteps).toHaveLength(2);
+    });
+
+    it("creates a task without workflow_id using the project default workflow", async () => {
+      const workflowId = await seedWorkflow(tmpDir, "Default create workflow");
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        await store.setDefaultWorkflowId(workflowId);
+      } finally {
+        store.close();
+      }
+
+      const tool = api.tools.get("fn_task_create")!;
+      const result = await tool.execute(
+        "call-default-workflow",
+        { description: "Default workflow task" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const { task, selection } = await readTaskWorkflowState(tmpDir, result.details.taskId);
+      expect(selection?.workflowId).toBe(workflowId);
+      expect(task.enabledWorkflowSteps).toHaveLength(2);
+    });
+
     it("creates a task with dependencies", async () => {
       const tool = api.tools.get("fn_task_create")!;
       const first = await tool.execute(
@@ -552,6 +635,90 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       const show = await showTool.execute("s1", { id: "FN-001" }, undefined, undefined, makeCtx(tmpDir));
       expect(show.details.task.title).toBe("Retitled");
       expect(show.details.task.priority).toBe("high");
+    });
+
+    it("updates task workflow_id through workflow reconciliation", async () => {
+      const workflowId = await seedWorkflow(tmpDir, "Update workflow");
+      const createTool = api.tools.get("fn_task_create")!;
+      await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
+
+      const selectSpy = vi.spyOn(TaskStore.prototype, "selectTaskWorkflowAndReconcile");
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "u1",
+        { id: "FN-001", workflow_id: workflowId },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).not.toBe(true);
+      expect(result.details.updatedFields).toEqual(["workflowId"]);
+      expect(selectSpy).toHaveBeenCalledWith("FN-001", workflowId);
+      selectSpy.mockRestore();
+      const { task, selection } = await readTaskWorkflowState(tmpDir, "FN-001");
+      expect(selection?.workflowId).toBe(workflowId);
+      expect(task.enabledWorkflowSteps).toHaveLength(2);
+    });
+
+    it("clears task workflow_id with null", async () => {
+      const workflowId = await seedWorkflow(tmpDir, "Clear workflow");
+      const createTool = api.tools.get("fn_task_create")!;
+      await createTool.execute("c1", { description: "Original", workflow_id: workflowId }, undefined, undefined, makeCtx(tmpDir));
+
+      const clearSpy = vi.spyOn(TaskStore.prototype, "clearTaskWorkflowSelection");
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "u1",
+        { id: "FN-001", workflow_id: null },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).not.toBe(true);
+      expect(result.details.updatedFields).toEqual(["workflowId"]);
+      expect(clearSpy).toHaveBeenCalledWith("FN-001");
+      clearSpy.mockRestore();
+      const { task, selection } = await readTaskWorkflowState(tmpDir, "FN-001");
+      expect(selection).toBeUndefined();
+      expect(task.enabledWorkflowSteps ?? []).toEqual([]);
+    });
+
+    it("returns an error for unknown workflow_id updates", async () => {
+      const createTool = api.tools.get("fn_task_create")!;
+      await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
+
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "u1",
+        { id: "FN-001", workflow_id: "WF-404" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("WF-404");
+    });
+
+    it("treats empty-string workflow_id as not provided", async () => {
+      const createTool = api.tools.get("fn_task_create")!;
+      await createTool.execute("c1", { description: "Original" }, undefined, undefined, makeCtx(tmpDir));
+
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "u1",
+        { id: "FN-001", title: "Retitled", workflow_id: "   " },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).not.toBe(true);
+      expect(result.details.updatedFields).toEqual(["title"]);
+      const { selection } = await readTaskWorkflowState(tmpDir, "FN-001");
+      expect(selection).toBeUndefined();
     });
 
     it("rejects invalid priority value", () => {
@@ -3185,6 +3352,28 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(task).toBeTruthy();
       expect(task!.assignedAgentId).toBe(agentId);
       expect(task!.column).toBe("todo");
+    });
+
+    it("delegates task with workflow_id selected and materialized", async () => {
+      const agentId = await seedAgent(tmpDir, { name: "delegate-workflow-target" });
+      const workflowId = await seedWorkflow(tmpDir, "Delegate workflow");
+
+      const tool = api.tools.get("fn_delegate_task")!;
+      const result = await tool.execute(
+        "dt-workflow",
+        { agent_id: agentId, description: "Do workflow work", workflow_id: workflowId },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).not.toBe(true);
+      expect(result.content[0].text).toContain(`(workflow: ${workflowId})`);
+      const { task, selection } = await readTaskWorkflowState(tmpDir, result.details.taskId);
+      expect(task.column).toBe("todo");
+      expect(task.assignedAgentId).toBe(agentId);
+      expect(selection?.workflowId).toBe(workflowId);
+      expect(task.enabledWorkflowSteps).toHaveLength(2);
     });
 
     it("rejects unknown agent", async () => {

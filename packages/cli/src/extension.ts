@@ -493,7 +493,8 @@ export default function kbExtension(pi: ExtensionAPI) {
     description:
       "Create a new task on the Fusion task board. The task enters the planning column " +
       "where the AI planning agent will plan it into a full prompt with steps, " +
-      "file scope, and acceptance criteria.",
+      "file scope, and acceptance criteria. Optionally pass workflow_id to select " +
+      "a workflow at creation time; use fn_workflow_list to discover valid IDs.",
     promptSnippet: "Create a task on the Fusion AI-orchestrated task board",
     promptGuidelines: [
       "Use fn_task_create for task tracking — be descriptive so the planning agent can write a good plan.",
@@ -513,6 +514,13 @@ export default function kbExtension(pi: ExtensionAPI) {
       ),
       priority: Type.Optional(
         StringEnum([...TASK_PRIORITIES], { description: "Task priority (low, normal, high, urgent)" }) as unknown as TSchema,
+      ),
+      workflow_id: Type.Optional(
+        Type.String({
+          description:
+            "Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). " +
+            "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
+        }),
       ),
     }),
 
@@ -541,12 +549,14 @@ export default function kbExtension(pi: ExtensionAPI) {
           projectSettings,
           globalSettings,
         );
+        const workflowId = params.workflow_id?.trim() || undefined;
 
         const task = await store.createTask({
           description: params.description.trim(),
           dependencies: params.depends,
           assignedAgentId: normalizedAgentId === null ? undefined : normalizedAgentId,
           priority: params.priority as TaskPriority | undefined,
+          ...(workflowId ? { workflowId } : {}),
           source: { sourceType: "api" },
           githubTracking: resolvedTracking.enabled
             ? {
@@ -568,7 +578,7 @@ export default function kbExtension(pi: ExtensionAPI) {
             {
               type: "text",
               text:
-                `Created ${task.id}: ${label}\n` +
+                `Created ${task.id}: ${label}${workflowId ? ` (workflow: ${workflowId})` : ""}\n` +
                 `Column: triage\n` +
                 (task.dependencies.length
                   ? `Dependencies: ${task.dependencies.join(", ")}\n`
@@ -608,10 +618,12 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Update Task",
     description:
       "Update fields on an existing task. Supports modifying the title, " +
-      "description, dependencies, assigned agent, and priority after task creation.",
+      "description, dependencies, assigned agent, priority, and workflow_id after task creation. " +
+      "Set workflow_id to a workflow ID to select it, or null to clear the workflow selection.",
     promptSnippet: "Update fields on an existing Fusion task",
     promptGuidelines: [
-      "Use fn_task_update to modify task title, description, dependencies, assigned agent, or priority after creation.",
+      "Use fn_task_update to modify task title, description, dependencies, assigned agent, priority, or workflow_id after creation.",
+      "Set workflow_id to null to clear a task's workflow selection and enabled workflow steps.",
       "At least one field must be provided to update.",
     ],
     parameters: Type.Object({
@@ -638,6 +650,14 @@ export default function kbExtension(pi: ExtensionAPI) {
       ),
       priority: Type.Optional(
         StringEnum([...TASK_PRIORITIES], { description: "Task priority (low, normal, high, urgent)" }) as unknown as TSchema,
+      ),
+      workflow_id: Type.Optional(
+        Type.Union([Type.String(), Type.Null()], {
+          description:
+            "Workflow ID to select for this task (e.g. 'WF-003' or 'builtin:coding'), " +
+            "or null to clear the workflow selection and revert to the project default. " +
+            "Use fn_workflow_list to discover valid IDs.",
+        }),
       ),
     }),
 
@@ -704,16 +724,39 @@ export default function kbExtension(pi: ExtensionAPI) {
         updates.priority = params.priority;
         updatedFields.push("priority");
       }
+      if (params.workflow_id !== undefined) {
+        if (params.workflow_id === null) {
+          await store.clearTaskWorkflowSelection(task.id);
+          updatedFields.push("workflowId");
+        } else {
+          const workflowId = params.workflow_id.trim();
+          if (workflowId.length > 0) {
+            try {
+              await store.selectTaskWorkflowAndReconcile(task.id, workflowId);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              return {
+                content: [{ type: "text", text: `ERROR: ${message}` }],
+                isError: true,
+                details: { error: message },
+              };
+            }
+            updatedFields.push("workflowId");
+          }
+        }
+      }
 
       if (updatedFields.length === 0) {
         return {
-          content: [{ type: "text", text: "No fields to update. Provide at least one of: title, description, depends, agentId, nodeId, priority." }],
+          content: [{ type: "text", text: "No fields to update. Provide at least one of: title, description, depends, agentId, nodeId, priority, workflow_id." }],
           isError: true,
           details: { error: "No fields provided" },
         };
       }
 
-      await store.updateTask(params.id, updates);
+      if (Object.keys(updates).length > 0) {
+        await store.updateTask(params.id, updates);
+      }
 
       return {
         content: [
@@ -3912,7 +3955,9 @@ export default function kbExtension(pi: ExtensionAPI) {
     description:
       "Create a new task and assign it to a specific agent for execution. The task goes to " +
       "'todo' and will be picked up by the target agent on their next heartbeat cycle. " +
-      "Use fn_list_agents first to find available agents and their capabilities.",
+      "Use fn_list_agents first to find available agents and their capabilities. " +
+      "Optionally pass workflow_id to select a workflow at creation time; use " +
+      "fn_workflow_list to discover valid IDs.",
     promptSnippet: "Delegate a task to a specific Fusion agent",
     promptGuidelines: [
       "Use fn_list_agents first to find available agents and their capabilities",
@@ -3926,6 +3971,13 @@ export default function kbExtension(pi: ExtensionAPI) {
       description: Type.String({ description: "What needs to be done" }),
       dependencies: Type.Optional(
         Type.Array(Type.String(), { description: "Task IDs this new task depends on (e.g. [\"KB-001\"]" }),
+      ),
+      workflow_id: Type.Optional(
+        Type.String({
+          description:
+            "Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). " +
+            "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
+        }),
       ),
       override: Type.Optional(
         Type.Boolean({ description: "Set true to bypass executor-role assignment policy" }),
@@ -3952,11 +4004,13 @@ export default function kbExtension(pi: ExtensionAPI) {
       try {
         // Create task assigned to the target agent
         const store = await getStore(ctx.cwd);
+        const workflowId = params.workflow_id?.trim() || undefined;
         const task = await store.createTask({
           description: params.description,
           dependencies: params.dependencies,
           column: "todo",
           assignedAgentId: params.agent_id,
+          ...(workflowId ? { workflowId } : {}),
           source: {
             sourceType: "api",
             ...(params.override === true ? { sourceMetadata: { executorRoleOverride: true } } : {}),
@@ -3964,10 +4018,11 @@ export default function kbExtension(pi: ExtensionAPI) {
         });
 
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        const workflow = workflowId ? ` (workflow: ${workflowId})` : "";
         return {
           content: [{
             type: "text" as const,
-            text: `Delegated to ${agent!.name} (${agent!.id}): Created ${task.id}${deps}. ` +
+            text: `Delegated to ${agent!.name} (${agent!.id}): Created ${task.id}${deps}${workflow}. ` +
               `The task will be picked up by ${agent!.name} on their next heartbeat cycle.`,
           }],
           details: { taskId: task.id, agentId: agent!.id, agentName: agent!.name },

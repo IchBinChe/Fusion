@@ -10,7 +10,7 @@ All tools are registered via the Fusion extension. They are available in any age
 
 ### fn_task_create
 
-Create a new task on the Fusion task board. The task enters the planning column where the AI planning agent will plan it into a full prompt with steps, file scope, and acceptance criteria.
+Create a new task on the Fusion task board. The task enters the planning column where the AI planning agent will plan it into a full prompt with steps, file scope, and acceptance criteria. Optionally pass workflow_id to select a workflow at creation time; use fn_workflow_list to discover valid IDs.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -18,10 +18,11 @@ Create a new task on the Fusion task board. The task enters the planning column 
 | `depends` | array | — | Task IDs this depends on (e.g. ['FN-001', 'FN-002']) |
 | `agentId` | string | — | Agent ID to assign this task to (e.g. 'agent-abc123') |
 | `priority` | string(enum) | — | Task priority (low, normal, high, urgent) |
+| `workflow_id` | string | — | Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). |
 
 ### fn_task_update
 
-Update fields on an existing task. Supports modifying the title, description, dependencies, assigned agent, and priority after task creation.
+Update fields on an existing task. Supports modifying the title, description, dependencies, assigned agent, priority, and workflow_id after task creation. Set workflow_id to a workflow ID to select it, or null to clear the workflow selection.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -32,6 +33,7 @@ Update fields on an existing task. Supports modifying the title, description, de
 | `agentId` | union | — | Agent ID to assign this task to, or null to clear (e.g. 'agent-abc123') |
 | `nodeId` | union | — | Node ID override for this task, or null to clear |
 | `priority` | string(enum) | — | Task priority (low, normal, high, urgent) |
+| `workflow_id` | union | — | Workflow ID to select for this task (e.g. 'WF-003' or 'builtin:coding'), |
 
 ### fn_task_list
 
@@ -438,13 +440,14 @@ List all available agents in the system. Shows each agent's name, role, state, p
 
 ### fn_delegate_task
 
-Create a new task and assign it to a specific agent for execution. The task goes to 'todo' and will be picked up by the target agent on their next heartbeat cycle. Use fn_list_agents first to find available agents and their capabilities.
+Create a new task and assign it to a specific agent for execution. The task goes to 'todo' and will be picked up by the target agent on their next heartbeat cycle. Use fn_list_agents first to find available agents and their capabilities. Optionally pass workflow_id to select a workflow at creation time; use fn_workflow_list to discover valid IDs.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `agent_id` | string | ✓ | The agent ID to delegate work to |
 | `description` | string | ✓ | What needs to be done |
 | `dependencies` | array | — | Task IDs this new task depends on (e.g. [\"KB-001\"] |
+| `workflow_id` | string | — | Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). |
 | `override` | boolean | — | Set true to bypass executor-role assignment policy |
 
 ### fn_agent_show

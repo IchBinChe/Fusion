@@ -170,6 +170,42 @@ describe("createTaskCreateTool", () => {
     }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
   });
 
+  it("passes workflow_id through as workflowId", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-099", description: "Test", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any);
+    const result = await tool.execute(
+      "call-1",
+      { description: "Test", workflow_id: " WF-003 " } as any,
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: "WF-003",
+    }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+    const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(responseText).toContain("(workflow: WF-003)");
+  });
+
+  it("omits workflowId when workflow_id is not provided", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-100", description: "Test", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any);
+    await tool.execute("call-1", { description: "Test" } as any, undefined, undefined, {} as any);
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowId: expect.anything(),
+    }), expect.anything());
+  });
+
   it("passes explicit provenance to store.createTask", async () => {
     const store = {
       getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
@@ -298,6 +334,48 @@ describe("createDelegateTaskTool", () => {
     expect(taskStore.createTask).toHaveBeenCalledWith(expect.objectContaining({
       source: { sourceType: "api", sourceMetadata: { executorRoleOverride: true } },
     }), expect.any(Object));
+  });
+
+  it("passes workflow_id through as workflowId for delegated tasks", async () => {
+    const agentStore = {
+      getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
+    };
+    const taskStore = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "FN-103", dependencies: [], description: "Delegated" }),
+    };
+
+    const tool = createDelegateTaskTool(agentStore as any, taskStore as any);
+    const result = await tool.execute(
+      "call-1",
+      { agent_id: "agent-1", description: "Delegated", workflow_id: " builtin:coding " } as any,
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(taskStore.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: "builtin:coding",
+    }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+    const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(responseText).toContain("(workflow: builtin:coding)");
+  });
+
+  it("omits workflowId for delegated tasks when workflow_id is not provided", async () => {
+    const agentStore = {
+      getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
+    };
+    const taskStore = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "FN-104", dependencies: [], description: "Delegated" }),
+    };
+
+    const tool = createDelegateTaskTool(agentStore as any, taskStore as any);
+    await tool.execute("call-1", { agent_id: "agent-1", description: "Delegated" } as any, undefined, undefined, {} as any);
+
+    expect(taskStore.createTask).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowId: expect.anything(),
+    }), expect.anything());
   });
 
   it("uses linked-existing wording when delegated task is a deterministic duplicate", async () => {

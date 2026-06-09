@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const FUSION_DISABLED_EXTENSIONS_KEY = "fusionDisabledExtensions";
 
@@ -66,7 +67,40 @@ export function getProjectRootFromWorktree(
     }
   }
 
+  const gitLinkedWorktreeRoot = getProjectRootFromGitLinkedWorktree(cwd);
+  if (gitLinkedWorktreeRoot) {
+    return gitLinkedWorktreeRoot;
+  }
+
   return null;
+}
+
+function getProjectRootFromGitLinkedWorktree(cwd: string): string | null {
+  const resolvedCwd = resolve(cwd);
+  const commonDir = spawnSync("git", ["rev-parse", "--git-common-dir"], {
+    cwd: resolvedCwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const gitDir = spawnSync("git", ["rev-parse", "--git-dir"], {
+    cwd: resolvedCwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (commonDir.status !== 0 || gitDir.status !== 0) {
+    return null;
+  }
+
+  const resolvedCommonDir = resolve(resolvedCwd, commonDir.stdout.trim());
+  const resolvedGitDir = resolve(resolvedCwd, gitDir.stdout.trim());
+  if (!resolvedCommonDir || !resolvedGitDir || resolvedCommonDir === resolvedGitDir) {
+    return null;
+  }
+
+  const parentRoot = resolvedCommonDir.endsWith(`${sep}.git`)
+    ? dirname(resolvedCommonDir)
+    : resolvedCommonDir;
+  return existsSync(join(parentRoot, ".fusion")) ? parentRoot : null;
 }
 
 export function resolvePiExtensionProjectRoot(cwd: string): string {

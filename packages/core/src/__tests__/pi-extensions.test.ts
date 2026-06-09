@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execSync } from "node:child_process";
 import { getProjectRootFromWorktree, resolvePiExtensionProjectRoot } from "../pi-extensions.js";
+
+function git(cwd: string, args: string): string {
+  return execSync(`git ${args}`, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
 
 describe("getProjectRootFromWorktree", () => {
   it("detects POSIX worktree paths", () => {
@@ -31,6 +36,35 @@ describe("getProjectRootFromWorktree", () => {
         worktreesDirCandidates: ["/tmp/repo.worktrees"],
       }),
     ).toBe("/tmp");
+  });
+
+  it("detects arbitrary Git linked worktree paths when the parent has Fusion metadata", () => {
+    const root = mkdtempSync(join(tmpdir(), "fn-6079-root-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "fusion-ai-merge-fn-6079-"));
+    try {
+      const expectedRoot = realpathSync(root);
+      git(root, "init -q -b main");
+      git(root, "config user.email test@example.com");
+      git(root, "config user.name Test");
+      mkdirSync(join(root, ".fusion"), { recursive: true });
+      writeFileSync(join(root, "base.txt"), "base\n");
+      git(root, "add -A");
+      git(root, "commit -q -m base");
+      git(root, `worktree add --detach ${JSON.stringify(worktreeRoot)} HEAD`);
+      mkdirSync(join(worktreeRoot, "subdir"), { recursive: true });
+
+      expect(getProjectRootFromWorktree(worktreeRoot)).toBe(expectedRoot);
+      expect(getProjectRootFromWorktree(join(worktreeRoot, "subdir"))).toBe(expectedRoot);
+      expect(resolvePiExtensionProjectRoot(worktreeRoot)).toBe(expectedRoot);
+    } finally {
+      try {
+        git(root, `worktree remove --force ${JSON.stringify(worktreeRoot)}`);
+      } catch {
+        // best effort cleanup
+      }
+      rmSync(worktreeRoot, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

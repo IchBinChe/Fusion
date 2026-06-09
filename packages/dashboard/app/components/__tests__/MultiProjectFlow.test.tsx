@@ -156,7 +156,7 @@ describe("MultiProjectFlow", () => {
       );
 
       fireEvent.click(screen.getByTestId("project-selector-trigger"));
-      const manageProjectsAction = screen.getByText("View All Projects");
+      const manageProjectsAction = screen.getByText("Manage Projects");
 
       fireEvent.click(manageProjectsAction);
       expect(handleViewAllProjects).toHaveBeenCalled();

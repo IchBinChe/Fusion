@@ -1829,7 +1829,7 @@ describe("MailboxView", () => {
       expect(splitPaneBlock).toContain("border: var(--btn-border-width) solid var(--border);");
       expect(splitPaneBlock).toContain("background: var(--surface);");
 
-      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{[^}]*cursor:\s*col-resize;[^}]*background:\s*transparent;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{[^}]*cursor:\s*col-resize;[^}]*background:\s*color-mix\(in srgb,\s*var\(--border\)\s*70%,\s*transparent\);[^}]*\}/);
 
       const splitEmptyBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-empty\s*\{([^}]*)\}/);
       expect(splitEmptyBlockMatch).toBeTruthy();

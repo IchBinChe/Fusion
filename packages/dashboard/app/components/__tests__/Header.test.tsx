@@ -1592,7 +1592,7 @@ describe("Header", () => {
       expect(trigger).toHaveTextContent(longName);
     });
 
-    it("falls back to 'Select Project' label when current project is missing", () => {
+    it("falls back to 'Projects' label when current project is missing", () => {
       renderHeader({
         projects,
         currentProject: null,
@@ -1601,10 +1601,10 @@ describe("Header", () => {
       }, "desktop");
 
       const trigger = screen.getByTestId("project-selector-trigger");
-      expect(trigger).toHaveTextContent("Select Project");
+      expect(trigger).toHaveTextContent("Projects");
     });
 
-    it("shows View All Projects action in dropdown and calls onViewAllProjects", () => {
+    it("shows Manage Projects action in dropdown and calls onViewAllProjects", () => {
       const onViewAllProjects = vi.fn();
       renderHeader({
         projects,
@@ -1614,7 +1614,7 @@ describe("Header", () => {
       }, "desktop");
 
       fireEvent.click(screen.getByTestId("project-selector-trigger"));
-      fireEvent.click(screen.getByText("View All Projects"));
+      fireEvent.click(screen.getByText("Manage Projects"));
       expect(onViewAllProjects).toHaveBeenCalled();
       expect(screen.queryByTestId("project-selector-dropdown")).toBeNull();
     });

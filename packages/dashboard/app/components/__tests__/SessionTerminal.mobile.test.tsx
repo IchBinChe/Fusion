@@ -13,24 +13,11 @@ const mockTerm = {
   cols: 80,
   rows: 24,
 };
-vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn(function (this: typeof mockTerm) {
-    Object.assign(this, mockTerm);
-  }),
-}));
-vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: vi.fn(function (this: { fit: ReturnType<typeof vi.fn> }) {
-    this.fit = vi.fn();
-  }),
-}));
-vi.mock("@xterm/addon-unicode11", () => ({
-  Unicode11Addon: vi.fn(function () {}),
-}));
+vi.mock("@xterm/xterm", () => ({ Terminal: vi.fn(function Terminal() { return mockTerm; }) }));
+vi.mock("@xterm/addon-fit", () => ({ FitAddon: vi.fn(function FitAddon() { return { fit: vi.fn() }; }) }));
+vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: vi.fn(function Unicode11Addon() { return {}; }) }));
 vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: vi.fn(function (this: { onContextLoss: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }) {
-    this.onContextLoss = vi.fn();
-    this.dispose = vi.fn();
-  }),
+  WebglAddon: vi.fn(function WebglAddon() { return { onContextLoss: vi.fn(), dispose: vi.fn() }; }),
 }));
 
 const apiMock = vi.fn();

@@ -339,6 +339,40 @@ describe("WorkflowNodeEditor", () => {
     expect(screen.getAllByRole("button", { name: "QA" })[0]).toHaveClass("active");
   });
 
+  it("lets desktop users switch to the simple graph layout and back", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    expect(screen.queryByTestId("wf-mobile-shell")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+
+    expect(await screen.findByTestId("wf-mobile-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-tab-graph")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "start start" })).toBeInTheDocument();
+    expect(screen.getByTestId("wf-layout-toggle")).toHaveTextContent("Show canvas editor");
+
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+
+    await waitFor(() => expect(screen.queryByTestId("wf-mobile-shell")).not.toBeInTheDocument());
+    expect(screen.getByTestId("wf-layout-toggle")).toHaveTextContent("Show simple editor");
+  });
+
+  it("lets tablet users switch to the simple graph layout", async () => {
+    mockWorkflowEditorViewport("tablet");
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+
+    expect(await screen.findByTestId("wf-mobile-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-tab-actions")).toBeInTheDocument();
+  });
+
   it("opens populated mobile workflows on the list with no preselected workflow", async () => {
     mockWorkflowEditorViewport("mobile");
     vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);

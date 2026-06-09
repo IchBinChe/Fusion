@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 114;
+const SCHEMA_VERSION = 115;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -601,6 +601,27 @@ CREATE TABLE IF NOT EXISTS completion_handoff_markers (
   source TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_completion_handoff_markers_acceptedAt ON completion_handoff_markers(acceptedAt);
+
+CREATE TABLE IF NOT EXISTS workflow_work_items (
+  id TEXT PRIMARY KEY,
+  runId TEXT NOT NULL,
+  taskId TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  nodeId TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  retryAfter TEXT,
+  leaseOwner TEXT,
+  leaseExpiresAt TEXT,
+  lastError TEXT,
+  blockedReason TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  UNIQUE(runId, taskId, nodeId, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_work_items_due ON workflow_work_items(state, retryAfter, createdAt);
+CREATE INDEX IF NOT EXISTS idx_workflow_work_items_leaseExpiresAt ON workflow_work_items(leaseExpiresAt);
+CREATE INDEX IF NOT EXISTS idx_workflow_work_items_task_run ON workflow_work_items(taskId, runId);
 
 -- Per-branch run state for concurrent workflow fan-out/join (U13, KTD-11/R21).
 -- Reconstructible per ADR-0001: a crashed parallel run resumes each branch from
@@ -4631,6 +4652,40 @@ export class Database {
           END;
         `);
         this.configureTaskFts5();
+      });
+    }
+
+    // Migration 115: Workflow-owned merge/retry/scheduling S1.
+    // Adds durable workflow work items so runnable, held, retrying, merge,
+    // manual-hold, and recovery work can be claimed generically before legacy
+    // merge queue and retry policy are deleted.
+    if (version < 115) {
+      this.applyMigration(115, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_work_items (
+            id TEXT PRIMARY KEY,
+            runId TEXT NOT NULL,
+            taskId TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            nodeId TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            state TEXT NOT NULL,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            retryAfter TEXT,
+            leaseOwner TEXT,
+            leaseExpiresAt TEXT,
+            lastError TEXT,
+            blockedReason TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            UNIQUE(runId, taskId, nodeId, kind)
+          );
+          CREATE INDEX IF NOT EXISTS idx_workflow_work_items_due
+            ON workflow_work_items(state, retryAfter, createdAt);
+          CREATE INDEX IF NOT EXISTS idx_workflow_work_items_leaseExpiresAt
+            ON workflow_work_items(leaseExpiresAt);
+          CREATE INDEX IF NOT EXISTS idx_workflow_work_items_task_run
+            ON workflow_work_items(taskId, runId);
+        `);
       });
     }
 

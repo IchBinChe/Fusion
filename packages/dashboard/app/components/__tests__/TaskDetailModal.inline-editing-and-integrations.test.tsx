@@ -111,14 +111,17 @@ describe("TaskDetailModal", () => {
 
       await user.click(toggle);
 
-      expect(screen.getByRole("button", { name: "Collapse source issue details" })).toHaveAttribute("aria-expanded", "true");
-      expect(screen.getByText("Provider")).toBeTruthy();
+      const collapseToggle = await screen.findByRole("button", { name: "Collapse source issue details" });
+      await waitFor(() => {
+        expect(collapseToggle).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getByText("Provider")).toBeTruthy();
+      });
       expect(screen.getByText("github")).toBeTruthy();
       expect(screen.getByText("runfusion/fusion")).toBeTruthy();
       const sourceLink = screen.getByRole("link", { name: "https://github.com/runfusion/fusion/issues/2473" });
       expect(sourceLink).toHaveAttribute("href", "https://github.com/runfusion/fusion/issues/2473");
       expect(sourceLink).toHaveAttribute("target", "_blank");
-      const expandedChevron = screen.getByRole("button", { name: "Collapse source issue details" }).querySelector("svg");
+      const expandedChevron = collapseToggle.querySelector("svg");
       expect(expandedChevron?.classList.contains("detail-source-chevron--expanded")).toBe(true);
     });
 
@@ -2197,11 +2200,12 @@ describe("TaskDetailModal", () => {
   });
 
   describe("github tracking section", () => {
-    const expandGithubTracking = () => {
+    const expandGithubTracking = async () => {
       fireEvent.click(screen.getByRole("button", { name: "Expand GitHub tracking details" }));
+      return screen.findByRole("button", { name: "Collapse GitHub tracking details" });
     };
 
-    it("renders linked issue as link when url exists", () => {
+    it("renders linked issue as link when url exists", async () => {
       render(
         <TaskDetailModal
           task={makeTask({
@@ -2230,9 +2234,9 @@ describe("TaskDetailModal", () => {
       expect(screen.getByLabelText("GitHub tracking status")).toHaveTextContent("Linked");
       expect(screen.queryByRole("link", { name: "runfusion/fusion#123" })).toBeNull();
 
-      expandGithubTracking();
+      const collapseToggle = await expandGithubTracking();
 
-      expect(screen.getByRole("button", { name: "Collapse GitHub tracking details" })).toHaveAttribute("aria-expanded", "true");
+      expect(collapseToggle).toHaveAttribute("aria-expanded", "true");
       expect(screen.getByRole("link", { name: "runfusion/fusion#123" })).toHaveAttribute("href", "https://github.com/runfusion/fusion/issues/123");
     });
 
@@ -2279,8 +2283,8 @@ describe("TaskDetailModal", () => {
         expect(screen.getByLabelText("GitHub tracking status")).toHaveTextContent("Linked");
       });
 
-      expandGithubTracking();
-      expect(screen.getByDisplayValue("runfusion/fusion")).toBeInTheDocument();
+      await expandGithubTracking();
+      expect(await screen.findByDisplayValue("runfusion/fusion")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "runfusion/fusion#301" })).toHaveAttribute("href", "https://github.com/runfusion/fusion/issues/301");
     });
 
@@ -2561,7 +2565,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expandGithubTracking();
+      await expandGithubTracking();
       fireEvent.click(screen.getByRole("button", { name: "Create tracking issue" }));
 
       await waitFor(() => {
@@ -2602,7 +2606,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expandGithubTracking();
+      await expandGithubTracking();
 
       const toggle = screen.getByLabelText("Enable GitHub tracking") as HTMLInputElement;
       expect(toggle.checked).toBe(false);
@@ -2638,7 +2642,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expandGithubTracking();
+      await expandGithubTracking();
 
       fireEvent.click(screen.getByLabelText("Enable GitHub tracking"));
       await waitFor(() => {
@@ -2703,7 +2707,7 @@ describe("TaskDetailModal", () => {
 
       render(<Harness />);
 
-      expandGithubTracking();
+      await expandGithubTracking();
       const toggle = screen.getByRole("checkbox", { name: "Enable GitHub tracking" }) as HTMLInputElement;
       expect(toggle.checked).toBe(true);
 
@@ -2737,7 +2741,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expandGithubTracking();
+      await expandGithubTracking();
 
       fireEvent.change(screen.getByPlaceholderText("owner/repo"), { target: { value: "runfusion/cli" } });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -2785,7 +2789,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expandGithubTracking();
+      await expandGithubTracking();
 
       fireEvent.click(screen.getByRole("button", { name: "Unlink GitHub issue" }));
       await waitFor(() => {

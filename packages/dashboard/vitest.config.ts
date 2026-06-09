@@ -182,6 +182,7 @@ const qualityAppComponentTests = [
   "TaskDetailModal.allow-resurrection",
   "TaskDetailModal.create-pr-e2e",
   "TaskDetailModal.custom-fields",
+  "TaskDetailModal.inline-editing-and-integrations",
   "TestModeBanner",
   "TaskDetailModal.create-pr-integration",
   "TaskDetailModal.github-tracking-header",

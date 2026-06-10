@@ -428,15 +428,15 @@
   }
 }
 
-/* === Quick Entry Mobile Touch + Overflow Fixes (FN-1140) === */
+/* === Quick Entry Mobile Touch + Overflow Fixes (FN-1140, FN-6153) === */
 @media (max-width: 768px) {
-  .quick-entry-actions {
-    touch-action: manipulation;
+  .quick-entry-actions,
+  .quick-entry-actions * {
+    touch-action: none;
   }
 
   .quick-entry-actions .btn {
     min-height: 36px;
-    touch-action: manipulation;
   }
 
   .quick-entry-box .dep-dropdown {

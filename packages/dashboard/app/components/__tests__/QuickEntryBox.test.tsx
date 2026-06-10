@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { QuickEntryBox } from "../QuickEntryBox";
@@ -25,6 +26,15 @@ const MOCK_MODELS = [
 
 const TEST_PROJECT_ID = "proj-123";
 const QUICK_ENTRY_STORAGE_KEY = scopedKey("kb-quick-entry-text", TEST_PROJECT_ID);
+const QUICK_ENTRY_BOX_CSS = readFileSync("app/components/QuickEntryBox.css", "utf8");
+
+function quickEntryMobileActionsTouchRule() {
+  return (
+    QUICK_ENTRY_BOX_CSS.match(
+      /@media \(max-width: 768px\) \{[\s\S]*?(\.quick-entry-actions,\s*\.quick-entry-actions \*\s*\{[\s\S]*?\})/,
+    )?.[1] ?? ""
+  );
+}
 
 const CREATED_TASK: Task = {
   id: "FN-999",
@@ -3204,6 +3214,13 @@ describe("QuickEntryBox", () => {
   });
 
   describe("QuickEntryBox Mobile", () => {
+    it("keeps quick-entry action controls and descendants out of browser touch gesture handling on mobile", () => {
+      const touchRule = quickEntryMobileActionsTouchRule();
+
+      expect(touchRule).toMatch(/\.quick-entry-actions,\s*\.quick-entry-actions \*/);
+      expect(touchRule).toMatch(/touch-action:\s*none;/);
+    });
+
     it("keeps inline deps/models controls in touch-target button classes on mobile", () => {
       vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
 

@@ -1484,11 +1484,28 @@
     background: var(--bg-secondary);
     color: var(--text);
     cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      transform var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
   .wf-mobile-tab--active {
     border-color: var(--accent, var(--ws-info));
     background: var(--bg-tertiary);
+  }
+
+  .wf-mobile-tab:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .wf-mobile-tab:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-strong);
+  }
+
+  .wf-mobile-tab:active {
+    transform: scale(0.97);
   }
 
   .wf-mobile-panel {
@@ -1541,6 +1558,26 @@
     cursor: pointer;
     text-align: left;
     overflow-wrap: anywhere;
+    transition:
+      background var(--transition-fast),
+      transform var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
+
+  .wf-mobile-add-option:hover,
+  .wf-mobile-template-option:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .wf-mobile-add-option:focus-visible,
+  .wf-mobile-template-option:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-strong);
+  }
+
+  .wf-mobile-add-option:active,
+  .wf-mobile-template-option:active {
+    transform: scale(0.97);
   }
 
   .wf-mobile-template-filter {

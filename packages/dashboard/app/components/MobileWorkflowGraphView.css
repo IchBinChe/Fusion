@@ -33,6 +33,23 @@
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.mobile-wf-node-main:hover {
+  background: var(--bg-tertiary);
+}
+
+.mobile-wf-node-main:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.mobile-wf-node-main:active {
+  transform: scale(0.97);
 }
 
 .mobile-wf-node-row--selected .mobile-wf-node-main {
@@ -43,7 +60,7 @@
 .mobile-wf-node-kind {
   min-width: 4.5rem;
   max-width: 6rem;
-  padding: 2px var(--space-xs);
+  padding: calc(var(--space-xs) / 2) var(--space-xs);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -56,7 +73,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 2px;
+  gap: calc(var(--space-xs) / 2);
 }
 
 .mobile-wf-node-title,
@@ -88,6 +105,23 @@
   background: var(--bg-secondary);
   color: var(--text);
   cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.mobile-wf-node-expand:hover {
+  background: var(--bg-tertiary);
+}
+
+.mobile-wf-node-expand:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.mobile-wf-node-expand:active {
+  transform: scale(0.97);
 }
 
 .mobile-wf-node-meta {
@@ -101,7 +135,7 @@
 .mobile-wf-edge-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
   min-height: 34px;
   max-width: 100%;
   padding: var(--space-xs) var(--space-sm);
@@ -115,6 +149,23 @@
 .mobile-wf-edge-chip {
   color: var(--text);
   cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.mobile-wf-edge-chip:hover {
+  background: var(--bg-secondary);
+}
+
+.mobile-wf-edge-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.mobile-wf-edge-chip:active {
+  transform: scale(0.97);
 }
 
 .mobile-wf-edge-chip--selected {

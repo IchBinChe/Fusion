@@ -1202,8 +1202,13 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     await screen.findByText("Save");
+    // Wait for graph/column hydration before driving the palette — clicking
+    // mid-hydration races the flow-state seeding and the added node may never
+    // render (same flake class as foreach palette add, 86867c57b).
+    expect(await screen.findByTestId("wf-column-panel")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Code").closest("button")!);
-    const source = (await screen.findByText("Source (TypeScript)")).parentElement!.querySelector("textarea")! as HTMLTextAreaElement;
+    await waitFor(() => expect(screen.getByTestId("wf-node-code")).toBeInTheDocument(), { timeout: 5000 });
+    const source = screen.getByText("Source (TypeScript)").parentElement!.querySelector("textarea")! as HTMLTextAreaElement;
     fireEvent.change(source, { target: { value: "export default async()=>({outcome:'success'})" } });
     expect(source.value).toContain("outcome:'success'");
     const timeout = screen.getByText("Timeout (ms)").parentElement!.querySelector("input")! as HTMLInputElement;

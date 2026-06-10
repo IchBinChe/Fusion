@@ -167,6 +167,32 @@ export type GitMutationType =
   | "merge:ai-review-landed-with-concerns"
   | "merge:ai-local-sync"
   | "merge:ai-landed"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   mergeRoot: string;
+   *   phase: "git-remove" | "fs-rm";
+   *   success: boolean;
+   *   error?: string;
+   *   code?: string;
+   * }
+   * ```
+   */
+  | "merge:ai-worktree-cleanup"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   path: string;
+   *   success: boolean;
+   *   reason?: "stale" | "active-session" | "git-remove-failed" | "fs-rm-failed" | "not-directory" | "stat-failed";
+   *   error?: string;
+   * }
+   * ```
+   */
+  | "worktree:tempdir-sweep"
   | "merge:reuse-handoff-acquired"
   | "merge:reuse-handoff-refused"
   | "merge:reuse-handoff-released"

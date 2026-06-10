@@ -18,6 +18,7 @@
  * - `pruneWorktrees`: defer to backend prune
  * - `cleanupOrphans`: defer to backend prune/remove semantics
  * - `reapUnregisteredOrphans`: defer to backend prune/remove semantics
+ * - `cleanupStaleTempMergeWorktrees`: remains native (temp-dir scope, outside worktrunk layout)
  * - `enforceWorktreeCap`: defer to backend prune/remove semantics
  * - `reclaimSelfOwnedBranchConflicts`: remains native (branch-level)
  * - `reclaimStaleActiveBranches`: remains native (branch-level)
@@ -27,6 +28,7 @@ import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
@@ -73,6 +75,7 @@ const BOARD_STALL_NOTIFICATION_COOLDOWN_MS = 60 * 60_000;
 const DB_CORRUPTION_NOTIFICATION_COOLDOWN_MS = 60 * 60 * 1000;
 const FTS_MAINTENANCE_MERGE_CADENCE_TICKS = 1;
 const FTS_MAINTENANCE_OPTIMIZE_CADENCE_TICKS = 4;
+const STALE_TEMP_MERGE_WORKTREE_MS = 2 * 60 * 60 * 1000;
 // Live pathology peaked around 775 KB/task (~96 MB for ~120 tasks), while a
 // rebuilt healthy index was ~0.1 MB. Keep the steady-state budget generous but
 // bounded so sustained text churn heals before segment growth becomes material.
@@ -1808,6 +1811,16 @@ export class SelfHealingManager {
       const batch1Fns: Array<{ name: string; fn: () => Promise<unknown> }> = [
         { name: "prune-worktrees", fn: () => this.pruneWorktrees() },
         { name: "cleanup-orphans", fn: () => this.cleanupOrphans() },
+        {
+          name: "cleanup-stale-temp-merge-worktrees",
+          fn: async () => {
+            const cleaned = await this.cleanupStaleTempMergeWorktrees();
+            if (cleaned > 0) {
+              log.log(`Cleaned ${cleaned} stale AI merge temp worktree(s)`);
+            }
+            return cleaned;
+          },
+        },
         { name: "cleanup-orphaned-branches", fn: () => this.cleanupOrphanedBranches() },
         {
           name: "cleanup-old-chats",
@@ -8838,6 +8851,98 @@ export class SelfHealingManager {
     return cleaned;
   }
 
+  /**
+   * Sweep stale AI merge clean-room worktrees from `tmpdir()`.
+   *
+   * These worktrees are intentionally outside the project/worktrunk-managed
+   * `.worktrees/` layout, so this native sweep proceeds even when worktrunk is
+   * enabled. Safety is bounded by a two-hour age gate plus active-session checks.
+   */
+  private async cleanupStaleTempMergeWorktrees(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.worktrunk?.enabled === true) {
+        log.log("[self-healing] temp-dir sweep: worktrunk enabled — AI merge temp worktrees are outside worktrunk's managed layout, proceeding with native sweep");
+      }
+
+      const tempRoot = tmpdir();
+      let entries: string[];
+      try {
+        entries = readdirSync(tempRoot).filter((entry) => entry.startsWith("fusion-ai-merge-"));
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        log.warn(`[self-healing] temp-dir sweep: failed to read ${tempRoot}: ${errorMessage}`);
+        return 0;
+      }
+      if (entries.length === 0) return 0;
+
+      const auditor = createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("self-heal", "tempdir-sweep"),
+        agentId: "self-healing",
+        phase: "tempdir-sweep",
+      });
+      const now = Date.now();
+      let cleaned = 0;
+
+      for (const entry of entries) {
+        const path = join(tempRoot, entry);
+        let canonicalPath = path;
+        try {
+          const stat = statSync(path);
+          if (!stat.isDirectory()) {
+            await auditor.git({ type: "worktree:tempdir-sweep", target: path, metadata: { path, success: false, reason: "not-directory" } });
+            continue;
+          }
+          const ageMs = now - stat.mtimeMs;
+          if (ageMs < STALE_TEMP_MERGE_WORKTREE_MS) continue;
+          try {
+            canonicalPath = realpathSync(path);
+          } catch {
+            canonicalPath = path;
+          }
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`[self-healing] temp-dir sweep: failed to stat ${path}: ${errorMessage}`);
+          await auditor.git({ type: "worktree:tempdir-sweep", target: path, metadata: { path, success: false, reason: "stat-failed", error: errorMessage } });
+          continue;
+        }
+
+        if (activeSessionRegistry.isPathActive(canonicalPath) || activeSessionRegistry.isPathActive(path)) {
+          log.log(`[self-healing] temp-dir sweep: deferring ${canonicalPath}: active session present`);
+          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "active-session" } });
+          continue;
+        }
+
+        try {
+          await execAsync(`git worktree remove --force ${shellQuote(canonicalPath)}`, {
+            cwd: this.options.rootDir,
+            timeout: 120_000,
+          });
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`[self-healing] temp-dir sweep: git worktree remove failed for ${canonicalPath}: ${errorMessage} — falling back to filesystem removal`);
+          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "git-remove-failed", error: errorMessage } });
+        }
+
+        try {
+          rmSync(canonicalPath, { recursive: true, force: true });
+          log.log(`[self-healing] temp-dir sweep: cleaned stale AI merge worktree ${canonicalPath}`);
+          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: true, reason: "stale" } });
+          cleaned++;
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`[self-healing] temp-dir sweep: failed to remove ${canonicalPath}: ${errorMessage}`);
+          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "fs-rm-failed", error: errorMessage } });
+        }
+      }
+
+      return cleaned;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`[self-healing] temp-dir sweep failed: ${errorMessage}`);
+      return 0;
+    }
+  }
 
   /**
    * Resolve orphaned `fusion/*` branches.

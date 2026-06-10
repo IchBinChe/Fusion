@@ -87,6 +87,55 @@ async function gitOk(args: string[], cwd: string): Promise<boolean> {
   }
 }
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function getErrorStringProperty(err: unknown, key: "stderr" | "code"): string | undefined {
+  if (!err || typeof err !== "object" || !(key in err)) return undefined;
+  const value = (err as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function describeCleanupError(err: unknown): string {
+  const stderr = getErrorStringProperty(err, "stderr");
+  const message = getErrorMessage(err);
+  return stderr ? `${message}: ${stderr.trim()}` : message;
+}
+
+export async function cleanupAiMergeWorktree(input: {
+  taskId: string;
+  mergeRoot: string;
+  projectRootDir: string;
+  worktreeAdded: boolean;
+  audit: RunAuditor;
+  log: (message: string) => Promise<void>;
+  gitRunner?: typeof git;
+  rmRunner?: typeof rm;
+}): Promise<void> {
+  const { taskId, mergeRoot, projectRootDir, worktreeAdded, audit, log, gitRunner = git, rmRunner = rm } = input;
+  if (worktreeAdded) {
+    try {
+      await gitRunner(["worktree", "remove", "--force", mergeRoot], projectRootDir);
+      await audit.git({ type: "merge:ai-worktree-cleanup", target: mergeRoot, metadata: { taskId, mergeRoot, phase: "git-remove", success: true } });
+    } catch (err: unknown) {
+      const error = describeCleanupError(err);
+      const code = getErrorStringProperty(err, "code");
+      await log(`AI merge cleanup: git worktree remove failed for ${mergeRoot}${code ? ` (${code})` : ""}: ${error}`);
+      await audit.git({ type: "merge:ai-worktree-cleanup", target: mergeRoot, metadata: { taskId, mergeRoot, phase: "git-remove", success: false, error, ...(code ? { code } : {}) } });
+    }
+  }
+  try {
+    await rmRunner(mergeRoot, { recursive: true, force: true });
+    await audit.git({ type: "merge:ai-worktree-cleanup", target: mergeRoot, metadata: { taskId, mergeRoot, phase: "fs-rm", success: true } });
+  } catch (err: unknown) {
+    const error = getErrorMessage(err);
+    const code = getErrorStringProperty(err, "code");
+    await log(`AI merge cleanup: filesystem rm failed for ${mergeRoot}${code ? ` (${code})` : ""}: ${error}`);
+    await audit.git({ type: "merge:ai-worktree-cleanup", target: mergeRoot, metadata: { taskId, mergeRoot, phase: "fs-rm", success: false, error, ...(code ? { code } : {}) } });
+  }
+}
+
 const FUSION_TASK_ID_TRAILER_KEY = "Fusion-Task-Id";
 
 /** Trailers that associate the squash commit with its board task: the
@@ -836,10 +885,7 @@ export async function runAiMerge(
       await log(`AI merge: advanced ${integrationBranch} → ${short(squashSha)} (local checkout: ${landed.localSync})`);
       return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, squashSha, audit, log, { empty: false });
     } finally {
-      if (worktreeAdded) {
-        await gitOk(["worktree", "remove", "--force", mergeRoot], projectRootDir);
-      }
-      await rm(mergeRoot, { recursive: true, force: true }).catch(() => undefined);
+      await cleanupAiMergeWorktree({ taskId, mergeRoot, projectRootDir, worktreeAdded, audit, log });
     }
   }
 }

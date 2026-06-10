@@ -6625,6 +6625,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
             },
           });
           this.enqueueMergeQueue(id, { priority: task.priority, now: internal.now });
+          this.createCompletionHandoffWorkflowWork(task, {
+            runId: internal.runContext?.runId,
+            now: internal.now,
+            source: internal.evidence?.reason,
+          });
           this.insertRunAuditEventRow({
             taskId: id,
             agentId: internal.runContext?.agentId,
@@ -7092,6 +7097,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       if (internal.fromHandoff) {
         alreadyEnqueued = Boolean(this.db.prepare("SELECT 1 FROM mergeQueue WHERE taskId = ?").get(id));
         this.enqueueMergeQueue(id, { priority: task.priority, now: internal.now });
+        this.createCompletionHandoffWorkflowWork(task, {
+          runId: internal.runContext?.runId,
+          now: internal.now,
+          source: internal.evidence?.reason,
+        });
         this.insertRunAuditEventRow({
           taskId: id,
           agentId: internal.runContext?.agentId,
@@ -9005,6 +9015,38 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       });
       return item;
     });
+  }
+
+  createCompletionHandoffWorkflowWork(
+    task: Pick<Task, "id" | "autoMerge" | "priority">,
+    opts: { runId?: string; now?: string; source?: string } = {},
+  ): WorkflowWorkItem {
+    const autoMerge = task.autoMerge !== false;
+    const item = this.upsertWorkflowWorkItem({
+      runId: opts.runId ?? `completion-handoff:${task.id}`,
+      taskId: task.id,
+      nodeId: autoMerge ? "merge-gate" : "merge-manual-hold",
+      kind: autoMerge ? "merge" : "manual-hold",
+      state: autoMerge ? "runnable" : "manual-required",
+      blockedReason: autoMerge ? null : "autoMerge:false",
+      now: opts.now,
+    });
+    this.insertRunAuditEventRow({
+      taskId: task.id,
+      runId: item.runId,
+      domain: "database",
+      mutationType: "workflowWorkItem:completion-handoff",
+      target: item.id,
+      metadata: {
+        taskId: task.id,
+        autoMerge,
+        source: opts.source ?? "completion-handoff",
+        workItemId: item.id,
+        nodeId: item.nodeId,
+        state: item.state,
+      },
+    });
+    return item;
   }
 
   upsertWorkflowWorkItem(input: WorkflowWorkItemUpsertInput): WorkflowWorkItem {

@@ -222,4 +222,54 @@ describe("TaskStore merge request record + completion handoff marker", () => {
       lastError: "cancelled-by-user-hard-cancel",
     });
   });
+
+  it("creates idempotent workflow merge work during completion handoff", async () => {
+    const taskId = await createTask();
+    await store.moveTask(taskId, "todo");
+    await store.moveTask(taskId, "in-progress");
+
+    await store.handoffToReview(taskId, {
+      ownerAgentId: "agent-test",
+      evidence: { reason: "fn_task_done", runId: "run-handoff", agentId: "agent-test" },
+      now: "2026-05-30T00:00:00.000Z",
+    });
+    await store.handoffToReview(taskId, {
+      ownerAgentId: "agent-test",
+      evidence: { reason: "fn_task_done", runId: "run-handoff", agentId: "agent-test" },
+      now: "2026-05-30T00:00:01.000Z",
+    });
+
+    expect(store.listWorkflowWorkItemsForTask(taskId, { kinds: ["merge"] })).toEqual([
+      expect.objectContaining({
+        runId: "run-handoff",
+        taskId,
+        nodeId: "merge-gate",
+        kind: "merge",
+        state: "runnable",
+      }),
+    ]);
+  });
+
+  it("creates manual hold workflow work instead of merge work when autoMerge is false", async () => {
+    const taskId = await createTask();
+    await store.updateTask(taskId, { autoMerge: false });
+    await store.moveTask(taskId, "todo");
+    await store.moveTask(taskId, "in-progress");
+
+    await store.handoffToReview(taskId, {
+      ownerAgentId: "agent-test",
+      evidence: { reason: "fn_task_done", runId: "run-manual", agentId: "agent-test" },
+    });
+
+    expect(store.listWorkflowWorkItemsForTask(taskId)).toEqual([
+      expect.objectContaining({
+        runId: "run-manual",
+        taskId,
+        nodeId: "merge-manual-hold",
+        kind: "manual-hold",
+        state: "manual-required",
+        blockedReason: "autoMerge:false",
+      }),
+    ]);
+  });
 });

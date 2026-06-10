@@ -100,7 +100,7 @@ describe("useModalManager", () => {
     expect(result.current.planningResumeSessionId).toBe("plan-1");
   });
 
-  it("keeps script-to-terminal handoff inside runScript", async () => {
+  it("runScript sets terminalInitialCommand and opens the terminal modal", async () => {
     const { result } = renderHook(() =>
       useModalManager({ projectId: "proj_1", planningSessions: [] }),
     );
@@ -109,6 +109,8 @@ describe("useModalManager", () => {
       result.current.openScripts();
     });
     expect(result.current.scriptsOpen).toBe(true);
+    expect(result.current.terminalOpen).toBe(false);
+    expect(result.current.terminalInitialCommand).toBeUndefined();
 
     await act(async () => {
       await result.current.runScript("build", "pnpm build");

@@ -45,20 +45,26 @@ const mockTerminalInstance = {
 };
 
 vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn(() => mockTerminalInstance),
+  Terminal: vi.fn(function TerminalMock() {
+    return mockTerminalInstance;
+  }),
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: vi.fn(() => ({
-    fit: mockFitAddonFit,
-    dispose: vi.fn(),
-  })),
+  FitAddon: vi.fn(function FitAddonMock() {
+    return {
+      fit: mockFitAddonFit,
+      dispose: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock("@xterm/addon-web-links", () => ({
-  WebLinksAddon: vi.fn(() => ({
-    dispose: vi.fn(),
-  })),
+  WebLinksAddon: vi.fn(function WebLinksAddonMock() {
+    return {
+      dispose: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock("@xterm/addon-webgl", () => {
@@ -128,7 +134,24 @@ describe("TerminalModal", () => {
     ...overrides,
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    const xtermModule = await import("@xterm/xterm");
+    const fitAddonModule = await import("@xterm/addon-fit");
+    const webLinksAddonModule = await import("@xterm/addon-web-links");
+    vi.mocked(xtermModule.Terminal).mockImplementation(function TerminalMock() {
+      return mockTerminalInstance;
+    } as never);
+    vi.mocked(fitAddonModule.FitAddon).mockImplementation(function FitAddonMock() {
+      return {
+        fit: mockFitAddonFit,
+        dispose: vi.fn(),
+      };
+    } as never);
+    vi.mocked(webLinksAddonModule.WebLinksAddon).mockImplementation(function WebLinksAddonMock() {
+      return {
+        dispose: vi.fn(),
+      };
+    } as never);
     vi.clearAllMocks();
     terminalKeyEventHandler = null;
     mockFitAddonFit.mockClear();
@@ -155,6 +178,7 @@ describe("TerminalModal", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -924,16 +948,22 @@ describe("TerminalModal", () => {
       });
     }
 
-    it("sends initialCommand to terminal when connected", async () => {
+    it("sends initialCommand to the existing auto-created terminal on first open", async () => {
       vi.useFakeTimers();
+      const mockCreateTab = vi.fn();
       mockUseTerminal.mockReturnValue(
         createMockTerminalState({ connectionStatus: "connected" })
       );
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        createTab: mockCreateTab,
+      });
 
       try {
         render(<TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />);
 
         await flushInitialCommandDelay();
+        expect(mockCreateTab).not.toHaveBeenCalled();
         expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
       } finally {
         vi.useRealTimers();
@@ -970,11 +1000,74 @@ describe("TerminalModal", () => {
       }
     });
 
-    it("sends a new initialCommand when it changes while terminal is open", async () => {
+    it("creates a new tab before sending an initialCommand that arrives while terminal is already open", async () => {
       vi.useFakeTimers();
+      const scriptTab = {
+        id: "tab-script",
+        sessionId: "script-session-456",
+        title: "Terminal 2",
+        isActive: true,
+        createdAt: Date.now(),
+      };
+      const mockCreateTab = vi.fn().mockResolvedValue(scriptTab);
       mockUseTerminal.mockReturnValue(
         createMockTerminalState({ connectionStatus: "connected" })
       );
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        createTab: mockCreateTab,
+      });
+
+      try {
+        const { rerender } = render(
+          <TerminalModal isOpen={true} onClose={mockOnClose} />
+        );
+
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" />
+        );
+
+        await act(async () => {});
+        expect(mockCreateTab).toHaveBeenCalledTimes(1);
+        expect(mockSendInput).not.toHaveBeenCalledWith("pnpm test\n");
+
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, scriptTab],
+          activeTab: scriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" />
+        );
+
+        await flushInitialCommandDelay();
+        expect(mockSendInput).toHaveBeenCalledWith("pnpm test\n");
+        expect(mockCreateTab.mock.invocationCallOrder[0]).toBeLessThan(
+          mockSendInput.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("creates a new tab before sending a changed initialCommand while terminal remains open", async () => {
+      vi.useFakeTimers();
+      const scriptTab = {
+        id: "tab-script",
+        sessionId: "script-session-456",
+        title: "Terminal 2",
+        isActive: true,
+        createdAt: Date.now(),
+      };
+      const mockCreateTab = vi.fn().mockResolvedValue(scriptTab);
+      mockUseTerminal.mockReturnValue(
+        createMockTerminalState({ connectionStatus: "connected" })
+      );
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        createTab: mockCreateTab,
+      });
 
       try {
         const { rerender } = render(
@@ -984,7 +1077,20 @@ describe("TerminalModal", () => {
         await flushInitialCommandDelay();
         expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
 
-        // Change the command (e.g., user runs a different script)
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" />
+        );
+
+        await act(async () => {});
+        expect(mockCreateTab).toHaveBeenCalledTimes(1);
+        expect(mockSendInput).not.toHaveBeenCalledWith("pnpm test\n");
+
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, scriptTab],
+          activeTab: scriptTab,
+          createTab: mockCreateTab,
+        });
         rerender(
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" />
         );
@@ -1038,7 +1144,7 @@ describe("TerminalModal", () => {
 
       // Replace Terminal constructor with one that throws
       const throwingModule = await import("@xterm/xterm");
-      (throwingModule as any).Terminal = vi.fn().mockImplementation(() => {
+      (throwingModule as any).Terminal = vi.fn(function ThrowingTerminalMock() {
         throw new Error("xterm constructor failed");
       });
 
@@ -1069,7 +1175,7 @@ describe("TerminalModal", () => {
       const OrigTerminal = throwingModule.Terminal;
 
       let callCount = 0;
-      (throwingModule as any).Terminal = vi.fn().mockImplementation(() => {
+      (throwingModule as any).Terminal = vi.fn(function ReinitializingTerminalMock() {
         callCount++;
         if (callCount === 1) {
           throw new Error("first init fails");
@@ -1119,7 +1225,7 @@ describe("TerminalModal", () => {
         const xtermModule = await import("@xterm/xterm");
         const OrigTerminal = xtermModule.Terminal;
 
-        (xtermModule as any).Terminal = vi.fn().mockImplementation(() => {
+        (xtermModule as any).Terminal = vi.fn(function ThrowingTerminalMock() {
           throw new Error("xterm constructor failed");
         });
 
@@ -1161,7 +1267,7 @@ describe("TerminalModal", () => {
 
       // Simulate the timeout error by making Terminal constructor throw
       // with the exact timeout message the watchdog would produce
-      (xtermModule as any).Terminal = vi.fn().mockImplementation(() => {
+      (xtermModule as any).Terminal = vi.fn(function TimeoutTerminalMock() {
         throw new Error("xterm initialization timed out");
       });
 
@@ -1203,7 +1309,7 @@ describe("TerminalModal", () => {
       const throwingModule = await import("@xterm/xterm");
       const OrigTerminal = throwingModule.Terminal;
 
-      (throwingModule as any).Terminal = vi.fn().mockImplementation(() => {
+      (throwingModule as any).Terminal = vi.fn(function ThrowingTerminalMock() {
         throw new Error("xterm constructor failed");
       });
 
@@ -1248,10 +1354,12 @@ describe("TerminalModal", () => {
 
       // Mock WebGL addon to track if it's loaded
       vi.mock("@xterm/addon-webgl", () => ({
-        WebglAddon: vi.fn(() => ({
-          onContextLoss: vi.fn(),
-          dispose: vi.fn(),
-        })),
+        WebglAddon: vi.fn(function WebglAddonMock() {
+          return {
+            onContextLoss: vi.fn(),
+            dispose: vi.fn(),
+          };
+        }),
       }));
     });
 

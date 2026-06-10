@@ -251,6 +251,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const [fontSize, setFontSize] = useState<number>(() => readInitialTerminalFontSize());
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [stickyModifier, setStickyModifier] = useState<null | "ctrl" | "alt">(null);
+  const [pendingInitialCommandGeneration, setPendingInitialCommandGeneration] = useState(0);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -259,6 +260,10 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<ITerminalAddon | null>(null);
   const hasInitialCommandRun = useRef<string | false>(false);
+  const initialCommandAtOpenRef = useRef<string | null>(null);
+  const latestInitialCommandRef = useRef<string | undefined>(initialCommand);
+  const pendingInitialCommandRef = useRef<{ command: string; sessionId: string } | null>(null);
+  const creatingInitialCommandTabRef = useRef(false);
   const xtermInitializedRef = useRef<string | false>(false);
   const resizeRef = useRef<((cols: number, rows: number) => void) | null>(null);
   // Latest sendInput, kept in a ref so the xterm.onData listener bound at
@@ -280,6 +285,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // current mobile keyboard state without forcing the init effect to re-run.
   keyboardOverlapRef.current = keyboardOverlap;
   fontSizeRef.current = fontSize;
+  latestInitialCommandRef.current = initialCommand;
 
   /**
    * Fit xterm and publish cols/rows for a specific terminal session.
@@ -321,6 +327,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // effect re-evaluates after a close/reopen cycle (deps may be identical).
   useEffect(() => {
     if (isOpen) {
+      initialCommandAtOpenRef.current = latestInitialCommandRef.current ?? null;
       setOpenGeneration((g) => g + 1);
     }
   }, [isOpen]);
@@ -769,6 +776,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     setXtermReady(false);
     setXtermInitError(null);
     hasInitialCommandRun.current = false;
+    initialCommandAtOpenRef.current = null;
+    pendingInitialCommandRef.current = null;
+    creatingInitialCommandTabRef.current = false;
     setError(null);
     setExitCode(null);
     setShowShortcuts(false);
@@ -826,16 +836,76 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // Tracks the last command that was sent so that a new command provided
   // while the terminal is already open (e.g., running a different script)
   // will be executed immediately without requiring a modal close/reopen.
+  // Commands provided with a fresh modal open use the auto-created active tab;
+  // later commands create a new tab first so an existing terminal is not
+  // interrupted or overwritten by script output.
   // Depends on openGeneration so the command re-fires after close/reopen.
   useEffect(() => {
-    if (connectionStatus === "connected" && initialCommand && hasInitialCommandRun.current !== initialCommand && activeTab) {
-      hasInitialCommandRun.current = initialCommand;
-      // Small delay to let shell initialize
-      setTimeout(() => {
-        sendInput(initialCommand + "\n");
-      }, 500);
+    if (connectionStatus !== "connected" || !initialCommand || !activeTab) {
+      return;
     }
-  }, [connectionStatus, initialCommand, sendInput, activeTab, openGeneration]);
+
+    if (hasInitialCommandRun.current === initialCommand) {
+      return;
+    }
+
+    const pendingCommand = pendingInitialCommandRef.current;
+    if (pendingCommand?.command === initialCommand || creatingInitialCommandTabRef.current) {
+      return;
+    }
+
+    hasInitialCommandRun.current = initialCommand;
+
+    const commandArrivedWithThisOpen =
+      hasInitialCommandRun.current === initialCommand &&
+      initialCommandAtOpenRef.current === initialCommand;
+
+    if (commandArrivedWithThisOpen) {
+      setTimeout(() => {
+        sendInputRef.current(initialCommand + "\n");
+      }, 500);
+      return;
+    }
+
+    creatingInitialCommandTabRef.current = true;
+    void createTab()
+      .then((newTab) => {
+        pendingInitialCommandRef.current = {
+          command: initialCommand,
+          sessionId: newTab.sessionId,
+        };
+        setPendingInitialCommandGeneration((generation) => generation + 1);
+      })
+      .catch((err) => {
+        const message = getErrorMessage(err);
+        setError(t("terminal.createScriptTabError", "Failed to create terminal tab for script: {{message}}", { message }));
+        if (hasInitialCommandRun.current === initialCommand) {
+          hasInitialCommandRun.current = false;
+        }
+      })
+      .finally(() => {
+        creatingInitialCommandTabRef.current = false;
+      });
+  }, [connectionStatus, initialCommand, activeTab, createTab, openGeneration, t]);
+
+  useEffect(() => {
+    const pendingCommand = pendingInitialCommandRef.current;
+    if (
+      connectionStatus !== "connected" ||
+      !activeTab ||
+      !pendingCommand ||
+      pendingCommand.sessionId !== activeTab.sessionId
+    ) {
+      return;
+    }
+
+    pendingInitialCommandRef.current = null;
+    const timeout = setTimeout(() => {
+      sendInputRef.current(pendingCommand.command + "\n");
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [connectionStatus, activeTab?.sessionId, pendingInitialCommandGeneration]);
 
   useEffect(() => {
     if (!xtermReady || !xtermRef.current) {

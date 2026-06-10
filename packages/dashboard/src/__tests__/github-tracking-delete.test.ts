@@ -234,6 +234,8 @@ describe("github tracking delete flow", () => {
       createdAt: new Date().toISOString(),
     });
 
+    await store.moveTask(task.id, "todo");
+    await store.moveTask(task.id, "in-progress");
     await store.moveTask(task.id, "done");
     mockSetIssueState.mockClear();
     mockGetIssue.mockResolvedValue({ state: "closed" });

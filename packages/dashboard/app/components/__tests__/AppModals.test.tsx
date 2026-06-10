@@ -558,10 +558,13 @@ describe("AppModals", () => {
       expect(mockSystemStatsModalProps).toHaveBeenCalledWith(
         expect.objectContaining({
           isOpen: true,
-          onClose: closeSystemStats,
+          onClose: expect.any(Function),
           projectId: "proj-system",
         }),
       );
+
+      mockSystemStatsModalProps.mock.calls[0][0].onClose();
+      expect(closeSystemStats).toHaveBeenCalledTimes(1);
     });
   });
 

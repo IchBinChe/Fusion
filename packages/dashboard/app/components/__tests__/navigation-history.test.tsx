@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import type { Settings } from "@fusion/core";
+import type { Settings, Task } from "@fusion/core";
 import type { ProjectInfo } from "../../api";
 import { scopedKey } from "../../utils/projectStorage";
 
@@ -142,6 +142,18 @@ vi.mock("../../components/model-onboarding-state", () => ({
   getSkippedSteps: () => [],
   getStepData: () => null,
   ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+}));
+
+vi.mock("../../components/Board", () => ({
+  Board: ({ tasks, onOpenDetail }: { tasks: Task[]; onOpenDetail: (task: Task) => void }) => (
+    <div data-testid="board-view">
+      {tasks.map((task) => (
+        <button key={task.id} type="button" data-testid={`open-task-${task.id}`} onClick={() => onOpenDetail(task)}>
+          {task.title}
+        </button>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("../../components/TaskDetailModal", () => ({
@@ -305,6 +317,18 @@ vi.mock("../../hooks/useMobileKeyboard", () => ({
 
 import { App } from "../../App";
 
+function makeTask(id: string, title: string): Task {
+  return {
+    id,
+    title,
+    description: "Test task description",
+    column: "todo",
+    status: "todo",
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  } as Task;
+}
+
 function dispatchPopState(state: Record<string, unknown> | null) {
   act(() => {
     window.dispatchEvent(new PopStateEvent("popstate", { state }));
@@ -376,6 +400,14 @@ describe("Navigation history integration", () => {
     const result = render(<App />);
     await waitFor(() => {
       expect(screen.getByTitle("Settings")).toBeTruthy();
+    });
+    return result;
+  }
+
+  async function renderMobileAppAndWait() {
+    const result = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId("board-view")).toBeTruthy();
     });
     return result;
   }
@@ -478,6 +510,85 @@ describe("Navigation history integration", () => {
     // Agents view should be reverted (board view shown instead)
     await waitFor(() => {
       expect(screen.queryByTestId("agents-view")).toBeNull();
+    });
+  });
+
+  it("dismisses task detail on mobile popstate after a normal open", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    const task = makeTask("FN-1", "Mobile Swipe Detail");
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [task],
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+    }));
+
+    await renderMobileAppAndWait();
+
+    fireEvent.click(screen.getByTestId("open-task-FN-1"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-detail-modal")).toBeTruthy();
+    });
+
+    dispatchPopState({ navIndex: 0 });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("task-detail-modal")).toBeNull();
+    });
+  });
+
+  it("dismisses task detail on mobile popstate after close and reopen", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    const task = makeTask("FN-1", "Mobile Swipe Detail");
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [task],
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+    }));
+
+    await renderMobileAppAndWait();
+
+    fireEvent.click(screen.getByTestId("open-task-FN-1"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-detail-modal")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    // removeNav drives history.back(); consume the self-triggered popstate
+    // before reopening so the next popstate represents the user's swipe-back.
+    dispatchPopState({ navIndex: 0 });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("task-detail-modal")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByTestId("open-task-FN-1"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-detail-modal")).toBeTruthy();
+    });
+
+    dispatchPopState({ navIndex: 0 });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("task-detail-modal")).toBeNull();
     });
   });
 

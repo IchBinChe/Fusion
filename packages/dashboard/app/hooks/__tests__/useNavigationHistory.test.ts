@@ -11,25 +11,30 @@ import {
 describe("useNavigationHistory", () => {
   const originalPushState = window.history.pushState;
   const originalReplaceState = window.history.replaceState;
+  const originalBack = window.history.back;
 
   let pushStateSpy: ReturnType<typeof vi.fn>;
   let replaceStateSpy: ReturnType<typeof vi.fn>;
+  let backSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     pushStateSpy = vi.fn();
     replaceStateSpy = vi.fn();
+    backSpy = vi.fn();
     // Use real replaceState for setup so history.state is actually set,
     // then install spies for assertions.
     window.history.replaceState = originalReplaceState;
     window.history.replaceState({}, "");
     window.history.pushState = pushStateSpy;
     window.history.replaceState = replaceStateSpy;
+    window.history.back = backSpy;
   });
 
   afterEach(() => {
     window.history.pushState = originalPushState;
     window.history.replaceState = originalReplaceState;
+    window.history.back = originalBack;
   });
 
   function renderHookWithHistory(enabled = true) {
@@ -126,6 +131,98 @@ describe("useNavigationHistory", () => {
     expect(close3).toHaveBeenCalledTimes(1);
     expect(close2).not.toHaveBeenCalled();
     expect(close1).not.toHaveBeenCalled();
+  });
+
+  it("removeNav removes a matching entry and calls history.back", () => {
+    const close = vi.fn();
+    const { result } = renderHookWithHistory();
+
+    act(() => {
+      result.current.pushNav({ type: "modal", close });
+    });
+
+    act(() => {
+      result.current.removeNav(close);
+    });
+
+    expect(backSpy).toHaveBeenCalledTimes(1);
+
+    dispatchPopState({ navIndex: 0 });
+
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("consumes the self-triggered popstate after removeNav without invoking callbacks", () => {
+    const close = vi.fn();
+    const revert = vi.fn();
+    const { result } = renderHookWithHistory();
+
+    act(() => {
+      result.current.pushNav({ type: "modal", close });
+      result.current.pushNav({ type: "view", revert });
+      result.current.removeNav(revert);
+    });
+
+    dispatchPopState({ navIndex: 1 });
+
+    expect(revert).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("allows reopening with the same callback after removeNav", () => {
+    const close = vi.fn();
+    const { result } = renderHookWithHistory();
+
+    act(() => {
+      result.current.pushNav({ type: "modal", close });
+      result.current.removeNav(close);
+    });
+
+    dispatchPopState({ navIndex: 0 });
+
+    act(() => {
+      result.current.pushNav({ type: "modal", close });
+    });
+
+    expect(pushStateSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps stack order consistent after removing the top entry", () => {
+    const close1 = vi.fn();
+    const close2 = vi.fn();
+    const close3 = vi.fn();
+    const { result } = renderHookWithHistory();
+
+    act(() => {
+      result.current.pushNav({ type: "modal", close: close1 });
+      result.current.pushNav({ type: "modal", close: close2 });
+      result.current.pushNav({ type: "modal", close: close3 });
+      result.current.removeNav(close3);
+    });
+
+    dispatchPopState({ navIndex: 2 });
+    dispatchPopState({ navIndex: 1 });
+
+    expect(close3).not.toHaveBeenCalled();
+    expect(close2).toHaveBeenCalledTimes(1);
+    expect(close1).not.toHaveBeenCalled();
+  });
+
+  it("removeNav is a no-op when the callback is not on the stack", () => {
+    const close = vi.fn();
+    const absent = vi.fn();
+    const { result } = renderHookWithHistory();
+
+    act(() => {
+      result.current.pushNav({ type: "modal", close });
+      result.current.removeNav(absent);
+    });
+
+    expect(backSpy).not.toHaveBeenCalled();
+
+    dispatchPopState({ navIndex: 0 });
+
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   // 5. replaceCurrent updates the top entry
@@ -325,6 +422,7 @@ describe("useNavigationHistory", () => {
     const value: UseNavigationHistoryResult = {
       pushNav: vi.fn(),
       replaceCurrent: vi.fn(),
+      removeNav: vi.fn(),
     };
 
     const wrapper = ({ children }: { children: ReactNode }) =>

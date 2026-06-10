@@ -381,7 +381,7 @@ function AppInner() {
   const isMobile = viewportMode === "mobile";
 
   // Navigation history for browser back button (desktop + mobile).
-  const { pushNav, replaceCurrent } = useNavigationHistory({ enabled: true });
+  const { pushNav, replaceCurrent, removeNav } = useNavigationHistory({ enabled: true });
 
   // View state must be defined before useTasks since useTasks depends on taskView for SSE gating
   const { viewMode, setViewMode, taskView, handleChangeTaskView } = useViewState({
@@ -755,6 +755,9 @@ function AppInner() {
 
   // Nodes management is an overlay view (not a modal), so it stays local to App.
   const [nodesOpen, setNodesOpen] = useState(false);
+  const closeNodes = useCallback(() => {
+    setNodesOpen(false);
+  }, []);
   const [retryingProjects, setRetryingProjects] = useState(false);
   const [missionResumeSessionId, setMissionResumeSessionId] = useState<string | undefined>(undefined);
   const [missionTargetId, setMissionTargetId] = useState<string | undefined>(undefined);
@@ -953,6 +956,11 @@ function AppInner() {
     void refreshAppSettings();
   }, [modalManager, refreshAppSettings]);
 
+  const handleSettingsCloseWithNav = useCallback(() => {
+    removeNav(handleSettingsClose);
+    handleSettingsClose();
+  }, [handleSettingsClose, removeNav]);
+
   // Redirect to board if feature-gated views are disabled.
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -990,9 +998,10 @@ function AppInner() {
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
     if (nodesOpen && !nodesEnabled) {
-      setNodesOpen(false);
+      removeNav(closeNodes);
+      closeNodes();
     }
-  }, [nodesOpen, nodesEnabled]);
+  }, [closeNodes, nodesOpen, nodesEnabled, removeNav]);
   const {
     availableModels,
     favoriteProviders,
@@ -1133,16 +1142,21 @@ function AppInner() {
     setNodesOpen((prev) => !prev);
   }, [nodesEnabled]);
 
+  const closeNodesWithNav = useCallback(() => {
+    removeNav(closeNodes);
+    closeNodes();
+  }, [closeNodes, removeNav]);
+
   // History-aware nodes toggle — pushes nav entry only when opening
   const handleOpenNodesWithNav = useCallback(() => {
     if (!nodesEnabled) return;
     if (!nodesOpen) {
       setNodesOpen(true);
-      pushNav({ type: "view", revert: () => setNodesOpen(false) });
+      pushNav({ type: "view", revert: closeNodes });
     } else {
-      setNodesOpen(false);
+      closeNodesWithNav();
     }
-  }, [nodesEnabled, nodesOpen, pushNav]);
+  }, [closeNodes, closeNodesWithNav, nodesEnabled, nodesOpen, pushNav]);
 
   // History-aware modal open handlers — push nav entries for back-navigation.
   const openDetailTask = useCallback((task: Task | TaskDetail, tab?: Parameters<typeof modalManager.openDetailTask>[1], opts?: { origin?: DetailTaskOrigin }) => {
@@ -1195,9 +1209,10 @@ function AppInner() {
       modalManager.toggleTerminal();
       pushNav({ type: "modal", close: modalManager.closeTerminal });
     } else {
+      removeNav(modalManager.closeTerminal);
       modalManager.toggleTerminal();
     }
-  }, [modalManager, pushNav]);
+  }, [modalManager, pushNav, removeNav]);
 
   const openFilesWithNav = useCallback((workspace?: string, initialFile?: string | null) => {
     modalManager.openFiles(workspace, initialFile);
@@ -1408,7 +1423,7 @@ function AppInner() {
         <div className="nodes-management-overlay">
           <PageErrorBoundary>
             <Suspense fallback={null}>
-              <NodesView addToast={addToast} onClose={() => setNodesOpen(false)} />
+              <NodesView addToast={addToast} onClose={closeNodesWithNav} />
             </Suspense>
           </PageErrorBoundary>
         </div>
@@ -1804,7 +1819,7 @@ function AppInner() {
   const isRevalidating = projectsLoading || currentProjectLoading || isStale;
 
   return (
-    <NavigationHistoryProvider value={{ pushNav, replaceCurrent }}>
+    <NavigationHistoryProvider value={{ pushNav, replaceCurrent, removeNav }}>
       <FileBrowserProvider openFile={openFileInBrowser}>
         <RetryWarningProvider value={maxTotalRetriesBeforeFail * RETRY_WARNING_RATIO}>
         {isFirstEverBoot ? (
@@ -2108,7 +2123,7 @@ function AppInner() {
         taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, retryTask, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}
         settings={{ prAuthAvailable, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
-        onSettingsClose={handleSettingsClose}
+        onSettingsClose={handleSettingsCloseWithNav}
         onReopenOnboarding={reopenOnboardingWithNav}
         onOpenApprovals={(_approvalId) => handleTaskViewChange("mailbox")}
       />

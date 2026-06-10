@@ -33,7 +33,14 @@ export interface UseNavigationHistoryResult {
   pushNav: (entry: NavEntry) => void;
   /** Replace the top-of-stack entry and call history.replaceState. */
   replaceCurrent: (entry: NavEntry) => void;
+  /**
+   * Remove a programmatically-dismissed entry and call history.back so the
+   * browser history entry created by pushNav is consumed as well.
+   */
+  removeNav: (closeOrRevert: () => void) => void;
 }
+
+const SELF_POP_FALLBACK_CLEAR_MS = 1_000;
 
 export const NavigationHistoryContext = createContext<UseNavigationHistoryResult | null>(null);
 
@@ -75,6 +82,12 @@ export function useNavigationHistory(
   // resulting state change (e.g. `setDetailTask(null)`) must NOT re-push a
   // history entry. pushNav checks this flag and skips if true.
   const isPoppingRef = useRef(false);
+
+  // Guard flag: removeNav calls history.back() to consume the matching browser
+  // history entry after the UI has already closed. The resulting popstate must
+  // be ignored so callbacks are not invoked twice.
+  const selfPopRef = useRef(false);
+  const selfPopClearTimerRef = useRef<number | null>(null);
 
   // Keep enabled in a ref so the popstate handler can read the current value
   // without needing to be re-registered on every change.
@@ -128,6 +141,33 @@ export function useNavigationHistory(
     [], // stable — reads from refs
   );
 
+  const removeNav = useCallback(
+    (closeOrRevert: () => void) => {
+      if (!enabledRef.current) return;
+
+      for (let i = stackRef.current.length - 1; i >= 0; i -= 1) {
+        const entry = stackRef.current[i];
+        const callback = entry.type === "modal" ? entry.close : entry.revert;
+        if (callback !== closeOrRevert) continue;
+
+        stackRef.current.splice(i, 1);
+        selfPopRef.current = true;
+
+        if (selfPopClearTimerRef.current !== null) {
+          window.clearTimeout(selfPopClearTimerRef.current);
+        }
+        selfPopClearTimerRef.current = window.setTimeout(() => {
+          selfPopRef.current = false;
+          selfPopClearTimerRef.current = null;
+        }, SELF_POP_FALLBACK_CLEAR_MS);
+
+        window.history.back();
+        return;
+      }
+    },
+    [], // stable — reads from refs
+  );
+
   // Register popstate listener. Always registers in browser environments but
   // the handler checks enabledRef.current to skip when disabled (desktop).
   useEffect(() => {
@@ -135,6 +175,15 @@ export function useNavigationHistory(
 
     const handlePopState = (event: PopStateEvent) => {
       if (!enabledRef.current) return;
+
+      if (selfPopRef.current) {
+        selfPopRef.current = false;
+        if (selfPopClearTimerRef.current !== null) {
+          window.clearTimeout(selfPopClearTimerRef.current);
+          selfPopClearTimerRef.current = null;
+        }
+        return;
+      }
 
       const targetIndex = event.state?.navIndex ?? 0;
       const currentLength = stackRef.current.length;
@@ -168,8 +217,12 @@ export function useNavigationHistory(
     window.addEventListener("popstate", handlePopState);
     return () => {
       window.removeEventListener("popstate", handlePopState);
+      if (selfPopClearTimerRef.current !== null) {
+        window.clearTimeout(selfPopClearTimerRef.current);
+        selfPopClearTimerRef.current = null;
+      }
     };
   }, []);
 
-  return { pushNav, replaceCurrent };
+  return { pushNav, replaceCurrent, removeNav };
 }

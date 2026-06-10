@@ -106,7 +106,7 @@ export function AppModals({
   onReopenOnboarding,
   onOpenApprovals,
 }: AppModalsProps) {
-  const { pushNav } = useNavigationHistoryContext();
+  const { pushNav, removeNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
   const detailTask = modalManager.detailTask
     ? (() => {
@@ -130,6 +130,101 @@ export function AppModals({
 
   // Use the override handler if provided, otherwise fall back to modalManager.closeSettings
   const handleSettingsClose = onSettingsClose ?? modalManager.closeSettings;
+
+  const closeDetailWithNav = useCallback(() => {
+    removeNav(modalManager.closeDetailTask);
+    deepLink.handleDetailClose();
+  }, [deepLink, modalManager.closeDetailTask, removeNav]);
+
+  const closeGroupWithNav = useCallback(() => {
+    removeNav(modalManager.closeGroupModal);
+    modalManager.closeGroupModal();
+  }, [modalManager.closeGroupModal, removeNav]);
+
+  const closeSettingsWithNav = useCallback(() => {
+    removeNav(handleSettingsClose);
+    handleSettingsClose();
+  }, [handleSettingsClose, removeNav]);
+
+  const closeGitHubImportWithNav = useCallback(() => {
+    removeNav(modalManager.closeGitHubImport);
+    modalManager.closeGitHubImport();
+  }, [modalManager.closeGitHubImport, removeNav]);
+
+  const closePlanningWithNav = useCallback(() => {
+    removeNav(modalManager.closePlanning);
+    modalManager.closePlanning();
+  }, [modalManager.closePlanning, removeNav]);
+
+  const closeSubtaskWithNav = useCallback(() => {
+    removeNav(modalManager.closeSubtask);
+    modalManager.closeSubtask();
+  }, [modalManager.closeSubtask, removeNav]);
+
+  const closeTerminalWithNav = useCallback(() => {
+    removeNav(modalManager.closeTerminal);
+    modalManager.closeTerminal();
+  }, [modalManager.closeTerminal, removeNav]);
+
+  const closeScriptsWithNav = useCallback(() => {
+    removeNav(modalManager.closeScripts);
+    modalManager.closeScripts();
+  }, [modalManager.closeScripts, removeNav]);
+
+  const closeFilesWithNav = useCallback(() => {
+    removeNav(modalManager.closeFiles);
+    modalManager.closeFiles();
+  }, [modalManager.closeFiles, removeNav]);
+
+  const closeTodosWithNav = useCallback(() => {
+    removeNav(modalManager.closeTodos);
+    modalManager.closeTodos();
+  }, [modalManager.closeTodos, removeNav]);
+
+  const closeUsageWithNav = useCallback(() => {
+    removeNav(modalManager.closeUsage);
+    modalManager.closeUsage();
+  }, [modalManager.closeUsage, removeNav]);
+
+  const closeSystemStatsWithNav = useCallback(() => {
+    removeNav(modalManager.closeSystemStats);
+    modalManager.closeSystemStats();
+  }, [modalManager.closeSystemStats, removeNav]);
+
+  const closeSchedulesWithNav = useCallback(() => {
+    removeNav(modalManager.closeSchedules);
+    modalManager.closeSchedules();
+  }, [modalManager.closeSchedules, removeNav]);
+
+  const closeNewTaskWithNav = useCallback(() => {
+    removeNav(modalManager.closeNewTask);
+    modalManager.closeNewTask();
+  }, [modalManager.closeNewTask, removeNav]);
+
+  const closeActivityLogWithNav = useCallback(() => {
+    removeNav(modalManager.closeActivityLog);
+    modalManager.closeActivityLog();
+  }, [modalManager.closeActivityLog, removeNav]);
+
+  const closeGitManagerWithNav = useCallback(() => {
+    removeNav(modalManager.closeGitManager);
+    modalManager.closeGitManager();
+  }, [modalManager.closeGitManager, removeNav]);
+
+  const closeWorkflowEditorWithNav = useCallback(() => {
+    removeNav(modalManager.closeWorkflowEditor);
+    modalManager.closeWorkflowEditor();
+  }, [modalManager.closeWorkflowEditor, removeNav]);
+
+  const closeAgentsWithNav = useCallback(() => {
+    removeNav(modalManager.closeAgents);
+    modalManager.closeAgents();
+  }, [modalManager.closeAgents, removeNav]);
+
+  const closeSetupWizardWithNav = useCallback(() => {
+    removeNav(modalManager.closeSetupWizard);
+    modalManager.closeSetupWizard();
+  }, [modalManager.closeSetupWizard, removeNav]);
 
   const handleOpenNewTask = useCallback(() => {
     modalManager.openNewTask();
@@ -190,7 +285,7 @@ export function AppModals({
             task={detailTask}
             projectId={projectId}
             tasks={tasks}
-            onClose={deepLink.handleDetailClose}
+            onClose={closeDetailWithNav}
             onOpenDetail={openDetailTaskWithNav}
             mobileHeaderMode={modalManager.detailTaskOrigin === "list-mobile" ? "back" : "close"}
             onMoveTask={taskOperations.moveTask}
@@ -213,7 +308,7 @@ export function AppModals({
         <ModalErrorBoundary>
           <GroupTaskModal
             isOpen={Boolean(modalManager.groupModalGroupId)}
-            onClose={modalManager.closeGroupModal}
+            onClose={closeGroupWithNav}
             groupId={modalManager.groupModalGroupId}
             projectId={projectId}
             onOpenMemberTask={(taskId) => {
@@ -230,7 +325,7 @@ export function AppModals({
         <ModalErrorBoundary>
           <Suspense fallback={null}>
             <SettingsModal
-              onClose={handleSettingsClose}
+              onClose={closeSettingsWithNav}
               addToast={addToast}
               initialSection={modalManager.settingsInitialSection}
               projectId={projectId}
@@ -243,7 +338,7 @@ export function AppModals({
               onReopenOnboarding={onReopenOnboarding}
               onOpenApprovals={onOpenApprovals}
               onOpenWorkflowSettings={() => {
-                handleSettingsClose();
+                closeSettingsWithNav();
                 modalManager.openWorkflowEditor("settings");
               }}
             />
@@ -253,7 +348,7 @@ export function AppModals({
 
       <GitHubImportModal
         isOpen={modalManager.githubImportOpen}
-        onClose={modalManager.closeGitHubImport}
+        onClose={closeGitHubImportWithNav}
         onImport={taskHandlers.handleGitHubImport}
         tasks={tasks}
         projectId={projectId}
@@ -262,7 +357,7 @@ export function AppModals({
       <ModalErrorBoundary>
         <PlanningModeModal
           isOpen={modalManager.isPlanningOpen}
-          onClose={modalManager.closePlanning}
+          onClose={closePlanningWithNav}
           onTaskCreated={taskHandlers.handlePlanningTaskCreated}
           onTasksCreated={taskHandlers.handlePlanningTasksCreated}
           tasks={tasks}
@@ -275,7 +370,7 @@ export function AppModals({
       <ModalErrorBoundary>
         <SubtaskBreakdownModal
           isOpen={modalManager.isSubtaskOpen}
-          onClose={modalManager.closeSubtask}
+          onClose={closeSubtaskWithNav}
           initialDescription={modalManager.subtaskInitialDescription ?? ""}
           onTasksCreated={taskHandlers.handleSubtaskTasksCreated}
           projectId={projectId}
@@ -286,14 +381,14 @@ export function AppModals({
 
       <TerminalModal
         isOpen={modalManager.terminalOpen}
-        onClose={modalManager.closeTerminal}
+        onClose={closeTerminalWithNav}
         initialCommand={modalManager.terminalInitialCommand}
         projectId={projectId}
       />
 
       <ScriptsModal
         isOpen={modalManager.scriptsOpen}
-        onClose={modalManager.closeScripts}
+        onClose={closeScriptsWithNav}
         addToast={addToast}
         onRunScript={modalManager.runScript}
         projectId={projectId}
@@ -304,7 +399,7 @@ export function AppModals({
           initialWorkspace={modalManager.fileBrowserWorkspace}
           initialFile={modalManager.fileBrowserInitialFile}
           isOpen={true}
-          onClose={modalManager.closeFiles}
+          onClose={closeFilesWithNav}
           onWorkspaceChange={modalManager.setFileWorkspace}
           projectId={projectId}
         />
@@ -313,7 +408,7 @@ export function AppModals({
       {modalManager.todosOpen && (
         <TodoModal
           isOpen={true}
-          onClose={modalManager.closeTodos}
+          onClose={closeTodosWithNav}
           addToast={addToast}
           projectId={projectId}
           onPlanningMode={modalManager.openPlanningWithInitialPlan}
@@ -322,20 +417,20 @@ export function AppModals({
 
       <UsageIndicator
         isOpen={modalManager.usageOpen}
-        onClose={modalManager.closeUsage}
+        onClose={closeUsageWithNav}
         projectId={projectId}
         anchorRect={modalManager.usageAnchorRect}
       />
 
       <SystemStatsModal
         isOpen={modalManager.systemStatsOpen}
-        onClose={modalManager.closeSystemStats}
+        onClose={closeSystemStatsWithNav}
         projectId={projectId}
       />
 
       {modalManager.schedulesOpen && (
         <ScheduledTasksModal
-          onClose={modalManager.closeSchedules}
+          onClose={closeSchedulesWithNav}
           addToast={addToast}
           projectId={projectId}
         />
@@ -344,7 +439,7 @@ export function AppModals({
       <ModalErrorBoundary>
         <NewTaskModal
           isOpen={modalManager.newTaskModalOpen}
-          onClose={modalManager.closeNewTask}
+          onClose={closeNewTaskWithNav}
           tasks={tasks}
           onCreateTask={handleModalCreateWithOnboardingTracking}
           addToast={addToast}
@@ -354,7 +449,7 @@ export function AppModals({
 
       <ActivityLogModal
         isOpen={modalManager.activityLogOpen}
-        onClose={modalManager.closeActivityLog}
+        onClose={closeActivityLogWithNav}
         tasks={tasks}
         projectId={projectId}
         projects={projects}
@@ -370,7 +465,7 @@ export function AppModals({
       <ModalErrorBoundary>
         <GitManagerModal
           isOpen={modalManager.gitManagerOpen}
-          onClose={modalManager.closeGitManager}
+          onClose={closeGitManagerWithNav}
           tasks={tasks}
           addToast={addToast}
           projectId={projectId}
@@ -382,7 +477,7 @@ export function AppModals({
           <Suspense fallback={null}>
             <WorkflowNodeEditor
               isOpen={modalManager.workflowEditorOpen}
-              onClose={modalManager.closeWorkflowEditor}
+              onClose={closeWorkflowEditorWithNav}
               addToast={addToast}
               projectId={projectId}
               initialPanel={modalManager.workflowEditorInitialPanel}
@@ -395,7 +490,7 @@ export function AppModals({
 
       <AgentListModal
         isOpen={modalManager.agentsOpen}
-        onClose={modalManager.closeAgents}
+        onClose={closeAgentsWithNav}
         addToast={addToast}
         projectId={projectId}
       />
@@ -404,7 +499,7 @@ export function AppModals({
         <Suspense fallback={null}>
           <SetupWizardModal
             onProjectRegistered={projectActions.handleSetupComplete}
-            onClose={modalManager.closeSetupWizard}
+            onClose={closeSetupWizardWithNav}
           />
         </Suspense>
       )}

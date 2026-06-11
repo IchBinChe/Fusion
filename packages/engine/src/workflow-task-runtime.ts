@@ -20,7 +20,7 @@ import {
 } from "./workflow-node-handlers.js";
 import type { WorkflowRuntimePrimitives } from "./runtime-primitives.js";
 
-export type WorkflowTaskRuntimeDisposition = "completed" | "failed";
+export type WorkflowTaskRuntimeDisposition = "completed" | "failed" | "manual-required";
 
 export interface WorkflowTaskRuntimeResult {
   disposition: WorkflowTaskRuntimeDisposition;
@@ -178,8 +178,17 @@ export class WorkflowTaskRuntime {
       reason = `workflow-work-item-node-error:${err instanceof Error ? err.message : String(err)}`;
     }
 
-    const disposition: WorkflowTaskRuntimeDisposition = outcome === "success" ? "completed" : "failed";
-    this.deps.store.transitionWorkflowWorkItem(workItem.id, disposition === "completed" ? "succeeded" : "failed", {
+    const disposition: WorkflowTaskRuntimeDisposition = outcome === "success"
+      ? "completed"
+      : reason === "manual-required"
+        ? "manual-required"
+        : "failed";
+    const terminalState: WorkflowWorkItemState = disposition === "completed"
+      ? "succeeded"
+      : disposition === "manual-required"
+        ? "manual-required"
+        : "failed";
+    this.deps.store.transitionWorkflowWorkItem(workItem.id, terminalState, {
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError: reason ?? null,

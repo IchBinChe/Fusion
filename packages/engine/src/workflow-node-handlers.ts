@@ -1,5 +1,5 @@
 import { WorkflowIrError, getStepParser, instanceNodeId } from "@fusion/core";
-import type { NotificationEvent, NotificationPayload, TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
+import type { NotificationEvent, NotificationPayload, Settings, TaskDetail, TaskStep, WorkflowIrNode } from "@fusion/core";
 
 import type { WorkflowNodeHandler, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import { createPrNodeHandlers, createAutoMergeGateHandler, type PrNodeDeps } from "./pr-nodes.js";
@@ -925,10 +925,14 @@ export function createDefaultNodeHandlers(
     "parse-steps": parseSteps,
     code: createCodeNodeHandler(deps?.runCode),
     notify: createNotifyHandler(deps?.notifyDispatch),
-    "merge-gate": async (_node, ctx) => ({
-      outcome: "success",
-      value: ctx.context.autoMerge === false ? "auto-off" : "auto-on",
-    }),
+    "merge-gate": async (_node, ctx) => {
+      const settingsAutoMerge = (ctx.settings as Partial<Settings> | undefined)?.autoMerge;
+      const autoMerge = ctx.task.autoMerge !== false && settingsAutoMerge !== false;
+      return {
+        outcome: "success",
+        value: autoMerge ? "auto-on" : "auto-off",
+      };
+    },
     "merge-attempt": async (_node, ctx) => {
       if (!deps?.primitives) return { outcome: "failure", value: "merge-primitives-unwired" };
       const result = await deps.primitives.requestMerge(primitiveContextForNode(_node, ctx.task, ctx.context), ctx.task);

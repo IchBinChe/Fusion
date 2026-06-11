@@ -411,6 +411,96 @@ describe("WorkflowTaskRuntime", () => {
     ]);
   });
 
+  it("routes merge-gate work items off when task auto-merge is disabled", async () => {
+    const transitions: Array<{ id: string; state: WorkflowWorkItemState; patch?: Record<string, unknown> }> = [];
+    const workItem = {
+      id: "work-merge-gate",
+      runId: "run-merge-gate",
+      taskId: task.id,
+      nodeId: "merge-gate",
+      kind: "merge",
+      state: "running",
+      attempt: 0,
+      retryAfter: null,
+      leaseOwner: "scheduler-a",
+      leaseExpiresAt: "2026-06-09T00:01:00.000Z",
+      lastError: null,
+      blockedReason: null,
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+    } satisfies WorkflowWorkItem;
+    const runtime = new WorkflowTaskRuntime({
+      store: {
+        getTask: async () => ({ ...task, autoMerge: false } as TaskDetail),
+        getTaskWorkflowSelection: () => undefined,
+        getWorkflowDefinition: async () => undefined,
+        transitionWorkflowWorkItem: (id, state, patch) => {
+          transitions.push({ id, state, patch });
+          return { ...workItem, state };
+        },
+      },
+      primitives: recordingPrimitives([]),
+      runCustomNode: async () => ({ outcome: "success" }),
+    });
+
+    const result = await runtime.runWorkItem(workItem, { ...flagOff, autoMerge: true } as Settings);
+
+    expect(result.disposition).toBe("completed");
+    expect(result.context["node:merge-gate:value"]).toBe("auto-off");
+    expect(transitions).toEqual([
+      {
+        id: "work-merge-gate",
+        state: "succeeded",
+        patch: { leaseOwner: null, leaseExpiresAt: null, lastError: null },
+      },
+    ]);
+  });
+
+  it("persists manual merge holds as manual-required work items", async () => {
+    const transitions: Array<{ id: string; state: WorkflowWorkItemState; patch?: Record<string, unknown> }> = [];
+    const workItem = {
+      id: "work-manual-hold",
+      runId: "run-manual-hold",
+      taskId: task.id,
+      nodeId: "merge-manual-hold",
+      kind: "manual-hold",
+      state: "running",
+      attempt: 0,
+      retryAfter: null,
+      leaseOwner: "scheduler-a",
+      leaseExpiresAt: "2026-06-09T00:01:00.000Z",
+      lastError: null,
+      blockedReason: null,
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+    } satisfies WorkflowWorkItem;
+    const runtime = new WorkflowTaskRuntime({
+      store: {
+        getTask: async () => task,
+        getTaskWorkflowSelection: () => undefined,
+        getWorkflowDefinition: async () => undefined,
+        transitionWorkflowWorkItem: (id, state, patch) => {
+          transitions.push({ id, state, patch });
+          return { ...workItem, state };
+        },
+      },
+      primitives: recordingPrimitives([]),
+      runCustomNode: async () => ({ outcome: "success" }),
+    });
+
+    const result = await runtime.runWorkItem(workItem, flagOff);
+
+    expect(result.disposition).toBe("manual-required");
+    expect(result.reason).toBe("manual-required");
+    expect(transitions).toEqual([
+      {
+        id: "work-manual-hold",
+        state: "manual-required",
+        patch: { leaseOwner: null, leaseExpiresAt: null, lastError: "manual-required" },
+      },
+    ]);
+  });
+
   it("uses the built-in workflow id in the default run id for unselected tasks", async () => {
     const observedRunIds: string[] = [];
     const runtime = new WorkflowTaskRuntime({

@@ -31,9 +31,21 @@ describe("workflow merge nodes", () => {
       outcome: "failure",
       value: "file-scope-violation",
     });
+    expect(classifyMergePrimitiveResult({ status: "merged-requested" }, undefined, "failure")).toEqual({
+      outcome: "success",
+      value: "merged-requested",
+    });
+    expect(classifyMergePrimitiveResult({ status: "stale-head" }, undefined, "failure")).toEqual({
+      outcome: "failure",
+      value: "stale-head",
+    });
     expect(classifyMergePrimitiveResult(undefined, "transient-failure", "failure")).toEqual({
       outcome: "success",
       value: "transient-failure",
+    });
+    expect(classifyMergePrimitiveResult(undefined, "merged-requested", "failure")).toEqual({
+      outcome: "success",
+      value: "merged-requested",
     });
   });
 
@@ -56,6 +68,23 @@ describe("workflow merge nodes", () => {
       outcome: "success",
       value: "merged",
       contextPatch: { mergedBranch: "main", "workflow:merge-status": "merged" },
+    });
+  });
+
+  it("does not retry the merge primitive when audit fails after classification", async () => {
+    const audit = vi.fn().mockRejectedValue(new Error("audit unavailable"));
+    const requestMerge = vi.fn().mockResolvedValue({
+      outcome: "success",
+      data: { status: "merged" },
+    });
+
+    const result = await runWorkflowMergeAttemptNode({ primitives: { requestMerge, audit } }, ctx, task);
+
+    expect(requestMerge).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      outcome: "success",
+      value: "merged",
+      contextPatch: { "workflow:merge-status": "merged" },
     });
   });
 });

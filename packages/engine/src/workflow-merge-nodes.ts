@@ -13,11 +13,15 @@ export async function runWorkflowMergeAttemptNode(
 ): Promise<WorkflowNodeResult> {
   const result = await deps.primitives.requestMerge(ctx, task);
   const classified = classifyMergePrimitiveResult(result.data, result.value, result.outcome);
-  await deps.primitives.audit(ctx, {
-    type: "workflow-merge-node",
-    message: `workflow merge node classified ${classified.value ?? classified.outcome}`,
-    metadata: { taskId: task.id, primitiveOutcome: result.outcome, primitiveValue: result.value, primitiveData: result.data },
-  });
+  try {
+    await deps.primitives.audit(ctx, {
+      type: "workflow-merge-node",
+      message: `workflow merge node classified ${classified.value ?? classified.outcome}`,
+      metadata: { taskId: task.id, primitiveOutcome: result.outcome, primitiveValue: result.value, primitiveData: result.data },
+    });
+  } catch {
+    // Audit is diagnostic; a transient audit failure must not re-run the merge primitive.
+  }
   return {
     outcome: classified.outcome,
     value: classified.value,
@@ -42,7 +46,13 @@ export function classifyMergePrimitiveResult(
   if (data?.status === "failed") {
     return classifyMergeFailure(data.reason);
   }
-  if (value === "transient-failure" || value === "manual-required" || value === "stale-head" || value === "not-actionable") {
+  if (data?.status === "merged-requested") {
+    return { outcome: "success", value: "merged-requested" };
+  }
+  if (data?.status === "stale-head") {
+    return { outcome: primitiveOutcome, value: "stale-head" };
+  }
+  if (value === "transient-failure" || value === "manual-required" || value === "stale-head" || value === "not-actionable" || value === "merged-requested") {
     return { outcome: "success", value };
   }
   return { outcome: primitiveOutcome, value };

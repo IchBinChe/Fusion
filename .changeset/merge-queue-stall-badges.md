@@ -1,3 +1,4 @@
+---
 "@runfusion/fusion": patch
 ---
 

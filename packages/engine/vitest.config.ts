@@ -84,6 +84,7 @@ export default defineConfig({
             "src/__tests__/self-healing.test.ts",
             "src/__tests__/heartbeat-monitor.test.ts",
             "src/__tests__/workflow-node-handlers.test.ts",
+            "src/__tests__/workflow-policy-ownership-map.test.ts",
           ],
           exclude: ["node_modules/**", "dist/**"],
         },

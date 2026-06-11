@@ -86,6 +86,80 @@ export const MERGE_REQUEST_STATES = [
 
 export type MergeRequestState = (typeof MERGE_REQUEST_STATES)[number];
 
+export const WORKFLOW_WORK_ITEM_KINDS = [
+  "task",
+  "merge",
+  "retry",
+  "manual-hold",
+  "recovery",
+] as const;
+
+export type WorkflowWorkItemKind = (typeof WORKFLOW_WORK_ITEM_KINDS)[number];
+
+export const WORKFLOW_WORK_ITEM_STATES = [
+  "runnable",
+  "running",
+  "held",
+  "retrying",
+  "manual-required",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "exhausted",
+] as const;
+
+export type WorkflowWorkItemState = (typeof WORKFLOW_WORK_ITEM_STATES)[number];
+
+export interface WorkflowWorkItem {
+  id: string;
+  runId: string;
+  taskId: string;
+  nodeId: string;
+  kind: WorkflowWorkItemKind;
+  state: WorkflowWorkItemState;
+  attempt: number;
+  retryAfter: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+  blockedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowWorkItemUpsertInput {
+  id?: string;
+  runId: string;
+  taskId: string;
+  nodeId: string;
+  kind: WorkflowWorkItemKind;
+  state?: WorkflowWorkItemState;
+  attempt?: number;
+  retryAfter?: string | null;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  lastError?: string | null;
+  blockedReason?: string | null;
+  now?: string;
+}
+
+export interface WorkflowWorkItemTransitionPatch {
+  attempt?: number;
+  retryAfter?: string | null;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  lastError?: string | null;
+  blockedReason?: string | null;
+  now?: string;
+}
+
+export interface WorkflowWorkItemDueFilter {
+  now?: string;
+  limit?: number;
+  kinds?: WorkflowWorkItemKind[];
+  states?: WorkflowWorkItemState[];
+}
+
 export interface MergeQueueEntry {
   taskId: string;
   enqueuedAt: string;

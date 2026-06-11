@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, CompletionHandoffMarker, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
 import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
@@ -623,6 +623,23 @@ interface CompletionHandoffMarkerRow {
   taskId: string;
   acceptedAt: string;
   source: string;
+}
+
+interface WorkflowWorkItemRow {
+  id: string;
+  runId: string;
+  taskId: string;
+  nodeId: string;
+  kind: string;
+  state: string;
+  attempt: number;
+  retryAfter: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+  blockedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Database row shape for the config table. */
@@ -8803,6 +8820,59 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     };
   }
 
+  private normalizeWorkflowWorkItemKind(value: string): WorkflowWorkItemKind {
+    switch (value) {
+      case "task":
+      case "merge":
+      case "retry":
+      case "manual-hold":
+      case "recovery":
+        return value;
+      default:
+        return "task";
+    }
+  }
+
+  private normalizeWorkflowWorkItemState(value: string): WorkflowWorkItemState {
+    switch (value) {
+      case "runnable":
+      case "running":
+      case "held":
+      case "retrying":
+      case "manual-required":
+      case "succeeded":
+      case "failed":
+      case "cancelled":
+      case "exhausted":
+        return value;
+      default:
+        return "runnable";
+    }
+  }
+
+  private isTerminalWorkflowWorkItemState(state: WorkflowWorkItemState): boolean {
+    return state === "succeeded" || state === "failed" || state === "cancelled" || state === "exhausted";
+  }
+
+  private rowToWorkflowWorkItem(row: WorkflowWorkItemRow): WorkflowWorkItem {
+    return {
+      id: row.id,
+      runId: row.runId,
+      taskId: row.taskId,
+      nodeId: row.nodeId,
+      kind: this.normalizeWorkflowWorkItemKind(row.kind),
+      state: this.normalizeWorkflowWorkItemState(row.state),
+      attempt: row.attempt,
+      retryAfter: row.retryAfter,
+      leaseOwner: row.leaseOwner,
+      leaseExpiresAt: row.leaseExpiresAt,
+      lastError: row.lastError,
+      blockedReason: row.blockedReason,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
   private isValidMergeRequestTransition(from: MergeRequestState, to: MergeRequestState): boolean {
     if (from === to) return true;
     const allowed: Record<MergeRequestState, ReadonlySet<MergeRequestState>> = {
@@ -8890,6 +8960,201 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   getMergeRequestRecord(taskId: string): MergeRequestRecord | null {
     const row = this.db.prepare("SELECT * FROM merge_requests WHERE taskId = ?").get(taskId) as MergeRequestRow | undefined;
     return row ? this.rowToMergeRequestRecord(row) : null;
+  }
+
+  upsertWorkflowWorkItem(input: WorkflowWorkItemUpsertInput): WorkflowWorkItem {
+    return this.db.transactionImmediate(() => {
+      const existing = this.db
+        .prepare("SELECT * FROM workflow_work_items WHERE runId = ? AND taskId = ? AND nodeId = ? AND kind = ?")
+        .get(input.runId, input.taskId, input.nodeId, input.kind) as WorkflowWorkItemRow | undefined;
+      const now = input.now ?? new Date().toISOString();
+      const existingState = existing ? this.normalizeWorkflowWorkItemState(existing.state) : null;
+      const state = input.state ?? existingState ?? "runnable";
+      if (existingState && this.isTerminalWorkflowWorkItemState(existingState) && existingState !== state) {
+        throw new Error(
+          `Workflow work item ${existing?.id ?? input.id ?? input.nodeId} is terminal (${existingState}) and cannot be requeued as ${state}`,
+        );
+      }
+
+      const id = existing?.id ?? input.id ?? randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO workflow_work_items (
+             id, runId, taskId, nodeId, kind, state, attempt, retryAfter,
+             leaseOwner, leaseExpiresAt, lastError, blockedReason, createdAt, updatedAt
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(runId, taskId, nodeId, kind) DO UPDATE SET
+             state = excluded.state,
+             attempt = excluded.attempt,
+             retryAfter = excluded.retryAfter,
+             leaseOwner = excluded.leaseOwner,
+             leaseExpiresAt = excluded.leaseExpiresAt,
+             lastError = excluded.lastError,
+             blockedReason = excluded.blockedReason,
+             updatedAt = excluded.updatedAt`,
+        )
+        .run(
+          id,
+          input.runId,
+          input.taskId,
+          input.nodeId,
+          input.kind,
+          state,
+          input.attempt ?? existing?.attempt ?? 0,
+          input.retryAfter === undefined ? existing?.retryAfter ?? null : input.retryAfter,
+          input.leaseOwner === undefined ? existing?.leaseOwner ?? null : input.leaseOwner,
+          input.leaseExpiresAt === undefined ? existing?.leaseExpiresAt ?? null : input.leaseExpiresAt,
+          input.lastError === undefined ? existing?.lastError ?? null : input.lastError,
+          input.blockedReason === undefined ? existing?.blockedReason ?? null : input.blockedReason,
+          existing?.createdAt ?? now,
+          now,
+        );
+
+      const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!row) throw new Error(`Failed to upsert workflow work item ${id}`);
+      this.insertRunAuditEventRow({
+        taskId: row.taskId,
+        runId: row.runId,
+        domain: "database",
+        mutationType: "workflowWorkItem:upsert",
+        target: row.id,
+        metadata: { id: row.id, nodeId: row.nodeId, kind: row.kind, state: row.state, attempt: row.attempt },
+      });
+      return this.rowToWorkflowWorkItem(row);
+    });
+  }
+
+  transitionWorkflowWorkItem(
+    id: string,
+    state: WorkflowWorkItemState,
+    patch: WorkflowWorkItemTransitionPatch = {},
+  ): WorkflowWorkItem {
+    return this.db.transactionImmediate(() => {
+      const now = patch.now ?? new Date().toISOString();
+      const existing = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!existing) throw new Error(`Workflow work item ${id} not found`);
+      const fromState = this.normalizeWorkflowWorkItemState(existing.state);
+      if (this.isTerminalWorkflowWorkItemState(fromState) && fromState !== state) {
+        throw new Error(`Workflow work item ${id} is terminal (${fromState}) and cannot transition to ${state}`);
+      }
+
+      this.db
+        .prepare(
+          `UPDATE workflow_work_items
+              SET state = ?,
+                  attempt = ?,
+                  retryAfter = ?,
+                  leaseOwner = ?,
+                  leaseExpiresAt = ?,
+                  lastError = ?,
+                  blockedReason = ?,
+                  updatedAt = ?
+            WHERE id = ?`,
+        )
+        .run(
+          state,
+          patch.attempt ?? existing.attempt,
+          patch.retryAfter === undefined ? existing.retryAfter : patch.retryAfter,
+          patch.leaseOwner === undefined ? existing.leaseOwner : patch.leaseOwner,
+          patch.leaseExpiresAt === undefined ? existing.leaseExpiresAt : patch.leaseExpiresAt,
+          patch.lastError === undefined ? existing.lastError : patch.lastError,
+          patch.blockedReason === undefined ? existing.blockedReason : patch.blockedReason,
+          now,
+          id,
+        );
+
+      const updated = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!updated) throw new Error(`Workflow work item ${id} disappeared`);
+      this.insertRunAuditEventRow({
+        taskId: updated.taskId,
+        runId: updated.runId,
+        domain: "database",
+        mutationType: "workflowWorkItem:transition",
+        target: updated.id,
+        metadata: { id: updated.id, fromState, toState: state, attempt: updated.attempt },
+      });
+      return this.rowToWorkflowWorkItem(updated);
+    });
+  }
+
+  getWorkflowWorkItem(id: string): WorkflowWorkItem | null {
+    const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+    return row ? this.rowToWorkflowWorkItem(row) : null;
+  }
+
+  listDueWorkflowWorkItems(filter: WorkflowWorkItemDueFilter = {}): WorkflowWorkItem[] {
+    const now = filter.now ?? new Date().toISOString();
+    const includeExpiredRunning = !filter.states || filter.states.includes("running");
+    const states = filter.states?.length ? filter.states : ["runnable", "retrying"];
+    const stateConditions = [`(state IN (${states.map(() => "?").join(", ")}) AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?))`];
+    const params: unknown[] = [...states, now];
+    if (includeExpiredRunning) {
+      stateConditions.push("(state = 'running' AND leaseExpiresAt IS NOT NULL AND leaseExpiresAt <= ?)");
+      params.push(now);
+    }
+    const conditions = [
+      `(${stateConditions.join(" OR ")})`,
+      "(retryAfter IS NULL OR retryAfter <= ?)",
+    ];
+    params.push(now);
+    if (filter.kinds?.length) {
+      conditions.push(`kind IN (${filter.kinds.map(() => "?").join(", ")})`);
+      params.push(...filter.kinds);
+    }
+    params.push(filter.limit ?? 100);
+
+    const rows = this.db
+      .prepare(
+        `SELECT *
+           FROM workflow_work_items
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY retryAfter IS NOT NULL, retryAfter ASC, createdAt ASC
+          LIMIT ?`,
+      )
+      .all(...params) as WorkflowWorkItemRow[];
+    return rows.map((row) => this.rowToWorkflowWorkItem(row));
+  }
+
+  acquireWorkflowWorkItemLease(
+    id: string,
+    leaseOwner: string,
+    opts: { leaseDurationMs: number; now?: string },
+  ): WorkflowWorkItem | null {
+    if (opts.leaseDurationMs <= 0) {
+      throw new Error(`workflow work item leaseDurationMs must be > 0 (received ${opts.leaseDurationMs})`);
+    }
+
+    return this.db.transactionImmediate(() => {
+      const now = opts.now ?? new Date().toISOString();
+      const leaseExpiresAt = new Date(new Date(now).getTime() + opts.leaseDurationMs).toISOString();
+      const result = this.db
+        .prepare(
+          `UPDATE workflow_work_items
+              SET state = 'running',
+                  leaseOwner = ?,
+                  leaseExpiresAt = ?,
+                  updatedAt = ?
+            WHERE id = ?
+              AND state IN ('runnable', 'retrying', 'running')
+              AND (retryAfter IS NULL OR retryAfter <= ?)
+              AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?)`,
+        )
+        .run(leaseOwner, leaseExpiresAt, now, id, now, now);
+      if (result.changes === 0) return null;
+
+      const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!row) throw new Error(`Workflow work item ${id} disappeared`);
+      this.insertRunAuditEventRow({
+        taskId: row.taskId,
+        runId: row.runId,
+        domain: "database",
+        mutationType: "workflowWorkItem:lease-acquired",
+        target: row.id,
+        metadata: { id: row.id, leaseOwner: row.leaseOwner, leaseExpiresAt: row.leaseExpiresAt },
+      });
+      return this.rowToWorkflowWorkItem(row);
+    });
   }
 
   setCompletionHandoffAcceptedMarker(

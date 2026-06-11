@@ -2,6 +2,65 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.40.1
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/engine@0.40.1
+- @fusion/i18n@0.39.2
+- @fusion-plugin-examples/cli-printing-press@0.1.19
+- @fusion-plugin-examples/compound-engineering@0.1.2
+- @fusion-plugin-examples/dependency-graph@0.1.33
+- @fusion-plugin-examples/roadmap@0.1.21
+- @fusion-plugin-examples/cursor-runtime@0.1.21
+- @fusion-plugin-examples/droid-runtime@0.1.28
+- @fusion-plugin-examples/hermes-runtime@0.2.52
+- @fusion-plugin-examples/openclaw-runtime@0.2.52
+- @fusion-plugin-examples/paperclip-runtime@0.2.52
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/dashboard@0.40.1
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/pi-claude-cli@0.40.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- e62847b: fix: keep `./dist/*` subpaths resolvable in the packed manifest
+
+  The prepack transform injects an `exports` field for the plugin-sdk subpath,
+  which flips Node into strict subpath mode and hid every other `./dist/*` file.
+  That broke the runfusion.ai alias (which imports
+  `@runfusion/fusion/dist/bin.js`) with `ERR_PACKAGE_PATH_NOT_EXPORTED`, failing
+  the pre-publish smoke test. Add a `./dist/*` passthrough so the alias bin and
+  the pi `./dist/extension.js` loader keep resolving after pack.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [e62847b]
+  - @runfusion/fusion@0.40.1
+
 ## 0.40.0
 
 ### @fusion/dashboard
@@ -8589,6 +8648,14 @@ for reference.
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
 
+## 0.39.2
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+
 ## 0.39.1
 
 ### @fusion/i18n
@@ -8596,6 +8663,14 @@ for reference.
 #### Patch Changes
 
 - @fusion/core@0.40.0
+
+## 0.11.28
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.28
 
 ## 0.11.27
 

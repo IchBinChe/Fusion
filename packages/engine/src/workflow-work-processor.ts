@@ -43,12 +43,16 @@ export async function processDueWorkflowWorkItem(
     runtimeResult = await runtime.runWorkItem(dispatch.workItem, settings);
   } catch (err) {
     const reason = `workflow-work-item-runtime-error:${err instanceof Error ? err.message : String(err)}`;
-    store.transitionWorkflowWorkItem?.(dispatch.workItem.id, "failed", {
-      now: opts.now,
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      lastError: reason,
-    });
+    try {
+      store.transitionWorkflowWorkItem?.(dispatch.workItem.id, "failed", {
+        now: opts.now,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        lastError: reason,
+      });
+    } catch {
+      // Best-effort cleanup; callers still need the claimed work identity on double-failure.
+    }
     runtimeResult = {
       disposition: "failed",
       outcome: "failure",

@@ -3001,7 +3001,7 @@ describe("executeHeartbeat", () => {
       expect(taskLogTool.name).toBe("fn_task_log");
     });
 
-    it("passes runtime model as primary and execution settings model as fallback", async () => {
+    it("passes execution settings model ahead of stale runtime model", async () => {
       const store = createStoreWithAgentForExec({
         runtimeConfig: { model: "anthropic/claude-sonnet-4-5" },
       });
@@ -3022,10 +3022,10 @@ describe("executeHeartbeat", () => {
 
       expect(mockedCreateFnAgent).toHaveBeenCalledOnce();
       const callArgs = mockedCreateFnAgent.mock.calls[0]![0];
-      expect(callArgs.defaultProvider).toBe("anthropic");
-      expect(callArgs.defaultModelId).toBe("claude-sonnet-4-5");
-      expect(callArgs.fallbackProvider).toBe("openai");
-      expect(callArgs.fallbackModelId).toBe("gpt-4.1");
+      expect(callArgs.defaultProvider).toBe("openai");
+      expect(callArgs.defaultModelId).toBe("gpt-4.1");
+      expect(callArgs.fallbackProvider).toBeUndefined();
+      expect(callArgs.fallbackModelId).toBeUndefined();
     });
 
     it("passes undefined model when runtimeConfig has no model", async () => {

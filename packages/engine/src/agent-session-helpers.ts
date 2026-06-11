@@ -14,9 +14,12 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   isTestModeActive,
   resolveExecutionSettingsModel,
+  resolveProjectDefaultModel,
   resolveTaskExecutionModel,
   resolveTaskPlanningModel,
+  resolveTaskValidatorModel,
   TEST_MODE_RESOLVED,
+  type ResolvedModelSelection,
   type Settings,
 } from "@fusion/core";
 import { resolveRuntime, buildRuntimeResolutionContext, isMockProviderId, type SessionPurpose } from "./runtime-resolution.js";
@@ -131,6 +134,32 @@ export function extractRuntimeModel(
   };
 }
 
+function hasCompleteRuntimeModel(
+  model: ResolvedModelSelection,
+): model is { provider: string; modelId: string } {
+  return Boolean(model.provider && model.modelId);
+}
+
+function pickSettingsThenRuntimeModel(
+  settingsModel: ResolvedModelSelection,
+  assignedAgentRuntimeConfig?: Record<string, unknown>,
+): { provider: string | undefined; modelId: string | undefined } {
+  if (settingsModel.provider && settingsModel.modelId) {
+    return {
+      provider: settingsModel.provider,
+      modelId: settingsModel.modelId,
+    };
+  }
+
+  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
+  return hasCompleteRuntimeModel(assignedRuntimeModel)
+    ? assignedRuntimeModel
+    : {
+      provider: settingsModel.provider,
+      modelId: settingsModel.modelId,
+    };
+}
+
 export function resolveExecutorSessionModel(
   taskModelProvider: string | undefined,
   taskModelId: string | undefined,
@@ -144,11 +173,6 @@ export function resolveExecutorSessionModel(
     };
   }
 
-  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
-  if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
-    return assignedRuntimeModel;
-  }
-
   const resolvedTaskModel = resolveTaskExecutionModel(
     {
       modelProvider: taskModelProvider,
@@ -157,10 +181,7 @@ export function resolveExecutorSessionModel(
     settings,
   );
 
-  return {
-    provider: resolvedTaskModel.provider,
-    modelId: resolvedTaskModel.modelId,
-  };
+  return pickSettingsThenRuntimeModel(resolvedTaskModel, assignedAgentRuntimeConfig);
 }
 
 export function resolvePlanningSessionModel(
@@ -176,11 +197,6 @@ export function resolvePlanningSessionModel(
     };
   }
 
-  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
-  if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
-    return assignedRuntimeModel;
-  }
-
   const resolvedTaskPlanningModel = resolveTaskPlanningModel(
     {
       planningModelProvider: taskPlanningModelProvider,
@@ -189,10 +205,31 @@ export function resolvePlanningSessionModel(
     settings,
   );
 
-  return {
-    provider: resolvedTaskPlanningModel.provider,
-    modelId: resolvedTaskPlanningModel.modelId,
-  };
+  return pickSettingsThenRuntimeModel(resolvedTaskPlanningModel, assignedAgentRuntimeConfig);
+}
+
+export function resolveValidatorSessionModel(
+  taskValidatorModelProvider: string | undefined,
+  taskValidatorModelId: string | undefined,
+  settings: Partial<Settings> | undefined,
+  assignedAgentRuntimeConfig?: Record<string, unknown>,
+): { provider: string | undefined; modelId: string | undefined } {
+  if (isTestModeActive(settings)) {
+    return {
+      provider: TEST_MODE_RESOLVED.provider,
+      modelId: TEST_MODE_RESOLVED.modelId,
+    };
+  }
+
+  const resolvedTaskValidatorModel = resolveTaskValidatorModel(
+    {
+      validatorModelProvider: taskValidatorModelProvider,
+      validatorModelId: taskValidatorModelId,
+    },
+    settings,
+  );
+
+  return pickSettingsThenRuntimeModel(resolvedTaskValidatorModel, assignedAgentRuntimeConfig);
 }
 
 export function resolveHeartbeatSessionModels(
@@ -213,21 +250,14 @@ export function resolveHeartbeatSessionModels(
     };
   }
 
-  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
   const executionSettingsModel = resolveExecutionSettingsModel(settings);
-
-  const defaultProvider = assignedRuntimeModel.provider ?? executionSettingsModel.provider;
-  const defaultModelId = assignedRuntimeModel.modelId ?? executionSettingsModel.modelId;
-
-  const executionPairAvailable = Boolean(executionSettingsModel.provider && executionSettingsModel.modelId);
-  const defaultMatchesExecution =
-    defaultProvider === executionSettingsModel.provider && defaultModelId === executionSettingsModel.modelId;
+  const resolvedModel = pickSettingsThenRuntimeModel(executionSettingsModel, assignedAgentRuntimeConfig);
 
   return {
-    defaultProvider,
-    defaultModelId,
-    fallbackProvider: executionPairAvailable && !defaultMatchesExecution ? executionSettingsModel.provider : undefined,
-    fallbackModelId: executionPairAvailable && !defaultMatchesExecution ? executionSettingsModel.modelId : undefined,
+    defaultProvider: resolvedModel.provider,
+    defaultModelId: resolvedModel.modelId,
+    fallbackProvider: undefined,
+    fallbackModelId: undefined,
   };
 }
 
@@ -242,22 +272,11 @@ export function resolveMergerSessionModel(
     };
   }
 
-  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
-  if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
-    return assignedRuntimeModel;
-  }
-
-  if (settings?.defaultProviderOverride && settings.defaultModelIdOverride) {
-    return {
-      provider: settings.defaultProviderOverride,
-      modelId: settings.defaultModelIdOverride,
-    };
-  }
-
-  return {
-    provider: settings?.defaultProvider,
-    modelId: settings?.defaultModelId,
-  };
+  // Merger intentionally uses the default lane rather than execution/validator
+  // lanes. Validator-specific callers resolve `resolveValidatorSettingsModel`
+  // before falling back here; generic merger work uses project/global defaults.
+  const defaultModel = resolveProjectDefaultModel(settings);
+  return pickSettingsThenRuntimeModel(defaultModel, assignedAgentRuntimeConfig);
 }
 
 /**

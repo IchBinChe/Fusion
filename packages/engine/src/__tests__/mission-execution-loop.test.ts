@@ -1145,7 +1145,7 @@ describe("MissionExecutionLoop", () => {
       }));
     });
 
-    it("uses assigned agent runtime model ahead of task/settings for mission validation", async () => {
+    it("uses task/settings validator model ahead of assigned agent runtime model for mission validation", async () => {
       const feature = createMockFeature({ loopState: "implementing", taskId: "FN-MODEL-AGENT", status: "in-progress" });
       missionStore._setFeature(feature);
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
@@ -1185,8 +1185,8 @@ describe("MissionExecutionLoop", () => {
 
       expect(createResolvedAgentSession).toHaveBeenCalledWith(expect.objectContaining({
         sessionPurpose: "validation",
-        defaultProvider: "agent-provider",
-        defaultModelId: "agent-model",
+        defaultProvider: "task-validator",
+        defaultModelId: "task-validator-model",
       }));
     });
 

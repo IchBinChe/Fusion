@@ -3084,7 +3084,7 @@ describe("taskCreate tool model inheritance", () => {
       expect(capturedArgs.systemPrompt).toContain("agent ID: agent-007");
     });
 
-    it("prefers assigned-agent runtime model and falls back when incomplete", async () => {
+    it("prefers planning settings model ahead of assigned-agent runtime model", async () => {
       const completeRuntimeTask = createTriageTask({ id: "FN-AGENT-MODEL-1", assignedAgentId: "agent-model-complete" });
       const incompleteRuntimeTask = createTriageTask({ id: "FN-AGENT-MODEL-2", assignedAgentId: "agent-model-incomplete" });
 
@@ -3152,7 +3152,7 @@ describe("taskCreate tool model inheritance", () => {
       const completeCall = capturedArgs.find((entry) => entry.taskId === "FN-AGENT-MODEL-1");
       const fallbackCall = capturedArgs.find((entry) => entry.taskId === "FN-AGENT-MODEL-2");
 
-      expect(completeCall).toMatchObject({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" });
+      expect(completeCall).toMatchObject({ defaultProvider: "openai", defaultModelId: "gpt-4o" });
       expect(fallbackCall).toMatchObject({ defaultProvider: "openai", defaultModelId: "gpt-4o" });
     });
 

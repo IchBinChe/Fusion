@@ -4,6 +4,7 @@ import {
   resolveHeartbeatSessionModels,
   resolveMergerSessionModel,
   resolvePlanningSessionModel,
+  resolveValidatorSessionModel,
 } from "../agent-session-helpers.js";
 
 const assignedAgentRuntimeConfig = {
@@ -30,6 +31,10 @@ describe("agent-session-helpers test mode overrides", () => {
       modelId: "scripted",
     });
     expect(resolvePlanningSessionModel("openai", "gpt-4.1", settings, assignedAgentRuntimeConfig)).toEqual({
+      provider: "mock",
+      modelId: "scripted",
+    });
+    expect(resolveValidatorSessionModel("openai", "gpt-4.1", settings, assignedAgentRuntimeConfig)).toEqual({
       provider: "mock",
       modelId: "scripted",
     });
@@ -65,6 +70,10 @@ describe("agent-session-helpers test mode overrides", () => {
       provider: "mock",
       modelId: "scripted",
     });
+    expect(resolveValidatorSessionModel("openai", "gpt-4.1", settings, assignedAgentRuntimeConfig)).toEqual({
+      provider: "mock",
+      modelId: "scripted",
+    });
     expect(resolveMergerSessionModel(settings, assignedAgentRuntimeConfig)).toEqual({
       provider: "mock",
       modelId: "scripted",
@@ -77,7 +86,7 @@ describe("agent-session-helpers test mode overrides", () => {
     });
   });
 
-  it("keeps existing behavior when test mode is inactive", () => {
+  it("prefers freshly resolved settings over runtimeConfig when test mode is inactive", () => {
     const settings = {
       executionProvider: "openai",
       executionModelId: "gpt-4.1",
@@ -90,22 +99,26 @@ describe("agent-session-helpers test mode overrides", () => {
     };
 
     expect(resolveExecutorSessionModel("task-provider", "task-model", settings, assignedAgentRuntimeConfig)).toEqual({
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
+      provider: "task-provider",
+      modelId: "task-model",
     });
     expect(resolvePlanningSessionModel("task-provider", "task-model", settings, assignedAgentRuntimeConfig)).toEqual({
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
+      provider: "task-provider",
+      modelId: "task-model",
+    });
+    expect(resolveValidatorSessionModel("task-provider", "task-model", settings, assignedAgentRuntimeConfig)).toEqual({
+      provider: "task-provider",
+      modelId: "task-model",
     });
     expect(resolveMergerSessionModel(settings, assignedAgentRuntimeConfig)).toEqual({
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
+      provider: "openai",
+      modelId: "gpt-4.1",
     });
     expect(resolveHeartbeatSessionModels(settings, assignedAgentRuntimeConfig)).toEqual({
-      defaultProvider: "anthropic",
-      defaultModelId: "claude-sonnet-4-5",
-      fallbackProvider: "openai",
-      fallbackModelId: "gpt-4.1",
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
     });
   });
 });

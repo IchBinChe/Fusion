@@ -1335,9 +1335,9 @@ export class TriageProcessor {
         });
 
         // Resolve planning model using executor-style precedence:
-        // 1. Assigned durable agent runtime model pair when complete
-        // 2. Task planning override pair
-        // 3. Planning/project/global fallbacks
+        // 1. Task planning override pair
+        // 2. Planning/project/global fallbacks
+        // 3. Assigned durable agent runtime model pair when no fresh model pair exists
         const planningModel = resolvePlanningSessionModel(
           task.planningModelProvider,
           task.planningModelId,

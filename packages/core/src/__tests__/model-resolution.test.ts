@@ -119,6 +119,46 @@ describe("model-resolution", () => {
     ).toEqual({ provider: "openai", modelId: "gpt-4.1" });
   });
 
+  it("ignores partial pairs at every precedence tier", () => {
+    expect(
+      resolveProjectDefaultModel({
+        defaultProviderOverride: "openai",
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+      }),
+    ).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
+
+    expect(
+      resolveTaskExecutionModel(
+        { modelProvider: "task-provider" },
+        {
+          executionProvider: "openai",
+          executionModelId: "gpt-4.1",
+        },
+      ),
+    ).toEqual({ provider: "openai", modelId: "gpt-4.1" });
+
+    expect(
+      resolveTaskPlanningModel(
+        { planningModelId: "task-planning-model" },
+        {
+          planningGlobalProvider: "anthropic",
+          planningGlobalModelId: "claude-sonnet-4-5",
+        },
+      ),
+    ).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
+
+    expect(
+      resolveTaskValidatorModel(
+        { validatorModelProvider: "validator-task-provider" },
+        {
+          defaultProviderOverride: "google",
+          defaultModelIdOverride: "gemini-2.5-pro",
+        },
+      ),
+    ).toEqual({ provider: "google", modelId: "gemini-2.5-pro" });
+  });
+
   it("forces every lane to mock when testMode is true", () => {
     const settings = {
       testMode: true,

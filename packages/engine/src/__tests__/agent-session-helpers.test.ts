@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractRuntimeHint,
+  extractRuntimeModel,
+  resolveExecutorSessionModel,
   resolveHeartbeatSessionModels,
   resolveMergerSessionModel,
+  resolvePlanningSessionModel,
+  resolveValidatorSessionModel,
 } from "../agent-session-helpers.js";
 
 const { resolveRuntimeMock } = vi.hoisted(() => ({
@@ -39,49 +43,199 @@ describe("extractRuntimeHint", () => {
   });
 });
 
-describe("resolveHeartbeatSessionModels", () => {
-  it("uses agent runtime model as primary and execution settings as fallback", () => {
+describe("extractRuntimeModel", () => {
+  it("parses combined and separate runtime model pairs", () => {
+    expect(extractRuntimeModel({ model: " anthropic/claude-sonnet-4-5 " })).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(extractRuntimeModel({ modelProvider: " openai ", modelId: " gpt-4.1 " })).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+  });
+
+  it("does not turn malformed combined strings into complete model pairs", () => {
+    expect(extractRuntimeModel({ model: "gpt 5.3" })).toEqual({
+      provider: undefined,
+      modelId: undefined,
+    });
+  });
+});
+
+describe("resolve session model parity", () => {
+  const settings = {
+    executionProvider: "openai",
+    executionModelId: "gpt-4.1",
+    planningProvider: "anthropic",
+    planningModelId: "claude-sonnet-4-5",
+    defaultProviderOverride: "google",
+    defaultModelIdOverride: "gemini-2.5-pro",
+    defaultProvider: "zai",
+    defaultModelId: "glm-5.1",
+  };
+
+  it("uses the same fresh settings model for executor and heartbeat when runtimeConfig is absent", () => {
+    const executor = resolveExecutorSessionModel(undefined, undefined, settings);
+    const heartbeat = resolveHeartbeatSessionModels(settings);
+
+    expect(executor).toEqual({ provider: "openai", modelId: "gpt-4.1" });
+    expect(heartbeat).toEqual({
+      defaultProvider: executor.provider,
+      defaultModelId: executor.modelId,
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+  });
+
+  it("ignores partial runtimeConfig pairs without mixing runtime and settings fields", () => {
     expect(resolveHeartbeatSessionModels(
       {
         executionProvider: "openai",
         executionModelId: "gpt-4.1",
       },
-      { model: "anthropic/claude-sonnet-4-5" },
+      { modelProvider: "stale-provider" },
     )).toEqual({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+
+    expect(resolveHeartbeatSessionModels(
+      {
+        executionProvider: "openai",
+        executionModelId: "gpt-4.1",
+      },
+      { modelId: "gpt 5.3" },
+    )).toEqual({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+  });
+
+  it("does not let a stale complete runtime model mask newer task or settings models", () => {
+    const staleRuntimeConfig = { model: "openai-codex/gpt-5.3-codex" };
+
+    expect(resolveExecutorSessionModel("task-provider", "task-model", settings, staleRuntimeConfig)).toEqual({
+      provider: "task-provider",
+      modelId: "task-model",
+    });
+    expect(resolveExecutorSessionModel(undefined, undefined, settings, staleRuntimeConfig)).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+    expect(resolvePlanningSessionModel("planning-task-provider", "planning-task-model", settings, staleRuntimeConfig)).toEqual({
+      provider: "planning-task-provider",
+      modelId: "planning-task-model",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, settings, staleRuntimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveHeartbeatSessionModels(settings, staleRuntimeConfig)).toEqual({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+    expect(resolveValidatorSessionModel("validator-task-provider", "validator-task-model", settings, staleRuntimeConfig)).toEqual({
+      provider: "validator-task-provider",
+      modelId: "validator-task-model",
+    });
+    expect(resolveMergerSessionModel(settings, staleRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+  });
+
+  it("does not leak malformed gpt 5.3-style runtimeConfig into any automatic lane", () => {
+    const malformedRuntimeConfig = { modelId: "gpt 5.3" };
+
+    expect(resolveExecutorSessionModel(undefined, undefined, settings, malformedRuntimeConfig)).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, settings, malformedRuntimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveHeartbeatSessionModels(settings, malformedRuntimeConfig)).toEqual({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+    expect(resolveValidatorSessionModel(undefined, undefined, settings, malformedRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+    expect(resolveMergerSessionModel(settings, malformedRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+  });
+
+  it("falls back through project override and global defaults before runtimeConfig", () => {
+    const staleRuntimeConfig = { model: "stale-provider/stale-model" };
+
+    expect(resolveMergerSessionModel({
+      defaultProviderOverride: "google",
+      defaultModelIdOverride: "gemini-2.5-pro",
       defaultProvider: "anthropic",
       defaultModelId: "claude-sonnet-4-5",
-      fallbackProvider: "openai",
-      fallbackModelId: "gpt-4.1",
-    });
+    }, staleRuntimeConfig)).toEqual({ provider: "google", modelId: "gemini-2.5-pro" });
+    expect(resolveMergerSessionModel({
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    }, staleRuntimeConfig)).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
   });
 
-  it("uses execution settings model when runtime override is missing", () => {
-    expect(resolveHeartbeatSessionModels(
-      {
-        executionProvider: "openai",
-        executionModelId: "gpt-4.1",
-      },
-      {},
-    )).toEqual({
-      defaultProvider: "openai",
-      defaultModelId: "gpt-4.1",
+  it("uses a complete runtime model only when no lane/task/default model is configured", () => {
+    const runtimeConfig = { modelProvider: "anthropic", modelId: "claude-opus-4" };
+
+    expect(resolveExecutorSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+    expect(resolveHeartbeatSessionModels(undefined, runtimeConfig)).toEqual({
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-opus-4",
       fallbackProvider: undefined,
       fallbackModelId: undefined,
     });
+    expect(resolveValidatorSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+    expect(resolveMergerSessionModel(undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
   });
 
-  it("does not duplicate fallback when runtime and execution model are the same", () => {
-    expect(resolveHeartbeatSessionModels(
-      {
-        executionProvider: "openai",
-        executionModelId: "gpt-4.1",
-      },
-      { modelProvider: "openai", modelId: "gpt-4.1" },
-    )).toEqual({
-      defaultProvider: "openai",
-      defaultModelId: "gpt-4.1",
-      fallbackProvider: undefined,
-      fallbackModelId: undefined,
+  it("covers backend-only surfaces; desktop and mobile breakpoints are not applicable", () => {
+    expect(resolveExecutorSessionModel(undefined, undefined, settings, { model: "stale/old" })).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, settings, { model: "stale/old" })).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveValidatorSessionModel(undefined, undefined, settings, { model: "stale/old" })).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+    expect(resolveMergerSessionModel(settings, { model: "stale/old" })).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
     });
   });
 });
@@ -220,15 +374,10 @@ describe("createResolvedAgentSession", () => {
 });
 
 describe("resolveMergerSessionModel", () => {
-  it("uses assigned agent runtime model when both provider and modelId are present", () => {
+  it("uses assigned agent runtime model only when no default model pair is configured", () => {
     expect(
       resolveMergerSessionModel(
-        {
-          defaultProviderOverride: "openai",
-          defaultModelIdOverride: "gpt-4.1",
-          defaultProvider: "anthropic",
-          defaultModelId: "claude-3-5-sonnet",
-        },
+        {},
         { model: "  anthropic/claude-3-5-sonnet-20241022  " },
       ),
     ).toEqual({

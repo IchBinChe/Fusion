@@ -32,7 +32,7 @@ function recordingPrimitives(
   overrides: Partial<Record<"prepare" | "execute" | "workflowStep", WorkflowNodeResult>> & {
     prepareData?: PreparedWorktree | null;
   } = {},
-  observed: { prepared?: PreparedWorktree; mergeAttempt?: number } = {},
+  observed: { prepared?: PreparedWorktree; mergeAttempt?: number; mergeRunId?: string; mergeWorkflowId?: string } = {},
 ): WorkflowRuntimePrimitives {
   const prepared: PreparedWorktree = { worktreePath: "/tmp/fusion-worktree" };
   return {
@@ -95,6 +95,8 @@ function recordingPrimitives(
     requestMerge: async (ctx) => {
       calls.push("merge");
       observed.mergeAttempt = ctx.node.attempt;
+      observed.mergeRunId = ctx.run.runId;
+      observed.mergeWorkflowId = ctx.run.workflowId;
       return { outcome: "success", value: "merged", data: { status: "merged" } };
     },
     abortRun: async () => ({ outcome: "success" }),
@@ -535,7 +537,7 @@ describe("WorkflowTaskRuntime", () => {
   });
 
   it("threads work item attempt into merge primitive context", async () => {
-    const observed: { mergeAttempt?: number } = {};
+    const observed: { mergeAttempt?: number; mergeRunId?: string; mergeWorkflowId?: string } = {};
     const transitions: Array<{ id: string; state: WorkflowWorkItemState; patch?: Record<string, unknown> }> = [];
     const workItem = {
       id: "work-merge-attempt",
@@ -572,6 +574,8 @@ describe("WorkflowTaskRuntime", () => {
     expect(result.disposition).toBe("completed");
     expect(result.context["workflow:work-item-attempt"]).toBe(3);
     expect(observed.mergeAttempt).toBe(3);
+    expect(observed.mergeRunId).toBe("run-merge-attempt");
+    expect(observed.mergeWorkflowId).toBe("builtin:coding");
     expect(transitions).toEqual([
       expect.objectContaining({ id: "work-merge-attempt", state: "succeeded" }),
     ]);

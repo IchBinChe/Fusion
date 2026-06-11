@@ -14,6 +14,8 @@ import {
   type WorkflowNodeOutcome,
 } from "./workflow-graph-executor.js";
 import {
+  WORKFLOW_ID_CONTEXT_KEY,
+  WORKFLOW_RUN_ID_CONTEXT_KEY,
   createDefaultNodeHandlers,
   createNoopLegacySeams,
   type WorkflowCustomNodeRunner,
@@ -169,6 +171,8 @@ export class WorkflowTaskRuntime {
     let outcome: WorkflowNodeOutcome = "success";
     let reason: string | undefined;
     let context: Record<string, unknown> = {
+      [WORKFLOW_RUN_ID_CONTEXT_KEY]: workItem.runId,
+      [WORKFLOW_ID_CONTEXT_KEY]: target.workflowId,
       "workflow:work-item-id": workItem.id,
       "workflow:work-item-kind": workItem.kind,
       "workflow:work-item-attempt": workItem.attempt,

@@ -88,3 +88,7 @@ packages/dashboard/android/
 
 # Plugin hot-reload scratch artifacts
 **/.index.reload-*.ts
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

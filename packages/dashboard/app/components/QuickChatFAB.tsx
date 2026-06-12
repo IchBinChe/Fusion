@@ -371,7 +371,16 @@ const QUICK_CHAT_VIEWPORT_PADDING = 8;
  * @param projectId - Optional project ID for localStorage key
  * @param externalDidDragRef - External ref to track drag state for click detection
  */
-function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefObject<boolean>) {
+function useDraggable(
+  projectId?: string,
+  externalDidDragRef?: React.MutableRefObject<boolean>,
+  onTap?: () => void,
+) {
+  // Latest onTap kept in a ref so the imperatively-bound document
+  // pointerup handler always calls the current closure without forcing
+  // listener re-binds.
+  const onTapRef = useRef(onTap);
+  onTapRef.current = onTap;
   // Get executor footer height from CSS variable
   const getFooterHeight = useCallback((): number => {
     if (typeof window === "undefined") return 0;
@@ -475,6 +484,12 @@ function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefO
 
     if (didDragRef.current) {
       savePosition(positionRef.current);
+    } else {
+      // A tap (not a drag). Fire the toggle from pointerup rather than
+      // relying on the synthetic click: iOS Safari suppresses the click
+      // when setPointerCapture() was called in pointerdown (a WebKit
+      // quirk), so onClick alone never opens the panel on iPhone.
+      onTapRef.current?.();
     }
 
     document.removeEventListener("pointermove", handleDocumentPointerMove);
@@ -998,13 +1013,21 @@ export function QuickChatFAB({
   const hideMentionPopupTimeoutRef = useRef<number | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const dragDepthRef = useRef(0);
+  // Set by the latest tap handler (defined further down, after isOpen /
+  // stealthInputRef exist). Indirection keeps the useDraggable call above
+  // those declarations.
+  const fabTapHandlerRef = useRef<(() => void) | null>(null);
+  // True for ~the click-delay window after a pointerup tap fired the
+  // toggle, so the trailing synthetic click (when iOS does emit one)
+  // doesn't double-toggle.
+  const suppressNextFabClickRef = useRef(false);
 
   // Draggable hook for FAB positioning
   const {
     position,
     isDragging,
     handlePointerDown,
-  } = useDraggable(projectId, didDragRef);
+  } = useDraggable(projectId, didDragRef, () => fabTapHandlerRef.current?.());
 
   // Panel stays 60px above FAB (FAB is 48px tall + 12px gap)
   const panelY = position.y + 60;
@@ -2427,9 +2450,9 @@ export function QuickChatFAB({
     ],
   );
 
-  // Handle FAB click - only toggle if this was a click (not a drag)
-  // Reset didDragRef after checking to prevent double-toggle
-  const handleFABClick = useCallback(() => {
+  // Core open/close toggle. Only toggles if this was a tap (not a drag);
+  // resets didDragRef after checking to prevent a double-toggle.
+  const toggleQuickChat = useCallback(() => {
     if (didDragRef.current) {
       // Was a drag, don't toggle
       didDragRef.current = false;
@@ -2451,6 +2474,34 @@ export function QuickChatFAB({
     }
     setIsOpen(true);
   }, [isOpen, setIsOpen]);
+
+  // Fired from the drag hook's pointerup when the gesture was a tap, not a
+  // drag. This is the reliable open path on iOS: setPointerCapture() in
+  // pointerdown makes iOS Safari swallow the synthetic click, so onClick
+  // alone never opens the panel on iPhone. pointerup is itself a user
+  // gesture, so the stealth-input focus inside toggleQuickChat still
+  // raises the keyboard.
+  const handleFABTap = useCallback(() => {
+    suppressNextFabClickRef.current = true;
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => {
+        suppressNextFabClickRef.current = false;
+      }, 500);
+    }
+    toggleQuickChat();
+  }, [toggleQuickChat]);
+  fabTapHandlerRef.current = handleFABTap;
+
+  // Synthetic click path — still used for mouse (where pointerup also
+  // fires handleFABTap, so we de-dupe) and for click-only callers like
+  // tests (no preceding pointerup tap, so we handle it).
+  const handleFABClick = useCallback(() => {
+    if (suppressNextFabClickRef.current) {
+      suppressNextFabClickRef.current = false;
+      return;
+    }
+    toggleQuickChat();
+  }, [toggleQuickChat]);
 
   return (
     <>

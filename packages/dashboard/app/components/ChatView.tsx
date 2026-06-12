@@ -1613,6 +1613,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const apply = () => {
       if (suppressVvShrinkRef.current) {
         thread.classList.remove("chat-thread--keyboard-active");
+        thread.style.transform = "";
+        thread.style.willChange = "";
         return;
       }
       const overlap = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
@@ -1623,6 +1625,22 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
       const keyboardActive = (overlap > 0 || offsetTop > 0) && isKeyboardTrackingFocusable(document.activeElement);
       thread.classList.toggle("chat-thread--keyboard-active", keyboardActive);
+
+      // Drift compensation is applied here (not in CSS) so .chat-thread —
+      // an ancestor of the focused composer textarea — only gets a
+      // non-`none` transform when iOS actually shifts the visual viewport
+      // (offsetTop > 0). Keeping a transform/will-change on it at all times
+      // (as the old CSS did) makes iOS Safari blur the input and collapse
+      // the keyboard the moment it opens, because at focus time offsetTop
+      // is 0 and translateY(0) still establishes a containing block over
+      // the focused element.
+      if (keyboardActive && offsetTop > 0) {
+        thread.style.transform = `translateY(${offsetTop}px)`;
+        thread.style.willChange = "transform";
+      } else {
+        thread.style.transform = "";
+        thread.style.willChange = "";
+      }
     };
 
     apply();
@@ -1640,6 +1658,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       window.removeEventListener("pageshow", apply);
       document.removeEventListener("visibilitychange", apply);
       thread.classList.remove("chat-thread--keyboard-active");
+      thread.style.transform = "";
+      thread.style.willChange = "";
     };
   }, [activeSession, isMobile, roomThreadActive]);
 

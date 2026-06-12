@@ -1758,12 +1758,16 @@
   .chat-thread--keyboard-active {
     height: calc(var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px))) - var(--header-height));
     max-height: calc(var(--vv-height, calc(100dvh - var(--keyboard-overlap, 0px))) - var(--header-height));
-    /* Re-anchored: useMobileKeyboard now only updates --vv-offset-top
-       on resize/focus transitions (not on every visualViewport scroll
-       during a pan), so the transform tracks the keyboard open/close
-       without jittering during a swipe. */
-    transform: translateY(var(--vv-offset-top, 0px));
-    will-change: transform;
+    /* NOTE: the translateY drift compensation is applied imperatively in
+       JS (see ChatView's vv `apply()`), NOT here. Declaring
+       `transform`/`will-change: transform` in CSS keeps a non-`none`
+       transform on .chat-thread for the entire keyboard-active window —
+       and since .chat-thread is an ancestor of the focused composer
+       textarea, iOS Safari treats establishing that containing block as a
+       reason to blur the input and collapse the keyboard the instant it
+       opens. JS only sets a transform when there is real viewport drift
+       (offsetTop > 0); at the focus moment offsetTop is 0, so the
+       ancestor stays `transform: none` and the keyboard stays up. */
   }
 
   /* On mobile, the active scope affordance uses a full-width pinned footer. */

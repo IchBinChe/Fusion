@@ -9507,9 +9507,10 @@ export class TaskExecutor {
       };
     }
 
+    const promptContent = (task as Task & { prompt?: unknown }).prompt;
     const noCommitEligibility = task.noCommitsExpected === true
       ? { eligible: true, reason: "noCommitsExpected=true" }
-      : evaluatePromptDerivedNoCommitEligibility(task, typeof task.prompt === "string" ? task.prompt : "");
+      : evaluatePromptDerivedNoCommitEligibility(task, typeof promptContent === "string" ? promptContent : "");
     if (noCommitEligibility.eligible) {
       executorLog.log(`${task.id}: fn_task_done no_commits guard skipped (${noCommitEligibility.reason})`);
       await this.store.logEntry(

@@ -35,7 +35,7 @@ import { promisify } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import {
   buildTaskLineageTrailer,
   getPrimaryPrInfo,
@@ -65,6 +65,7 @@ import { createLogger } from "./logger.js";
 import { captureSingleCommitLandedMetadata, type MergerOptions } from "./merger.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import { MIN_TEMP_WORKTREE_REAP_AGE_MS } from "./self-healing.js";
+import { resolveAiMergeRootPath, resolveLegacyAiMergeRootPath } from "./worktree-paths.js";
 
 const execFileAsync = promisify(execFile);
 const aiMergeLog = createLogger("merger-ai");
@@ -113,13 +114,23 @@ export function isBenignAbsentWorktreeError(err: unknown): boolean {
   return /is not a working tree|No such file or directory|spawn\s+.*\bENOENT\b/i.test(description);
 }
 
-function ensureAiMergeRootIgnored(projectRootDir: string): void {
+function ensureAiMergeRootIgnored(projectRootDir: string, settings?: Settings): void {
   const excludePath = join(projectRootDir, ".git", "info", "exclude");
   if (!existsSync(excludePath)) return;
   try {
     const current = readFileSync(excludePath, "utf-8");
-    if (!/(?:^|\n)\.fusion\/ai-merge\/(?:\n|$)/.test(current)) {
-      appendFileSync(excludePath, `${current.endsWith("\n") ? "" : "\n"}.fusion/ai-merge/\n`);
+    const legacyAiMergeRoot = resolveLegacyAiMergeRootPath(projectRootDir);
+    const legacyRelativeAiMergeRoot = relative(projectRootDir, legacyAiMergeRoot);
+    const entries = [`${legacyRelativeAiMergeRoot.replaceAll("\\", "/")}/`];
+    const aiMergeRoot = resolveAiMergeRootPath(projectRootDir, settings);
+    const relativeAiMergeRoot = relative(projectRootDir, aiMergeRoot);
+    if (relativeAiMergeRoot && !relativeAiMergeRoot.startsWith("..") && !isAbsolute(relativeAiMergeRoot)) {
+      entries.push(`${relativeAiMergeRoot.replaceAll("\\", "/")}/`);
+    }
+
+    const missing = entries.filter((entry) => !current.split(/\r?\n/).includes(entry));
+    if (missing.length > 0) {
+      appendFileSync(excludePath, `${current.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`);
     }
   } catch {
     // Best effort only: cleanup still removes the root contents, and existing
@@ -127,15 +138,15 @@ function ensureAiMergeRootIgnored(projectRootDir: string): void {
   }
 }
 
-export function resolveAiMergeRoot(projectRootDir: string, _settings?: Settings): string {
-  const root = resolve(projectRootDir, ".fusion", "ai-merge");
+export function resolveAiMergeRoot(projectRootDir: string, settings?: Settings): string {
+  const root = resolveAiMergeRootPath(projectRootDir, settings);
   mkdirSync(root, { recursive: true });
-  ensureAiMergeRootIgnored(projectRootDir);
+  ensureAiMergeRootIgnored(projectRootDir, settings);
   return root;
 }
 
 function getAiMergeTempSearchRoots(projectRootDir: string, settings?: Settings): string[] {
-  const roots = [resolveAiMergeRoot(projectRootDir, settings), tmpdir()];
+  const roots = [resolveAiMergeRoot(projectRootDir, settings), resolveLegacyAiMergeRootPath(projectRootDir), tmpdir()];
   const testWorkerRoot = process.env.FUSION_TEST_WORKER_ROOT;
   if (testWorkerRoot) {
     try {

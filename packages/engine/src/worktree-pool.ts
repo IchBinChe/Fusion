@@ -5,7 +5,7 @@ import { basename, join, relative, resolve, isAbsolute } from "node:path";
 import type { ColumnId, SecretsStore, Settings, TaskStore, WorktrunkSettings } from "@fusion/core";
 import { assertCleanBranchAtBase, inspectBranchConflict } from "./branch-conflicts.js";
 import { worktreePoolLog } from "./logger.js";
-import { isInsideConfiguredWorktreesDir, resolveWorktreesDir } from "./worktree-paths.js";
+import { isAiMergeContainerDir, isInsideConfiguredWorktreesDir, resolveWorktreesDir } from "./worktree-paths.js";
 import { canonicalFusionBranchName } from "./worktree-names.js";
 import {
   resolveWorktrunkBinary,
@@ -704,7 +704,7 @@ export async function scanIdleWorktrees(
   try {
     const entries = readdirSync(worktreesDir, { withFileTypes: true });
     dirs = entries
-      .filter((e) => e.isDirectory())
+      .filter((e) => e.isDirectory() && !isAiMergeContainerDir(e.name))
       .map((e) => join(worktreesDir, e.name));
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -766,7 +766,7 @@ export async function cleanupOrphanedWorktrees(
   if (existsSync(worktreesDir)) {
     try {
       dirs = readdirSync(worktreesDir, { withFileTypes: true })
-        .filter((e) => e.isDirectory())
+        .filter((e) => e.isDirectory() && !isAiMergeContainerDir(e.name))
         .map((e) => join(worktreesDir, e.name));
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -863,8 +863,8 @@ export async function reapOrphanWorktrees(
   try {
     entries = readdirSync(worktreesDir, { withFileTypes: true })
       .filter((e) => {
-        // Only real directories — never symlinks
-        if (!e.isDirectory()) return false;
+        // Only real directories — never symlinks; never the dedicated AI-merge container.
+        if (!e.isDirectory() || isAiMergeContainerDir(e.name)) return false;
         try {
           return lstatSync(join(worktreesDir, e.name)).isDirectory() && !lstatSync(join(worktreesDir, e.name)).isSymbolicLink();
         } catch {

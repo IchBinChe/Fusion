@@ -18,7 +18,7 @@
  * - `pruneWorktrees`: defer to backend prune
  * - `cleanupOrphans`: defer to backend prune/remove semantics
  * - `reapUnregisteredOrphans`: defer to backend prune/remove semantics
- * - `cleanupStaleTempMergeWorktrees`: remains native (repo-local AI-merge root + legacy temp-dir scope, outside worktrunk layout)
+ * - `cleanupStaleTempMergeWorktrees`: remains native (dedicated AI-merge root + legacy roots)
  * - `enforceWorktreeCap`: defer to backend prune/remove semantics
  * - `reclaimSelfOwnedBranchConflicts`: remains native (branch-level)
  * - `reclaimStaleActiveBranches`: remains native (branch-level)
@@ -48,7 +48,7 @@ import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, ty
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
 import { findAlreadyMergedTaskCommit } from "./already-merged-detector.js";
-import { resolveWorktreesDir } from "./worktree-paths.js";
+import { isAiMergeContainerDir, resolveAiMergeRootPath, resolveLegacyAiMergeRootPath, resolveWorktreesDir } from "./worktree-paths.js";
 import { canonicalFusionBranchName, resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { resolveBranchGroupMergeRouting } from "./group-merge-coordinator.js";
@@ -102,8 +102,8 @@ function extractTaskIdFromTempMergeDir(dirname: string): string | null {
   return match?.[1]?.toUpperCase() ?? null;
 }
 
-function resolveRepoLocalAiMergeRoot(rootDir: string): string {
-  return resolve(rootDir, ".fusion", "ai-merge");
+function resolveRepoLocalAiMergeRoot(rootDir: string, settings?: Pick<Settings, "worktreesDir">): string {
+  return resolveAiMergeRootPath(rootDir, settings);
 }
 
 function getErrorMessage(err: unknown): string {
@@ -9012,7 +9012,7 @@ export class SelfHealingManager {
     let dirs: string[];
     try {
       dirs = readdirSync(worktreesDir, { withFileTypes: true })
-        .filter((e) => e.isDirectory())
+        .filter((e) => e.isDirectory() && !isAiMergeContainerDir(e.name))
         .map((e) => join(worktreesDir, e.name));
     } catch (err: unknown) {
       log.warn(`Failed to read .worktrees/ for unregistered orphan reap: ${err instanceof Error ? err.message : String(err)}`);
@@ -9058,21 +9058,20 @@ export class SelfHealingManager {
   }
 
   /**
-   * Sweep stale AI merge clean-room worktrees from the repo-local clean-room
-   * root plus the legacy `tmpdir()` location used by older engine versions.
+   * Sweep stale AI merge clean-room worktrees from the configured worktrees-dir
+   * clean-room root plus legacy `.fusion/ai-merge/` and `tmpdir()` locations
+   * used by older engine versions.
    *
-   * These worktrees are intentionally outside the project/worktrunk-managed
-   * `.worktrees/` layout, so this native sweep proceeds even when worktrunk is
-   * enabled. Safety is bounded by age gates plus active-session checks.
+   * Safety is bounded by age gates plus active-session checks.
    */
   private async cleanupStaleTempMergeWorktrees(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.worktrunk?.enabled === true) {
-        log.log("[self-healing] temp-dir sweep: worktrunk enabled — AI merge clean-room worktrees are outside worktrunk's managed layout, proceeding with native sweep");
+        log.log("[self-healing] temp-dir sweep: worktrunk enabled — AI merge clean-room worktrees use Fusion's dedicated clean-room root, proceeding with native sweep");
       }
 
-      const roots = Array.from(new Set([resolveRepoLocalAiMergeRoot(this.options.rootDir), tmpdir()]));
+      const roots = Array.from(new Set([resolveRepoLocalAiMergeRoot(this.options.rootDir, settings), resolveLegacyAiMergeRootPath(this.options.rootDir), tmpdir()]));
       const auditor = createRunAuditor(this.store, {
         runId: generateSyntheticRunId("self-heal", "tempdir-sweep"),
         agentId: "self-healing",
@@ -9418,7 +9417,7 @@ export class SelfHealingManager {
       const cap = (settings.maxWorktrees ?? 4) * 2;
 
       const entries = readdirSync(worktreesDir, { withFileTypes: true });
-      const dirs = entries.filter((e) => e.isDirectory());
+      const dirs = entries.filter((e) => e.isDirectory() && !isAiMergeContainerDir(e.name));
 
       if (dirs.length <= cap) return;
 

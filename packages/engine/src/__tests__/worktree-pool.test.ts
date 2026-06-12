@@ -875,6 +875,20 @@ describe("scanIdleWorktrees", () => {
     );
   });
 
+  it("excludes the .ai-merge container even when git lists clean-room children", async () => {
+    mockedReaddirSync.mockReturnValue([
+      makeDirEntry(".ai-merge"),
+      makeDirEntry("registered-wt"),
+    ] as any);
+    mockRegisteredWorktrees("/root", [".ai-merge/fusion-ai-merge-fn-1-active", "registered-wt"]);
+
+    const store = createMockStore([]);
+
+    const idle = await scanIdleWorktrees("/root", store);
+    expect(idle).toEqual(["/root/.worktrees/registered-wt"]);
+    expect(idle).not.toContain("/root/.worktrees/.ai-merge");
+  });
+
   it("does not return unregistered directories for pool rehydration", async () => {
     mockedReaddirSync.mockReturnValue([
       makeDirEntry("registered-wt"),
@@ -1033,6 +1047,25 @@ describe("cleanupOrphanedWorktrees", () => {
     expect(removeCalls).toHaveLength(0);
   });
 
+  it("excludes the .ai-merge container while still removing genuine unregistered orphans", async () => {
+    mockedReaddirSync.mockReturnValue([
+      makeDirEntry(".ai-merge"),
+      makeDirEntry("broken-wt"),
+    ] as any);
+    mockRegisteredWorktrees("/root", []);
+
+    const store = createMockStore([]);
+
+    const cleaned = await cleanupOrphanedWorktrees("/root", store);
+
+    expect(cleaned).toBe(1);
+    expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/broken-wt", {
+      recursive: true,
+      force: true,
+    });
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/.ai-merge", expect.anything());
+  });
+
   it("removes unregistered directories even when stale active task metadata references them", async () => {
     mockedReaddirSync.mockReturnValue([
       makeDirEntry("broken-wt"),
@@ -1053,6 +1086,28 @@ describe("cleanupOrphanedWorktrees", () => {
     expect(mockedPruneWorktreeAdminEntries).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "pool-cleanup-orphan", target: "/root/.worktrees/broken-wt" }),
     );
+  });
+});
+
+describe("reapOrphanWorktrees", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRegisteredWorktrees("/root", []);
+    mockedExistsSync.mockImplementation((path) => String(path) === "/root/.worktrees");
+    mockedLstatSync.mockReturnValue({ isDirectory: () => true, isSymbolicLink: () => false } as any);
+  });
+
+  it("excludes the .ai-merge container while removing half-initialized task worktrees", async () => {
+    mockedReaddirSync.mockReturnValue([
+      makeDirEntry(".ai-merge"),
+      makeDirEntry("half-built"),
+    ] as any);
+
+    const removed = await reapOrphanWorktrees("/root");
+
+    expect(removed).toBe(1);
+    expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/half-built", { recursive: true, force: true });
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/.ai-merge", expect.anything());
   });
 });
 

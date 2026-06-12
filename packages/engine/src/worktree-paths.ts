@@ -4,6 +4,23 @@ import type { Settings } from "@fusion/core";
 import type { WorktreeBackendKind } from "./worktree-backend.js";
 import { canonicalizePath } from "./worktree-pool.js";
 
+export const AI_MERGE_DIRNAME = ".ai-merge";
+
+export function isAiMergeContainerDir(name: string): boolean {
+  return name === AI_MERGE_DIRNAME;
+}
+
+export function resolveAiMergeRootPath(
+  rootDir: string,
+  settings: Pick<Settings, "worktreesDir"> | undefined,
+): string {
+  return join(resolveWorktreesDir(rootDir, settings), AI_MERGE_DIRNAME);
+}
+
+export function resolveLegacyAiMergeRootPath(rootDir: string): string {
+  return join(rootDir, ".fusion", "ai-merge");
+}
+
 export function resolveWorktreesDir(
   rootDir: string,
   settings: Pick<Settings, "worktreesDir"> | undefined,

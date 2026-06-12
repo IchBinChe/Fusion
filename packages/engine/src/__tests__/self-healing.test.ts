@@ -6941,6 +6941,129 @@ describe("FN-4538 overlapBlockedBy self-healing", () => {
     manager.stop();
   });
 
+  it("FN-6276: clearStaleBlockedBy logs unchanged active overlap blocker only once across passes", async () => {
+    const overlapBlocker = makeTask("FN-ACTIVE", { column: "in-progress" });
+    const target = makeTask("FN-TARGET", {
+      column: "todo",
+      status: "queued",
+      blockedBy: undefined,
+      overlapBlockedBy: "FN-ACTIVE",
+      dependencies: [],
+    });
+    const store = makeStore([target, overlapBlocker]);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const message = "Auto-recovered: preserved queued status — still blocked by file scope overlap with FN-ACTIVE";
+
+    await manager.clearStaleBlockedBy();
+    await manager.clearStaleBlockedBy();
+    await manager.clearStaleBlockedBy();
+
+    expect(store.updateTask).toHaveBeenCalledTimes(3);
+    expect(store.updateTask).toHaveBeenNthCalledWith(1, "FN-TARGET", { blockedBy: null, status: "queued" });
+    expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[0] === "FN-TARGET" && call[1] === message)).toHaveLength(1);
+    manager.stop();
+  });
+
+  it("FN-6276: clearStaleBlockedBy logs again when active overlap blocker changes", async () => {
+    const overlapBlockerA = makeTask("FN-ACTIVE-A", { column: "in-progress" });
+    const overlapBlockerB = makeTask("FN-ACTIVE-B", { column: "in-progress" });
+    const target = makeTask("FN-TARGET", {
+      column: "todo",
+      status: "queued",
+      blockedBy: undefined,
+      overlapBlockedBy: "FN-ACTIVE-A",
+      dependencies: [],
+    });
+    const store = makeStore([target, overlapBlockerA, overlapBlockerB]);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+    await manager.clearStaleBlockedBy();
+    target.overlapBlockedBy = "FN-ACTIVE-B";
+    await manager.clearStaleBlockedBy();
+
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-TARGET",
+      "Auto-recovered: preserved queued status — still blocked by file scope overlap with FN-ACTIVE-A",
+    );
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-TARGET",
+      "Auto-recovered: preserved queued status — still blocked by file scope overlap with FN-ACTIVE-B",
+    );
+    expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[0] === "FN-TARGET" && String(call[1]).includes("preserved queued status"))).toHaveLength(2);
+    manager.stop();
+  });
+
+  it("FN-6276: clearStaleBlockedBy resets preserved queued memo after blocker resolves", async () => {
+    const overlapBlocker = makeTask("FN-ACTIVE", { column: "in-progress" });
+    const target = makeTask("FN-TARGET", {
+      column: "todo",
+      status: "queued",
+      blockedBy: undefined,
+      overlapBlockedBy: "FN-ACTIVE",
+      dependencies: [],
+    });
+    const store = makeStore([target, overlapBlocker]);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const message = "Auto-recovered: preserved queued status — still blocked by file scope overlap with FN-ACTIVE";
+
+    await manager.clearStaleBlockedBy();
+    overlapBlocker.column = "done";
+    await manager.clearStaleBlockedBy();
+    target.status = null;
+    target.overlapBlockedBy = null;
+    await manager.clearStaleBlockedBy();
+    target.status = "queued";
+    target.overlapBlockedBy = "FN-ACTIVE";
+    overlapBlocker.column = "in-progress";
+    await manager.clearStaleBlockedBy();
+
+    expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[0] === "FN-TARGET" && call[1] === message)).toHaveLength(2);
+    manager.stop();
+  });
+
+  it("FN-6276: stop clears preserved queued memo so next pass logs again", async () => {
+    const overlapBlocker = makeTask("FN-ACTIVE", { column: "in-progress" });
+    const target = makeTask("FN-TARGET", {
+      column: "todo",
+      status: "queued",
+      blockedBy: undefined,
+      overlapBlockedBy: "FN-ACTIVE",
+      dependencies: [],
+    });
+    const store = makeStore([target, overlapBlocker]);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const message = "Auto-recovered: preserved queued status — still blocked by file scope overlap with FN-ACTIVE";
+
+    await manager.clearStaleBlockedBy();
+    manager.stop();
+    await manager.clearStaleBlockedBy();
+
+    expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[0] === "FN-TARGET" && call[1] === message)).toHaveLength(2);
+    manager.stop();
+  });
+
+  it("FN-6276: FN-5488 stale blockedBy overlap-preservation log is idempotent", async () => {
+    const staleBlocker = makeTask("FN-DONE", { column: "done" });
+    const overlapBlocker = makeTask("FN-ACTIVE", { column: "in-progress" });
+    const target = makeTask("FN-TARGET", {
+      column: "todo",
+      status: "queued",
+      blockedBy: "FN-DONE",
+      overlapBlockedBy: "FN-ACTIVE",
+      dependencies: [],
+    });
+    const store = makeStore([target, staleBlocker, overlapBlocker]);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const message = "Auto-recovered (FN-5488): preserved queued status — blocker=FN-DONE blockerStatus=none reason=blocker-done; still blocked by file scope overlap with FN-ACTIVE";
+
+    await manager.clearStaleBlockedBy();
+    await manager.clearStaleBlockedBy();
+
+    expect(store.updateTask).toHaveBeenCalledTimes(2);
+    expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[0] === "FN-TARGET" && call[1] === message)).toHaveLength(1);
+    manager.stop();
+  });
+
   it("FN-4538: clearStaleBlockedBy clears overlapBlockedBy when overlap blocker is done", async () => {
     const overlapBlocker = makeTask("FN-DONE", { column: "done" });
     const target = makeTask("FN-TARGET", {

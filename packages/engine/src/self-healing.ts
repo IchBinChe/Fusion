@@ -653,6 +653,7 @@ export class SelfHealingManager {
   private finalizeUnprovenWarned = new Set<string>();
   private metaResolvedSkipAuditMemo = new Map<string, string>();
   private metaStalledSkipAuditMemo = new Map<string, string>();
+  private preservedQueuedOverlapLogged = new Map<string, string>();
   private maintenanceTickCounter = 0;
   private readonly processBootStartedAt = Date.now();
   private dependencyBlockedTodoReporter: DependencyBlockedTodoReporter | null = null;
@@ -1098,6 +1099,7 @@ export class SelfHealingManager {
     this.finalizeUnprovenWarned.clear();
     this.metaResolvedSkipAuditMemo.clear();
     this.metaStalledSkipAuditMemo.clear();
+    this.preservedQueuedOverlapLogged.clear();
     log.log("Stopped");
   }
 
@@ -4018,6 +4020,18 @@ export class SelfHealingManager {
     memo.delete(taskId);
   }
 
+  private shouldLogPreservedQueuedOverlap(taskId: string, overlapBlockedBy: string | null | undefined): overlapBlockedBy is string {
+    if (!overlapBlockedBy) return false;
+    const previous = this.preservedQueuedOverlapLogged.get(taskId);
+    if (previous === overlapBlockedBy) return false;
+    this.preservedQueuedOverlapLogged.set(taskId, overlapBlockedBy);
+    return true;
+  }
+
+  private clearPreservedQueuedOverlapMemo(taskId: string): void {
+    this.preservedQueuedOverlapLogged.delete(taskId);
+  }
+
   async autoArchiveResolvedMetaTasks(reboundedTargets?: Set<string>): Promise<number> {
     const tasks = await this.store.listTasks({ slim: false, includeArchived: true });
     const byId = new Map(tasks.map((task) => [task.id.toUpperCase(), task]));
@@ -4354,7 +4368,10 @@ export class SelfHealingManager {
         (task) => task.status === "queued" && (task.dependencies.length > 0 || Boolean(task.overlapBlockedBy)),
       );
 
-      if (blockedTasks.length === 0 && queuedDependencyTasks.length === 0) return 0;
+      if (blockedTasks.length === 0 && queuedDependencyTasks.length === 0) {
+        this.preservedQueuedOverlapLogged.clear();
+        return 0;
+      }
 
       const allTasks = await this.store.listTasks({ includeArchived: true });
       const taskById = new Map(allTasks.map((task) => [task.id, task]));
@@ -4366,6 +4383,24 @@ export class SelfHealingManager {
       const candidates = new Map<string, typeof todoTasks[number]>();
       for (const task of blockedTasks) candidates.set(task.id, task);
       for (const task of queuedDependencyTasks) candidates.set(task.id, task);
+
+      for (const [taskId, lastLoggedBlockerId] of this.preservedQueuedOverlapLogged) {
+        const memoTask = taskById.get(taskId);
+        const memoOverlapBlocker = memoTask?.overlapBlockedBy ? taskById.get(memoTask.overlapBlockedBy) : undefined;
+        const memoHasActiveOverlapBlocker = Boolean(
+          memoOverlapBlocker
+          && (memoOverlapBlocker.column === "in-progress" || (memoOverlapBlocker.column === "in-review" && !memoOverlapBlocker.paused)),
+        );
+        if (
+          !candidates.has(taskId)
+          || memoTask?.column !== "todo"
+          || memoTask.status !== "queued"
+          || memoTask.overlapBlockedBy !== lastLoggedBlockerId
+          || !memoHasActiveOverlapBlocker
+        ) {
+          this.clearPreservedQueuedOverlapMemo(taskId);
+        }
+      }
 
       for (const task of candidates.values()) {
         const blockerId = task.blockedBy;
@@ -4462,26 +4497,36 @@ export class SelfHealingManager {
 
           if (reason) {
             try {
+              let didRecover = false;
               if (todoTaskIds.has(task.id)) {
                 if (unresolvedDeps.length > 0) {
+                  this.clearPreservedQueuedOverlapMemo(task.id);
                   const nextBlocker = unresolvedDeps[0]!;
                   if (nextBlocker === blockerId) {
                     continue;
                   }
                   await this.store.updateTask(task.id, { blockedBy: nextBlocker, status: "queued" });
                   await this.store.logEntry(task.id, `Auto-recovered (FN-5488): refreshed stale blockedBy — blocker=${blockerId} blockerStatus=${blocker?.status ?? "none"} reason=${reasonCode ?? "unspecified"}; ${reason}; now blocked by ${nextBlocker}`);
+                  didRecover = true;
                 } else if (hasActiveOverlapBlocker) {
                   await this.store.updateTask(task.id, { blockedBy: null, status: "queued" });
-                  await this.store.logEntry(task.id, `Auto-recovered (FN-5488): preserved queued status — blocker=${blockerId} blockerStatus=${blocker?.status ?? "none"} reason=${reasonCode ?? "unspecified"}; still blocked by file scope overlap with ${task.overlapBlockedBy}`);
+                  if (this.shouldLogPreservedQueuedOverlap(task.id, task.overlapBlockedBy)) {
+                    await this.store.logEntry(task.id, `Auto-recovered (FN-5488): preserved queued status — blocker=${blockerId} blockerStatus=${blocker?.status ?? "none"} reason=${reasonCode ?? "unspecified"}; still blocked by file scope overlap with ${task.overlapBlockedBy}`);
+                    didRecover = true;
+                  }
                 } else {
+                  this.clearPreservedQueuedOverlapMemo(task.id);
                   await this.store.updateTask(task.id, { blockedBy: null, overlapBlockedBy: null, status: null });
                   await this.store.logEntry(task.id, `Auto-recovered (FN-5488): cleared stale blockedBy — blocker=${blockerId} blockerStatus=${blocker?.status ?? "none"} reason=${reasonCode ?? "unspecified"}; ${reason}`);
+                  didRecover = true;
                 }
               } else {
+                this.clearPreservedQueuedOverlapMemo(task.id);
                 await this.store.updateTask(task.id, { blockedBy: null });
                 await this.store.logEntry(task.id, `Auto-recovered (FN-4091): cleared stale blockedBy — ${reason}`);
+                didRecover = true;
               }
-              recovered++;
+              if (didRecover) recovered++;
             } catch (err: unknown) {
               const errorMessage = err instanceof Error ? err.message : String(err);
               log.error(`Failed to clear stale blockedBy for ${task.id}: ${errorMessage}`);
@@ -4499,13 +4544,14 @@ export class SelfHealingManager {
             try {
               if (hasActiveOverlapBlocker) {
                 await this.store.updateTask(task.id, { blockedBy: null, status: "queued" });
-                await this.store.logEntry(task.id, `Auto-recovered: preserved queued status — still blocked by file scope overlap with ${task.overlapBlockedBy}`);
+                if (this.shouldLogPreservedQueuedOverlap(task.id, task.overlapBlockedBy)) {
+                  await this.store.logEntry(task.id, `Auto-recovered: preserved queued status — still blocked by file scope overlap with ${task.overlapBlockedBy}`);
+                  recovered++;
+                }
               } else {
+                this.clearPreservedQueuedOverlapMemo(task.id);
                 // FN-5434: routine scheduler↔self-healing queued-status churn should stay silent; keep state cleanup only.
                 await this.store.updateTask(task.id, { blockedBy: null, overlapBlockedBy: null, status: null });
-              }
-              if (hasActiveOverlapBlocker) {
-                recovered++;
               }
             } catch (err: unknown) {
               const errorMessage = err instanceof Error ? err.message : String(err);
@@ -4515,6 +4561,7 @@ export class SelfHealingManager {
           continue;
         }
 
+        this.clearPreservedQueuedOverlapMemo(task.id);
         const nextBlocker = unresolvedDeps[0] ?? null;
         if (nextBlocker && task.blockedBy !== nextBlocker) {
           try {

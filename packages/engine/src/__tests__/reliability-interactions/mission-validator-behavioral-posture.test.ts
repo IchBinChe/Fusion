@@ -399,4 +399,103 @@ describe("Validator behavioral posture (U2 + U3)", () => {
     expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
     expect(missionStore.getFeature("F-001")?.status).not.toBe("done");
   });
+
+  it("U6/R6: failed verification passes the observed-vs-expected reason to the Fix Feature", async () => {
+    const verify = vi.fn(async (req): Promise<VerificationOutcome> => ({
+      verdict: "fail",
+      assertionId: req.assertionId,
+      reason: "defect still reproduces",
+      detail: "button still does nothing on click",
+    }));
+    const feature = createMockFeature({ loopState: "implementing", taskId: "FN-R6", status: "in-progress" });
+    missionStore._setFeature(feature);
+    missionStore._setAssertions("F-001", [assertionRow({ id: "CA-1", type: "behavioral" })]);
+    taskStore._setTask({ id: "FN-R6", title: "reason", integrationSha: "sha123", log: [] });
+    judgePass(["CA-1"]);
+
+    loop = new MissionExecutionLoop({ taskStore: taskStore as any, missionStore: missionStore as any, rootDir: "/tmp", verificationCapability: { verifyBehavioralAssertion: verify } });
+    loop.start();
+    await loop.processTaskOutcome("FN-R6");
+
+    expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
+    const call = (missionStore.createGeneratedFixFeature as any).mock.calls[0];
+    // (sourceFeatureId, runId, failedAssertionIds, failureReason)
+    expect(call[0]).toBe("F-001");
+    expect(call[2]).toEqual(["CA-1"]);
+    expect(typeof call[3]).toBe("string");
+    expect(call[3]).toContain("defect still reproduces");
+  });
+
+  it("U6/R16: a verification FAILURE emits a persisted mission event with outcome=fail", async () => {
+    const verify = vi.fn(async (req): Promise<VerificationOutcome> => ({ verdict: "fail", assertionId: req.assertionId, reason: "defect still reproduces" }));
+    const feature = createMockFeature({ loopState: "implementing", taskId: "FN-EVT-F", status: "in-progress" });
+    missionStore._setFeature(feature);
+    missionStore._setAssertions("F-001", [assertionRow({ id: "CA-1", type: "behavioral" })]);
+    taskStore._setTask({ id: "FN-EVT-F", title: "evt fail", integrationSha: "sha123", log: [] });
+    judgePass(["CA-1"]);
+
+    loop = new MissionExecutionLoop({ taskStore: taskStore as any, missionStore: missionStore as any, rootDir: "/tmp", verificationCapability: { verifyBehavioralAssertion: verify } });
+    loop.start();
+    await loop.processTaskOutcome("FN-EVT-F");
+
+    const failEvent = (missionStore.logMissionEvent as any).mock.calls.find(
+      (c: any[]) => c[3]?.code === "validation_failed",
+    );
+    expect(failEvent).toBeDefined();
+    expect(failEvent[1]).toBe("error");
+    expect(failEvent[3]).toMatchObject({ outcome: "fail" });
+  });
+
+  it("U6/R16+R21: an INCONCLUSIVE verdict emits a distinguishable infra-failure event and no Fix Feature", async () => {
+    const verify = vi.fn(async (req): Promise<VerificationOutcome> => ({ verdict: "inconclusive", assertionId: req.assertionId, reason: "no isolating sandbox backend" }));
+    const feature = createMockFeature({ loopState: "implementing", taskId: "FN-EVT-INC", status: "in-progress" });
+    missionStore._setFeature(feature);
+    missionStore._setAssertions("F-001", [assertionRow({ id: "CA-1", type: "behavioral" })]);
+    taskStore._setTask({ id: "FN-EVT-INC", title: "evt inconclusive", integrationSha: "sha123", log: [] });
+    judgePass(["CA-1"]);
+
+    loop = new MissionExecutionLoop({ taskStore: taskStore as any, missionStore: missionStore as any, rootDir: "/tmp", verificationCapability: { verifyBehavioralAssertion: verify } });
+    loop.start();
+    await loop.processTaskOutcome("FN-EVT-INC");
+
+    // No remediation work.
+    expect(missionStore.createGeneratedFixFeature).not.toHaveBeenCalled();
+    // Completed as blocked (no new run status), distinct from a real fail.
+    expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(expect.any(String), "blocked", expect.any(String));
+
+    const incEvent = (missionStore.logMissionEvent as any).mock.calls.find(
+      (c: any[]) => c[3]?.code === "verification_inconclusive",
+    );
+    expect(incEvent).toBeDefined();
+    // Distinguishable from a real fail: warning severity + infra-failure marker.
+    expect(incEvent[1]).toBe("warning");
+    expect(incEvent[3]).toMatchObject({ outcome: "inconclusive", infraFailure: true });
+    // A real-fail event must NOT have been emitted for this run.
+    const failEvent = (missionStore.logMissionEvent as any).mock.calls.find(
+      (c: any[]) => c[3]?.code === "validation_failed",
+    );
+    expect(failEvent).toBeUndefined();
+  });
+
+  it("U6/R16: a swallowed Fix-Feature triage error is durably recorded, not silent", async () => {
+    const verify = vi.fn(async (req): Promise<VerificationOutcome> => ({ verdict: "fail", assertionId: req.assertionId, reason: "defect still reproduces" }));
+    const feature = createMockFeature({ loopState: "implementing", taskId: "FN-TRIAGE", status: "in-progress" });
+    missionStore._setFeature(feature);
+    missionStore._setAssertions("F-001", [assertionRow({ id: "CA-1", type: "behavioral" })]);
+    taskStore._setTask({ id: "FN-TRIAGE", title: "triage fail", integrationSha: "sha123", log: [] });
+    judgePass(["CA-1"]);
+    // Make triage throw so the swallow path is exercised.
+    missionStore.triageFeature = vi.fn(async () => { throw new Error("triage boom"); }) as any;
+
+    loop = new MissionExecutionLoop({ taskStore: taskStore as any, missionStore: missionStore as any, rootDir: "/tmp", verificationCapability: { verifyBehavioralAssertion: verify } });
+    loop.start();
+    await loop.processTaskOutcome("FN-TRIAGE");
+
+    const triageEvent = (missionStore.logMissionEvent as any).mock.calls.find(
+      (c: any[]) => c[3]?.code === "fix_feature_triage_failed",
+    );
+    expect(triageEvent).toBeDefined();
+    expect(triageEvent[1]).toBe("error");
+    expect(triageEvent[3]?.error).toContain("triage boom");
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { MissionStore, deriveMilestoneAcceptanceCriteriaFromFeatures } from "../mission-store.js";
 import { GoalStore } from "../goal-store.js";
-import { Database } from "../db.js";
+import { Database, SCHEMA_VERSION } from "../db.js";
 import type { MissionFeature } from "../mission-types.js";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -3781,7 +3781,7 @@ describe("MissionStore", () => {
 
   describe("Loop State & Validator Run Schema (v31)", () => {
     it("schema version is 101 after migration", () => {
-      expect(db.getSchemaVersion()).toBe(114);
+      expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     });
 
     it("mission_features table has loop state columns", () => {
@@ -4315,6 +4315,89 @@ describe("MissionStore", () => {
 
     expect(result.applied).toBeGreaterThan(0);
     expect(snapshot2.payload).toEqual(snapshot.payload);
+  });
+
+  describe("createGeneratedFixFeature (U6: reason, dedup, budget)", () => {
+    function seedFailedFeature(title = "Source Feature") {
+      const mission = store.createMission({ title: "Fix Feature Mission" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title, description: "Original description." });
+      return { mission, milestone, slice, feature };
+    }
+
+    it("R6: threads the observed-vs-expected reason into the Fix Feature description", () => {
+      const { feature } = seedFailedFeature();
+      const run = store.startValidatorRun(feature.id);
+
+      const reason = "- CA-1: defect still reproduces\n    expected: button submits\n    observed: nothing happens";
+      const fix = store.createGeneratedFixFeature(feature.id, run.id, ["CA-1"], reason);
+
+      expect(fix.description).toContain("Verification failure detail");
+      expect(fix.description).toContain("defect still reproduces");
+      expect(fix.description).toContain("Original description.");
+      // Reload from DB to confirm it persisted.
+      expect(store.getFeature(fix.id)?.description).toContain("defect still reproduces");
+    });
+
+    it("R22: re-drive of the same failing run returns the SAME Fix Feature (no duplicate)", () => {
+      const { feature } = seedFailedFeature();
+      const run = store.startValidatorRun(feature.id);
+
+      const first = store.createGeneratedFixFeature(feature.id, run.id, ["CA-1"], "first reason");
+      const attemptsAfterFirst = store.getFeature(feature.id)?.implementationAttemptCount;
+
+      // A recovery/reaper re-drive of the same run.
+      const second = store.createGeneratedFixFeature(feature.id, run.id, ["CA-1"], "first reason");
+
+      expect(second.id).toBe(first.id);
+      // No second lineage row, no second attempt consumed.
+      const snapshot = store.getFeatureLoopSnapshot(feature.id);
+      expect(snapshot.lineage.filter((l) => l.sourceFeatureId === feature.id).length).toBe(1);
+      expect(store.getFeature(feature.id)?.implementationAttemptCount).toBe(attemptsAfterFirst);
+    });
+
+    it("R22: an OPEN Fix Feature for the source blocks creating another (different run)", () => {
+      const { feature } = seedFailedFeature();
+      const run1 = store.startValidatorRun(feature.id);
+      const first = store.createGeneratedFixFeature(feature.id, run1.id, ["CA-1"], "reason 1");
+
+      // A second, distinct failing run re-drives while the first fix is still open.
+      const run2 = store.startValidatorRun(feature.id);
+      const second = store.createGeneratedFixFeature(feature.id, run2.id, ["CA-1"], "reason 2");
+
+      expect(second.id).toBe(first.id);
+    });
+
+    it("R22: a flaky verification across re-drives does NOT exhaust the retry budget", () => {
+      const { feature } = seedFailedFeature();
+
+      // Simulate many recovery re-drives of the same failing run (flaky infra
+      // repeatedly re-failing the same feature). Idempotency must keep the
+      // attempt count at exactly 1 so a correct feature is never force-blocked.
+      const run = store.startValidatorRun(feature.id);
+      for (let i = 0; i < 10; i++) {
+        store.createGeneratedFixFeature(feature.id, run.id, ["CA-1"], "flaky");
+      }
+
+      expect(store.getFeature(feature.id)?.implementationAttemptCount).toBe(1);
+      expect(store.getFeature(feature.id)?.status).not.toBe("blocked");
+    });
+
+    it("findGeneratedFixFeature / findOpenGeneratedFixFeature reflect terminal status", () => {
+      const { feature } = seedFailedFeature();
+      const run = store.startValidatorRun(feature.id);
+      const fix = store.createGeneratedFixFeature(feature.id, run.id, ["CA-1"], "reason");
+
+      expect(store.findGeneratedFixFeature(feature.id, run.id)?.id).toBe(fix.id);
+      expect(store.findOpenGeneratedFixFeature(feature.id)?.id).toBe(fix.id);
+
+      // Once the Fix Feature reaches a terminal status it is no longer "open".
+      store.updateFeature(fix.id, { status: "done" });
+      expect(store.findOpenGeneratedFixFeature(feature.id)).toBeUndefined();
+      // Exact-run lookup still finds it (lineage is permanent).
+      expect(store.findGeneratedFixFeature(feature.id, run.id)?.id).toBe(fix.id);
+    });
   });
 });
 

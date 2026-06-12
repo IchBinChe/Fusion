@@ -2964,6 +2964,9 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * @param sourceFeatureId - The feature that failed validation
    * @param runId - The validator run that failed
    * @param failedAssertionIds - IDs of assertions that failed
+   * @param failureReason - Optional observed-vs-expected detail (R6) appended to
+   *   the Fix Feature description so the remediation agent sees what behavior was
+   *   wrong rather than only which assertion ids failed.
    * @param title - Optional title for the fix feature (defaults to "Fix: {sourceTitle}")
    * @returns The created fix feature, or throws if retry budget is exhausted
    * @throws Error if source feature not found
@@ -2972,6 +2975,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     sourceFeatureId: string,
     runId: string,
     failedAssertionIds: string[],
+    failureReason?: string,
     title?: string,
   ): MissionFeature {
     const sourceFeature = this.getFeature(sourceFeatureId);
@@ -2982,6 +2986,30 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const run = this.getValidatorRun(runId);
     if (!run) {
       throw new Error(`Validator run ${runId} not found`);
+    }
+
+    // R22 — idempotency across re-drives.
+    //
+    // Recovery sweeps and the validator reaper re-drive validation for the same
+    // feature/run. Without dedup, each re-drive mints a fresh Fix Feature and
+    // increments the source's implementationAttemptCount, eventually exhausting
+    // the retry budget and force-blocking a feature whose code may be correct.
+    //
+    // Two guards, in order:
+    //   1. Exact dedup on (sourceFeatureId, generatedFromRunId): a re-drive of the
+    //      *same* failing run reuses the Fix Feature it already produced.
+    //   2. Open-fix dedup: if any non-terminal Fix Feature already exists for this
+    //      source (still being worked, i.e. not done/blocked), reuse it rather
+    //      than stacking another remediation feature.
+    // In both cases we return the existing feature WITHOUT incrementing the
+    // attempt count — the budget is consumed once per genuine failing run.
+    const existingForRun = this.findGeneratedFixFeature(sourceFeatureId, runId);
+    if (existingForRun) {
+      return existingForRun;
+    }
+    const openFix = this.findOpenGeneratedFixFeature(sourceFeatureId);
+    if (openFix) {
+      return openFix;
     }
 
     const now = new Date().toISOString();
@@ -3003,11 +3031,17 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       );
     }
 
+    // R6 — surface the observed-vs-expected reason to the remediation agent.
+    const reasonText = failureReason?.trim();
+    const fixDescription = reasonText
+      ? `${sourceFeature.description ? `${sourceFeature.description}\n\n` : ""}## Verification failure detail\n${reasonText}`
+      : sourceFeature.description;
+
     const fixFeature: MissionFeature = {
       id: fixFeatureId,
       sliceId: sourceFeature.sliceId,
       title: title ?? `Fix: ${sourceFeature.title}`,
-      description: sourceFeature.description,
+      description: fixDescription,
       acceptanceCriteria: sourceFeature.acceptanceCriteria,
       status: "defined",
       createdAt: now,
@@ -3077,6 +3111,51 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     });
 
     return fixFeature;
+  }
+
+  /**
+   * Find the Fix Feature already generated for a given (source feature, run)
+   * pair, if any. Used to make {@link createGeneratedFixFeature} idempotent
+   * across re-drives of the same failing validator run (R22).
+   *
+   * @param sourceFeatureId - The feature that failed validation
+   * @param runId - The originating validator run
+   * @returns The existing Fix Feature, or undefined if none exists
+   */
+  findGeneratedFixFeature(sourceFeatureId: string, runId: string): MissionFeature | undefined {
+    const row = this.db.prepare(
+      "SELECT fixFeatureId FROM mission_fix_feature_lineage WHERE sourceFeatureId = ? AND runId = ? ORDER BY createdAt ASC LIMIT 1",
+    ).get(sourceFeatureId, runId) as { fixFeatureId?: string } | undefined;
+    if (!row?.fixFeatureId) {
+      return undefined;
+    }
+    return this.getFeature(row.fixFeatureId);
+  }
+
+  /**
+   * Find an open (non-terminal) Fix Feature already generated for a source
+   * feature, if any. "Open" means a generated Fix Feature whose status is not a
+   * terminal one (`done` / `blocked`) — i.e. remediation is still in flight.
+   *
+   * Used by {@link createGeneratedFixFeature} so a recovery/reaper re-drive does
+   * not stack a second Fix Feature (and burn the retry budget) while the prior
+   * one is still being worked (R22).
+   *
+   * @param sourceFeatureId - The feature that failed validation
+   * @returns The earliest open Fix Feature, or undefined if none is open
+   */
+  findOpenGeneratedFixFeature(sourceFeatureId: string): MissionFeature | undefined {
+    const rows = this.db.prepare(
+      "SELECT fixFeatureId FROM mission_fix_feature_lineage WHERE sourceFeatureId = ? ORDER BY createdAt ASC",
+    ).all(sourceFeatureId) as Array<{ fixFeatureId?: string }>;
+    for (const row of rows) {
+      if (!row.fixFeatureId) continue;
+      const fix = this.getFeature(row.fixFeatureId);
+      if (fix && fix.status !== "done" && fix.status !== "blocked") {
+        return fix;
+      }
+    }
+    return undefined;
   }
 
   /**

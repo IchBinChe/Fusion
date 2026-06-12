@@ -454,10 +454,14 @@ export class MissionExecutionLoop extends EventEmitter {
         await this.handleValidationPass(feature.id, run.id, result.summary);
       } else if (result.status === "fail") {
         await this.handleValidationFail(feature.id, run.id, result);
-      } else if (result.status === "blocked" || result.status === "inconclusive") {
-        // Inconclusive (infra: no isolating backend, timeout, rejected proof)
-        // routes to blocked/needs-attention — distinct from a behavioral fail,
-        // and spawns no Fix Feature (per KTD / R21, fully realized in a later unit).
+      } else if (result.status === "inconclusive") {
+        // R21 — "verification could not run" is distinct from "behavior observed
+        // wrong". An infra-driven inconclusive (no isolating backend, timeout,
+        // isolation setup failure, rejected proof) routes to a blocked/needs-
+        // attention outcome that spawns NO Fix Feature, and is tracked with a
+        // distinguishable infra-failure event so it is separable from real fails.
+        await this.handleValidationInconclusive(feature.id, run.id, result.blockedReason ?? result.summary);
+      } else if (result.status === "blocked") {
         await this.handleValidationBlocked(feature.id, run.id, result.blockedReason ?? result.summary);
       } else if (result.status === "error") {
         await this.handleValidationError(feature.id, run.id, result.summary);
@@ -1243,12 +1247,26 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
 
       loopLog.log(`Feature ${featureId} failed validation with ${failures.length} failures`);
 
+      // R6 — build an observed-vs-expected reason so the remediation agent sees
+      // what behavior was wrong, not just which assertion ids failed.
+      const failureReason = this.buildFailureReason(failures, result.summary);
+
+      // R16 — durable observability: a verification/validation failure is a
+      // persisted mission event, not just a log line.
+      this.logFeatureMissionEvent(featureId, "error", "validation_failed", `Validation failed for feature ${featureId}: ${result.summary}`, {
+        runId: runId ?? null,
+        failedAssertionIds: failures.map((f) => f.assertionId),
+        reason: failureReason,
+        outcome: "fail",
+      });
+
       // Create fix feature
       try {
         const fixFeature = this.missionStore.createGeneratedFixFeature(
           featureId,
           runId || "unknown",
           failures.map((f) => f.assertionId),
+          failureReason,
         );
         loopLog.log(`Created fix feature ${fixFeature.id} for ${featureId}`);
 
@@ -1259,7 +1277,15 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
         } catch (triageErr) {
           const triageMessage = triageErr instanceof Error ? triageErr.message : String(triageErr);
           loopLog.error(`Error triaging fix feature ${fixFeature.id}:`, triageMessage);
-          // Continue even if triage fails - the fix feature was created and can be triaged manually
+          // R16 — a swallowed triage error must be durably recorded, not just
+          // logged. The branch-group-collision learning: silent triage stalls
+          // are invisible mission deadlocks. The Fix Feature was created and can
+          // be triaged manually, so we continue, but the failure is persisted.
+          this.logFeatureMissionEvent(featureId, "error", "fix_feature_triage_failed", `Auto-triage of fix feature ${fixFeature.id} failed: ${triageMessage}`, {
+            runId: runId ?? null,
+            fixFeatureId: fixFeature.id,
+            error: triageMessage,
+          });
         }
 
         this.emit("validation:failed", {
@@ -1270,12 +1296,20 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
         });
       } catch (fixErr) {
         const message = fixErr instanceof Error ? fixErr.message : String(fixErr);
-        if (message.includes("retry budget exhausted")) {
+        if (message.includes("retry budget exhausted") || message.includes("exhausted its retry budget")) {
           loopLog.warn(`Feature ${featureId} retry budget exhausted; marking as blocked`);
           // completeValidatorRun already handles the blocked transition when budget is exhausted
+          this.logFeatureMissionEvent(featureId, "error", "retry_budget_exhausted", `Feature ${featureId} exhausted its retry budget`, {
+            runId: runId ?? null,
+          });
           this.emit("validation:budget_exhausted", { featureId, runId });
         } else {
           loopLog.error(`Error creating fix feature for ${featureId}:`, message);
+          // R16 — a swallowed Fix-Feature creation error is durably recorded.
+          this.logFeatureMissionEvent(featureId, "error", "fix_feature_creation_failed", `Failed to create fix feature for ${featureId}: ${message}`, {
+            runId: runId ?? null,
+            error: message,
+          });
         }
       }
 
@@ -1285,6 +1319,78 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
       }
     } catch (err) {
       loopLog.error(`Error handling validation fail for ${featureId}:`, err);
+    }
+  }
+
+  /**
+   * Build an observed-vs-expected failure reason (R6) suitable for surfacing to
+   * the remediation agent in the generated Fix Feature. Prefers per-assertion
+   * expected/actual detail; falls back to the per-assertion message, then the
+   * overall summary.
+   */
+  private buildFailureReason(
+    failures: Array<{ assertionId: string; message: string; expected?: string; actual?: string }>,
+    summary: string,
+  ): string {
+    if (failures.length === 0) {
+      return summary;
+    }
+    const lines = failures.map((f) => {
+      const parts: string[] = [`- ${f.assertionId}: ${f.message}`];
+      if (f.expected) parts.push(`    expected: ${f.expected}`);
+      if (f.actual) parts.push(`    observed: ${f.actual}`);
+      return parts.join("\n");
+    });
+    return lines.join("\n");
+  }
+
+  /**
+   * Handle an inconclusive validation (R21).
+   *
+   * An inconclusive verdict means verification could not run or could not
+   * conclude (no isolating sandbox backend, timeout, isolation setup failure,
+   * rejected proof, detected flakiness) — it is NOT an observed behavioral
+   * failure. It must:
+   *   - route to a blocked/needs-attention outcome (no Fix Feature, no
+   *     remediation work minted),
+   *   - record a distinguishable, durably-observable infra-failure signal so the
+   *     infra-failure rate is separable from real failures.
+   *
+   * The validator run is completed as `blocked` (no new run status is
+   * introduced), but the persisted mission event carries a distinct
+   * `verification_inconclusive` code and an `outcome: "inconclusive"` marker so
+   * downstream observers can compute the infra-failure rate distinctly from real
+   * fails (which carry `outcome: "fail"`).
+   */
+  private async handleValidationInconclusive(
+    featureId: string,
+    runId: string | undefined,
+    reason: string | undefined,
+  ): Promise<void> {
+    try {
+      this.completeValidatorRunIfStillRunning(runId, "blocked", reason);
+      loopLog.warn(`Feature ${featureId} verification inconclusive: ${reason ?? "no reason provided"}`);
+
+      // R16/R21 — durable, distinguishable infra-failure event. The `outcome`
+      // marker separates infra-driven non-passes from real behavioral fails so
+      // the infra-failure rate can be tracked without conflating the two.
+      this.logFeatureMissionEvent(featureId, "warning", "verification_inconclusive", `Verification inconclusive for feature ${featureId}: ${reason ?? "verification could not conclude"}`, {
+        runId: runId ?? null,
+        reason: reason ?? null,
+        outcome: "inconclusive",
+        infraFailure: true,
+      });
+
+      // Explicitly does NOT call createGeneratedFixFeature — inconclusive mints
+      // no remediation work (R21).
+
+      if (this.missionAutopilot?.notifyValidationComplete) {
+        await this.missionAutopilot.notifyValidationComplete(featureId, "blocked");
+      }
+
+      this.emit("validation:inconclusive", { featureId, runId, reason });
+    } catch (err) {
+      loopLog.error(`Error handling inconclusive validation for ${featureId}:`, err);
     }
   }
 

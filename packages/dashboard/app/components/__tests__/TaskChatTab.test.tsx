@@ -141,8 +141,11 @@ describe("TaskChatTab", () => {
     render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
 
     const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
     await user.type(input, "Please inspect the failing test");
-    await user.click(screen.getByRole("button", { name: "Send" }));
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
 
     await waitFor(() => {
       expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Please inspect the failing test", "project-1");
@@ -150,11 +153,63 @@ describe("TaskChatTab", () => {
     expect(input).toHaveValue("");
   });
 
-  it("disables the composer and shows a hint when no active assigned session exists", () => {
-    render(<TaskChatTab task={makeTask({ column: "todo", assignedAgentId: undefined, status: undefined })} active addToast={vi.fn()} />);
+  it.each(["reviewing", "merging", "merging-fix", "fixing"])(
+    "enables in-review steering while %s with an assigned agent",
+    async (status) => {
+      const user = userEvent.setup();
+      mockedAddSteeringComment.mockResolvedValue(makeTask({ column: "in-review", status }));
+      render(<TaskChatTab task={makeTask({ column: "in-review", status })} projectId="project-1" active addToast={vi.fn()} />);
+
+      const input = screen.getByLabelText("Message active agent session");
+      expect(input).not.toBeDisabled();
+      await user.type(input, `Please continue ${status}`);
+      const sendButton = screen.getByRole("button", { name: "Send" });
+      expect(sendButton).not.toBeDisabled();
+      await user.click(sendButton);
+
+      await waitFor(() => {
+        expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", `Please continue ${status}`, "project-1");
+      });
+    },
+  );
+
+  it("enables in-review steering with checkedOutBy when no assignedAgentId exists", async () => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask({ column: "in-review", status: "reviewing" }));
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-review", status: "reviewing", assignedAgentId: undefined, checkedOutBy: "agent-1" })}
+        projectId="project-1"
+        active
+        addToast={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    await user.type(input, "Please review this follow-up");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Please review this follow-up", "project-1");
+    });
+  });
+
+  it.each([
+    ["todo task", makeTask({ column: "todo", assignedAgentId: undefined, status: undefined })],
+    ["in-review task without an assigned or checked-out agent", makeTask({ column: "in-review", status: "reviewing", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["paused in-review task", makeTask({ column: "in-review", status: "reviewing", paused: true })],
+    ["user-paused in-review task", makeTask({ column: "in-review", status: "reviewing", userPaused: true })],
+    ["done task", makeTask({ column: "done", status: undefined })],
+  ])("disables the composer and shows a hint for %s", (_label, task) => {
+    render(<TaskChatTab task={task} active addToast={vi.fn()} />);
 
     expect(screen.getByText(/No active assigned agent session/)).toBeTruthy();
+    expect(screen.getByText(/active, assigned agent session is required/i)).toBeTruthy();
     expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Active assigned agent session required")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 

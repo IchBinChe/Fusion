@@ -102,13 +102,14 @@ async function classifyHarmlessMergeRemoveFailure(input: {
     maxBuffer: MAX_BUFFER,
   });
 
-  const { stdout } = await execAsync("git worktree list --porcelain", {
+  const listResult = await execAsync("git worktree list --porcelain", {
     cwd: input.rootDir,
     encoding: "utf-8",
     timeout: 10_000,
     maxBuffer: MAX_BUFFER,
   });
-  const registeredAfterPrune = porcelainContainsWorktree(String(stdout ?? ""), input.worktreePath);
+  const stdout = typeof listResult === "string" ? listResult : String(listResult.stdout ?? "");
+  const registeredAfterPrune = porcelainContainsWorktree(stdout, input.worktreePath);
 
   if (registeredAfterPrune) {
     await input.audit?.git({

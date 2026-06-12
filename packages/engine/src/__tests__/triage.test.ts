@@ -1788,8 +1788,12 @@ describe("approved triage recovery", () => {
   it("includes decision-only noCommitsExpected heuristic instructions in system prompts", () => {
     expect(TRIAGE_POLICY_PROMPT).toContain("**No commits expected:** true");
     expect(TRIAGE_POLICY_PROMPT).toContain("Decide whether FN-XYZ needs a fix");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Assign ready implementation task to active owner, or record no-route state");
+    expect(TRIAGE_POLICY_PROMPT).toContain("operational routing/coordination");
     expect(TRIAGE_POLICY_PROMPT).toContain("Investigate FN-XYZ and fix if needed");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Investigate and fix routing if needed");
     expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("**No commits expected:** true");
+    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("operational routing/coordination");
   });
 
   it("preserves imported GitHub issue titles during planning recovery", async () => {

@@ -1953,7 +1953,6 @@ export class TaskExecutor {
     }
 
     this.loopRecoveryState.delete(taskId);
-    this.spawnedAgents.delete(taskId);
     this.stuckAborted.delete(taskId);
 
     if (hadActiveSurface) {
@@ -13867,6 +13866,51 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         try {
           const settings = await this.store.getSettings();
           const preserveProgress = settings.preserveProgressOnStuckRequeue !== false;
+          const latestTask = await this.store.getTask(taskId);
+          const worktreePath = this.getWorktreePath(taskId) ?? latestTask.worktree;
+          await this.store.logEntry(
+            taskId,
+            `Force-kill cleanup starting after stuck-kill unwind timeout — reaping in-flight surfaces and worktree`,
+          );
+
+          // Spawned children must be terminated before the canonical reaper clears
+          // spawnedAgents bookkeeping; otherwise child agent sessions would be orphaned.
+          await this.terminateAllChildren(taskId).catch((err: unknown) => {
+            executorLog.warn(`${taskId}: spawned child cleanup failed during force-requeue: ${err instanceof Error ? err.message : String(err)}`);
+          });
+          await this.awaitAbortInFlightTaskWork(taskId, "force-requeue after stuck-kill unwind timeout");
+          // awaitAbortInFlightTaskWork marks pausedAborted as a generic hard-cancel
+          // signal. The force-requeue path has already handled the task move, so
+          // clear it to prevent a later subprocess unwind from logging/moving as a pause.
+          this.pausedAborted.delete(taskId);
+
+          if (!preserveProgress) {
+            await this.resetStepsIfWorkLost(latestTask);
+          }
+
+          let cleanupFailed = false;
+          if (worktreePath && existsSync(worktreePath)) {
+            try {
+              await removeWorktree({
+                worktreePath,
+                rootDir: this.rootDir,
+                settings,
+                taskId,
+                reason: RemovalReason.ExecutorStuckKilled,
+                expectedOwnerTaskId: taskId,
+                liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+              });
+              executorLog.log(`${taskId}: removed worktree during force-requeue cleanup: ${worktreePath}`);
+            } catch (cleanupErr: unknown) {
+              cleanupFailed = true;
+              const cleanupErrMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+              executorLog.warn(`${taskId}: worktree removal failed during force-requeue cleanup (${worktreePath}): ${cleanupErrMessage}`);
+              await this.store.logEntry(taskId, `Force-kill cleanup failed to remove worktree ${worktreePath}: ${cleanupErrMessage}`);
+            }
+          }
+
+          this.activeWorktrees.delete(taskId);
+
           await this.store.logEntry(
             taskId,
             `Force-requeued after stuck-kill: executor did not unwind within ${FORCE_REQUEUE_GRACE_MS / 1000}s (hung subprocess)${preserveProgress ? " — progress preserved" : ""}`,
@@ -13878,16 +13922,23 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
             branch: null,
           });
           await this.store.moveTask(taskId, "todo", preserveProgress ? { preserveProgress: true } : undefined);
-          // Remove from executing so the scheduler can re-dispatch normally.
-          // The old Promise is still running but the executing guard is cleared so
-          // a fresh execute() call won't be blocked.
+          // Remove from executing only after the hung surfaces and worktree have
+          // been reaped, preventing a scheduler re-dispatch onto stale resources.
           this.executing.delete(taskId);
           executingTaskLock.release(taskId);
           this.stuckAborted.delete(taskId);
-          executorLog.log(`${taskId} force-requeued to todo`);
+          this.loopRecoveryState.delete(taskId);
+          await this.store.logEntry(
+            taskId,
+            cleanupFailed
+              ? "Force-kill cleanup completed with non-fatal worktree removal failure — task requeued"
+              : "Force-kill cleanup completed — in-flight surfaces reaped and task requeued",
+          );
+          executorLog.log(`${taskId} force-requeued to todo after stuck-kill cleanup`);
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);
           executorLog.error(`Failed to force-requeue stuck task ${taskId}: ${errorMessage}`);
+          await this.store.logEntry(taskId, `Force-kill cleanup failed during stuck-kill force-requeue: ${errorMessage}`).catch(() => undefined);
         }
       }, FORCE_REQUEUE_GRACE_MS);
     }

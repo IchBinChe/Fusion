@@ -2981,6 +2981,41 @@ describe("MissionStore", () => {
       expect(assertion.orderIndex).toBe(0);
       expect(assertion.createdAt).toBeTruthy();
       expect(assertion.updatedAt).toBeTruthy();
+      // U1: conservative default type preserves legacy static judging.
+      expect(assertion.type).toBe("static");
+    });
+
+    it("persists an explicit behavioral type and reloads it", () => {
+      const created = store.addContractAssertion(milestone.id, {
+        title: "Clicking Save no longer drops the form",
+        assertion: "After clicking Save the form persists",
+        type: "behavioral",
+      });
+      expect(created.type).toBe("behavioral");
+
+      const reloaded = store.getContractAssertion(created.id);
+      expect(reloaded?.type).toBe("behavioral");
+    });
+
+    it("defaults an unspecified type to static (conservative)", () => {
+      const created = store.addContractAssertion(milestone.id, {
+        title: "Documented in README",
+        assertion: "The new flag appears in the README",
+      });
+      expect(created.type).toBe("static");
+      expect(store.getContractAssertion(created.id)?.type).toBe("static");
+    });
+
+    it("normalizes a legacy/unknown stored type value to static", () => {
+      const created = store.addContractAssertion(milestone.id, {
+        title: "Legacy row",
+        assertion: "Pre-migration assertion",
+      });
+      // Simulate a corrupt/unknown value persisted directly (the column is
+      // NOT NULL DEFAULT 'static', so NULL can't be written — only an
+      // out-of-enum string is reachable). The reader normalizes it.
+      db.prepare("UPDATE mission_contract_assertions SET type = ? WHERE id = ?").run("garbage", created.id);
+      expect(store.getContractAssertion(created.id)?.type).toBe("static");
     });
 
     it("creates assertions with auto-incrementing orderIndex", () => {

@@ -14,6 +14,7 @@
 import { EventEmitter } from "node:events";
 import type { Database } from "./db.js";
 import { fromJson, toJson, toJsonNullable } from "./db.js";
+import { normalizeMissionAssertionType } from "./mission-types.js";
 import type { Goal, GoalStatus } from "./goal-types.js";
 import type {
   Mission,
@@ -282,6 +283,7 @@ interface AssertionRow {
   title: string;
   assertion: string;
   status: string;
+  type: string | null;
   orderIndex: number;
   sourceFeatureId: string | null;
   createdAt: string;
@@ -507,6 +509,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       title: row.title,
       assertion: row.assertion,
       status: row.status as import("./mission-types.js").MissionAssertionStatus,
+      type: normalizeMissionAssertionType(row.type),
       orderIndex: row.orderIndex,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -3252,20 +3255,22 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       title: input.title,
       assertion: input.assertion,
       status: input.status || "pending",
+      type: normalizeMissionAssertionType(input.type),
       orderIndex,
       createdAt: now,
       updatedAt: now,
     };
 
     this.db.prepare(`
-      INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, orderIndex, sourceFeatureId, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, type, orderIndex, sourceFeatureId, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       assertion.id,
       assertion.milestoneId,
       assertion.title,
       assertion.assertion,
       assertion.status,
+      assertion.type,
       assertion.orderIndex,
       assertion.sourceFeatureId ?? null,
       assertion.createdAt,
@@ -4232,10 +4237,10 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     for (const assertion of snapshot.payload.assertions) {
       if (!assertion.id || !assertion.milestoneId) continue;
-      this.db.prepare(`INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, orderIndex, sourceFeatureId, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title, assertion=excluded.assertion, status=excluded.status, orderIndex=excluded.orderIndex, sourceFeatureId=excluded.sourceFeatureId, updatedAt=excluded.updatedAt`)
-        .run(assertion.id, assertion.milestoneId, assertion.title, assertion.assertion, assertion.status, assertion.orderIndex, assertion.sourceFeatureId ?? null, assertion.createdAt, assertion.updatedAt);
+      this.db.prepare(`INSERT INTO mission_contract_assertions (id, milestoneId, title, assertion, status, type, orderIndex, sourceFeatureId, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title, assertion=excluded.assertion, status=excluded.status, type=excluded.type, orderIndex=excluded.orderIndex, sourceFeatureId=excluded.sourceFeatureId, updatedAt=excluded.updatedAt`)
+        .run(assertion.id, assertion.milestoneId, assertion.title, assertion.assertion, assertion.status, normalizeMissionAssertionType((assertion as { type?: unknown }).type), assertion.orderIndex, assertion.sourceFeatureId ?? null, assertion.createdAt, assertion.updatedAt);
     }
 
     for (const link of snapshot.payload.featureAssertionLinks) {

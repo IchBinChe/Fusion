@@ -611,19 +611,25 @@ describe("Planning Mode Routes", () => {
       });
 
       it("enforces rate limiting (1000 sessions per hour per IP)", async () => {
-        // Create 1000 sessions (should succeed)
-        for (let i = 0; i < 1000; i++) {
-          const res = await REQUEST(
-            buildApp(),
-            "POST",
-            "/api/planning/start",
-            JSON.stringify({ initialPlan: `Plan ${i}` }),
-            { "Content-Type": "application/json" }
-          );
-          expect(res.status).toBe(201);
+        // Seed the in-memory limiter directly so this boundary test still proves
+        // the 1000th HTTP request is accepted and the 1001st is rejected without
+        // spending seconds creating 999 duplicate full planning sessions.
+        const candidateIps = ["::ffff:127.0.0.1", "127.0.0.1", "unknown"];
+        for (const ip of candidateIps) {
+          for (let i = 0; i < 999; i += 1) {
+            expect(planningModule.checkRateLimit(ip)).toBe(true);
+          }
         }
 
-        // 1001st session should be rate limited
+        const allowed = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Plan 1000" }),
+          { "Content-Type": "application/json" }
+        );
+        expect(allowed.status).toBe(201);
+
         const res = await REQUEST(
           buildApp(),
           "POST",
@@ -3430,10 +3436,9 @@ describe("Saturated-slot regression: heartbeat wake routes", () => {
         );
 
         expect(res.status).toBe(200);
+        await Promise.resolve();
         // Active run conflict must still work under saturation
-        await vi.waitFor(() => {
-          expect(heartbeatMonitor.executeHeartbeat).not.toHaveBeenCalled();
-        }, { timeout: 1000 });
+        expect(heartbeatMonitor.executeHeartbeat).not.toHaveBeenCalled();
       } finally {
         agentStore?.close?.();
         rmSync(tempDir, { recursive: true, force: true });

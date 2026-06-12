@@ -118,6 +118,26 @@
   - `ChatView.test.tsx`: **12.53s → 14.66s** (390 tests; sampled rerun modestly higher while preserving coverage)
 - FN-5074 preserved FN-tagged coverage and frozen-button assertions; all four files pass in isolation and full verification gates remained green in task execution.
 
+## FN-6307 follow-up results
+- Targeted isolated re-measure used the current dashboard quality projects with the dot reporter and a 2x back-to-back flakiness check for:
+  - `src/__tests__/routes-agents.test.ts`
+  - `src/__tests__/routes-git.test.ts`
+  - `src/__tests__/routes-planning.test.ts`
+  - `app/components/__tests__/FileEditor.test.tsx`
+  - `app/components/__tests__/NewTaskModal.test.tsx`
+- Results (tests unchanged):
+
+| File | Tests | Baseline duration/test time | After run 1 duration/test time | After run 2 duration/test time | Outcome |
+|---|---:|---:|---:|---:|---|
+| `routes-agents.test.ts` | 174 | 58.43s / 46.64s | 33.42s / 28.84s | 27.06s / 24.31s | retained coverage; no source edits needed |
+| `routes-git.test.ts` | 98 | 10.71s / 7.89s | 17.81s / 15.37s | 10.65s / 8.25s | retained coverage; no source edits needed |
+| `routes-planning.test.ts` | 102 | 7.74s / 4.97s | 4.76s / 2.30s | 4.17s / 1.64s | replaced duplicate rate-limit HTTP loop with direct limiter seeding while preserving boundary HTTP assertions |
+| `FileEditor.test.tsx` | 45 | 5.31s / 3.76s | 6.99s / 3.57s | 4.83s / 3.71s | retained CSS/layout suites unchanged |
+| `NewTaskModal.test.tsx` | 50 | 3.83s / 2.16s | 3.58s / 1.95s | 3.54s / 1.97s | replaced disabled-button negative polling waits with direct assertions |
+
+- Combined after-run 2 duration for the five targeted files was **50.25s** versus **86.02s** in the Step 0 baseline. Test counts stayed constant; no FN-tagged regression coverage was removed.
+
 ## Notes
 - Dashboard `vitest run` baseline and post-change measurements both surfaced broad failing suites outside this task’s implementation scope; timing evidence is still captured from the same command family.
+- FN-6307 verification also observed pre-existing isolated failures in `src/__tests__/routes-settings.test.ts` (`GET /settings/scopes` returning 500 for scoped settings cases) while targeted files remained green.
 - Standing prevention rule: see `AGENTS.md` → **Standing Rule: Do Not Add Slow Tests (FN-5048)**.

@@ -85,6 +85,9 @@ function getUsageColorClass(percentUsed: number): string {
 const HIDDEN_WINDOWS_STORAGE_KEY = "kb-usage-hidden-windows";
 const MODAL_SIZE_STORAGE_KEY = "kb-usage-modal-size";
 const PROVIDER_ORDER_KEY = "kb-usage-provider-order";
+const DESKTOP_POPOVER_GAP = 8;
+const DESKTOP_POPOVER_TOP_INSET = DESKTOP_POPOVER_GAP * 2;
+const DESKTOP_POPOVER_MAX_TOP_VIEWPORT_RATIO = 0.25;
 
 interface ModalSize {
   width: number;
@@ -890,12 +893,19 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
   if (!isOpen) return null;
 
   const showDesktopPopover = Boolean(anchorRect && isDesktopViewport);
-  const desktopGap = 8;
-  const maxTopPadding = 12;
   const defaultPopoverWidth = 420;
   const popoverWidth = savedSize?.width ?? defaultPopoverWidth;
   const desktopTop = showDesktopPopover
-    ? Math.min((anchorRect?.bottom ?? 0) + desktopGap, window.innerHeight - maxTopPadding)
+    ? Math.max(
+        DESKTOP_POPOVER_TOP_INSET,
+        Math.min(
+          (anchorRect?.bottom ?? 0) + DESKTOP_POPOVER_GAP,
+          Math.max(
+            DESKTOP_POPOVER_TOP_INSET,
+            window.innerHeight * DESKTOP_POPOVER_MAX_TOP_VIEWPORT_RATIO
+          )
+        )
+      )
     : undefined;
   // Anchor popover so its right edge aligns with the anchor button's right edge,
   // but use `left` positioning so native resize (bottom-right handle) feels natural.
@@ -1052,7 +1062,7 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
   }
 
   return (
-    <div className="modal-overlay open" onClick={handleOverlayClick} data-testid="usage-modal-overlay">
+    <div className="modal-overlay open usage-modal-overlay" onClick={handleOverlayClick} data-testid="usage-modal-overlay">
       {usageContent}
     </div>
   );

@@ -621,12 +621,20 @@
   resize: both;
 }
 
+.usage-modal-overlay {
+  --overlay-padding-top: var(--space-lg);
+}
+
 .usage-modal.modal {
   resize: both;
   overflow: hidden;
 }
 
 @media (max-width: 768px) {
+  .usage-modal-overlay {
+    --overlay-padding-top: 0;
+  }
+
   .usage-modal--popover,
   .usage-modal.modal {
     resize: none;

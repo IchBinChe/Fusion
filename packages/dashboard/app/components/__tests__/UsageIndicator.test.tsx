@@ -44,6 +44,21 @@ function createAnchorRect(partial: Partial<DOMRect> = {}): DOMRect {
 const USAGE_VIEW_MODE_KEY = scopedKey("kb-usage-view-mode", TEST_PROJECT_ID);
 const USAGE_HIDDEN_WINDOWS_KEY = scopedKey("kb-usage-hidden-windows", TEST_PROJECT_ID);
 const USAGE_PROVIDER_ORDER_KEY = scopedKey("kb-usage-provider-order", TEST_PROJECT_ID);
+const USAGE_MODAL_SIZE_KEY = scopedKey("kb-usage-modal-size", TEST_PROJECT_ID);
+
+function setViewportSize({ width, height }: { width: number; height: number }) {
+  Object.defineProperty(window, "innerWidth", {
+    writable: true,
+    configurable: true,
+    value: width,
+  });
+  Object.defineProperty(window, "innerHeight", {
+    writable: true,
+    configurable: true,
+    value: height,
+  });
+  window.dispatchEvent(new Event("resize"));
+}
 
 function getWindowIdentity(label: string, index: number): string {
   return `${index}::${label}`;
@@ -105,6 +120,8 @@ describe("UsageIndicator", () => {
     localStorage.removeItem(USAGE_VIEW_MODE_KEY);
     localStorage.removeItem(USAGE_HIDDEN_WINDOWS_KEY);
     localStorage.removeItem(USAGE_PROVIDER_ORDER_KEY);
+    localStorage.removeItem(USAGE_MODAL_SIZE_KEY);
+    setViewportSize({ width: 1024, height: 768 });
   });
 
   it("renders nothing when isOpen is false", () => {
@@ -438,7 +455,7 @@ describe("UsageIndicator", () => {
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
 
-  it("renders as popover below anchor on desktop when anchorRect provided", () => {
+  it("renders as top-biased popover below a high desktop anchor", () => {
     mockUseUsageData.mockReturnValue(createUsageDataState({
       providers: mockProviders,
       loading: false,
@@ -459,10 +476,65 @@ describe("UsageIndicator", () => {
     const modal = screen.getByTestId("usage-modal") as HTMLElement;
     expect(modal).toHaveClass("usage-modal--popover");
     expect(modal.style.top).toBe("88px");
+    expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 2);
     expect(modal.style.left).toBe("520px");
   });
 
-  it("renders as full-screen modal when anchorRect is null", () => {
+  it("keeps the desktop popover near the top on a short viewport", () => {
+    setViewportSize({ width: 1024, height: 240 });
+    mockUseUsageData.mockReturnValue(createUsageDataState({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    }));
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={createAnchorRect()}
+      />
+    );
+
+    const modal = screen.getByTestId("usage-modal") as HTMLElement;
+    expect(modal).toHaveClass("usage-modal--popover");
+    expect(modal.style.top).toBe("60px");
+    expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 2);
+  });
+
+  it("clamps the desktop popover near the top for a low anchor while preserving saved size", () => {
+    setViewportSize({ width: 1024, height: 800 });
+    localStorage.setItem(USAGE_MODAL_SIZE_KEY, JSON.stringify({ width: 600, height: 500 }));
+    mockUseUsageData.mockReturnValue(createUsageDataState({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    }));
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={createAnchorRect({ top: 620, bottom: 650 })}
+      />
+    );
+
+    const modal = screen.getByTestId("usage-modal") as HTMLElement;
+    expect(modal).toHaveClass("usage-modal--popover");
+    expect(modal.style.top).toBe("200px");
+    expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 2);
+    expect(modal.style.left).toBe("340px");
+    expect(modal.style.width).toBe("600px");
+    expect(modal.style.height).toBe("500px");
+  });
+
+  it("renders as top-aligned full-screen modal when anchorRect is null", () => {
     mockUseUsageData.mockReturnValue(createUsageDataState({
       providers: mockProviders,
       loading: false,
@@ -473,8 +545,67 @@ describe("UsageIndicator", () => {
 
     render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} anchorRect={null} />);
 
-    expect(screen.getByTestId("usage-modal")).toHaveClass("modal");
-    expect(screen.getByTestId("usage-modal")).not.toHaveClass("usage-modal--popover");
+    const overlay = screen.getByTestId("usage-modal-overlay");
+    const modal = screen.getByTestId("usage-modal");
+    expect(overlay).toHaveClass("modal-overlay", "open", "usage-modal-overlay");
+    expect(modal).toHaveClass("modal");
+    expect(modal).not.toHaveClass("usage-modal--popover");
+    expect(modal.parentElement).toBe(overlay);
+  });
+
+  it("uses the top-aligned mobile sheet surface instead of the desktop popover", () => {
+    setViewportSize({ width: 768, height: 600 });
+    mockUseUsageData.mockReturnValue(createUsageDataState({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    }));
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={createAnchorRect()}
+      />
+    );
+
+    const overlay = screen.getByTestId("usage-modal-overlay");
+    const modal = screen.getByTestId("usage-modal") as HTMLElement;
+    expect(overlay).toHaveClass("usage-modal-overlay");
+    expect(modal).toHaveClass("usage-modal", "modal");
+    expect(modal).not.toHaveClass("usage-modal--popover");
+    expect(modal.style.top).toBe("");
+  });
+
+  it.each([
+    ["populated", createUsageDataState({ providers: mockProviders, loading: false, error: null, lastUpdated: new Date(), refresh: mockRefresh }), "Anthropic"],
+    ["empty", createUsageDataState({ providers: [], loading: false, error: null, lastUpdated: null, refresh: mockRefresh }), "No AI providers configured"],
+    ["loading", createUsageDataState({ providers: [], loading: true, error: null, lastUpdated: null, hasFetched: false, refresh: mockRefresh }), null],
+    ["error", createUsageDataState({ providers: [], loading: false, error: "Failed to fetch usage data", lastUpdated: null, refresh: mockRefresh }), "Failed to load usage data"],
+  ])("keeps top-biased popover positioning for %s content", (_stateName, usageState, expectedText) => {
+    setViewportSize({ width: 1024, height: 240 });
+    mockUseUsageData.mockReturnValue(usageState);
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={createAnchorRect({ top: 180, bottom: 210 })}
+      />
+    );
+
+    const modal = screen.getByTestId("usage-modal") as HTMLElement;
+    expect(modal).toHaveClass("usage-modal--popover");
+    expect(modal.style.top).toBe("60px");
+    if (expectedText) {
+      expect(screen.getByText(expectedText)).toBeInTheDocument();
+    } else {
+      expect(document.querySelector(".usage-skeleton")).toBeInTheDocument();
+    }
   });
 
   it("calls onClose when overlay is clicked", () => {

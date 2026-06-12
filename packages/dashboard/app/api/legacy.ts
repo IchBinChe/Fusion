@@ -6439,7 +6439,7 @@ export interface SummarizeTitleResponse {
 }
 
 /** Summarize a task description into a concise title using AI.
- * @param description - The task description to summarize (must be 201-2000 chars)
+ * @param description - The task description to summarize (must be >200 chars; model input is truncated)
  * @param provider - Optional AI model provider (e.g., "anthropic")
  * @param modelId - Optional AI model ID (e.g., "claude-sonnet-4-5")
  * @param projectId - Optional project ID for scoped settings resolution

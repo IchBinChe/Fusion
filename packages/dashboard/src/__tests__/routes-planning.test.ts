@@ -3757,6 +3757,31 @@ describe("POST /api/ai/summarize-title", () => {
     );
   });
 
+  it("accepts descriptions longer than 2000 characters", async () => {
+    const fusionCore = await import("@fusion/core");
+    const summarizeTitleSpy = vi
+      .spyOn(fusionCore, "summarizeTitle")
+      .mockResolvedValueOnce("Generated title");
+
+    const description = "x".repeat(5000);
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/ai/summarize-title",
+      JSON.stringify({ description }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ title: "Generated title" });
+    expect(summarizeTitleSpy).toHaveBeenCalledWith(
+      description,
+      "/test/project",
+      undefined,
+      undefined,
+    );
+  });
+
   it("emits structured diagnostics for unexpected summarize failures", async () => {
     const diagnostics = captureDiagnostics();
     const fusionCore = await import("@fusion/core");

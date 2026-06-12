@@ -22,6 +22,7 @@ import {
   MERGE_COMMIT_SUMMARIZE_SYSTEM_PROMPT,
   COMMIT_BODY_SYSTEM_PROMPT,
   MAX_DESCRIPTION_LENGTH,
+  MAX_TITLE_SUMMARIZE_INPUT_LENGTH,
   MIN_DESCRIPTION_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_MERGE_COMMIT_SUMMARY_LENGTH,
@@ -53,6 +54,7 @@ describe("ai-summarize", () => {
     it("should have correct length limits", () => {
       expect(MIN_DESCRIPTION_LENGTH).toBe(201);
       expect(MAX_DESCRIPTION_LENGTH).toBe(2000);
+      expect(MAX_TITLE_SUMMARIZE_INPUT_LENGTH).toBe(4000);
       expect(MAX_TITLE_LENGTH).toBe(60);
     });
 
@@ -89,19 +91,19 @@ describe("ai-summarize", () => {
       expect(() => validateDescription(desc)).toThrow("at least 201 characters");
     });
 
-    it("should throw for description too long", () => {
-      const desc = "a".repeat(2001);
-      expect(() => validateDescription(desc)).toThrow(ValidationError);
-      expect(() => validateDescription(desc)).toThrow("not exceed 2000 characters");
-    });
-
     it("should accept description at minimum boundary", () => {
       const desc = "a".repeat(201);
       expect(validateDescription(desc)).toBe(desc);
     });
 
-    it("should accept description at maximum boundary", () => {
+    it("should accept description at historical maximum boundary", () => {
       const desc = "a".repeat(2000);
+      expect(validateDescription(desc)).toBe(desc);
+    });
+
+    it("should accept descriptions longer than the historical maximum", () => {
+      const desc = "a".repeat(5000);
+      expect(() => validateDescription(desc)).not.toThrow();
       expect(validateDescription(desc)).toBe(desc);
     });
   });
@@ -204,6 +206,33 @@ describe("ai-summarize", () => {
       expect(prompt).toHaveBeenCalledTimes(1);
       expect(prompt.mock.calls[0][0]).toContain("<description>");
       expect(prompt.mock.calls[0][0]).toContain("Do not call any tools");
+    });
+
+    it("summarizes long descriptions with bounded prompt input", async () => {
+      const prompt = vi.fn().mockResolvedValue(undefined);
+      getFnAgentMock.mockResolvedValue(() =>
+        Promise.resolve({
+          session: {
+            prompt,
+            dispose: vi.fn(),
+            state: {
+              messages: [
+                { role: "assistant", content: "Summarize long description" },
+              ],
+            },
+          },
+        })
+      );
+      const description = "a".repeat(MAX_TITLE_SUMMARIZE_INPUT_LENGTH) + "tail".repeat(250);
+
+      const title = await summarizeTitle(description, "/tmp");
+
+      expect(title).toBe("Summarize long description");
+      expect(prompt).toHaveBeenCalledTimes(1);
+      const promptText = prompt.mock.calls[0][0] as string;
+      expect(promptText).toContain("…(truncated)");
+      expect(promptText).not.toContain("tail");
+      expect(promptText.length).toBeLessThanOrEqual(MAX_TITLE_SUMMARIZE_INPUT_LENGTH + 250);
     });
 
     it("strips chatty preamble + markdown from AI response (FN-3057 regression)", async () => {

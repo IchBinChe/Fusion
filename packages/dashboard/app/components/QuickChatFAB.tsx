@@ -1070,6 +1070,7 @@ export function QuickChatFAB({
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const shouldAutoFocusComposerRef = useRef(false);
   const handledMobileActionRef = useRef(false);
+  const handledMobileActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preserveComposerFocusRef = useRef(false);
   // Always-mounted offscreen input used to claim the iOS soft keyboard
   // synchronously inside the FAB click gesture, before the real composer
@@ -1970,6 +1971,43 @@ export function QuickChatFAB({
     if (typeof window === "undefined") return;
     if (window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
     preserveComposerFocusRef.current = true;
+  }, []);
+
+  // Latch that a mobile pointer/touch handler already performed a button's
+  // action, so the synthetic onClick that trails the gesture is ignored
+  // (prevents a double send/stop). On iOS, preventDefault() in
+  // touchstart/pointerdown frequently suppresses that click entirely, so we
+  // also clear the latch on a timer: without it the ref stays stuck `true` and
+  // swallows the *next* real click (e.g. after switching chats), making the
+  // button look dead. The latch is shared by the send and stop buttons, so a
+  // stuck value cross-contaminates between them.
+  const markHandledMobileAction = useCallback(() => {
+    handledMobileActionRef.current = true;
+    if (handledMobileActionTimerRef.current != null) {
+      clearTimeout(handledMobileActionTimerRef.current);
+    }
+    handledMobileActionTimerRef.current = setTimeout(() => {
+      handledMobileActionRef.current = false;
+      handledMobileActionTimerRef.current = null;
+    }, 700);
+  }, []);
+
+  // If a mobile handler already ran this gesture's action, consume the latch
+  // (and cancel its timer) so the trailing onClick bails without double-firing.
+  const consumeHandledMobileAction = useCallback(() => {
+    if (!handledMobileActionRef.current) return false;
+    handledMobileActionRef.current = false;
+    if (handledMobileActionTimerRef.current != null) {
+      clearTimeout(handledMobileActionTimerRef.current);
+      handledMobileActionTimerRef.current = null;
+    }
+    return true;
+  }, []);
+
+  useEffect(() => () => {
+    if (handledMobileActionTimerRef.current != null) {
+      clearTimeout(handledMobileActionTimerRef.current);
+    }
   }, []);
 
   const handleSendMessage = useCallback(async () => {
@@ -3048,14 +3086,14 @@ export function QuickChatFAB({
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
                       if (event.pointerType && event.pointerType !== "mouse") {
-                        handledMobileActionRef.current = true;
+                        markHandledMobileAction();
                         stopStreaming();
                       }
                     }}
                     onTouchStart={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
-                      handledMobileActionRef.current = true;
+                      markHandledMobileAction();
                       stopStreaming();
                     }}
                     onMouseDown={(event) => {
@@ -3063,10 +3101,7 @@ export function QuickChatFAB({
                       event.preventDefault();
                     }}
                     onClick={() => {
-                      if (handledMobileActionRef.current) {
-                        handledMobileActionRef.current = false;
-                        return;
-                      }
+                      if (consumeHandledMobileAction()) return;
                       stopStreaming();
                     }}
                     aria-label={t("chat.stopGeneration", "Stop generation")}
@@ -3082,7 +3117,7 @@ export function QuickChatFAB({
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
                       if (event.pointerType && event.pointerType !== "mouse") {
-                        handledMobileActionRef.current = true;
+                        markHandledMobileAction();
                         markPreserveComposerFocus();
                         focusComposerInput();
                         void handleSendMessage();
@@ -3091,7 +3126,7 @@ export function QuickChatFAB({
                     onTouchStart={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
-                      handledMobileActionRef.current = true;
+                      markHandledMobileAction();
                       markPreserveComposerFocus();
                       focusComposerInput();
                       void handleSendMessage();
@@ -3101,10 +3136,7 @@ export function QuickChatFAB({
                       event.preventDefault();
                     }}
                     onClick={() => {
-                      if (handledMobileActionRef.current) {
-                        handledMobileActionRef.current = false;
-                        return;
-                      }
+                      if (consumeHandledMobileAction()) return;
                       void handleSendMessage();
                     }}
                     disabled={sendDisabled}

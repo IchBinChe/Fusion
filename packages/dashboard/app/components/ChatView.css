@@ -14,6 +14,7 @@
 /* Sidebar */
 .chat-sidebar {
   min-width: 0;
+  max-width: 500px; /* FN-6210: defensive cap — matches CHAT_SIDEBAR_MAX_WIDTH */
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -1725,6 +1726,7 @@
   .chat-sidebar {
     width: 100%;
     min-width: 100%;
+    max-width: 100%; /* FN-6210: mobile sidebar spans full viewport */
     height: 100%;
     max-height: none;
     border-right: none;

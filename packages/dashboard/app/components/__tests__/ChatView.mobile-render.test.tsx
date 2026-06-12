@@ -386,6 +386,59 @@ describe("FN-5997 mobile chat message pane rendering", () => {
     }
   });
 
+  it("keeps sidebar width bounded even if viewport mode flickers to mobile during keyboard-open on tablet", async () => {
+    const restoreMatchMedia = mockViewportMode("tablet");
+    const originalScreenDescriptor = Object.getOwnPropertyDescriptor(window, "screen");
+    const visualViewport = mockVisualViewport({ width: 900, height: 1112 });
+    try {
+      setupChat({
+        sessions: [activeSession],
+        filteredSessions: [activeSession],
+        activeSession,
+      });
+      await renderWithCss(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const sidebar = getSidebar();
+      expect(sidebar).not.toHaveClass("chat-sidebar--hidden");
+      expect(sidebar.style.width).toBe("280px");
+
+      const input = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+      await act(async () => {
+        input.focus();
+      });
+      await setVisualViewportHeight(visualViewport, 400);
+
+      // Simulate the FN-6213 bug scenario where viewport mode transiently
+      // resolves to mobile on a tablet while the keyboard has shrunk height.
+      Object.defineProperty(window, "screen", { configurable: true, value: { width: 390, height: 844 } });
+      restoreMatchMedia.mockImplementation((query: string) => ({
+        matches:
+          query.includes("max-width: 768px") ||
+          query.includes("max-height: 480px"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+      });
+
+      await waitFor(() => expect(sidebar.style.width).toBe(""));
+      const maxWidth = parseInt(getComputedStyle(sidebar).maxWidth, 10);
+      expect(maxWidth).toBeLessThanOrEqual(500);
+      expect(sidebar.offsetWidth).toBeLessThanOrEqual(500);
+    } finally {
+      restoreMatchMedia.mockRestore();
+      if (originalScreenDescriptor) {
+        Object.defineProperty(window, "screen", originalScreenDescriptor);
+      }
+    }
+  });
+
   it("keeps the desktop sidebar fixed even if visualViewport shrinks while the composer is focused", async () => {
     const restoreMatchMedia = mockViewportMode("desktop");
     const visualViewport = mockVisualViewport({ width: 1280, height: 900 });

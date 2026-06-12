@@ -42,6 +42,8 @@ Keep the exported `MOBILE_MEDIA_QUERY` string unchanged for listener compatibili
 
 This preserves landscape-phone behavior while preventing keyboard-driven height shrink from changing tablet/desktop viewport mode. Direct breakpoint consumers (`Board`, `WorkflowNodeEditor`, and `SessionTerminal`) should subscribe to `MOBILE_MEDIA_QUERY` for reactivity but recompute state with `isMobileViewport()` rather than reading `.matches` as the final decision.
 
+ChatView also keeps a defense-in-depth CSS guard from FN-6210: `.chat-sidebar` has a non-mobile `max-width` matching `CHAT_SIDEBAR_MAX_WIDTH`, with the mobile media rule overriding it back to `100%`. That guard bounds the sidebar even if viewport-mode state is temporarily wrong and the inline sidebar width is removed.
+
 ## Regression coverage
 
 Cover the invariant rather than the single repro:
@@ -52,3 +54,4 @@ Cover the invariant rather than the single repro:
 - Portrait phone width stays `mobile` regardless of height.
 - Undefined/zero `window.screen` does not throw and falls back to width-only detection.
 - Component-local mobile hooks such as `SessionTerminal` also use the guarded predicate.
+- ChatView sidebar CSS remains bounded at the sidebar max width during simulated viewport-mode flicker while the keyboard is open.

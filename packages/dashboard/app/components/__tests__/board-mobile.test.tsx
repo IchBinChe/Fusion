@@ -26,6 +26,7 @@ vi.mock("../../api", () => ({
   } satisfies Partial<Settings>),
   updateGlobalSettings: vi.fn(),
   fetchAgents: vi.fn().mockResolvedValue([]),
+  fetchWorkflowOptionalSteps: vi.fn().mockResolvedValue([]),
   // InlineCreateCard renders WorkflowSelector, which loads these on mount.
   fetchWorkflows: vi.fn().mockResolvedValue([]),
   fetchProjectDefaultWorkflow: vi.fn().mockResolvedValue({ workflowId: null }),

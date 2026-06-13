@@ -5,9 +5,10 @@ import { get, request } from "../test-request.js";
 const state = {
   requests: new Map<string, any>(),
   audits: new Map<string, any[]>(),
-  task: { id: "FN-1", paused: true, pausedByAgentId: "agent-1" },
+  task: { id: "FN-1", paused: true, pausedByAgentId: "agent-1" } as any,
   agent: { id: "agent-1", state: "paused", pauseReason: "awaiting-approval" },
   runAuditEvents: [] as any[],
+  pauseTaskCalls: [] as Array<{ id: string; paused: boolean }>,
   provisionedAgents: new Set<string>(),
 };
 
@@ -106,7 +107,8 @@ describe("approval routes", async () => {
           getFusionDir: () => "/tmp/fusion",
           getTask: async () => state.task,
           getSettings: async () => ({ worktrunk: {} }),
-          pauseTask: async (_id: string, paused: boolean) => {
+          pauseTask: async (id: string, paused: boolean) => {
+            state.pauseTaskCalls.push({ id, paused });
             state.task = { ...state.task, paused, pausedByAgentId: paused ? state.task.pausedByAgentId : undefined };
           },
           recordRunAuditEvent: (event: any) => {
@@ -136,6 +138,7 @@ describe("approval routes", async () => {
     executeApprovedAgentProvisioning.mockClear();
     executeApprovedWorktrunkInstall.mockClear();
     state.runAuditEvents = [];
+    state.pauseTaskCalls = [];
     state.provisionedAgents = new Set(["target-1"]);
     state.task = { id: "FN-1", paused: true, pausedByAgentId: "agent-1" };
     state.agent = { id: "agent-1", state: "paused", pauseReason: "awaiting-approval" };
@@ -283,6 +286,25 @@ describe("approval routes", async () => {
     expect(res.body.history.at(-1)?.eventType).toBe("approved");
     expect(res.body.history.at(-1)?.note).toBe("looks good");
     expect(state.task.paused).toBe(false);
+    expect(updateAgent).toHaveBeenCalledWith("agent-1", { pauseReason: undefined });
+  });
+
+  it("does not unpause user-paused tasks after approval decision", async () => {
+    state.task = { id: "FN-1", paused: true, pausedByAgentId: "agent-1", userPaused: true };
+    const app = createApp();
+
+    const res = await request(
+      app,
+      "POST",
+      "/api/approvals/apr-1/decision",
+      JSON.stringify({ decision: "approve" }),
+      { "content-type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(state.task.paused).toBe(true);
+    expect(state.task.userPaused).toBe(true);
+    expect(state.pauseTaskCalls).not.toContainEqual({ id: "FN-1", paused: false });
     expect(updateAgent).toHaveBeenCalledWith("agent-1", { pauseReason: undefined });
   });
 

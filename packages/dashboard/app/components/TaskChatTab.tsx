@@ -1,9 +1,9 @@
-import type { AgentLogEntry, AgentRole, Task, TaskDetail } from "@fusion/core";
+import type { AgentLogEntry, AgentRole, SteeringComment, Task, TaskDetail } from "@fusion/core";
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2, Send } from "lucide-react";
-import { addSteeringComment } from "../api";
+import { ChevronDown, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
+import { addSteeringComment, refineTask } from "../api";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { ToastType } from "../hooks/useToast";
 import { getErrorMessage } from "@fusion/core";
@@ -19,15 +19,18 @@ interface TaskChatTabProps {
   active: boolean;
   addToast: (msg: string, type?: ToastType) => void;
   sessionLive?: boolean;
+  onTaskUpdated?: (task: Task) => void;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }
 
 type AgentLogRole = AgentRole | undefined;
 
-interface AgentLogGroup {
-  role: AgentLogRole;
-  label: string;
-  entries: AgentLogEntry[];
-}
+type UserChatMessage = Pick<SteeringComment, "id" | "text" | "createdAt"> & { optimistic?: boolean };
+
+type TaskChatTranscriptItem =
+  | { kind: "agent"; role: AgentLogRole; label: string; entries: AgentLogEntry[] }
+  | { kind: "user"; message: UserChatMessage };
 
 type TaskChatSegment =
   | { kind: "tool"; entries: AgentLogEntry[]; startIndex: number }
@@ -48,6 +51,10 @@ const STEERING_BLOCKED_STATUSES = new Set([
 ]);
 const REVIEW_STEERABLE_STATUSES = new Set(["reviewing", "merging", "merging-fix", "fixing"]);
 const BOTTOM_FOLLOW_THRESHOLD = 48;
+
+function isTranscriptNearBottom(container: HTMLElement): boolean {
+  return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD;
+}
 
 function getRoleLabel(role: AgentLogRole): string {
   switch (role) {
@@ -83,16 +90,63 @@ function getEntryKey(entry: AgentLogEntry, index: number): string {
   return [entry.taskId, entry.timestamp, entry.agent ?? "agent", entry.type, index].join(":");
 }
 
-function groupEntriesByAgent(entries: AgentLogEntry[]): AgentLogGroup[] {
-  return entries.reduce<AgentLogGroup[]>((groups, entry) => {
-    const previousGroup = groups[groups.length - 1];
-    const role = entry.agent;
-    if (previousGroup && previousGroup.role === role) {
-      previousGroup.entries.push(entry);
-      return groups;
+function getTimestampMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getUserMessageDedupKey(message: Pick<SteeringComment, "id" | "text" | "createdAt">): string {
+  return message.id ? `id:${message.id}` : `fallback:${message.text}:${message.createdAt}`;
+}
+
+function getUserMessageFallbackKey(message: Pick<SteeringComment, "text" | "createdAt">): string {
+  return `fallback:${message.text}:${message.createdAt}`;
+}
+
+function mergeUserMessages(persistedComments: readonly SteeringComment[] | undefined, optimisticMessages: readonly UserChatMessage[]): UserChatMessage[] {
+  const messages: UserChatMessage[] = [];
+  const seen = new Set<string>();
+  const seenFallbacks = new Set<string>();
+  const addMessage = (message: UserChatMessage) => {
+    const idKey = getUserMessageDedupKey(message);
+    const fallbackKey = getUserMessageFallbackKey(message);
+    if (seen.has(idKey) || seenFallbacks.has(fallbackKey)) return;
+    seen.add(idKey);
+    seenFallbacks.add(fallbackKey);
+    messages.push(message);
+  };
+
+  for (const comment of persistedComments ?? []) {
+    if (comment.author !== "user") continue;
+    addMessage({ id: comment.id, text: comment.text, createdAt: comment.createdAt });
+  }
+  for (const message of optimisticMessages) {
+    addMessage(message);
+  }
+
+  return messages;
+}
+
+function buildTranscriptItems(entries: readonly AgentLogEntry[], userMessages: readonly UserChatMessage[]): TaskChatTranscriptItem[] {
+  const orderedItems = [
+    ...entries.map((entry, index) => ({ kind: "agent" as const, entry, index, timestamp: getTimestampMs(entry.timestamp) })),
+    ...userMessages.map((message, index) => ({ kind: "user" as const, message, index, timestamp: getTimestampMs(message.createdAt) })),
+  ].sort((a, b) => a.timestamp - b.timestamp || a.index - b.index || (a.kind === "agent" ? -1 : 1));
+
+  return orderedItems.reduce<TaskChatTranscriptItem[]>((items, item) => {
+    if (item.kind === "user") {
+      items.push({ kind: "user", message: item.message });
+      return items;
     }
-    groups.push({ role, label: getRoleLabel(role), entries: [entry] });
-    return groups;
+
+    const previousItem = items[items.length - 1];
+    const role = item.entry.agent;
+    if (previousItem?.kind === "agent" && previousItem.role === role) {
+      previousItem.entries.push(item.entry);
+      return items;
+    }
+    items.push({ kind: "agent", role, label: getRoleLabel(role), entries: [item.entry] });
+    return items;
   }, []);
 }
 
@@ -338,10 +392,29 @@ function TaskChatSegmentView({ segment }: { segment: TaskChatSegment }) {
   return <TaskChatText entries={segment.entries} />;
 }
 
-export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: TaskChatTabProps) {
+function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
+  return (
+    <section className="task-chat-user-group" aria-label="You message">
+      <div className="task-chat-user-header">
+        <div className="task-chat-role-label">You</div>
+      </div>
+      <article className="task-chat-entry task-chat-entry--user" data-testid="task-chat-entry-user">
+        <div className="markdown-body task-chat-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {message.text}
+          </ReactMarkdown>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated, expanded = false, onToggleExpanded }: TaskChatTabProps) {
   const { entries, loading } = useAgentLogs(task.id, active, projectId);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<UserChatMessage[]>([]);
+  const [isTranscriptAtBottom, setIsTranscriptAtBottom] = useState(true);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const previousEntryCountRef = useRef(0);
   const previousScrollHeightRef = useRef(0);
@@ -349,9 +422,23 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
   const anchorFrameRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const groups = useMemo(() => groupEntriesByAgent(entries), [entries]);
+  const userMessages = useMemo(
+    () => mergeUserMessages(task.steeringComments, optimisticMessages),
+    [optimisticMessages, task.steeringComments],
+  );
+  const transcriptItems = useMemo(() => buildTranscriptItems(entries, userMessages), [entries, userMessages]);
+  const transcriptItemCount = entries.length + userMessages.length;
   const activeSession = isActiveAgentSession(task, { sessionLive });
-  const canSend = activeSession && draft.trim().length > 0 && !sending;
+  const isDoneTask = task.column === "done";
+  const sessionHint = isDoneTask
+    ? "Send a message to start a refinement task for this completed task."
+    : activeSession
+      ? "Message the active agent session. Guidance is delivered to the running session in real time."
+      : null;
+  const composerPlaceholder = isDoneTask
+    ? "Start a refinement task for this completed task"
+    : "Steer the currently executing agent";
+  const canSend = draft.trim().length > 0 && !sending;
 
   const resizeComposer = useCallback(() => {
     const textarea = textareaRef.current;
@@ -388,6 +475,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
 
       container.scrollTop = container.scrollHeight;
       previousScrollHeightRef.current = container.scrollHeight;
+      setIsTranscriptAtBottom(true);
       if (container.scrollHeight === lastScrollHeight) {
         stableFrames += 1;
       } else {
@@ -414,65 +502,109 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
     const container = transcriptRef.current;
     const wasActive = previousActiveRef.current;
     previousActiveRef.current = active;
-    if (!container || !active || entries.length === 0) return;
+    if (!container || !active || transcriptItemCount === 0) return;
 
     const becameActive = !wasActive;
-    const receivedInitialEntries = previousEntryCountRef.current === 0;
-    if (!becameActive && !receivedInitialEntries) return;
+    const receivedInitialItems = previousEntryCountRef.current === 0;
+    if (!becameActive && !receivedInitialItems) return;
 
     anchorTranscriptToBottom(container);
-    previousEntryCountRef.current = entries.length;
+    previousEntryCountRef.current = transcriptItemCount;
     previousScrollHeightRef.current = container.scrollHeight;
 
     return () => {
       cancelAnchorTranscriptFrame();
     };
-  }, [active, anchorTranscriptToBottom, cancelAnchorTranscriptFrame, entries.length]);
+  }, [active, anchorTranscriptToBottom, cancelAnchorTranscriptFrame, transcriptItemCount]);
 
   useLayoutEffect(() => {
     const container = transcriptRef.current;
     if (!container) return;
 
     if (!active) {
-      previousEntryCountRef.current = entries.length;
+      previousEntryCountRef.current = transcriptItemCount;
+      previousScrollHeightRef.current = container.scrollHeight;
+      return;
+    }
+
+    if (transcriptItemCount === 0) {
+      previousEntryCountRef.current = transcriptItemCount;
       previousScrollHeightRef.current = container.scrollHeight;
       return;
     }
 
     const previousCount = previousEntryCountRef.current;
     const previousScrollHeight = previousScrollHeightRef.current || container.scrollHeight;
-    if (entries.length > previousCount) {
+    if (transcriptItemCount > previousCount) {
       const shouldFollow = previousCount === 0 || previousScrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD;
       if (shouldFollow) {
         container.scrollTop = container.scrollHeight;
+        setIsTranscriptAtBottom(true);
+      } else {
+        setIsTranscriptAtBottom(isTranscriptNearBottom(container));
       }
+    } else {
+      setIsTranscriptAtBottom(isTranscriptNearBottom(container));
     }
 
-    previousEntryCountRef.current = entries.length;
+    previousEntryCountRef.current = transcriptItemCount;
     previousScrollHeightRef.current = container.scrollHeight;
-  }, [active, entries]);
+  }, [active, transcriptItemCount]);
 
   const handleTranscriptScroll = useCallback(() => {
     const container = transcriptRef.current;
     if (!container) return;
     previousScrollHeightRef.current = container.scrollHeight;
+    setIsTranscriptAtBottom(isTranscriptNearBottom(container));
+  }, []);
+
+  const scrollTranscriptToBottom = useCallback(() => {
+    const container = transcriptRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    previousScrollHeightRef.current = container.scrollHeight;
+    setIsTranscriptAtBottom(true);
   }, []);
 
   const handleSubmit = useCallback(async (event?: React.FormEvent) => {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || !activeSession || sending) return;
+    if (!text || sending) return;
 
+    const optimisticMessage: UserChatMessage = {
+      id: `optimistic-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      text,
+      createdAt: new Date().toISOString(),
+      optimistic: true,
+    };
+    setOptimisticMessages((current) => [...current, optimisticMessage]);
     setSending(true);
     try {
-      await addSteeringComment(task.id, text, projectId);
+      if (isDoneTask) {
+        const newTask = await refineTask(task.id, text, projectId);
+        addToast(`Refinement task created: ${newTask.id}`, "success");
+      } else {
+        const updatedTask = await addSteeringComment(task.id, text, projectId);
+        const persistedComment = updatedTask.steeringComments
+          ?.filter((comment) => comment.author === "user" && comment.text === text)
+          .at(-1);
+        if (persistedComment) {
+          setOptimisticMessages((current) => current.map((message) => (
+            message.id === optimisticMessage.id
+              ? { id: persistedComment.id, text: persistedComment.text, createdAt: persistedComment.createdAt, optimistic: true }
+              : message
+          )));
+        }
+        onTaskUpdated?.(updatedTask);
+      }
       setDraft("");
     } catch (error) {
+      setOptimisticMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
       addToast(`Unable to send message: ${getErrorMessage(error)}`, "error");
     } finally {
       setSending(false);
     }
-  }, [activeSession, addToast, draft, projectId, sending, task.id]);
+  }, [addToast, draft, isDoneTask, onTaskUpdated, projectId, sending, task.id]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -482,6 +614,21 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
 
   return (
     <div className="task-chat-tab" data-testid="task-chat-tab">
+      {onToggleExpanded ? (
+        <div className="task-chat-toolbar">
+          <button
+            type="button"
+            className="btn btn-sm task-chat-expand-toggle"
+            onClick={onToggleExpanded}
+            aria-label={expanded ? "Collapse chat" : "Expand chat to full modal"}
+            aria-pressed={expanded}
+            data-testid="task-chat-expand-toggle"
+          >
+            {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+            <span>{expanded ? "Collapse" : "Expand"}</span>
+          </button>
+        </div>
+      ) : null}
       <div
         className="task-chat-transcript"
         ref={transcriptRef}
@@ -489,28 +636,32 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
         aria-live="polite"
         data-testid="task-chat-transcript"
       >
-        {loading && entries.length === 0 ? (
+        {loading && transcriptItemCount === 0 ? (
           <div className="task-chat-empty" role="status">
             <Loader2 className="animate-spin" aria-hidden="true" />
             <span>Loading agent output…</span>
           </div>
-        ) : entries.length === 0 ? (
+        ) : transcriptItemCount === 0 ? (
           <div className="task-chat-empty">No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.</div>
         ) : (
-          groups.map((group, groupIndex) => {
+          transcriptItems.map((item, itemIndex) => {
+            if (item.kind === "user") {
+              return <TaskChatUserMessage key={`user-${item.message.id}-${itemIndex}`} message={item.message} />;
+            }
+
             const avatarAgent = {
-              id: group.role ?? "agent",
-              name: group.label,
-              icon: getRoleIcon(group.role),
+              id: item.role ?? "agent",
+              name: item.label,
+              icon: getRoleIcon(item.role),
             };
-            const segments = segmentGroupEntries(group.entries);
+            const segments = segmentGroupEntries(item.entries);
             return (
-              <section className="task-chat-group" key={`${group.role ?? "agent"}-${groupIndex}`} aria-label={`${group.label} messages`}>
+              <section className="task-chat-group" key={`${item.role ?? "agent"}-${itemIndex}`} aria-label={`${item.label} messages`}>
                 <header className="task-chat-group-header">
                   <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />
                   <div>
-                    <div className="task-chat-role-label">{group.label}</div>
-                    <div className="task-chat-group-meta">{group.entries.length === 1 ? "1 entry" : `${group.entries.length} entries`}</div>
+                    <div className="task-chat-role-label">{item.label}</div>
+                    <div className="task-chat-group-meta">{item.entries.length === 1 ? "1 entry" : `${item.entries.length} entries`}</div>
                   </div>
                 </header>
                 <div className="task-chat-group-bubbles">
@@ -523,12 +674,24 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
             );
           })
         )}
+        {transcriptItemCount > 0 && !isTranscriptAtBottom ? (
+          <button
+            type="button"
+            className="task-chat-jump-to-bottom"
+            onClick={scrollTranscriptToBottom}
+            aria-label="Jump to latest message"
+            data-testid="task-chat-jump-to-bottom"
+          >
+            <ChevronDown aria-hidden="true" />
+            <span>Latest</span>
+          </button>
+        ) : null}
       </div>
 
       <form className="task-chat-composer card" onSubmit={handleSubmit}>
-        {!activeSession ? (
+        {sessionHint ? (
           <div className="task-chat-session-hint" role="status">
-            No active steerable agent session is available. An active assigned task agent or live, non-paused CLI session is required to send guidance.
+            {sessionHint}
           </div>
         ) : null}
         <div className="task-chat-composer-row">
@@ -536,16 +699,21 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
             ref={textareaRef}
             className="input task-chat-input"
             value={draft}
-            placeholder={activeSession ? "Message the active agent session…" : "Active steerable agent session required"}
+            placeholder={composerPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={!activeSession || sending}
+            disabled={sending}
             aria-label="Message active agent session"
             rows={1}
           />
-          <button type="submit" className="btn btn-primary task-chat-send" disabled={!canSend}>
+          <button
+            type="submit"
+            className="btn btn-primary btn-icon task-chat-send"
+            disabled={!canSend}
+            aria-label={sending ? "Sending" : "Send"}
+            title={sending ? "Sending" : "Send"}
+          >
             {sending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
-            <span>{sending ? "Sending" : "Send"}</span>
           </button>
         </div>
       </form>

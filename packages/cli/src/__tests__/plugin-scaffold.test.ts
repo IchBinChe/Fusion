@@ -8,6 +8,13 @@ import { runPluginCreate, runPluginNew } from "../commands/plugin-scaffold.js";
 
 describe("plugin-scaffold", () => {
   const tmpBase = join(tmpdir(), `fn-scaffold-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const standaloneDevDependencyKeys = [
+    "@runfusion/fusion",
+    "@types/node",
+    "typescript",
+    "vitest",
+  ];
+  const caretRangePattern = /^\^\d+\.\d+\.\d+$/;
 
   beforeEach(() => {
     mkdirSync(tmpBase, { recursive: true });
@@ -64,6 +71,7 @@ describe("plugin-scaffold", () => {
         private?: boolean;
         keywords: string[];
         exports: { ".": { types: string; import: string } };
+        scripts: { build: string; test: string };
         devDependencies: Record<string, string>;
       };
 
@@ -72,8 +80,10 @@ describe("plugin-scaffold", () => {
       expect(packageJson.private).toBeUndefined();
       expect(packageJson.exports["."].types).toBe("./dist/index.d.ts");
       expect(packageJson.exports["."].import).toBe("./dist/index.js");
-      expect(Object.keys(packageJson.devDependencies)).toEqual(["@runfusion/fusion"]);
-      expect(packageJson.devDependencies["@runfusion/fusion"]).toMatch(/^\^\d+\.\d+\.\d+$/);
+      expect(Object.keys(packageJson.devDependencies)).toEqual(standaloneDevDependencyKeys);
+      for (const dependencyName of standaloneDevDependencyKeys) {
+        expect(packageJson.devDependencies[dependencyName]).toMatch(caretRangePattern);
+      }
 
       const packageContents = readFileSync(join(outputDir, "package.json"), "utf-8");
       const indexContents = readFileSync(join(outputDir, "src/index.ts"), "utf-8");
@@ -87,8 +97,16 @@ describe("plugin-scaffold", () => {
 
       const tsconfig = JSON.parse(readFileSync(join(outputDir, "tsconfig.json"), "utf-8")) as {
         extends?: string;
+        compilerOptions: { types?: string[] };
       };
       expect(tsconfig.extends).toBeUndefined();
+      for (const typeName of tsconfig.compilerOptions.types ?? []) {
+        expect(packageJson.devDependencies[`@types/${typeName}`]).toBeDefined();
+      }
+      expect(packageJson.scripts.test.split(/\s+/)[0]).toBe("vitest");
+      expect(packageJson.devDependencies.vitest).toBeDefined();
+      expect(packageJson.scripts.build.split(/\s+/)[0]).toBe("tsc");
+      expect(packageJson.devDependencies.typescript).toBeDefined();
     });
 
     it("supports scoped package names", async () => {
@@ -96,8 +114,10 @@ describe("plugin-scaffold", () => {
       await runPluginNew("scoped-plugin", { output: outputDir, scope: "acme" });
       const packageJson = JSON.parse(readFileSync(join(outputDir, "package.json"), "utf-8")) as {
         name: string;
+        devDependencies: Record<string, string>;
       };
       expect(packageJson.name).toBe("@acme/fusion-plugin-scoped-plugin");
+      expect(Object.keys(packageJson.devDependencies)).toEqual(standaloneDevDependencyKeys);
     });
 
     it("rejects invalid plugin names", async () => {

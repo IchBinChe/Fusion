@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => {
 
   const app = {
     whenReady: vi.fn(() => Promise.resolve()),
+    getPath: vi.fn((name: string) => (name === "home" ? "/mock/home" : "/mock/other")),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       appEvents.set(event, handler);
     }),
@@ -51,14 +52,14 @@ const mocks = vi.hoisted(() => {
     isQuitting: false,
   };
 
-  const BrowserWindow = vi.fn((options: Record<string, unknown>) => {
+  const BrowserWindow = vi.fn(function (options: Record<string, unknown>) {
     callLog.push("createMainWindow");
     const instance = createWindowMock();
     windowInstances.push({ instance, options });
     return instance;
   });
 
-  const Tray = vi.fn(() => {
+  const Tray = vi.fn(function () {
     const tray = createTrayMock();
     trayInstances.push(tray);
     return tray;
@@ -117,6 +118,14 @@ const mocks = vi.hoisted(() => {
   const getStatus = vi.fn(() => ({ source: "none", state: "stopped" }));
 
   const saveWindowState = vi.fn();
+  const LocalRuntimeManager = vi.fn(function () {
+    return {
+      startLocal,
+      stopLocal,
+      getStatus,
+      getServerPort: vi.fn(() => 0),
+    };
+  });
 
   const DEFAULT_WINDOW_STATE = {
     width: 1280,
@@ -149,6 +158,7 @@ const mocks = vi.hoisted(() => {
     startLocal,
     stopLocal,
     getStatus,
+    LocalRuntimeManager,
     DEFAULT_WINDOW_STATE,
   };
 });
@@ -195,12 +205,7 @@ vi.mock("../native.js", () => ({
 }));
 
 vi.mock("../local-runtime.js", () => ({
-  LocalRuntimeManager: vi.fn(() => ({
-    startLocal: mocks.startLocal,
-    stopLocal: mocks.stopLocal,
-    getStatus: mocks.getStatus,
-    getServerPort: vi.fn(() => 0),
-  })),
+  LocalRuntimeManager: mocks.LocalRuntimeManager,
 }));
 
 // Mock renderer module
@@ -268,6 +273,8 @@ describe("main integration", () => {
       "setupAutoUpdater",
       "startUpdateCheckInterval",
     ]);
+    expect(mocks.LocalRuntimeManager).toHaveBeenCalledWith({ rootDir: "/mock/home" });
+    expect(mocks.app.getPath).toHaveBeenCalledWith("home");
   });
 
   it("createMainWindow uses restored window state", async () => {

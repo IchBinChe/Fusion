@@ -172,6 +172,7 @@ export interface ResumeAgentOptions {
   /**
    * When true, unpauses tasks paused by this agent. Defaults to false; this is
    * legacy cleanup only and correctness must not depend on cascade-unpause.
+   * User-paused tasks are never cascade-unpaused.
    */
   cascadeToTasks?: boolean;
 }
@@ -1700,7 +1701,7 @@ export class HeartbeatMonitor {
         pausedOnly: true,
         excludeArchived: true,
       });
-      const toUnpause = pausedTasks.filter((task) => task.pausedByAgentId === agentId);
+      const toUnpause = pausedTasks.filter((task) => task.pausedByAgentId === agentId && !task.userPaused);
       const results = await Promise.allSettled(toUnpause.map((task) => this.taskStore!.pauseTask(task.id, false)));
       results.forEach((result, index) => {
         if (result.status === "rejected") {

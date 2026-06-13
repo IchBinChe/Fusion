@@ -1,5 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const previewPlanMock = vi.hoisted(() => vi.fn());
 const finalizeMock = vi.hoisted(() => vi.fn());
 
@@ -18,7 +33,7 @@ const mockErrors = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/core", () => ({
-  TaskStore: vi.fn().mockImplementation(() => ({
+  TaskStore: makeConstructibleMock(() => ({
     init: vi.fn().mockResolvedValue(undefined),
     getExperimentSessionStore: vi.fn(() => ({})),
   })),
@@ -43,7 +58,7 @@ vi.mock("@fusion/engine", () => ({
   createFnAgent: vi.fn(),
   fetchWebContent: vi.fn(),
   defaultGitOps: vi.fn(() => ({})),
-  ExperimentFinalizeService: vi.fn(() => ({ previewPlan: previewPlanMock, finalize: finalizeMock })),
+  ExperimentFinalizeService: makeConstructibleMock(() => ({ previewPlan: previewPlanMock, finalize: finalizeMock })),
   ExperimentFinalizeStateError: mockErrors.StateError,
   ExperimentFinalizeNoKeptRunsError: mockErrors.NoKeptError,
   ExperimentFinalizePlanError: mockErrors.PlanError,

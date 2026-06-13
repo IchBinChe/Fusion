@@ -10,8 +10,6 @@ const agentsPath = resolve(rootDir, "AGENTS.md");
 const agents = readFileSync(agentsPath, "utf8");
 
 const requiredAnchors = [
-  "STANDING DIRECTIVE: Buttons Are Frozen",
-  "Buttons Are Frozen (2026-05-13)",
   "Port 4040",
   "pnpm release --yes",
   "@runfusion/fusion",

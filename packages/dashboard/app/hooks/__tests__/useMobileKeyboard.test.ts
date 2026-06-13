@@ -592,6 +592,166 @@ describe("useMobileKeyboard", () => {
     }
   });
 
+  it("FN-6362: resets stale iOS keyboard metrics on visibility restore when the keyboard collapsed but focus remains", async () => {
+    const { listeners, mockVV } = setupMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+
+    const { result } = renderHook(() => useMobileKeyboard());
+
+    input.focus();
+    Object.defineProperty(mockVV, "height", { value: 520, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "offsetTop", { value: 180, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(true);
+      expect(result.current.viewportOffsetTop).toBe(180);
+    });
+
+    // iOS can restore with the visual viewport back at full height while
+    // window.innerHeight still reflects the pre-background keyboard shrink.
+    // The retained focused input plus impossible sample used to hold the stale
+    // keyboard-open metrics forever because no blur/resize followed.
+    Object.defineProperty(window, "innerHeight", { value: 520, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 844, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "offsetTop", { value: 0, writable: true, configurable: true });
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(false);
+      expect(result.current.viewportOffsetTop).toBe(0);
+      expect(result.current.viewportHeight).toBeNull();
+    });
+
+    input.remove();
+  });
+
+  it("FN-6362: resets stale iOS keyboard metrics on pageshow when stale offset drift remains", async () => {
+    const { listeners, mockVV } = setupMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+
+    const { result } = renderHook(() => useMobileKeyboard());
+
+    input.focus();
+    Object.defineProperty(mockVV, "height", { value: 520, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "offsetTop", { value: 160, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(true);
+      expect(result.current.viewportOffsetTop).toBe(160);
+    });
+
+    Object.defineProperty(window, "innerHeight", { value: 520, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 844, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "offsetTop", { value: 120, writable: true, configurable: true });
+
+    const pageshow = new Event("pageshow") as PageTransitionEvent;
+    Object.defineProperty(pageshow, "persisted", { value: false });
+
+    act(() => {
+      window.dispatchEvent(pageshow);
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(false);
+      expect(result.current.viewportOffsetTop).toBe(0);
+      expect(result.current.viewportHeight).toBeNull();
+    });
+
+    input.remove();
+  });
+
+  it("FN-6362: keeps a genuinely-open restored viewport open", async () => {
+    const { mockVV } = setupMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+
+    const { result } = renderHook(() => useMobileKeyboard());
+
+    input.focus();
+    Object.defineProperty(window, "innerHeight", { value: 520, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 520, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "offsetTop", { value: 0, writable: true, configurable: true });
+
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(true);
+      expect(result.current.viewportOffsetTop).toBe(0);
+      expect(result.current.viewportHeight).toBe(520);
+    });
+
+    input.remove();
+  });
+
+  it("FN-6362: resets Android-style shrink metrics on restore without introducing offset drift", async () => {
+    const { listeners, mockVV } = setupMobileVisualViewport({
+      innerHeight: 800,
+      vvHeight: 800,
+    });
+
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+
+    const { result } = renderHook(() => useMobileKeyboard());
+
+    input.focus();
+    Object.defineProperty(mockVV, "height", { value: 500, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "offsetTop", { value: 0, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(true);
+      expect(result.current.viewportOffsetTop).toBe(0);
+      expect(result.current.viewportHeight).toBe(500);
+    });
+
+    Object.defineProperty(mockVV, "height", { value: 800, writable: true, configurable: true });
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(false);
+      expect(result.current.viewportOffsetTop).toBe(0);
+      expect(result.current.viewportHeight).toBeNull();
+    });
+
+    input.remove();
+  });
+
   // FN-3290 regression: focusout must reset keyboard state when input blurs
   describe("FN-3290: focusout resets keyboard state", () => {
     it("resets keyboardOpen to false on focusout when viewport returns to baseline", async () => {

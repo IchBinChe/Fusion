@@ -225,9 +225,9 @@ describe("workflow-flow-mapping v2 round-trip", () => {
     };
 
     const { nodes, edges } = irToFlow(v2Def(ir));
-    expect(nodes.find((node) => node.id === "gate")?.type).toBe("merge");
+    expect(nodes.find((node) => node.id === "gate")?.type).toBe("gate");
     expect(nodes.find((node) => node.id === "hold")?.type).toBe("hold");
-    expect(nodes.find((node) => node.id === "retry")?.type).toBe("loop");
+    expect(nodes.find((node) => node.id === "retry")?.type).toBe("hold");
 
     const { ir: out } = flowToIr("merge aliases", nodes, edges, columnsOf(v2Def(ir)));
     if (out.version !== "v2") throw new Error("expected v2");

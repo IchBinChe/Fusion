@@ -439,8 +439,8 @@ export function flowToIr(
       }
       return { id: localId, kind: "prompt", config: { ...(config ?? {}), seam: "merge" } };
     }
-    if (data.kind === "foreach" || data.kind === "loop") {
-      if (originalKind && originalKind !== "foreach" && originalKind !== "loop") {
+    if (data.kind === "foreach" || data.kind === "loop" || originalKind === "retry-backoff") {
+      if (originalKind && originalKind !== "foreach" && originalKind !== "loop" && originalKind !== "retry-backoff") {
         return { id: localId, kind: originalKind, config: config && Object.keys(config).length ? config : undefined };
       }
       // Reassemble the template from this group's children.

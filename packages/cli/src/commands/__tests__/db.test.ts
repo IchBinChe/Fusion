@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 // Hoist mocks so they are evaluated before module imports
 const { mockGetDatabase, mockVacuum, mockResolveProject } = vi.hoisted(() => ({
   mockGetDatabase: vi.fn(),
@@ -8,7 +23,7 @@ const { mockGetDatabase, mockVacuum, mockResolveProject } = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/core", () => ({
-  TaskStore: vi.fn().mockImplementation(() => ({
+  TaskStore: makeConstructibleMock(() => ({
     init: vi.fn(),
     getDatabase: mockGetDatabase,
   })),

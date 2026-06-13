@@ -3,6 +3,21 @@ import { writeFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const previewPlan = vi.fn();
 const finalize = vi.fn();
 const init = vi.fn();
@@ -18,12 +33,12 @@ const mockErrors = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/core", () => ({
-  TaskStore: vi.fn(() => ({ init, getExperimentSessionStore })),
+  TaskStore: makeConstructibleMock(() => ({ init, getExperimentSessionStore })),
 }));
 
 vi.mock("@fusion/engine", () => ({
   defaultGitOps: vi.fn(() => ({})),
-  ExperimentFinalizeService: vi.fn(() => ({ previewPlan, finalize })),
+  ExperimentFinalizeService: makeConstructibleMock(() => ({ previewPlan, finalize })),
   ExperimentFinalizeStateError: class extends Error { code = "state_error" as const; },
   ExperimentFinalizeNoKeptRunsError: class extends Error { code = "no_kept_runs" as const; },
   ExperimentFinalizePlanError: class extends Error { code = "plan_error" as const; },

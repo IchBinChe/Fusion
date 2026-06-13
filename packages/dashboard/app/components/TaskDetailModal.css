@@ -94,6 +94,15 @@
   overflow-y: hidden;
 }
 
+/* Chat mirrors the Agent Log fill-height layout: the modal body does not scroll;
+   the transcript owns internal scrolling while the composer stays visible. */
+.detail-body--chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: hidden;
+}
+
 .detail-title {
   font-size: 18px;
   font-weight: 600;
@@ -711,6 +720,44 @@
   margin-top: var(--space-lg);
 }
 
+.detail-section--chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--space-lg);
+}
+
+.task-detail-content--chat-expanded .detail-title-row {
+  display: none;
+}
+
+.task-detail-content--chat-expanded .detail-tabs {
+  display: none;
+}
+
+.task-detail-content--chat-expanded .modal-actions {
+  display: none;
+}
+
+.task-detail-content--chat-expanded .modal-header {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding-block: var(--space-sm);
+}
+
+.task-detail-content--chat-expanded .detail-body--chat {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-md);
+}
+
+.task-detail-content--chat-expanded .detail-section--chat {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+}
+
 
 .detail-spec-edit-trigger {
   margin-bottom: var(--space-md);
@@ -892,8 +939,8 @@
 /* FN-5599: widen task detail modal on tablet viewports. */
 @media (min-width: 769px) and (max-width: 1024px) {
   .modal.task-detail-modal {
-    width: min(92vw, 960px);
-    max-width: 92vw;
+    width: min(96vw, 1024px);
+    max-width: 96vw;
     height: 92vh;
     max-height: calc(100dvh - var(--overlay-padding-top, 6vh) - 16px);
   }
@@ -924,6 +971,30 @@
     border: none;
     border-radius: 0;
     resize: none;
+  }
+
+  .detail-body--chat {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: hidden;
+  }
+
+  .detail-section--chat {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .task-detail-content--chat-expanded .detail-body--chat {
+    padding: var(--space-sm);
+  }
+
+  .task-detail-content--chat-expanded .detail-tabs {
+    display: none;
+  }
+
+  .task-detail-content--chat-expanded .modal-actions {
+    display: none;
   }
 }
 

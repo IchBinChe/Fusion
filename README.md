@@ -69,13 +69,13 @@ Every task shows its plan, its reviews, its diffs, and its file changes in real 
 |  |  |
 |---|---|
 | 🧠 **AI planning** | Describe a task in plain language. Planning agents turn it into a `PROMPT.md` plan with steps, file scope, and acceptance criteria. |
-| 🔁 **Workflow gates** | Plan → Review → Execute → Review on every step. Pre-merge gates block bad code; post-merge gates run informational checks. |
+| 🔁 **Workflow gates** | Plan → Review → Execute → Review on every step. Pre-merge gates block bad code; post-merge gates run informational checks; workflow-declared optional steps such as [Browser Verification](./docs/workflow-steps.md#workflow-declared-optional-steps) can be enabled per task. |
 | 🌳 **Worktree isolation** | Each task runs in its own branch and worktree (`fusion/{task-id}`). Parallel tasks. Zero conflicts. Optional [worktrunk](https://github.com/max-sixty/worktrunk) delegation via [`worktrunk.enabled`](./docs/settings-reference.md#worktree-backend-settings) (see [WorktreeBackend abstraction](./docs/architecture.md#worktreebackend-abstraction)). |
-| ⚡ **Smart merge** | Passing every gate? Fusion squash-merges and moves on. Opt into manual approval anywhere. |
+| ⚡ **Smart merge** | Passing every gate? Fusion squash-merges and moves on. Opt into manual approval anywhere, or let tasks follow the live global auto-merge default unless they have an explicit per-task override. |
 | 🛰️ **Multi-node mesh** | Laptop, Mac mini, Linux server, cloud VM, phone — all synced. Desktop, mobile, web. |
-| 🧩 **Any model** | Anthropic, OpenAI, Ollama, and more. Local and cloud coexist. |
+| 🧩 **Any model** | Anthropic, OpenAI, Ollama, Google Generative AI, and user-defined [custom providers](./docs/dashboard-guide.md#custom-providers). Local and cloud coexist, with workflow model lanes configurable per project. |
 | 🏢 **Agent companies** | Import pre-built teams — 440+ agents across 16 companies — and run them autonomously for weeks. |
-| 📬 **Inter-agent messaging** | Built-in mailbox between agents. Delegate, clarify, coordinate. |
+| 📬 **Inter-agent messaging** | Built-in mailbox between agents. Delegate, clarify, coordinate; engineer-role agents can opt into backlog auto-claim when you want implementation help beyond executor-only pickup. |
 | 🗨️ **Multi-agent Chat Rooms** | Project-scoped group conversations where multiple room members can reply: mentioned members are direct responders, and additional ambient members may respond up to a cap. Currently **experimental** — enable `chatRooms` in **Settings → Experimental Features → Chat Rooms**. ([Chat Rooms docs](./docs/dashboard-guide.md#chat-rooms)) |
 | 🗺️ **Missions** | Hierarchical planning (Mission → Milestone → Slice → Feature → Task) with autopilot and validation contracts. |
 | 🔬 **Research** | Bounded research runs with web search, GitHub, local docs, and LLM synthesis (plus runtime builtin WebSearch/WebFetch support in planning + synthesis flows when available). Turn findings into tasks. ([Docs](./docs/research.md)) |
@@ -299,12 +299,15 @@ For Capacitor + PWA workflow, see [MOBILE.md](./MOBILE.md).
 - **AI Planning** — Planning agent generates detailed `PROMPT.md` with steps, file scope, and acceptance criteria
 - **Step-by-step Execution** — Plan → Review → Execute → Review cycle for each task step
 - **Git Worktree Isolation** — Each task runs in its own worktree (`fusion/{task-id}` branch)
-- **Workflow Steps** — Configurable quality gates (pre-merge: blocks merge; post-merge: informational)
+- **Workflow Steps** — Configurable quality gates (pre-merge: blocks merge; post-merge: informational), plus workflow-declared optional steps such as opt-in [Browser Verification](./docs/workflow-steps.md#workflow-declared-optional-steps)
+- **Workflow-native policy** — Fast-mode planning (`leanPlanning` / `autoApproveSpec`) and typed triage thresholds are workflow settings, not hard-coded engine constants ([Settings Reference](./docs/settings-reference.md#workflow-native-triage-policy-settings); [fast-mode step behavior](./docs/workflow-steps.md#execution-modes))
 - **GitHub Integration** — Import issues, create PRs, real-time PR/issue badges
-- **Dashboard** — Real-time kanban board, agent management, terminal, git manager, mission planner
+- **Dashboard** — Real-time kanban board, agent management, terminal, git manager, mission planner, custom provider setup, and workflow model lanes
 - **Missions** — Hierarchical planning (Mission → Milestone → Slice → Feature → Task) with autopilot, validation contracts, fix-feature retries, and blocked-handoff semantics
 - **Multi-Project** — Manage multiple projects from a single installation with project isolation
-- **Inter-Agent Messaging** — Built-in messaging for coordination between agents and users
+- **Custom Providers** — Add OpenAI-compatible, OpenAI Responses, Anthropic-compatible, or Google Generative AI providers; saved models appear in Project Models and workflow model dropdowns ([Dashboard Guide](./docs/dashboard-guide.md#custom-providers); [settings shape](./docs/settings-reference.md#customproviders))
+- **Smart merge controls** — Global auto-merge stays live for default tasks, while explicit per-task overrides can force auto/manual behavior ([Settings Reference](./docs/settings-reference.md#project-settings))
+- **Inter-Agent Messaging** — Built-in messaging for coordination between agents and users; engineer-role agents can opt into backlog auto-claim for implementation tasks ([Settings Reference](./docs/settings-reference.md#project-settings))
 - **Chat Rooms (Experimental)** — Project-scoped group chat where mentioned members are routed as direct responders and additional ambient members may reply up to a cap (enable via **Settings → Experimental Features → Chat Rooms**; details in [Dashboard Guide → Chat Rooms](./docs/dashboard-guide.md#chat-rooms))
 
 ### Provider authentication
@@ -316,6 +319,7 @@ Fusion supports OAuth-based authentication for AI providers configured via **Set
 - **Factory AI — via Droid CLI** *(optional)* — requires local Droid CLI install + `droid auth login`; detection follows the effective runtime binary path (default `droid`, or plugin `droidBinaryPath` when configured), then enable in **Settings → Authentication** and restart Fusion
 - **llama.cpp — via HTTP server** *(optional)* — configure your llama.cpp server URL (default `http://127.0.0.1:8080`) and optional API key, then enable in **Settings → Authentication**
 - **Other providers** — Authenticate via API key entry in Settings (including Google/Gemini API key, Google Generative AI, Vertex, and Cloud Code aliases)
+- **Custom providers** — Add user-defined OpenAI-compatible, OpenAI Responses, Anthropic-compatible, or Google Generative AI endpoints from **Settings → Authentication → Custom Providers**; saved model IDs become selectable in project and workflow model lanes ([Dashboard Guide](./docs/dashboard-guide.md#custom-providers))
 
 ### Model system
 
@@ -328,6 +332,8 @@ Fusion uses a dual-scope model hierarchy with five independent lanes. Global set
 | Validator | Plan/code reviewer | `validatorGlobalProvider` + `validatorGlobalModelId` | `validatorProvider` + `validatorModelId` |
 | Title Summarization | Auto-title generation | `titleSummarizerGlobalProvider` + `titleSummarizerGlobalModelId` | `titleSummarizerProvider` + `titleSummarizerModelId` |
 | Workflow Step Refinement | AI prompt refinement | (uses `defaultProvider`/`defaultModelId`) | (uses `modelProvider`/`modelId` on WorkflowStep) |
+
+**Workflow lanes:** The default workflow exposes Plan/Triage, Executor, and Reviewer model lanes in **Settings → Project Models**, and advanced workflow settings can declare additional typed model/policy values ([Settings Reference](./docs/settings-reference.md#workflow-settings)).
 
 **Per-Task Overrides:** Tasks can override the executor, validator, and planning lanes with per-task model fields (`modelProvider`/`modelId`, `validatorModelProvider`/`validatorModelId`, `planningModelProvider`/`planningModelId`).
 

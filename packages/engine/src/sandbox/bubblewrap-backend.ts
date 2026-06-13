@@ -17,6 +17,7 @@ import type {
 const execAsync = promisify(exec);
 
 type FailureMode = "fail-hard" | "fallback-native";
+type BubblewrapRunner = (command: string, args: string[], options: SandboxRunOptions) => Promise<SandboxRunResult>;
 
 export class SandboxUnavailableError extends Error {
   constructor(message: string) {
@@ -30,7 +31,10 @@ export class BubblewrapBackend implements SandboxBackend {
   private useNativeFallback = false;
   private pnpmStorePathByCwd = new Map<string, string>();
 
-  constructor(private readonly nativeBackend: SandboxBackend = new NativeSandboxBackend()) {}
+  constructor(
+    private readonly nativeBackend: SandboxBackend = new NativeSandboxBackend(),
+    private readonly bwrapRunner?: BubblewrapRunner,
+  ) {}
 
   capabilities(): SandboxCapabilities {
     return {
@@ -87,7 +91,8 @@ export class BubblewrapBackend implements SandboxBackend {
     });
 
     const bwrapPath = detect.path ?? "bwrap";
-    return this.runBwrapSpawn(bwrapPath, [...policyArgs, "--", "/bin/sh", "-lc", command], options);
+    const bwrapArgs = [...policyArgs, "--", "/bin/sh", "-lc", command];
+    return (this.bwrapRunner ?? this.runBwrapSpawn.bind(this))(bwrapPath, bwrapArgs, options);
   }
 
   async runStreaming(command: string, options: SandboxRunStreamingOptions): Promise<SandboxStreamingResult> {

@@ -191,6 +191,7 @@ interface TaskRow {
   executionStartBranch: string | null;
   branch: string | null;
   autoMerge: number | null;
+  autoMergeProvenance: string | null;
   baseCommitSha: string | null;
   modelPresetId: string | null;
   modelProvider: string | null;
@@ -311,6 +312,7 @@ function defineTaskColumn(
 }
 
 const serializeTaskAutoMerge: TaskColumnDescriptor["serialize"] = (task) => task.autoMerge === undefined ? null : (task.autoMerge ? 1 : 0);
+const serializeTaskAutoMergeProvenance: TaskColumnDescriptor["serialize"] = (task) => task.autoMergeProvenance ?? null;
 
 // Keep this descriptor order in lockstep with the named-column INSERT/UPSERT
 // clauses we generate below. SQLite binds by the explicit column list we emit,
@@ -336,6 +338,7 @@ const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   defineTaskColumn("baseBranch", (task) => task.baseBranch ?? null),
   defineTaskColumn("branch", (task) => task.branch ?? null),
   defineTaskColumn("autoMerge", serializeTaskAutoMerge),
+  defineTaskColumn("autoMergeProvenance", serializeTaskAutoMergeProvenance),
   defineTaskColumn("executionStartBranch", (task) => task.executionStartBranch ?? null),
   defineTaskColumn("baseCommitSha", (task) => task.baseCommitSha ?? null),
   defineTaskColumn("modelPresetId", (task) => task.modelPresetId ?? null),
@@ -1407,6 +1410,15 @@ interface MoveTaskInternalOptions {
 
 const WORKFLOW_MOVE_POLICY_TIMEOUT_MS = 5000;
 
+export interface LegacyAutoMergeStampReconcileResult {
+  taskId: string;
+  column: string;
+  cleared: boolean;
+}
+
+const LEGACY_AUTO_MERGE_STAMP_MARKER_KEY = "legacyAutoMergeStampMarkedVersion";
+const LEGACY_AUTO_MERGE_STAMP_MARKER_VERSION = "1";
+
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private static readonly ACTIVE_TASKS_WHERE = '"deletedAt" IS NULL';
   /** U6: sentinel effective-workflow id for default-workflow (null-selection)
@@ -1807,6 +1819,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     await this.migrateActiveArchivedTasksToArchiveDb();
     await this.migrateAgentLogEntriesToFilesOnce();
     await this.cleanupNoOpTaskMovedActivityRowsOnce();
+    try {
+      await this.markLegacyAutoMergeStampsOnce();
+    } catch (err) {
+      storeLog.warn("Legacy auto-merge stamp marker failed during init (non-fatal)", {
+        phase: "init:legacy-auto-merge-stamp-marker",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     // U4: one-time per-project hard-move of MOVED_SETTINGS_KEYS into workflow
     // setting values (marker-gated, idempotent, never blocks startup).
     try {
@@ -1920,6 +1940,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       executionStartBranch: row.executionStartBranch || undefined,
       branch: row.branch || undefined,
       autoMerge: row.autoMerge === null ? undefined : row.autoMerge === 1,
+      autoMergeProvenance: row.autoMergeProvenance === "user" || row.autoMergeProvenance === "legacy-stamp"
+        ? row.autoMergeProvenance
+        : undefined,
       baseCommitSha: row.baseCommitSha || undefined,
       scopeOverride: row.scopeOverride ? true : undefined,
       scopeOverrideReason: row.scopeOverrideReason || undefined,
@@ -2448,7 +2471,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "autoMergeProvenance", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -2497,7 +2520,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
     const columns = [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "autoMergeProvenance", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
@@ -4460,6 +4483,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       sourceMetadata: withTaskBranchContextInSourceMetadata(input.source?.sourceMetadata, input.branchContext),
       branchContext: input.branchContext,
       autoMerge: input.autoMerge,
+      autoMergeProvenance: input.autoMerge === undefined ? undefined : "user",
       column: input.column || "triage",
       dependencies: input.dependencies || [],
       breakIntoSubtasks: input.breakIntoSubtasks === true ? true : undefined,
@@ -8053,20 +8077,28 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       } else if (updates.baseBranch !== undefined) {
         task.baseBranch = updates.baseBranch;
       }
+      // Explicit task-level auto-merge overrides written through updateTask are
+      // user provenance. Task creation mirrors this for create-time overrides.
       if (updates.autoMerge === null) {
         task.autoMerge = undefined;
+        task.autoMergeProvenance = undefined;
       } else if (updates.autoMerge !== undefined) {
         task.autoMerge = updates.autoMerge;
+        task.autoMergeProvenance = "user";
       }
       if (updates.branch === null) {
         task.branch = undefined;
       } else if (updates.branch !== undefined) {
         task.branch = updates.branch;
       }
+      // Keep in sync with the first autoMerge block above; both legacy update
+      // paths may run before persistence.
       if (updates.autoMerge === null) {
         task.autoMerge = undefined;
+        task.autoMergeProvenance = undefined;
       } else if (updates.autoMerge !== undefined) {
         task.autoMerge = updates.autoMerge;
+        task.autoMergeProvenance = "user";
       }
       if (updates.executionStartBranch === null) {
         task.executionStartBranch = undefined;
@@ -9364,6 +9396,118 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     });
 
     return event;
+  }
+
+  private isLegacyAutoMergeStampCandidate(task: Pick<Task, "column" | "autoMerge" | "autoMergeProvenance">): boolean {
+    return task.column === "in-review" && task.autoMerge === true && task.autoMergeProvenance !== "user";
+  }
+
+  private async listLegacyAutoMergeStampCandidates(): Promise<Task[]> {
+    const inReview = await this.listTasks({ column: "in-review" });
+    return inReview.filter((task) => this.isLegacyAutoMergeStampCandidate(task));
+  }
+
+  /**
+   * Dry-run or apply the operator-driven cleanup for legacy review-entry
+   * auto-merge stamps. Dry-run is the default and only reports candidates.
+   * With apply=true, ambiguous legacy stamps are cleared so the task follows the
+   * live global autoMerge setting again. Explicit user overrides are never
+   * candidates and are preserved.
+   */
+  async reconcileLegacyAutoMergeStamps(options?: { apply?: boolean }): Promise<LegacyAutoMergeStampReconcileResult[]> {
+    const candidates = await this.listLegacyAutoMergeStampCandidates();
+    const results: LegacyAutoMergeStampReconcileResult[] = [];
+
+    if (options?.apply !== true) {
+      return candidates.map((task) => ({ taskId: task.id, column: task.column, cleared: false }));
+    }
+
+    for (const candidate of candidates) {
+      const current = await this.getTask(candidate.id);
+      if (!current || !this.isLegacyAutoMergeStampCandidate(current)) {
+        continue;
+      }
+
+      const priorAutoMerge = current.autoMerge;
+      const priorProvenance = current.autoMergeProvenance;
+      current.autoMerge = undefined;
+      current.autoMergeProvenance = undefined;
+      current.updatedAt = new Date().toISOString();
+
+      await this.atomicWriteTaskJson(this.taskDir(current.id), current);
+      if (this.isWatching) this.taskCache.set(current.id, { ...current });
+      this.emitTaskLifecycleEventSafely("task:updated", [current]);
+
+      this.recordRunAuditEvent({
+        taskId: current.id,
+        agentId: "system",
+        runId: `legacy-auto-merge-stamp-clear-${current.id}-${Date.now()}`,
+        domain: "database",
+        mutationType: "task:auto-merge-legacy-stamp-cleared",
+        target: current.id,
+        metadata: {
+          taskId: current.id,
+          priorAutoMerge,
+          priorAutoMergeProvenance: priorProvenance ?? null,
+          action: "cleared-to-follow-global-autoMerge",
+        },
+      });
+      results.push({ taskId: current.id, column: current.column, cleared: true });
+    }
+
+    return results;
+  }
+
+  private async markLegacyAutoMergeStampsOnce(): Promise<void> {
+    const markerRow = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(LEGACY_AUTO_MERGE_STAMP_MARKER_KEY) as
+      | { value: string }
+      | undefined;
+    if (markerRow?.value === LEGACY_AUTO_MERGE_STAMP_MARKER_VERSION) {
+      return;
+    }
+
+    const candidates = await this.listLegacyAutoMergeStampCandidates();
+    const markedTaskIds: string[] = [];
+    for (const candidate of candidates) {
+      const current = await this.getTask(candidate.id);
+      if (!current || !this.isLegacyAutoMergeStampCandidate(current)) {
+        continue;
+      }
+      current.autoMergeProvenance = "legacy-stamp";
+      current.updatedAt = new Date().toISOString();
+      await this.atomicWriteTaskJson(this.taskDir(current.id), current);
+      if (this.isWatching) this.taskCache.set(current.id, { ...current });
+      this.emitTaskLifecycleEventSafely("task:updated", [current]);
+      markedTaskIds.push(current.id);
+
+      this.recordRunAuditEvent({
+        taskId: current.id,
+        agentId: "system",
+        runId: `legacy-auto-merge-stamp-mark-${current.id}-${Date.now()}`,
+        domain: "database",
+        mutationType: "task:auto-merge-legacy-stamp-marked",
+        target: current.id,
+        metadata: {
+          taskId: current.id,
+          autoMerge: true,
+          autoMergeProvenance: "legacy-stamp",
+          action: "marked-only-no-behavior-change",
+        },
+      });
+    }
+
+    this.db.prepare(`
+      INSERT INTO __meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(LEGACY_AUTO_MERGE_STAMP_MARKER_KEY, LEGACY_AUTO_MERGE_STAMP_MARKER_VERSION);
+    this.db.bumpLastModified();
+
+    storeLog.log("legacy auto-merge stamp marker completed", {
+      phase: "legacy-auto-merge-stamp-marker",
+      markedCount: markedTaskIds.length,
+      markedTaskIds: markedTaskIds.slice(0, 50),
+      truncated: markedTaskIds.length > 50,
+    });
   }
 
   /**
@@ -10926,6 +11070,15 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     this.taskCache.clear();
     for (const task of tasks) {
       this.taskCache.set(task.id, { ...task });
+    }
+
+    try {
+      await this.markLegacyAutoMergeStampsOnce();
+    } catch (err) {
+      storeLog.warn("Legacy auto-merge stamp marker failed during watch startup (non-fatal)", {
+        phase: "watch:legacy-auto-merge-stamp-marker",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     if (!this.donePauseBackfillDone) {
@@ -14912,6 +15065,8 @@ ${stepsSection}`;
     // default falls back cleanly with nothing written. Interpreter-deferred
     // built-ins are valid selectable workflows but not lowerable to legacy
     // WorkflowStep rows, so default materialization falls back to legacy defaults.
+    // Built-ins that compile to zero steps still record a stepless selection,
+    // mirroring explicit workflow materialization.
     let inputs: import("./types.js").WorkflowStepInput[];
     try {
       inputs = compileWorkflowToSteps(def.ir);
@@ -14920,7 +15075,7 @@ ${stepsSection}`;
       throw err;
     }
     if (isBuiltinWorkflowId(workflowId) && inputs.length === 0) {
-      return undefined;
+      return { workflowId, stepIds: [] };
     }
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
     return { workflowId, stepIds };

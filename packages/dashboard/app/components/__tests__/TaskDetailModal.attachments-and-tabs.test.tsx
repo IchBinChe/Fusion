@@ -764,6 +764,182 @@ describe("TaskDetailModal", () => {
     });
   });
 
+  describe("Chat full-height layout", () => {
+    it("FN-6347 defines chat modal-body and section fill-height CSS for desktop and mobile", () => {
+      const css = readDashboardStylesSource();
+      const bodyRule = getCssRuleBlock(css, ".detail-body--chat");
+      const sectionRule = getCssRuleBlock(css, ".detail-section--chat");
+      const mobileCss = css.slice(css.indexOf("@media (max-width: 768px)"));
+      const mobileBodyRule = getCssRuleBlock(mobileCss, ".detail-body--chat");
+      const mobileSectionRule = getCssRuleBlock(mobileCss, ".detail-section--chat");
+
+      expect(bodyRule).toContain("display: flex");
+      expect(bodyRule).toContain("flex-direction: column");
+      expect(bodyRule).toContain("min-height: 0");
+      expect(bodyRule).toContain("overflow-y: hidden");
+      expect(sectionRule).toContain("display: flex");
+      expect(sectionRule).toContain("flex-direction: column");
+      expect(sectionRule).toContain("flex: 1");
+      expect(sectionRule).toContain("min-height: 0");
+      expect(mobileBodyRule).toContain("overflow-y: hidden");
+      expect(mobileBodyRule).toContain("min-height: 0");
+      expect(mobileSectionRule).toContain("flex: 1");
+      expect(mobileSectionRule).toContain("min-height: 0");
+    });
+
+    it("FN-6370 defines expanded chat chrome-hiding CSS for desktop and mobile", () => {
+      const css = readDashboardStylesSource();
+      const expandedChromeRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-title-row");
+      const expandedBodyRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-body--chat");
+      const expandedSectionRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-section--chat");
+      const mobileCss = css.slice(css.indexOf("@media (max-width: 768px)"));
+      const mobileTabsRule = getCssRuleBlock(mobileCss, ".task-detail-content--chat-expanded .detail-tabs");
+
+      expect(expandedChromeRule).toContain("display: none");
+      expect(expandedBodyRule).toContain("flex: 1");
+      expect(expandedBodyRule).toContain("min-height: 0");
+      expect(expandedSectionRule).toContain("margin-top: 0");
+      expect(mobileTabsRule).toContain("display: none");
+    });
+
+    it("FN-6370 expands and collapses chat without leaving chrome hidden", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      const content = container.querySelector(".task-detail-content");
+      expect(content).not.toHaveClass("task-detail-content--chat-expanded");
+      expect(container.querySelector(".detail-tabs")).toBeTruthy();
+      expect(container.querySelector(".modal-actions")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(content).toHaveClass("task-detail-content--chat-expanded");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse chat");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(content).not.toHaveClass("task-detail-content--chat-expanded");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand chat to full modal");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("FN-6370 resets expanded chat when the active tab changes", () => {
+      const { container, rerender } = render(
+        <TaskDetailContent
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+          initialTab="chat"
+        />,
+      );
+
+      const content = container.querySelector(".task-detail-content");
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(content).toHaveClass("task-detail-content--chat-expanded");
+
+      rerender(
+        <TaskDetailContent
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+          initialTab="logs"
+        />,
+      );
+
+      expect(container.querySelector(".task-detail-content--chat-expanded")).toBeNull();
+      expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
+    });
+
+    it("FN-6370 resets expanded chat when entering edit mode", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ column: "triage", prompt: "# Hello\n\nContent" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(container.querySelector(".task-detail-content")).toHaveClass("task-detail-content--chat-expanded");
+
+      fireEvent.click(screen.getByLabelText("Edit task"));
+      expect(container.querySelector(".task-detail-content--chat-expanded")).toBeNull();
+      expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
+    });
+
+    it("FN-6347 applies chat modifiers only while the Chat tab is active", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(container.querySelector(".detail-body--chat")).toBeNull();
+      expect(container.querySelector(".detail-section--chat")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      const chatBody = container.querySelector(".detail-body--chat");
+      const chatSection = container.querySelector(".detail-section--chat");
+      expect(chatBody).toBeTruthy();
+      expect(chatBody).not.toHaveClass("detail-body--agent-log");
+      expect(chatSection).toBeTruthy();
+      expect(chatSection!.querySelector("[data-testid='task-chat-tab']")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Logs" }));
+      fireEvent.click(screen.getByText("Agent Log"));
+      expect(container.querySelector(".detail-body--chat")).toBeNull();
+      expect(container.querySelector(".detail-section--chat")).toBeNull();
+      expect(container.querySelector(".detail-body--agent-log")).toBeTruthy();
+    });
+
+    it("FN-6347 removes the chat body modifier while editing", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ column: "triage", prompt: "# Hello\n\nContent" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      expect(container.querySelector(".detail-body--chat")).toBeTruthy();
+
+      fireEvent.click(screen.getByLabelText("Edit task"));
+      expect(container.querySelector(".detail-body--chat")).toBeNull();
+      expect(container.querySelector(".detail-section--chat")).toBeNull();
+    });
+  });
+
   describe("Agent Log full-height layout", () => {
     it("applies detail-body--agent-log class when Logs → Agent Log subview is active", () => {
       const { container } = render(

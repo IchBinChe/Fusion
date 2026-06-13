@@ -30,6 +30,7 @@ import {
   mockExecuteAll,
   mockTerminateAllSessions,
   mockCleanup,
+  mockSteerActiveSessions,
   resetExecutorMocks,
 } from "./executor-test-helpers.js";
 
@@ -3128,6 +3129,113 @@ describe("Real-time steering injection", () => {
     // Complete the execution
     promptResolve!();
     await executePromise;
+  });
+
+  it("injects new steering comments via active StepSessionExecutor on task:updated", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const steerActiveSessions = vi.fn().mockResolvedValue(undefined);
+    const newComment = {
+      id: "step-session-comment",
+      text: "Please adjust the active step",
+      createdAt: new Date().toISOString(),
+      author: "user" as const,
+    };
+
+    (executor as any).activeStepExecutors.set("FN-001", { steerActiveSessions });
+    (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", new Set());
+
+    await (store as any)._triggerAsync("task:updated", {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      steeringComments: [newComment],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(steerActiveSessions).toHaveBeenCalledOnce();
+    expect(steerActiveSessions.mock.calls[0][0]).toContain("📣 **New feedback**");
+    expect(steerActiveSessions.mock.calls[0][0]).toContain("Please adjust the active step");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("Comment received mid-execution"),
+      "by user",
+    );
+  });
+
+  it("injects new steering comments via active workflow step session on task:updated", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const steer = vi.fn().mockResolvedValue(undefined);
+    const newComment = {
+      id: "workflow-step-comment",
+      text: "Please adjust the workflow step",
+      createdAt: new Date().toISOString(),
+      author: "user" as const,
+    };
+
+    (executor as any).activeWorkflowStepSessions.set("FN-001", { steer });
+    (executor as any).activeWorkflowStepSessionSeenSteeringIds.set("FN-001", new Set());
+
+    await (store as any)._triggerAsync("task:updated", {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      steeringComments: [newComment],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(steer).toHaveBeenCalledOnce();
+    expect(steer.mock.calls[0][0]).toContain("📣 **New feedback**");
+    expect(steer.mock.calls[0][0]).toContain("Please adjust the workflow step");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("Comment received mid-execution"),
+      "by user",
+    );
+  });
+
+  it("does not re-inject an already seen active StepSessionExecutor steering comment", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const steerActiveSessions = vi.fn().mockResolvedValue(undefined);
+    const comment = {
+      id: "step-session-seen-comment",
+      text: "Already delivered",
+      createdAt: new Date().toISOString(),
+      author: "user" as const,
+    };
+
+    (executor as any).activeStepExecutors.set("FN-001", { steerActiveSessions });
+    (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", new Set([comment.id]));
+
+    await (store as any)._triggerAsync("task:updated", {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      steeringComments: [comment],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(steerActiveSessions).not.toHaveBeenCalled();
   });
 
   it("does not re-inject already seen steering comments", async () => {

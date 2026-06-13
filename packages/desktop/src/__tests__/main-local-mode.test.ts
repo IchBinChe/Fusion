@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   const appHandlers = new Map<string, (...args: unknown[]) => void>();
   const app = {
     whenReady: vi.fn(async () => undefined),
+    getPath: vi.fn((name: string) => (name === "home" ? "/mock/home" : "/mock/other")),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       appHandlers.set(event, handler);
       return app;
@@ -26,8 +27,12 @@ const mocks = vi.hoisted(() => {
     webContents: { send: vi.fn() },
   };
 
-  const BrowserWindow = vi.fn(() => browserWindow);
-  const Tray = vi.fn(() => ({ destroy: vi.fn() }));
+  const BrowserWindow = vi.fn(function () {
+    return browserWindow;
+  });
+  const Tray = vi.fn(function () {
+    return { destroy: vi.fn() };
+  });
 
   const localRuntimeManager = {
     startLocal: vi.fn(async () => ({ source: "embedded-local", state: "running", port: 4041 })),
@@ -40,7 +45,11 @@ const mocks = vi.hoisted(() => {
     getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
   };
 
-  return { app, appHandlers, BrowserWindow, Tray, browserWindow, localRuntimeManager, screen };
+  const LocalRuntimeManager = vi.fn(function () {
+    return localRuntimeManager;
+  });
+
+  return { app, appHandlers, BrowserWindow, Tray, browserWindow, localRuntimeManager, LocalRuntimeManager, screen };
 });
 
 vi.mock("electron", () => ({
@@ -66,7 +75,7 @@ vi.mock("../native.js", () => ({
   clampWindowStateToVisibleDisplay: vi.fn((state) => state),
 }));
 vi.mock("../deep-link.js", () => ({ registerDeepLinkProtocol: vi.fn(), setupDeepLinkHandler: vi.fn() }));
-vi.mock("../local-runtime.js", () => ({ LocalRuntimeManager: vi.fn(() => mocks.localRuntimeManager) }));
+vi.mock("../local-runtime.js", () => ({ LocalRuntimeManager: mocks.LocalRuntimeManager }));
 
 describe("main local mode", () => {
   beforeEach(() => {
@@ -81,6 +90,8 @@ describe("main local mode", () => {
     const { initializeApp } = await import("../main.ts");
     await initializeApp();
 
+    expect(mocks.LocalRuntimeManager).toHaveBeenCalledWith({ rootDir: "/mock/home" });
+    expect(mocks.app.getPath).toHaveBeenCalledWith("home");
     expect(mocks.localRuntimeManager.startLocal).toHaveBeenCalled();
     delete process.env.FUSION_DESKTOP_MODE;
   });

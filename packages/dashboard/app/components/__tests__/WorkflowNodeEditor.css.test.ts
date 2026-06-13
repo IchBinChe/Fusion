@@ -54,6 +54,53 @@ describe("WorkflowNodeEditor edge visibility CSS contract", () => {
   });
 });
 
+describe("WorkflowNodeEditor sidebar overflow CSS contract", () => {
+  it("FN-6379 clamps horizontal overflow on desktop and list-stage sidebars", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+    const mobileBlocks = extractMediaBlocks(editorCss, "(max-width: 768px)");
+
+    const desktopSidebarRule = findRule([editorCss], /\.wf-editor-sidebar\s*\{(?=[^}]*width\s*:\s*300px)[^}]*\}/);
+    expect(desktopSidebarRule).toMatch(/width\s*:\s*300px\s*;/);
+    expect(desktopSidebarRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(desktopSidebarRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+    expect(desktopSidebarRule).toMatch(/overflow-y\s*:\s*auto\s*;/);
+
+    const listStageSidebarRule = findRule(mobileBlocks, /\.wf-editor-body--list-stage \.wf-editor-sidebar\s*\{[^}]*\}/);
+    expect(listStageSidebarRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(listStageSidebarRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(listStageSidebarRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+    expect(listStageSidebarRule).toMatch(/overflow-y\s*:\s*auto\s*;/);
+  });
+
+  it("FN-6379 keeps sidebar children from forcing horizontal scroll", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+
+    const listRule = findRule([editorCss], /\.wf-editor-list\s*\{[^}]*\}/);
+    expect(listRule).toMatch(/min-width\s*:\s*0\s*;/);
+
+    const listItemRule = findRule([editorCss], /\.wf-editor-list-item\s*\{[^}]*\}/);
+    expect(listItemRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(listItemRule).toMatch(/overflow\s*:\s*hidden\s*;/);
+    expect(listItemRule).toMatch(/text-overflow\s*:\s*ellipsis\s*;/);
+    expect(listItemRule).toMatch(/white-space\s*:\s*nowrap\s*;/);
+
+    const paletteRule = findRule([editorCss], /\.wf-editor-palette\s*\{[^}]*\}/);
+    expect(paletteRule).toMatch(/min-width\s*:\s*0\s*;/);
+
+    const paletteButtonRule = findRule(
+      [editorCss],
+      /\.wf-palette-btn,\s*\.wf-editor-action,\s*\.wf-editor-delete,\s*\.wf-editor-save\s*\{[^}]*\}/,
+    );
+    expect(paletteButtonRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(paletteButtonRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
+
+    const sidebarCodeRule = findRule([editorCss], /\.wf-editor-sidebar \.wf-code-source\s*\{[^}]*\}/);
+    expect(sidebarCodeRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+    expect(sidebarCodeRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
+    expect(sidebarCodeRule).toMatch(/white-space\s*:\s*pre-wrap\s*;/);
+  });
+});
+
 describe("WorkflowNodeEditor mobile CSS contract", () => {
   it("FN-5992 preserves desktop editor min-width while adding full-screen mobile overrides", () => {
     const baseCss = loadAllAppCssBaseOnly();

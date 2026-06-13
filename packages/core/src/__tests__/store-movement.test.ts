@@ -75,6 +75,7 @@ describe("TaskStore", () => {
       const moved = await store.moveTask(task.id, "in-review");
 
       expect(moved.autoMerge).toBeUndefined();
+      expect(moved.autoMergeProvenance).toBeUndefined();
       expect(allowsAutoMergeProcessing(moved, { autoMerge: true })).toBe(true);
       expect(allowsAutoMergeProcessing(moved, { autoMerge: false })).toBe(false);
     });
@@ -86,6 +87,7 @@ describe("TaskStore", () => {
       const moved = await store.moveTask(task.id, "in-review");
 
       expect(moved.autoMerge).toBeUndefined();
+      expect(moved.autoMergeProvenance).toBeUndefined();
       expect(resolveEffectiveAutoMerge(moved, { autoMerge: false })).toBe(false);
       expect(resolveEffectiveAutoMerge(moved, { autoMerge: true })).toBe(true);
     });
@@ -96,23 +98,35 @@ describe("TaskStore", () => {
       const inheritedMoved = await store.moveTask(inherited.id, "in-review");
 
       expect(inheritedMoved.autoMerge).toBeUndefined();
+      expect(inheritedMoved.autoMergeProvenance).toBeUndefined();
       expect(allowsAutoMergeProcessing(inheritedMoved, { autoMerge: false })).toBe(false);
       expect(allowsAutoMergeProcessing(inheritedMoved, { autoMerge: true })).toBe(true);
 
       const explicitTrue = await createInProgressTask("explicit true override");
       await store.updateTask(explicitTrue.id, { autoMerge: true });
+      const explicitTrueWithProvenance = await store.getTask(explicitTrue.id);
+      expect(explicitTrueWithProvenance?.autoMergeProvenance).toBe("user");
       const explicitTrueMoved = await store.moveTask(explicitTrue.id, "in-review");
       expect(explicitTrueMoved.autoMerge).toBe(true);
+      expect(explicitTrueMoved.autoMergeProvenance).toBe("user");
       expect(allowsAutoMergeProcessing(explicitTrueMoved, { autoMerge: false })).toBe(true);
       expect(resolveEffectiveAutoMerge(explicitTrueMoved, { autoMerge: false })).toBe(true);
 
       const explicitFalse = await createInProgressTask("explicit false override");
       await store.updateTask(explicitFalse.id, { autoMerge: false });
+      const explicitFalseWithProvenance = await store.getTask(explicitFalse.id);
+      expect(explicitFalseWithProvenance?.autoMergeProvenance).toBe("user");
       const explicitFalseMoved = await store.moveTask(explicitFalse.id, "in-review");
       expect(explicitFalseMoved.autoMerge).toBe(false);
+      expect(explicitFalseMoved.autoMergeProvenance).toBe("user");
       expect(allowsAutoMergeProcessing(explicitFalseMoved, { autoMerge: false })).toBe(false);
       expect(resolveEffectiveAutoMerge(explicitFalseMoved, { autoMerge: false })).toBe(false);
       expect(resolveEffectiveAutoMerge(explicitFalseMoved, { autoMerge: true })).toBe(false);
+
+      await store.updateTask(explicitFalse.id, { autoMerge: null });
+      const cleared = await store.getTask(explicitFalse.id);
+      expect(cleared?.autoMerge).toBeUndefined();
+      expect(cleared?.autoMergeProvenance).toBeUndefined();
     });
   });
 

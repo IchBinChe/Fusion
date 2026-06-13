@@ -65,11 +65,17 @@ describe("BubblewrapBackend", () => {
     expect(nativeStub.run).toHaveBeenCalled();
   });
 
-  it(
-    "attempts bwrap execution when available",
-    async () => {
-    detectMock.mockResolvedValue({ available: true, path: "bwrap" });
-    const backend = new BubblewrapBackend();
+  it("attempts bwrap execution when available", async () => {
+    detectMock.mockResolvedValue({ available: true, path: "/usr/bin/test-bwrap" });
+    const runBwrap = vi.fn(async (): Promise<SandboxRunResult> => ({
+      stdout: "hello\n",
+      stderr: "",
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      bufferExceeded: false,
+    }));
+    const backend = new BubblewrapBackend(undefined, runBwrap);
     await backend.prepare({ allowNetwork: true });
 
     const result = await backend.run("echo hello", {
@@ -79,11 +85,14 @@ describe("BubblewrapBackend", () => {
       encoding: "utf-8",
     });
 
-      expect(result).toHaveProperty("stdout");
-      expect(result).toHaveProperty("stderr");
-    },
-    10_000,
-  );
+    expect(result.stdout).toBe("hello\n");
+    expect(runBwrap).toHaveBeenCalledOnce();
+    const [command, args] = runBwrap.mock.calls[0];
+    expect(command).toBe("/usr/bin/test-bwrap");
+    expect(args.at(-3)).toBe("/bin/sh");
+    expect(args.at(-2)).toBe("-lc");
+    expect(args.at(-1)).toBe("echo hello");
+  });
 
   it.skipIf(process.platform !== "linux" || !hasBwrap)("runs real bubblewrap hello integration", async () => {
     vi.doUnmock("../../sandbox/bubblewrap-detect.js");

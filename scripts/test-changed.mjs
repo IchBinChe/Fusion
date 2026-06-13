@@ -173,8 +173,94 @@ export function shouldRunIsolationGuard(env = process.env) {
 // can't spend unbounded time rm-rf'ing a tmpdir that accumulated thousands of
 // stale homes — and so the cache-fresh fast path can skip it entirely.
 const PRUNE_MAX_ENTRIES = 64;
+let cleanupRmSync = rmSync;
+const PRUNE_REMOVE_RETRIES = 3;
+const PRUNE_REMOVE_DELAY_MS = 75;
+const PRUNE_DIAGNOSTIC_CHILD_LIMIT = 8;
+const FUSION_WORKER_ROOT_OWNER_FILE = ".fusion-test-worker-root-owner";
 
-export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES) {
+function isEnoentError(err) {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error && typeof error === "object" && error.code === "EPERM";
+  }
+}
+
+function readWorkerRootOwnerPid(rootPath) {
+  try {
+    const raw = readFileSync(path.join(rootPath, FUSION_WORKER_ROOT_OWNER_FILE), "utf8").trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isActiveFusionWorkerRoot(rootPath) {
+  const ownerPid = readWorkerRootOwnerPid(rootPath);
+  if (ownerPid !== null && isProcessAlive(ownerPid)) return true;
+
+  // Backward-compatible guard for worker roots created before the owner marker
+  // landed, or marker writes that failed: an alive redir-<pid> child means a
+  // Vitest worker still owns temp workspaces beneath this root.
+  try {
+    for (const child of readdirSync(rootPath, { withFileTypes: true })) {
+      if (!child.isDirectory()) continue;
+      const match = /^redir-(\d+)$/.exec(child.name);
+      if (match && isProcessAlive(Number.parseInt(match[1], 10))) return true;
+    }
+  } catch {
+    // If we cannot inspect it, fall through to normal best-effort pruning.
+  }
+  return false;
+}
+
+function listImmediateChildrenForPruneWarning(rootPath) {
+  try {
+    const children = readdirSync(rootPath).slice(0, PRUNE_DIAGNOSTIC_CHILD_LIMIT);
+    if (children.length === 0) return "";
+    const suffix = children.length === PRUNE_DIAGNOSTIC_CHILD_LIMIT ? ", ..." : "";
+    return `; remaining children: ${children.join(", ")}${suffix}`;
+  } catch {
+    return "";
+  }
+}
+
+function removePrunedRootWithRetry(rawPath, { retries = PRUNE_REMOVE_RETRIES, delayMs = PRUNE_REMOVE_DELAY_MS } = {}) {
+  if (!existsSync(rawPath)) return true;
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // FN-6371/FN-6360: macOS can report a transient ENOTEMPTY/EBUSY while
+      // child handles inside an orphaned fusion-test-* root are still closing.
+      // Keep this a short bounded retry (not a long live-root deletion loop) and
+      // keep the surrounding scan single-level/prefix-capped.
+      cleanupRmSync(rawPath, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      if (isEnoentError(err)) return true;
+      lastError = err;
+      if (attempt < retries) {
+        sleepMsSync(delayMs);
+      }
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  const children = listImmediateChildrenForPruneWarning(rawPath);
+  console.warn(`[test-changed] failed to prune leftover ${rawPath} after ${retries} attempts: ${message}${children}`);
+  return false;
+}
+
+function pruneFusionTestRoots(prefix, maxEntries = PRUNE_MAX_ENTRIES, retryOptions = {}) {
   let tmpEntries = [];
   try {
     tmpEntries = readdirSync(tmpdir(), { withFileTypes: true });
@@ -182,24 +268,28 @@ export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES) {
     return;
   }
 
-  let removed = 0;
+  let processed = 0;
   for (const entry of tmpEntries) {
-    if (removed >= maxEntries) break;
-    if (!entry.isDirectory() || !entry.name.startsWith("fusion-test-home-root-")) continue;
+    if (processed >= maxEntries) break;
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+    processed++;
     const rawPath = path.join(tmpdir(), entry.name);
     try {
       realpathSync(rawPath);
     } catch {
       // Keep raw path fallback.
     }
-    try {
-      rmSync(rawPath, { recursive: true, force: true });
-      removed++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[test-changed] failed to prune leftover ${rawPath}: ${message}`);
-    }
+    if (isActiveFusionWorkerRoot(rawPath)) continue;
+    removePrunedRootWithRetry(rawPath, retryOptions);
   }
+}
+
+export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES, retryOptions = {}) {
+  pruneFusionTestRoots("fusion-test-home-root-", maxEntries, retryOptions);
+}
+
+export function pruneFusionTestWorkers(maxEntries = PRUNE_MAX_ENTRIES, retryOptions = {}) {
+  pruneFusionTestRoots("fusion-test-workers-", maxEntries, retryOptions);
 }
 
 // Run a test invocation under the L2 wall-clock watchdog (async). Throws on
@@ -242,6 +332,7 @@ async function runMaybeIsolated(command, commandArgs, options = {}) {
       onBeforeAfterCheck();
     }
     pruneFusionTestHomes();
+    pruneFusionTestWorkers();
     if (enabled) runIsolationCheck(false, env);
   }
 }
@@ -947,8 +1038,6 @@ const isolatedHomesToCleanup = new Set();
 // Passed to check-test-isolation.mjs via env so it allow-lists them
 // unconditionally, even if cleanup's rm silently failed.
 export const knownIsolatedHomeBasenames = new Set();
-
-let cleanupRmSync = rmSync;
 
 export function __setCleanupRmSyncForTests(nextRmSync) {
   cleanupRmSync = typeof nextRmSync === "function" ? nextRmSync : rmSync;

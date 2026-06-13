@@ -45,8 +45,23 @@ export async function buildCore(): Promise<void> {
   await runWorkspaceBin("tsc", [], resolve(workspaceRoot, "packages", "core"));
 }
 
+async function buildPackage(relativePath: string): Promise<void> {
+  await runWorkspaceBin("tsc", [], resolve(workspaceRoot, relativePath));
+}
+
+export async function buildDashboardRuntimePlugins(): Promise<void> {
+  await buildPackage("packages/plugin-sdk");
+  await Promise.all([
+    buildPackage("plugins/fusion-plugin-dependency-graph"),
+    buildPackage("plugins/fusion-plugin-hermes-runtime"),
+    buildPackage("plugins/fusion-plugin-openclaw-runtime"),
+    buildPackage("plugins/fusion-plugin-paperclip-runtime"),
+  ]);
+}
+
 export async function buildDashboard(): Promise<void> {
   const dashboardRoot = resolve(workspaceRoot, "packages", "dashboard");
+  await buildDashboardRuntimePlugins();
   await runWorkspaceBin("vite", ["build"], dashboardRoot);
   await runWorkspaceBin("tsc", [], dashboardRoot);
 }

@@ -1,8 +1,30 @@
 import { useEffect, type RefObject } from "react";
 
+import { isMobileViewport } from "./useViewportMode";
+
 interface PersistedSize {
   width?: number;
   height?: number;
+}
+
+const RESIZE_GRIP_CLASS = "modal-resize-grip";
+const RESIZE_GRIP_LABEL = "Resize modal from bottom-right corner";
+
+function readPersistableSize(node: HTMLElement): PersistedSize {
+  const styleWidth = Number.parseFloat(node.style.width);
+  const styleHeight = Number.parseFloat(node.style.height);
+  return {
+    width: node.offsetWidth > 0
+      ? node.offsetWidth
+      : Number.isFinite(styleWidth)
+        ? styleWidth
+        : undefined,
+    height: node.offsetHeight > 0
+      ? node.offsetHeight
+      : Number.isFinite(styleHeight)
+        ? styleHeight
+        : undefined,
+  };
 }
 
 /**
@@ -37,13 +59,12 @@ export function useModalResizePersist(
     // would override the mobile CSS and leave the modal stuck at a partial
     // height. Skip restoration; also clear any width/height left over from
     // a prior desktop render of the same modal instance.
-    const isMobile =
-      typeof window !== "undefined" &&
-      ("ontouchstart" in window || navigator.maxTouchPoints > 0) &&
-      window.innerWidth <= 768;
-    if (isMobile) {
+    const existingGrip = node.querySelector(`:scope > .${RESIZE_GRIP_CLASS}`);
+
+    if (isMobileViewport()) {
       node.style.removeProperty("width");
       node.style.removeProperty("height");
+      existingGrip?.remove();
       return;
     }
 
@@ -59,34 +80,109 @@ export function useModalResizePersist(
       // ignore corrupted entry
     }
 
-    // jsdom (and very old browsers) lacks ResizeObserver — skip persistence
-    // gracefully rather than throw. Restoration above still ran.
-    if (typeof ResizeObserver === "undefined") return;
-
-    let lastSavedW = node.offsetWidth;
-    let lastSavedH = node.offsetHeight;
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const observer = new ResizeObserver(() => {
-      const w = node.offsetWidth;
-      const h = node.offsetHeight;
-      if (w === lastSavedW && h === lastSavedH) return;
-      lastSavedW = w;
-      lastSavedH = h;
+    const scheduleSave = () => {
+      const { width, height } = readPersistableSize(node);
+      if (typeof width !== "number" || typeof height !== "number") return;
       // Debounce so we don't spam localStorage during the drag.
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         try {
-          localStorage.setItem(storageKey, JSON.stringify({ width: w, height: h }));
+          localStorage.setItem(storageKey, JSON.stringify({ width, height }));
         } catch {
           // quota / private mode — best-effort
         }
       }, 200);
-    });
+    };
 
-    observer.observe(node);
+    let lastSavedW = node.offsetWidth;
+    let lastSavedH = node.offsetHeight;
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            const w = node.offsetWidth;
+            const h = node.offsetHeight;
+            if (w === lastSavedW && h === lastSavedH) return;
+            lastSavedW = w;
+            lastSavedH = h;
+            scheduleSave();
+          });
+
+    observer?.observe(node);
+
+    const grip = document.createElement("div");
+    grip.className = RESIZE_GRIP_CLASS;
+    grip.setAttribute("role", "separator");
+    grip.setAttribute("aria-label", RESIZE_GRIP_LABEL);
+    grip.dataset.resizeDirection = "se";
+    existingGrip?.remove();
+    node.appendChild(grip);
+
+    let cleanupActiveDrag: (() => void) | null = null;
+
+    const onPointerDown = (event: PointerEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (typeof grip.setPointerCapture === "function") {
+        grip.setPointerCapture(event.pointerId);
+      }
+
+      const startRect = node.getBoundingClientRect();
+      const startWidth = startRect.width ||
+        node.offsetWidth ||
+        Number.parseFloat(node.style.width) ||
+        0;
+      const startHeight = startRect.height ||
+        node.offsetHeight ||
+        Number.parseFloat(node.style.height) ||
+        0;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const previousUserSelect = document.body.style.userSelect;
+      document.body.style.userSelect = "none";
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        moveEvent.preventDefault();
+        const nextWidth = startWidth + moveEvent.clientX - startX;
+        const nextHeight = startHeight + moveEvent.clientY - startY;
+        if (nextWidth > 0) node.style.width = `${nextWidth}px`;
+        if (nextHeight > 0) node.style.height = `${nextHeight}px`;
+        scheduleSave();
+      };
+
+      const endDrag = (upEvent: PointerEvent) => {
+        if (typeof grip.releasePointerCapture === "function") {
+          grip.releasePointerCapture(upEvent.pointerId);
+        }
+        document.body.style.userSelect = previousUserSelect;
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", endDrag);
+        document.removeEventListener("pointercancel", endDrag);
+        scheduleSave();
+        cleanupActiveDrag = null;
+      };
+
+      cleanupActiveDrag = () => {
+        document.body.style.userSelect = previousUserSelect;
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", endDrag);
+        document.removeEventListener("pointercancel", endDrag);
+      };
+
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", endDrag);
+      document.addEventListener("pointercancel", endDrag);
+    };
+
+    grip.addEventListener("pointerdown", onPointerDown);
+
     return () => {
-      observer.disconnect();
+      cleanupActiveDrag?.();
+      grip.removeEventListener("pointerdown", onPointerDown);
+      grip.remove();
+      observer?.disconnect();
       if (saveTimer) clearTimeout(saveTimer);
     };
   }, [ref, isOpen, storageKey]);

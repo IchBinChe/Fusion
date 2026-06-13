@@ -308,6 +308,92 @@ afterEach(() => {
 });
 
 
+describe("POST /tasks/:id/steer", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore({
+      getFusionDir: vi.fn().mockReturnValue("/fake/root/.fusion"),
+    } as Partial<TaskStore>);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function buildApp(heartbeatMonitor?: NonNullable<Parameters<typeof createApiRoutes>[1]>["heartbeatMonitor"]) {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, heartbeatMonitor ? { heartbeatMonitor } : undefined));
+    return app;
+  }
+
+  it("records user steering comments and wakes the assigned immediate-response agent", async () => {
+    const updatedTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-progress" as const,
+      assignedAgentId: "agent-1",
+      steeringComments: [{ id: "steer-1", text: "Please continue", author: "user" as const, createdAt: "2026-06-12T00:00:00.000Z" }],
+    };
+    const executeHeartbeat = vi.fn().mockResolvedValue({ id: "run-1" });
+    const heartbeatMonitor = {
+      rootDir: "/fake/root",
+      startRun: vi.fn(),
+      executeHeartbeat,
+      stopRun: vi.fn(),
+    };
+    vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
+    vi.spyOn(AgentStore.prototype, "getAgent").mockResolvedValue({
+      id: "agent-1",
+      name: "Executor",
+      role: "executor",
+      runtimeConfig: { messageResponseMode: "immediate" },
+    } as Awaited<ReturnType<AgentStore["getAgent"]>>);
+    vi.spyOn(AgentStore.prototype, "getActiveHeartbeatRun").mockResolvedValue(null);
+    (store.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+
+    const res = await REQUEST(buildApp(heartbeatMonitor), "POST", "/api/tasks/FN-001/steer", JSON.stringify({ text: "Please continue" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.addSteeringComment).toHaveBeenCalledWith("FN-001", "Please continue", "user");
+    expect(res.body.steeringComments).toEqual(updatedTask.steeringComments);
+    await vi.waitFor(() => {
+      expect(executeHeartbeat).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "agent-1",
+        source: "on_demand",
+        taskId: "FN-001",
+        triggerDetail: "steering-comment",
+        triggeringCommentIds: ["steer-1"],
+        triggeringCommentType: "steering",
+        contextSnapshot: expect.objectContaining({
+          taskId: "FN-001",
+          triggerDetail: "steering-comment",
+          triggeringCommentIds: ["steer-1"],
+          triggeringCommentType: "steering",
+          wakeReason: "on_demand",
+        }),
+      }));
+    });
+  });
+
+  it.each([
+    ["", "text is required and must be a string"],
+    ["x".repeat(2001), "text must be between 1 and 2000 characters"],
+  ])("rejects invalid steering text %#", async (text, expectedError) => {
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/FN-001/steer", JSON.stringify({ text }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain(expectedError);
+    expect(store.addSteeringComment).not.toHaveBeenCalled();
+  });
+});
+
+
 describe("POST /tasks/:id/retry", () => {
   let store: TaskStore;
 

@@ -4,6 +4,21 @@ import { join, resolve } from "node:path";
 import { TaskStore, exportSettings, generateExportFilename } from "@fusion/core";
 import { resolveProject } from "../../project-context.js";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const mockStoreInit = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("node:fs/promises", () => ({
@@ -11,7 +26,7 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("@fusion/core", () => ({
-  TaskStore: vi.fn().mockImplementation(() => ({
+  TaskStore: makeConstructibleMock(() => ({
     init: mockStoreInit,
   })),
   exportSettings: vi.fn(),

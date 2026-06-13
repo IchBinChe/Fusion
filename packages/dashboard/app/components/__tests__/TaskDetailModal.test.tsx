@@ -344,6 +344,63 @@ describe("TaskDetailModal Logs activity loading", () => {
   });
 });
 
+describe("TaskDetailModal Chat task merge", () => {
+  it("forwards full-detail agent fields to Chat when a sparse parent task has undefined live fields", async () => {
+    const user = userEvent.setup();
+    const { fetchTaskDetail, addSteeringComment } = await import("../../api");
+    const fullDetail = makeTask({
+      id: "FN-6346",
+      column: "in-progress" as any,
+      status: "queued",
+      assignedAgentId: "agent-full",
+      checkedOutBy: "agent-full",
+      prompt: "# Loaded detail",
+    });
+    const sparseParent = makeTask({
+      id: "FN-6346",
+      column: undefined as any,
+      status: undefined,
+      assignedAgentId: undefined,
+      checkedOutBy: undefined,
+    });
+    delete (sparseParent as any).prompt;
+    delete (sparseParent as any).log;
+    vi.mocked(fetchTaskDetail).mockReset();
+    vi.mocked(fetchTaskDetail).mockResolvedValueOnce(fullDetail);
+    vi.mocked(addSteeringComment).mockReset();
+    vi.mocked(addSteeringComment).mockResolvedValueOnce(fullDetail);
+
+    render(
+      <TaskDetailModal
+        task={sparseParent as any}
+        initialTab="chat"
+        projectId="project-1"
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await waitFor(() => expect(fetchTaskDetail).toHaveBeenCalledWith("FN-6346", "project-1"));
+    const input = await screen.findByLabelText("Message active agent session");
+    await waitFor(() => {
+      expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
+      expect(input).not.toBeDisabled();
+    });
+    await user.type(input, "Continue from the attached worktree agent");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(addSteeringComment).toHaveBeenCalledWith("FN-6346", "Continue from the attached worktree agent", "project-1");
+    });
+  });
+});
+
 describe("TaskDetailModal Logs agent loading", () => {
   it("shows the Agent Log loading indicator when entering the subview", async () => {
     const user = userEvent.setup();

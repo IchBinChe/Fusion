@@ -1,4 +1,6 @@
 .wf-editor-modal {
+  --wf-editor-touch-target: calc(var(--space-xl) + var(--space-lg) + var(--space-xs));
+
   display: flex;
   flex-direction: column;
   width: min(1200px, 95vw);
@@ -10,6 +12,10 @@
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+}
+
+.wf-create-modal {
+  --wf-editor-touch-target: calc(var(--space-xl) + var(--space-lg) + var(--space-xs));
 }
 
 .wf-editor-header {
@@ -82,8 +88,10 @@
   flex-direction: column;
   gap: var(--space-xs);
   width: 300px;
+  min-width: 0;
   padding: var(--space-sm);
   border-right: 1px solid var(--border);
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -95,6 +103,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  min-width: 0;
   margin-top: var(--space-sm);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border);
@@ -104,6 +113,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  min-width: 0;
 }
 
 .wf-sidebar-section-toggle {
@@ -111,6 +121,7 @@
   align-items: center;
   gap: var(--space-xs);
   width: 100%;
+  min-width: 0;
   padding: var(--space-xs) var(--space-sm);
   background: transparent;
   border: none;
@@ -222,11 +233,20 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+}
+
+.wf-editor-list li {
+  min-width: 0;
 }
 
 .wf-editor-list-item {
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: var(--space-xs) var(--space-sm);
   background: transparent;
   border: 1px solid transparent;
@@ -338,6 +358,7 @@
   display: flex;
   gap: var(--space-xs);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .wf-palette-btn,
@@ -347,12 +368,14 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
+  min-width: 0;
   padding: var(--space-xs) var(--space-sm);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
   cursor: pointer;
+  overflow-wrap: anywhere;
   transition: background var(--transition-fast);
 }
 
@@ -589,6 +612,145 @@
   flex-direction: column;
   border-top: 1px solid var(--border);
   overflow: hidden;
+}
+
+.wf-mobile-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  overflow-x: auto;
+  overflow-y: visible;
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-mobile-tab {
+  flex: 0 0 auto;
+  min-height: var(--wf-editor-touch-target);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.wf-mobile-tab--active {
+  border-color: var(--accent, var(--ws-info));
+  background: var(--bg-tertiary);
+}
+
+.wf-mobile-tab:hover {
+  background: var(--bg-tertiary);
+}
+
+.wf-mobile-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.wf-mobile-tab:active {
+  transform: scale(0.97);
+}
+
+.wf-mobile-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wf-mobile-add,
+.wf-mobile-actions,
+.wf-mobile-destination {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+}
+
+.wf-mobile-add-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.wf-mobile-add-section h3,
+.wf-mobile-template-group h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.wf-mobile-add-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xs);
+}
+
+.wf-mobile-add-option,
+.wf-mobile-template-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-xs);
+  min-width: 0;
+  min-height: var(--wf-editor-touch-target);
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+  transition:
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.wf-mobile-add-option:hover,
+.wf-mobile-template-option:hover {
+  background: var(--bg-tertiary);
+}
+
+.wf-mobile-add-option:focus-visible,
+.wf-mobile-template-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.wf-mobile-add-option:active,
+.wf-mobile-template-option:active {
+  transform: scale(0.97);
+}
+
+.wf-mobile-template-filter {
+  width: 100%;
+}
+
+.wf-mobile-template-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.wf-mobile-actions .wf-editor-action,
+.wf-mobile-actions .wf-editor-delete,
+.wf-mobile-actions .wf-editor-save {
+  justify-content: center;
+  min-height: var(--wf-editor-touch-target);
+}
+
+.wf-mobile-ai-panel {
+  position: static;
+  inset: auto;
+  width: 100%;
+  box-shadow: none;
 }
 
 .wf-editor-inspector {
@@ -921,6 +1083,12 @@
   font-size: 0.72rem;
   white-space: pre;
   overflow-x: auto;
+}
+
+.wf-editor-sidebar .wf-code-source {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 /* Header overflow priority (R1): icon fixed-width; label flex-shrinks first
@@ -1328,8 +1496,6 @@
 
   .wf-editor-modal,
   .wf-create-modal {
-    --wf-editor-touch-target: calc(var(--space-xl) + var(--space-lg) + var(--space-xs));
-
     width: 100vw;
     min-width: 0;
     max-width: 100vw;
@@ -1365,10 +1531,12 @@
   .wf-editor-body--list-stage .wf-editor-sidebar {
     display: flex;
     width: 100%;
+    min-width: 0;
     flex: 1 1 auto;
     max-height: none;
     border-right: none;
     border-bottom: none;
+    overflow-x: hidden;
     overflow-y: auto;
   }
 
@@ -1466,145 +1634,6 @@
     flex-direction: column;
     border-top: 1px solid var(--border);
     overflow: hidden;
-  }
-
-  .wf-mobile-tabs {
-    display: flex;
-    flex: 0 0 auto;
-    gap: var(--space-xs);
-    padding: var(--space-sm);
-    overflow-x: auto;
-    overflow-y: visible;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .wf-mobile-tab {
-    flex: 0 0 auto;
-    min-height: var(--wf-editor-touch-target);
-    padding: var(--space-sm) var(--space-md);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
-    color: var(--text);
-    cursor: pointer;
-    transition:
-      background var(--transition-fast),
-      transform var(--transition-fast),
-      box-shadow var(--transition-fast);
-  }
-
-  .wf-mobile-tab--active {
-    border-color: var(--accent, var(--ws-info));
-    background: var(--bg-tertiary);
-  }
-
-  .wf-mobile-tab:hover {
-    background: var(--bg-tertiary);
-  }
-
-  .wf-mobile-tab:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring-strong);
-  }
-
-  .wf-mobile-tab:active {
-    transform: scale(0.97);
-  }
-
-  .wf-mobile-panel {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .wf-mobile-add,
-  .wf-mobile-actions,
-  .wf-mobile-destination {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-  }
-
-  .wf-mobile-add-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-
-  .wf-mobile-add-section h3,
-  .wf-mobile-template-group h4 {
-    margin: 0;
-    color: var(--text);
-    font-size: 0.85rem;
-  }
-
-  .wf-mobile-add-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-xs);
-  }
-
-  .wf-mobile-add-option,
-  .wf-mobile-template-option {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: var(--space-xs);
-    min-width: 0;
-    min-height: var(--wf-editor-touch-target);
-    padding: var(--space-sm);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    overflow-wrap: anywhere;
-    transition:
-      background var(--transition-fast),
-      transform var(--transition-fast),
-      box-shadow var(--transition-fast);
-  }
-
-  .wf-mobile-add-option:hover,
-  .wf-mobile-template-option:hover {
-    background: var(--bg-tertiary);
-  }
-
-  .wf-mobile-add-option:focus-visible,
-  .wf-mobile-template-option:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring-strong);
-  }
-
-  .wf-mobile-add-option:active,
-  .wf-mobile-template-option:active {
-    transform: scale(0.97);
-  }
-
-  .wf-mobile-template-filter {
-    width: 100%;
-  }
-
-  .wf-mobile-template-group {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-
-  .wf-mobile-actions .wf-editor-action,
-  .wf-mobile-actions .wf-editor-delete,
-  .wf-mobile-actions .wf-editor-save {
-    justify-content: center;
-    min-height: var(--wf-editor-touch-target);
-  }
-
-  .wf-mobile-ai-panel {
-    position: static;
-    inset: auto;
-    width: 100%;
-    box-shadow: none;
   }
 
   .wf-editor-canvas .react-flow,

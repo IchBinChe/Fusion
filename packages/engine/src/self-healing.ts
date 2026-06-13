@@ -1230,6 +1230,15 @@ export class SelfHealingManager {
 
       const task = await this.store.getTask(taskId);
 
+      if (task.userPaused) {
+        log.warn(`${taskId} STUCK_KILL: skipped — task is user-paused; leaving paused`);
+        await this.store.logEntry(
+          taskId,
+          `STUCK_KILL: skipped stuck-budget recovery for ${reason} because the task is user-paused; leaving paused.`,
+        );
+        return false;
+      }
+
       if (reason === "no-progress-churn") {
         const ignoredStepUpdateCount = event?.ignoredStepUpdateCount ?? 0;
         const stuckKillStreak = task.stuckKillCount ?? 0;
@@ -1329,10 +1338,9 @@ export class SelfHealingManager {
           const requeueUpdate = {
             stuckKillCount: newCount,
             paused: false,
-            userPaused: false,
             pausedReason: null,
             status: "queued",
-          } satisfies Parameters<typeof this.store.updateTask>[1] & { userPaused: boolean };
+          } satisfies Parameters<typeof this.store.updateTask>[1];
           try {
             await this.store.updateTask(taskId, requeueUpdate);
           } catch (patchErr: unknown) {

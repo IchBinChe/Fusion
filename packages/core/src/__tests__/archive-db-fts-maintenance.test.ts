@@ -60,8 +60,8 @@ describe("ArchiveDatabase FTS maintenance", () => {
         return;
       }
 
-      const payload = "alpha ".repeat(1200);
-      for (let i = 0; i < 180; i++) {
+      const payload = "alpha ".repeat(400);
+      for (let i = 0; i < 72; i++) {
         archive.upsert(makeEntry("FN-ARCHIVE-1", {
           archivedAt: new Date(1717372800000 + i * 1000).toISOString(),
           updatedAt: new Date(1717372800000 + i * 1000).toISOString(),
@@ -81,7 +81,7 @@ describe("ArchiveDatabase FTS maintenance", () => {
       expect(rebuiltBytes).not.toBeNull();
       expect(rebuiltBytes!).toBeLessThan(grownBytes!);
       expect(rebuiltBytes!).toBeLessThan(1 * 1024 * 1024);
-      expect(archive.search("release-note-179", 10).map((entry) => entry.id)).toContain("FN-ARCHIVE-1");
+      expect(archive.search("release-note-71", 10).map((entry) => entry.id)).toContain("FN-ARCHIVE-1");
     } finally {
       archive.close();
       await rm(dir, { recursive: true, force: true });

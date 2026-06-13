@@ -120,6 +120,38 @@ function releaseLock(): void {
   void scrollY;
 }
 
+export function isAnyMobileScrollLockActive(): boolean {
+  return lockCount > 0 || kbLockCount > 0;
+}
+
+function clearOrphanedBodyOffset(): void {
+  if (savedStyles !== null || kbSavedStyles !== null) return;
+  const body = document.body;
+  if (body.style.position === "fixed") {
+    body.style.position = "";
+  }
+  if (body.style.top) {
+    body.style.top = "";
+  }
+  if (body.style.left === "0px") {
+    body.style.left = "";
+  }
+  if (body.style.right === "0px") {
+    body.style.right = "";
+  }
+  if (body.style.width === "100%") {
+    body.style.width = "";
+  }
+}
+
+function resetStaleDocumentScrollOnRestore(): void {
+  if (isAnyMobileScrollLockActive()) return;
+  clearOrphanedBodyOffset();
+  if (window.scrollY > 0) {
+    window.scrollTo(0, 0);
+  }
+}
+
 /** Test-only: reset the module-level lock state. */
 export function _resetLockState(): void {
   lockCount = 0;
@@ -190,6 +222,35 @@ export function useMobileKeyboardViewportLock(enabled: boolean): void {
     applyKeyboardLock();
     return () => {
       releaseKeyboardLock();
+    };
+  }, [enabled]);
+}
+
+/**
+ * Snap stale iOS document scroll/body offset back to the dashboard's resting
+ * position when the page is restored from background or bfcache. Active locks
+ * own their own restore path, so this only runs when the page is otherwise
+ * unlocked.
+ */
+export function useMobileViewportRestoreReset(enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled || !isMobileDevice() || !isIOS()) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      resetStaleDocumentScrollOnRestore();
+    };
+
+    const handlePageShow = () => {
+      resetStaleDocumentScrollOnRestore();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
     };
   }, [enabled]);
 }

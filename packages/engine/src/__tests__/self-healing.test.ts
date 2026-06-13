@@ -467,7 +467,6 @@ describe("SelfHealingManager", () => {
       expect(store.updateTask).toHaveBeenLastCalledWith("FN-001", expect.objectContaining({
         stuckKillCount: 7,
         paused: false,
-        userPaused: false,
         pausedReason: null,
         status: "queued",
       }));
@@ -476,6 +475,38 @@ describe("SelfHealingManager", () => {
         "FN-001",
         "STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (7/6), last reason=loop. Re-queued in todo with progress preserved; scheduler may retry without manual unpause.",
       );
+    });
+
+    it("leaves user-paused incomplete stuck-loop exhaustion paused and unrequeued", async () => {
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "FN-001",
+        column: "in-progress",
+        stuckKillCount: 6,
+        paused: true,
+        userPaused: true,
+        steps: [
+          { name: "Preflight", status: "done" },
+          { name: "Delivery", status: "in-progress" },
+        ],
+      } as unknown as Task);
+
+      manager.start();
+
+      const result = await manager.checkStuckBudget("FN-001", "loop");
+
+      expect(result).toBe(false);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-001",
+        "STUCK_KILL: skipped stuck-budget recovery for loop because the task is user-paused; leaving paused.",
+      );
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", expect.objectContaining({
+        paused: false,
+        userPaused: false,
+        status: "queued",
+      }));
     });
 
     it("falls back to executor requeue when todo parking fails", async () => {

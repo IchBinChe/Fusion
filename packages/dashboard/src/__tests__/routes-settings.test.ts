@@ -161,6 +161,31 @@ import { createFnAgent } from "@fusion/engine";
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
 
+function resetCreateFnAgentMockForInsightExtraction(): void {
+  vi.mocked(createFnAgent).mockImplementation(async (options?: { onText?: (delta: string) => void }) => {
+    const session = {
+      state: {
+        messages: [] as Array<{ role: string; content: string }>,
+      },
+      prompt: vi.fn(async function (this: { state: { messages: Array<{ role: string; content: string }> } }, message: string) {
+        options?.onText?.("mock-ai-output");
+        this.state.messages.push({ role: "user", content: message });
+        this.state.messages.push({
+          role: "assistant",
+          content: JSON.stringify({
+            summary: "Extracted insights",
+            insights: [{ category: "pattern", content: "Persist reusable memory-audit conventions" }],
+            prunedMemory: "## Architecture\n\nDurable architecture notes.",
+          }),
+        });
+      }),
+      dispose: vi.fn(),
+    };
+
+    return { session } as never;
+  });
+}
+
 function createMockGlobalSettingsStore() {
   return {
     getSettings: vi.fn().mockResolvedValue({}),
@@ -2760,6 +2785,7 @@ describe("POST /api/memory/extract", () => {
   let rootDir: string;
 
   beforeEach(() => {
+    resetCreateFnAgentMockForInsightExtraction();
     rootDir = mkdtempSync(join(tmpdir(), "fusion-memory-extract-"));
     mkdirSync(join(rootDir, ".fusion"), { recursive: true });
     store = createMockStore({
@@ -2769,6 +2795,7 @@ describe("POST /api/memory/extract", () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+    resetCreateFnAgentMockForInsightExtraction();
   });
 
   function buildApp() {
@@ -2889,6 +2916,7 @@ describe("GET /api/memory/audit", () => {
   let rootDir: string;
 
   beforeEach(() => {
+    resetCreateFnAgentMockForInsightExtraction();
     rootDir = mkdtempSync(join(tmpdir(), "fusion-memory-audit-"));
     mkdirSync(join(rootDir, ".fusion", "memory"), { recursive: true });
     store = createMockStore({

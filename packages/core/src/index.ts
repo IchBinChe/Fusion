@@ -455,6 +455,7 @@ export {
   InvalidMergeQueueLeaseDurationError,
   HandoffInvariantViolationError,
   TransitionRejectionError,
+  type LegacyAutoMergeStampReconcileResult,
 } from "./store.js";
 export {
   STOPWORDS,
@@ -479,6 +480,11 @@ export {
   parseExplicitDuplicateMarker,
   type ExplicitDuplicateMarker,
 } from "./explicit-duplicate-marker.js";
+export {
+  parseNoOpCompletionMarker,
+  type NoOpCompletionMarker,
+  type NoOpCompletionMarkerKind,
+} from "./no-op-completion-marker.js";
 export {
   __getDeterministicGuardMutexSize,
   deterministicGuardLocks,

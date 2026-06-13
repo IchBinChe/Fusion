@@ -34,7 +34,9 @@ const mocks = vi.hoisted(() => {
     maximize: vi.fn(),
   };
 
-  const BrowserWindow = vi.fn(() => browserWindowInstance) as unknown as {
+  const BrowserWindow = vi.fn(function () {
+    return browserWindowInstance;
+  }) as unknown as {
     (...args: unknown[]): typeof browserWindowInstance;
     getAllWindows: () => unknown[];
   };
@@ -60,7 +62,9 @@ const mocks = vi.hoisted(() => {
     on: vi.fn(),
   };
 
-  const Tray = vi.fn(() => trayInstance);
+  const Tray = vi.fn(function () {
+    return trayInstance;
+  });
   const Menu = {
     buildFromTemplate: vi.fn(() => ({ id: "mock-menu" })),
     setApplicationMenu: vi.fn(),
@@ -133,7 +137,9 @@ const mainDeps = vi.hoisted(() => {
     loadDesktopLaunchMode,
     saveDesktopLaunchMode,
     saveWindowState: vi.fn(),
-    LocalRuntimeManager: vi.fn(() => ({ startLocal, stopLocal, getStatus, getServerPort })),
+    LocalRuntimeManager: vi.fn(function () {
+      return { startLocal, stopLocal, getStatus, getServerPort };
+    }),
     startLocal,
   };
 });
@@ -301,6 +307,7 @@ describe("main process", () => {
 
     await initializeApp();
 
+    expect(mainDeps.LocalRuntimeManager).toHaveBeenCalledWith({ rootDir: "/mock/home" });
     expect(mainDeps.startLocal).toHaveBeenCalledTimes(1);
     expect(getCurrentDesktopLaunchMode()).toBe("local");
   });

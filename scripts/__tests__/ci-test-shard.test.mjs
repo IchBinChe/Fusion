@@ -554,6 +554,38 @@ test("U6: enumerateDashboardLanes reads lanes from a fixture package.json shape"
   assert.deepEqual(lanes, ["test:quality:app:a", "test:quality:app:b", "test:quality:api"]);
 });
 
+test("U6: enumerateDashboardLanes expands run-quality-tests delegators to package leaf lanes", () => {
+  const scripts = {
+    test: "node scripts/run-quality-tests.mjs",
+    "test:quality:app": "node scripts/run-quality-tests.mjs --group app",
+    "test:quality:app:a": "node scripts/run-vitest-with-heap.mjs run --project app-a",
+    "test:quality:app:b": "node scripts/run-vitest-with-heap.mjs run --project app-b --shard=1/2",
+    "test:quality:app:aggregate": "pnpm run test:quality:app:a && pnpm run test:quality:app:b",
+    "test:quality:api": "node scripts/run-quality-tests.mjs --group=api",
+    "test:quality:api:a": "node scripts/run-vitest-with-heap.mjs run --project api-a",
+    "test:quality:api:delegator": "node scripts/run-quality-tests.mjs --group api",
+    "test:quality:misc": "node scripts/run-vitest-with-heap.mjs run --project misc",
+    "test:deep": "vitest run --project deep",
+  };
+
+  assert.deepEqual(enumerateDashboardLanes(scripts, "test"), [
+    "test:quality:app:a",
+    "test:quality:app:b",
+    "test:quality:api:a",
+    "test:quality:misc",
+  ]);
+  assert.deepEqual(enumerateDashboardLanes(scripts, "test:quality:app"), [
+    "test:quality:app:a",
+    "test:quality:app:b",
+  ]);
+  assert.deepEqual(enumerateDashboardLanes(scripts, "test:quality:api"), ["test:quality:api:a"]);
+});
+
+test("U6: enumerateDashboardLanes preserves single-leaf fallback for non-delegating scripts", () => {
+  assert.deepEqual(enumerateDashboardLanes({ test: "node custom-runner.mjs" }, "test"), ["test"]);
+  assert.deepEqual(enumerateDashboardLanes({}, "test"), []);
+});
+
 test("U6: laneProjectNames extracts --project targets including = and space forms", () => {
   assert.deepEqual(laneProjectNames("vitest run --project foo --project=bar baz"), ["foo", "bar"]);
 });

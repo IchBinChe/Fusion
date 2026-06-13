@@ -12,6 +12,9 @@ import { fileURLToPath } from "node:url";
 // Valid plugin name pattern: kebab-case
 const PLUGIN_NAME_REGEX = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 const DEFAULT_RUNFUSION_VERSION = "0.39.0";
+const SCAFFOLD_TYPES_NODE_VERSION = "^22.0.0";
+const SCAFFOLD_VITEST_VERSION = "^4.1.0";
+const SCAFFOLD_TYPESCRIPT_VERSION = "^5.7.0";
 
 /**
  * Convert a kebab-case string to Title Case
@@ -167,6 +170,9 @@ function generateStandalonePackageJson(name: string, scope?: string): string {
       },
       devDependencies: {
         "@runfusion/fusion": resolveFusionCaretVersion(),
+        "@types/node": SCAFFOLD_TYPES_NODE_VERSION,
+        typescript: SCAFFOLD_TYPESCRIPT_VERSION,
+        vitest: SCAFFOLD_VITEST_VERSION,
       },
     },
     null,

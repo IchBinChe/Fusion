@@ -2043,7 +2043,7 @@ function TaskCardComponent({
               <Trash2 size={12} />
             </button>
           )}
-          {task.column !== "archived" && onArchiveTask && (
+          {task.column === "done" && onArchiveTask && (
             <button
               className="card-archive-btn"
               onClick={handleArchiveClick}

@@ -1,12 +1,18 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, act } from "@testing-library/react";
+import { render, cleanup, act, waitFor } from "@testing-library/react";
 import { Board } from "../Board";
 import { loadAllAppCss } from "../../test/cssFixture";
 
+const apiMocks = vi.hoisted(() => ({
+  fetchBoardWorkflows: vi.fn(),
+  fetchWorkflowSteps: vi.fn(),
+}));
+
 vi.mock("../../api", () => ({
-  fetchBoardWorkflows: vi.fn().mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} }),
-  fetchWorkflowSteps: vi.fn().mockResolvedValue([]),
+  fetchBoardWorkflows: apiMocks.fetchBoardWorkflows,
+  fetchWorkflowSteps: apiMocks.fetchWorkflowSteps,
+  promoteTask: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("../../hooks/useBlockerFanout", () => ({
@@ -15,7 +21,7 @@ vi.mock("../../hooks/useBlockerFanout", () => ({
 
 vi.mock("../Column", () => ({
   Column: React.memo(({ column, tasks }: { column: string; tasks?: unknown[] }) => (
-    <div data-task-count={tasks?.length ?? 0} data-testid={`column-${column}`} />
+    <div className="column" data-task-count={tasks?.length ?? 0} data-testid={`column-${column}`} />
   )),
 }));
 
@@ -68,6 +74,26 @@ function extractRule(content: string, selector: string): string {
   return content.match(new RegExp(`${escapedSelector}\\s*\\{[^}]*\\}`))?.[0] ?? "";
 }
 
+const workflowPayload = {
+  flagEnabled: true,
+  defaultWorkflowId: "builtin:coding",
+  workflows: [
+    {
+      id: "builtin:coding",
+      name: "Coding (built-in)",
+      columns: [
+        { id: "triage", name: "Triage", flags: { intake: true } },
+        { id: "todo", name: "Todo", flags: {} },
+        { id: "in-progress", name: "In Progress", flags: { countsTowardWip: true } },
+        { id: "in-review", name: "In Review", flags: { humanReview: true } },
+        { id: "done", name: "Done", flags: { complete: true } },
+        { id: "archived", name: "Archived", flags: { archived: true } },
+      ],
+    },
+  ],
+  taskWorkflowIds: {},
+};
+
 const boardProps = {
   tasks: [],
   maxConcurrent: 2,
@@ -84,6 +110,8 @@ const boardProps = {
 describe("Board mobile initial render stabilization (FN-4574)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMocks.fetchBoardWorkflows.mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} });
+    apiMocks.fetchWorkflowSteps.mockResolvedValue([]);
     vi.useFakeTimers();
   });
 
@@ -223,9 +251,15 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     }
   });
 
-  it("keeps the board fill-height invariant across base, tablet, and mobile CSS tiers", () => {
+  it("keeps the board fill-height invariant across workflow, base, tablet, and mobile CSS tiers", () => {
     const cssContent = loadAllAppCss();
     const baseBoardRule = extractRule(cssContent, ".board");
+    const workflowViewRule = extractRule(cssContent, ".board-workflow-view");
+    const workflowColumnsRule = extractRule(cssContent, ".board.board-workflow-columns");
+    const workflowColumnRule = extractRule(cssContent, ".board.board-workflow-columns > .column");
+    const sharedColumnRule = extractRule(cssContent, ".column");
+    const workflowTabletCss = extractMediaBlocks(cssContent, /\(max-width: 1024px\)/);
+    const workflowTabletColumnsRule = extractRule(workflowTabletCss, ".board.board-workflow-columns");
     const tabletCss = extractMediaBlocks(cssContent, /\(min-width: 769px\) and \(max-width: 1024px\)/);
     const mobileCss = extractMediaBlocks(cssContent, /\(max-width: 768px\)/);
     const tabletBoardRule = extractRule(tabletCss, ".board");
@@ -239,8 +273,39 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
 
     expect(baseBoardRule).toContain("box-sizing: border-box");
     expect(baseBoardRule).toContain("flex: 1 1 auto");
+    expect(baseBoardRule).toContain("height: 100%");
     expect(baseBoardRule).toContain("min-height: 0");
     expect(baseBoardRule).toContain("min-width: 0");
+
+    expect(workflowViewRule).toContain("display: flex");
+    expect(workflowViewRule).toContain("flex-direction: column");
+    expect(workflowViewRule).toContain("flex: 1 1 auto");
+    expect(workflowViewRule).toContain("height: 100%");
+    expect(workflowViewRule).toContain("max-height: 100%");
+    expect(workflowViewRule).toContain("min-height: 0");
+
+    expect(workflowColumnsRule).toContain("flex: 1 1 auto");
+    expect(workflowColumnsRule).toContain("display: flex");
+    expect(workflowColumnsRule).toContain("align-items: stretch");
+    expect(workflowColumnsRule).toContain("height: 100%");
+    expect(workflowColumnsRule).toContain("max-height: 100%");
+    expect(workflowColumnsRule).toContain("min-height: 0");
+    expect(workflowColumnsRule).toContain("scroll-snap-type: x proximity");
+    expect(workflowColumnsRule).not.toContain("scroll-snap-type: x mandatory");
+
+    expect(workflowTabletColumnsRule).toContain("flex: 1 1 auto");
+    expect(workflowTabletColumnsRule).toContain("align-items: stretch");
+    expect(workflowTabletColumnsRule).toContain("height: 100%");
+    expect(workflowTabletColumnsRule).toContain("max-height: 100%");
+    expect(workflowTabletColumnsRule).toContain("min-height: 0");
+    expect(workflowTabletColumnsRule).toContain("scroll-snap-type: x proximity");
+    expect(workflowTabletColumnsRule).not.toContain("scroll-snap-type: x mandatory");
+
+    expect(workflowColumnRule).toContain("flex: 1 0 300px");
+    expect(workflowColumnRule).toContain("min-width: 300px");
+    expect(workflowColumnRule).toContain("height: 100%");
+    expect(workflowColumnRule).toContain("min-height: 0");
+    expect(sharedColumnRule).toContain("min-height: 0");
 
     expect(tabletBoardRule).toContain("grid-template-columns: repeat(6, minmax(260px, 1fr))");
     expect(tabletBoardRule).toContain("overflow-x: auto");
@@ -283,6 +348,52 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     expect(columns).toHaveLength(6);
     expect(document.querySelector("[data-testid='column-triage']")).toHaveAttribute("data-task-count", "1");
     expect(document.querySelector("[data-testid='column-todo']")).toHaveAttribute("data-task-count", "1");
+
+    viewportSpy.mockRestore();
+  });
+
+  it("renders workflow-mode columns for empty and populated states at tablet width", async () => {
+    vi.useRealTimers();
+    const viewportSpy = mockViewport(900);
+    apiMocks.fetchBoardWorkflows.mockResolvedValue(workflowPayload);
+
+    const { rerender } = render(<Board {...boardProps} />);
+
+    await waitFor(() => {
+      expect(document.querySelector(".board-workflow-view")).not.toBeNull();
+    });
+
+    let board = document.querySelector("main.board.board-workflow-columns");
+    expect(board).not.toBeNull();
+
+    let columns = document.querySelectorAll(".board-workflow-columns [data-testid^='column-']");
+    expect(columns).toHaveLength(6);
+    for (const column of columns) {
+      expect(column).toHaveClass("column");
+      expect(column).toHaveAttribute("data-task-count", "0");
+    }
+
+    rerender(
+      <Board
+        {...boardProps}
+        tasks={[
+          { id: "FN-1", title: "Workflow planning task", column: "triage" },
+          { id: "FN-2", title: "Workflow todo task", column: "todo" },
+        ] as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("main.board.board-workflow-columns")).not.toBeNull();
+    });
+
+    board = document.querySelector("main.board.board-workflow-columns");
+    expect(board).not.toBeNull();
+
+    columns = document.querySelectorAll(".board-workflow-columns [data-testid^='column-']");
+    expect(columns).toHaveLength(6);
+    expect(document.querySelector(".board-workflow-columns [data-testid='column-triage']")).toHaveAttribute("data-task-count", "1");
+    expect(document.querySelector(".board-workflow-columns [data-testid='column-todo']")).toHaveAttribute("data-task-count", "1");
 
     viewportSpy.mockRestore();
   });

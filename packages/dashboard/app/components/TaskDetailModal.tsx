@@ -564,6 +564,7 @@ export function TaskDetailContent({
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
   const [activeTab, setActiveTab] = useState<TabId>(initialTab === "retries" ? "definition" : initialTab);
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
   const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
@@ -624,6 +625,13 @@ export function TaskDetailContent({
       prompt: fullDetail.prompt,
       log: fullDetail.log,
       githubTracking: task.githubTracking ?? fullDetail.githubTracking,
+      assignedAgentId: task.assignedAgentId === undefined ? fullDetail.assignedAgentId : task.assignedAgentId,
+      checkedOutBy: task.checkedOutBy === undefined ? fullDetail.checkedOutBy : task.checkedOutBy,
+      status: task.status === undefined ? fullDetail.status : task.status,
+      column: task.column === undefined ? fullDetail.column : task.column,
+      paused: task.paused === undefined ? fullDetail.paused : task.paused,
+      userPaused: task.userPaused === undefined ? fullDetail.userPaused : task.userPaused,
+      pausedReason: task.pausedReason === undefined ? fullDetail.pausedReason : task.pausedReason,
     } as TaskDetail)
     : ({ ...task, prompt: "" } as TaskDetail);
   const canRetryTask =
@@ -770,6 +778,13 @@ export function TaskDetailContent({
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== "chat" || isEditing) {
+      setChatExpanded(false);
+    }
+  }, [activeTab, isEditing]);
+
   const [editTitle, setEditTitle] = useState(task.title || "");
   const [editDescription, setEditDescription] = useState(task.description || "");
   const [editDependencies, setEditDependencies] = useState<string[]>(task.dependencies || []);
@@ -2516,6 +2531,11 @@ export function TaskDetailContent({
     overlapBlockerTask && (overlapBlockerTask.column === "in-progress" || overlapBlockerTask.column === "in-review"),
   );
 
+  const handleChatTaskUpdated = useCallback((updatedTask: Task) => {
+    setFullDetail((prev) => prev ? ({ ...prev, ...updatedTask } as TaskDetail) : (updatedTask as TaskDetail));
+    onTaskUpdated?.(updatedTask);
+  }, [onTaskUpdated]);
+
   const assignedAgentLabel = assignedAgent?.name ?? task.assignedAgentId ?? null;
   const detailProviders = useMemo(() => {
     const providers: string[] = [];
@@ -2613,6 +2633,7 @@ export function TaskDetailContent({
   const autoMergeEnabled = autoMergeEnabledProp ?? (settings?.autoMerge ?? false);
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled });
   const isManualPrFlow = mergeStrategy === "pull-request" && !autoMergeEnabled;
+  const isChatExpanded = chatExpanded && activeTab === "chat" && !isEditing;
 
   const isCheckPrStatusAction = isManualPrFlow && !prAutomationLabel && task.prInfo?.status === "open";
   let manualReviewActionLabel = t("taskDetail.pr.mergeAndClose", "Merge & Close");
@@ -2628,7 +2649,7 @@ export function TaskDetailContent({
 
   return (
     <div
-      className={embedded ? "task-detail-content task-detail-content--embedded" : "task-detail-content"}
+      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isChatExpanded ? " task-detail-content--chat-expanded" : ""}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -2668,7 +2689,7 @@ export function TaskDetailContent({
             )}
           </div>
         </div>
-        <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}`}>
+        <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && !isEditing ? " detail-body--chat" : ""}`}>
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -3124,13 +3145,16 @@ export function TaskDetailContent({
               <ModelSelectorTab task={task} addToast={addToast} onTaskUpdated={onTaskUpdated} settings={settings} />
             </div>
           ) : activeTab === "chat" ? (
-            <div className="detail-section">
+            <div className="detail-section detail-section--chat">
               <TaskChatTab
-                task={task}
+                task={workingTask}
                 projectId={projectId}
                 active={activeTab === "chat"}
                 addToast={addToast}
                 sessionLive={isCliSessionLive(cliSession)}
+                onTaskUpdated={handleChatTaskUpdated}
+                expanded={chatExpanded}
+                onToggleExpanded={() => setChatExpanded((value) => !value)}
               />
             </div>
           ) : activeTab === "logs" ? (

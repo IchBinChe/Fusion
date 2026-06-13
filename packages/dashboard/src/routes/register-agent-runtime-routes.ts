@@ -470,7 +470,7 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
               pausedOnly: true,
               excludeArchived: true,
             });
-            const toUnpause = pausedTasks.filter((task) => task.pausedByAgentId === agentId);
+            const toUnpause = pausedTasks.filter((task) => task.pausedByAgentId === agentId && !task.userPaused);
             const results = await Promise.allSettled(
               toUnpause.map((task) => scopedStore.pauseTask(task.id, false)),
             );

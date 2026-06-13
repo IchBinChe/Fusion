@@ -34,6 +34,10 @@ function updateBaselineViewportHeight(nextHeight: number): void {
   }
 }
 
+function resetBaselineViewportHeight(): void {
+  _baselineViewportHeight = null;
+}
+
 function isKeyboardFocusableElement(el: Element | null): boolean {
   if (!el) return false;
   if (el instanceof HTMLTextAreaElement) return true;
@@ -66,7 +70,18 @@ function hasImpossibleViewportSample(): boolean {
   return window.visualViewport.offsetTop + window.visualViewport.height > window.innerHeight + IMPOSSIBLE_VIEWPORT_EPSILON_PX;
 }
 
-function getKeyboardMetrics(previousMetrics: KeyboardMetrics = CLOSED_KEYBOARD_METRICS): KeyboardMetrics {
+function isCollapsedRestoreViewportSample(baselineHeight: number): boolean {
+  if (typeof window === "undefined" || !window.visualViewport) {
+    return false;
+  }
+
+  return window.visualViewport.height >= baselineHeight - IOS_VIEWPORT_SHRINK_MIN_PX;
+}
+
+function getKeyboardMetrics(
+  previousMetrics: KeyboardMetrics = CLOSED_KEYBOARD_METRICS,
+  { bypassImpossibleSampleHold = false }: { bypassImpossibleSampleHold?: boolean } = {},
+): KeyboardMetrics {
   if (typeof window === "undefined" || !window.visualViewport) {
     return CLOSED_KEYBOARD_METRICS;
   }
@@ -92,7 +107,7 @@ function getKeyboardMetrics(previousMetrics: KeyboardMetrics = CLOSED_KEYBOARD_M
   // FN-5155: iOS focus/restore can briefly report offsetTop from the keyboard
   // transition while height is still near the pre-keyboard baseline. Reject
   // that impossible snapshot and keep the last stable metrics until settle.
-  if (focused && hasImpossibleViewportSample()) {
+  if (focused && hasImpossibleViewportSample() && !bypassImpossibleSampleHold) {
     return previousMetrics;
   }
 
@@ -139,7 +154,7 @@ function getKeyboardMetrics(previousMetrics: KeyboardMetrics = CLOSED_KEYBOARD_M
 
 /** Reset cached viewport baseline. Exported for tests only. */
 export function _resetInitialViewportHeight(): void {
-  _baselineViewportHeight = null;
+  resetBaselineViewportHeight();
 }
 
 interface UseMobileKeyboardOptions {
@@ -267,19 +282,7 @@ export function useMobileKeyboard(
       stableFrames = 0;
       rafId = window.requestAnimationFrame(pollFrame);
     };
-    const updateWithTail = () => {
-      cancelHeadUpdate();
-      if (isKeyboardFocusableElement(document.activeElement) && hasImpossibleViewportSample()) {
-        // FN-5155: focusin/page-restore can arrive before visualViewport height
-        // catches up to the keyboard transition. Defer the head commit one frame
-        // so the tail/poll can converge instead of publishing the stale sample.
-        headRafId = window.requestAnimationFrame(() => {
-          headRafId = null;
-          update();
-        });
-      } else {
-        update();
-      }
+    const scheduleTailUpdates = () => {
       scheduleUpdate(50);
       scheduleUpdate(200);
       scheduleUpdate(500);
@@ -288,24 +291,58 @@ export function useMobileKeyboard(
       startStabilityPoll();
     };
 
+    const updateWithTail = () => {
+      cancelHeadUpdate();
+      if (isKeyboardFocusableElement(document.activeElement) && hasImpossibleViewportSample()) {
+        // FN-5155: focusin can arrive before visualViewport height catches up
+        // to the keyboard transition. Defer the head commit one frame so the
+        // tail/poll can converge instead of publishing the stale sample.
+        headRafId = window.requestAnimationFrame(() => {
+          headRafId = null;
+          update();
+        });
+      } else {
+        update();
+      }
+      scheduleTailUpdates();
+    };
+
+    const resetOnRestore = () => {
+      cancelHeadUpdate();
+      const baselineHeight = getBaselineViewportHeight();
+      const collapsedRestoreSample = isCollapsedRestoreViewportSample(baselineHeight);
+      if (collapsedRestoreSample) {
+        resetBaselineViewportHeight();
+      }
+      commitMetrics(getKeyboardMetrics(stableMetricsRef.current, {
+        bypassImpossibleSampleHold: collapsedRestoreSample,
+      }));
+      scheduleTailUpdates();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      resetOnRestore();
+    };
+
     updateWithTail();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", updateScrollOnly);
     document.addEventListener("focusin", updateWithTail);
     document.addEventListener("focusout", update);
-    // When the user navigates back to this view, force a fresh snapshot
-    // — without it the hook initializes with stale metrics (keyboard up
-    // from before, but our state thinks it's closed).
-    document.addEventListener("visibilitychange", updateWithTail);
-    window.addEventListener("pageshow", updateWithTail);
+    // When the user navigates back to this view, force a fresh snapshot that
+    // can bypass the stale impossible-sample hold if the viewport has already
+    // returned to its closed baseline while the input retained focus.
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", resetOnRestore);
 
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", updateScrollOnly);
       document.removeEventListener("focusin", updateWithTail);
       document.removeEventListener("focusout", update);
-      document.removeEventListener("visibilitychange", updateWithTail);
-      window.removeEventListener("pageshow", updateWithTail);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", resetOnRestore);
       for (const timeoutId of timeoutIds) {
         clearTimeout(timeoutId);
       }

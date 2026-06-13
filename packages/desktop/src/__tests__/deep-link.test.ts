@@ -33,7 +33,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("electron", () => ({
   app: mocks.app,
-  BrowserWindow: vi.fn(() => mocks.browserWindow),
+  BrowserWindow: vi.fn(function () {
+    return mocks.browserWindow;
+  }),
 }));
 
 async function importDeepLinkModule() {

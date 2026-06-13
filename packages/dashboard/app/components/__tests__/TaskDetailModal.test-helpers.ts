@@ -65,6 +65,7 @@ vi.mock("lucide-react", () => ({
   Maximize2: () => null,
   Minimize2: () => null,
   Loader2: (props: any) => React.createElement("svg", { "data-testid": "loader2-icon", ...props }),
+  Send: (props: any) => React.createElement("svg", { "data-testid": "send-icon", ...props }),
   Bot: () => null,
   CircleDot: () => null,
   XCircle: () => null,

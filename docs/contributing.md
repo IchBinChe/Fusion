@@ -94,7 +94,7 @@ GitHub Actions runs deterministic test sharding via `pnpm test:ci:shard --shard 
 - `pnpm test:full` remains the explicit full workspace suite; dashboard exhaustive coverage is explicit via `pnpm --filter @fusion/dashboard test:deep`.
 - `pnpm verify:workspace` remains the deep opt-in lint -> test -> build verification.
 
-`test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that deterministically balances workspace packages with `test` scripts by counting package-local `**/__tests__/**/*.test.{ts,tsx,mjs}` files, auto-splitting oversized packages into virtual shard entries (`{ name, shardIndex, shardCount }`), then assigning entries in descending weight order with best-fit placement for unsplit entries (closest under-budget fit, otherwise minimum overshoot) while keeping slices of the same package on different shards when possible. Whole entries run as grouped `pnpm --filter <pkg> test` calls, and virtual entries run one-by-one via `pnpm --filter <pkg> test -- --shard <index>/<count>`. This keeps coverage reproducible while improving shard balance.
+`test:ci:shard` is a CI-focused entrypoint (`scripts/ci-test-shard.mjs`) that deterministically balances workspace packages with `test` scripts by counting package-local `**/__tests__/**/*.test.{ts,tsx,mjs}` files, auto-splitting oversized packages into virtual shard entries (`{ name, shardIndex, shardCount }`), then assigning entries in descending weight order with best-fit placement for unsplit entries (closest under-budget fit, otherwise minimum overshoot) while keeping slices of the same package on different shards when possible. Whole entries run as grouped `pnpm --filter <pkg> test` calls, and virtual entries run one-by-one via `pnpm --filter <pkg> test --shard <index>/<count>` (no bare `--`, because Vitest's cac parser would otherwise treat the shard flag as a filter separator). This keeps coverage reproducible while improving shard balance.
 
 `pnpm test` now uses a changed-only entrypoint (`scripts/test-changed.mjs`) for faster local iteration. It resolves the comparison base from `.changeset/config.json` (`baseBranch`) and runs only affected workspaces from `pnpm-workspace.yaml` (both `packages/*` and `plugins/**`) using safe package-first filtering (`pnpm --filter <pkg> test`). It runs the merge-gate suite first, then the affected set. The full suite runs only on explicit opt-in (`--full` / `pnpm test:full`); shared-infrastructure changes and unresolvable diffs widen the affected set but never escalate to an implicit full-suite run (the old escalation was the local OOM path).
 
@@ -111,6 +111,34 @@ Fusion tests must run against disposable test data, never live local state:
 - `pnpm test` (`scripts/test-changed.mjs`) now creates a disposable temp HOME/USERPROFILE for the entire run (including cache-hit no-op guard checks), so concurrent writes from an active local Fusion session to your real `~/.fusion` do not trigger false positives.
 
 If you add or change test entrypoints, keep this isolation guard path intact and ensure guard + test execution share the same disposable HOME so changed/full/cached paths stay consistent.
+
+## Spec authoring: provenance evidence for outside tooling
+
+Any task that wires in an outside command-line program, daemon, separately-fetched program, or package-managed dependency must include provenance evidence in its `PROMPT.md`. The deterministic spec-validation gate (`detectExternalIntegrationEvidenceGaps`) REVISEs specs that mention this kind of outside tooling without enough provenance to audit where it comes from and what command or artifact is expected.
+
+Use a dedicated `## External Integration Evidence` or `## External-Integration Evidence` section when possible. The gate accepts semantically labeled bullets; labels may include or omit a trailing `URL`/`name`, may use `/` or `:` separators (for example `Docs / homepage URL:` or `Docs/homepage:`), and URLs may be bare or backtick-wrapped.
+
+Include all five evidence fields:
+
+1. Canonical upstream repo URL — a GitHub URL with distinct owner/repo; duplicate owner/owner placeholders are rejected.
+2. Docs / homepage URL — a distinct non-GitHub, non-artifact URL.
+3. Release / download URL — a GitHub `…/releases/…` URL, a generic `…download…` URL, an npm `registry.npmjs.org/<pkg>/-/<name>-<ver>.tgz` URL, or any `.tgz`/`.tar.gz` artifact URL.
+4. Binary / CLI name — the command name in backticks, such as `` `wt` ``.
+5. Checksum — a `sha256`/`sha512` digest, a pinned-manifest token, or the literal `upstream-pending-verification` marker. The marker is accepted for the checksum field only; never use it in place of source, docs, or artifact URLs.
+
+Never fabricate source URLs, command names, release locations, or checksums. Cite real provenance, or use `upstream-pending-verification` only for the checksum field while the digest is being pinned.
+
+<!-- evidence-example:start -->
+```markdown
+## External Integration Evidence
+
+- Canonical upstream repo URL: https://github.com/max-sixty/worktrunk
+- Docs / homepage URL: https://worktrunk.dev/
+- Release / download URL: https://github.com/max-sixty/worktrunk/releases/latest/download/wt-linux-x64.tar.gz
+- Binary / CLI name: `wt`
+- Checksum: `sha256-<digest>` (or `upstream-pending-verification` until the checksum is pinned)
+```
+<!-- evidence-example:end -->
 
 ## Quality Gate Checklist
 

@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
     options: Record<string, unknown>;
   }> = [];
 
-  const Notification = vi.fn().mockImplementation((options: Record<string, unknown>) => {
+  const Notification = vi.fn().mockImplementation(function (options: Record<string, unknown>) {
     const listeners = new Map<string, () => void>();
     const instance = {
       show: vi.fn(),
@@ -92,7 +92,9 @@ vi.mock("electron", () => ({
   app: mocks.app,
   dialog: mocks.dialog,
   Notification: mocks.Notification,
-  BrowserWindow: vi.fn(() => mocks.browserWindow),
+  BrowserWindow: vi.fn(function () {
+    return mocks.browserWindow;
+  }),
 }));
 
 vi.mock("electron-updater", () => ({

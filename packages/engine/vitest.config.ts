@@ -105,7 +105,6 @@ export default defineConfig({
             "src/__tests__/merger-ai-cleanup-active-session.test.ts",
             "src/__tests__/merger-ai-cleanup.test.ts",
             "src/__tests__/merger-ai.test.ts",
-            "src/__tests__/sandbox/bubblewrap-backend.test.ts",
           ],
         },
       },

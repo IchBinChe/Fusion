@@ -224,6 +224,7 @@ vi.mock("node:fs", () => ({
 export const mockExecuteAll: Mock<() => Promise<unknown[]>> = vi.fn().mockResolvedValue([]);
 export const mockTerminateAllSessions: Mock<() => Promise<void>> = vi.fn().mockResolvedValue(undefined);
 export const mockCleanup: Mock<() => Promise<void>> = vi.fn().mockResolvedValue(undefined);
+export const mockSteerActiveSessions: Mock<(message: string) => Promise<void>> = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../step-session-executor.js", () => ({
   StepSessionExecutor: vi.fn().mockImplementation(function () {
@@ -231,6 +232,7 @@ vi.mock("../step-session-executor.js", () => ({
       executeAll: mockExecuteAll,
       terminateAllSessions: mockTerminateAllSessions,
       cleanup: mockCleanup,
+      steerActiveSessions: mockSteerActiveSessions,
     };
   }),
 }));
@@ -345,6 +347,7 @@ export function createMockStore() {
       updatedAt: new Date().toISOString(),
     }),
     updateTask: vi.fn().mockResolvedValue({}),
+    recordActivity: vi.fn().mockResolvedValue({}),
     moveTask: vi.fn().mockResolvedValue({}),
     handoffToReview: vi.fn().mockImplementation(async (id: string) => store.moveTask(id, "in-review")),
     mergeTask: vi.fn().mockResolvedValue({}),
@@ -415,6 +418,7 @@ export function resetExecutorMocks() {
   mockExecuteAll.mockResolvedValue([]);
   mockTerminateAllSessions.mockResolvedValue(undefined);
   mockCleanup.mockResolvedValue(undefined);
+  mockSteerActiveSessions.mockResolvedValue(undefined);
   // FN-4811 follow-up: the executingTaskLock is process-wide module state, so it must
   // be cleared between tests or earlier tests' claims will block later tests' execute()
   // calls ("expected at least 2 createFnAgent calls but got 0" / "expected not called

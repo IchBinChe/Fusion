@@ -18,7 +18,7 @@ describe("TaskStore merge queue", () => {
   beforeEach(async () => {
     rootDir = makeTmpDir();
     globalDir = join(rootDir, ".fusion-global");
-    store = new TaskStore(rootDir, globalDir);
+    store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
     await store.init();
   });
 
@@ -60,10 +60,14 @@ describe("TaskStore merge queue", () => {
       expect.arrayContaining(["idx_mergeQueue_lease_ready", "idx_mergeQueue_leaseExpiresAt"]),
     );
 
-    expect(store.getDatabase().getSchemaVersion()).toBe(116);
+    expect(store.getDatabase().getSchemaVersion()).toBe(117);
   });
 
   it("migrates a legacy v88 database and preserves task rows", async () => {
+    store.close();
+    store = new TaskStore(rootDir, globalDir);
+    await store.init();
+
     const existingTask = await store.createTask({ description: "legacy row survives", priority: "high" });
     const db = store.getDatabase();
     db.exec("DROP INDEX IF EXISTS idx_mergeQueue_lease_ready");
@@ -404,10 +408,11 @@ describe("TaskStore merge queue", () => {
   });
 
   it("allows exactly one worker to lease a single queued task across competing stores", async () => {
-    const storeA = new TaskStore(rootDir, globalDir);
+    store.close();
+    store = new TaskStore(rootDir, globalDir);
     const storeB = new TaskStore(rootDir, globalDir);
-    extraStores.push(storeA, storeB);
-    await storeA.init();
+    extraStores.push(storeB);
+    await store.init();
     await storeB.init();
 
     const taskId = await createInReviewTask();
@@ -415,7 +420,7 @@ describe("TaskStore merge queue", () => {
     for (let index = 0; index < 20; index += 1) {
       store.enqueueMergeQueue(taskId, { now: `2026-05-19T00:00:${String(index).padStart(2, "0")}.000Z` });
       const [leaseA, leaseB] = await Promise.all([
-        Promise.resolve().then(() => storeA.acquireMergeQueueLease("worker-a", { leaseDurationMs: 60_000, now: `2026-05-19T00:10:${String(index).padStart(2, "0")}.000Z` })),
+        Promise.resolve().then(() => store.acquireMergeQueueLease("worker-a", { leaseDurationMs: 60_000, now: `2026-05-19T00:10:${String(index).padStart(2, "0")}.000Z` })),
         Promise.resolve().then(() => storeB.acquireMergeQueueLease("worker-b", { leaseDurationMs: 60_000, now: `2026-05-19T00:10:${String(index).padStart(2, "0")}.000Z` })),
       ]);
 

@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 116;
+const SCHEMA_VERSION = 117;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   baseBranch TEXT,
   branch TEXT,
   autoMerge INTEGER,
+  autoMergeProvenance TEXT,
   executionStartBranch TEXT,
   baseCommitSha TEXT,
   modelPresetId TEXT,
@@ -4694,6 +4695,13 @@ export class Database {
     if (version < 116) {
       this.applyMigration(116, () => {
         this.addColumnIfMissing("tasks", "graphResumeRetryCount", "INTEGER DEFAULT 0");
+      });
+    }
+
+    // Migration 117: Auto-merge override provenance for legacy stamp cleanup.
+    if (version < 117) {
+      this.applyMigration(117, () => {
+        this.addColumnIfMissing("tasks", "autoMergeProvenance", "TEXT");
       });
     }
 

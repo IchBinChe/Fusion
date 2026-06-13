@@ -634,6 +634,34 @@ describe("executeHeartbeat", () => {
       expect(pauseTask).not.toHaveBeenCalledWith(expect.any(String), true, expect.anything(), expect.anything());
       expect(pauseTask).not.toHaveBeenCalled();
     });
+
+    it("resumeAgent cascade skips user-paused tasks but unpauses agent-only pauses", async () => {
+      const pauseTask = vi.fn().mockResolvedValue(undefined);
+      const getTasksByAssignedAgent = vi.fn().mockResolvedValue([
+        { id: "FN-001", paused: true, pausedByAgentId: "agent-001" },
+        { id: "FN-002", paused: true, pausedByAgentId: "agent-001", userPaused: true },
+        { id: "FN-003", paused: true, userPaused: true },
+      ]);
+      mockTaskStore = createMockTaskStore({ pauseTask, getTasksByAssignedAgent });
+      const store = createStoreWithAgentForExec({
+        taskId: "FN-001",
+        state: "active",
+        runtimeConfig: { enabled: false },
+      });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.resumeAgent("agent-001", { cascadeToTasks: true });
+
+      expect(getTasksByAssignedAgent).toHaveBeenCalledWith("agent-001", {
+        pausedOnly: true,
+        excludeArchived: true,
+      });
+      expect(pauseTask).toHaveBeenCalledTimes(1);
+      expect(pauseTask).toHaveBeenCalledWith("FN-001", false);
+      expect(pauseTask).not.toHaveBeenCalledWith("FN-002", false);
+      expect(pauseTask).not.toHaveBeenCalledWith("FN-003", false);
+      expect(mockedCreateFnAgent).not.toHaveBeenCalled();
+    });
   });
 
   it("pauseForApproval pauses task and agent when taskId exists", async () => {

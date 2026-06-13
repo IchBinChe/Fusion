@@ -602,6 +602,8 @@ interface SessionHandle {
    *  is killed via pi-coding-agent's killProcessTree. dispose() alone only
    *  disconnects listeners and leaves bash subtrees orphaned. */
   abortBash: () => void;
+  /** Inject mid-flight steering into the live step session. */
+  steer: (message: string) => Promise<void>;
 }
 
 
@@ -764,6 +766,16 @@ export class StepSessionExecutor {
         handle.abortBash();
       } catch (err) {
         stepExecLog.warn(`Failed to abort bash for step ${stepIdx}: ${err}`);
+      }
+    }
+  }
+
+  async steerActiveSessions(message: string): Promise<void> {
+    for (const [stepIdx, handle] of this.activeSessions) {
+      try {
+        await handle.steer(message);
+      } catch (err) {
+        stepExecLog.warn(`Failed to steer active session for step ${stepIdx}: ${err}`);
       }
     }
   }
@@ -1098,6 +1110,10 @@ Follow instructions precisely and avoid unrelated changes.`,
           const handle: SessionHandle = {
             dispose: () => session?.dispose(),
             abortBash: () => session?.abortBash(),
+            steer: async (message) => {
+              if (!session) return;
+              await session.steer(message);
+            },
           };
           this.registerActiveStepSession(stepIndex, handle, worktreePath);
           stuckTaskDetector?.trackTask(trackingKey, { dispose: () => session?.dispose() }, taskDetail.id);

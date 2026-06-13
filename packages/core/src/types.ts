@@ -2131,12 +2131,16 @@ export interface Task {
    *  Defaults to the project default branch when omitted. */
   baseBranch?: string;
   /** Per-task auto-merge override.
-   *  `undefined` means no explicit per-task value: follow `settings.autoMerge`
-   *  and snapshot that global setting when the task enters `in-review`.
-   *  `true`/`false` are explicit user overrides and take precedence.
+   *  `undefined` means no explicit per-task value: follow live `settings.autoMerge`.
+   *  `true`/`false` are explicit overrides when paired with `autoMergeProvenance: "user"`.
    *  Distinct from GitHub PR metadata (`PrInfo.autoMergeOnGreen` /
    *  `PrInfo.autoMergeStrategy`), which must not be conflated with this field. */
   autoMerge?: boolean;
+  /** Provenance for `autoMerge`.
+   *  `"user"` means a sticky explicit user-set override.
+   *  `"legacy-stamp"` means an ambiguous value written by the pre-FN-6245
+   *  review-entry stamp and is operator-clearable. Absent means unknown/none. */
+  autoMergeProvenance?: "user" | "legacy-stamp";
   /** Actual git working branch name used for this task's worktree. May differ from
    *  the conventional `fn/{task-id}` when conflict recovery generated a
    *  unique suffixed name (e.g., `fn/fn-042-2`). */

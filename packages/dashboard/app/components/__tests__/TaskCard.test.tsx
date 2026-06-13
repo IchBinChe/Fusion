@@ -462,8 +462,8 @@ describe("TaskCard", () => {
     expect(screen.getByLabelText("Archive task")).toBeDefined();
   });
 
-  it.each(["triage", "todo", "in-progress", "in-review", "done"] as const)(
-    "renders archive action for %s tasks",
+  it.each(["triage", "todo", "in-progress", "in-review"] as const)(
+    "hides archive action for %s tasks",
     (column) => {
       render(
         <TaskCard
@@ -474,9 +474,22 @@ describe("TaskCard", () => {
         />,
       );
 
-      expect(screen.getByLabelText("Archive task")).toBeDefined();
+      expect(screen.queryByLabelText("Archive task")).toBeNull();
     },
   );
+
+  it("renders archive action for done tasks", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "done" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+      />,
+    );
+
+    expect(screen.getByLabelText("Archive task")).toBeDefined();
+  });
 
   it("does not render archive action for archived tasks", () => {
     render(
@@ -1994,10 +2007,10 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(editBtn)).toBe(true);
   });
 
-  it("renders archive button inside card-header-actions for live columns", () => {
+  it("renders archive button inside card-header-actions for done columns", () => {
     const { container } = render(
       <TaskCard 
-        task={makeTask({ column: "todo", size: "L" })} 
+        task={makeTask({ column: "done", size: "L" })} 
         onOpenDetail={noop} 
         addToast={noop}
         onArchiveTask={async () => makeTask()}

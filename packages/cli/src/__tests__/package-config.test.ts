@@ -93,6 +93,26 @@ describe("CLI package.json publishing config", () => {
     expect(deps).toContain("ioredis");
   });
 
+  it("defines test:docs-index as a single-file docs README index lane", () => {
+    const script = pkg.scripts?.["test:docs-index"];
+    const parts = script?.trim().split(/\s+/) ?? [];
+    const docsIndexPath = "src/__tests__/docs-readme-index.test.ts";
+
+    expect(script).toBeDefined();
+    expect(script).toContain("vitest run");
+    expect(parts).toEqual([
+      "vitest",
+      "run",
+      docsIndexPath,
+      "--silent=passed-only",
+      "--reporter=dot",
+    ]);
+    expect(parts.filter((part) => part.endsWith(".test.ts"))).toEqual([docsIndexPath]);
+    expect(parts).not.toContain("--");
+    expect(script).not.toMatch(/vitest\s+run\s+(?:--silent=passed-only\s+)?(?:--reporter=dot\s+)?$/);
+    expect(script).not.toContain("docs-readme-index ");
+  });
+
   it("prepack manifest rewrite strips workspace-only plugin/tooling devDependencies", () => {
     expect(prepackScript).toContain('delete devDependencies["@fusion/pi-claude-cli"]');
     expect(prepackScript).toContain('delete devDependencies["@fusion/pi-llama-cpp"]');
@@ -276,17 +296,18 @@ describe("Workspace bootstrap script contract", () => {
     const defaultTest = dashboardPkg.scripts?.test;
     const defaultAppQuality = dashboardPkg.scripts?.["test:quality:app"];
     const defaultApiQuality = dashboardPkg.scripts?.["test:quality:api"];
+    const appSettings = dashboardPkg.scripts?.["test:quality:app:settings"];
     const apiCurated = dashboardPkg.scripts?.["test:quality:api:curated"];
     const deepTest = dashboardPkg.scripts?.["test:deep"];
 
-    expect(defaultTest).toBe("pnpm run test:quality:app && pnpm run test:quality:api");
-    expect(defaultAppQuality).toContain("test:quality:app:foundation-api");
-    expect(defaultAppQuality).toContain("test:quality:app:settings");
-    // The api lane chains curated + backfill sub-lanes; the curated sub-lane
-    // carries the explicit quality project, and the backfill lane is the
-    // curated-gate completeness net (broad glob minus curated minus skip-list).
-    expect(defaultApiQuality).toContain("test:quality:api:curated");
-    expect(defaultApiQuality).toContain("test:quality:api:backfill");
+    expect(defaultTest).toBe("node scripts/run-quality-tests.mjs");
+    expect(defaultAppQuality).toBe("node scripts/run-quality-tests.mjs --group app");
+    expect(defaultApiQuality).toBe("node scripts/run-quality-tests.mjs --group api");
+    expect(defaultAppQuality).toContain("--group app");
+    expect(appSettings).toContain("dashboard-app-quality-settings");
+    // The default quality runner dispatches grouped quality lanes by script
+    // name; the curated API sub-lane still carries the explicit quality project.
+    expect(defaultApiQuality).toContain("--group api");
     expect(hasProjectArg(apiCurated, "dashboard-api-quality")).toBe(true);
     expect(hasProjectArg(defaultTest, "dashboard-app")).toBe(false);
     expect(hasProjectArg(defaultTest, "dashboard-api")).toBe(false);

@@ -222,7 +222,7 @@ async function resumeAfterDecision(params: {
   try {
     if (request.taskId) {
       const task = await scopedStore.getTask(request.taskId);
-      if (task?.paused && task.pausedByAgentId === request.requester.actorId) {
+      if (task?.paused && task.pausedByAgentId === request.requester.actorId && !task.userPaused) {
         await scopedStore.pauseTask(request.taskId, false, undefined);
       }
     }

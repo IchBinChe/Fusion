@@ -122,7 +122,9 @@ const mocks = vi.hoisted(() => {
     server,
     app,
     spawn,
-    taskStoreCtor: vi.fn(() => store),
+    taskStoreCtor: vi.fn(function () {
+      return store;
+    }),
     createServer: vi.fn(() => app),
   };
 });

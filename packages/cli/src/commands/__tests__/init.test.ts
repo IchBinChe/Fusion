@@ -11,6 +11,21 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { GitRepositoryInitializationError } from "@fusion/core";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const execAsync = promisify(exec);
 
 const mockCentralInit = vi.fn();
@@ -27,7 +42,7 @@ vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: makeConstructibleMock(() => ({
       init: mockCentralInit,
       close: mockCentralClose,
       getProjectByPath: mockGetProjectByPath,

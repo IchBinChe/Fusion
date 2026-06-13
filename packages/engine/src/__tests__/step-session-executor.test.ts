@@ -986,6 +986,7 @@ function makeMockSession(promptFn?: () => Promise<void>) {
     prompt: promptFn ?? vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn(),
     subscribe: vi.fn(),
+    steer: vi.fn().mockResolvedValue(undefined),
     model: { provider: "mock", id: "mock-model" },
   };
 }
@@ -1019,6 +1020,45 @@ describe("StepSessionExecutor", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  describe("steering", () => {
+    it("steers every active step session and continues after per-session failures", async () => {
+      const task = makeTaskDetail();
+      const executor = new StepSessionExecutor({
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings: makeSettings(),
+        pluginRunner: undefined,
+      } as any);
+      const steerOne = vi.fn().mockResolvedValue(undefined);
+      const steerTwo = vi.fn().mockRejectedValue(new Error("disconnected"));
+      const steerThree = vi.fn().mockResolvedValue(undefined);
+
+      (executor as any).activeSessions.set(0, {
+        dispose: vi.fn(),
+        abortBash: vi.fn(),
+        steer: steerOne,
+      });
+      (executor as any).activeSessions.set(1, {
+        dispose: vi.fn(),
+        abortBash: vi.fn(),
+        steer: steerTwo,
+      });
+      (executor as any).activeSessions.set(2, {
+        dispose: vi.fn(),
+        abortBash: vi.fn(),
+        steer: steerThree,
+      });
+
+      await executor.steerActiveSessions("new guidance");
+
+      expect(steerOne).toHaveBeenCalledWith("new guidance");
+      expect(steerTwo).toHaveBeenCalledWith("new guidance");
+      expect(steerThree).toHaveBeenCalledWith("new guidance");
+      expect(getStepSessionLogger().warn).toHaveBeenCalledWith(expect.stringContaining("Failed to steer active session for step 1"));
+    });
   });
 
   describe("sequential execution", () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const app = {
     whenReady: vi.fn(() => Promise.resolve()),
+    getPath: vi.fn((name: string) => (name === "home" ? "/mock/home" : "/mock/other")),
     on: vi.fn(),
     quit: vi.fn(),
   };
@@ -20,14 +21,18 @@ const mocks = vi.hoisted(() => {
 
   return {
     app,
-    BrowserWindow: vi.fn(() => browserWindow),
-    Tray: vi.fn(() => ({
-      destroy: vi.fn(),
-      setImage: vi.fn(),
-      setContextMenu: vi.fn(),
-      setToolTip: vi.fn(),
-      on: vi.fn(),
-    })),
+    BrowserWindow: vi.fn(function () {
+      return browserWindow;
+    }),
+    Tray: vi.fn(function () {
+      return {
+        destroy: vi.fn(),
+        setImage: vi.fn(),
+        setContextMenu: vi.fn(),
+        setToolTip: vi.fn(),
+        on: vi.fn(),
+      };
+    }),
     nativeImage: {
       createEmpty: vi.fn(() => ({ id: "empty-image" })),
     },

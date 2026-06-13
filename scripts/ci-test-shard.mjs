@@ -594,12 +594,40 @@ export function enumerateDashboardLanes(scripts, entryScript = "test") {
     while ((match = re.exec(command)) !== null) names.push(match[1]);
     return names;
   };
+  const delegatedGroup = (command) => {
+    const match = command.match(/--group(?:=|\s+)(app|api)\b/);
+    return match?.[1] ?? null;
+  };
+  const isQualityLeaf = ([name, command]) => (
+    name.startsWith("test:quality:")
+    && command.includes("--project")
+    && !command.includes("run-quality-tests")
+    && referencedRuns(command).length === 0
+  );
+  const pushLane = (lane) => {
+    if (seen.has(lane)) return;
+    seen.add(lane);
+    lanes.push(lane);
+  };
+  const expandQualityDelegation = (command) => {
+    // The dashboard package's quality-test runner owns the current lane manifest;
+    // expand delegators back to real package.json leaf scripts so CI can shard them.
+    const group = delegatedGroup(command);
+    const prefix = group ? `test:quality:${group}:` : "test:quality:";
+    for (const [name, leafCommand] of Object.entries(scripts ?? {})) {
+      if (name.startsWith(prefix) && isQualityLeaf([name, leafCommand])) pushLane(name);
+    }
+  };
 
   const visit = (scriptName) => {
     if (seen.has(scriptName)) return;
     seen.add(scriptName);
     const command = scripts?.[scriptName];
     if (typeof command !== "string") return;
+    if (command.includes("run-quality-tests")) {
+      expandQualityDelegation(command);
+      return;
+    }
     const children = referencedRuns(command);
     if (children.length === 0) {
       // Leaf: a lane that actually invokes a test runner.

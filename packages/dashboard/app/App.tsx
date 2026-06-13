@@ -63,7 +63,7 @@ import { useDeepLink } from "./hooks/useDeepLink";
 import { useFavorites } from "./hooks/useFavorites";
 import { useAuthOnboarding } from "./hooks/useAuthOnboarding";
 import { useMobileKeyboard } from "./hooks/useMobileKeyboard";
-import { isIOS, useMobileKeyboardViewportLock } from "./hooks/useMobileScrollLock";
+import { isIOS, useMobileKeyboardViewportLock, useMobileViewportRestoreReset } from "./hooks/useMobileScrollLock";
 import { computeMobileBarKeyboardFlags } from "./utils/mobileBarKeyboardFlags";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
@@ -545,6 +545,8 @@ function AppInner() {
   // into place when the keyboard dismisses. Modals manage their own lock
   // via useMobileScrollLock — the reference-counted hook handles overlap.
   useMobileKeyboardViewportLock(mobileKeyboardOpen);
+  // Complements FN-6362's keyboard metrics reset by recovering stale document scroll on foreground.
+  useMobileViewportRestoreReset(isMobile);
 
   // App-level mailbox/chat unread state (used for header/mobile nav badges)
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);

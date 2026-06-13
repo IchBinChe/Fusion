@@ -2,6 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { readFileSync } from "node:fs";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const CLI_PACKAGE_VERSION = (
   JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf-8")) as { version: string }
 ).version;
@@ -16,7 +31,7 @@ const { cacheDir, mockResolveGlobalDir } = vi.hoisted(() => {
 
 vi.mock("@fusion/core", () => ({
   resolveGlobalDir: mockResolveGlobalDir,
-  GlobalSettingsStore: vi.fn(),
+  GlobalSettingsStore: makeConstructibleMock(),
 }));
 
 const { getCachedUpdateStatus } = await import("../update-cache.js");

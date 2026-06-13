@@ -3,6 +3,21 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const mocks = vi.hoisted(() => {
   const pluginStoreInstances: Array<{
     init: ReturnType<typeof vi.fn>;
@@ -15,9 +30,9 @@ const mocks = vi.hoisted(() => {
   let loaderTaskStore: { getRootDir?: () => string } | undefined;
   let loaderRootDir: string | undefined;
 
-  const PluginStore = vi.fn();
+  const PluginStore = makeConstructibleMock();
 
-  const PluginLoader = vi.fn();
+  const PluginLoader = makeConstructibleMock();
 
   const setupDefaults = () => {
     PluginStore.mockImplementation(() => {

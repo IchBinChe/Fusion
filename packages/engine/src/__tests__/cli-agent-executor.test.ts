@@ -287,7 +287,7 @@ describe("cli-agent executor seam (U7)", () => {
   it("re-entry: a fresh run kills the prior live session and spawns a new PTY", async () => {
     const { executor } = makeExecutor(taskDetail());
     // First run, left live (no done).
-    void (executor as any).runGraphCustomNode(cliNode, taskDetail(), {});
+    const firstP = (executor as any).runGraphCustomNode(cliNode, taskDetail(), {});
     await vi.waitFor(() => expect(state.ptys).toHaveLength(1));
     lastPty().emitData("READY\r\n");
     const firstId = await vi.waitFor(() => {
@@ -299,6 +299,8 @@ describe("cli-agent executor seam (U7)", () => {
     // Let the first run's async injection settle (it drives the machine to busy
     // and would otherwise overwrite the killed reason mid-race).
     await vi.waitFor(() => expect(hub.getStateMachine(firstId)?.getState()).toBe("busy"));
+    const firstSession = (executor as any).activeCliTaskSessions.get("FN-100");
+    expect(firstSession?.sessionId).toBe(firstId);
     // Drop the first run's active handle to simulate a graph re-entry without abort.
     (executor as any).activeCliTaskSessions.delete("FN-100");
 
@@ -314,6 +316,12 @@ describe("cli-agent executor seam (U7)", () => {
     hub.ingest(second.id, { kind: "done" });
     const result = await secondP;
     expect(result.outcome).toBe("success");
+
+    // FN-6341: the original flake left this first run as a dropped `void` promise;
+    // settle the task-session after proving re-entry killed its PTY so no hub/store
+    // work can outlive afterEach's db.close().
+    await firstSession.kill("killed");
+    await expect(firstP).resolves.toMatchObject({ outcome: "failure", value: "cli-agent-killed" });
   });
 
   // ── Ceiling produces a typed surfaced value, not a hang ──────────────────────

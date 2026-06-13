@@ -29,6 +29,7 @@ import {
   __setCleanupRmSyncForTests,
   emitModeDecision,
   pruneFusionTestHomes,
+  pruneFusionTestWorkers,
   buildForwardDependencyMap,
   collectTransitiveDependencies,
   computeOwnHash,
@@ -951,6 +952,164 @@ test("pruneFusionTestHomes: bounded — removes at most maxEntries per call", ()
   }
 });
 
+test("pruneFusionTestWorkers: bounded — removes at most maxEntries per call", () => {
+  const created = [];
+  try {
+    for (let i = 0; i < 5; i++) {
+      const dir = path.join(tmpdir(), `fusion-test-workers-prune-budget-${process.pid}-${i}`);
+      mkdirSync(dir, { recursive: true });
+      created.push(dir);
+    }
+    // Cap at 2 → at least 3 of ours survive this call.
+    pruneFusionTestWorkers(2);
+    const survivors = created.filter((dir) => existsSync(dir));
+    assert.ok(survivors.length >= 3, `expected >=3 survivors with cap=2, got ${survivors.length}`);
+  } finally {
+    for (const dir of created) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function createNonEmptyPruneRoot(prefix, label) {
+  const root = mkdtempSync(path.join(tmpdir(), `${prefix}${label}-${process.pid}-`));
+  const childDir = path.join(root, `w-${process.pid}-busy`);
+  mkdirSync(childDir, { recursive: true });
+  writeFileSync(path.join(childDir, "busy.txt"), "busy\n");
+  return root;
+}
+
+function capturePruneWarnings(fn) {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (msg) => warnings.push(String(msg));
+  try {
+    fn(warnings);
+  } finally {
+    console.warn = originalWarn;
+  }
+  return warnings;
+}
+
+function withTransientPruneFailure(root, pruneFn) {
+  const error = Object.assign(new Error("simulated ENOTEMPTY"), { code: "ENOTEMPTY" });
+  let calls = 0;
+  __setCleanupRmSyncForTests((target, options) => {
+    if (target === root) {
+      calls += 1;
+      if (calls === 1) throw error;
+    }
+    return rmSync(target, options);
+  });
+
+  try {
+    const warnings = capturePruneWarnings(() => pruneFn(64, { retries: 3, delayMs: 0 }));
+    assert.equal(existsSync(root), false);
+    assert.equal(calls, 2);
+    assert.deepEqual(warnings, []);
+  } finally {
+    __setCleanupRmSyncForTests(null);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function withPersistentPruneFailure(root, pruneFn) {
+  const error = Object.assign(new Error("simulated EBUSY"), { code: "EBUSY" });
+  let calls = 0;
+  __setCleanupRmSyncForTests((target, options) => {
+    if (target === root) {
+      calls += 1;
+      throw error;
+    }
+    return rmSync(target, options);
+  });
+
+  try {
+    const warnings = capturePruneWarnings(() => pruneFn(1024, { retries: 3, delayMs: 0 }));
+    assert.equal(existsSync(root), true);
+    assert.equal(calls, 3);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /failed to prune leftover/);
+    assert.match(warnings[0], /after 3 attempts/);
+  } finally {
+    __setCleanupRmSyncForTests(null);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("pruneFusionTestWorkers: skips active per-invocation worker roots", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "active");
+  try {
+    writeFileSync(path.join(root, ".fusion-test-worker-root-owner"), `${process.pid}\n`);
+    pruneFusionTestWorkers(1024);
+    assert.equal(existsSync(root), true, "active worker root must not be pruned");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pruneFusionTestWorkers: skips markerless roots with live redirect sinks", () => {
+  const root = mkdtempSync(path.join(tmpdir(), `fusion-test-workers-active-redir-${process.pid}-`));
+  try {
+    mkdirSync(path.join(root, `redir-${process.pid}`), { recursive: true });
+    writeFileSync(path.join(root, `redir-${process.pid}`, "payload.txt"), "active\n");
+    pruneFusionTestWorkers(1024);
+    assert.equal(existsSync(root), true, "live redir-pid root must not be pruned");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pruneFusionTestWorkers: reclaims non-empty root after transient ENOTEMPTY", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "transient");
+  withTransientPruneFailure(root, pruneFusionTestWorkers);
+});
+
+test("pruneFusionTestWorkers: persistent busy root warns once after bounded retries", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "persistent");
+  withPersistentPruneFailure(root, pruneFusionTestWorkers);
+});
+
+test("pruneFusionTestHomes: reclaims non-empty root after transient ENOTEMPTY", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-home-root-", "transient");
+  withTransientPruneFailure(root, pruneFusionTestHomes);
+});
+
+test("pruneFusionTestHomes: persistent busy root warns once after bounded retries", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-home-root-", "persistent");
+  withPersistentPruneFailure(root, pruneFusionTestHomes);
+});
+
+function withEnoentPruneSuccess(root, pruneFn) {
+  let calls = 0;
+  __setCleanupRmSyncForTests((target, options) => {
+    if (target === root) {
+      calls += 1;
+      rmSync(root, { recursive: true, force: true });
+      throw Object.assign(new Error("simulated ENOENT"), { code: "ENOENT" });
+    }
+    return rmSync(target, options);
+  });
+
+  try {
+    const warnings = capturePruneWarnings(() => pruneFn(1024, { retries: 3, delayMs: 0 }));
+    assert.equal(existsSync(root), false);
+    assert.equal(calls, 1);
+    assert.deepEqual(warnings, []);
+  } finally {
+    __setCleanupRmSyncForTests(null);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("pruneFusionTestWorkers: ENOENT during prune is success without warning", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "enoent");
+  withEnoentPruneSuccess(root, pruneFusionTestWorkers);
+});
+
+test("pruneFusionTestHomes: ENOENT during prune is success without warning", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-home-root-", "enoent");
+  withEnoentPruneSuccess(root, pruneFusionTestHomes);
+});
+
 // ---------------------------------------------------------------------------
 // U4: real-git-fixture integration (dirty working tree + transitive deps).
 //
@@ -1351,6 +1510,21 @@ test("pruneFusionTestHomes: only targets the fusion-test-home-root- prefix", () 
   try {
     pruneFusionTestHomes();
     assert.equal(existsSync(ours), false, "our prefixed dir should be pruned");
+    assert.equal(existsSync(foreign), true, "foreign dir must be left untouched");
+  } finally {
+    rmSync(ours, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
+  }
+});
+
+test("pruneFusionTestWorkers: only targets the fusion-test-workers- prefix", () => {
+  const ours = path.join(tmpdir(), `fusion-test-workers-prune-prefix-${process.pid}`);
+  const foreign = path.join(tmpdir(), `not-ours-workers-prune-prefix-${process.pid}`);
+  mkdirSync(ours, { recursive: true });
+  mkdirSync(foreign, { recursive: true });
+  try {
+    pruneFusionTestWorkers();
+    assert.equal(existsSync(ours), false, "orphaned worker root should be pruned");
     assert.equal(existsSync(foreign), true, "foreign dir must be left untouched");
   } finally {
     rmSync(ours, { recursive: true, force: true });

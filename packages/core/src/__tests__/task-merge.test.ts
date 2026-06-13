@@ -52,11 +52,21 @@ describe("resolveEffectiveAutoMerge", () => {
     expect(resolveEffectiveAutoMerge(task, { autoMerge: false })).toBe(false);
     expect(resolveEffectiveAutoMerge(task, { autoMerge: true })).toBe(true);
   });
+
+  it("treats provenance as metadata and resolves solely from the value", () => {
+    expect(resolveEffectiveAutoMerge({ autoMerge: true, autoMergeProvenance: "legacy-stamp" }, { autoMerge: false })).toBe(true);
+    expect(resolveEffectiveAutoMerge({ autoMerge: false, autoMergeProvenance: "user" }, { autoMerge: true })).toBe(false);
+    expect(resolveEffectiveAutoMerge({ autoMerge: undefined, autoMergeProvenance: undefined }, { autoMerge: true })).toBe(true);
+  });
 });
 
 describe("allowsAutoMergeProcessing", () => {
-  it("lets explicit per-task true through when the global setting is off (FN per-task override)", () => {
-    expect(allowsAutoMergeProcessing({ autoMerge: true }, { autoMerge: false })).toBe(true);
+  it("lets explicit per-task true with user provenance through when the global setting is off", () => {
+    expect(allowsAutoMergeProcessing({ autoMerge: true, autoMergeProvenance: "user" }, { autoMerge: false })).toBe(true);
+  });
+
+  it("still lets legacy-stamp true through at the gate so reconcile, not the gate, owns cleanup", () => {
+    expect(allowsAutoMergeProcessing({ autoMerge: true, autoMergeProvenance: "legacy-stamp" }, { autoMerge: false })).toBe(true);
   });
 
   it("blocks tasks without an explicit override when the global setting is off", () => {
@@ -64,7 +74,7 @@ describe("allowsAutoMergeProcessing", () => {
     expect(allowsAutoMergeProcessing(task, { autoMerge: true })).toBe(true);
     expect(allowsAutoMergeProcessing(task, { autoMerge: false })).toBe(false);
     expect(allowsAutoMergeProcessing(task, { autoMerge: true })).toBe(true);
-    expect(allowsAutoMergeProcessing({ autoMerge: false }, { autoMerge: false })).toBe(false);
+    expect(allowsAutoMergeProcessing({ autoMerge: false, autoMergeProvenance: "user" }, { autoMerge: false })).toBe(false);
   });
 
   it("lets everything through when the global setting is on — explicit false still flows so the merger can park it manual-required", () => {

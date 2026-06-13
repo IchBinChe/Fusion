@@ -3,6 +3,21 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+function makeConstructibleMock<T extends (...args: any[]) => unknown>(impl?: T) {
+  const mock = vi.fn(function () {});
+  const originalMockImplementation = mock.mockImplementation.bind(mock);
+  const originalMockImplementationOnce = mock.mockImplementationOnce.bind(mock);
+  const wrap = (nextImpl: T) => function (this: unknown, ...args: Parameters<T>) {
+    return nextImpl(...args);
+  };
+  mock.mockImplementation = ((nextImpl: T) => originalMockImplementation(wrap(nextImpl))) as typeof mock.mockImplementation;
+  mock.mockImplementationOnce = ((nextImpl: T) => originalMockImplementationOnce(wrap(nextImpl))) as typeof mock.mockImplementationOnce;
+  if (impl) {
+    mock.mockImplementation(impl);
+  }
+  return mock;
+}
+
 const mockListProjects = vi.fn();
 const mockRegisterProject = vi.fn();
 const mockEnsureProjectForPath = vi.fn(async (...args: unknown[]) => ({
@@ -29,7 +44,7 @@ const mockEnsureMemoryFileWithBackend = vi.fn();
 
 // Mock @fusion/core
 vi.mock("@fusion/core", () => ({
-  CentralCore: vi.fn().mockImplementation(() => ({
+  CentralCore: makeConstructibleMock(() => ({
     init: mockInit.mockResolvedValue(undefined),
     close: mockClose.mockResolvedValue(undefined),
     listProjects: mockListProjects,
@@ -41,11 +56,11 @@ vi.mock("@fusion/core", () => ({
     getProjectByPath: mockGetProjectByPath,
     getProjectHealth: mockGetProjectHealth,
   })),
-  GlobalSettingsStore: vi.fn().mockImplementation(() => ({
+  GlobalSettingsStore: makeConstructibleMock(() => ({
     init: mockGlobalInit.mockResolvedValue(undefined),
     getSettings: mockGetSettings,
   })),
-  TaskStore: vi.fn().mockImplementation(() => ({
+  TaskStore: makeConstructibleMock(() => ({
     init: mockTaskStoreInit,
     listTasks: mockTaskStoreListTasks,
   })),

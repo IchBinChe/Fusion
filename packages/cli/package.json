@@ -1,6 +1,6 @@
 {
   "name": "@runfusion/fusion",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "license": "MIT",
   "description": "Fusion CLI: HTTP API server, daemon, dashboard launcher, and task tooling for the Fusion AI coding agent.",
   "homepage": "https://github.com/Runfusion/Fusion#readme",
@@ -51,6 +51,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --silent=passed-only --reporter=dot",
     "test:ci-shape": "vitest run src/__tests__/ci-workflow.test.ts --silent=passed-only --reporter=dot",
+    "test:docs-index": "vitest run src/__tests__/docs-readme-index.test.ts --silent=passed-only --reporter=dot",
     "test:slow-cli": "cross-env FUSION_TEST_SLOW_CLI=1 vitest run src/commands/__tests__/agent-export.test.ts --silent=passed-only --reporter=dot",
     "test:extension-integration": "cross-env FUSION_TEST_EXTENSION_INTEGRATION=1 vitest run src/__tests__/extension-integration.test.ts --silent=passed-only --reporter=dot",
     "test:build-exe": "cross-env FUSION_TEST_BUILD_EXE=1 vitest run --config vitest.build-exe.config.ts --silent=passed-only --reporter=dot",

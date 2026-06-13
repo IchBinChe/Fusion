@@ -1,6 +1,11 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetLockState, useMobileScrollLock } from "../useMobileScrollLock";
+import {
+  _resetLockState,
+  useMobileKeyboardViewportLock,
+  useMobileScrollLock,
+  useMobileViewportRestoreReset,
+} from "../useMobileScrollLock";
 
 describe("useMobileScrollLock", () => {
   let savedInnerWidth: number;
@@ -20,6 +25,7 @@ describe("useMobileScrollLock", () => {
     scrollSpy = vi.fn();
     window.scrollTo = scrollSpy as unknown as typeof window.scrollTo;
     Object.defineProperty(window, "scrollY", { value: 0, writable: true, configurable: true });
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
   });
 
   afterEach(() => {
@@ -58,6 +64,119 @@ describe("useMobileScrollLock", () => {
     Object.defineProperty(navigator, "maxTouchPoints", { value: 0, configurable: true });
     Object.defineProperty(window, "innerWidth", { value: 1280, writable: true, configurable: true });
   }
+
+  function setVisibilityState(value: DocumentVisibilityState) {
+    Object.defineProperty(document, "visibilityState", { value, configurable: true });
+  }
+
+  it("snaps stale iOS document scroll to top on visibilitychange restore", () => {
+    makeMobile();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    setVisibilityState("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(scrollSpy).toHaveBeenCalledWith(0, 0);
+  });
+
+  it("snaps stale iOS document scroll to top on pageshow restore", () => {
+    makeMobile();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+
+    expect(scrollSpy).toHaveBeenCalledWith(0, 0);
+  });
+
+  it("does not reset document scroll on Android restore", () => {
+    makeAndroid();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not reset document scroll on desktop restore", () => {
+    makeDesktop();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not reset document scroll on visibilitychange hidden", () => {
+    makeMobile();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    setVisibilityState("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not fight an active fullscreen mobile scroll lock on restore", () => {
+    makeMobile();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileScrollLock(true));
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not fight an active keyboard viewport lock on restore", () => {
+    makeMobile();
+    renderHook(() => useMobileKeyboardViewportLock(true));
+    scrollSpy.mockClear();
+    Object.defineProperty(window, "scrollY", { value: 120, writable: true, configurable: true });
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent when already aligned on restore", () => {
+    makeMobile();
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+    expect(document.body.style.position).toBe("");
+    expect(document.body.style.top).toBe("");
+  });
+
+  it("clears orphaned body offset styles without a live lock", () => {
+    makeMobile();
+    document.body.style.position = "fixed";
+    document.body.style.top = "-120px";
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+    renderHook(() => useMobileViewportRestoreReset(true));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(document.body.style.position).toBe("");
+    expect(document.body.style.top).toBe("");
+    expect(document.body.style.left).toBe("");
+    expect(document.body.style.right).toBe("");
+    expect(document.body.style.width).toBe("");
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
 
   it("pins body with position:fixed and overflow:hidden on mobile when enabled", () => {
     makeMobile();

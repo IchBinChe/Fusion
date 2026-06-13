@@ -38,7 +38,8 @@ function isFusionSiblingBranch(branch: string): boolean {
  * Resolves a task's effective auto-merge behavior.
  * Explicit per-task values (`true`/`false`) take precedence over the global
  * setting; when `task.autoMerge` is `undefined`, falls back to
- * `settings.autoMerge`.
+ * `settings.autoMerge`. `autoMergeProvenance` is metadata used by legacy-stamp
+ * remediation; this resolver intentionally keys only on the value.
  */
 export function resolveEffectiveAutoMerge(
   task: Pick<Task, "autoMerge">,
@@ -52,8 +53,9 @@ export function resolveEffectiveAutoMerge(
  * Additive relative to the global setting: when `settings.autoMerge` is on,
  * every task flows through — tasks with an explicit `autoMerge: false` are
  * parked as `manual-required` downstream by the merger, not silently skipped
- * here. When the global setting is off, only tasks with an explicit per-task
- * `autoMerge: true` override proceed. Distinct from
+ * here. When the global setting is off, only tasks with a per-task
+ * `autoMerge: true` value proceed; legacy stamp provenance is surfaced and
+ * reconciled separately. Distinct from
  * `resolveEffectiveAutoMerge`, which resolves the effective boolean and would
  * (incorrectly for processing gates) starve the manual-required parking path.
  */

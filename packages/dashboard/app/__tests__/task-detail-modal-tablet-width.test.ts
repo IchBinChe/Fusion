@@ -23,8 +23,8 @@ describe("task detail modal tablet width (FN-5599)", () => {
     const tabletBlock = tabletBlockMatch![1];
     const modalRuleMatch = tabletBlock.match(/\.modal\.task-detail-modal\s*\{[^}]*\}/s);
     expect(modalRuleMatch).toBeTruthy();
-    expect(modalRuleMatch![0]).toContain("width: min(92vw, 960px);");
-    expect(modalRuleMatch![0]).toContain("max-width: 92vw;");
+    expect(modalRuleMatch![0]).toContain("width: min(96vw, 1024px);");
+    expect(modalRuleMatch![0]).toContain("max-width: 96vw;");
   });
 
   it("keeps mobile full-screen sheet width behavior", () => {

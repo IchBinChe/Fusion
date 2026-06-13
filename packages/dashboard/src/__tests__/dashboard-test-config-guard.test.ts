@@ -1,42 +1,97 @@
 // @vitest-environment node
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { globSync, readFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { dashboardQualityProjectGlobs } from "../../vitest.config";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dashboardRoot = join(__dirname, "..", "..");
 const dashboardPackageJsonPath = join(dashboardRoot, "package.json");
 const vitestConfigPath = join(dashboardRoot, "vitest.config.ts");
+const dashboardQualityScriptPath = join(dashboardRoot, "scripts", "run-quality-tests.mjs");
+const qualityParityBaselineFileCount = 746;
+
+interface QualityLane {
+  name: string;
+  group: "app" | "api";
+  args: string[];
+}
 
 function readDashboardPackageJson(): { scripts: Record<string, string> } {
   return JSON.parse(readFileSync(dashboardPackageJsonPath, "utf8"));
 }
 
-describe("dashboard test config guard", () => {
-  it("keeps the dashboard quality gate split into sequential sub-runs", () => {
-    const { scripts } = readDashboardPackageJson();
+async function readQualityLanes(): Promise<QualityLane[]> {
+  const module = (await import(pathToFileURL(dashboardQualityScriptPath).href)) as { qualityLanes: QualityLane[] };
+  return module.qualityLanes;
+}
 
-    expect(scripts.test).toBe("pnpm run test:quality:app && pnpm run test:quality:api");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:foundation-api");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:foundation-ui");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:foundation-hooks-utils");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:components-a");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:components-b");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:app");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:chat");
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:settings");
-    // The backfill lane (plan U2 / R7) closes the curated-gate hole: every
-    // app test file that no curated lane enumerates runs here.
-    expect(scripts["test:quality:app"]).toContain("test:quality:app:backfill");
-    // The API gate runs the curated lane AND the backfill lane.
-    expect(scripts["test:quality:api"]).toContain("test:quality:api:curated");
-    expect(scripts["test:quality:api"]).toContain("test:quality:api:backfill");
-    expect(scripts["test:quality:app"]).not.toContain("dashboard-app-quality --project dashboard-api-quality");
+function projectNameForLane(lane: QualityLane): string {
+  const projectFlagIndex = lane.args.indexOf("--project");
+  expect(projectFlagIndex).toBeGreaterThanOrEqual(0);
+  const projectName = lane.args[projectFlagIndex + 1];
+  expect(projectName).toBeTruthy();
+  return projectName;
+}
+
+function expandDashboardGlobs(patterns: readonly string[]): Set<string> {
+  return new Set(
+    patterns.flatMap((pattern) =>
+      globSync(pattern, { cwd: dashboardRoot, nodir: true }).map((file) =>
+        relative(dashboardRoot, join(dashboardRoot, file)),
+      ),
+    ),
+  );
+}
+
+function expandProjectFiles(projectName: keyof typeof dashboardQualityProjectGlobs): Set<string> {
+  const project = dashboardQualityProjectGlobs[projectName];
+  const included = expandDashboardGlobs(project.include);
+  const excluded = expandDashboardGlobs(project.exclude);
+  for (const file of excluded) {
+    included.delete(file);
+  }
+  return included;
+}
+
+describe("dashboard test config guard", () => {
+  it("routes the dashboard quality gate through the bounded orchestrator", async () => {
+    const { scripts } = readDashboardPackageJson();
+    const qualityLanes = await readQualityLanes();
+
+    expect(scripts.pretest).toBe("node ../../scripts/ensure-test-artifacts.mjs");
+    expect(scripts.test).toBe("node scripts/run-quality-tests.mjs");
+    expect(scripts["test:quality:app"]).toBe("node scripts/run-quality-tests.mjs --group app");
+    expect(scripts["test:quality:api"]).toBe("node scripts/run-quality-tests.mjs --group api");
+    expect(qualityLanes).toHaveLength(15);
+    expect(qualityLanes.map((lane) => lane.name)).toEqual([
+      "app:foundation-api",
+      "app:foundation-ui",
+      "app:foundation-hooks-utils",
+      "app:components-a",
+      "app:components-b",
+      "app:app",
+      "app:chat",
+      "app:settings",
+      "app:backfill-1",
+      "app:backfill-2",
+      "app:backfill-3",
+      "app:backfill-4",
+      "api:curated",
+      "api:backfill-1",
+      "api:backfill-2",
+    ]);
+
+    for (const lane of qualityLanes) {
+      expect(lane.args[0]).toBe("--heap=6144");
+      expect(lane.args).not.toContain("-t");
+      expect(lane.args.join(" ")).not.toContain("ensure-test-artifacts");
+    }
   });
 
-  it("pins every app-quality shard to the heap wrapper", () => {
+  it("pins compatibility lane scripts to the heap wrapper", () => {
     const { scripts } = readDashboardPackageJson();
 
     for (const key of [
@@ -52,20 +107,24 @@ describe("dashboard test config guard", () => {
       "test:quality:app:backfill-2",
       "test:quality:app:backfill-3",
       "test:quality:app:backfill-4",
+      "test:quality:api:curated",
+      "test:quality:api:backfill-1",
+      "test:quality:api:backfill-2",
     ]) {
       expect(scripts[key]).toContain("node scripts/run-vitest-with-heap.mjs --heap=6144");
     }
   });
 
-  it("runs the settings lane unfiltered so no describe block can fall through a -t name filter", () => {
-    // Plan U2 / R7 structural fix: the settings lane used to be split into six
-    // `-t` name-filtered sub-runs, which meant a SettingsModal describe block
-    // matching none of the substrings ran in NO project. The whole
-    // SettingsModal.test.tsx file fits one heap-6144 lane, so the lane now runs
-    // the project unfiltered. Guard against a regression back to `-t` filters.
+  it("runs the settings lane unfiltered so no describe block can fall through a -t name filter", async () => {
     const { scripts } = readDashboardPackageJson();
+    const qualityLanes = await readQualityLanes();
+    const settingsLane = qualityLanes.find((lane) => lane.name === "app:settings");
+
     expect(scripts["test:quality:app:settings"]).toContain("--project dashboard-app-quality-settings");
     expect(scripts["test:quality:app:settings"]).not.toContain("-t ");
+    expect(settingsLane?.args).toContain("--project");
+    expect(settingsLane?.args).toContain("dashboard-app-quality-settings");
+    expect(settingsLane?.args).not.toContain("-t");
     for (const removed of [
       "test:quality:app:settings-a1",
       "test:quality:app:settings-a2",
@@ -98,6 +157,25 @@ describe("dashboard test config guard", () => {
     }
 
     expect(vitestConfig).toContain('"app/__tests__/spinner-animation.css.test.ts"');
-    expect(vitestConfig).toContain('"scripts/__tests__/run-vitest-with-heap.test.ts"');
+    expect(vitestConfig).toContain('"scripts/__tests__/{run-quality-tests,run-vitest-with-heap}.test.ts"');
+  });
+
+  it("keeps orchestrated quality project coverage at the measured baseline", async () => {
+    const qualityLanes = await readQualityLanes();
+    const laneProjects = new Set(qualityLanes.map(projectNameForLane));
+    const knownProjects = Object.keys(dashboardQualityProjectGlobs);
+
+    expect([...laneProjects].sort()).toEqual([...knownProjects].sort());
+
+    const files = new Set<string>();
+    for (const projectName of laneProjects) {
+      const projectFiles = expandProjectFiles(projectName as keyof typeof dashboardQualityProjectGlobs);
+      expect(projectFiles.size).toBeGreaterThan(0);
+      for (const file of projectFiles) {
+        files.add(file);
+      }
+    }
+
+    expect(files.size).toBeGreaterThanOrEqual(qualityParityBaselineFileCount);
   });
 });

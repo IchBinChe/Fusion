@@ -189,6 +189,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     updateGlobalSettings: vi.fn(),
     getSettingsByScope: vi.fn().mockResolvedValue({ global: {}, project: {} }),
     getSettingsByScopeFast: vi.fn().mockResolvedValue({ global: {}, project: {} }),
+    listWorkflowSettingValuesForProject: vi.fn().mockReturnValue({}),
     getGlobalSettingsStore: vi.fn().mockReturnValue(createMockGlobalSettingsStore()),
     logEntry: vi.fn().mockResolvedValue(undefined),
     getAgentLogs: vi.fn().mockResolvedValue([]),
@@ -1381,10 +1382,13 @@ describe("GET /settings/scopes", () => {
     expect(res.body.project.persistAgentThinkingLog).toBeUndefined();
   });
 
-  it("returns exact response envelope shape with only global and project keys", async () => {
+  it("returns exact response envelope shape with global, project, and workflowSettings keys", async () => {
     (store.getSettingsByScopeFast as ReturnType<typeof vi.fn>).mockResolvedValue({
       global: { themeMode: "dark" },
       project: { maxConcurrent: 4 },
+    });
+    (store.listWorkflowSettingValuesForProject as ReturnType<typeof vi.fn>).mockReturnValue({
+      "builtin:coding": { workflowStepTimeoutMs: 120000 },
     });
 
     const res = await GET(buildApp(), "/api/settings/scopes");
@@ -1393,10 +1397,14 @@ describe("GET /settings/scopes", () => {
     // Assert exact envelope shape
     expect(res.body).toHaveProperty("global");
     expect(res.body).toHaveProperty("project");
+    expect(res.body).toHaveProperty("workflowSettings");
     // No unexpected top-level keys
     const keys = Object.keys(res.body);
-    expect(keys).toHaveLength(2);
-    expect(keys).toEqual(["global", "project"]);
+    expect(keys).toHaveLength(3);
+    expect(keys).toEqual(["global", "project", "workflowSettings"]);
+    expect(res.body.workflowSettings).toEqual({
+      "builtin:coding": { workflowStepTimeoutMs: 120000 },
+    });
   });
 
   it("uses getSettingsByScopeFast and does not call getSettingsByScope", async () => {

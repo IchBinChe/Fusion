@@ -137,7 +137,13 @@
 
 - Combined after-run 2 duration for the five targeted files was **50.25s** versus **86.02s** in the Step 0 baseline. Test counts stayed constant; no FN-tagged regression coverage was removed.
 
+## FN-6308 dashboard orchestration follow-up results
+- `pnpm --filter @fusion/dashboard test` now uses `packages/dashboard/scripts/run-quality-tests.mjs` to run the same 15 quality lanes with bounded process concurrency (`FUSION_DASHBOARD_TEST_CONCURRENCY`, default/hard cap `2`) while preserving the 6144 MiB per-lane heap wrapper and app/API split that avoids historical jsdom SIGKILL/OOM.
+- Same-machine warm baseline before orchestration: **446.8s** for the sequential dashboard quality chain.
+- Post-orchestration measurements: **202.2s** after the route-settings mock update and **193.3s** after the lint import fix, a roughly **55–57%** wall-clock reduction versus the FN-6308 baseline while preserving the file-set parity guard.
+- CI-shape validation with `FUSION_TEST_TOTAL_WORKERS=6 FUSION_TEST_CONCURRENCY=2 pnpm --filter @fusion/dashboard test` passed in **192.5s**. Standard and CI-shape logs were scanned for SIGKILL/OOM/fatal heap symptoms with none found.
+
 ## Notes
 - Dashboard `vitest run` baseline and post-change measurements both surfaced broad failing suites outside this task’s implementation scope; timing evidence is still captured from the same command family.
-- FN-6307 verification also observed pre-existing isolated failures in `src/__tests__/routes-settings.test.ts` (`GET /settings/scopes` returning 500 for scoped settings cases) while targeted files remained green.
+- FN-6307 verification also observed pre-existing isolated failures in `src/__tests__/routes-settings.test.ts` (`GET /settings/scopes` returning 500 for scoped settings cases) while targeted files remained green. FN-6308 updated that stale mock/response expectation after `/api/settings/scopes` added `workflowSettings`.
 - Standing prevention rule: see `AGENTS.md` → **Standing Rule: Do Not Add Slow Tests (FN-5048)**.

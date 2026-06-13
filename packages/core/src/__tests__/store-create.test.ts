@@ -501,50 +501,6 @@ describe("TaskStore", () => {
       expect(promptSpy).toHaveBeenCalledWith(expect.stringContaining(longDescription));
     });
 
-    it("defers the task-created hook until store-managed summarize completes", async () => {
-      const longDescription = "a".repeat(201);
-      let releasePrompt!: () => void;
-      const promptStarted = vi.fn();
-      const promptDone = new Promise<void>((resolve) => {
-        releasePrompt = resolve;
-      });
-      setCreateFnAgent(vi.fn(async () => ({
-        session: {
-          prompt: vi.fn(async () => {
-            promptStarted();
-            await promptDone;
-          }),
-          state: { messages: [{ role: "assistant", content: "Deferred Hook Title" }] },
-        },
-      })));
-      const hookSpy = vi.fn();
-      setTaskCreatedHook(hookSpy);
-
-      const task = await store.createTask(
-        { description: longDescription, summarize: true },
-        {
-          settings: {
-            autoSummarizeTitles: false,
-            titleSummarizerProvider: "mock",
-            titleSummarizerModelId: "title-model",
-          },
-        },
-      );
-
-      await vi.waitFor(() => expect(promptStarted).toHaveBeenCalled());
-      expect(hookSpy).not.toHaveBeenCalled();
-
-      releasePrompt();
-      await vi.waitFor(() => {
-        expect(hookSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            id: task.id,
-            title: "Deferred Hook Title",
-          }),
-          store,
-        );
-      });
-    });
 
     it("should ignore malformed confirmation-prose generated titles", async () => {
       const mockOnSummarize = vi

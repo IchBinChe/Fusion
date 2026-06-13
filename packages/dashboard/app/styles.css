@@ -3417,6 +3417,13 @@ input[type="range"]:focus-visible {
     display: none;
   }
 
+  .board > .column,
+  .column,
+  .column-header,
+  .column-body {
+    touch-action: pan-x pan-y;
+  }
+
   .board > .column {
     width: 300px;
     min-width: 300px;

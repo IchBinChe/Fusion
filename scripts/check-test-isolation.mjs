@@ -278,7 +278,7 @@ function checkAgainstBaseline() {
     .map((name) => name.trim())
     .filter(Boolean);
   for (const name of callerIgnoreNames) baselineNames.add(name);
-  const leaks = snapshotTmp().filter((e) => {
+  let leaks = snapshotTmp().filter((e) => {
     if (baselineNames.has(e.name)) {
       return false;
     }
@@ -287,6 +287,16 @@ function checkAgainstBaseline() {
     }
     return true;
   });
+
+  // Vitest/Node worker roots can disappear a moment after the child process
+  // exits on macOS. Re-check candidate leaks after a short settle window so
+  // the guard still fails durable leaks while avoiding false failures for
+  // already-cleaned transient worker directories.
+  if (leaks.length > 0) {
+    sleepMs(500);
+    const settledNames = new Set(snapshotTmp().map((e) => e.name));
+    leaks = leaks.filter((e) => settledNames.has(e.name));
+  }
 
   const baselineByDir = new Map((baseline.protectedFusion ?? []).map((entry) => [entry.dir, entry]));
   const unstableProtectedDirs = new Set(baseline.unstableProtectedDirs ?? []);

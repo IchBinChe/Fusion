@@ -49,6 +49,29 @@ test("fails when a tracked temp leak appears after baseline", () => {
   });
 });
 
+test("ignores tracked temp dirs that disappear during the settle window", () => {
+  withFixture(({ cwd, home }) => {
+    const before = runScript(["--before"], { cwd, home });
+    assert.equal(before.status, 0);
+
+    const transientName = `fusion-test-transient-worker-${process.pid}`;
+    const transientPath = path.join(tmpdir(), transientName);
+    mkdirSync(transientPath, { recursive: true });
+    const cleanup = spawn(process.execPath, ["-e", `setTimeout(() => require("node:fs").rmSync(process.argv[1], { recursive: true, force: true }), 100)`, transientPath], {
+      cwd,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      stdio: "ignore",
+    });
+    try {
+      const after = runScript([], { cwd, home });
+      assert.equal(after.status, 0, after.stderr || after.stdout);
+    } finally {
+      cleanup.kill("SIGTERM");
+      rmSync(transientPath, { recursive: true, force: true });
+    }
+  });
+});
+
 test("ignores leaked temp dirs whose basenames appear in FUSION_TEST_ISOLATION_IGNORE_NAMES", () => {
   withFixture(({ cwd, home }) => {
     const before = runScript(["--before"], { cwd, home });

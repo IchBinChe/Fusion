@@ -367,6 +367,8 @@ describe("TaskChatTab", () => {
     const toolGroup = screen.getByTestId("task-chat-tool-group");
     const summary = toolGroup.querySelector("summary");
     expect(summary).toBeTruthy();
+    expect(toolGroup).toHaveClass("task-chat-tool-group");
+    expect(summary).toHaveClass("task-chat-tool-group-summary");
     expect(toolGroup).not.toHaveAttribute("open");
     expect(within(summary as HTMLElement).getByText("1 tool call")).toBeVisible();
     expect(within(summary as HTMLElement).getByText("bash")).toBeVisible();
@@ -377,7 +379,11 @@ describe("TaskChatTab", () => {
     await user.click(within(summary as HTMLElement).getByText("1 tool call"));
 
     expect(toolGroup).toHaveAttribute("open");
-    expect(screen.getByText("Tool call → result")).toBeVisible();
+    const invocation = screen.getByTestId("task-chat-tool-invocation");
+    const kicker = screen.getByText("Tool call → result");
+    expect(invocation).toHaveClass("task-chat-tool-entry", "task-chat-tool-invocation");
+    expect(kicker).toHaveClass("task-chat-entry-kicker");
+    expect(kicker).toBeVisible();
     expect(screen.getByText("Arguments")).toBeVisible();
     expect(screen.getByText("Result")).toBeVisible();
     expect(screen.getByText("pnpm test")).toBeVisible();
@@ -452,7 +458,8 @@ describe("TaskChatTab", () => {
     expect(screen.queryByText("Arguments")).not.toBeInTheDocument();
   });
 
-  it("falls back to result entries when a tool completion has no preceding call", () => {
+  it("falls back to result entries when a tool completion has no preceding call", async () => {
+    const user = userEvent.setup();
     mockLogs([
       makeEntry({ agent: "executor", type: "tool_result", text: "bash", detail: "ok" }),
     ]);
@@ -466,6 +473,13 @@ describe("TaskChatTab", () => {
     expect(within(summary as HTMLElement).getByText("1 tool call")).toBeVisible();
     expect(within(summary as HTMLElement).getByText("bash")).toBeVisible();
     expect(screen.queryByText("0 tool calls")).not.toBeInTheDocument();
+
+    await user.click(within(summary as HTMLElement).getByText("1 tool call"));
+
+    const standaloneEntry = screen.getByTestId("task-chat-entry-tool_result");
+    const standaloneKicker = screen.getByText("Tool result");
+    expect(standaloneEntry).toHaveClass("task-chat-tool-entry");
+    expect(standaloneKicker).toHaveClass("task-chat-entry-kicker");
   });
 
   it("renders thinking in an expanded-by-default collapsible block", async () => {

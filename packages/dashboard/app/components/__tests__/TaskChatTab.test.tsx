@@ -7,7 +7,7 @@ import type { AgentLogEntry, Task } from "@fusion/core";
 import { TaskChatTab } from "../TaskChatTab";
 import { isCliSessionLive, type CliSessionSummaryRecord } from "../TaskDetailModal";
 import { useAgentLogs } from "../../hooks/useAgentLogs";
-import { addSteeringComment } from "../../api";
+import { addSteeringComment, refineTask } from "../../api";
 
 vi.mock("../../hooks/useAgentLogs", () => ({
   useAgentLogs: vi.fn(),
@@ -15,10 +15,12 @@ vi.mock("../../hooks/useAgentLogs", () => ({
 
 vi.mock("../../api", () => ({
   addSteeringComment: vi.fn(),
+  refineTask: vi.fn(),
 }));
 
 const mockedUseAgentLogs = vi.mocked(useAgentLogs);
 const mockedAddSteeringComment = vi.mocked(addSteeringComment);
+const mockedRefineTask = vi.mocked(refineTask);
 const originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
 const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
 const originalClientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
@@ -126,6 +128,11 @@ function expectNoInactiveSessionHint() {
 function expectActiveSessionCopy() {
   expect(screen.getByText(/active agent session/i)).toBeInTheDocument();
   expect(screen.getByText(/delivered to the running session in real time/i)).toBeInTheDocument();
+}
+
+function expectDoneRefinementCopy() {
+  expect(screen.getByText(/start a refinement task for this completed task/i)).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("Start a refinement task for this completed task")).toBeInTheDocument();
 }
 
 function restoreMetricDescriptor(name: "scrollTop" | "scrollHeight" | "clientHeight", descriptor: PropertyDescriptor | undefined) {
@@ -827,8 +834,10 @@ describe("TaskChatTab", () => {
 
   it("posts composer text through addSteeringComment and clears on success", async () => {
     const user = userEvent.setup();
-    mockedAddSteeringComment.mockResolvedValue(makeTask());
-    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+    const onTaskUpdated = vi.fn();
+    const updatedTask = makeTask();
+    mockedAddSteeringComment.mockResolvedValue(updatedTask);
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} onTaskUpdated={onTaskUpdated} />);
 
     const input = screen.getByLabelText("Message active agent session");
     expect(input).not.toBeDisabled();
@@ -840,7 +849,76 @@ describe("TaskChatTab", () => {
     await waitFor(() => {
       expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Please inspect the failing test", "project-1");
     });
+    expect(mockedRefineTask).not.toHaveBeenCalled();
+    expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
     expect(input).toHaveValue("");
+  });
+
+  it("routes done-task composer sends to refineTask without replacing the current task", async () => {
+    const user = userEvent.setup();
+    const addToast = vi.fn();
+    const onTaskUpdated = vi.fn();
+    const refinementTask = makeTask({ id: "FN-222", column: "todo" });
+    mockedRefineTask.mockResolvedValue(refinementTask);
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "done", status: undefined })}
+        projectId="project-1"
+        active
+        addToast={addToast}
+        onTaskUpdated={onTaskUpdated}
+      />,
+    );
+
+    expectDoneRefinementCopy();
+    const input = screen.getByLabelText("Message active agent session");
+    await user.type(input, "Please add a follow-up report");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mockedRefineTask).toHaveBeenCalledWith("FN-001", "Please add a follow-up report", "project-1");
+    });
+    expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+    expect(within(screen.getByTestId("task-chat-transcript")).getByText("You")).toBeVisible();
+    expect(within(screen.getByTestId("task-chat-transcript")).getByText("Please add a follow-up report")).toBeVisible();
+    expect(input).toHaveValue("");
+    expect(addToast).toHaveBeenCalledWith("Refinement task created: FN-222", "success");
+    expect(onTaskUpdated).not.toHaveBeenCalledWith(refinementTask);
+    expect(onTaskUpdated).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, "failed", "done"])("routes done-task sends to refineTask regardless of %s status", async (status) => {
+    const user = userEvent.setup();
+    mockedRefineTask.mockResolvedValue(makeTask({ id: "FN-333", column: "todo" }));
+    render(<TaskChatTab task={makeTask({ column: "done", status })} projectId="project-1" active addToast={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("Message active agent session"), `Refine from ${String(status)}`);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mockedRefineTask).toHaveBeenCalledWith("FN-001", `Refine from ${String(status)}`, "project-1");
+    });
+    expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["in-progress", makeTask({ column: "in-progress", assignedAgentId: "agent-1", status: "queued" })],
+    ["in-review", makeTask({ column: "in-review", assignedAgentId: "agent-1", status: "reviewing" })],
+    ["todo", makeTask({ column: "todo", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["triage", makeTask({ column: "triage", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["archived", makeTask({ column: "archived", assignedAgentId: undefined, checkedOutBy: undefined })],
+  ])("keeps %s sends routed to addSteeringComment", async (_label, task) => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(task);
+    render(<TaskChatTab task={task} projectId="project-1" active addToast={vi.fn()} sessionLive={false} />);
+
+    await user.type(screen.getByLabelText("Message active agent session"), "Keep steering");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Keep steering", "project-1");
+    });
+    expect(mockedRefineTask).not.toHaveBeenCalled();
   });
 
   it("renders a sent user message in the chat transcript", async () => {
@@ -1192,7 +1270,9 @@ describe("TaskChatTab", () => {
   ])("keeps the composer sendable for %s column", (_label, task, showsActiveCopy) => {
     render(<TaskChatTab task={task} active addToast={vi.fn()} sessionLive={false} />);
 
-    if (showsActiveCopy) {
+    if (task.column === "done") {
+      expectDoneRefinementCopy();
+    } else if (showsActiveCopy) {
       expectActiveSessionCopy();
     } else {
       expectNoInactiveSessionHint();
@@ -1265,6 +1345,38 @@ describe("TaskChatTab", () => {
     expect(input).toHaveValue("");
   });
 
+  it("uses the same send lifecycle while creating a done-task refinement", async () => {
+    const user = userEvent.setup();
+    const send = deferred<Task>();
+    mockedRefineTask.mockReturnValue(send.promise);
+    render(<TaskChatTab task={makeTask({ column: "done" })} active addToast={vi.fn()} sessionLive={false} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(input).not.toBeDisabled();
+    expect(sendButton).toBeDisabled();
+
+    await user.type(input, "   ");
+    expect(sendButton).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, "Create follow-up");
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    const sendingButton = screen.getByRole("button", { name: "Sending" });
+    expect(sendingButton).toBeDisabled();
+    expect(sendingButton).toHaveTextContent("");
+    expect(input).toBeDisabled();
+
+    await act(async () => {
+      send.resolve(makeTask({ id: "FN-444", column: "todo" }));
+      await send.promise;
+    });
+
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveValue("");
+  });
+
   it("rolls back optimistic messages and surfaces send failures through addToast", async () => {
     const user = userEvent.setup();
     const addToast = vi.fn();
@@ -1291,6 +1403,38 @@ describe("TaskChatTab", () => {
       expect(screen.queryByTestId("task-chat-entry-user")).not.toBeInTheDocument();
       expect(addToast).toHaveBeenCalledWith("Unable to send message: network down", "error");
     });
+  });
+
+  it("rolls back done-task optimistic messages when refinement creation fails", async () => {
+    const user = userEvent.setup();
+    const addToast = vi.fn();
+    const onTaskUpdated = vi.fn();
+    const send = deferred<Task>();
+    mockedRefineTask.mockReturnValue(send.promise);
+    render(<TaskChatTab task={makeTask({ column: "done" })} active addToast={addToast} onTaskUpdated={onTaskUpdated} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    await user.type(input, "make a follow-up");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const transcript = screen.getByTestId("task-chat-transcript");
+    expect(within(transcript).getByTestId("task-chat-entry-user")).toBeVisible();
+    expect(within(transcript).getByText("make a follow-up")).toBeVisible();
+
+    await act(async () => {
+      send.reject(new Error("refine failed"));
+      try {
+        await send.promise;
+      } catch {
+        // Expected rejection drives the component rollback path.
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("task-chat-entry-user")).not.toBeInTheDocument();
+      expect(addToast).toHaveBeenCalledWith("Unable to send message: refine failed", "error");
+    });
+    expect(input).toHaveValue("make a follow-up");
+    expect(onTaskUpdated).not.toHaveBeenCalled();
   });
 
   it("renders the same composer affordance shell on desktop and mobile breakpoints", () => {

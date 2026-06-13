@@ -3,7 +3,7 @@ import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
-import { addSteeringComment } from "../api";
+import { addSteeringComment, refineTask } from "../api";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { ToastType } from "../hooks/useToast";
 import { getErrorMessage } from "@fusion/core";
@@ -429,9 +429,15 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   const transcriptItems = useMemo(() => buildTranscriptItems(entries, userMessages), [entries, userMessages]);
   const transcriptItemCount = entries.length + userMessages.length;
   const activeSession = isActiveAgentSession(task, { sessionLive });
-  const sessionHint = activeSession
-    ? "Message the active agent session. Guidance is delivered to the running session in real time."
-    : null;
+  const isDoneTask = task.column === "done";
+  const sessionHint = isDoneTask
+    ? "Send a message to start a refinement task for this completed task."
+    : activeSession
+      ? "Message the active agent session. Guidance is delivered to the running session in real time."
+      : null;
+  const composerPlaceholder = isDoneTask
+    ? "Start a refinement task for this completed task"
+    : "Steer the currently executing agent";
   const canSend = draft.trim().length > 0 && !sending;
 
   const resizeComposer = useCallback(() => {
@@ -574,18 +580,23 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     setOptimisticMessages((current) => [...current, optimisticMessage]);
     setSending(true);
     try {
-      const updatedTask = await addSteeringComment(task.id, text, projectId);
-      const persistedComment = updatedTask.steeringComments
-        ?.filter((comment) => comment.author === "user" && comment.text === text)
-        .at(-1);
-      if (persistedComment) {
-        setOptimisticMessages((current) => current.map((message) => (
-          message.id === optimisticMessage.id
-            ? { id: persistedComment.id, text: persistedComment.text, createdAt: persistedComment.createdAt, optimistic: true }
-            : message
-        )));
+      if (isDoneTask) {
+        const newTask = await refineTask(task.id, text, projectId);
+        addToast(`Refinement task created: ${newTask.id}`, "success");
+      } else {
+        const updatedTask = await addSteeringComment(task.id, text, projectId);
+        const persistedComment = updatedTask.steeringComments
+          ?.filter((comment) => comment.author === "user" && comment.text === text)
+          .at(-1);
+        if (persistedComment) {
+          setOptimisticMessages((current) => current.map((message) => (
+            message.id === optimisticMessage.id
+              ? { id: persistedComment.id, text: persistedComment.text, createdAt: persistedComment.createdAt, optimistic: true }
+              : message
+          )));
+        }
+        onTaskUpdated?.(updatedTask);
       }
-      onTaskUpdated?.(updatedTask);
       setDraft("");
     } catch (error) {
       setOptimisticMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
@@ -593,7 +604,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     } finally {
       setSending(false);
     }
-  }, [addToast, draft, onTaskUpdated, projectId, sending, task.id]);
+  }, [addToast, draft, isDoneTask, onTaskUpdated, projectId, sending, task.id]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -688,7 +699,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
             ref={textareaRef}
             className="input task-chat-input"
             value={draft}
-            placeholder="Steer the currently executing agent"
+            placeholder={composerPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={sending}

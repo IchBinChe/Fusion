@@ -1,6 +1,10 @@
 import { definePlugin } from "@fusion/plugin-sdk";
 import { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
 import { installBundledCeSkills } from "./skill-installation.js";
+import {
+  installBundledCeAgents,
+  resolveDefaultAgentsInstallTargetRoot,
+} from "./agent-installation.js";
 import { ensureCeSchema } from "./schema.js";
 import { createSessionRoutes } from "./routes/session-routes.js";
 import { createArtifactRoutes } from "./routes/artifact-routes.js";
@@ -16,6 +20,12 @@ export {
   resolveDefaultInstallTargetRoot,
   isPluginLocalPath,
 } from "./skill-installation.js";
+export {
+  installBundledCeAgents,
+  resolveBundledAgentsRoot,
+  resolveDefaultAgentsInstallTargetRoot,
+  isPluginLocalAgentsPath,
+} from "./agent-installation.js";
 export { ensureCeSchema } from "./schema.js";
 export { CeSessionStore, getCeSessionStore } from "./session/session-store.js";
 export { CePipelineStore, getCePipelineStore } from "./sync/pipeline-store.js";
@@ -128,8 +138,40 @@ const plugin = definePlugin({
         const message = error instanceof Error ? error.message : String(error);
         ctx.logger.error(`Compound Engineering skill install failed: ${message}`);
       }
+
+      // Install the bundled ce-* persona definitions (same posture as skills:
+      // pinned, plugin-local, idempotent, never a global ~/.claude/agents). The
+      // CE skills read these and pass them to fn_spawn_agent.systemPromptOverride.
+      try {
+        const { targetRoot, results } = installBundledCeAgents();
+        const installed = results.filter((r) => r.outcome === "installed").length;
+        const errored = results.filter((r) => r.outcome === "error");
+        if (errored.length > 0) {
+          ctx.logger.warn(
+            `Compound Engineering: ${errored.length} agent def(s) failed to install: ${errored
+              .map((e) => `${e.agentId} (${e.reason})`)
+              .join(", ")}`,
+          );
+        }
+        ctx.logger.info(
+          `Compound Engineering agent personas ready — installed=${installed} target=${targetRoot}`,
+        );
+        ctx.emitEvent("compound-engineering:agents-installed", { targetRoot, results });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.logger.error(`Compound Engineering agent install failed: ${message}`);
+      }
     },
   },
+  // Expose the plugin-local ce-* persona-definition directory to executor /
+  // workflow-step sessions via FUSION_CE_AGENTS_DIR. The CE skills read a persona
+  // def from here and pass its body to fn_spawn_agent's systemPromptOverride —
+  // the lightweight subagent path (no plugin agent-contribution channel exists).
+  // Defs are installed in onLoad.
+  executorRuntimeEnv: () => ({
+    env: { FUSION_CE_AGENTS_DIR: resolveDefaultAgentsInstallTargetRoot() },
+    description: "compound-engineering ce-* persona definitions directory",
+  }),
   routes: [...createSessionRoutes(), ...createArtifactRoutes()],
   dashboardViews: [
     {

@@ -4,6 +4,10 @@
 
 The Fusion dashboard is the main control plane for tasks, agents, missions, settings, logs, and repository operations.
 
+## Dashboard Updates
+
+When Fusion detects a newer `@runfusion/fusion` release, the Settings modal footer shows the available version with **Learn more** and **Update now** actions. **Update now** installs the latest global package with npm; after it succeeds, restart Fusion to apply the new version because the already-running dashboard server is unchanged until restart.
+
 ## Browser Navigation
 
 The dashboard now handles browser back navigation consistently on desktop and mobile.

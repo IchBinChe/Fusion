@@ -171,6 +171,8 @@ Disable daily update checks globally:
 fn settings set updateCheckEnabled false
 ```
 
+When the dashboard footer reports that a newer `@runfusion/fusion` version is available, **Update now** runs the same global npm install as `fn update` (`npm install -g @runfusion/fusion@latest`) and retries once with `--force` for the legacy `fn`/`fusion` binary-collision case. A successful install updates the global package on disk, but the currently running Fusion server is not hot-swapped; restart Fusion to run the newly installed version.
+
 ---
 
 ## Workflow Settings

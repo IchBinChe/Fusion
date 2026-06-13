@@ -812,6 +812,19 @@ export function refreshUpdateCheck(projectId?: string): Promise<UpdateCheckRespo
   });
 }
 
+export interface UpdateInstallResponse {
+  currentVersion: string;
+  latestVersion: string | null;
+  updated: boolean;
+  error?: string;
+}
+
+export function installUpdate(projectId?: string): Promise<UpdateInstallResponse> {
+  return api<UpdateInstallResponse>(withProjectId("/update-check/install", projectId), {
+    method: "POST",
+  });
+}
+
 export interface RemoteSettings {
   remoteActiveProvider: "tailscale" | "cloudflare" | null;
   remoteTailscaleEnabled: boolean;

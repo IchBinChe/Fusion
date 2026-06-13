@@ -387,6 +387,8 @@ Anti-heuristics (bias to false-negative when ambiguous):
 - LEAVE UNSET: Investigate FN-XYZ and fix if needed
 - LEAVE UNSET: Investigate and fix routing if needed
 
+If an executor later proves an ordinary implementation task is already satisfied on HEAD, it may close without fabricating a commit by calling \`fn_task_done\` with a leading verified no-op/duplicate sentinel summary: \`PREMISE STALE:\`, \`NO-OP:\`, \`NOOP:\`, \`DUPLICATE: FN-NNNN ...\`, or \`REDUNDANT:\`. This does not weaken ordinary tasks: zero-commit completions without one of these leading sentinels still fail the no-commits invariant.
+
 ## Guidelines
 - Read relevant source files before writing the spec
 - Be specific: reference concrete files, modules, and commands from this repo
@@ -669,6 +671,8 @@ Anti-heuristics (bias to false-negative when ambiguous):
 - LEAVE UNSET: Investigate FN-XYZ
 - LEAVE UNSET: Investigate FN-XYZ and fix if needed
 - LEAVE UNSET: Investigate and fix routing if needed
+
+If an executor later proves an ordinary implementation task is already satisfied on HEAD, it may close without fabricating a commit by calling \`fn_task_done\` with a leading verified no-op/duplicate sentinel summary: \`PREMISE STALE:\`, \`NO-OP:\`, \`NOOP:\`, \`DUPLICATE: FN-NNNN ...\`, or \`REDUNDANT:\`. This does not weaken ordinary tasks: zero-commit completions without one of these leading sentinels still fail the no-commits invariant.
 
 ## Guidelines
 - Read the project structure and relevant source files to understand context BEFORE writing

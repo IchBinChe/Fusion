@@ -9,7 +9,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -1109,7 +1109,7 @@ PROMPT.md is captured at task-creation time; HEAD may have moved on since then. 
 3. Mark every remaining step skipped with a one-line reason: \`fn_task_update(step=N, status="skipped")\`.
 4. Call \`fn_task_done\` with a summary that begins \`PREMISE STALE:\` followed by the concrete reason (e.g. \`PREMISE STALE: targeted reproduction passes unchanged on HEAD; PROMPT claimed MOBILE_MEDIA_QUERY had been expanded but useViewportMode.ts:9 still exports the legacy value\`).
 
-This path exists specifically to prevent the executor from looping when PROMPT.md is out of sync with HEAD. Use it only after running the actual reproduction — do not invoke it to dodge real work.
+This path exists specifically to prevent the executor from looping when PROMPT.md is out of sync with HEAD. Use it only after running the actual reproduction — do not invoke it to dodge real work. If a task is verified as a no-op, duplicate, or redundant for the same reason (the requested behavior is already present on HEAD), \`fn_task_done\` may also use a leading sentinel summary of \`NO-OP:\`, \`NOOP:\`, \`DUPLICATE: FN-NNNN ...\`, or \`REDUNDANT:\`. These sentinels are audit-logged and allow a verified zero-commit completion; ordinary zero-commit implementation completions without a recognized leading sentinel are still refused.
 
 **Logging important actions:** \`fn_task_log(message="what happened")\`
 
@@ -9509,6 +9509,7 @@ export class TaskExecutor {
     task: Task,
     worktreePathOverride?: string,
     allowReanchor = true,
+    options?: { noOpCompletion?: boolean; noOpCompletionReason?: string },
   ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
     const settings = await this.store.getSettings();
     const branchName = resolveTaskWorkingBranch(task);
@@ -9572,7 +9573,7 @@ export class TaskExecutor {
               executorLog.log(`${task.id}: re-anchored nested task.worktree ${worktreePath} -> ${reanchor.root}`);
               await this.store.logEntry(task.id, `Re-anchored nested task.worktree from ${worktreePath} to ${reanchor.root}`, undefined, this.getRunContextFor(task.id));
               await this.emitWorktreeReanchoredAudit(task.id, worktreePath, reanchor.root, "verify-worktree-invariants");
-              return this.verifyWorktreeInvariants(task, reanchor.root, false);
+              return this.verifyWorktreeInvariants(task, reanchor.root, false, options);
             }
           }
           return {
@@ -9649,6 +9650,9 @@ export class TaskExecutor {
     );
     const noCommitEligibilityReason =
       getNoCommitEligibilityReason(task) ??
+      (options?.noOpCompletion
+        ? options.noOpCompletionReason ?? "verified no-op/duplicate completion sentinel"
+        : null) ??
       (promptDerivedEligibility.eligible
         ? promptDerivedEligibility.reason ?? "prompt-derived no-commit eligibility"
         : null);
@@ -9878,7 +9882,13 @@ export class TaskExecutor {
           };
         }
 
-        const invariantCheck = await this.verifyWorktreeInvariants(task, worktreePath);
+        const noOpMarker = parseNoOpCompletionMarker(params.summary);
+        const invariantCheck = await this.verifyWorktreeInvariants(task, worktreePath, true, {
+          noOpCompletion: Boolean(noOpMarker),
+          noOpCompletionReason: noOpMarker
+            ? `verified ${noOpMarker.kind} completion sentinel${noOpMarker.canonicalId ? ` (${noOpMarker.canonicalId})` : ""}`
+            : undefined,
+        });
         if (!invariantCheck.ok) {
           const refusalMessage = `fn_task_done refused: ${invariantCheck.reason} — observed=${invariantCheck.observed}, expected=${invariantCheck.expected}`;
           await store.logEntry(taskId, refusalMessage, undefined, this.getRunContextFor(task.id));
@@ -10013,6 +10023,52 @@ export class TaskExecutor {
               error: scopeLeakCheck.message,
             },
           };
+        }
+
+        if (noOpMarker) {
+          const runContext = this.getRunContextFor(taskId);
+          await store.updateTask(taskId, { noCommitsExpected: true });
+          await store.logEntry(
+            taskId,
+            `Verified ${noOpMarker.kind} completion sentinel accepted; no commits expected for terminal handoff`,
+            JSON.stringify({
+              kind: noOpMarker.kind,
+              reason: noOpMarker.reason,
+              canonicalId: noOpMarker.canonicalId,
+              summary: params.summary,
+              runId: runContext?.runId,
+              agentId: runContext?.agentId,
+            }),
+            runContext,
+          );
+          const recordActivity = (store as typeof store & {
+            recordActivity?: (entry: {
+              type: "task:updated";
+              taskId: string;
+              taskTitle?: string;
+              details: string;
+              metadata?: Record<string, unknown>;
+            }) => Promise<unknown>;
+          }).recordActivity;
+          if (recordActivity) {
+            await recordActivity.call(store, {
+              type: "task:updated",
+              taskId,
+              taskTitle: task.title,
+              details: `Task marked as verified ${noOpMarker.kind}; no commits expected`,
+              metadata: {
+                taskId,
+                kind: noOpMarker.kind,
+                reason: noOpMarker.reason,
+                canonicalId: noOpMarker.canonicalId,
+                summary: params.summary,
+                runId: runContext?.runId,
+                agentId: runContext?.agentId,
+              },
+            }).catch((error: unknown) => {
+              executorLog.warn(`${taskId}: failed to record no-op completion activity: ${error instanceof Error ? error.message : String(error)}`);
+            });
+          }
         }
 
         onDone();

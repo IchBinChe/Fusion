@@ -156,6 +156,106 @@ describe("FN-4114 fn_task_done invariants", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
   });
 
+  it.each([
+    "NO-OP: existing tests already cover this",
+    "PREMISE STALE: targeted reproduction already passes unchanged on HEAD",
+    "DUPLICATE: FN-6239 existing QuickChatFAB tests already cover this",
+  ])("FN-6275 allows verified no-op zero-commit completion with sentinel %s", async (summary) => {
+    const { store, tool } = await setup({
+      steps: [
+        { name: "Preflight", status: "done" as const },
+        { name: "Implement", status: "skipped" as const },
+        { name: "Testing & Verification", status: "done" as const },
+      ],
+      currentStep: 2,
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-4114\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", { summary });
+
+    expect(result.content[0].text).toContain("Task marked complete");
+    expect(result.content[0].text).not.toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-4114", { noCommitsExpected: true });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-4114",
+      expect.stringContaining("completion sentinel accepted"),
+      expect.stringContaining(summary),
+      undefined,
+    );
+    expect(store.recordActivity).toHaveBeenCalledWith(expect.objectContaining({
+      type: "task:updated",
+      taskId: "FN-4114",
+      metadata: expect.objectContaining({ summary }),
+    }));
+  });
+
+  it("FN-6275 still refuses ordinary zero-commit completion summaries", async () => {
+    const { store, tool } = await setup({
+      steps: [{ name: "Implement", status: "done" as const }],
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-4114\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", { summary: "Verified existing behavior with targeted tests." });
+
+    expect(result.content[0].text).toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-4114", { noCommitsExpected: true });
+  });
+
+  it.each([
+    ["wrong_toplevel", "/repo\n", "fusion/fn-4114\n"],
+    ["wrong_branch", "/repo/.worktrees/swift-falcon\n", "main\n"],
+  ] as const)("FN-6275 does not relax %s for sentinel summaries", async (reason, toplevel, branch) => {
+    const { store, tool } = await setup({ steps: [{ name: "Implement", status: "done" as const }] });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from(toplevel);
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from(branch);
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", { summary: "NO-OP: already covered" });
+
+    expect(result.content[0].text).toContain(`fn_task_done refused: ${reason}`);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-4114", { noCommitsExpected: true });
+  });
+
+  it("FN-6275 sentinel summaries do not auto-complete multiple pending unreviewed steps", async () => {
+    const { store, tool } = await setup({
+      steps: [
+        { name: "Implement", status: "in-progress" as const },
+        { name: "Testing", status: "pending" as const },
+      ],
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-4114\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", { summary: "NO-OP: already covered" });
+
+    expect(result.content[0].text).toContain("fn_task_done refused (bulk-step-completion-without-review)");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
+  });
+
   it("FN-350 allows Review Level 1 coordination completion with zero commits when no source files are scoped", async () => {
     const fn350Prompt = `# Task: FN-350 - Route Ready Swift Tasks to Executor Owner
 

@@ -345,6 +345,7 @@ export function createMockStore() {
       updatedAt: new Date().toISOString(),
     }),
     updateTask: vi.fn().mockResolvedValue({}),
+    recordActivity: vi.fn().mockResolvedValue({}),
     moveTask: vi.fn().mockResolvedValue({}),
     handoffToReview: vi.fn().mockImplementation(async (id: string) => store.moveTask(id, "in-review")),
     mergeTask: vi.fn().mockResolvedValue({}),

@@ -146,6 +146,7 @@ export class TriageProcessor {
   /** Tasks killed by the stuck task detector (to avoid reporting as errors). */
   private stuckAborted = new Set<string>();
   private taskDeletedHandler?: (task: Task) => void;
+  private taskPausedHandler?: (task: Task) => void;
 
   /**
    * @param store — Task store instance (also used to listen for `settings:updated` events)
@@ -218,6 +219,32 @@ export class TriageProcessor {
         this.activeSessions.delete(task.id);
       }
     };
+
+    this.taskPausedHandler = (task: Task) => {
+      if (!task?.id || (task.paused !== true && task.userPaused !== true)) {
+        return;
+      }
+      if (this.activeSubagentSessions.has(task.id)) {
+        this.disposeSubagentsForTask(task.id, "task paused");
+      }
+      if (this.activeSessions.has(task.id)) {
+        const session = this.activeSessions.get(task.id)!;
+        planLog.log(`task paused — terminating triage session for ${task.id}`);
+        this.pauseAborted.add(task.id);
+        this.options.stuckTaskDetector?.untrackTask(task.id);
+        const sessionWithAbort = session as {
+          abort?: () => Promise<void>;
+          dispose: () => void;
+        };
+        if (typeof sessionWithAbort.abort === "function") {
+          void sessionWithAbort.abort().catch((err) => {
+            planLog.warn(`Failed to abort triage session for ${task.id}: ${err}`);
+          });
+        }
+        session.dispose();
+        this.activeSessions.delete(task.id);
+      }
+    };
   }
 
   start(): void {
@@ -225,6 +252,9 @@ export class TriageProcessor {
     this.running = true;
     if (this.taskDeletedHandler && typeof this.store.on === "function") {
       this.store.on("task:deleted", this.taskDeletedHandler);
+    }
+    if (this.taskPausedHandler && typeof this.store.on === "function") {
+      this.store.on("task:updated", this.taskPausedHandler);
     }
 
     // Clear stale "planning" statuses left by a prior crash/restart.
@@ -266,6 +296,9 @@ export class TriageProcessor {
     }
     if (this.taskDeletedHandler && typeof this.store.off === "function") {
       this.store.off("task:deleted", this.taskDeletedHandler);
+    }
+    if (this.taskPausedHandler && typeof this.store.off === "function") {
+      this.store.off("task:updated", this.taskPausedHandler);
     }
     // Tear down any in-flight specify sessions and reviewer subagents so they
     // don't keep streaming LLM tokens / tool calls past engine shutdown.
@@ -404,6 +437,11 @@ export class TriageProcessor {
    */
   async recoverApprovedTask(task: Task): Promise<boolean> {
     if (task.column !== "triage" || task.status !== "planning") {
+      return false;
+    }
+
+    if (task.paused === true || task.userPaused === true) {
+      planLog.log(`${task.id} approved-spec recovery skipped — task is paused`);
       return false;
     }
 
@@ -2242,6 +2280,25 @@ export class TriageProcessor {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       planLog.warn(`${task.id}: near-duplicate backstop failed open: ${message}`);
+    }
+
+    let latestTransitionTask: Task | undefined;
+    try {
+      latestTransitionTask = await this.store.getTask(task.id);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      planLog.warn(`${task.id}: failed to re-read task before approved-spec transition (${message}); proceeding with original task snapshot`);
+      latestTransitionTask = task;
+    }
+    if (latestTransitionTask?.paused === true || latestTransitionTask?.userPaused === true) {
+      const restoreStatus = options.isReplan ? "needs-replan" : null;
+      await this.store.updateTask(task.id, { status: restoreStatus });
+      await this.store.logEntry(
+        task.id,
+        "Specification approved but task is paused — leaving in triage, will resume on unpause",
+      );
+      planLog.log(`${task.id} approved specification paused — leaving in triage, will resume on unpause`);
+      return;
     }
 
     if (settings.requirePlanApproval) {

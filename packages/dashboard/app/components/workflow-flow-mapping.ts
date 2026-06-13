@@ -226,7 +226,7 @@ function foreachConfigOf(node: WorkflowIrNode): WorkflowForeachConfig | undefine
 }
 
 function loopConfigOf(node: WorkflowIrNode): WorkflowLoopConfig | undefined {
-  if (node.kind !== "loop") return undefined;
+  if (node.kind !== "loop" && node.kind !== "retry-backoff") return undefined;
   const cfg = node.config as Partial<WorkflowLoopConfig> | undefined;
   if (!cfg || !cfg.template) return undefined;
   return cfg as WorkflowLoopConfig;
@@ -375,7 +375,11 @@ export function irToFlow(def: WorkflowDefinition): {
 function nodeConfig(node: FlowNode<WorkflowFlowNodeData>): Record<string, unknown> | undefined {
   const data = node.data;
   const config: Record<string, unknown> = { ...(data.config ?? {}) };
-  const fallbackLabel = data.kind === "merge" ? "Merge boundary" : node.id;
+  const fallbackLabel = data.kind === "merge"
+    ? "Merge boundary"
+    : node.parentId
+      ? templateNodeIdFromChild(node.parentId, node.id)
+      : node.id;
   if (data.kind !== "start" && data.kind !== "end" && data.label && data.label !== fallbackLabel) {
     config.name = data.label;
   } else {

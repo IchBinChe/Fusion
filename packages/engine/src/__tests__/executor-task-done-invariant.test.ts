@@ -156,6 +156,164 @@ describe("FN-4114 fn_task_done invariants", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
   });
 
+  it("FN-350 allows Review Level 1 coordination completion with zero commits when no source files are scoped", async () => {
+    const fn350Prompt = `# Task: FN-350 - Route Ready Swift Tasks to Executor Owner
+
+**Created:** 2026-06-12
+**Size:** S
+
+## Review Level: 1 (Plan Only)
+
+**Assessment:** This is a coordination/routing task that should not change product source, but it can affect execution ordering and owner assignment for active Swift implementation work. Risk is low if the executor follows the existing coordinator handoff policy, routes at most one existing ready task, and records clear evidence instead of creating duplicate implementation work.
+
+## Mission
+
+Route exactly one existing ready Swift implementation task to the durable executor owner, or record the intentional block if no safe candidate exists. Do not change product source.
+
+## File Scope
+
+Atlas Notes task-board artifacts only:
+
+- FN-350 task document \`docs\` via \`fn_task_document_write\`
+- Board task metadata and logs via Fusion task tools
+
+## Steps
+
+### Step 0: Preflight
+- [x] Required board records exist.
+
+### Step 1: Re-check live candidate readiness
+- [x] Candidate readiness inspected.
+
+### Step 2: Select exactly one routing action
+- [x] One routing action selected.
+
+### Step 3: Perform safe routing or record intentional block
+- [x] Routing evidence recorded.
+
+### Step 4: Testing & Verification
+- [x] Board-only verification recorded.
+
+### Step 5: Documentation & Delivery
+- [x] Final documentation saved.
+
+## Do NOT
+
+- Do not edit product source.
+- Do not create duplicate implementation tasks.
+`;
+    const { store, tool } = await setup({
+      id: "FN-350",
+      title: "Route Ready Swift Tasks to Executor Owner",
+      description: "Coordination/routing task with task-document evidence only.",
+      prompt: fn350Prompt,
+      branch: "fusion/fn-350",
+      noCommitsExpected: undefined,
+      steps: [
+        { name: "Preflight", status: "done" as const },
+        { name: "Re-check live candidate readiness", status: "done" as const },
+        { name: "Select exactly one routing action", status: "done" as const },
+        { name: "Perform safe routing or record intentional block", status: "done" as const },
+        { name: "Testing & Verification", status: "done" as const },
+        { name: "Documentation & Delivery", status: "in-progress" as const },
+      ],
+      currentStep: 5,
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-350\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    store.moveTask.mockClear();
+    const result = await tool.execute("id", { summary: "Recorded routing evidence in task documents and logs." });
+
+    expect(result.content[0].text).toContain("Task marked complete");
+    expect(result.content[0].text).not.toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask.mock.calls).toEqual([["FN-350", "in-progress"]]);
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+  });
+
+  it("FN-350 refuses contradictory implementation plus coordination fallback prompts", async () => {
+    const prompt = `# Task: FN-350 - Route Ready Swift Tasks to Executor Owner
+
+## Review Level: 1 (Plan Only)
+
+**Assessment:** This is a coordination/routing task that should not change product source.
+
+## Mission
+Implement the source fix if possible, or record the intentional block if no safe candidate exists. Do not change product source.
+
+## File Scope
+
+- FN-350 task document \`docs\` via \`fn_task_document_write\`
+
+## Steps
+
+### Step 1: Decide
+- [x] Decision recorded.
+`;
+    const { store, tool } = await setup({
+      id: "FN-350",
+      title: "Route Ready Swift Tasks to Executor Owner",
+      description: "Coordination/routing task with task-document evidence only.",
+      prompt,
+      branch: "fusion/fn-350",
+      noCommitsExpected: undefined,
+      steps: [{ name: "Decide", status: "done" as const }],
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-350\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", {});
+
+    expect(result.content[0].text).toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-350", "todo", { preserveProgress: true });
+  });
+
+  it("FN-4114 still refuses source-changing implementation tasks with zero commits and no explicit no-commit contract", async () => {
+    const implementationPrompt = `# Task: FN-4114 - Implement source change
+
+**Size:** M
+
+## Review Level: 2 (Plan and Code)
+
+## Mission
+
+Implement a bug fix in the engine.
+
+## File Scope
+
+- packages/engine/src/executor.ts
+- packages/engine/src/__tests__/executor-task-done-invariant.test.ts
+
+## Steps
+
+### Step 1: Implement
+- [ ] Change source code and tests.
+`;
+    const { store, tool } = await setup({ prompt: implementationPrompt, noCommitsExpected: undefined });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-4114\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", {});
+
+    expect(result.content[0].text).toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-4114", "todo", { preserveProgress: true });
+  });
+
   it("FN-4114 allows no-commit completion when noCommitsExpected is true", async () => {
     const { store, tool } = await setup({ noCommitsExpected: true });
     mockedExecSync.mockImplementation((cmd: string) => {

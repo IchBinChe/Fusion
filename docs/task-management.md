@@ -876,7 +876,10 @@ Use `noCommitsExpected: true` for tasks where the deliverable is a decision/repo
 
 - Meaning: executor allows `fn_task_done` with zero commits for that task.
 - Triage auto-sets it only when the task is clearly decision-shaped (e.g. "Decide whether...", "Evaluate...", "Verify...", "Audit...") with explicitly observational acceptance criteria and explicit no-code language.
+- Review Level 1 coordination/routing tasks that are board-only, explicitly say not to change source, and scope only task documents/metadata can also complete without commits even if older prompts omitted the explicit flag. This fallback is intentionally narrow and exists to recover plan-only coordination work; it does not bypass wrong-worktree or wrong-branch checks.
 - Ambiguous/forked tasks (e.g. "Investigate..." or "Investigate and fix if needed") leave it unset by default.
+- Implementation, feature, bug-fix, source-docs, test, config, or broad investigation tasks still require commits unless they have an explicit and valid no-commit contract.
+- If a legacy coordination task is stuck with `fn_task_done refused: no_commits`, prefer setting/verifying `noCommitsExpected` and re-running normal no-op finalization rather than editing `.fusion/fusion.db` directly.
 - You can manually set/clear it in Task Detail via **No commits expected (decision-only task)**.
 - Task cards show a **decision-only** badge when enabled.
 - Finalization still uses the existing no-op review/merge path (`mergeDetails.noOpMerge: true`, `mergeConfirmed: true`); no synthetic merge strategy values are introduced.

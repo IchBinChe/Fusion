@@ -508,6 +508,8 @@ function AppInner() {
     }
   }, [initialLoadComplete]);
 
+  const [quickChatOpen, setQuickChatOpen] = useState(false);
+
   const { keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   // Keyboard visibility controls both MobileNavBar rendering and whether
   // the project content reserves bottom padding for the mobile nav bar.
@@ -532,6 +534,7 @@ function AppInner() {
     isMobile,
     keyboardOpen,
     anyModalOpen: modalManager.anyModalOpen,
+    overlayOpen: isMobile && quickChatOpen,
     isIOS: isIOS(),
   });
   const mobileKeyboardOpen = footerHidden;
@@ -787,7 +790,6 @@ function AppInner() {
       setSelectedPrId(undefined);
     }
   }, [selectedPrId, taskView]);
-  const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [authTokenRecoveryOpen, setAuthTokenRecoveryOpen] = useState(false);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResponse | null>(null);
   const [dbCorruptionRefreshing, setDbCorruptionRefreshing] = useState(false);

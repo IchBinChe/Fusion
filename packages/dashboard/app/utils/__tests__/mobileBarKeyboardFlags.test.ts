@@ -7,6 +7,7 @@ describe("computeMobileBarKeyboardFlags", () => {
       isMobile: true,
       keyboardOpen: true,
       anyModalOpen: false,
+      overlayOpen: false,
       isIOS: false,
     });
 
@@ -15,11 +16,12 @@ describe("computeMobileBarKeyboardFlags", () => {
     expect(flags.navKeyboardOpen).toBe(true);
   });
 
-  it("hides and collapses footer on iOS when keyboard is open and no modal is open", () => {
+  it("hides and collapses footer on iOS when keyboard is open and no overlay is open", () => {
     const flags = computeMobileBarKeyboardFlags({
       isMobile: true,
       keyboardOpen: true,
       anyModalOpen: false,
+      overlayOpen: false,
       isIOS: true,
     });
 
@@ -33,6 +35,7 @@ describe("computeMobileBarKeyboardFlags", () => {
       isMobile: true,
       keyboardOpen: true,
       anyModalOpen: true,
+      overlayOpen: false,
       isIOS: true,
     });
 
@@ -46,6 +49,7 @@ describe("computeMobileBarKeyboardFlags", () => {
       isMobile: true,
       keyboardOpen: false,
       anyModalOpen: false,
+      overlayOpen: false,
       isIOS: true,
     });
 
@@ -61,6 +65,7 @@ describe("computeMobileBarKeyboardFlags", () => {
       isMobile: false,
       keyboardOpen: true,
       anyModalOpen: false,
+      overlayOpen: false,
       isIOS: true,
     });
 
@@ -69,5 +74,55 @@ describe("computeMobileBarKeyboardFlags", () => {
       navKeyboardOpen: false,
       footerKeyboardOpen: false,
     });
+  });
+
+  it("keeps the board footer visible on iOS when a fullscreen overlay owns the keyboard", () => {
+    const flags = computeMobileBarKeyboardFlags({
+      isMobile: true,
+      keyboardOpen: true,
+      anyModalOpen: false,
+      overlayOpen: true,
+      isIOS: true,
+    });
+
+    expect(flags.footerHidden).toBe(false);
+    expect(flags.navKeyboardOpen).toBe(true);
+    expect(flags.footerKeyboardOpen).toBe(true);
+  });
+
+  it("keeps Android board-layout behavior unchanged when a fullscreen overlay owns the keyboard", () => {
+    const flags = computeMobileBarKeyboardFlags({
+      isMobile: true,
+      keyboardOpen: true,
+      anyModalOpen: false,
+      overlayOpen: true,
+      isIOS: false,
+    });
+
+    expect(flags.footerHidden).toBe(false);
+    expect(flags.navKeyboardOpen).toBe(true);
+    expect(flags.footerKeyboardOpen).toBe(false);
+  });
+
+  it("suppresses the original iOS board-shift trigger only when the Quick Chat overlay flag is set", () => {
+    const originalBoardShiftTrigger = computeMobileBarKeyboardFlags({
+      isMobile: true,
+      keyboardOpen: true,
+      anyModalOpen: false,
+      overlayOpen: false,
+      isIOS: true,
+    });
+    const quickChatOverlayKeyboard = computeMobileBarKeyboardFlags({
+      isMobile: true,
+      keyboardOpen: true,
+      anyModalOpen: false,
+      overlayOpen: true,
+      isIOS: true,
+    });
+
+    expect(originalBoardShiftTrigger.footerHidden).toBe(true);
+    expect(quickChatOverlayKeyboard.footerHidden).toBe(false);
+    expect(quickChatOverlayKeyboard.navKeyboardOpen).toBe(true);
+    expect(quickChatOverlayKeyboard.footerKeyboardOpen).toBe(true);
   });
 });

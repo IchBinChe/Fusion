@@ -1,5 +1,5 @@
 import "./TaskDetailModal.css";
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -531,8 +531,6 @@ function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOpt
   }
 }
 
-const DESCRIPTION_TRUNCATE_LENGTH = 200;
-
 // #1403: widened to ColumnId so `.has(task.column)` accepts custom column ids
 // (non-members correctly resolve to false → not editable).
 const EDITABLE_COLUMNS: Set<ColumnId> = new Set<ColumnId>(["triage", "todo"]);
@@ -672,12 +670,15 @@ export function TaskDetailContent({
 
   // Reset description expanded state when task changes
   useEffect(() => {
-    setDescriptionExpanded(task.column === "triage");
+    setDescriptionExpanded(false);
   }, [task.column, task.id]);
 
   const [logSubview, setLogSubview] = useState<"activity" | "agent-log">("activity");
   const [highlightStallCode, setHighlightStallCode] = useState<string | null>(null);
-  const [descriptionExpanded, setDescriptionExpanded] = useState(() => task.column === "triage");
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [titleOverflows, setTitleOverflows] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const displayTitleText = task.title || task.description || task.id;
   const [attachments, setAttachments] = useState<TaskAttachment[]>(task.attachments || []);
   const [uploading, setUploading] = useState(false);
   const [dependencies, setDependencies] = useState<string[]>(task.dependencies || []);
@@ -694,6 +695,43 @@ export function TaskDetailContent({
   const [specFeedback, setSpecFeedback] = useState("");
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [prCreateOpen, setPrCreateOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const titleElement = titleRef.current;
+    if (!titleElement) {
+      setTitleOverflows(false);
+      return;
+    }
+
+    const measureTitleOverflow = () => {
+      let addedCollapsedClass = false;
+      if (descriptionExpanded && !titleElement.classList.contains("detail-title--collapsed")) {
+        titleElement.classList.add("detail-title--collapsed");
+        addedCollapsedClass = true;
+      }
+
+      const overflows = titleElement.scrollHeight > titleElement.clientHeight + 1;
+
+      if (addedCollapsedClass) {
+        titleElement.classList.remove("detail-title--collapsed");
+      }
+
+      setTitleOverflows(overflows);
+    };
+
+    measureTitleOverflow();
+
+    const resizeObserver = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(measureTitleOverflow)
+      : null;
+    resizeObserver?.observe(titleElement);
+    window.addEventListener("resize", measureTitleOverflow);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measureTitleOverflow);
+    };
+  }, [descriptionExpanded, displayTitleText, task.id]);
 
   // Custom field definitions (U13/KTD-14). Resolved for this task's workflow
   // from the board-workflows payload; absent when the workflow declares none,
@@ -2783,39 +2821,36 @@ export function TaskDetailContent({
             </div>
           ) : (
             <>
-              {(() => {
-                const displayText = task.title || task.description || task.id;
-                const shouldTruncate = !descriptionExpanded && displayText.length > DESCRIPTION_TRUNCATE_LENGTH;
-                return (
-                  <>
-                    <div className="detail-heading-row">
-                      <h2 className="detail-title">
-                        {shouldTruncate ? displayText.slice(0, DESCRIPTION_TRUNCATE_LENGTH) + "…" : displayText}
-                      </h2>
-                      {showSummarizeTitleButton && (
-                        <button
-                          type="button"
-                          className="detail-summarize-title-btn"
-                          onClick={() => void handleSummarizeTitle()}
-                          disabled={isSummarizingTitle || isSaving}
-                          data-testid="summarize-title-btn"
-                        >
-                          {isSummarizingTitle ? <Loader2 size={14} className="spinner" /> : <Sparkles size={14} />}
-                          <span>{t("taskDetail.title.summarize", "Summarize as title")}</span>
-                        </button>
-                      )}
-                    </div>
-                    {displayText.length > DESCRIPTION_TRUNCATE_LENGTH && (
-                      <button
-                        className="detail-description-toggle"
-                        onClick={() => setDescriptionExpanded(!descriptionExpanded)}
-                      >
-                        {descriptionExpanded ? t("taskDetail.description.showLess", "Show less") : t("taskDetail.description.showMore", "Show more")}
-                      </button>
-                    )}
-                  </>
-                );
-              })()}
+              <>
+                <div className="detail-heading-row">
+                  <h2
+                    ref={titleRef}
+                    className={`detail-title${descriptionExpanded ? "" : " detail-title--collapsed"}`}
+                  >
+                    {displayTitleText}
+                  </h2>
+                  {showSummarizeTitleButton && (
+                    <button
+                      type="button"
+                      className="detail-summarize-title-btn"
+                      onClick={() => void handleSummarizeTitle()}
+                      disabled={isSummarizingTitle || isSaving}
+                      data-testid="summarize-title-btn"
+                    >
+                      {isSummarizingTitle ? <Loader2 size={14} className="spinner" /> : <Sparkles size={14} />}
+                      <span>{t("taskDetail.title.summarize", "Summarize as title")}</span>
+                    </button>
+                  )}
+                </div>
+                {(titleOverflows || descriptionExpanded) && (
+                  <button
+                    className="detail-description-toggle"
+                    onClick={() => setDescriptionExpanded(!descriptionExpanded)}
+                  >
+                    {descriptionExpanded ? t("taskDetail.description.showLess", "Show less") : t("taskDetail.description.showMore", "Show more")}
+                  </button>
+                )}
+              </>
               {customFieldDefs && customFieldDefs.length > 0 ? (
                 <TaskFieldsSection
                   fieldDefs={customFieldDefs}

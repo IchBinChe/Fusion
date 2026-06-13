@@ -107,6 +107,16 @@
   font-size: 18px;
   font-weight: 600;
   margin-bottom: var(--space-md);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-title--collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 
 .detail-heading-row {

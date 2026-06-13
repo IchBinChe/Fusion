@@ -953,6 +953,12 @@ const spawnAgentParams = Type.Object({
     Type.Literal("custom"),
   ], { description: "Role for the child agent" }),
   task: Type.String({ description: "Task description for the child agent to execute" }),
+  systemPromptOverride: Type.Optional(
+    Type.String({
+      description:
+        "Optional persona/system-prompt for the child agent. When provided (non-empty), it replaces the generic child base prompt so the child runs as a specific persona (e.g. a compound-engineering reviewer). Executor instructions are still appended.",
+    }),
+  ),
 });
 
 /** Result returned from fn_spawn_agent tool */
@@ -14365,7 +14371,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         "When you end (fn_task_done), all spawned children are terminated.",
       parameters: spawnAgentParams,
       execute: async (_id: string, params: Static<typeof spawnAgentParams>) => {
-        const { name, role, task: taskPrompt } = params;
+        const { name, role, task: taskPrompt, systemPromptOverride } = params;
 
         // Check if AgentStore is available
         if (!this.options.agentStore) {
@@ -14416,7 +14422,16 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
 
           // Child agents inherit executor instructions
           const childInstructions = await this.resolveInstructionsForRole("executor", settings);
-          const childBasePrompt = `You are a child agent spawned by a parent task executor.
+          // A non-empty systemPromptOverride lets the caller run the child as a
+          // specific persona (e.g. a compound-engineering reviewer) instead of the
+          // generic child executor. Executor instructions are still appended below.
+          const personaOverride = systemPromptOverride?.trim();
+          const childBasePrompt = personaOverride
+            ? `${personaOverride}
+
+Parent task: ${taskId}
+Child agent: ${agent.id} (${name})`
+            : `You are a child agent spawned by a parent task executor.
 
 Your role:
 - Complete the delegated task in your own worktree.

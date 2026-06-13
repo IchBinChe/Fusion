@@ -57,7 +57,7 @@ The fix has four threads:
 
 - **KTD-3 — The task-card button launches the existing chat-steering surface, scoped to the questions.** Live steering already exists (FN-6338): `addSteeringComment` → `POST /tasks/:id/steer`, `TaskChatTab` with `sessionLive`, `isActiveAgentSession()`. The new button (on `TaskCard.tsx` `card-header-actions` ~2025-2102, shown when `status === "awaiting-user-input"` with a planning marker) deep-links into the task's chat/Q&A surface. *Rationale:* the user asked specifically for a card button + interactive answer session; the steering plumbing already carries answers back.
 
-- **KTD-4 — Install `ce-*` agent definitions the same way skills are installed.** The plugin installs bundled skills via `installBundledCeSkills()` (`src/index.ts:111-131`, `src/skill-installation.ts`). Add a parallel `installBundledCeAgents()` that installs bundled `ce-*` agent definitions into a location Fusion's subagent resolver discovers. The exact resolver path is unverified (see Risk-1 / U2) and must be confirmed before this is wired. *Rationale:* mirror the working skill-install pattern; keep agents versioned with the plugin.
+- **KTD-4 — Add an optional persona-prompt override to `fn_spawn_agent`; install `ce-*` persona defs plugin-locally; the CE skill reads the def and passes it inline.** **VERIFIED (two spikes):** (a) Fusion's spawn primitive is `fn_spawn_agent({ name, role, task })`, `role` an `AgentCapability` — `executor.ts:945-956`; no persona param; children inherit generic `resolveInstructionsForRole(role)` and each gets its own git worktree (`executor.ts:14356-14460`). (b) There is **no plugin agent-contribution channel** in the SDK — `FusionPlugin` contributes `skills`/`workflowSteps`/`traits`/etc. but no `agents`; `pluginRunner` has `getPluginSkills()` but no agent equivalent; `createResolvedAgentSession` threads skills via `additionalSkillPaths` + `requestedSkillNames` but has no agent-definition path. The 43 `ce-*` persona defs ship in the CE plugin cache as plain markdown (frontmatter + system-prompt body). **Chosen approach (lightest that gives real fan-out):** (1) add an optional `systemPromptOverride` (persona prompt) field to `spawnAgentParams`; when present the child session uses it as its system prompt instead of the generic `childBasePrompt` (`executor.ts:14420-14460`). (2) Install the `ce-*` persona defs plugin-locally via `installBundledCeAgents()` (mirror of `installBundledCeSkills()`), and expose the install dir to step sessions via an env var (e.g. `FUSION_CE_AGENTS_DIR`). (3) The CE skills (which have Read in coding mode) read the persona def for the type they want and pass its body as `systemPromptOverride`. *Rationale:* no new plugin-SDK surface (rejected as overkill for one consumer — agents in Fusion are durable store entities, not static plugin contributions); minimal, generic engine change; personas versioned with the plugin. *Fallback (R5):* `role`-only generic child when no override supplied.
 
 - **KTD-5 — CE steps run in `coding` toolMode where they must spawn or write.** `toolMode` is read from node config (`executor.ts:5969`, default readonly). Execute (ce-work) and the merge/PR steps get `toolMode: "coding"` so `fn_spawn_agent` and write tools are present. Plan/review stay readonly unless subagent fan-out is required there too (then coding). *Rationale:* readonly strips the spawn + write tools the CE skills need.
 
@@ -156,31 +156,33 @@ plugins/fusion-plugin-compound-engineering/
   - Edge: env var does not leak into the user's interactive chat sessions (non-workflow paths).
 - **Verification:** new env keys present on step sessions; absent on interactive sessions.
 
-### U2. Verify and wire `ce-*` subagent-type resolution
-- **Goal:** Make CE-spawned subagent types actually resolve inside Fusion sessions — or prove they can't and document the fallback.
+### U2. Add an optional `systemPromptOverride` to `fn_spawn_agent`
+- **Goal:** Let a spawned child run with a supplied persona system prompt, since today it only spawns generic-role children. (Both spikes done — see KTD-4/Risk-1; this is the build.)
 - **Requirements:** R5
-- **Dependencies:** none (spike first)
-- **Files:** `packages/engine/src/pi.ts` (~1930-2042 readonly/extension handling, spawn-agent path), agent/subagent resolution code (search `fn_spawn_agent`, `subagent_type`, agent registry); findings recorded in this plan's Risk section.
-- **Approach:** **Spike first** — trace exactly how `fn_spawn_agent` resolves a `subagent_type` string to an agent definition in a Fusion-spawned session. Determine whether a bundled-on-disk agent definition (`.claude/agents`-style or plugin-registered) is discoverable. Output: a definitive answer + the install target path that U3/KTD-4 needs. If no resolver exists, the unit's deliverable becomes the minimal resolver hook (or the documented single-agent fallback per R5).
-- **Patterns to follow:** how skills are resolved (`skill-resolver.ts`) as the analogue for agent resolution.
+- **Dependencies:** none
+- **Files:** `packages/engine/src/executor.ts` (`spawnAgentParams` 945-956; child-session `systemPrompt` build 14420-14460).
+- **Approach:** Add an optional `systemPromptOverride` string to `spawnAgentParams`. When present, use it as the child session's `systemPrompt` (still composed with executor instructions via `buildSystemPromptWithInstructions`) instead of the generic `childBasePrompt`; keep `role` for capability/model routing. Absent → unchanged behavior. Keep the param generic (not CE-specific) so it's a clean primitive extension.
+- **Patterns to follow:** `buildSystemPromptWithInstructions`; the existing child-session creation block.
 - **Test scenarios:**
-  - Spawn `subagent_type: "ce-correctness-reviewer"` from a coding-mode step resolves to the installed definition.
-  - Unknown agent type degrades gracefully (documented error, not a crash).
-  - Edge: readonly step has no spawn tool (asserts the negative).
-- **Verification:** a coding-mode step can spawn a named `ce-*` agent and receive its output; gap (if any) is documented with the chosen fallback.
+  - Spawn with `systemPromptOverride` uses it as the child system prompt.
+  - Spawn without it is byte-for-byte the old generic-child behavior.
+  - Empty/whitespace override falls back to the generic prompt.
+  - Edge: readonly step has no `fn_spawn_agent` at all (asserts the negative).
+- **Verification:** a child spawned with an override runs under that persona's instructions.
 
-### U3. Bundle and install `ce-*` agent definitions in the plugin
-- **Goal:** Ship the `ce-*` agent definitions with the plugin and install them where U2 determined they resolve.
+### U3. Install `ce-*` persona defs plugin-locally + expose dir; skills read & inline them
+- **Goal:** Ship the 43 `ce-*` persona defs with the plugin and make them reachable so the CE skills can pass them as `systemPromptOverride`.
 - **Requirements:** R5
 - **Dependencies:** U2
-- **Files:** `plugins/fusion-plugin-compound-engineering/.fusion-ce-agents/*.md` (NEW), `plugins/fusion-plugin-compound-engineering/src/agent-installation.ts` (NEW, mirror `skill-installation.ts`), `plugins/fusion-plugin-compound-engineering/src/index.ts` (onLoad — call `installBundledCeAgents()` alongside `installBundledCeSkills()`), `src/skills.ts` analogue for agents.
-- **Approach:** Mirror the skill-installation pattern: a bundled source dir, an installer that copies into the resolver's discovery location (from U2), an emitted `compound-engineering:agents-installed` event. Bundle the agent definitions the CE skills actually spawn (research: `ce-repo-research-analyst`, `ce-learnings-researcher`, `ce-best-practices-researcher`, `ce-framework-docs-researcher`, `ce-web-researcher`, `ce-spec-flow-analyzer`; review personas: `ce-correctness-reviewer`, `ce-maintainability-reviewer`, `ce-testing-reviewer`, `ce-project-standards-reviewer`, and the conditional reviewers; ship `ce-pr-comment-resolver` for U9).
-- **Patterns to follow:** `src/skill-installation.ts`, `installBundledCeSkills()`, the onLoad block in `src/index.ts:111-131`.
+- **Files:** `plugins/fusion-plugin-compound-engineering/src/agents/ce-*.md` (NEW, vendored from cache), `plugins/fusion-plugin-compound-engineering/src/agent-installation.ts` (NEW, mirror `skill-installation.ts`), `src/index.ts` (onLoad — call `installBundledCeAgents()`), engine: set `FUSION_CE_AGENTS_DIR` (or generic contributed-agents dir) on step sessions so skills can locate the defs.
+- **Approach:** Mirror skill installation: bundled source dir → plugin-local `.fusion-ce-agents/` install → idempotent. Expose the install dir to step sessions via env. CE skills (Read in coding mode) read `<dir>/<agentType>.md`, strip frontmatter, and pass the body as `systemPromptOverride` to `fn_spawn_agent`. (Adapting each CE skill's dispatch sections to this Fusion path is part of U5-scope skill edits.)
+- **Patterns to follow:** `skill-installation.ts`, `installBundledCeSkills()`, onLoad block `src/index.ts:111-131`.
 - **Test scenarios:**
-  - onLoad installs agent definitions; install result reports counts.
-  - Re-install is idempotent (matches skill-install behavior).
-  - Edge: missing/corrupt bundled agent file is skipped with a warning, not a throw.
-- **Verification:** after plugin load, the agent definitions exist at the discovery path and U2's resolution test passes against them.
+  - onLoad installs persona defs; install result reports counts; idempotent re-install.
+  - Missing/corrupt def is skipped with a warning, not a throw.
+  - Step session env exposes the agents dir.
+- **Verification:** after load, defs exist at the dir and a skill can read one and spawn with it.
+
 
 ### U4. Swap the Execute node to `ce-work` (coding mode)
 - **Goal:** Implementation runs the CE way.
@@ -286,6 +288,7 @@ plugins/fusion-plugin-compound-engineering/
 ### Deferred to Follow-Up Work
 - Applying the headless signal / subagent enablement to the *other* built-in workflows (`builtin:coding`, `builtin:stepwise-coding`).
 - A general plugin-provided **agent-definition registry** API (this plan installs CE agents via a focused installer; a generic plugin-agents contribution surface is larger).
+- A **lightweight read-only spawn path** that avoids a full git worktree per child for read-only reviewer personas (the `ce-code-review` panel can fan out wide); today every `fn_spawn_agent` child gets its own worktree.
 - Evidence-capture / demo-reel integration in the PR flow (`ce-demo-reel`).
 - HTML/Proof handoff for plans generated inside Fusion.
 
@@ -297,7 +300,7 @@ plugins/fusion-plugin-compound-engineering/
 
 ## Risks & Dependencies
 
-- **Risk-1 (high) — Subagent type resolution may not exist in Fusion's spawn path.** Research indicates `fn_spawn_agent` is present in coding mode but found **no discovery mechanism** that resolves `ce-*` `subagent_type` strings to definitions. **Mitigation:** U2 is a spike that must resolve this before U3/U9 are wired; if no resolver exists, deliver the minimal resolver hook or fall back to single-agent CE behavior (R5) and document it. *This is the largest uncertainty in the plan.*
+- **Risk-1 (high, NOW CHARACTERIZED) — Fusion's spawn primitive has no persona/type parameter.** **Confirmed by spike:** `fn_spawn_agent` is `{ name, role: AgentCapability, task }` (`executor.ts:945-956`); no `subagent_type`. The CE skills' named-persona dispatch can't work unmodified. **Mitigation:** KTD-4 — extend `spawnAgentParams` with an optional persona/`agentType` + install `ce-*` definitions; single-agent inline fallback (R5) if persona is absent. **Secondary cost:** every spawned child gets its own git worktree (`createWorktree`), so wide reviewer fan-out (the `ce-code-review` persona panel) is heavier in Fusion than in Claude Code — consider a lighter ephemeral-session spawn path for read-only reviewer personas (see Deferred). *This is the largest design decision in the plan and changes engine scope.*
 - **Risk-2 (med) — Readonly default silently degrades CE steps.** Any CE step needing spawn/write must set `toolMode: "coding"` or it loses tools with no error. **Mitigation:** KTD-5; tests assert compiled `toolMode`.
 - **Risk-3 (med) — CE PR flow vs. Fusion workflow-owned merge collision.** Two systems touching branch/PR/merge state can race. **Mitigation:** KTD-6 boundary; verify against the engine merge path before U9; keep CE to commit/push/PR-creation/feedback and leave the board merge transition to Fusion.
 - **Risk-4 (low) — Question loop UX.** One-at-a-time questions over the steering channel could feel clunky for multi-question plans. **Mitigation:** sequence questions; reuse the existing input banner; keep ce-plan's "ask one question at a time" discipline.

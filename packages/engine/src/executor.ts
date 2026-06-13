@@ -11830,6 +11830,16 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         ? await this.options.agentStore.getAgent(task.assignedAgentId).catch(() => null)
         : null;
       const workflowRuntimeHint = extractRuntimeHint(workflowAgent?.runtimeConfig);
+      // Signal to skills running in this step (e.g. compound-engineering ce-plan /
+      // ce-work) that they are inside a Fusion autonomous workflow step, NOT an
+      // interactive Claude Code session. There is no synchronous blocking-question
+      // tool here, so a skill must surface user questions via the await-input
+      // convention (which the dashboard / task card renders) instead of calling
+      // AskUserQuestion into the void. Scoped to the step session — the main
+      // executor session deliberately does not carry it.
+      // (FUSION_HEADLESS is reserved for a future genuinely-unattended run signal —
+      // LFG/pipeline — where no human can answer even asynchronously.)
+      const stepEnv: NodeJS.ProcessEnv = { ...(taskEnv ?? process.env), FUSION_WORKFLOW_STEP: "1" };
       const readonlyCustomTools = toolMode === "readonly"
         ? filterCustomToolsForReadonly([])
         : { allowed: [] as ToolDefinition[], denied: [] as string[] };
@@ -11854,7 +11864,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         defaultThinkingLevel: settings.defaultThinkingLevel,
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
-        taskEnv,
+        taskEnv: stepEnv,
         // Skill selection: use assigned agent skills if available, otherwise role fallback
         ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
         ...(readonlyCustomTools.allowed.length > 0 ? { customTools: readonlyCustomTools.allowed } : {}),

@@ -9,11 +9,12 @@ import { createFnAgent } from "../pi.js";
 import { reviewStep as mockedReviewStepFn } from "../reviewer.js";
 import { execSync } from "node:child_process";
 import { findWorktreeUser, aiMergeTask } from "../merger.js";
-import { WorktreePool } from "../worktree-pool.js";
+import { WorktreePool, removeWorktree } from "../worktree-pool.js";
 import { generateWorktreeName, slugify } from "../worktree-names.js";
 import type { Task, TaskDetail } from "@fusion/core";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { StepSessionExecutor } from "../step-session-executor.js";
+import { executingTaskLock } from "../active-session-registry.js";
 import { executorLog } from "../logger.js";
 import { withRateLimitRetry } from "../rate-limit-retry.js";
 import { runVerificationCommand as mockedRunVerificationCommand } from "../verification-utils.js";
@@ -565,6 +566,251 @@ describe("TaskExecutor bounded recovery retries", () => {
     );
   });
 
+  it("force-requeue timeout reaps hung in-flight surfaces and removes the worktree before clearing guards", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createMockStore();
+      const agentStore = {
+        updateAgentState: vi.fn().mockResolvedValue(undefined),
+        deleteAgent: vi.fn().mockResolvedValue(undefined),
+      };
+      const executor = new TaskExecutor(store, "/tmp/test", { agentStore: agentStore as any });
+      const taskId = "FN-001";
+      const worktreePath = "/tmp/test/.worktrees/FN-001";
+      const session = { abort: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), state: {} };
+      const workflowSession = { abort: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), state: {} };
+      const stepExecutor = {
+        abortAllSessionBash: vi.fn(),
+        terminateAllSessions: vi.fn().mockResolvedValue(undefined),
+      };
+      const controller = new AbortController();
+      const controllerAbort = vi.spyOn(controller, "abort");
+      const subagent = { dispose: vi.fn(), state: {} };
+      const cliSession = { kill: vi.fn().mockResolvedValue(undefined) };
+      const childSession = { dispose: vi.fn(), state: {} };
+      vi.mocked(removeWorktree).mockResolvedValue(undefined as any);
+      store.getTask.mockResolvedValue({
+        id: taskId,
+        title: "Test",
+        description: "Test task",
+        column: "in-progress",
+        worktree: worktreePath,
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      (executor as any).executing.add(taskId);
+      executingTaskLock.tryClaim(taskId);
+      (executor as any).activeWorktrees.set(taskId, worktreePath);
+      (executor as any).activeSessions.set(taskId, { session });
+      (executor as any).activeStepExecutors.set(taskId, stepExecutor);
+      (executor as any).activeWorkflowStepSessions.set(taskId, workflowSession);
+      (executor as any).activeConfiguredCommandControllers.set(taskId, new Set([controller]));
+      (executor as any).activeSubagentSessions.set(taskId, new Set([subagent]));
+      (executor as any).activeCliTaskSessions.set(taskId, cliSession);
+      (executor as any).spawnedAgents.set(taskId, new Set(["child-agent"]));
+      (executor as any).childSessions.set("child-agent", childSession);
+      (executor as any).loopRecoveryState.set(taskId, { attempts: 1, pending: true });
+
+      executor.markStuckAborted(taskId, true);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("child-agent", "paused");
+      expect(agentStore.deleteAgent).toHaveBeenCalledWith("child-agent");
+      expect(childSession.dispose).toHaveBeenCalledTimes(1);
+      expect(session.abort).toHaveBeenCalledTimes(1);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+      expect(stepExecutor.abortAllSessionBash).toHaveBeenCalledTimes(1);
+      expect(stepExecutor.terminateAllSessions).toHaveBeenCalled();
+      expect(workflowSession.abort).toHaveBeenCalledTimes(1);
+      expect(workflowSession.dispose).toHaveBeenCalledTimes(1);
+      expect(controllerAbort).toHaveBeenCalledTimes(1);
+      expect(subagent.dispose).toHaveBeenCalledTimes(1);
+      expect(cliSession.kill).toHaveBeenCalledWith("killed");
+      expect(removeWorktree).toHaveBeenCalledWith(expect.objectContaining({
+        worktreePath,
+        rootDir: "/tmp/test",
+        taskId,
+        expectedOwnerTaskId: taskId,
+      }));
+      expect(store.updateTask).toHaveBeenCalledWith(taskId, {
+        status: "queued",
+        error: null,
+        worktree: null,
+        branch: null,
+      });
+      expect(store.moveTask).toHaveBeenCalledWith(taskId, "todo", { preserveProgress: true });
+      expect(session.abort.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(removeWorktree).mock.invocationCallOrder[0]);
+      expect(vi.mocked(removeWorktree).mock.invocationCallOrder[0]).toBeLessThan(store.moveTask.mock.invocationCallOrder[0]);
+      const cleanupCompleteLogIndex = store.logEntry.mock.calls.findIndex(([, message]: any[]) => String(message).includes("Force-kill cleanup completed"));
+      expect(cleanupCompleteLogIndex).toBeGreaterThanOrEqual(0);
+      expect(store.moveTask.mock.invocationCallOrder[0]).toBeLessThan(store.logEntry.mock.invocationCallOrder[cleanupCompleteLogIndex]);
+      expect((executor as any).activeWorktrees.has(taskId)).toBe(false);
+      expect((executor as any).executing.has(taskId)).toBe(false);
+      expect(executingTaskLock.has(taskId)).toBe(false);
+      expect((executor as any).stuckAborted.has(taskId)).toBe(false);
+      expect((executor as any).loopRecoveryState.has(taskId)).toBe(false);
+      expect((executor as any).pausedAborted.has(taskId)).toBe(false);
+      expect(store.logEntry).toHaveBeenCalledWith(taskId, expect.stringContaining("Force-kill cleanup starting"));
+      expect(store.logEntry).toHaveBeenCalledWith(taskId, expect.stringContaining("Force-requeued after stuck-kill"));
+      expect(store.logEntry).toHaveBeenCalledWith(taskId, expect.stringContaining("progress preserved"));
+      expect(store.logEntry).toHaveBeenCalledWith(taskId, expect.stringContaining("Force-kill cleanup completed"));
+    } finally {
+      vi.useRealTimers();
+      executingTaskLock._clearForTest();
+    }
+  });
+
+  it("force-requeue timeout preserves concurrent non-in-progress recovery without reaping surfaces", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createMockStore();
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      const session = { abort: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), state: {} };
+      store.getTask.mockResolvedValue({
+        id: "FN-001",
+        title: "Test",
+        description: "Test task",
+        column: "in-review",
+        worktree: "/tmp/test/.worktrees/FN-001",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      (executor as any).executing.add("FN-001");
+      executingTaskLock.tryClaim("FN-001");
+      (executor as any).activeWorktrees.set("FN-001", "/tmp/test/.worktrees/FN-001");
+      (executor as any).activeSessions.set("FN-001", { session });
+
+      executor.markStuckAborted("FN-001", true);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(session.abort).not.toHaveBeenCalled();
+      expect(session.dispose).not.toHaveBeenCalled();
+      expect(removeWorktree).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "todo", expect.anything());
+      expect((executor as any).executing.has("FN-001")).toBe(false);
+      expect(executingTaskLock.has("FN-001")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      executingTaskLock._clearForTest();
+    }
+  });
+
+  it("force-requeue timeout no-ops when the executor unwound before the grace timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createMockStore();
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      const session = { abort: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), state: {} };
+      (executor as any).executing.add("FN-001");
+      executingTaskLock.tryClaim("FN-001");
+      (executor as any).activeSessions.set("FN-001", { session });
+
+      executor.markStuckAborted("FN-001", true);
+      (executor as any).executing.delete("FN-001");
+      executingTaskLock.release("FN-001");
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(session.abort).not.toHaveBeenCalled();
+      expect(removeWorktree).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "todo", expect.anything());
+    } finally {
+      vi.useRealTimers();
+      executingTaskLock._clearForTest();
+    }
+  });
+
+  it("force-requeue timeout logs non-fatal worktree cleanup failures distinctly", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createMockStore();
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      const session = { abort: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), state: {} };
+      store.getTask.mockResolvedValue({
+        id: "FN-001",
+        title: "Test",
+        description: "Test task",
+        column: "in-progress",
+        worktree: "/tmp/test/.worktrees/FN-001",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      vi.mocked(removeWorktree).mockRejectedValue(new Error("worktree busy"));
+      (executor as any).executing.add("FN-001");
+      executingTaskLock.tryClaim("FN-001");
+      (executor as any).activeWorktrees.set("FN-001", "/tmp/test/.worktrees/FN-001");
+      (executor as any).activeSessions.set("FN-001", { session });
+
+      executor.markStuckAborted("FN-001", true);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", expect.stringContaining("Force-kill cleanup failed to remove worktree"));
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", expect.stringContaining("Force-kill cleanup completed with non-fatal worktree removal failure"));
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
+    } finally {
+      vi.useRealTimers();
+      executingTaskLock._clearForTest();
+    }
+  });
+
+  it("force-requeue timeout honors disabled preserveProgressOnStuckRequeue", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createMockStore();
+      store.getSettings.mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 15000,
+        groupOverlappingFiles: false,
+        autoMerge: false,
+        worktreeInitCommand: undefined,
+        preserveProgressOnStuckRequeue: false,
+      });
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      const resetSpy = vi.spyOn(executor as any, "resetStepsIfWorkLost").mockResolvedValue(undefined);
+      const session = { abort: vi.fn().mockResolvedValue(undefined), dispose: vi.fn(), state: {} };
+      store.getTask.mockResolvedValue({
+        id: "FN-001",
+        title: "Test",
+        description: "Test task",
+        column: "in-progress",
+        worktree: "/tmp/test/.worktrees/FN-001",
+        dependencies: [],
+        steps: [{ name: "step", status: "in-progress" }],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      vi.mocked(removeWorktree).mockResolvedValue(undefined as any);
+      (executor as any).executing.add("FN-001");
+      executingTaskLock.tryClaim("FN-001");
+      (executor as any).activeWorktrees.set("FN-001", "/tmp/test/.worktrees/FN-001");
+      (executor as any).activeSessions.set("FN-001", { session });
+
+      executor.markStuckAborted("FN-001", true);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(resetSpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+      expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", undefined);
+    } finally {
+      vi.useRealTimers();
+      executingTaskLock._clearForTest();
+    }
+  });
+
   it("does not let a late graph failure clobber a retryable requeue", async () => {
     const store = createMockStore();
     const task = {
@@ -696,6 +942,207 @@ describe("TaskExecutor bounded recovery retries", () => {
       expect.anything(),
     );
     expect(store.handoffToReview).not.toHaveBeenCalled();
+  });
+
+  it("auto-retries a bounded transient resume-after-restart graph failure instead of parking", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 0,
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["execute"],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      { graphResumeRetryCount: 1, status: null, error: null },
+      undefined,
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ status: "failed" }),
+      expect.anything(),
+    );
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+  });
+
+  it("auto-retries a bounded transient graph failure after unpause resume instead of parking", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 0,
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["execute"],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      { graphResumeRetryCount: 1, status: null, error: null },
+      undefined,
+    );
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+  });
+
+  it("parks a transient resume graph failure once the retry budget is exhausted", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 2,
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["execute"],
+    });
+
+    const message = "Workflow graph terminated with failure at node 'execute'";
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: message, status: "failed" }, undefined);
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    expect(executeSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it.each([
+    ["non-empty execute-seam reason", { result: { reason: "interpreter-error: boom", visitedNodeIds: ["execute"] } }],
+    ["settings/workflow-selection reason before node progress", { result: { reason: "settings-load-failed: boom", visitedNodeIds: [] } }],
+    ["completed step progress", { task: { steps: [{ name: "Step 1", status: "done" }] }, result: { visitedNodeIds: ["execute"] } }],
+    ["lastError", { task: { lastError: "boom" }, result: { visitedNodeIds: ["execute"] } }],
+    ["failureReason", { task: { failureReason: "boom" }, result: { visitedNodeIds: ["execute"] } }],
+  ])("preserves terminal failed handling for genuine graph failure: %s", async (_name, fixture) => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 0,
+      ...(fixture.task ?? {}),
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      ...fixture.result,
+    });
+
+    const failedNode = fixture.result.visitedNodeIds.at(-1) ?? "unknown";
+    const message = `Workflow graph terminated with failure at node '${failedNode}'`;
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: message, status: "failed" }, undefined);
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    expect(executeSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  describe("transient resume-after-restart graph failure classifier", () => {
+    const makeClassifierTask = (overrides: Partial<Task> = {}) => ({
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [
+        { name: "Step 1", status: "pending" },
+        { name: "Step 2", status: "pending" },
+      ],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    }) as Task;
+
+    const isTransient = (task: Task, result: any) => {
+      const executor = new TaskExecutor(createMockStore(), "/tmp/test", {});
+      return (executor as any).isTransientResumeAfterRestartGraphFailure(task, result);
+    };
+
+    it("accepts only the exact no-progress execute-seam post-resume signature", () => {
+      expect(isTransient(makeClassifierTask(), { visitedNodeIds: ["execute"] })).toBe(true);
+      expect(isTransient(makeClassifierTask({ log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }] }), { visitedNodeIds: ["execute"] })).toBe(true);
+      expect(isTransient(makeClassifierTask(), { visitedNodeIds: [] })).toBe(true);
+    });
+
+    it.each([
+      ["non-empty reason", makeClassifierTask(), { visitedNodeIds: ["execute"], reason: "settings-load-failed: boom" }],
+      ["non-execute failed node", makeClassifierTask(), { visitedNodeIds: ["planning"] }],
+      ["completed step progress", makeClassifierTask({ steps: [{ name: "Step 1", status: "done" }] }), { visitedNodeIds: ["execute"] }],
+      ["lastError", makeClassifierTask({ lastError: "boom" } as any), { visitedNodeIds: ["execute"] }],
+      ["failureReason", makeClassifierTask({ failureReason: "boom" } as any), { visitedNodeIds: ["execute"] }],
+      ["missing resume log", makeClassifierTask({ log: [{ timestamp: new Date().toISOString(), action: "Started execution" }] }), { visitedNodeIds: ["execute"] }],
+    ])("rejects %s as genuine/non-transient", (_name, task, result) => {
+      expect(isTransient(task as Task, result)).toBe(false);
+    });
   });
 
   it("preserves genuine in-progress graph failure handling", async () => {

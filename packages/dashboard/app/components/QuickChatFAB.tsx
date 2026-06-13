@@ -371,7 +371,16 @@ const QUICK_CHAT_VIEWPORT_PADDING = 8;
  * @param projectId - Optional project ID for localStorage key
  * @param externalDidDragRef - External ref to track drag state for click detection
  */
-function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefObject<boolean>) {
+function useDraggable(
+  projectId?: string,
+  externalDidDragRef?: React.MutableRefObject<boolean>,
+  onTap?: () => void,
+) {
+  // Latest onTap kept in a ref so the imperatively-bound document
+  // pointerup handler always calls the current closure without forcing
+  // listener re-binds.
+  const onTapRef = useRef(onTap);
+  onTapRef.current = onTap;
   // Get executor footer height from CSS variable
   const getFooterHeight = useCallback((): number => {
     if (typeof window === "undefined") return 0;
@@ -475,6 +484,12 @@ function useDraggable(projectId?: string, externalDidDragRef?: React.MutableRefO
 
     if (didDragRef.current) {
       savePosition(positionRef.current);
+    } else {
+      // A tap (not a drag). Fire the toggle from pointerup rather than
+      // relying on the synthetic click: iOS Safari suppresses the click
+      // when setPointerCapture() was called in pointerdown (a WebKit
+      // quirk), so onClick alone never opens the panel on iPhone.
+      onTapRef.current?.();
     }
 
     document.removeEventListener("pointermove", handleDocumentPointerMove);
@@ -998,13 +1013,21 @@ export function QuickChatFAB({
   const hideMentionPopupTimeoutRef = useRef<number | null>(null);
   const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const dragDepthRef = useRef(0);
+  // Set by the latest tap handler (defined further down, after isOpen /
+  // stealthInputRef exist). Indirection keeps the useDraggable call above
+  // those declarations.
+  const fabTapHandlerRef = useRef<(() => void) | null>(null);
+  // True for ~the click-delay window after a pointerup tap fired the
+  // toggle, so the trailing synthetic click (when iOS does emit one)
+  // doesn't double-toggle.
+  const suppressNextFabClickRef = useRef(false);
 
   // Draggable hook for FAB positioning
   const {
     position,
     isDragging,
     handlePointerDown,
-  } = useDraggable(projectId, didDragRef);
+  } = useDraggable(projectId, didDragRef, () => fabTapHandlerRef.current?.());
 
   // Panel stays 60px above FAB (FAB is 48px tall + 12px gap)
   const panelY = position.y + 60;
@@ -1047,6 +1070,7 @@ export function QuickChatFAB({
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const shouldAutoFocusComposerRef = useRef(false);
   const handledMobileActionRef = useRef(false);
+  const handledMobileActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preserveComposerFocusRef = useRef(false);
   // Always-mounted offscreen input used to claim the iOS soft keyboard
   // synchronously inside the FAB click gesture, before the real composer
@@ -1949,6 +1973,43 @@ export function QuickChatFAB({
     preserveComposerFocusRef.current = true;
   }, []);
 
+  // Latch that a mobile pointer/touch handler already performed a button's
+  // action, so the synthetic onClick that trails the gesture is ignored
+  // (prevents a double send/stop). On iOS, preventDefault() in
+  // touchstart/pointerdown frequently suppresses that click entirely, so we
+  // also clear the latch on a timer: without it the ref stays stuck `true` and
+  // swallows the *next* real click (e.g. after switching chats), making the
+  // button look dead. The latch is shared by the send and stop buttons, so a
+  // stuck value cross-contaminates between them.
+  const markHandledMobileAction = useCallback(() => {
+    handledMobileActionRef.current = true;
+    if (handledMobileActionTimerRef.current != null) {
+      clearTimeout(handledMobileActionTimerRef.current);
+    }
+    handledMobileActionTimerRef.current = setTimeout(() => {
+      handledMobileActionRef.current = false;
+      handledMobileActionTimerRef.current = null;
+    }, 700);
+  }, []);
+
+  // If a mobile handler already ran this gesture's action, consume the latch
+  // (and cancel its timer) so the trailing onClick bails without double-firing.
+  const consumeHandledMobileAction = useCallback(() => {
+    if (!handledMobileActionRef.current) return false;
+    handledMobileActionRef.current = false;
+    if (handledMobileActionTimerRef.current != null) {
+      clearTimeout(handledMobileActionTimerRef.current);
+      handledMobileActionTimerRef.current = null;
+    }
+    return true;
+  }, []);
+
+  useEffect(() => () => {
+    if (handledMobileActionTimerRef.current != null) {
+      clearTimeout(handledMobileActionTimerRef.current);
+    }
+  }, []);
+
   const handleSendMessage = useCallback(async () => {
     const trimmed = messageInput.trim();
     const attachmentsToSend = pendingAttachmentsRef.current;
@@ -2427,9 +2488,9 @@ export function QuickChatFAB({
     ],
   );
 
-  // Handle FAB click - only toggle if this was a click (not a drag)
-  // Reset didDragRef after checking to prevent double-toggle
-  const handleFABClick = useCallback(() => {
+  // Core open/close toggle. Only toggles if this was a tap (not a drag);
+  // resets didDragRef after checking to prevent a double-toggle.
+  const toggleQuickChat = useCallback(() => {
     if (didDragRef.current) {
       // Was a drag, don't toggle
       didDragRef.current = false;
@@ -2451,6 +2512,34 @@ export function QuickChatFAB({
     }
     setIsOpen(true);
   }, [isOpen, setIsOpen]);
+
+  // Fired from the drag hook's pointerup when the gesture was a tap, not a
+  // drag. This is the reliable open path on iOS: setPointerCapture() in
+  // pointerdown makes iOS Safari swallow the synthetic click, so onClick
+  // alone never opens the panel on iPhone. pointerup is itself a user
+  // gesture, so the stealth-input focus inside toggleQuickChat still
+  // raises the keyboard.
+  const handleFABTap = useCallback(() => {
+    suppressNextFabClickRef.current = true;
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => {
+        suppressNextFabClickRef.current = false;
+      }, 500);
+    }
+    toggleQuickChat();
+  }, [toggleQuickChat]);
+  fabTapHandlerRef.current = handleFABTap;
+
+  // Synthetic click path — still used for mouse (where pointerup also
+  // fires handleFABTap, so we de-dupe) and for click-only callers like
+  // tests (no preceding pointerup tap, so we handle it).
+  const handleFABClick = useCallback(() => {
+    if (suppressNextFabClickRef.current) {
+      suppressNextFabClickRef.current = false;
+      return;
+    }
+    toggleQuickChat();
+  }, [toggleQuickChat]);
 
   return (
     <>
@@ -2976,26 +3065,14 @@ export function QuickChatFAB({
                   onBlur={handleInputBlur}
                   onFocus={handleInputFocus}
                   onPaste={handlePaste}
-                  // Intercept the touch *before* iOS's default focus-and-
-                  // scroll handler runs. Without this, on the second focus
-                  // (after a keyboard dismiss) iOS shifts the visual
-                  // viewport to "scroll" the input into view, which yanks
-                  // the position:fixed panel up off-screen for ~1s before
-                  // settling back. preventDefault on touchstart suppresses
-                  // that auto-scroll; we then focus programmatically with
-                  // preventScroll so the keyboard still comes up.
                   onTouchStart={(event) => {
                     if (typeof window === "undefined") return;
                     if (window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
-                    // iOS-only workaround. On Android, preventDefault on
-                    // textarea touchstart prevents the soft keyboard from
-                    // opening at all (programmatic focus() does not raise
-                    // the keyboard on Android — only the default touch
-                    // action does), so the tap silently dismisses.
                     if (!isIOS()) return;
                     if (document.activeElement === event.currentTarget) return;
-                    event.preventDefault();
-                    event.currentTarget.focus({ preventScroll: true });
+                    // FN-6301: do not preventDefault on the first unfocused iOS tap.
+                    // Native focus is the reliable path that raises the soft keyboard;
+                    // the visualViewport/input-focus effects own scroll compensation.
                   }}
                   placeholder={inputPlaceholder}
                   disabled={inputDisabled}
@@ -3009,14 +3086,14 @@ export function QuickChatFAB({
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
                       if (event.pointerType && event.pointerType !== "mouse") {
-                        handledMobileActionRef.current = true;
+                        markHandledMobileAction();
                         stopStreaming();
                       }
                     }}
                     onTouchStart={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
-                      handledMobileActionRef.current = true;
+                      markHandledMobileAction();
                       stopStreaming();
                     }}
                     onMouseDown={(event) => {
@@ -3024,10 +3101,7 @@ export function QuickChatFAB({
                       event.preventDefault();
                     }}
                     onClick={() => {
-                      if (handledMobileActionRef.current) {
-                        handledMobileActionRef.current = false;
-                        return;
-                      }
+                      if (consumeHandledMobileAction()) return;
                       stopStreaming();
                     }}
                     aria-label={t("chat.stopGeneration", "Stop generation")}
@@ -3043,7 +3117,7 @@ export function QuickChatFAB({
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
                       if (event.pointerType && event.pointerType !== "mouse") {
-                        handledMobileActionRef.current = true;
+                        markHandledMobileAction();
                         markPreserveComposerFocus();
                         focusComposerInput();
                         void handleSendMessage();
@@ -3052,7 +3126,7 @@ export function QuickChatFAB({
                     onTouchStart={(event) => {
                       if (typeof window === "undefined" || window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
                       event.preventDefault();
-                      handledMobileActionRef.current = true;
+                      markHandledMobileAction();
                       markPreserveComposerFocus();
                       focusComposerInput();
                       void handleSendMessage();
@@ -3062,10 +3136,7 @@ export function QuickChatFAB({
                       event.preventDefault();
                     }}
                     onClick={() => {
-                      if (handledMobileActionRef.current) {
-                        handledMobileActionRef.current = false;
-                        return;
-                      }
+                      if (consumeHandledMobileAction()) return;
                       void handleSendMessage();
                     }}
                     disabled={sendDisabled}

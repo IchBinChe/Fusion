@@ -18,7 +18,7 @@
  * - `pruneWorktrees`: defer to backend prune
  * - `cleanupOrphans`: defer to backend prune/remove semantics
  * - `reapUnregisteredOrphans`: defer to backend prune/remove semantics
- * - `cleanupStaleTempMergeWorktrees`: remains native (temp-dir scope, outside worktrunk layout)
+ * - `cleanupStaleTempMergeWorktrees`: remains native (dedicated AI-merge root + legacy roots)
  * - `enforceWorktreeCap`: defer to backend prune/remove semantics
  * - `reclaimSelfOwnedBranchConflicts`: remains native (branch-level)
  * - `reclaimStaleActiveBranches`: remains native (branch-level)
@@ -48,7 +48,7 @@ import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, ty
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
 import { findAlreadyMergedTaskCommit } from "./already-merged-detector.js";
-import { resolveWorktreesDir } from "./worktree-paths.js";
+import { isAiMergeContainerDir, resolveAiMergeRootPath, resolveLegacyAiMergeRootPath, resolveWorktreesDir } from "./worktree-paths.js";
 import { canonicalFusionBranchName, resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { resolveBranchGroupMergeRouting } from "./group-merge-coordinator.js";
@@ -65,6 +65,7 @@ import {
 } from "./notifier.js";
 import type { GhostBugDecision } from "./triage-preflight.js";
 import { DependencyBlockedTodoReporter } from "./dependency-blocked-todo-reporter.js";
+import { filterPathsByIgnoreList, getUnmetSchedulingDependencies, isCoordinationOnlyTask, pathsOverlap } from "./scheduler.js";
 
 const log = createLogger("self-healing");
 const worktreeMetadataReconcileLog = createLogger("worktree-metadata-reconcile");
@@ -99,6 +100,10 @@ const MAX_NO_PROGRESS_RESUME_ATTEMPTS = 2;
 function extractTaskIdFromTempMergeDir(dirname: string): string | null {
   const match = /^fusion-ai-merge-(fn-\d+)-[a-z0-9]+$/i.exec(dirname);
   return match?.[1]?.toUpperCase() ?? null;
+}
+
+function resolveRepoLocalAiMergeRoot(rootDir: string, settings?: Pick<Settings, "worktreesDir">): string {
+  return resolveAiMergeRootPath(rootDir, settings);
 }
 
 function getErrorMessage(err: unknown): string {
@@ -1039,6 +1044,7 @@ export class SelfHealingManager {
       { name: "reconcile-soft-delete-column-drift", fn: () => this.reconcileSoftDeletedColumnDrift().then(() => undefined) },
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
       { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies().then(() => undefined) },
+      { name: "reconcile-dependency-blocking-leases", fn: () => this.reconcileDependencyBlockingLeases().then(() => undefined) },
       { name: "reconcile-dependency-cycles", fn: () => this.reconcileDependencyCycles().then(() => undefined) },
       { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts().then(() => undefined) },
       { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts().then(() => undefined) },
@@ -1995,6 +2001,7 @@ export class SelfHealingManager {
           // only; a no-op when there are no markers).
           { name: "recover-stale-transition-pending", fn: () => this.runStaleTransitionPendingSweep() },
           { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies() },
+          { name: "reconcile-dependency-blocking-leases", fn: () => this.reconcileDependencyBlockingLeases() },
           { name: "reconcile-dependency-cycles", fn: () => this.reconcileDependencyCycles().then(() => undefined) },
           { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts() },
           { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts() },
@@ -4579,6 +4586,135 @@ export class SelfHealingManager {
       log.error(`Stale blockedBy sweep failed: ${errorMessage}`);
       return 0;
     }
+  }
+
+  async reconcileDependencyBlockingLeases(): Promise<number> {
+    const settings = await this.store.getSettings();
+    if (settings.globalPause || settings.enginePaused) return 0;
+
+    let tasks: Task[] = [];
+    try {
+      tasks = await this.store.listTasks({ includeArchived: false, slim: true });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.warn(`reconcileDependencyBlockingLeases: failed to list tasks: ${errorMessage}`);
+      return 0;
+    }
+
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    const markerAcceptedByTaskId = new Map<string, boolean>();
+    if (settings.mergeRequestContractShadowEnabled === true) {
+      const dependencyIds = new Set(tasks.flatMap((task) => task.dependencies));
+      for (const depId of dependencyIds) {
+        markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+      }
+    }
+    const dependencyOptions = settings.mergeRequestContractShadowEnabled === true
+      ? { markerAcceptedByTaskId }
+      : undefined;
+    const overlapIgnorePaths = settings.overlapIgnorePaths ?? [];
+    const filteredScopeByTaskId = new Map<string, string[]>();
+    const getFilteredFileScope = async (taskId: string): Promise<string[]> => {
+      const cached = filteredScopeByTaskId.get(taskId);
+      if (cached) return cached;
+      const scope = await this.store.parseFileScopeFromPrompt(taskId);
+      const filteredScope = filterPathsByIgnoreList(scope, overlapIgnorePaths);
+      filteredScopeByTaskId.set(taskId, filteredScope);
+      return filteredScope;
+    };
+
+    let recovered = 0;
+    for (const holder of tasks) {
+      if (holder.column !== "in-progress") continue;
+      if (holder.paused === true || holder.userPaused === true) continue;
+
+      const unmetDeps = getUnmetSchedulingDependencies(holder, tasks, dependencyOptions);
+      if (unmetDeps.length === 0) continue;
+
+      const holderScope = await getFilteredFileScope(holder.id);
+      if (holderScope.length === 0 || isCoordinationOnlyTask(holder, holderScope)) continue;
+
+      let deadlockingDependency: Task | undefined;
+      let deadlockEvidence: "stale-overlap-blocker" | "overlapping-todo-dependency" | undefined;
+      for (const depId of unmetDeps) {
+        const dependency = byId.get(depId);
+        if (!dependency) continue;
+        if (dependency.overlapBlockedBy === holder.id) {
+          deadlockingDependency = dependency;
+          deadlockEvidence = "stale-overlap-blocker";
+          break;
+        }
+        if (dependency.column !== "todo") continue;
+        const dependencyScope = await getFilteredFileScope(dependency.id);
+        if (dependencyScope.length === 0 || isCoordinationOnlyTask(dependency, dependencyScope)) continue;
+        if (pathsOverlap(holderScope, dependencyScope)) {
+          deadlockingDependency = dependency;
+          deadlockEvidence = "overlapping-todo-dependency";
+          break;
+        }
+      }
+      if (!deadlockingDependency || !deadlockEvidence) continue;
+
+      const graceMs = settings.taskStuckTimeoutMs ?? STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS;
+      const proof = await this.evaluateBackwardMoveTripleProof(holder, {
+        stage: "reconcile-dependency-blocking-lease",
+        graceMs,
+        stalenessAnchor: holder.executionStartedAt ?? holder.updatedAt,
+        reason: "dependency-blocking-file-scope-lease",
+        extra: {
+          holderId: holder.id,
+          dependencyId: deadlockingDependency.id,
+          unmetDeps,
+          deadlockEvidence,
+          holderScope,
+          dependencyOverlapBlockedBy: deadlockingDependency.overlapBlockedBy ?? null,
+        },
+      });
+      if (!proof.ok) {
+        await this.emitBackwardMoveNoAction(
+          holder,
+          "reconcile-dependency-blocking-lease",
+          "task:reconcile-dependency-blocking-lease-no-action",
+          proof,
+        );
+        continue;
+      }
+
+      await this.store.moveTask(holder.id, "todo", {
+        preserveProgress: true,
+        preserveWorktree: true,
+        preserveResumeState: true,
+        moveSource: "engine",
+        recoveryRehome: true,
+      });
+      if (deadlockingDependency.overlapBlockedBy === holder.id) {
+        await this.store.updateTask(deadlockingDependency.id, { overlapBlockedBy: null, status: null });
+      }
+      await this.store.logEntry(
+        holder.id,
+        `Auto-rebounded (FN-6292): released dependency-blocking file-scope lease; dependency ${deadlockingDependency.id} can run before this task resumes`,
+      );
+      await createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("fn6292-dependency-blocking-lease", holder.id),
+        agentId: "self-healing",
+        taskId: holder.id,
+        taskLineageId: holder.lineageId,
+        phase: "reconcile-dependency-blocking-lease",
+      }).database({
+        type: "task:reconcile-dependency-blocking-lease" as DatabaseMutationType,
+        target: holder.id,
+        metadata: {
+          holderId: holder.id,
+          dependencyId: deadlockingDependency.id,
+          unmetDeps,
+          deadlockEvidence,
+          clearedOverlapBlockedBy: deadlockingDependency.overlapBlockedBy === holder.id,
+        },
+      });
+      recovered++;
+    }
+
+    return recovered;
   }
 
   async reconcileSelfDefeatingDependencies(): Promise<number> {
@@ -8876,7 +9012,7 @@ export class SelfHealingManager {
     let dirs: string[];
     try {
       dirs = readdirSync(worktreesDir, { withFileTypes: true })
-        .filter((e) => e.isDirectory())
+        .filter((e) => e.isDirectory() && !isAiMergeContainerDir(e.name))
         .map((e) => join(worktreesDir, e.name));
     } catch (err: unknown) {
       log.warn(`Failed to read .worktrees/ for unregistered orphan reap: ${err instanceof Error ? err.message : String(err)}`);
@@ -8922,30 +9058,20 @@ export class SelfHealingManager {
   }
 
   /**
-   * Sweep stale AI merge clean-room worktrees from `tmpdir()`.
+   * Sweep stale AI merge clean-room worktrees from the configured worktrees-dir
+   * clean-room root plus legacy `.fusion/ai-merge/` and `tmpdir()` locations
+   * used by older engine versions.
    *
-   * These worktrees are intentionally outside the project/worktrunk-managed
-   * `.worktrees/` layout, so this native sweep proceeds even when worktrunk is
-   * enabled. Safety is bounded by a two-hour age gate plus active-session checks.
+   * Safety is bounded by age gates plus active-session checks.
    */
   private async cleanupStaleTempMergeWorktrees(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.worktrunk?.enabled === true) {
-        log.log("[self-healing] temp-dir sweep: worktrunk enabled — AI merge temp worktrees are outside worktrunk's managed layout, proceeding with native sweep");
+        log.log("[self-healing] temp-dir sweep: worktrunk enabled — AI merge clean-room worktrees use Fusion's dedicated clean-room root, proceeding with native sweep");
       }
 
-      const tempRoot = tmpdir();
-      let entries: string[];
-      try {
-        entries = readdirSync(tempRoot).filter((entry) => entry.startsWith("fusion-ai-merge-"));
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        log.warn(`[self-healing] temp-dir sweep: failed to read ${tempRoot}: ${errorMessage}`);
-        return 0;
-      }
-      if (entries.length === 0) return 0;
-
+      const roots = Array.from(new Set([resolveRepoLocalAiMergeRoot(this.options.rootDir, settings), resolveLegacyAiMergeRootPath(this.options.rootDir), tmpdir()]));
       const auditor = createRunAuditor(this.store, {
         runId: generateSyntheticRunId("self-heal", "tempdir-sweep"),
         agentId: "self-healing",
@@ -8954,78 +9080,105 @@ export class SelfHealingManager {
       const now = Date.now();
       let cleaned = 0;
 
-      for (const entry of entries) {
-        const path = join(tempRoot, entry);
-        let canonicalPath = path;
-        let cleanupReason = "stale";
+      for (const tempRoot of roots) {
+        let entries: string[];
         try {
-          const stat = statSync(path);
-          if (!stat.isDirectory()) {
-            await auditor.git({ type: "worktree:tempdir-sweep", target: path, metadata: { path, success: false, reason: "not-directory" } });
+          entries = readdirSync(tempRoot).filter((entry) => entry.startsWith("fusion-ai-merge-"));
+        } catch (err: unknown) {
+          if (!existsSync(tempRoot)) continue;
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(`[self-healing] temp-dir sweep: failed to read ${tempRoot}: ${errorMessage}`);
+          if (tempRoot === tmpdir()) return cleaned;
+          continue;
+        }
+        if (entries.length === 0) continue;
+
+        for (const entry of entries) {
+          const path = join(tempRoot, entry);
+          let canonicalPath = path;
+          let cleanupReason = "stale";
+          try {
+            const stat = statSync(path);
+            if (!stat.isDirectory()) {
+              await auditor.git({ type: "worktree:tempdir-sweep", target: path, metadata: { path, success: false, reason: "not-directory" } });
+              continue;
+            }
+            const ageMs = now - stat.mtimeMs;
+            let ageGateMs = STALE_TEMP_MERGE_WORKTREE_MS;
+            cleanupReason = "stale";
+            const taskId = extractTaskIdFromTempMergeDir(entry);
+            if (taskId) {
+              try {
+                const task = await this.store.getTask(taskId);
+                if (task.column === "done" || task.column === "archived") {
+                  ageGateMs = DONE_TASK_TEMP_WORKTREE_GRACE_MS;
+                  cleanupReason = "done-task-stale";
+                }
+              } catch (err: unknown) {
+                if (isTaskNotFoundError(err)) {
+                  ageGateMs = MIN_TEMP_WORKTREE_REAP_AGE_MS;
+                  cleanupReason = "deleted-task";
+                } else {
+                  const errorMessage = getErrorMessage(err);
+                  cleanupReason = "lookup-error";
+                  log.warn(`[self-healing] temp-dir sweep: task lookup failed for ${taskId}: ${errorMessage}; using conservative age gate`);
+                }
+              }
+            }
+            ageGateMs = Math.max(ageGateMs, MIN_TEMP_WORKTREE_REAP_AGE_MS);
+            if (ageMs < ageGateMs) continue;
+            try {
+              canonicalPath = realpathSync(path);
+            } catch {
+              canonicalPath = path;
+            }
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            log.warn(`[self-healing] temp-dir sweep: failed to stat ${path}: ${errorMessage}`);
+            await auditor.git({ type: "worktree:tempdir-sweep", target: path, metadata: { path, success: false, reason: "stat-failed", error: errorMessage } });
             continue;
           }
-          const ageMs = now - stat.mtimeMs;
-          let ageGateMs = STALE_TEMP_MERGE_WORKTREE_MS;
-          cleanupReason = "stale";
-          const taskId = extractTaskIdFromTempMergeDir(entry);
-          if (taskId) {
-            try {
-              const task = await this.store.getTask(taskId);
-              if (task.column === "done" || task.column === "archived") {
-                ageGateMs = DONE_TASK_TEMP_WORKTREE_GRACE_MS;
-                cleanupReason = "done-task-stale";
-              }
-            } catch (err: unknown) {
-              if (isTaskNotFoundError(err)) {
-                ageGateMs = MIN_TEMP_WORKTREE_REAP_AGE_MS;
-                cleanupReason = "deleted-task";
-              } else {
-                const errorMessage = getErrorMessage(err);
-                cleanupReason = "lookup-error";
-                log.warn(`[self-healing] temp-dir sweep: task lookup failed for ${taskId}: ${errorMessage}; using conservative age gate`);
+
+          if (activeSessionRegistry.isPathActive(canonicalPath) || activeSessionRegistry.isPathActive(path)) {
+            log.log(`[self-healing] temp-dir sweep: deferring ${canonicalPath}: active session present`);
+            await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "active-session" } });
+            continue;
+          }
+
+          let cleanupAttempted = false;
+          try {
+            cleanupAttempted = true;
+            await execAsync(`git worktree remove --force ${shellQuote(canonicalPath)}`, {
+              cwd: this.options.rootDir,
+              timeout: 120_000,
+            });
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            log.warn(`[self-healing] temp-dir sweep: git worktree remove failed for ${canonicalPath}: ${errorMessage} — falling back to filesystem removal`);
+            await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "git-remove-failed", error: errorMessage } });
+          }
+
+          try {
+            cleanupAttempted = true;
+            rmSync(canonicalPath, { recursive: true, force: true });
+            log.log(`[self-healing] temp-dir sweep: cleaned stale AI merge worktree ${canonicalPath}`);
+            await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: true, reason: cleanupReason } });
+            cleaned++;
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            log.warn(`[self-healing] temp-dir sweep: failed to remove ${canonicalPath}: ${errorMessage}`);
+            await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "fs-rm-failed", error: errorMessage } });
+          } finally {
+            if (cleanupAttempted) {
+              try {
+                await execAsync("git worktree prune", { cwd: this.options.rootDir, timeout: 30_000 });
+              } catch (err: unknown) {
+                const errorMessage = err instanceof Error ? err.message : String(err);
+                log.warn(`[self-healing] temp-dir sweep: git worktree prune failed after cleaning ${canonicalPath}: ${errorMessage}`);
+                await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "git-prune-failed", error: errorMessage } });
               }
             }
           }
-          ageGateMs = Math.max(ageGateMs, MIN_TEMP_WORKTREE_REAP_AGE_MS);
-          if (ageMs < ageGateMs) continue;
-          try {
-            canonicalPath = realpathSync(path);
-          } catch {
-            canonicalPath = path;
-          }
-        } catch (err: unknown) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          log.warn(`[self-healing] temp-dir sweep: failed to stat ${path}: ${errorMessage}`);
-          await auditor.git({ type: "worktree:tempdir-sweep", target: path, metadata: { path, success: false, reason: "stat-failed", error: errorMessage } });
-          continue;
-        }
-
-        if (activeSessionRegistry.isPathActive(canonicalPath) || activeSessionRegistry.isPathActive(path)) {
-          log.log(`[self-healing] temp-dir sweep: deferring ${canonicalPath}: active session present`);
-          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "active-session" } });
-          continue;
-        }
-
-        try {
-          await execAsync(`git worktree remove --force ${shellQuote(canonicalPath)}`, {
-            cwd: this.options.rootDir,
-            timeout: 120_000,
-          });
-        } catch (err: unknown) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          log.warn(`[self-healing] temp-dir sweep: git worktree remove failed for ${canonicalPath}: ${errorMessage} — falling back to filesystem removal`);
-          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "git-remove-failed", error: errorMessage } });
-        }
-
-        try {
-          rmSync(canonicalPath, { recursive: true, force: true });
-          log.log(`[self-healing] temp-dir sweep: cleaned stale AI merge worktree ${canonicalPath}`);
-          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: true, reason: cleanupReason } });
-          cleaned++;
-        } catch (err: unknown) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          log.warn(`[self-healing] temp-dir sweep: failed to remove ${canonicalPath}: ${errorMessage}`);
-          await auditor.git({ type: "worktree:tempdir-sweep", target: canonicalPath, metadata: { path: canonicalPath, success: false, reason: "fs-rm-failed", error: errorMessage } });
         }
       }
 
@@ -9264,7 +9417,7 @@ export class SelfHealingManager {
       const cap = (settings.maxWorktrees ?? 4) * 2;
 
       const entries = readdirSync(worktreesDir, { withFileTypes: true });
-      const dirs = entries.filter((e) => e.isDirectory());
+      const dirs = entries.filter((e) => e.isDirectory() && !isAiMergeContainerDir(e.name));
 
       if (dirs.length <= cap) return;
 

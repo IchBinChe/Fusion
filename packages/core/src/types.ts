@@ -2265,6 +2265,11 @@ export interface Task {
    *  Incremented by self-healing for resume-limbo detection and reset when
    *  progress is observed or recovery escalates to a fresh todo dispatch. */
   resumeLimboCount?: number;
+  /** Bounded auto-retry attempts for transient workflow-graph failures observed
+   *  immediately after engine-restart or unpause resume. Reset by manual retry
+   *  and by successful forward progress; capped by the executor before terminal
+   *  `status:"failed"` is recorded to preserve the FN-5704 anti-loop exemption. */
+  graphResumeRetryCount?: number | null;
   /** Branch tip SHA snapshot captured at the last reclaim/unpause attempt used
    *  by resume-limbo detection to determine whether commits advanced. */
   resumeLimboTipSha?: string;
@@ -3323,6 +3328,8 @@ export interface ProjectSettings {
   heartbeatMultiplier?: number;
   /** Number of auto-claim candidates rendered in no-task heartbeat prompts. Range: 0-10. Default: 5. */
   autoClaimCandidatesInPrompt?: number;
+  /** Opt engineer-role agents into no-task backlog auto-claim. Default: false. */
+  engineerBacklogAutoClaim?: boolean;
   /** Sticky window for intake duplicate checks against soft-deleted tasks.
    * Unit: days. Default: 7. Set to 0 to disable tombstone-window widening. */
   tombstoneStickyWindowDays?: number;
@@ -4148,6 +4155,10 @@ export interface Settings extends GlobalSettings, ProjectSettings {
   /** Whether PR authentication is currently available (read-only, set by server).
    *  True when authenticated gh CLI access is available or token fallback exists. */
   prAuthAvailable?: boolean;
+  /** Use the lean fast-path planning prompt variant instead of the full triage spec prompt. */
+  leanPlanning?: boolean;
+  /** Auto-approve generated specs and skip the independent spec reviewer. */
+  autoApproveSpec?: boolean;
   /** Index signature for dynamic settings access */
   [key: string]: unknown;
 }
@@ -6261,6 +6272,8 @@ export interface AgentHeartbeatConfig {
   autoClaimRelevantTasks?: boolean;
   /** Number of auto-claim candidates to inject into no-task heartbeat prompts. Default: 5, range: 0-10. */
   autoClaimCandidatesInPrompt?: number;
+  /** Per-agent override for opting engineer-role agents into no-task backlog auto-claim. Default: project setting or false. */
+  engineerBacklogAutoClaim?: boolean;
   /** Polling interval in ms (default: 30000). Min: 1000 */
   heartbeatIntervalMs?: number;
   /** Heartbeat timeout in ms (default: 60000). Min: 5000 */

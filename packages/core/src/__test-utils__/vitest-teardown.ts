@@ -1,28 +1,34 @@
 /**
  * Vitest globalSetup hook.
  *
- * We only publish the shared worker-root env var here. Teardown is intentionally
- * a no-op because deleting shared temp roots during teardown can race with
- * still-running suites in some Vitest pool modes and trigger uv_cwd failures.
- * Worker dirs are cleaned by vitest-setup.ts on process exit.
+ * We publish a per-invocation worker-root env var. Teardown removes that private
+ * root after the project finishes so workspace isolation checks do not report
+ * the run-local worker/home directories as leaks.
  */
 
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-const WORKER_ROOT = join(tmpdir(), "fusion-test-workers");
+import { join, resolve } from "node:path";
 
 export default function setup(): () => Promise<void> {
-  // Set the env var here too so vitest-setup.ts workers pick it up even if
-  // their own mkdir runs after globalSetup.
-  process.env.FUSION_TEST_WORKER_ROOT = WORKER_ROOT;
+  // Use a fresh root for each Vitest invocation. A static shared root makes the
+  // setup-time redirect sweep proportional to stale directories left by every
+  // prior interrupted run.
+  const workerRoot = resolve(mkdtempSync(join(tmpdir(), "fusion-test-workers-")));
+  process.env.FUSION_TEST_WORKER_ROOT = workerRoot;
 
   return async function teardown() {
-    // Intentionally no-op.
-    //
-    // Worker temp dirs are cleaned by vitest-setup.ts using process.on("exit")
-    // after first chdir-ing out of the worker dir. Deleting shared temp roots
-    // from global teardown is unsafe under some Vitest pool modes because it
-    // can run while other suites are still active, causing ENOENT uv_cwd.
+    try {
+      process.chdir(tmpdir());
+    } catch {
+      // Ignore — cleanup below is best-effort and uses an absolute path.
+    }
+    try {
+      rmSync(workerRoot, { recursive: true, force: true });
+    } catch {
+      // Ignore — interrupted or still-active workers may leave a per-run root
+      // behind, but future runs no longer sweep it because every invocation gets
+      // a fresh root.
+    }
   };
 }

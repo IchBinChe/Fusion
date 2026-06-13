@@ -53,6 +53,7 @@ describe("buildManualRetryResetPatch", () => {
     for (const key of MANUAL_RETRY_RESET_COUNTER_KEYS) {
       expect(patch[key]).toBe(0);
     }
+    expect(patch.graphResumeRetryCount).toBe(0);
   });
 
   it("includes all retry-summary counters in the reset key list", () => {

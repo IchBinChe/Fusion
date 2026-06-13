@@ -440,6 +440,9 @@ export function flowToIr(
       return { id: localId, kind: "prompt", config: { ...(config ?? {}), seam: "merge" } };
     }
     if (data.kind === "foreach" || data.kind === "loop") {
+      if (originalKind && originalKind !== "foreach" && originalKind !== "loop") {
+        return { id: localId, kind: originalKind, config: config && Object.keys(config).length ? config : undefined };
+      }
       // Reassemble the template from this group's children.
       const children = childrenByGroup.get(node.id) ?? [];
       const templateNodes: WorkflowIrNode[] = children.map((c) => {

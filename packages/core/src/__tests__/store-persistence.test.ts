@@ -59,6 +59,28 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("graphResumeRetryCount persistence", () => {
+    it("defaults to zero and round-trips updateTask values", async () => {
+      const task = await harness.store().createTask({ description: "Graph retry counter task" });
+
+      expect((await harness.store().getTask(task.id)).graphResumeRetryCount).toBe(0);
+
+      const updated = await harness.store().updateTask(task.id, { graphResumeRetryCount: 2 });
+      expect(updated.graphResumeRetryCount).toBe(2);
+      expect((await harness.store().getTask(task.id)).graphResumeRetryCount).toBe(2);
+    });
+
+    it("clears graphResumeRetryCount with null", async () => {
+      const task = await harness.store().createTask({ description: "Graph retry clear task" });
+      await harness.store().updateTask(task.id, { graphResumeRetryCount: 1 });
+
+      const cleared = await harness.store().updateTask(task.id, { graphResumeRetryCount: null });
+
+      expect(cleared.graphResumeRetryCount).toBeNull();
+      expect((await harness.store().getTask(task.id)).graphResumeRetryCount).toBeUndefined();
+    });
+  });
+
   describe("agent taskId sync on reassignment", () => {
     it("reassignment clears the old agent taskId and sets the new agent taskId", async () => {
       harness.store().close();

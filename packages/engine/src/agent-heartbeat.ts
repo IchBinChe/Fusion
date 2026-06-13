@@ -271,6 +271,39 @@ function resolveAutoClaimCandidatesInPromptLimit(agent: Agent, settings?: Settin
   return Math.max(0, Math.min(10, integer));
 }
 
+function resolveEngineerBacklogAutoClaim(agent: Agent, settings?: Settings): boolean {
+  const runtimeConfig = (agent.runtimeConfig ?? {}) as AgentHeartbeatConfig;
+  const perAgent = runtimeConfig.engineerBacklogAutoClaim;
+  const projectValue = settings?.engineerBacklogAutoClaim;
+  return typeof perAgent === "boolean" ? perAgent : (typeof projectValue === "boolean" ? projectValue : false);
+}
+
+function formatBacklogAutoClaimRoleStatus(agent: Agent, allowEngineer: boolean): string {
+  if (agent.role === "engineer") {
+    return allowEngineer
+      ? "enabled"
+      : "enabled (no role-compatible candidates; engineerBacklogAutoClaim disabled)";
+  }
+  return allowEngineer
+    ? "enabled (no role-compatible candidates; executor or opted-in engineer role required)"
+    : "enabled (no role-compatible candidates; executor role required)";
+}
+
+function formatBacklogAutoClaimRoleGuidance(agent: Agent, allowEngineer: boolean, candidateCount: number): string[] {
+  if (agent.role === "engineer" && !allowEngineer) {
+    return [
+      `- Snapshot found ${candidateCount} eligible Todo task(s), but this engineer-role agent is not opted into backlog auto-claim.`,
+      "- Backlog auto-claim is executor-only by default; set project settings.engineerBacklogAutoClaim or per-agent runtimeConfig.engineerBacklogAutoClaim to true to opt engineer agents in.",
+    ];
+  }
+  return [
+    `- Snapshot found ${candidateCount} eligible Todo task(s), but this agent role cannot auto-claim implementation work.`,
+    allowEngineer
+      ? "- Backlog auto-claim allows executor-role agents and engineer-role agents with engineerBacklogAutoClaim enabled; use delegation or create coordination follow-up instead of assuming the board is empty."
+      : "- Backlog auto-claim is restricted to executor-role agents by default; use delegation or create coordination follow-up instead of assuming the board is empty.",
+  ];
+}
+
 type RelevanceScorableTask = { title?: string | null; description: string };
 
 const agentSoulWordsCache = new Map<string, { soulSnapshot: string; words: readonly string[] }>();
@@ -1947,8 +1980,10 @@ export class HeartbeatMonitor {
 
         // Pause governance: globalPause blocks all heartbeat sources;
         // enginePaused is a soft pause that only blocks timer ticks.
+        let heartbeatModelSettings: Settings | undefined;
         try {
-          const settings = await taskStore.getSettings();
+          heartbeatModelSettings = await taskStore.getSettings();
+          const settings = heartbeatModelSettings;
           if (settings.globalPause) {
             heartbeatLog.log(`Agent ${agentId} heartbeat skipped — global pause active (source=${source})`);
             await this.completeRun(agentId, run.id, {
@@ -2050,16 +2085,17 @@ export class HeartbeatMonitor {
         let autoClaimSnapshotCandidateCount = 0;
         let autoClaimRoleFilteredCount = 0;
         const autoClaimEnabled = isAutoClaimRelevantTasksEnabled(agent);
+        const engineerBacklogAutoClaim = resolveEngineerBacklogAutoClaim(agent, heartbeatModelSettings);
         if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled && this.snapshotManager) {
           try {
             const snapshot = await this.snapshotManager.getSnapshot();
             autoClaimSnapshotCandidateCount = snapshot.tasks.length;
-            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate));
+            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate, { allowEngineer: engineerBacklogAutoClaim }));
             const skippedIncompatibleCount = snapshot.tasks.length - roleCompatibleCandidates.length;
             autoClaimRoleFilteredCount = skippedIncompatibleCount;
             if (skippedIncompatibleCount > 0) {
               heartbeatLog.log(
-                `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — only executor agents may claim implementation work`,
+                `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — ${engineerBacklogAutoClaim ? "only executor agents or engineer agents opted into engineerBacklogAutoClaim may claim implementation work" : "only executor agents may claim implementation work by default"}`,
               );
             }
 
@@ -2493,11 +2529,12 @@ export class HeartbeatMonitor {
           });
         };
 
-        let heartbeatModelSettings: Settings | undefined;
-        try {
-          heartbeatModelSettings = await taskStore.getSettings();
-        } catch (settingsErr) {
-          heartbeatLog.warn(`Failed to read heartbeat model settings for ${agentId}: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)}`);
+        if (!heartbeatModelSettings) {
+          try {
+            heartbeatModelSettings = await taskStore.getSettings();
+          } catch (settingsErr) {
+            heartbeatLog.warn(`Failed to read heartbeat model settings for ${agentId}: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)}`);
+          }
         }
 
         let sessionCwd = rootDir;
@@ -2722,18 +2759,16 @@ export class HeartbeatMonitor {
             }
 
             const promptCandidateLimit = resolveAutoClaimCandidatesInPromptLimit(agent, heartbeatModelSettings);
+            const hasOnlyRoleIncompatibleAutoClaimCandidates = autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0;
             const autoClaimStatus = autoClaimEnabled
               ? (promptCandidateLimit === 0
                 ? "disabled (prompt-suppressed)"
-                : (autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0
-                  ? "enabled (no role-compatible candidates; executor role required)"
+                : (hasOnlyRoleIncompatibleAutoClaimCandidates
+                  ? formatBacklogAutoClaimRoleStatus(agent, engineerBacklogAutoClaim)
                   : "enabled"))
               : "disabled";
-            const noRoleCompatibleCandidateLines = autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0
-              ? [
-                `- Snapshot found ${autoClaimSnapshotCandidateCount} eligible Todo task(s), but this agent role cannot auto-claim implementation work.`,
-                "- Backlog auto-claim is restricted to executor-role agents; use delegation or create coordination follow-up instead of assuming the board is empty.",
-              ]
+            const noRoleCompatibleCandidateLines = hasOnlyRoleIncompatibleAutoClaimCandidates
+              ? formatBacklogAutoClaimRoleGuidance(agent, engineerBacklogAutoClaim, autoClaimSnapshotCandidateCount)
               : [];
             const candidateLines = promptCandidateLimit > 0
               ? [
@@ -3627,11 +3662,19 @@ function readHeartbeatTimerRepairMetadata(agent: Agent): HeartbeatTimerRepairMet
   };
 }
 
+type PendingAssignment = {
+  taskId: string;
+  triggeringCommentIds?: string[];
+  triggeringCommentType?: "steering" | "task" | "pr";
+  budgetStatus?: AgentBudgetStatus;
+};
+
 export class HeartbeatTriggerScheduler {
   private store: AgentStore;
   private callback: TriggerCallback;
   private taskStore?: TaskStore;
   private timers: Map<string, AgentTimer> = new Map();
+  private pendingAssignments: Map<string, PendingAssignment> = new Map();
   private registrationEpochs: Map<string, number> = new Map();
   private running = false;
   private assignedListener: ((agent: import("@fusion/core").Agent, taskId: string) => void) | null = null;
@@ -3911,6 +3954,7 @@ export class HeartbeatTriggerScheduler {
    */
   unregisterAgent(agentId: string): void {
     this.registrationEpochs.set(agentId, (this.registrationEpochs.get(agentId) ?? 0) + 1);
+    this.pendingAssignments.delete(agentId);
     if (this.timers.has(agentId)) {
       this.clearAgentTimer(agentId);
       heartbeatLog.log(`Unregistered timer for ${agentId}`);
@@ -3948,9 +3992,12 @@ export class HeartbeatTriggerScheduler {
           return;
         }
 
-        // Guard: skip if agent already has an active run
+        // Guard: skip if agent already has an active run. Preserve this
+        // assignment for completion-driven re-fire so it is not stranded by
+        // long/idle-skipped timer intervals.
         const activeRun = await this.store.getActiveHeartbeatRun(agent.id);
         if (activeRun) {
+          this.pendingAssignments.set(agent.id, { taskId });
           heartbeatLog.log(`Assignment trigger skipped for ${agent.id} (active run)`);
           return;
         }
@@ -4022,6 +4069,101 @@ export class HeartbeatTriggerScheduler {
 
     this.store.on("agent:assigned", this.assignedListener);
     heartbeatLog.log("Watching agent:assigned events");
+  }
+
+  /**
+   * Re-evaluate and re-fire an assignment trigger that was deferred because
+   * the agent already had an active heartbeat run. Transient ineligibility
+   * keeps the pending entry so a later completion can retry; terminal
+   * ineligibility clears it.
+   */
+  async drainPendingAssignment(agentId: string): Promise<void> {
+    if (!this.running) return;
+
+    const pending = this.pendingAssignments.get(agentId);
+    if (!pending) {
+      return;
+    }
+
+    try {
+      const agent = await this.store.getAgent(agentId);
+      if (!agent) {
+        this.pendingAssignments.delete(agentId);
+        heartbeatLog.log(`Deferred assignment cleared for ${agentId} (agent missing)`);
+        return;
+      }
+
+      if (!isHeartbeatManaged(agent)) {
+        this.pendingAssignments.delete(agentId);
+        heartbeatLog.log(`Deferred assignment cleared for ${agentId} (ephemeral/internal)`);
+        return;
+      }
+
+      const runtimeConfig = (agent.runtimeConfig ?? {}) as { enabled?: boolean; allowParallelExecution?: boolean };
+      if (runtimeConfig.enabled === false) {
+        this.pendingAssignments.delete(agentId);
+        heartbeatLog.log(`Deferred assignment cleared for ${agentId} (disabled)`);
+        return;
+      }
+
+      if (!isTickableState(agent.state)) {
+        heartbeatLog.log(`Deferred assignment preserved for ${agentId} (state=${agent.state})`);
+        return;
+      }
+
+      const settings = this.taskStore ? await this.taskStore.getSettings() : null;
+      if (settings?.globalPause) {
+        heartbeatLog.log(`Deferred assignment preserved for ${agentId} (global pause active)`);
+        return;
+      }
+      if (settings?.enginePaused) {
+        heartbeatLog.log(`Deferred assignment preserved for ${agentId} (engine paused)`);
+        return;
+      }
+
+      const activeRun = await this.store.getActiveHeartbeatRun(agentId);
+      if (activeRun) {
+        heartbeatLog.log(`Deferred assignment preserved for ${agentId} (active run)`);
+        return;
+      }
+
+      if (
+        runtimeConfig.allowParallelExecution === false
+        && (this.isTaskExecuting?.(pending.taskId) || this.isAgentEffectivelyExecuting?.(agentId))
+      ) {
+        heartbeatLog.log(`Deferred assignment preserved for ${agentId} (parallel execution disabled, task ${pending.taskId} or column-bound session executing)`);
+        return;
+      }
+
+      let budgetStatus: AgentBudgetStatus | undefined = pending.budgetStatus;
+      try {
+        budgetStatus = await this.store.getBudgetStatus(agentId);
+        if (budgetStatus.isOverBudget) {
+          this.pendingAssignments.delete(agentId);
+          heartbeatLog.log(`Deferred assignment cleared for ${agentId} (budget exhausted)`);
+          return;
+        }
+      } catch (budgetErr) {
+        heartbeatLog.warn(`Deferred assignment budget check failed for ${agentId}: ${budgetErr instanceof Error ? budgetErr.message : String(budgetErr)} — proceeding without budget check`);
+      }
+
+      this.pendingAssignments.delete(agentId);
+      heartbeatLog.log(`Deferred assignment re-fired for ${agentId} (task: ${pending.taskId})`);
+      await this.callback(agentId, "assignment", {
+        taskId: pending.taskId,
+        wakeReason: "assignment",
+        triggerDetail: "task-assigned",
+        ...(pending.triggeringCommentIds?.length
+          ? {
+            triggeringCommentIds: pending.triggeringCommentIds,
+            triggeringCommentType: pending.triggeringCommentType ?? "steering",
+          }
+          : {}),
+        ...(budgetStatus && { budgetStatus }),
+      });
+    } catch (err) {
+      heartbeatLog.error(`Deferred assignment drain error for ${agentId}: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /**

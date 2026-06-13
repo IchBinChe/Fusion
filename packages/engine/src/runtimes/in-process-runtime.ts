@@ -610,6 +610,9 @@ export class InProcessRuntime
                 runtimeLog.warn(`resumeTaskForAgent failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`);
               });
             }
+            void this.triggerScheduler?.drainPendingAssignment(agentId).catch((err) => {
+              runtimeLog.warn(`drainPendingAssignment failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`);
+            });
           },
         });
         this.heartbeatMonitor.start();

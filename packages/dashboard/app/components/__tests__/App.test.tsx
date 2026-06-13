@@ -590,6 +590,7 @@ vi.mock("../../hooks/useViewportMode", () => ({
 // Mock isIOS so FN-3290 keyboard-open behavior is testable in jsdom
 vi.mock("../../hooks/useMobileScrollLock", () => ({
   useMobileScrollLock: vi.fn(),
+  useMobileKeyboardViewportLock: vi.fn(),
   isIOS: () => true,
   _resetLockState: vi.fn(),
 }));

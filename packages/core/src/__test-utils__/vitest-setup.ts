@@ -164,11 +164,21 @@ if (!process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN) {
   process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN = "1";
 }
 
-// Shared parent directory for all worker temp dirs in this run.
-// globalTeardown wipes this at the end of the suite.
-const WORKER_ROOT = join(tmpdir(), "fusion-test-workers");
-try { mkdirSync(WORKER_ROOT, { recursive: true }); } catch { /* ignore */ }
-process.env.FUSION_TEST_WORKER_ROOT = WORKER_ROOT;
+// Shared parent directory for all worker temp dirs in this Vitest invocation.
+// Keep this per-run (globalSetup seeds FUSION_TEST_WORKER_ROOT) instead of a
+// single long-lived tmpdir/fusion-test-workers directory: redirect setup does a
+// bounded one-level sweep of WORKER_ROOT, and a static root can accumulate enough
+// stale worker/home dirs after interrupted runs to make every mkdtempSync call
+// take seconds.
+const WORKER_ROOT = (() => {
+  const fromEnv = process.env.FUSION_TEST_WORKER_ROOT;
+  const root = fromEnv && fromEnv.trim().length > 0
+    ? resolve(fromEnv)
+    : realpathSync(mkdtempSync(join(tmpdir(), "fusion-test-workers-")));
+  try { mkdirSync(root, { recursive: true }); } catch { /* ignore */ }
+  process.env.FUSION_TEST_WORKER_ROOT = root;
+  return root;
+})();
 
 const REAL_TMPDIR = (() => {
   try {
@@ -194,6 +204,8 @@ function isProcessAlive(pid: number): boolean {
 }
 
 function removeTmpdirRedirectSinkForPid(ownerPid: number): void {
+  if (ownerPid === process.pid || isProcessAlive(ownerPid)) return;
+
   try {
     rmSync(join(WORKER_ROOT, `redir-${ownerPid}`), { recursive: true, force: true });
   } catch {
@@ -254,8 +266,25 @@ function sweepDeadTmpdirRedirectSinks(): void {
   }
 }
 
+export const __fusionTmpdirRedirectTestHooks = {
+  workerRoot: WORKER_ROOT,
+  registryPath: TMPDIR_REDIRECT_REGISTRY,
+  sinkForPid(pid: number): string {
+    return join(WORKER_ROOT, `redir-${pid}`);
+  },
+  resetSweepForTest(): void {
+    tmpdirRedirectSweepComplete = false;
+  },
+  sweepDeadTmpdirRedirectSinks,
+};
+
 function ensureTmpdirRedirectSink(): string {
-  if (tmpdirRedirectSink) return tmpdirRedirectSink;
+  if (tmpdirRedirectSink) {
+    // FN-6310: recovery-timeout cleanup can remove a live worker's cached
+    // redirect sink; recreate it on demand so later mkdtemp calls don't ENOENT.
+    mkdirSync(tmpdirRedirectSink, { recursive: true });
+    return tmpdirRedirectSink;
+  }
 
   sweepDeadTmpdirRedirectSinks();
   const sink = join(WORKER_ROOT, `redir-${process.pid}`);

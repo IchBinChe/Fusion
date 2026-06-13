@@ -9,6 +9,7 @@ import { useViewportMode } from "../../hooks/useViewportMode";
 import { useMobileKeyboard } from "../../hooks/useMobileKeyboard";
 import { useAppSettings } from "../../hooks/useAppSettings";
 import { useChatRooms } from "../../hooks/useChatRooms";
+import * as mobileScrollLock from "../../hooks/useMobileScrollLock";
 import { QuickChatFAB } from "../QuickChatFAB";
 import { FileBrowserProvider } from "../../context/FileBrowserContext";
 
@@ -797,6 +798,82 @@ describe("QuickChatFAB session-first UX", () => {
 
     fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
     expect(screen.getByTestId("quick-chat-session-option-session-model")).toBeInTheDocument();
+  });
+
+  it("FN-6301: iOS first tap focuses composer without canceling native focus, then sends", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(true);
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, _handlers) => ({
+      close: vi.fn(),
+      isConnected: () => true,
+    }));
+
+    try {
+      render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+      await waitFor(() => expect(input).not.toBeDisabled());
+      input.blur();
+      expect(document.activeElement).not.toBe(input);
+
+      const touchEvent = new TouchEvent("touchstart", { bubbles: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(touchEvent, "preventDefault");
+      fireEvent(input, touchEvent);
+      // jsdom has no soft keyboard/native touch-focus default action; mirror
+      // the browser focus that iOS only performs when touchstart is not canceled.
+      if (!touchEvent.defaultPrevented) {
+        input.focus();
+      }
+
+      expect(preventDefaultSpy).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(input);
+      expect(screen.getByTestId("quick-chat-send")).toBeDisabled();
+
+      fireEvent.change(input, { target: { value: "Hello quick mobile" } });
+      const sendButton = screen.getByTestId("quick-chat-send");
+      fireEvent.touchStart(sendButton);
+      fireEvent.click(sendButton);
+
+      await waitFor(() => {
+        expect(mockStreamChatResponse).toHaveBeenCalledTimes(1);
+      });
+      expect(mockStreamChatResponse).toHaveBeenCalledWith("session-model", "Hello quick mobile", expect.any(Object), [], "proj-1");
+      expect(await screen.findByTestId("quick-chat-stop")).toBeInTheDocument();
+      expect(document.activeElement).toBe(input);
+    } finally {
+      isIOSSpy.mockRestore();
+    }
+  });
+
+  it("FN-6301: Android mobile composer touchstart leaves native focus uncanceled", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(false);
+
+    try {
+      render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+      await waitFor(() => expect(input).not.toBeDisabled());
+      input.blur();
+
+      const touchEvent = new TouchEvent("touchstart", { bubbles: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(touchEvent, "preventDefault");
+      fireEvent(input, touchEvent);
+      if (!touchEvent.defaultPrevented) {
+        input.focus();
+      }
+
+      expect(preventDefaultSpy).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(input);
+    } finally {
+      isIOSSpy.mockRestore();
+    }
   });
 
   it("uses icon-only model tag without pill styling when mobile header fallback is active", async () => {

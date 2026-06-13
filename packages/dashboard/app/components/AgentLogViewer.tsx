@@ -48,7 +48,7 @@ function formatTimestamp(iso: string, t: TFunction<"app">): string {
   return date.toLocaleDateString();
 }
 
-const markdownComponents: Components = {
+export const markdownComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
   li: ({ children, ...props }) => <li {...props}>{linkifyReactChildren(children)}</li>,
   code: ({ children, ...props }) => {

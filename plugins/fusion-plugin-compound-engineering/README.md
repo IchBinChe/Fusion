@@ -93,7 +93,7 @@ The list refreshes on any CE push event and falls back to polling
 Turn execution is **detached**: `POST /sessions`, `/answer`, and `/resume`
 return as soon as the session row reflects the request, with the agent turn
 running in the background. Closing the flow does not cancel the server-side
-agent; use `POST /sessions/:id/cancel` (or the dashboard Cancel button) to stop
+agent; use `POST /sessions/:id/cancel` (or the dashboard cancel icon button) to stop
 an in-flight turn while preserving the session as `interrupted`. While it runs:
 
 - The engine streams **live progress** through the seam's `onProgress` option

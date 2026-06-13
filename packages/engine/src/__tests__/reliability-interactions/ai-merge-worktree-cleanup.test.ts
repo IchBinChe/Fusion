@@ -1,10 +1,10 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { DEFAULT_SETTINGS, TaskStore, type Settings } from "@fusion/core";
-import { cleanupAiMergeWorktree, runAiMerge } from "../../merger-ai.js";
+import { cleanupAiMergeWorktree, resolveAiMergeRoot, runAiMerge } from "../../merger-ai.js";
 import { hasGit } from "./_helpers.js";
 import type { RunAuditor } from "../../run-audit.js";
 
@@ -38,6 +38,14 @@ function tmpAiMergeDirs(taskId: string): string[] {
     .map((entry) => join(tmpdir(), entry));
 }
 
+function localAiMergeDirs(rootDir: string, taskId: string): string[] {
+  const root = resolveAiMergeRoot(rootDir);
+  const prefix = aiMergePrefix(taskId);
+  return readdirSync(root)
+    .filter((entry) => entry.startsWith(prefix))
+    .map((entry) => join(root, entry));
+}
+
 function removeTmpAiMergeDirs(taskId: string): void {
   for (const dir of tmpAiMergeDirs(taskId)) {
     try {
@@ -49,9 +57,15 @@ function removeTmpAiMergeDirs(taskId: string): void {
 }
 
 function expectNoAiMergeWorktrees(rootDir: string, taskId: string): void {
-  expect(tmpAiMergeDirs(taskId), `tmpdir entries for ${taskId}`).toEqual([]);
+  expect(tmpAiMergeDirs(taskId), `legacy tmpdir entries for ${taskId}`).toEqual([]);
+  expect(localAiMergeDirs(rootDir, taskId), `repo-local AI merge entries for ${taskId}`).toEqual([]);
   const worktrees = git(rootDir, "worktree list --porcelain");
   expect(worktrees).not.toContain(aiMergePrefix(taskId));
+}
+
+function makeAge(path: string, ageMs: number): void {
+  const old = new Date(Date.now() - ageMs);
+  utimesSync(path, old, old);
 }
 
 function realMergeAgent(branch: string) {
@@ -108,6 +122,7 @@ async function createFixture(label: string) {
     branch,
     cleanup: async () => {
       removeTmpAiMergeDirs(created.id);
+      for (const dir of localAiMergeDirs(rootDir, created.id)) rmSync(dir, RM);
       store.close();
       rmSync(rootDir, RM);
       tracked.delete(rootDir);
@@ -237,7 +252,10 @@ describe("FN-6220 AI-merge worktree cleanup lifecycle (real git)", () => {
 
     try {
       commitTaskBranch(rootDir, branch, "feature.txt", "feature work\n");
-      const orphanDir = mkdtempSync(join(tmpdir(), aiMergePrefix(taskId)));
+      const orphanRoot = resolveAiMergeRoot(rootDir);
+      mkdirSync(orphanRoot, { recursive: true });
+      const orphanDir = mkdtempSync(join(orphanRoot, aiMergePrefix(taskId)));
+      makeAge(orphanDir, 11 * 60_000);
       expect(existsSync(orphanDir)).toBe(true);
 
       await runAiMerge(store, rootDir, taskId, { manual: true, allowDirtyLocalCheckoutSync: true }, {

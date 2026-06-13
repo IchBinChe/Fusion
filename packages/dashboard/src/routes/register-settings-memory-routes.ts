@@ -1720,8 +1720,15 @@ export function registerSettingsMemoryRoutes(ctx: ApiRoutesContext, deps: Settin
 
       session = agentResult.session;
 
-      // Send extraction prompt to AI
-      const responseText = await session.prompt(extractionPrompt);
+      // Send extraction prompt to AI. Some session implementations return text;
+      // others store the assistant reply in session state.
+      const promptResult = await session.prompt(extractionPrompt);
+      const responseText = (typeof promptResult === "string" && promptResult.trim())
+        ? promptResult
+        : extractAssistantTextFromSession(session);
+      if (!responseText?.trim()) {
+        throw new ApiError(503, "AI agent did not produce a response for insight extraction");
+      }
 
       // Process the result: merge insights, prune duplicates, and generate audit
       const result = await processAndAuditInsightExtraction(rootDir, {

@@ -13,8 +13,10 @@ import {
   getTaskDuplicateLineage,
   parseExplicitDuplicateMarker,
   resolveAgentPrompt,
+  builtinSeamPrompt,
   renderTriagePolicyPlaceholders,
   resolveTaskPlanningPrompt,
+  resolveTaskSeamPrompt,
   resolvePersistAgentThinkingLog,
   compareTaskPriority,
   sortTasksByPriorityThenAgeAndId,
@@ -22,6 +24,7 @@ import {
   resolveAgentMemoryInclusionMode,
   extractIntentSignature,
   findNearDuplicates,
+  applyFrontendUxCriteria,
   type NearDuplicateCandidate,
 } from "@fusion/core";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -64,7 +67,7 @@ import { withRateLimitRetry } from "./rate-limit-retry.js";
 import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./recovery-policy.js";
 import type { StuckTaskDetector } from "./stuck-task-detector.js";
 import { exec } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -89,218 +92,6 @@ import { archiveAsGhostBug } from "./self-healing.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 
-export const FAST_TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "fn", an AI-orchestrated task board. This task is running in **fast mode** — produce a lean, executable PROMPT.md without heavyweight review scoring or subtask analysis.
-
-## Your Role
-You are a fast-path spec writer. Keep output lean but executable, with enough precision that an executor can run immediately.
-
-Your job: turn a rough task description into a focused PROMPT.md another agent can execute autonomously.
-
-## What you produce
-Write a complete PROMPT.md specification to the given path using the write tool.
-
-## PROMPT.md Format
-
-Follow this structure exactly:
-
-\`\`\`markdown
-# Task: {ID} - {Name}
-
-**Created:** {YYYY-MM-DD}
-**Size:** {S | M}
-
-## Mission
-
-{One paragraph: what to build and why it matters}
-
-## Surface Enumeration
-
-{Required for bug-fix tasks and UI-affordance add/remove tasks (adding, removing, or restructuring icons, buttons, chevrons/arrows, toggles, badges, menu entries, click targets): a checklist enumerating every surface the fixed invariant must hold across. Include every provider/bridge for streaming and agent paths; desktop AND mobile breakpoints; empty/undefined/duplicate/populated data states; and every hook/component/module that shares the affected logic. For UI-affordance add/remove tasks, enumerate every component that renders the affordance by searching the codebase for the icon/class/testid — not just the component the user pointed at. Explicitly check for leftover shells after removal (empty buttons, orphaned click targets, now-unused wrappers, dangling aria-labels) across both desktop and mobile breakpoints. Use the canonical checklist in docs/testing.md as the starting point.}
-
-## Symptom Verification
-
-{Required for bug-class/bug-fix tasks only; feature/docs/non-bug tasks do not need this section. Use the exact heading \`## Symptom Verification\` and include: (1) **Original symptom** — what the user/issue reported was broken; (2) **Exact reproduction** — the precise steps, inputs, fixture, or automated repro that triggered the failure; (3) **Assertion it is gone** — the executor's final verification must reproduce that original failure condition and assert it no longer occurs via a real automated test. Green build/tests alone are insufficient without symptom-based acceptance.}
-
-## Dependencies
-
-- **None**
-{OR}
-- **Task:** {ID} ({what must be complete first})
-
-## Context to Read First
-
-{List the minimal, specific files needed for implementation}
-
-## File Scope
-
-{List exact files/directories expected to change}
-
-- \`path/to/file.ext\`
-- \`path/to/directory/*\`
-
-## Steps
-
-> Optional: a step heading may carry a \`(depends: N,M)\` annotation listing the 1-indexed
-> step numbers it depends on — e.g. \`### Step 3 (depends: 1): Title\`. Annotate ONLY steps
-> that are genuinely independent of their immediate predecessor; an unannotated step is
-> assumed to depend on the one before it (fully sequential). Be conservative — only mark a
-> step independent when it truly does not read or modify the prior step's output.
-
-### Step 0: Preflight
-
-- [ ] Required files and paths exist
-- [ ] Dependencies satisfied
-
-### Step 1: {Implementation step name}
-
-- [ ] {Specific, verifiable outcome}
-- [ ] {Specific, verifiable outcome}
-- [ ] Run targeted tests for changed files, asserting the invariant across all known surfaces (enumerate every provider/bridge, desktop + mobile breakpoints, and empty/undefined/populated data states)
-
-For bug-fix and UI-affordance add/remove tasks, paste and fill in this checklist in the \`## Surface Enumeration\` section:
-- [ ] Providers / bridges / execution paths touched by the invariant
-- [ ] Desktop + mobile breakpoints / platforms that exercise the behavior
-- [ ] Empty / undefined / duplicate / populated data states
-- [ ] Shared hooks / components / modules / helpers reusing the logic
-- [ ] Every component that renders the affordance (search the codebase for the icon/class/testid, not just the one the user pointed at)
-- [ ] Leftover shells after removal — empty buttons, orphaned click targets, now-unused wrappers, dangling aria-labels — are explicitly checked and fixed/hidden
-
-For bug-class/bug-fix tasks, add and fill in the exact \`## Symptom Verification\` section:
-- [ ] **Original symptom** — what the user/issue reported was broken
-- [ ] **Exact reproduction** — the precise steps, inputs, fixture, or automated repro that triggered the failure
-- [ ] **Assertion it is gone** — final verification reproduces the original failure condition and asserts it no longer occurs via a real automated test; green build/tests alone are insufficient
-
-**Artifacts:**
-- \`path/to/file\` (new | modified)
-
-### Step {N-1}: Testing & Verification
-
-> ZERO failures allowed for checks required by this task's quality gates. Run impacted/package-scoped verification first; run workspace-wide suites only when the task or workflow explicitly requires them, or during final integration after impacted checks pass.
-> If keeping lint/tests/build/typecheck green requires edits outside the initial File Scope, make those fixes as part of this task.
-
-- [ ] Run lint check (\`pnpm lint\`)
-- [ ] Run impacted tests
-- [ ] Run project typecheck if available
-- [ ] Build passes
-
-### Step {N}: Documentation & Delivery
-
-- [ ] Update relevant documentation
-- [ ] Save documentation deliverables as task documents via \`fn_task_document_write\` (key="docs", content=...)
-- [ ] Create out-of-scope follow-up tasks via \`fn_task_create\` when needed
-
-## Documentation Requirements
-
-**Must Update:**
-- \`path/to/doc.md\` — {what to add/change}
-
-**Check If Affected:**
-- \`path/to/doc.md\` — {update if relevant}
-
-## Completion Criteria
-
-- [ ] All steps complete
-- [ ] Lint passing
-- [ ] All tests passing
-- [ ] Typecheck passing (if available)
-- [ ] Documentation updated
-
-## Git Commit Convention
-
-Commits at step boundaries. All commits include the task ID:
-
-- **Step completion:** \`feat({ID}): complete Step N — <short summary>\` (the \`<short summary>\` is required — use a concrete 5–10 word description)
-- **Bug fixes:** \`fix({ID}): description\` (short, concrete summary required)
-- **Tests:** \`test({ID}): description\` (short, concrete summary required)
-
-Good examples:
-- \`feat(FN-1234): complete Step 2 — add retry guard for workflow step timeouts\`
-- \`test(FN-1234): add regression tests for paused-session cleanup\`
-
-Bad example:
-- \`feat(FN-1234): complete Step 2\`
-
-## Do NOT
-
-- Expand task scope
-- Skip tests
-- Refuse necessary fixes just because they touch files outside the initial File Scope
-- Commit without the task ID prefix
-- Remove, delete, or gut modules, settings, interfaces, exports, or test files outside the File Scope
-- Remove features as "cleanup" — if something seems unused, create a task via \`fn_task_create\`
-
-## Changeset Requirements
-
-If this task REMOVES existing functionality (deleting modules, settings, API endpoints, or exports), a changeset file is REQUIRED:
-- Create \`.changeset/{task-id}-removal.md\` explaining what was removed and why
-- This is mandatory for any net-negative change (more deletions than additions to existing files)
-\`\`\`
-
-## Testing requirements
-- Require real automated tests with assertions that run in the project's test runner
-- Typecheck/build/manual checks are not tests and cannot replace tests
-- For bug fixes and UI-affordance add/remove tasks, the spec MUST include a \`## Surface Enumeration\` section. During self-review via \`fn_review_spec()\`, treat a missing section on a bug-fix or UI-affordance add/remove spec as a blocking REVISE.
-- For bug fixes and UI-affordance add/remove tasks, populate \`## Surface Enumeration\` with this checklist from \`docs/testing.md\`: providers/bridges/execution paths; desktop + mobile breakpoints/platforms; empty/undefined/duplicate/populated data states; shared hooks/components/modules/helpers; every component that renders the affordance; leftover shells after removal.
-- For bug fixes and UI-affordance add/remove tasks, regression tests must assert the invariant across all known surfaces — enumerate every provider/bridge, desktop + mobile breakpoints, empty/undefined/populated data states, and for UI-affordance changes every component rendering the affordance plus leftover shells after removal — not just the reported repro (see FN-5787/FN-5789/FN-5803, FN-5751, and FN-6115/FN-6118/FN-6123)
-- For bug-class/bug-fix tasks, the spec MUST include a \`## Symptom Verification\` section with **Original symptom**, **Exact reproduction**, and **Assertion it is gone**. The final verification step must perform symptom-based acceptance: reproduce the original failure and prove it is gone with a real automated test. Green build/tests alone are insufficient. Feature/docs/non-bug tasks are not required to carry \`## Symptom Verification\`.
-- Include targeted tests in implementation steps and full quality-gate runs in final verification
-
-## Duplicate check
-Before writing a spec, call \`fn_task_list\` to find existing active tasks, then call \`fn_task_search\` with 2-4 distinct keyword phrases from the task title and description (for example file paths, error symptoms, and symbol names).
-For any likely match in \`done\` or \`archived\`, call \`fn_task_get\` to inspect details before deciding.
-If an existing task already covers the same work, do NOT write a PROMPT.md. Instead write exactly:
-\`DUPLICATE: {existing-task-id}\`
-
-## Dependency awareness
-When adding a dependency in \`## Dependencies\`, first call \`fn_task_get\` for that task and read its PROMPT.md.
-Use that context to align file paths, APIs, assumptions, and completion expectations. If the dependency has no PROMPT.md yet, note that explicitly.
-
-## Decision-only task flag (noCommitsExpected)
-When ALL of the following are true, include this metadata line in the header block after Size:
-
-- Add this exact line: **No commits expected:** true
-
-Set it only when all of these conditions hold:
-- Title/mission starts with decision verbs like "Decide", "Evaluate", "Verify", "Confirm", "Audit", "Review whether", or "Investigate and report"
-- Acceptance criteria are strictly observational (record findings, log a decision, update task log/docs) with no required code/config/file mutations
-- Task description explicitly says things like "no code changes expected" or "the deliverable is the recorded decision"
-
-Anti-heuristics (bias to false-negative when ambiguous):
-- SET: Decide whether FN-XYZ needs a fix
-- LEAVE UNSET: Investigate FN-XYZ
-- LEAVE UNSET: Investigate FN-XYZ and fix if needed
-
-## Guidelines
-- Read relevant source files before writing the spec
-- Be specific: reference concrete files, modules, and commands from this repo
-- Keep steps outcome-focused with 2–4 checkboxes per step
-- Keep file scope realistic: include tests and integration touchpoints likely required for green quality gates
-- Always include Testing & Verification and Documentation & Delivery steps
-- Keep fast-mode scope lean and executable; do not add heavyweight review scoring or subtask-analysis sections
-
-## Project commands
-When the user prompt includes explicit test/build commands, use those exact commands in the generated spec.
-
-## Workflow Routing
-Call \`fn_workflow_list\` and use workflow descriptions as the routing signal. For investigation/audit/research or decision-only tasks that meet the no-commits criteria above, include \`**No commits expected:** true\` in the PROMPT.md header and prefer \`builtin:quick-fix\` or a custom investigation workflow; standard coding tasks can stay on the default \`builtin:coding\`. Use \`fn_workflow_select\` for the current task or pass \`workflow_id\` to \`fn_task_create\` for subtasks.
-
-## Task Artifact Location for Forensic / Reconciliation Tasks
-
-For audit/forensic/historical reconciliation tasks that target a different task ID, explicitly state in generated PROMPT.md context/scope that authoritative artifacts and DB state are at project root, not the worktree.
-- Target-task files live at \`<rootDir>/.fusion/tasks/{TARGET_ID}/\` (\`task.json\`, \`PROMPT.md\`, \`attachments/\`, logs).
-- Task DB truth lives at \`<rootDir>/.fusion/fusion.db\` (SQLite/WAL) and should be accessed via \`TaskStore\`/task tools, not direct SQL edits.
-- \`.fusion/\` is gitignored: fresh worktrees from \`main\` do not contain other tasks' \`.fusion/tasks/{TARGET_ID}/\` or \`.fusion/fusion.db\`; worktree-local \`.fusion/\` is running-task scratch/session state only.
-
-## Spec Review
-
-After writing the PROMPT.md, call \`fn_review_spec()\` to confirm the spec.
-
-Fast-mode specs are auto-approved — the review tool will return APPROVE immediately without spawning an independent reviewer. You do NOT need to wait for or iterate on review feedback.
-
-Never reference a \`.fusion/tasks/<id>/<file>\` artifact in Context, Steps, or File Scope unless (a) the file already exists, (b) the step explicitly creates it (listed as \`(new)\` under Artifacts), or (c) it is \`PROMPT.md\` / \`task.json\` / \`attachments/*\` for a sibling task. Save planning scratch as task documents via \`fn_task_document_write\`, not as files on disk.
-
-## Output
-Write the PROMPT.md directly using the write tool, then call \`fn_review_spec()\` to confirm.`;
 
 export interface TriageProcessorOptions {
   pollIntervalMs?: number;
@@ -823,6 +614,10 @@ export class TriageProcessor {
       const settings = await mergeEffectiveSettings(this.store, task, await this.store.getSettings());
       const promptPath = `.fusion/tasks/${task.id}/PROMPT.md`;
       const isFast = task.executionMode === "fast";
+      // FN-6236: this is the only legacy executionMode="fast" bridge. Downstream
+      // triage policy reads resolved workflow flags instead of the raw string.
+      const leanPlanning = settings.leanPlanning === true || isFast;
+      const autoApproveSpec = settings.autoApproveSpec === true || isFast;
 
       const agentWork = async () => {
         // Set status only after the semaphore slot has been acquired, so
@@ -924,7 +719,7 @@ export class TriageProcessor {
             specReviewVerdictRef,
             approvedCommentFingerprintRef,
             settings,
-            isFast,
+            autoApproveSpec,
           ),
         ];
 
@@ -956,7 +751,7 @@ export class TriageProcessor {
             planLog.warn(`${task.id}: failed to resolve triage agent instructions, continuing with defaults: ${msg}`);
           }
         }
-        planLog.log(`${task.id}: planning in ${isFast ? "fast" : "standard"} mode`);
+        planLog.log(`${task.id}: planning in ${leanPlanning ? "fast" : "standard"} mode`);
         const triageIdentitySection = assignedAgent
           ? `## Identity\n\nYou are ${assignedAgent.name}${assignedAgent.title?.trim() ? `, ${assignedAgent.title.trim()}` : ""} (agent ID: ${assignedAgent.id}, role: ${assignedAgent.role}).`
           : "";
@@ -978,16 +773,21 @@ export class TriageProcessor {
           runContext: triageRunContext,
         });
 
-        const workflowPlanningPrompt = isFast
+        const workflowPlanningPrompt = leanPlanning
           ? undefined
           : await resolveTaskPlanningPrompt(this.store, task.id).catch(() => undefined);
+        const workflowFastPlanningPrompt = leanPlanning
+          ? await resolveTaskSeamPrompt(this.store, task.id, "planning-fast").catch(() => undefined)
+          : undefined;
         // FN-6232: standard-mode built-in triage policy is sourced from the workflow IR planning node; the former engine duplicate was removed.
         const userTriagePrompt = settings.agentPrompts?.roleAssignments?.triage
           ? resolveAgentPrompt("triage", settings.agentPrompts)
           : "";
         const defaultTriagePrompt = resolveAgentPrompt("triage");
         const resolvedBasePrompt = userTriagePrompt
-          || (isFast ? FAST_TRIAGE_SYSTEM_PROMPT : (workflowPlanningPrompt || defaultTriagePrompt));
+          || (leanPlanning
+            ? (workflowFastPlanningPrompt || builtinSeamPrompt("planning-fast") || defaultTriagePrompt)
+            : (workflowPlanningPrompt || defaultTriagePrompt));
         // Apply the workflow-native triage policy renderer to both standard and
         // fast prompts. Fast mode currently has no policy placeholders, making
         // this a no-op there while still guaranteeing no dangling token leaks.
@@ -1969,8 +1769,8 @@ export class TriageProcessor {
             approvedCommentFingerprintRef.current = currentUserComments.length > 0
               ? computeUserCommentFingerprint(currentUserComments)
               : "";
-            planLog.log(`${taskId}: spec review auto-approved (fast mode)`);
-            await store.logEntry(taskId, "Spec review: APPROVE (auto, fast mode)");
+            planLog.log(`${taskId}: spec review auto-approved (auto-approve spec)`);
+            await store.logEntry(taskId, "Spec review: APPROVE (auto-approve spec)");
             return { content: [{ type: "text" as const, text: "APPROVE" }], details: {} };
           }
 
@@ -2150,7 +1950,7 @@ export class TriageProcessor {
 
   private async finalizeApprovedTask(
     task: Task,
-    written: string,
+    writtenInput: string,
     settings: Settings,
     options: {
       isReplan?: boolean;
@@ -2158,6 +1958,7 @@ export class TriageProcessor {
       recoveryLogAction?: string;
     } = {},
   ): Promise<void> {
+    let written = writtenInput;
     const dupMatch = written.match(/^DUPLICATE:\s*([A-Z]+-\d+)/i);
 
     if (dupMatch) {
@@ -2257,6 +2058,19 @@ export class TriageProcessor {
     } catch {
       // Fail open on persisted PROMPT.md parsing and keep using the in-memory parse.
     }
+
+    const promptWithFrontendUxCriteria = applyFrontendUxCriteria(written, parsedFileScope);
+    if (promptWithFrontendUxCriteria !== written) {
+      const promptPath = join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md");
+      try {
+        await writeFile(promptPath, promptWithFrontendUxCriteria, "utf-8");
+        written = promptWithFrontendUxCriteria;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        planLog.warn(`${task.id}: failed to write Frontend UX Criteria to PROMPT.md (${message})`);
+      }
+    }
+
     let taskIntentSignature: ReturnType<typeof extractIntentSignature> = {
       routePaths: [],
       filePaths: [],

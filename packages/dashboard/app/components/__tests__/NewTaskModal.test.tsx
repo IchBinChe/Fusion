@@ -291,9 +291,7 @@ describe("NewTaskModal", () => {
     expect(screen.getByText("Branch name is required for this branch strategy.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
-    await waitFor(() => {
-      expect(props.onCreateTask).not.toHaveBeenCalled();
-    });
+    expect(props.onCreateTask).not.toHaveBeenCalled();
   });
 
   it("submits custom-new branch selection when branch name exists", async () => {
@@ -328,9 +326,7 @@ describe("NewTaskModal", () => {
     expect(screen.getByText("Branch name is required for this branch strategy.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
-    await waitFor(() => {
-      expect(props.onCreateTask).not.toHaveBeenCalled();
-    });
+    expect(props.onCreateTask).not.toHaveBeenCalled();
   });
 
   it("submits shared-group branch selection when shared branch exists", async () => {

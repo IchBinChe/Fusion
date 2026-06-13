@@ -26,18 +26,25 @@ export function canAgentTakeImplementationTaskForExplicitRouting(
   return !isImplementationTask(task) || isExecutorRoleAgent(agent) || isEngineerRoleAgent(agent);
 }
 
+export interface BacklogPickupRoleOptions {
+  /** Allow durable engineer-role agents to auto-claim implementation backlog work. Default: false. */
+  allowEngineer?: boolean;
+}
+
 export function canAgentTakeImplementationTaskForBacklogPickup(
   agent: Pick<Agent, "role">,
   task: Pick<Task, "column">,
+  options: BacklogPickupRoleOptions = {},
 ): boolean {
-  return !isImplementationTask(task) || isExecutorRoleAgent(agent);
+  return !isImplementationTask(task) || isExecutorRoleAgent(agent) || (options.allowEngineer === true && isEngineerRoleAgent(agent));
 }
 
 export function canAgentTakeImplementationTask(
   agent: Pick<Agent, "role">,
   task: Pick<Task, "column">,
+  options?: BacklogPickupRoleOptions,
 ): boolean {
-  return canAgentTakeImplementationTaskForBacklogPickup(agent, task);
+  return canAgentTakeImplementationTaskForBacklogPickup(agent, task, options);
 }
 
 export function formatRoleMismatchReason(

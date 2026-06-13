@@ -391,9 +391,18 @@ describe("WorkflowGraphExecutor traversal", () => {
     expect(order).toEqual(["b", "c"]);
   });
 
-  it("builtin coding workflow ir exposes expected lifecycle nodes", () => {
+  it("builtin coding workflow ir exposes expected lifecycle and merge-policy nodes", () => {
     expect(BUILTIN_CODING_WORKFLOW_IR.nodes.map((node) => node.id)).toEqual(
-      expect.arrayContaining(["start", "execute", "review", "merge", "end"]),
+      expect.arrayContaining([
+        "start",
+        "execute",
+        "review",
+        "merge-gate",
+        "branch-group-member-integration",
+        "branch-group-promotion",
+        "merge-attempt",
+        "end",
+      ]),
     );
   });
 

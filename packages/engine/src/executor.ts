@@ -336,6 +336,13 @@ const MAX_WORKFLOW_STEP_RETRIES = 3;
 const MAX_TASK_DONE_SESSION_RETRIES = 3;
 /** Maximum todo requeues after exhausting in-session fn_task_done retries. */
 const MAX_TASK_DONE_REQUEUE_RETRIES = 3;
+/**
+ * Maximum bounded retries for the narrow resume-after-restart graph transient.
+ * Budget exhaustion falls through to terminal status:"failed" so FN-5704's
+ * self-healing anti-loop exemption remains intact for genuine graph failures.
+ */
+const MAX_TRANSIENT_GRAPH_RESUME_RETRIES = 2;
+const TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS = process.env.VITEST || process.env.NODE_ENV === "test" ? 0 : 1_000;
 /** How long to wait before recovering a completed task still stuck in in-progress. */
 const COMPLETED_TASK_WATCHDOG_MS = 60_000;
 /** How long to wait before retrying a workflow rerun handoff that never reached in-progress. */
@@ -2007,7 +2014,6 @@ export class TaskExecutor {
     }
 
     this.loopRecoveryState.delete(taskId);
-    this.spawnedAgents.delete(taskId);
     this.stuckAborted.delete(taskId);
 
     if (hadActiveSurface) {
@@ -3894,6 +3900,11 @@ export class TaskExecutor {
       }
       if (result.disposition === "failed") {
         await this.handleGraphFailure(task, result);
+      } else if (result.disposition === "completed") {
+        const live = await this.store.getTask(task.id).catch(() => task);
+        if ((live.graphResumeRetryCount ?? 0) !== 0) {
+          await this.store.updateTask(task.id, { graphResumeRetryCount: 0 }, this.getRunContextFor(task.id));
+        }
       }
       return true;
     } finally {
@@ -4507,11 +4518,15 @@ export class TaskExecutor {
         stageByNodeId.set(node.id, seam);
       }
     }
-    // Stop the shadow walk at the live terminal seam. The graph walker visits a
-    // node *before* invoking its seam, so even a failing merge seam (the case
-    // when the live task is parked in-review with autoMerge off) still records a
-    // "merge" stage. The legacy side never reports merge for an in-review task,
-    // so that phantom stage manufactures stageTransitions drift on healthy runs.
+    // The built-in coding IR now enters an interpreter-owned merge-policy
+    // primitive region after review; graph execution collapses that region to a
+    // synthetic legacy merge seam recorded as `merge` until merge-policy cutover.
+    stageByNodeId.set("merge", "merge");
+    // Stop the shadow walk at the live terminal seam. The graph walker records a
+    // merge stage before/while invoking its seam, so even a failing merge seam
+    // (the case when the live task is parked in-review with autoMerge off) still
+    // records a "merge" stage. The legacy side never reports merge for an
+    // in-review task, so that phantom stage manufactures stageTransitions drift.
     // Truncate the visited-stage sequence at the stage the live task actually
     // reached: merged → merge, reachedReview → review, else → execute.
     const terminalStage: WorkflowStage = merged ? "merge" : reachedReview ? "review" : "execute";
@@ -6031,6 +6046,22 @@ export class TaskExecutor {
     }
   }
 
+  private isTransientResumeAfterRestartGraphFailure(live: Task, result: WorkflowGraphTaskRunResult): boolean {
+    if ((result.reason ?? "").trim().length > 0) return false;
+
+    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+    if (failedNode !== undefined && failedNode !== "execute") return false;
+
+    if (live.steps.some((step) => step.status === "done")) return false;
+
+    const failureState = live as Task & { lastError?: unknown; failureReason?: unknown };
+    if (failureState.lastError != null || failureState.failureReason != null) return false;
+
+    const latestAction = live.log.at(-1)?.action;
+    return latestAction === "Resumed after engine restart"
+      || latestAction === "Resuming execution after unpause";
+  }
+
   /** Terminal failure of a graph run: record the error and park the task in
    *  review so a human can act — never leave it invisible in in-progress. */
   private async handleGraphFailure(task: Task, result: WorkflowGraphTaskRunResult): Promise<void> {
@@ -6053,6 +6084,32 @@ export class TaskExecutor {
         return;
       }
       const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+      if (this.isTransientResumeAfterRestartGraphFailure(live, result)) {
+        const priorRetries = live.graphResumeRetryCount ?? 0;
+        if (priorRetries < MAX_TRANSIENT_GRAPH_RESUME_RETRIES) {
+          const nextRetries = priorRetries + 1;
+          const benignMessage = `Transient resume-after-restart graph failure — auto-retrying (${nextRetries}/${MAX_TRANSIENT_GRAPH_RESUME_RETRIES}) instead of parking`;
+          executorLog.warn(`${task.id}: ${benignMessage}`);
+          await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
+          await this.store.updateTask(task.id, {
+            graphResumeRetryCount: nextRetries,
+            status: null,
+            error: null,
+          }, this.getRunContextFor(task.id));
+          const scheduleRetry = () => {
+            this.execute(live).catch((err) =>
+              executorLog.error(`Failed transient graph resume retry for ${task.id}:`, err),
+            );
+          };
+          if (TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS > 0) {
+            const handle = setTimeout(scheduleRetry, TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS);
+            handle.unref?.();
+          } else {
+            setTimeout(scheduleRetry, 0).unref?.();
+          }
+          return;
+        }
+      }
       const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
       executorLog.warn(`${task.id}: ${message}`);
       await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
@@ -13875,6 +13932,51 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         try {
           const settings = await this.store.getSettings();
           const preserveProgress = settings.preserveProgressOnStuckRequeue !== false;
+          const latestTask = await this.store.getTask(taskId);
+          const worktreePath = this.getWorktreePath(taskId) ?? latestTask.worktree;
+          await this.store.logEntry(
+            taskId,
+            `Force-kill cleanup starting after stuck-kill unwind timeout — reaping in-flight surfaces and worktree`,
+          );
+
+          // Spawned children must be terminated before the canonical reaper clears
+          // spawnedAgents bookkeeping; otherwise child agent sessions would be orphaned.
+          await this.terminateAllChildren(taskId).catch((err: unknown) => {
+            executorLog.warn(`${taskId}: spawned child cleanup failed during force-requeue: ${err instanceof Error ? err.message : String(err)}`);
+          });
+          await this.awaitAbortInFlightTaskWork(taskId, "force-requeue after stuck-kill unwind timeout");
+          // awaitAbortInFlightTaskWork marks pausedAborted as a generic hard-cancel
+          // signal. The force-requeue path has already handled the task move, so
+          // clear it to prevent a later subprocess unwind from logging/moving as a pause.
+          this.pausedAborted.delete(taskId);
+
+          if (!preserveProgress) {
+            await this.resetStepsIfWorkLost(latestTask);
+          }
+
+          let cleanupFailed = false;
+          if (worktreePath && existsSync(worktreePath)) {
+            try {
+              await removeWorktree({
+                worktreePath,
+                rootDir: this.rootDir,
+                settings,
+                taskId,
+                reason: RemovalReason.ExecutorStuckKilled,
+                expectedOwnerTaskId: taskId,
+                liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+              });
+              executorLog.log(`${taskId}: removed worktree during force-requeue cleanup: ${worktreePath}`);
+            } catch (cleanupErr: unknown) {
+              cleanupFailed = true;
+              const cleanupErrMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+              executorLog.warn(`${taskId}: worktree removal failed during force-requeue cleanup (${worktreePath}): ${cleanupErrMessage}`);
+              await this.store.logEntry(taskId, `Force-kill cleanup failed to remove worktree ${worktreePath}: ${cleanupErrMessage}`);
+            }
+          }
+
+          this.activeWorktrees.delete(taskId);
+
           await this.store.logEntry(
             taskId,
             `Force-requeued after stuck-kill: executor did not unwind within ${FORCE_REQUEUE_GRACE_MS / 1000}s (hung subprocess)${preserveProgress ? " — progress preserved" : ""}`,
@@ -13886,16 +13988,23 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
             branch: null,
           });
           await this.store.moveTask(taskId, "todo", preserveProgress ? { preserveProgress: true } : undefined);
-          // Remove from executing so the scheduler can re-dispatch normally.
-          // The old Promise is still running but the executing guard is cleared so
-          // a fresh execute() call won't be blocked.
+          // Remove from executing only after the hung surfaces and worktree have
+          // been reaped, preventing a scheduler re-dispatch onto stale resources.
           this.executing.delete(taskId);
           executingTaskLock.release(taskId);
           this.stuckAborted.delete(taskId);
-          executorLog.log(`${taskId} force-requeued to todo`);
+          this.loopRecoveryState.delete(taskId);
+          await this.store.logEntry(
+            taskId,
+            cleanupFailed
+              ? "Force-kill cleanup completed with non-fatal worktree removal failure — task requeued"
+              : "Force-kill cleanup completed — in-flight surfaces reaped and task requeued",
+          );
+          executorLog.log(`${taskId} force-requeued to todo after stuck-kill cleanup`);
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);
           executorLog.error(`Failed to force-requeue stuck task ${taskId}: ${errorMessage}`);
+          await this.store.logEntry(taskId, `Force-kill cleanup failed during stuck-kill force-requeue: ${errorMessage}`).catch(() => undefined);
         }
       }, FORCE_REQUEUE_GRACE_MS);
     }

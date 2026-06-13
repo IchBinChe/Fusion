@@ -14,6 +14,8 @@ describe("classifyTransientMergeError", () => {
     expect(classifyTransientMergeError("spawn ENOENT")).toBe("process-spawn-failure");
     expect(classifyTransientMergeError("Bash tool failed: spawn node ENOTDIR while starting merge verification"))
       .toBe("process-spawn-failure");
+    expect(classifyTransientMergeError("fatal: '/var/folders/x/fusion-ai-merge-fn-1-abc' is not a working tree"))
+      .toBe("process-spawn-failure");
 
     expect(classifyTransientMergeError("ENOTDIR while reading packages/cli/package.json"))
       .toBeNull();

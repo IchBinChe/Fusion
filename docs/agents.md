@@ -511,6 +511,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `enabled` | `boolean` | `true` | Whether heartbeat triggers are enabled for this agent |
 | `heartbeatIntervalMs` | `number` | — | How often the agent should wake up for heartbeat checks (ms) |
 | `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
+| `engineerBacklogAutoClaim` | `boolean` | inherits project (`false`) | Opt this engineer-role agent into no-task backlog auto-claim for implementation tasks. Executor-role agents remain eligible by default; explicit routing/delegation is unchanged. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Per-agent override for no-task candidate lines rendered in prompts. Integer `0-10`; `0` suppresses candidate injection. |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
@@ -526,6 +527,8 @@ The `runtimeConfig` field on agents supports the following options:
 | `modelProvider` | `string` | — | AI provider override for heartbeat session |
 | `modelId` | `string` | — | AI model ID override for heartbeat session |
 | `budgetConfig` | `AgentBudgetConfig` | — | Token budget governance settings |
+
+Assignment-triggered heartbeats are completion-resilient: if an `agent:assigned` wake is skipped only because the durable agent already has an active heartbeat run, Fusion records the latest assigned task as a pending assignment and re-fires that assignment wake once the active run completes. This prevents assigned work from being stranded by long heartbeat intervals or `skipHeartbeatWhenIdle`; disabled agents (`enabled === false`) and budget-exhausted agents still do not defer assignment wakes.
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
 Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat timing globally: both the heartbeat interval (`pollIntervalMs`) and unresponsive timeout base (`heartbeatTimeoutMs`) are multiplied. Per-agent `heartbeatIntervalMs`/`heartbeatTimeoutMs` remain base values before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
@@ -556,6 +559,8 @@ When an identity-bearing, non-ephemeral agent wakes with no assigned task and `r
 Guardrails:
 - Only unpaused, unassigned, unchecked-out todo tasks with satisfied dependencies are considered
 - Claims are rejected for terminal/paused/owned/conflicting tasks
+- Implementation-task backlog pickup is executor-only by default. Engineer-role agents may opt in through project setting `engineerBacklogAutoClaim` or per-agent `runtimeConfig.engineerBacklogAutoClaim`; the per-agent value overrides the project default in both directions.
+- Explicit task routing/delegation is not affected by the backlog auto-claim opt-in gate.
 - Checkout safety is preserved (`checkout_conflict` paths are non-fatal skips)
 - On successful claim, the same heartbeat run switches into task-scoped execution (no nested run re-entry)
 

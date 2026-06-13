@@ -200,7 +200,14 @@ describe("CompoundEngineeringView", () => {
     // Awaiting sessions advertise that they need the user.
     expect(rows[0].textContent).toMatch(/needs your input/i);
     // Only non-terminal sessions can be cancelled; only terminal sessions can be discarded.
-    expect(screen.getAllByTestId("ce-session-cancel")).toHaveLength(2);
+    const cancelButtons = screen.getAllByTestId("ce-session-cancel");
+    expect(cancelButtons).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Cancel session" })).toHaveLength(2);
+    for (const cancelButton of cancelButtons) {
+      expect(cancelButton).toHaveAccessibleName("Cancel session");
+      expect(cancelButton).toHaveAttribute("title", "Cancel session");
+      expect(cancelButton).not.toHaveTextContent(/cancel/i);
+    }
     expect(screen.getAllByTestId("ce-session-discard")).toHaveLength(1);
     expect(rows[0].querySelector("[data-testid='ce-session-cancel']")).toBeInTheDocument();
     expect(rows[1].querySelector("[data-testid='ce-session-cancel']")).toBeInTheDocument();

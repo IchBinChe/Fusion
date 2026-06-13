@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const osState = vi.hoisted(() => ({ tempRoot: "" }));
 const fsState = vi.hoisted(() => ({ failRmPath: "", rmCalls: [] as string[] }));
-const childState = vi.hoisted(() => ({ execCalls: [] as string[] }));
+const childState = vi.hoisted(() => ({ execCalls: [] as string[], execStdout: "" }));
 
 vi.mock("node:os", async () => {
   const actual = await vi.importActual<typeof import("node:os")>("node:os");
@@ -37,7 +37,7 @@ vi.mock("node:child_process", async () => {
       childState.execCalls.push(command);
       const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback;
       queueMicrotask(() => {
-        if (typeof callback === "function") callback(null, "", "");
+        if (typeof callback === "function") callback(null, childState.execStdout, "");
       });
       return {} as ReturnType<typeof actual.exec>;
     }),
@@ -46,18 +46,20 @@ vi.mock("node:child_process", async () => {
 
 import { activeSessionRegistry } from "../active-session-registry.js";
 import { DONE_TASK_TEMP_WORKTREE_GRACE_MS, MIN_TEMP_WORKTREE_REAP_AGE_MS, SelfHealingManager, STALE_TEMP_MERGE_WORKTREE_MS } from "../self-healing.js";
+import { resolveAiMergeRootPath, resolveLegacyAiMergeRootPath } from "../worktree-paths.js";
 
 const RM = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
 let sandboxRoot = "";
 let projectRoot = "";
 
 beforeEach(() => {
-  sandboxRoot = mkdtempSync(join(tmpdir(), "fusion-tempdir-sweep-sandbox-"));
-  projectRoot = mkdtempSync(join(tmpdir(), "fusion-tempdir-sweep-project-"));
+  sandboxRoot = realpathSync(mkdtempSync(join(tmpdir(), "fusion-tempdir-sweep-sandbox-")));
+  projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "fusion-tempdir-sweep-project-")));
   osState.tempRoot = sandboxRoot;
   fsState.failRmPath = "";
   fsState.rmCalls = [];
   childState.execCalls = [];
+  childState.execStdout = "";
   activeSessionRegistry.clear();
 });
 
@@ -67,6 +69,7 @@ afterEach(() => {
   fsState.failRmPath = "";
   fsState.rmCalls = [];
   childState.execCalls = [];
+  childState.execStdout = "";
   for (const dir of [sandboxRoot, projectRoot]) {
     try { rmSync(dir, RM); } catch { /* best effort */ }
   }
@@ -77,6 +80,7 @@ function makeStore(settings: Record<string, unknown> = {}, getTask: () => Promis
   const store: any = {
     getSettings: vi.fn(async () => ({ ...settings })),
     getTask: vi.fn(getTask),
+    listTasks: vi.fn(async () => []),
     recordRunAuditEvent: vi.fn(async (event: any) => { audits.push(event); }),
   };
   return { store, audits };
@@ -90,6 +94,18 @@ function makeManager(settings: Record<string, unknown> = {}, getTask?: () => Pro
 
 function tempMergeDir(name = `fusion-ai-merge-fn-1-${Math.random().toString(36).slice(2)}`): string {
   const dir = join(sandboxRoot, name);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function localMergeDir(name = `fusion-ai-merge-fn-1-${Math.random().toString(36).slice(2)}`): string {
+  const dir = join(resolveAiMergeRootPath(projectRoot, undefined), name);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function legacyRepoMergeDir(name = `fusion-ai-merge-fn-1-${Math.random().toString(36).slice(2)}`): string {
+  const dir = join(resolveLegacyAiMergeRootPath(projectRoot), name);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -119,6 +135,21 @@ function transientErrorTask(): () => Promise<any> {
   return async () => { throw new Error("SQLITE_BUSY: database is locked"); };
 }
 
+function gitWorktreeList(names: string[]): string {
+  return [
+    `worktree ${projectRoot}`,
+    "HEAD abc123",
+    "branch refs/heads/main",
+    "",
+    ...names.flatMap((name) => [
+      `worktree ${join(projectRoot, ".worktrees", name)}`,
+      "HEAD def456",
+      `branch refs/heads/fusion/${name}`,
+      "",
+    ]),
+  ].join("\n");
+}
+
 async function sweep(manager: SelfHealingManager): Promise<number> {
   return await (manager as any).cleanupStaleTempMergeWorktrees();
 }
@@ -126,6 +157,40 @@ async function sweep(manager: SelfHealingManager): Promise<number> {
 function sweepAudits(audits: any[]) {
   return audits.filter((event) => event.mutationType === "worktree:tempdir-sweep");
 }
+
+describe("SelfHealingManager worktrees-dir sweeps", () => {
+  it("excludes the .ai-merge container from unregistered-orphan reap while removing genuine orphans", async () => {
+    const worktreesDir = join(projectRoot, ".worktrees");
+    const aiMergeContainer = join(worktreesDir, ".ai-merge");
+    const orphan = join(worktreesDir, "half-built");
+    mkdirSync(aiMergeContainer, { recursive: true });
+    mkdirSync(orphan, { recursive: true });
+    const { manager } = makeManager({ recycleWorktrees: true });
+
+    await expect((manager as any).reapUnregisteredOrphans()).resolves.toBe(1);
+
+    expect(existsSync(aiMergeContainer)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+    expect(fsState.rmCalls).toContain(orphan);
+    expect(fsState.rmCalls).not.toContain(aiMergeContainer);
+  });
+
+  it("excludes the .ai-merge container from cap enforcement while removing genuine idle worktrees", async () => {
+    const worktreesDir = join(projectRoot, ".worktrees");
+    const aiMergeContainer = join(worktreesDir, ".ai-merge");
+    const idle = join(worktreesDir, "idle-wt");
+    mkdirSync(aiMergeContainer, { recursive: true });
+    mkdirSync(idle, { recursive: true });
+    childState.execStdout = gitWorktreeList(["idle-wt"]);
+    const { manager } = makeManager({ maxWorktrees: 0 });
+
+    await expect((manager as any).enforceWorktreeCap()).resolves.toBeUndefined();
+
+    expect(existsSync(aiMergeContainer)).toBe(true);
+    expect(childState.execCalls.some((command) => command.includes(".ai-merge"))).toBe(false);
+    expect(childState.execCalls.some((command) => command.includes("idle-wt"))).toBe(true);
+  });
+});
 
 describe("SelfHealingManager temp-dir AI merge worktree sweep", () => {
   it("removes stale fusion-ai-merge directories and emits success audits", async () => {
@@ -138,6 +203,38 @@ describe("SelfHealingManager temp-dir AI merge worktree sweep", () => {
     expect(existsSync(stale)).toBe(false);
     expect(sweepAudits(audits)).toEqual(expect.arrayContaining([
       expect.objectContaining({ mutationType: "worktree:tempdir-sweep", metadata: expect.objectContaining({ path: realpathSync(sandboxRoot) + "/" + stale.split("/").pop(), success: true, reason: "stale" }) }),
+    ]));
+  });
+
+  it("removes stale AI merge directories from new and legacy repo-local roots", async () => {
+    const staleNew = localMergeDir("fusion-ai-merge-fn-1-localstale");
+    const staleLegacy = legacyRepoMergeDir("fusion-ai-merge-fn-1-legacystale");
+    makeStale(staleNew);
+    makeStale(staleLegacy);
+    const { manager, audits } = makeManager();
+
+    await expect(sweep(manager)).resolves.toBe(2);
+
+    expect(existsSync(staleNew)).toBe(false);
+    expect(existsSync(staleLegacy)).toBe(false);
+    expect(sweepAudits(audits)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metadata: expect.objectContaining({ path: realpathSync(resolveAiMergeRootPath(projectRoot, undefined)) + "/fusion-ai-merge-fn-1-localstale", success: true, reason: "stale" }) }),
+      expect.objectContaining({ metadata: expect.objectContaining({ path: realpathSync(resolveLegacyAiMergeRootPath(projectRoot)) + "/fusion-ai-merge-fn-1-legacystale", success: true, reason: "stale" }) }),
+    ]));
+  });
+
+  it("defers active worktrees-dir AI merge directories", async () => {
+    const stale = localMergeDir("fusion-ai-merge-fn-1-localactive");
+    makeStale(stale);
+    const canonical = realpathSync(stale);
+    activeSessionRegistry.registerPath(canonical, { taskId: "FN-1", kind: "ai-merge", ownerKey: "ai-merge:FN-1" });
+    const { manager, audits } = makeManager();
+
+    await expect(sweep(manager)).resolves.toBe(0);
+
+    expect(existsSync(stale)).toBe(true);
+    expect(sweepAudits(audits)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metadata: expect.objectContaining({ path: canonical, success: false, reason: "active-session" }) }),
     ]));
   });
 

@@ -1,0 +1,559 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import type { AgentLogEntry, Task } from "@fusion/core";
+import { TaskChatTab } from "../TaskChatTab";
+import { useAgentLogs } from "../../hooks/useAgentLogs";
+import { addSteeringComment } from "../../api";
+
+vi.mock("../../hooks/useAgentLogs", () => ({
+  useAgentLogs: vi.fn(),
+}));
+
+vi.mock("../../api", () => ({
+  addSteeringComment: vi.fn(),
+}));
+
+const mockedUseAgentLogs = vi.mocked(useAgentLogs);
+const mockedAddSteeringComment = vi.mocked(addSteeringComment);
+const originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
+const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+const originalClientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "FN-001",
+    title: "Task",
+    description: "Task description",
+    column: "in-progress",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    assignedAgentId: "agent-1",
+    status: undefined,
+    ...overrides,
+  } as Task;
+}
+
+function makeEntry(overrides: Partial<AgentLogEntry>): AgentLogEntry {
+  return {
+    timestamp: "2026-06-12T00:00:00.000Z",
+    taskId: "FN-001",
+    type: "text",
+    text: "message",
+    ...overrides,
+  } as AgentLogEntry;
+}
+
+function mockLogs(entries: AgentLogEntry[] = [], loading = false) {
+  mockedUseAgentLogs.mockReturnValue({
+    entries,
+    loading,
+    clear: vi.fn(),
+    loadMore: vi.fn(async () => {}),
+    hasMore: false,
+    total: entries.length,
+    loadingMore: false,
+  });
+}
+
+function restoreMetricDescriptor(name: "scrollTop" | "scrollHeight" | "clientHeight", descriptor: PropertyDescriptor | undefined) {
+  if (descriptor) {
+    Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    return;
+  }
+  delete (HTMLElement.prototype as Record<string, unknown>)[name];
+}
+
+function mockTranscriptMetrics({
+  scrollHeight = 1200,
+  clientHeight = 240,
+  initialScrollTop = 0,
+}: {
+  scrollHeight?: number;
+  clientHeight?: number;
+  initialScrollTop?: number;
+} = {}) {
+  let scrollTopValue = initialScrollTop;
+  let scrollHeightValue = scrollHeight;
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return this instanceof HTMLElement && this.classList.contains("task-chat-transcript") ? scrollHeightValue : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      return this instanceof HTMLElement && this.classList.contains("task-chat-transcript") ? clientHeight : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get() {
+      return this instanceof HTMLElement && this.classList.contains("task-chat-transcript") ? scrollTopValue : 0;
+    },
+    set(value) {
+      if (this instanceof HTMLElement && this.classList.contains("task-chat-transcript")) {
+        scrollTopValue = Number(value);
+      }
+    },
+  });
+  return {
+    get scrollTop() {
+      return scrollTopValue;
+    },
+    set scrollTop(value: number) {
+      scrollTopValue = value;
+    },
+    get scrollHeight() {
+      return scrollHeightValue;
+    },
+    set scrollHeight(value: number) {
+      scrollHeightValue = value;
+    },
+  };
+}
+
+function mockMatchMedia(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+describe("TaskChatTab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLogs();
+  });
+
+  afterEach(() => {
+    restoreMetricDescriptor("scrollTop", originalScrollTopDescriptor);
+    restoreMetricDescriptor("scrollHeight", originalScrollHeightDescriptor);
+    restoreMetricDescriptor("clientHeight", originalClientHeightDescriptor);
+  });
+
+  it("subscribes to live agent logs only when active", () => {
+    render(<TaskChatTab task={makeTask()} active={false} projectId="project-1" addToast={vi.fn()} />);
+    expect(mockedUseAgentLogs).toHaveBeenCalledWith("FN-001", false, "project-1");
+  });
+
+  it("renders empty state when no agent output exists", () => {
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(screen.getByText(/No agent output yet/)).toBeTruthy();
+  });
+
+  it("labels every agent role and the legacy undefined-agent fallback", () => {
+    mockLogs([
+      makeEntry({ agent: "triage", text: "planning output" }),
+      makeEntry({ agent: "executor", text: "executor output" }),
+      makeEntry({ agent: "reviewer", text: "reviewer output" }),
+      makeEntry({ agent: "merger", text: "merger output" }),
+      makeEntry({ text: "legacy output" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(screen.getByText("Planner")).toBeTruthy();
+    expect(screen.getByText("Executor")).toBeTruthy();
+    expect(screen.getByText("Reviewer")).toBeTruthy();
+    expect(screen.getByText("Merger")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(screen.getByText("legacy output")).toBeTruthy();
+  });
+
+  it("groups consecutive entries by agent role", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", text: "first" }),
+      makeEntry({ agent: "executor", text: "second" }),
+      makeEntry({ agent: "reviewer", text: "third" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(screen.getByText("2 entries")).toBeTruthy();
+    expect(screen.getByLabelText("Executor messages")).toBeTruthy();
+    expect(screen.getByLabelText("Reviewer messages")).toBeTruthy();
+  });
+
+  it("collapses consecutive tool entries into one expandable summary", async () => {
+    const user = userEvent.setup();
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "bash", detail: "pnpm test" }),
+      makeEntry({ agent: "executor", type: "tool_result", text: "done", detail: "ok" }),
+      makeEntry({ agent: "executor", type: "tool_error", text: "failed", detail: "stderr" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(screen.getByText("3 tool calls")).toBeVisible();
+    expect(screen.getByText("1 call")).toBeVisible();
+    expect(screen.getByText("1 result")).toBeVisible();
+    expect(screen.getByText("1 error")).toBeVisible();
+    expect(screen.getByText("stderr")).not.toBeVisible();
+
+    await user.click(within(toolGroup).getByText("3 tool calls"));
+
+    expect(toolGroup).toHaveAttribute("open");
+    expect(screen.getByText("Tool call")).toBeVisible();
+    expect(screen.getByText("Tool result")).toBeVisible();
+    expect(screen.getByText("Tool error")).toBeVisible();
+    expect(screen.getByText("stderr")).toBeVisible();
+  });
+
+  it("renders a single tool entry as one collapsed group and tolerates missing detail", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "bash", detail: undefined }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(screen.getByText("1 tool call")).toBeVisible();
+    expect(screen.getByText("bash")).not.toBeVisible();
+  });
+
+  it("renders thinking in an expanded-by-default collapsible block", async () => {
+    const user = userEvent.setup();
+    mockLogs([
+      makeEntry({ agent: "triage", type: "thinking", text: "I am considering options" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const thinking = screen.getByTestId("task-chat-thinking");
+    expect(thinking).toHaveAttribute("open");
+    expect(screen.getByText("Thinking")).toBeVisible();
+    expect(screen.getByText("I am considering options")).toBeVisible();
+
+    await user.click(within(thinking).getByText("Thinking"));
+
+    expect(thinking).not.toHaveAttribute("open");
+    expect(screen.getByText("I am considering options")).not.toBeVisible();
+  });
+
+  it("creates distinct tool segments when text or thinking entries are interleaved", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "first tool", detail: "first detail" }),
+      makeEntry({ agent: "executor", text: "plain response" }),
+      makeEntry({ agent: "executor", type: "thinking", text: "thinking between tools" }),
+      makeEntry({ agent: "executor", type: "tool_result", text: "second tool", detail: "second detail" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroups = screen.getAllByTestId("task-chat-tool-group");
+    expect(toolGroups).toHaveLength(2);
+    expect(toolGroups[0]).not.toHaveAttribute("open");
+    expect(toolGroups[1]).not.toHaveAttribute("open");
+    expect(screen.getAllByText("1 tool call")).toHaveLength(2);
+    expect(screen.getByText("plain response")).toBeVisible();
+    expect(screen.getByText("thinking between tools")).toBeVisible();
+  });
+
+  it("appends newly streamed entries from the hook without auto-opening tool groups", () => {
+    const firstEntries = [makeEntry({ agent: "executor", text: "first live chunk" })];
+    const secondEntries = [
+      ...firstEntries,
+      makeEntry({ agent: "executor", type: "tool", text: "streamed tool", detail: "streamed detail", timestamp: "2026-06-12T00:00:01.000Z" }),
+      makeEntry({ agent: "executor", text: "second live chunk", timestamp: "2026-06-12T00:00:02.000Z" }),
+    ];
+    mockedUseAgentLogs.mockReturnValueOnce({ entries: firstEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 1, loadingMore: false });
+    mockedUseAgentLogs.mockReturnValueOnce({ entries: secondEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 3, loadingMore: false });
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(screen.getByText("first live chunk")).toBeVisible();
+
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(screen.getByText("1 tool call")).toBeVisible();
+    expect(screen.getByText("streamed detail")).not.toBeVisible();
+    expect(screen.getByText("second live chunk")).toBeVisible();
+  });
+
+  it.each([
+    ["desktop", false],
+    ["mobile", true],
+  ])("snaps populated transcripts to the bottom on initial %s render", (_label, matchesMobile) => {
+    mockMatchMedia(matchesMobile);
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1400, clientHeight: 240, initialScrollTop: 0 });
+    mockLogs([
+      makeEntry({ agent: "executor", text: "older output" }),
+      makeEntry({ agent: "executor", text: "latest output", timestamp: "2026-06-12T00:00:01.000Z" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(screen.getByTestId("task-chat-transcript")).toBeTruthy();
+    expect(metrics.scrollTop).toBe(metrics.scrollHeight);
+  });
+
+  it("snaps to the bottom when the tab reactivates with unchanged cached entries", () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1200, clientHeight: 240, initialScrollTop: 0 });
+    const cachedEntries = [
+      makeEntry({ agent: "executor", text: "cached first" }),
+      makeEntry({ agent: "executor", text: "cached latest", timestamp: "2026-06-12T00:00:01.000Z" }),
+    ];
+    mockLogs(cachedEntries);
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active={false} addToast={vi.fn()} />);
+    expect(metrics.scrollTop).toBe(0);
+
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(metrics.scrollHeight);
+  });
+
+  it("snaps when entries first become populated after an active empty render", () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1100, clientHeight: 240, initialScrollTop: 0 });
+    const loadedEntries = [makeEntry({ agent: "executor", text: "loaded output" })];
+    mockedUseAgentLogs
+      .mockReturnValueOnce({ entries: [], loading: true, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 0, loadingMore: false })
+      .mockReturnValueOnce({ entries: loadedEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 1, loadingMore: false });
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(metrics.scrollTop).toBe(0);
+
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(metrics.scrollHeight);
+  });
+
+  it("does not mutate scroll position for an empty transcript", () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 900, clientHeight: 240, initialScrollTop: 25 });
+    mockLogs([]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(screen.getByText(/No agent output yet/)).toBeTruthy();
+    expect(metrics.scrollTop).toBe(25);
+  });
+
+  it("continues following new entries when the user is near the bottom", () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1000, clientHeight: 240, initialScrollTop: 0 });
+    const firstEntries = [makeEntry({ agent: "executor", text: "first output" })];
+    const secondEntries = [...firstEntries, makeEntry({ agent: "executor", text: "second output", timestamp: "2026-06-12T00:00:01.000Z" })];
+    mockedUseAgentLogs
+      .mockReturnValueOnce({ entries: firstEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 1, loadingMore: false })
+      .mockReturnValueOnce({ entries: secondEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 2, loadingMore: false });
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(metrics.scrollTop).toBe(1000);
+
+    metrics.scrollTop = 720;
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+    metrics.scrollHeight = 1400;
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(1400);
+  });
+
+  it("does not yank a scrolled-up user when a new entry arrives", () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1000, clientHeight: 240, initialScrollTop: 0 });
+    const firstEntries = [makeEntry({ agent: "executor", text: "first output" })];
+    const secondEntries = [...firstEntries, makeEntry({ agent: "executor", text: "second output", timestamp: "2026-06-12T00:00:01.000Z" })];
+    mockedUseAgentLogs
+      .mockReturnValueOnce({ entries: firstEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 1, loadingMore: false })
+      .mockReturnValueOnce({ entries: secondEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 2, loadingMore: false });
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(metrics.scrollTop).toBe(1000);
+
+    metrics.scrollTop = 120;
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+    metrics.scrollHeight = 1400;
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(120);
+  });
+
+  it("posts composer text through addSteeringComment and clears on success", async () => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask());
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    await user.type(input, "Please inspect the failing test");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Please inspect the failing test", "project-1");
+    });
+    expect(input).toHaveValue("");
+  });
+
+  it.each([
+    ["queued", "Please continue after dispatch"],
+    [undefined, "Please continue with a cleared status"],
+  ])("enables in-progress steering for realistic %s status and posts guidance", async (status, message) => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask({ status }));
+    render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} projectId="project-1" active addToast={vi.fn()} />);
+
+    expect(screen.queryByText(/No active assigned agent session/)).not.toBeInTheDocument();
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    await user.type(input, message);
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", message, "project-1");
+    });
+  });
+
+  it.each([undefined, null, "queued", "planning", "merging", "merging-fix"])(
+    "enables in-progress steering for assigned agents with %s status",
+    (status) => {
+      render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
+
+      expect(screen.queryByText(/No active assigned agent session/)).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Message active agent session")).not.toBeDisabled();
+    },
+  );
+
+  it("enables in-progress steering with checkedOutBy when no assignedAgentId exists", async () => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask({ status: "queued" }));
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: "agent-1" })}
+        projectId="project-1"
+        active
+        addToast={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    await user.type(input, "Please keep going");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Please keep going", "project-1");
+    });
+  });
+
+  it.each(["reviewing", "merging", "merging-fix", "fixing"])(
+    "enables in-review steering while %s with an assigned agent",
+    async (status) => {
+      const user = userEvent.setup();
+      mockedAddSteeringComment.mockResolvedValue(makeTask({ column: "in-review", status }));
+      render(<TaskChatTab task={makeTask({ column: "in-review", status })} projectId="project-1" active addToast={vi.fn()} />);
+
+      const input = screen.getByLabelText("Message active agent session");
+      expect(input).not.toBeDisabled();
+      await user.type(input, `Please continue ${status}`);
+      const sendButton = screen.getByRole("button", { name: "Send" });
+      expect(sendButton).not.toBeDisabled();
+      await user.click(sendButton);
+
+      await waitFor(() => {
+        expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", `Please continue ${status}`, "project-1");
+      });
+    },
+  );
+
+  it("enables in-review steering with checkedOutBy when no assignedAgentId exists", async () => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask({ column: "in-review", status: "reviewing" }));
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-review", status: "reviewing", assignedAgentId: undefined, checkedOutBy: "agent-1" })}
+        projectId="project-1"
+        active
+        addToast={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    await user.type(input, "Please review this follow-up");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Please review this follow-up", "project-1");
+    });
+  });
+
+  it.each([
+    ["todo task", makeTask({ column: "todo", assignedAgentId: "agent-1", status: undefined })],
+    ["triage task", makeTask({ column: "triage", assignedAgentId: "agent-1", status: undefined })],
+    ["done task", makeTask({ column: "done", assignedAgentId: "agent-1", status: undefined })],
+    ["archived task", makeTask({ column: "archived", assignedAgentId: "agent-1", status: undefined })],
+    ["in-progress task without an assigned or checked-out agent", makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["paused in-progress task", makeTask({ column: "in-progress", status: "queued", paused: true })],
+    ["user-paused in-progress task", makeTask({ column: "in-progress", status: "queued", userPaused: true })],
+    ["in-review task without an assigned or checked-out agent", makeTask({ column: "in-review", status: "reviewing", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["paused in-review task", makeTask({ column: "in-review", status: "reviewing", paused: true })],
+    ["user-paused in-review task", makeTask({ column: "in-review", status: "reviewing", userPaused: true })],
+  ])("disables the composer and shows a hint for %s", (_label, task) => {
+    render(<TaskChatTab task={task} active addToast={vi.fn()} />);
+
+    expect(screen.getByText(/No active assigned agent session/)).toBeTruthy();
+    expect(screen.getByText(/active, assigned, non-paused agent session is required/i)).toBeTruthy();
+    expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Active non-paused agent session required")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it.each(["paused", "awaiting-user-input", "awaiting-cli-approval", "awaiting-user-review", "failed", "needs-replan"])(
+    "disables in-progress steering for non-steerable %s status",
+    (status) => {
+      render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
+
+      expect(screen.getByText(/No active assigned agent session/)).toBeTruthy();
+      expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    },
+  );
+
+  it("surfaces send failures through addToast", async () => {
+    const user = userEvent.setup();
+    const addToast = vi.fn();
+    mockedAddSteeringComment.mockRejectedValue(new Error("network down"));
+    render(<TaskChatTab task={makeTask()} active addToast={addToast} />);
+
+    await user.type(screen.getByLabelText("Message active agent session"), "hello");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith("Unable to send message: network down", "error");
+    });
+  });
+
+  it("keeps mobile breakpoint scaffolding for the transcript, composer, and collapsible groups", () => {
+    const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    expect(css).toContain("@media (max-width: 768px)");
+    expect(css).toContain(".task-chat-transcript");
+    expect(css).toContain(".task-chat-composer-row");
+    expect(css).toContain(".task-chat-tool-group-summary");
+    expect(css).toContain(".task-chat-thinking-summary");
+  });
+});

@@ -1206,6 +1206,7 @@ describe("HeartbeatTriggerScheduler", () => {
 
   describe("assignment watching", () => {
     let eventStore: EventEmitter & {
+      getAgent: ReturnType<typeof vi.fn>;
       getActiveHeartbeatRun: ReturnType<typeof vi.fn>;
       getBudgetStatus: ReturnType<typeof vi.fn>;
       getRecentRuns: ReturnType<typeof vi.fn>;
@@ -1215,6 +1216,7 @@ describe("HeartbeatTriggerScheduler", () => {
       vi.useRealTimers(); // Ensure real timers for these tests
 
       eventStore = Object.assign(new EventEmitter(), {
+        getAgent: vi.fn().mockResolvedValue({ id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} }),
         getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
         getBudgetStatus: vi.fn().mockRejectedValue(new Error("budget status unavailable")),
         getRecentRuns: vi.fn().mockResolvedValue([]),
@@ -1276,16 +1278,176 @@ describe("HeartbeatTriggerScheduler", () => {
       expect(eventStore.getActiveHeartbeatRun).not.toHaveBeenCalled();
     });
 
-    it("skips trigger when agent has active run", async () => {
-      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: "run-active",
-        status: "active",
-      });
+    // Regression surface checklist for deferred assignments:
+    // - active-run assignment skip records pending work; no-active-run control remains immediate
+    // - run-completion drain re-fires once, latest rapid re-assignment wins
+    // - transient global/engine pause, new active run, and parallel-execution guards preserve pending work
+    // - terminal missing/disabled/budget-exhausted states and unregister clear pending work
+    // - skipHeartbeatWhenIdle/long timer stalls are avoided because drain is completion-driven, not timer-driven
+    it("defers an active-run assignment and re-fires it exactly once on drain", async () => {
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValue(null);
 
-      const agent = { id: "agent-test", name: "Test" } as import("@fusion/core").Agent;
-      eventStore.emit("agent:assigned", agent, "FN-003");
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-001");
 
       await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(callback).not.toHaveBeenCalled();
+
+      await scheduler.drainPendingAssignment("agent-test");
+
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback).toHaveBeenCalledWith("agent-test", "assignment", expect.objectContaining({
+        taskId: "FN-001",
+        wakeReason: "assignment",
+        triggerDetail: "task-assigned",
+      }));
+
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).toHaveBeenCalledOnce();
+    });
+
+    it("does not record pending work when assignment fires immediately", async () => {
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-002");
+
+      await vi.waitFor(() => {
+        expect(callback).toHaveBeenCalledOnce();
+      }, { timeout: 1000 });
+
+      callback.mockClear();
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("keeps only the latest task when assignments are repeated during an active run", async () => {
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValue(null);
+
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-OLD");
+      eventStore.emit("agent:assigned", agent, "FN-LATEST");
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(callback).not.toHaveBeenCalled();
+
+      await scheduler.drainPendingAssignment("agent-test");
+
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback).toHaveBeenCalledWith("agent-test", "assignment", expect.objectContaining({ taskId: "FN-LATEST" }));
+    });
+
+    it.each([
+      ["globalPause", { globalPause: true }],
+      ["enginePaused", { enginePaused: true }],
+    ])("preserves pending assignment while %s blocks drain", async (_name, settings) => {
+      scheduler.stop();
+      const pausedTaskStore = { getSettings: vi.fn().mockResolvedValue(settings) } as unknown as TaskStore;
+      scheduler = new HeartbeatTriggerScheduler(eventStore as unknown as AgentStore, callback, pausedTaskStore);
+      scheduler.start();
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValue(null);
+
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-PAUSED");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).not.toHaveBeenCalled();
+
+      (pausedTaskStore.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({});
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback).toHaveBeenCalledWith("agent-test", "assignment", expect.objectContaining({ taskId: "FN-PAUSED" }));
+    });
+
+    it("preserves pending assignment when a new active run exists at drain time", async () => {
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValueOnce({ id: "run-new", status: "active" })
+        .mockResolvedValue(null);
+
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-ACTIVE");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).not.toHaveBeenCalled();
+
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).toHaveBeenCalledOnce();
+      expect(callback).toHaveBeenCalledWith("agent-test", "assignment", expect.objectContaining({ taskId: "FN-ACTIVE" }));
+    });
+
+    it.each([
+      ["missing agent", async () => {
+        eventStore.getAgent.mockResolvedValue(null);
+      }],
+      ["disabled agent", async () => {
+        eventStore.getAgent.mockResolvedValue({ id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {}, runtimeConfig: { enabled: false } });
+      }],
+      ["budget exhausted", async () => {
+        eventStore.getBudgetStatus.mockResolvedValue(createBudgetStatus({
+          agentId: "agent-test",
+          isOverBudget: true,
+          isOverThreshold: true,
+          usagePercent: 100,
+          budgetLimit: 1000,
+          thresholdPercent: 80,
+        }));
+      }],
+    ])("clears pending assignment without re-fire for %s", async (_name, configureTerminal) => {
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValue(null);
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-CLEAR");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await configureTerminal();
+
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).not.toHaveBeenCalled();
+
+      eventStore.getAgent.mockResolvedValue({ id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} });
+      eventStore.getBudgetStatus.mockRejectedValue(new Error("budget status unavailable"));
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("preserves pending assignment while parallel execution guard blocks drain", async () => {
+      scheduler.stop();
+      scheduler = new HeartbeatTriggerScheduler(eventStore as unknown as AgentStore, callback, undefined, {
+        isTaskExecuting: (taskId) => taskId === "FN-EXECUTING",
+      });
+      scheduler.start();
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValue(null);
+
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {}, runtimeConfig: { allowParallelExecution: false } } as import("@fusion/core").Agent;
+      eventStore.getAgent.mockResolvedValue(agent);
+      eventStore.emit("agent:assigned", agent, "FN-EXECUTING");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await scheduler.drainPendingAssignment("agent-test");
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("clears pending assignment when unregistering an agent", async () => {
+      (eventStore.getActiveHeartbeatRun as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "run-active", status: "active" })
+        .mockResolvedValue(null);
+
+      const agent = { id: "agent-test", name: "Test", role: "executor", state: "active", metadata: {} } as import("@fusion/core").Agent;
+      eventStore.emit("agent:assigned", agent, "FN-UNREGISTER");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      scheduler.unregisterAgent("agent-test");
+      await scheduler.drainPendingAssignment("agent-test");
 
       expect(callback).not.toHaveBeenCalled();
     });

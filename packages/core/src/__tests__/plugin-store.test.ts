@@ -37,33 +37,37 @@ function seedLegacyPluginRow(
   },
 ): void {
   const db = new Database(join(projectRoot, ".fusion"));
-  db.init();
-  const now = row.updatedAt ?? new Date().toISOString();
-  db.prepare(`
-    INSERT INTO plugins (
-      id, name, version, description, author, homepage, path,
-      enabled, state, settings, settingsSchema, error, dependencies,
-      aiScanOnLoad, lastSecurityScan, createdAt, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    row.id,
-    row.name,
-    row.version,
-    null,
-    null,
-    null,
-    row.path,
-    row.enabled ?? 1,
-    row.state ?? "installed",
-    toJson(row.settings ?? {}),
-    null,
-    row.error ?? null,
-    toJson([]),
-    0,
-    null,
-    now,
-    now,
-  );
+  try {
+    db.init();
+    const now = row.updatedAt ?? new Date().toISOString();
+    db.prepare(`
+      INSERT INTO plugins (
+        id, name, version, description, author, homepage, path,
+        enabled, state, settings, settingsSchema, error, dependencies,
+        aiScanOnLoad, lastSecurityScan, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id,
+      row.name,
+      row.version,
+      null,
+      null,
+      null,
+      row.path,
+      row.enabled ?? 1,
+      row.state ?? "installed",
+      toJson(row.settings ?? {}),
+      null,
+      row.error ?? null,
+      toJson([]),
+      0,
+      null,
+      now,
+      now,
+    );
+  } finally {
+    db.close();
+  }
 }
 
 describe("PluginStore", () => {
@@ -165,18 +169,26 @@ describe("PluginStore", () => {
         expect(plugins.filter((plugin) => plugin.id === "legacy-idempotent")).toHaveLength(1);
 
         const centralDb = new CentralDatabase(migrationCentral);
-        centralDb.init();
-        const installCount = centralDb
-          .prepare("SELECT COUNT(*) as count FROM plugin_installs WHERE id = ?")
-          .get("legacy-idempotent") as { count: number };
-        expect(installCount.count).toBe(1);
+        try {
+          centralDb.init();
+          const installCount = centralDb
+            .prepare("SELECT COUNT(*) as count FROM plugin_installs WHERE id = ?")
+            .get("legacy-idempotent") as { count: number };
+          expect(installCount.count).toBe(1);
+        } finally {
+          centralDb.close();
+        }
 
         const localDb = new Database(join(migrationProject, ".fusion"));
-        localDb.init();
-        const marker = localDb
-          .prepare("SELECT value FROM __meta WHERE key = 'pluginCentralMigrationV1'")
-          .get() as { value: string } | undefined;
-        expect(marker?.value).toBe("done");
+        try {
+          localDb.init();
+          const marker = localDb
+            .prepare("SELECT value FROM __meta WHERE key = 'pluginCentralMigrationV1'")
+            .get() as { value: string } | undefined;
+          expect(marker?.value).toBe("done");
+        } finally {
+          localDb.close();
+        }
       } finally {
         await rm(migrationProject, { recursive: true, force: true });
         await rm(migrationCentral, { recursive: true, force: true });

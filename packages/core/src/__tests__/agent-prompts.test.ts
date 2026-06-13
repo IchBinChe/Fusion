@@ -9,6 +9,7 @@ import {
   getTemplatesForRole,
 } from "../agent-prompts.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { BUILTIN_SEAM_PROMPTS, builtinSeamPrompt } from "../builtin-workflow-prompts.js";
 import { renderTriagePolicyPlaceholders } from "../builtin-workflow-settings.js";
 import { resolvePlanningPromptFromIr, resolveSeamPromptFromIr } from "../workflow-ir-resolver.js";
 import type { AgentPromptsConfig, AgentPromptTemplate } from "../types.js";
@@ -261,6 +262,17 @@ describe("resolveAgentPrompt", () => {
     expect(result).toContain("task_document_write");
   });
 
+  it("fast triage prompt is sourced from built-in workflow seam data", () => {
+    const fastTemplate = BUILTIN_AGENT_PROMPTS.find((prompt) => prompt.id === "default-triage-fast");
+
+    expect(fastTemplate).toBeDefined();
+    expect(fastTemplate?.role).toBe("triage");
+    expect(BUILTIN_SEAM_PROMPTS["planning-fast"]).toBe(fastTemplate?.prompt);
+    expect(builtinSeamPrompt("planning-fast")).toBe(fastTemplate?.prompt);
+    expect(builtinSeamPrompt("planning-fast")).toContain("This task is running in **fast mode**");
+    expect(builtinSeamPrompt("planning-fast")).not.toContain("## Review Level");
+  });
+
   it("triage planning prompt is sourced from workflow IR without an engine duplicate", () => {
     const corePrompt = resolveAgentPrompt("triage");
     const planningPrompt = resolvePlanningPromptFromIr(BUILTIN_CODING_WORKFLOW_IR);
@@ -269,8 +281,8 @@ describe("resolveAgentPrompt", () => {
       "utf8",
     );
 
-    expect(triageSource).not.toMatch(/export const TRIAGE_SYSTEM_PROMPT\s*=/);
-    expect(triageSource).not.toMatch(/export const (?!FAST_TRIAGE_SYSTEM_PROMPT)[A-Z_]*TRIAGE[A-Z_]*SYSTEM_PROMPT\s*=/);
+    expect(triageSource).not.toContain(["FAST", "TRIAGE", "SYSTEM", "PROMPT"].join("_"));
+    expect(triageSource).not.toMatch(/export const [A-Z_]*TRIAGE[A-Z_]*SYSTEM_PROMPT\s*=/);
     expect(planningPrompt).toBe(corePrompt);
     expect(corePrompt).toContain("**Broad-scope decomposition signals:**");
     expect(corePrompt).toContain("step count would reach {{triageSubtaskLargeStepSignal}} or more");

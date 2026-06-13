@@ -143,7 +143,11 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
     setName(provider.name);
     setApiType(provider.apiType);
     setBaseUrl(provider.baseUrl);
-    setApiKey(provider.apiKey ?? "");
+    // The loaded provider's apiKey is masked (e.g. "abc•••••wxyz") for display.
+    // Never seed the editable field with the mask — echoing it back would send a
+    // masked value to save/probe (which the server rejects). Start empty; an
+    // unchanged blank field leaves the stored key untouched on save.
+    setApiKey("");
     setModels((provider.models ?? []).map((model) => model.id).join(", "));
     setFormError(null);
     setDetectError(null);
@@ -345,6 +349,7 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
                         <option value="openai-compatible">{t("providers.apiTypeOpenAi", "OpenAI-compatible")}</option>
                         <option value="openai-responses">{t("providers.apiTypeOpenAiResp", "OpenAI Responses")}</option>
                         <option value="anthropic-compatible">{t("providers.apiTypeAnthropic", "Anthropic-compatible")}</option>
+                        <option value="google-generative-ai">{t("providers.apiTypeGoogle", "Google Generative AI")}</option>
                       </select>
                     </div>
 
@@ -366,6 +371,9 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
                         id="custom-provider-api-key"
                         type="password"
                         className="input"
+                        placeholder={editingProvider?.apiKey
+                          ? t("providers.apiKeyKeepPlaceholder", "Leave blank to keep current key")
+                          : undefined}
                         value={apiKey}
                         onChange={(event) => setApiKey(event.target.value)}
                         disabled={saving}
@@ -461,6 +469,7 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
               <option value="openai-compatible">{t("providers.apiTypeOpenAi", "OpenAI-compatible")}</option>
               <option value="openai-responses">{t("providers.apiTypeOpenAiResp", "OpenAI Responses")}</option>
               <option value="anthropic-compatible">{t("providers.apiTypeAnthropic", "Anthropic-compatible")}</option>
+              <option value="google-generative-ai">{t("providers.apiTypeGoogle", "Google Generative AI")}</option>
             </select>
           </div>
 

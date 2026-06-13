@@ -239,7 +239,7 @@ const qualityApiTests = [
   "src/__tests__/{api-error,auth-middleware,auth-middleware-integration,chat-attachment-routes,chat-manager,chat-routes,file-service,github,github-webhooks,initialize,planning-flow-diagnostics-guardrail,pr-routes-auto-merge,pr-routes.contract,project-routes,project-store-resolver,register-git-github.pr-options-preflight-metadata,register-git-github.pr-resolve-conflicts,remote-access-routes,remote-auth,routes-agent-budget,routes-agent-keys,routes-agent-permissions,routes-agent-ratings,routes-agent-runs,routes-agent-soul-memory,routes-agents,routes-automation,routes-branch-groups,routes-git,routes-github,routes-merge-advance-push-origin,routes-nodes,routes-nodes-sync-contract,routes-planning,routes-plugin-registry,routes-secrets-sync,routes-settings,routes-task-commit-associations,routes-tasks,routes-tasks-deterministic-dedup,routes-tasks-duplicate-check,routes-tasks-explicit-duplicate-marker,server,server-static-assets,server-webhook,server.events,setup-routes,sse,sse-buffer,test-isolation-guard,update-check-route,websocket,recover-branch-binding-route}.test.ts",
   "src/__tests__/dashboard-test-config-guard.test.ts",
   "src/routes/__tests__/{custom-provider-routes,custom-providers,register-docker-node-routes,register-diagnostics-routes,stash-recovery-routes}.test.ts",
-  "scripts/__tests__/run-vitest-with-heap.test.ts",
+  "scripts/__tests__/{run-quality-tests,run-vitest-with-heap}.test.ts",
 ];
 
 // Backfill projects (plan U2 / R7). Historically the curated quality lanes
@@ -261,6 +261,53 @@ const backfillApiExclude = [
   ...skipListDashboardGlobs.filter((file) => file.startsWith("src/")),
 ];
 const qualityApiBackfillTests = ["src/**/*.test.{ts,tsx}"];
+
+export const dashboardQualityProjectGlobs = {
+  "dashboard-app-quality-foundation-api": {
+    include: qualityAppFoundationApiShardTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-foundation-ui": {
+    include: qualityAppFoundationUiShardTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-foundation-hooks-utils": {
+    include: qualityAppFoundationHooksAndUtilsTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-components-a": {
+    include: qualityAppComponentBatchATests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-components-b": {
+    include: qualityAppComponentBatchBTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-app": {
+    include: qualityAppAppOnlyTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-chat": {
+    include: qualityAppChatOnlyTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-settings": {
+    include: qualityAppSettingsOnlyTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-api-quality": {
+    include: qualityApiTests,
+    exclude: quarantinedDashboardTests,
+  },
+  "dashboard-app-quality-backfill": {
+    include: qualityAppBackfillTests,
+    exclude: [...backfillAppExclude, ...quarantinedDashboardTests],
+  },
+  "dashboard-api-quality-backfill": {
+    include: qualityApiBackfillTests,
+    exclude: [...backfillApiExclude, ...quarantinedDashboardTests],
+  },
+} as const;
 
 export default defineConfig({
   plugins: [react()],

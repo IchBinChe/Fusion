@@ -43,7 +43,7 @@ import { useModelsCache } from "../hooks/useModelsCache";
 import { useDiscoveredSkillsCache } from "../hooks/useDiscoveredSkillsCache";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
-import { useMobileScrollLock, isIOS } from "../hooks/useMobileScrollLock";
+import { useMobileKeyboardViewportLock, isIOS } from "../hooks/useMobileScrollLock";
 import { matchesAgentMentionFilter } from "./mentionMatching";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
@@ -1088,6 +1088,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   // visualViewport shrink samples do not jerk the chat thread/composer.
   const suppressVvShrinkRef = useRef(false);
   const suppressVvShrinkTimeoutRef = useRef<number | null>(null);
+  // Deferred drift-reset scheduled on blur; cancelled on the next focus so a
+  // quick re-tap never scrolls the document while iOS is raising the keyboard.
+  const blurScrollResetTimeoutRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
@@ -1588,9 +1591,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [keyboardOverlap, scrollToBottom]);
 
   // Lock body scroll on mobile while the keyboard is up so iOS can't shift
-  // the visual viewport (offsetTop > 0). Shared hook also restores
+  // the visual viewport (offsetTop > 0). Uses the overflow-only keyboard
+  // lock (NOT position:fixed): the composer is focused before the lock
+  // applies, and pinning body to position:fixed afterwards blurs the input
+  // on iOS, collapsing the keyboard the instant it opens. Restores
   // window.scrollTo(0, 0) on cleanup to recover from any iOS drift.
-  useMobileScrollLock(isMobile && keyboardOpen);
+  useMobileKeyboardViewportLock(isMobile && keyboardOpen);
 
   // FN-5365: mirror QuickChatFAB keyboard handling by writing visualViewport
   // metrics directly to .chat-thread, avoiding React commit lag/jitter.
@@ -1613,6 +1619,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     const apply = () => {
       if (suppressVvShrinkRef.current) {
         thread.classList.remove("chat-thread--keyboard-active");
+        thread.style.transform = "";
+        thread.style.willChange = "";
         return;
       }
       const overlap = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
@@ -1623,6 +1631,22 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
       const keyboardActive = (overlap > 0 || offsetTop > 0) && isKeyboardTrackingFocusable(document.activeElement);
       thread.classList.toggle("chat-thread--keyboard-active", keyboardActive);
+
+      // Drift compensation is applied here (not in CSS) so .chat-thread —
+      // an ancestor of the focused composer textarea — only gets a
+      // non-`none` transform when iOS actually shifts the visual viewport
+      // (offsetTop > 0). Keeping a transform/will-change on it at all times
+      // (as the old CSS did) makes iOS Safari blur the input and collapse
+      // the keyboard the moment it opens, because at focus time offsetTop
+      // is 0 and translateY(0) still establishes a containing block over
+      // the focused element.
+      if (keyboardActive && offsetTop > 0) {
+        thread.style.transform = `translateY(${offsetTop}px)`;
+        thread.style.willChange = "transform";
+      } else {
+        thread.style.transform = "";
+        thread.style.willChange = "";
+      }
     };
 
     apply();
@@ -1640,6 +1664,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       window.removeEventListener("pageshow", apply);
       document.removeEventListener("visibilitychange", apply);
       thread.classList.remove("chat-thread--keyboard-active");
+      thread.style.transform = "";
+      thread.style.willChange = "";
     };
   }, [activeSession, isMobile, roomThreadActive]);
 
@@ -1675,30 +1701,23 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     };
   }, [isMobile, keyboardOpen]);
 
-  // On mount and on visibility/page restore, if iOS thinks the keyboard is
-  // up but the textarea isn't actually focused (or vice versa), the
-  // visualViewport metrics get stuck in a half-state — composer pushed up
-  // or covered by a blank pane. Force a blur+refocus on the textarea to
-  // make iOS resync. Only runs on mobile and only when ChatView holds the
-  // active session (avoids stealing focus from other views).
-  useEffect(() => {
-    if (!isMobile || !activeSession) return;
-    const resync = () => {
-      const ta = inputRef.current;
-      if (!ta) return;
-      if (document.activeElement !== ta) return; // only if it was focused
-      ta.blur();
-      window.setTimeout(() => {
-        ta.focus({ preventScroll: true });
-      }, 0);
-    };
-    document.addEventListener("visibilitychange", resync);
-    window.addEventListener("pageshow", resync);
-    return () => {
-      document.removeEventListener("visibilitychange", resync);
-      window.removeEventListener("pageshow", resync);
-    };
-  }, [isMobile, activeSession]);
+  // NOTE: a previous iOS-only "resync" effect here force-blurred and
+  // re-focused the active textarea on visibilitychange/pageshow to nudge
+  // iOS out of a stuck visualViewport half-state (composer pushed up /
+  // blank pane). It was removed because it was the cause of the iOS
+  // "keyboard won't stay up" bug: the effect only ever ran while the
+  // composer was already focused (its `document.activeElement !== ta`
+  // guard), and on iOS a programmatic focus() fired from setTimeout has
+  // no user-gesture context, so it cannot re-raise the keyboard after the
+  // blur(). In practice it never resynced the keyboard up — it only
+  // dismissed it whenever iOS emitted a visibilitychange (Control Center,
+  // notification banners, app switches, etc.) mid-session.
+  //
+  // The visualViewport half-state it targeted is now owned by
+  // useMobileKeyboard, which re-snapshots vv metrics on
+  // visibilitychange/pageshow via its settle tail + rAF stability poll —
+  // without ever touching textarea focus. Do not reintroduce a
+  // blur()+focus() resync here.
 
   useEffect(() => {
     const previousScope = previousChatScopeRef.current;
@@ -2276,6 +2295,31 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         suppressVvShrinkRef.current = false;
         suppressVvShrinkTimeoutRef.current = null;
       }, 450);
+
+      // Undo iOS layout-viewport drift HERE, on blur, not on the next focus.
+      // After a keyboard dismiss iOS can leave window.scrollY > 0; if that
+      // residual scroll is still present on the next focus, the keyboard
+      // lock's scrollTo(0,0) fires a *real* scroll while iOS is raising the
+      // keyboard and dismisses it (the "second tap dismisses" regression).
+      // Resetting on blur — when the keyboard is already closing, so there is
+      // nothing to dismiss — means the next focus starts at scrollY 0 and the
+      // lock's scroll is a no-op. We reset immediately and once more after the
+      // dismiss animation settles (iOS can re-drift mid-animation). The
+      // deferred reset is cancelled on focus so a fast re-tap can't scroll
+      // mid-raise.
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
+      if (blurScrollResetTimeoutRef.current !== null) {
+        window.clearTimeout(blurScrollResetTimeoutRef.current);
+      }
+      blurScrollResetTimeoutRef.current = window.setTimeout(() => {
+        blurScrollResetTimeoutRef.current = null;
+        if (document.activeElement?.tagName === "TEXTAREA") return;
+        if (window.scrollY !== 0 || window.scrollX !== 0) {
+          window.scrollTo(0, 0);
+        }
+      }, 350);
     }
 
     if (hideSkillMenuTimeoutRef.current !== null) {
@@ -2303,28 +2347,28 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       window.clearTimeout(hideSkillMenuTimeoutRef.current);
       hideSkillMenuTimeoutRef.current = null;
     }
-    // iOS quirk: after the keyboard has been dismissed once, re-focusing
-    // an input leaves window.scrollY > 0 *and* visualViewport.offsetTop
-    // > 0 — the layout viewport drifts up, and the position:fixed
-    // useMobileScrollLock applies to a body that is no longer at the
-    // top of the document. Result: the message thread anchors above
-    // the visible viewport with a large blank area below it. Forcing
-    // scroll back to (0,0) on the focus event neutralizes the drift
-    // before lock applies. Done in a microtask so iOS finishes its
-    // own scroll-into-view first.
-    if (typeof window !== "undefined" && window.innerWidth <= 768) {
-      queueMicrotask(() => {
-        if (window.scrollY !== 0 || window.scrollX !== 0) {
-          window.scrollTo(0, 0);
-        }
-      });
+    // Cancel any deferred blur drift-reset: it would scroll the document while
+    // iOS is raising the keyboard for THIS focus and dismiss it.
+    if (blurScrollResetTimeoutRef.current !== null) {
+      window.clearTimeout(blurScrollResetTimeoutRef.current);
+      blurScrollResetTimeoutRef.current = null;
     }
+    // NOTE: deliberately no window.scrollTo(0,0) here. Scrolling on the focus
+    // event fires while iOS is still raising the soft keyboard, and iOS treats
+    // a programmatic scroll mid-raise as a reason to abort it — the keyboard
+    // opens then immediately dismisses, so the input can't be typed in. This
+    // mirrors QuickChatFAB's handleInputFocus, which does not scroll and works.
+    // Drift is instead reset on blur (see handleInputBlur), so by the time this
+    // focus runs the document is already at scrollY 0.
   }, []);
 
   useEffect(() => {
     return () => {
       if (suppressVvShrinkTimeoutRef.current !== null) {
         window.clearTimeout(suppressVvShrinkTimeoutRef.current);
+      }
+      if (blurScrollResetTimeoutRef.current !== null) {
+        window.clearTimeout(blurScrollResetTimeoutRef.current);
       }
     };
   }, []);
@@ -2875,8 +2919,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               if (window.innerWidth > 768) return;
               if (!isIOS()) return;
               if (document.activeElement === event.currentTarget) return;
-              event.preventDefault();
-              event.currentTarget.focus({ preventScroll: true });
+              // FN-6301: do not preventDefault on the first unfocused iOS tap.
+              // Native focus is the reliable path that raises the soft keyboard;
+              // the visualViewport/input-focus effects own scroll compensation.
             }}
             rows={1}
             data-testid="chat-input"
@@ -3415,16 +3460,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     onTouchStart={(event) => {
                       if (typeof window === "undefined") return;
                       if (window.innerWidth > 768) return;
-                      // iOS-only: preventDefault + programmatic focus avoids
-                      // iOS's visual-viewport scroll on re-focus. On Android,
-                      // preventDefault here blocks the soft keyboard from
-                      // opening at all (programmatic focus() does not raise
-                      // the keyboard on Android), so the input "focuses" but
-                      // the keyboard never appears.
                       if (!isIOS()) return;
                       if (document.activeElement === event.currentTarget) return;
-                      event.preventDefault();
-                      event.currentTarget.focus({ preventScroll: true });
+                      // FN-6301: do not preventDefault on the first unfocused iOS tap.
+                      // Native focus is the reliable path that raises the soft keyboard;
+                      // the visualViewport/input-focus effects own scroll compensation.
                     }}
                     rows={1}
                     data-testid="chat-input"

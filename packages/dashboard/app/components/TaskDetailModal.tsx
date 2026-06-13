@@ -34,6 +34,7 @@ import { ModelSelectorTab } from "./ModelSelectorTab";
 import { PrPanel } from "./PrPanel";
 import { PrCreateModal } from "./PrCreateModal";
 import { TaskComments } from "./TaskComments";
+import { TaskChatTab } from "./TaskChatTab";
 import { TaskReviewTab } from "./TaskReviewTab";
 import { MergeDetails } from "./MergeDetails";
 import { TaskChangesTab } from "./TaskChangesTab";
@@ -283,7 +284,7 @@ function formatDurationCompact(ageMs: number): string {
   return `${minutes}m`;
 }
 
-type TabId = "definition" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
+type TabId = "definition" | "chat" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
 
 // Lazy-load the terminal so xterm + addons stay out of the main bundle (U11).
 const LazySessionTerminal = lazy(() =>
@@ -3000,6 +3001,12 @@ export function TaskDetailContent({
               {t("taskDetail.tabs.definition", "Definition")}
             </button>
             <button
+              className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
+              onClick={() => setActiveTab("chat")}
+            >
+              {t("taskDetail.tabs.chat", "Chat")}
+            </button>
+            <button
               className={`detail-tab${activeTab === "logs" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("logs")}
             >
@@ -3113,6 +3120,10 @@ export function TaskDetailContent({
           ) : activeTab === "model" ? (
             <div className="detail-section">
               <ModelSelectorTab task={task} addToast={addToast} onTaskUpdated={onTaskUpdated} settings={settings} />
+            </div>
+          ) : activeTab === "chat" ? (
+            <div className="detail-section">
+              <TaskChatTab task={task} projectId={projectId} active={activeTab === "chat"} addToast={addToast} />
             </div>
           ) : activeTab === "logs" ? (
             <div className={`detail-section${logSubview === "agent-log" ? " detail-section--agent-log" : ""}`}>

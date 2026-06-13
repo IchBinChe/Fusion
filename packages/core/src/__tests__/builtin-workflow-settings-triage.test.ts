@@ -5,6 +5,7 @@ import {
   BUILTIN_WORKFLOW_SETTINGS,
   renderTriagePolicyPlaceholders,
 } from "../builtin-workflow-settings.js";
+import { MOVED_SETTINGS_KEYS } from "../moved-settings.js";
 
 const expectedDefaults: Record<string, { type: string; default: unknown }> = {
   triageSizeSmallMaxHours: { type: "number", default: 2 },
@@ -22,6 +23,8 @@ const expectedDefaults: Record<string, { type: string; default: unknown }> = {
   },
   triageDecisionOnlyWorkflowId: { type: "enum", default: "builtin:quick-fix" },
   triageDefaultWorkflowId: { type: "enum", default: "builtin:coding" },
+  leanPlanning: { type: "boolean", default: false },
+  autoApproveSpec: { type: "boolean", default: false },
 };
 
 describe("workflow-native triage policy settings", () => {
@@ -29,6 +32,7 @@ describe("workflow-native triage policy settings", () => {
     const triageById = new Map(BUILTIN_TRIAGE_POLICY_SETTINGS.map((setting) => [setting.id, setting]));
     const fullIds = new Set(BUILTIN_WORKFLOW_SETTINGS.map((setting) => setting.id));
     const movedIds = new Set(BUILTIN_MOVED_WORKFLOW_SETTINGS.map((setting) => setting.id));
+    const movedKeyIds = new Set(MOVED_SETTINGS_KEYS);
 
     expect(BUILTIN_TRIAGE_POLICY_SETTINGS).toHaveLength(Object.keys(expectedDefaults).length);
     for (const [id, expected] of Object.entries(expectedDefaults)) {
@@ -38,6 +42,7 @@ describe("workflow-native triage policy settings", () => {
       expect(setting?.default).toStrictEqual(expected.default);
       expect(fullIds.has(id), `${id} should be in the full built-in catalog`).toBe(true);
       expect(movedIds.has(id), `${id} should not be in the moved-key catalog`).toBe(false);
+      expect(movedKeyIds.has(id), `${id} should not be in MOVED_SETTINGS_KEYS`).toBe(false);
     }
   });
 

@@ -5111,6 +5111,16 @@ export function fetchWorkflow(id: string, projectId?: string): Promise<import("@
   return api<import("@fusion/core").WorkflowDefinition>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId));
 }
 
+/** Fetch resolved optional step declarations for a workflow. */
+export function fetchWorkflowOptionalSteps(
+  workflowId: string,
+  projectId?: string,
+): Promise<import("@fusion/core").ResolvedWorkflowOptionalStep[]> {
+  return api<import("@fusion/core").ResolvedWorkflowOptionalStep[]>(
+    withProjectId(`/workflows/${encodeURIComponent(workflowId)}/optional-steps`, projectId),
+  );
+}
+
 /** Create a workflow definition. */
 export function createWorkflow(
   input: import("@fusion/core").WorkflowDefinitionInput,
@@ -6439,7 +6449,7 @@ export interface SummarizeTitleResponse {
 }
 
 /** Summarize a task description into a concise title using AI.
- * @param description - The task description to summarize (must be 201-2000 chars)
+ * @param description - The task description to summarize (must be >200 chars; model input is truncated)
  * @param provider - Optional AI model provider (e.g., "anthropic")
  * @param modelId - Optional AI model ID (e.g., "claude-sonnet-4-5")
  * @param projectId - Optional project ID for scoped settings resolution

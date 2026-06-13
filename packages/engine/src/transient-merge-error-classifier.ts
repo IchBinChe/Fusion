@@ -36,11 +36,12 @@
  *
  *  - `process-spawn-failure`: Node/OS process launch failed while the merger
  *    was operating from an integration cwd (`spawn ENOTDIR`, `spawn git ENOENT`,
- *    `spawn ENOENT`). These indicate the command could not even start because
- *    the cwd/entrypoint was missing or file-shadowed (for example a stale temp
- *    merge checkout), not that the task branch's code failed. A fresh merge
- *    attempt gets a fresh/revalidated worktree, so the self-healing sweep can
- *    recover these within its bounded retry budget.
+ *    `spawn ENOENT`) or git reported that the AI-merge clean-room path `is not
+ *    a working tree`. These indicate the command could not even start because
+ *    the cwd/entrypoint/worktree was missing or file-shadowed (for example a
+ *    stale temp merge checkout), not that the task branch's code failed. A
+ *    fresh merge attempt gets a fresh/revalidated worktree, so the self-healing
+ *    sweep can recover these within its bounded retry budget.
  */
 export function classifyTransientMergeError(error: string | null | undefined): string | null {
   if (!error) return null;
@@ -48,6 +49,9 @@ export function classifyTransientMergeError(error: string | null | undefined): s
     return "lease-handoff-target-not-queued";
   }
   if (/\bspawn(?:\s+\S+)?\s+ENO(?:TDIR|ENT)\b/i.test(error)) {
+    return "process-spawn-failure";
+  }
+  if (/\bis not a working tree\b/i.test(error)) {
     return "process-spawn-failure";
   }
   const sameSha = error.match(/advanced concurrently \(expected ([0-9a-f]{7,40}),\s+observed ([0-9a-f]{7,40})\)/i);

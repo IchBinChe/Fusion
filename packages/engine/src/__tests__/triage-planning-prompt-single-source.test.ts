@@ -2,11 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Settings, Task, TaskDetail, TaskStore, WorkflowIr } from "@fusion/core";
 import {
   BUILTIN_CODING_WORKFLOW_IR,
+  builtinSeamPrompt,
   renderTriagePolicyPlaceholders,
   resolveAgentPrompt,
   resolvePlanningPromptFromIr,
 } from "@fusion/core";
-import { FAST_TRIAGE_SYSTEM_PROMPT, TriageProcessor } from "../triage.js";
+import { TriageProcessor } from "../triage.js";
 
 const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
   mockReviewStep: vi.fn(),
@@ -110,6 +111,7 @@ async function captureBasePrompt(task: Task, store: TaskStore): Promise<string> 
 const canonicalPlanningPrompt = resolvePlanningPromptFromIr(BUILTIN_CODING_WORKFLOW_IR)!;
 const renderedCanonicalPlanningPrompt = renderTriagePolicyPlaceholders(canonicalPlanningPrompt, {});
 const renderedDefaultTriagePrompt = renderTriagePolicyPlaceholders(resolveAgentPrompt("triage"), {});
+const renderedFastPlanningPrompt = renderTriagePolicyPlaceholders(builtinSeamPrompt("planning-fast"), {});
 
 describe("triage planning prompt single source", () => {
   beforeEach(() => {
@@ -145,11 +147,11 @@ describe("triage planning prompt single source", () => {
     await expect(captureBasePrompt(task, store)).resolves.toBe(overridePrompt);
   });
 
-  it("keeps fast mode on FAST_TRIAGE_SYSTEM_PROMPT", async () => {
+  it("keeps fast mode on the planning-fast workflow prompt", async () => {
     const task = createTask({ id: "FN-6232-FAST", executionMode: "fast" });
     const store = createStore(task);
 
-    await expect(captureBasePrompt(task, store)).resolves.toBe(FAST_TRIAGE_SYSTEM_PROMPT);
+    await expect(captureBasePrompt(task, store)).resolves.toBe(renderedFastPlanningPrompt);
   });
 
   it("uses a selected custom workflow planning prompt", async () => {

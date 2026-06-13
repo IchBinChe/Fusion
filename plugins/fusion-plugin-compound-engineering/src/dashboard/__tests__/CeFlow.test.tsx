@@ -423,7 +423,13 @@ describe("CeFlow — lifecycle surfaces", () => {
     const onCancel = vi.fn();
     render(<CeFlow session={makeSession({ status, currentQuestion: null })} onAnswer={vi.fn()} onCancel={onCancel} />);
 
-    fireEvent.click(screen.getByTestId("ce-flow-cancel"));
+    const cancelButton = screen.getByTestId("ce-flow-cancel");
+    expect(cancelButton).toHaveAccessibleName("Cancel session");
+    expect(cancelButton).toHaveAttribute("title", "Cancel session");
+    expect(screen.getByRole("button", { name: "Cancel session" })).toBe(cancelButton);
+    expect(cancelButton).not.toHaveTextContent(/cancel/i);
+
+    fireEvent.click(cancelButton);
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 

@@ -21,7 +21,7 @@ At runtime, settings are merged. **Project settings override global settings** w
 | `PUT /api/settings` | Update project settings only. |
 | `GET /api/settings/global` | Get global settings only. |
 | `PUT /api/settings/global` | Update global settings only. |
-| `GET /api/settings/scopes` | Get separated `{ global, project }` view. |
+| `GET /api/settings/scopes` | Get separated `{ global, project, workflowSettings }` view. |
 
 ---
 
@@ -58,7 +58,7 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `webhookFormat` | `"slack" \| "discord" \| "generic"` | `"generic"` | Webhook payload format. Part of legacy flat settings. |
 | `webhookEvents` | `string[]` | `[]` | Event filter for webhook notifications. Empty/omitted means all events. Part of legacy flat settings. |
 | `notificationProviders` | `NotificationProviderConfig[]` | `[]` | Array of pluggable notification provider configurations. Each entry uses `{ id, name, enabled, config }` and is dispatched by provider ID (for example `ntfy` or `webhook`). |
-| `customProviders` | `CustomProvider[]` | `[]` | User-defined OpenAI-compatible, OpenAI Responses API (`apiType: "openai-responses"`), or Anthropic-compatible providers used by the custom-provider API (`/api/custom-providers`). Each entry uses `{ id, name, apiType, baseUrl, apiKey?, supportsDeveloperRole?, models? }`; `supportsDeveloperRole` is an OpenAI-compatible opt-in that enables `developer` role emission (default/omitted is `false`, forcing safe `system` role). API keys are stored raw but masked in API responses. Fusion resolves these providers from the active global settings directory (`~/.fusion`, with legacy `~/.pi/fusion` and `~/.pi/kb` migration support) so custom-provider models remain available after restart. |
+| `customProviders` | `CustomProvider[]` | `[]` | <a id="customproviders"></a>User-defined OpenAI-compatible, OpenAI Responses API (`apiType: "openai-responses"`), Anthropic-compatible, or Google Generative AI (`apiType: "google-generative-ai"`) providers used by the custom-provider API (`/api/custom-providers`). Each entry uses `{ id, name, apiType, baseUrl, apiKey?, supportsDeveloperRole?, models? }`; `supportsDeveloperRole` is an OpenAI-compatible opt-in that enables `developer` role emission (default/omitted is `false`, forcing safe `system` role). API keys are stored raw but masked in API responses. Fusion resolves these providers from the active global settings directory (`~/.fusion`, with legacy `~/.pi/fusion` and `~/.pi/kb` migration support) so custom-provider models remain available after restart. |
 | `defaultProjectId` | `string` | `undefined` | Default project for multi-project CLI operations when `--project` is omitted. |
 | `setupComplete` | `boolean` | `undefined` | Tracks completion of first-run setup. |
 | `favoriteProviders` | `string[]` | `undefined` | Pinned providers shown first in model selectors. |
@@ -254,6 +254,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
 | `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks. |
 | `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks. |
+| `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
+| `autoApproveSpec` | `false` | Workflow-native fast-mode policy: auto-approve generated specs and skip the independent spec reviewer. |
 
 In the dashboard Settings modal, Project Models now exposes Plan/Triage, Executor,
 and Reviewer dropdown controls for the default workflow. The modal's primary
@@ -293,6 +295,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `heartbeatScopeDiscipline` | `"strict" \| "lite" \| "off"` | `"strict"` | Heartbeat prompt procedure mode. `strict` keeps coordination-heavy scope discipline, `lite` restores pre-2026-05-11 wording, and `off` uses a minimal procedure. Per-agent `runtimeConfig.heartbeatScopeDiscipline` can override this default. |
 | `heartbeatPromptTemplate` | `"default" \| "compact"` | `"default"` | Heartbeat execution-prompt trim template default. Per-agent `runtimeConfig.heartbeatPromptTemplate` overrides this value. Role fallback when unset everywhere is `executor`→`default`, non-executor coordination roles→`compact`. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Default no-task heartbeat candidate list length. Integer range `0-10`; `0` suppresses candidate prompt injection. |
+| `engineerBacklogAutoClaim` | `boolean` | `false` | Opt engineer-role agents into no-task backlog auto-claim for implementation tasks. The default remains executor-only; per-agent `runtimeConfig.engineerBacklogAutoClaim` overrides this project default, and explicit routing/delegation is unchanged. |
 | `defaultNodeId` | `string` | `undefined` | Optional project default execution node for task dispatch. When set, tasks without a per-task `nodeId` override resolve to this node (`routing source: project-default`). See [Task Management → Node Routing](./task-management.md#node-routing). |
 | `unavailableNodePolicy` | `"block" \| "fallback-local"` | `"block"` | Project routing policy used during scheduler dispatch when a task resolves to a remote node and node health is known. `"block"` keeps the task in `todo` if the node is unhealthy; `"fallback-local"` reroutes dispatch to local execution. See [Architecture → Task Routing Architecture](./architecture.md#task-routing-architecture). |
 | `secretsAccessPolicy` | `"auto" \| "prompt" \| "deny"` | `undefined` | Project-level default secret access policy (overrides global default when present). |

@@ -105,6 +105,7 @@ export default defineConfig({
             "src/__tests__/merger-ai-cleanup-active-session.test.ts",
             "src/__tests__/merger-ai-cleanup.test.ts",
             "src/__tests__/merger-ai.test.ts",
+            "src/__tests__/sandbox/bubblewrap-backend.test.ts",
           ],
         },
       },
@@ -115,7 +116,10 @@ export default defineConfig({
           include: ["src/__tests__/reliability-interactions/**/*.test.ts"],
           // Mirror the engine-default exclusion so reliability slow tests
           // also tier into engine-slow.
-          exclude: ["src/**/*.slow.test.ts"],
+          exclude: [
+            "src/**/*.slow.test.ts",
+            "src/__tests__/reliability-interactions/soft-delete-blocker-residue.test.ts",
+          ],
           // These tests assert event ordering across real worktrees. Parallel
           // execution under merger load caused subprocess-guard timeouts and
           // SQLite rowid interleaving (e.g. FN-5521 hit

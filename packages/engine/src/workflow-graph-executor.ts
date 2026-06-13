@@ -1,4 +1,13 @@
-import type { Settings, TaskDetail, TaskStep, WorkflowIr, WorkflowIrEdge, WorkflowIrNode, WorkflowNodeExtensionResult } from "@fusion/core";
+import type {
+  Settings,
+  TaskDetail,
+  TaskStep,
+  WorkflowIr,
+  WorkflowIrEdge,
+  WorkflowIrNode,
+  WorkflowIrNodeKind,
+  WorkflowNodeExtensionResult,
+} from "@fusion/core";
 import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, getWorkflowExtensionRegistry, isExperimentalFeatureEnabled, resolveMaxReworkCycles } from "@fusion/core";
 
 import {
@@ -164,6 +173,27 @@ const TERMINAL_FAILURE: WorkflowGraphExecutorResult = {
   visitedNodeIds: [],
 };
 
+/**
+ * Engine-local mirror of core's workflow-owned merge/retry/recovery primitive
+ * region. Until the workflow interpreter owns merge policy end-to-end, graph
+ * execution treats any entry into this region as the terminal legacy `merge`
+ * seam so observable lifecycle behavior stays byte-identical with the legacy
+ * executor. Consolidate with a core export when one exists.
+ */
+const MERGE_REGION_KINDS = new Set<WorkflowIrNodeKind>([
+  "merge-gate",
+  "merge-attempt",
+  "manual-merge-hold",
+  "retry-backoff",
+  "recovery-router",
+  "branch-group-member-integration",
+  "branch-group-promotion",
+]);
+
+function isMergeRegionKind(kind: WorkflowIrNodeKind): boolean {
+  return MERGE_REGION_KINDS.has(kind);
+}
+
 function normalizeTouchedFile(value: unknown): string | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim().replaceAll("\\", "/").replace(/^\.\//, "");
@@ -273,6 +303,12 @@ export class WorkflowGraphExecutor {
     };
     const visitedNodeIds: string[] = [];
     const inStack = new Set<string>();
+    const syntheticMergeNode: WorkflowIrNode = {
+      id: "merge",
+      kind: "prompt",
+      column: "in-review",
+      config: { seam: "merge" },
+    };
 
     // Bounded-rework generalization (U6). A `kind: "rework"` edge is the only
     // legal cycle: it loops back to a "rework region head" (the edge's `to` node).
@@ -499,6 +535,26 @@ export class WorkflowGraphExecutor {
       }
     };
 
+    const runLegacyMergeSeam = async (): Promise<WorkflowNodeResult> => {
+      // The merge-policy primitive region is interpreter-owned policy. While the
+      // legacy lifecycle remains authoritative, reaching any of its node kinds is
+      // the terminal merge boundary: dispatch the same prompt/seam handler a
+      // legacy `config.seam: "merge"` node used, but record it under the stable
+      // legacy node id `merge` and never expose raw merge-region primitive ids.
+      visitedNodeIds.push(syntheticMergeNode.id);
+      const result = await this.executeNodeWithRetries(
+        syntheticMergeNode,
+        task,
+        settings,
+        context,
+        ir,
+      );
+      if (result.contextPatch) Object.assign(context, result.contextPatch);
+      context[`node:${syntheticMergeNode.id}:outcome`] = result.outcome;
+      if (result.value !== undefined) context[`node:${syntheticMergeNode.id}:value`] = result.value;
+      return result;
+    };
+
     const traverseChildren = async (
       node: WorkflowIrNode,
       sourceResult: WorkflowNodeResult,
@@ -530,6 +586,11 @@ export class WorkflowGraphExecutor {
         const target = nodeMap.get(edge.to);
         if (target?.kind === "end") {
           aggregate = sourceResult;
+          continue;
+        }
+        if (target && isMergeRegionKind(target.kind)) {
+          aggregate = await runLegacyMergeSeam();
+          if (aggregate.outcome === "failure") break;
           continue;
         }
         const child = await walk(edge.to);

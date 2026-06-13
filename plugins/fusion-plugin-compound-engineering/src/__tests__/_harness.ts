@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
@@ -50,7 +50,10 @@ export function makeHarness(): TestHarness {
     projectRoot,
     ctx,
     emitted,
-    close: () => db.close(),
+    close: () => {
+      db.close();
+      rmSync(projectRoot, { recursive: true, force: true });
+    },
   };
 }
 

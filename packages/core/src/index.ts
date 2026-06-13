@@ -17,6 +17,7 @@ export type {
 } from "./branch-assignment.js";
 export { customProviderRegistryKey } from "./custom-provider-key.js";
 export { redactSecrets } from "./redact-secrets.js";
+export * from "./frontend-ux-policy.js";
 export { MOCK_PROVIDER_ID } from "./mock-provider-constants.js";
 export type { MockProviderId, MockSessionPurpose } from "./mock-provider-constants.js";
 export {
@@ -78,6 +79,7 @@ export type {
   WorkflowFieldOption,
   WorkflowFieldRender,
   // Workflow-settings (U1): typed setting declaration IR types.
+  WorkflowOptionalStep,
   WorkflowSettingDefinition,
   WorkflowSettingType,
   WorkflowSettingOption,
@@ -103,6 +105,8 @@ export type {
   EffectiveAgentResult,
 } from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+export { resolveWorkflowOptionalSteps } from "./workflow-optional-steps.js";
+export type { ResolvedWorkflowOptionalStep } from "./workflow-optional-steps.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
 export {
@@ -111,6 +115,11 @@ export {
   BUILTIN_TRIAGE_POLICY_SETTINGS,
   renderTriagePolicyPlaceholders,
 } from "./builtin-workflow-settings.js";
+export {
+  BUILTIN_SEAM_PROMPTS,
+  builtinPromptConfig,
+  builtinSeamPrompt,
+} from "./builtin-workflow-prompts.js";
 export {
   MOVED_SETTINGS_KEYS,
   SETTINGS_MIGRATION_VERSION,
@@ -1005,6 +1014,7 @@ export {
   MAX_COMMIT_SUBJECT_LENGTH,
   DEFAULT_COMMIT_SUBJECT_TIMEOUT_MS,
   MAX_DESCRIPTION_LENGTH,
+  MAX_TITLE_SUMMARIZE_INPUT_LENGTH,
   MIN_DESCRIPTION_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_MERGE_COMMIT_SUMMARY_LENGTH,

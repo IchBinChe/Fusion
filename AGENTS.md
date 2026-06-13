@@ -116,7 +116,7 @@ Never kill processes on port 4040 and never start test servers on 4040. Use `--p
 
 Do not issue a recursive `find` (or any unbounded recursive directory walk) rooted at the OS temp directory — `$TMPDIR`, `/tmp`, or macOS `/var/folders/...` (canonical `/private/var/...`). The temp root can hold an enormous number of entries on CI and long-lived dev hosts, so a broad scan can hang for minutes and pin I/O.
 
-When you need a Fusion temp artifact, target the known prefix directly and list a single level with a prefix filter — never walk the whole temp tree. The canonical bounded pattern is the engine's own sweep: a non-recursive `readdirSync(tmpdir())` filtered by a known prefix such as `fusion-ai-merge-` (`SelfHealingManager.cleanupStaleTempMergeWorktrees()` in `packages/engine/src/self-healing.ts`). Scoped `find` calls under a project worktree or `.fusion/` are fine; only the broad temp-root scan is forbidden.
+When you need a Fusion temp artifact, target the known prefix directly and list a single level with a prefix filter — never walk the whole temp tree. The canonical bounded pattern is the engine's own sweep: non-recursive `readdirSync(...)` passes over the configured `<worktreesDir>/.ai-merge/` root plus legacy `.fusion/ai-merge/` and `tmpdir()` leftovers, filtered by a known prefix such as `fusion-ai-merge-` (`SelfHealingManager.cleanupStaleTempMergeWorktrees()` in `packages/engine/src/self-healing.ts`). Scoped `find` calls under a project worktree or `.fusion/` are fine; only the broad temp-root scan is forbidden.
 
 ### Engine Process Rules
 
@@ -175,6 +175,7 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 ### Run Audit
 
 - FN-5419: git run-audit now includes `pull:fast-forward` and `stash:pop-conflict`; dashboard git surfaces now include the extended `POST /api/git/pull` integration-worktree path plus companion `POST /api/git/stash-resolve`, `POST /api/git/stash-drop`, and `POST /api/git/stash-apply` routes.
+- FN-6292: self-healing emits `task:reconcile-dependency-blocking-lease` when it rebounds an in-progress holder whose stale file-scope lease blocks an unmet dependency, and `task:reconcile-dependency-blocking-lease-no-action` when triple-proof blocks that backward move.
 
 
 ## Reference docs (deeper detail)

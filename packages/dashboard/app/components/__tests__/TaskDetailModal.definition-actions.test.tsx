@@ -182,20 +182,21 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // In-progress tasks show exactly 10 tabs:
-      // Definition, Logs, Changes, Review, Comments, Documents, Model, Workflow, Stats, Routing
+      // In-progress tasks show exactly 11 tabs:
+      // Definition, Chat, Logs, Changes, Review, Comments, Documents, Model, Workflow, Stats, Routing
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(10);
+      expect(tabs.length).toBe(11);
       expect(tabs[0].textContent).toBe("Definition");
-      expect(tabs[1].textContent).toBe("Logs");
-      expect(tabs[2].textContent).toBe("Changes");
-      expect(tabs[3].textContent).toBe("Review");
-      expect(tabs[4].textContent).toBe("Comments");
-      expect(tabs[5].textContent).toBe("Documents");
-      expect(tabs[6].textContent).toBe("Model");
-      expect(tabs[7].textContent).toBe("Workflow");
-      expect(tabs[8].textContent).toBe("Stats");
-      expect(tabs[9].textContent).toBe("Routing");
+      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[2].textContent).toBe("Logs");
+      expect(tabs[3].textContent).toBe("Changes");
+      expect(tabs[4].textContent).toBe("Review");
+      expect(tabs[5].textContent).toBe("Comments");
+      expect(tabs[6].textContent).toBe("Documents");
+      expect(tabs[7].textContent).toBe("Model");
+      expect(tabs[8].textContent).toBe("Workflow");
+      expect(tabs[9].textContent).toBe("Stats");
+      expect(tabs[10].textContent).toBe("Routing");
       // Commits tab should NOT be present for non-done tasks
       expect(screen.queryByText("Commits")).toBeNull();
     });
@@ -213,19 +214,20 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // In-progress task with workflow steps: 10 tabs (Review after Changes, Workflow after Model)
+      // In-progress task with workflow steps: 11 tabs (Review after Changes, Workflow after Model)
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(10);
+      expect(tabs.length).toBe(11);
       expect(tabs[0].textContent).toBe("Definition");
-      expect(tabs[1].textContent).toBe("Logs");
-      expect(tabs[2].textContent).toBe("Changes");
-      expect(tabs[3].textContent).toBe("Review");
-      expect(tabs[4].textContent).toBe("Comments");
-      expect(tabs[5].textContent).toBe("Documents");
-      expect(tabs[6].textContent).toBe("Model");
-      expect(tabs[7].textContent).toBe("Workflow");
-      expect(tabs[8].textContent).toBe("Stats");
-      expect(tabs[9].textContent).toBe("Routing");
+      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[2].textContent).toBe("Logs");
+      expect(tabs[3].textContent).toBe("Changes");
+      expect(tabs[4].textContent).toBe("Review");
+      expect(tabs[5].textContent).toBe("Comments");
+      expect(tabs[6].textContent).toBe("Documents");
+      expect(tabs[7].textContent).toBe("Model");
+      expect(tabs[8].textContent).toBe("Workflow");
+      expect(tabs[9].textContent).toBe("Stats");
+      expect(tabs[10].textContent).toBe("Routing");
     });
 
     it("does NOT show Commits tab for done task with mergeDetails.commitSha (changes merged into Changes tab)", () => {
@@ -244,24 +246,25 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Done task with commit SHA: Definition, Logs, Changes, Review, Comments, Documents, Model, Workflow, Stats, Routing (10 tabs, no Commits)
+      // Done task with commit SHA: Definition, Chat, Logs, Changes, Review, Comments, Documents, Model, Workflow, Stats, Routing (11 tabs, no Commits)
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(10);
+      expect(tabs.length).toBe(11);
       expect(tabs[0].textContent).toBe("Definition");
-      expect(tabs[1].textContent).toBe("Logs");
-      expect(tabs[2].textContent).toBe("Changes");
-      expect(tabs[3].textContent).toBe("Review");
-      expect(tabs[4].textContent).toBe("Comments");
-      expect(tabs[5].textContent).toBe("Documents");
-      expect(tabs[6].textContent).toBe("Model");
-      expect(tabs[7].textContent).toBe("Workflow");
-      expect(tabs[8].textContent).toBe("Stats");
-      expect(tabs[9].textContent).toBe("Routing");
+      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[2].textContent).toBe("Logs");
+      expect(tabs[3].textContent).toBe("Changes");
+      expect(tabs[4].textContent).toBe("Review");
+      expect(tabs[5].textContent).toBe("Comments");
+      expect(tabs[6].textContent).toBe("Documents");
+      expect(tabs[7].textContent).toBe("Model");
+      expect(tabs[8].textContent).toBe("Workflow");
+      expect(tabs[9].textContent).toBe("Stats");
+      expect(tabs[10].textContent).toBe("Routing");
       // Commits tab should NOT be present
       expect(screen.queryByText("Commits")).toBeNull();
     });
 
-    it("shows 10 tabs for done task with workflow steps and commit SHA (Commits merged into Changes)", () => {
+    it("shows 11 tabs for done task with workflow steps and commit SHA (Commits merged into Changes)", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({
@@ -278,19 +281,20 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Done task with workflow steps and commit SHA: 10 tabs including Review (no Commits)
+      // Done task with workflow steps and commit SHA: 11 tabs including Review (no Commits)
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(10);
+      expect(tabs.length).toBe(11);
       expect(tabs[0].textContent).toBe("Definition");
-      expect(tabs[1].textContent).toBe("Logs");
-      expect(tabs[2].textContent).toBe("Changes");
-      expect(tabs[3].textContent).toBe("Review");
-      expect(tabs[4].textContent).toBe("Comments");
-      expect(tabs[5].textContent).toBe("Documents");
-      expect(tabs[6].textContent).toBe("Model");
-      expect(tabs[7].textContent).toBe("Workflow");
-      expect(tabs[8].textContent).toBe("Stats");
-      expect(tabs[9].textContent).toBe("Routing");
+      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[2].textContent).toBe("Logs");
+      expect(tabs[3].textContent).toBe("Changes");
+      expect(tabs[4].textContent).toBe("Review");
+      expect(tabs[5].textContent).toBe("Comments");
+      expect(tabs[6].textContent).toBe("Documents");
+      expect(tabs[7].textContent).toBe("Model");
+      expect(tabs[8].textContent).toBe("Workflow");
+      expect(tabs[9].textContent).toBe("Stats");
+      expect(tabs[10].textContent).toBe("Routing");
       // Commits tab should NOT be present
       expect(screen.queryByText("Commits")).toBeNull();
     });
@@ -309,9 +313,9 @@ describe("TaskDetailModal", () => {
       );
 
       const triageTabs = triageContainer.querySelectorAll(".detail-tab");
-      expect(triageTabs.length).toBe(9); // Definition, Logs, Review, Comments, Documents, Model, Workflow, Stats, Routing
+      expect(triageTabs.length).toBe(10); // Definition, Chat, Logs, Review, Comments, Documents, Model, Workflow, Stats, Routing
       expect(Array.from(triageTabs).map(t => t.textContent)).toEqual([
-        "Definition", "Logs", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing",
+        "Definition", "Chat", "Logs", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing",
       ]);
 
       const { container: todoContainer } = render(
@@ -327,9 +331,9 @@ describe("TaskDetailModal", () => {
       );
 
       const todoTabs = todoContainer.querySelectorAll(".detail-tab");
-      expect(todoTabs.length).toBe(9); // Definition, Logs, Review, Comments, Documents, Model, Workflow, Stats, Routing
+      expect(todoTabs.length).toBe(10); // Definition, Chat, Logs, Review, Comments, Documents, Model, Workflow, Stats, Routing
       expect(Array.from(todoTabs).map(t => t.textContent)).toEqual([
-        "Definition", "Logs", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing",
+        "Definition", "Chat", "Logs", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing",
       ]);
     });
 

@@ -8,7 +8,7 @@
  * Features:
  * - Rate limiting per IP (10 requests per hour)
  * - Dynamic import of @fusion/engine for AI agent creation
- * - Text length validation (201-2000 characters)
+ * - Text length validation (minimum 201 characters; model input is truncated)
  */
 
 import { getFnAgent, type AgentMessage } from "./ai-engine-loader.js";
@@ -32,8 +32,20 @@ Your ONLY job is to create a concise title (max 60 characters) that summarizes t
 - Maximum 60 characters
 - Focus on the main goal or deliverable of the task`;
 
-/** Maximum description length in characters */
+/**
+ * Historical maximum accepted description length in characters.
+ *
+ * @deprecated Title summarization now accepts descriptions of any length;
+ * use MAX_TITLE_SUMMARIZE_INPUT_LENGTH for the bounded model-input cap.
+ */
 export const MAX_DESCRIPTION_LENGTH = 2000;
+
+/**
+ * Maximum input length for title summarization. Descriptions can be very large;
+ * we truncate before sending so the prompt stays bounded while preserving the
+ * long-input API behavior.
+ */
+export const MAX_TITLE_SUMMARIZE_INPUT_LENGTH = 4000;
 
 /** Minimum description length for summarization in characters */
 export const MIN_DESCRIPTION_LENGTH = 201;
@@ -178,15 +190,11 @@ export function validateDescription(description: unknown): string {
     throw new ValidationError("description must be a string");
   }
 
-  // Validate description length
+  // Validate description length floor. There is intentionally no upper bound:
+  // runTitleSummarizer truncates model input before prompting.
   if (description.length < MIN_DESCRIPTION_LENGTH) {
     throw new ValidationError(
       `description must be at least ${MIN_DESCRIPTION_LENGTH} characters for summarization`
-    );
-  }
-  if (description.length > MAX_DESCRIPTION_LENGTH) {
-    throw new ValidationError(
-      `description must not exceed ${MAX_DESCRIPTION_LENGTH} characters`
     );
   }
 
@@ -246,12 +254,16 @@ async function runTitleSummarizer(
     // Wrap the user-supplied description in a delimiter so the model treats it
     // as content to summarize, not as instructions to follow. Belt-and-suspenders
     // alongside the system-prompt guardrails and the engine's readonly tool
-    // isolation.
+    // isolation. Truncate before prompt construction so arbitrarily long task
+    // descriptions cannot produce unbounded model input.
+    const truncatedDescription = description.length > MAX_TITLE_SUMMARIZE_INPUT_LENGTH
+      ? description.slice(0, MAX_TITLE_SUMMARIZE_INPUT_LENGTH) + "\n…(truncated)"
+      : description;
     const wrappedPrompt =
       "Summarize the following task description into a title (≤60 chars). " +
       "Output ONLY the title text on a single line. Do not call any tools.\n\n" +
       "<description>\n" +
-      description +
+      truncatedDescription +
       "\n</description>";
     await agentResult.session.prompt(wrappedPrompt);
 
@@ -317,7 +329,7 @@ async function runTitleSummarizer(
 
 /**
  * Summarize a task description into a concise title using AI.
- * @param description - The task description to summarize (must be 201-2000 chars)
+ * @param description - The task description to summarize (must be >200 chars; model input is truncated)
  * @param rootDir - Project root directory for AI agent context
  * @param provider - Optional AI model provider (e.g., "anthropic")
  * @param modelId - Optional AI model ID (e.g., "claude-sonnet-4-5")

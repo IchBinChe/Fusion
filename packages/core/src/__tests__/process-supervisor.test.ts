@@ -73,7 +73,11 @@ describe("process-supervisor", () => {
     const child = superviseSpawn(process.execPath, [fixturePath, "spawn-child", parentPidFile, grandchildPidFile], {
       stdio: "ignore",
       killGraceMs: 100,
-      maxLifetimeMs: 5_000,
+      // This case is specifically asserting explicit cascade teardown. Do not
+      // arm a lifetime timer here: matching the old 5s lifetime with the 5s
+      // waitFor windows made the explicit teardown race maxLifetime cleanup
+      // under broad-suite load.
+      maxLifetimeMs: Number.POSITIVE_INFINITY,
     });
 
     await waitFor(() => Number.parseInt(readFileSync(grandchildPidFile, "utf8"), 10) > 0);
@@ -81,8 +85,10 @@ describe("process-supervisor", () => {
     expect(isAlive(grandchildPid)).toBe(true);
 
     await __terminateSupervisedChildrenForTests("cascade");
-    await child.waitExit();
+    await expect(child.waitExit()).resolves.toEqual({ code: null, signal: "SIGTERM" });
+    expect(__getProcessSupervisorStateForTests().registrySize).toBe(0);
     await waitFor(() => !isAlive(grandchildPid));
+    expect(isAlive(grandchildPid)).toBe(false);
   });
 
   it("escalates to SIGKILL after the grace period", async () => {

@@ -117,6 +117,71 @@ Behavior:
 - Mobile authoring exposes dedicated destinations for **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions**. Add includes the node palette plus fragments, built-in step templates, and plugin step templates; Settings keeps the Definitions/Values tab split.
 - The create-workflow dialog and workflow AI authoring popover follow the same mobile full-screen/sheet pattern so they are not clipped by the editor canvas on narrow screens
 
+## Custom Providers
+
+Custom Providers live in **Settings → Authentication → Custom Providers**, inside the **Advanced: Custom Providers** disclosure. Use this section to add user-defined model providers that speak an OpenAI-compatible API, the OpenAI Responses API, an Anthropic-compatible API, or Google Generative AI. After a provider is saved with models, those models become selectable in model dropdowns, including **Settings → Project Models** lanes and workflow model lanes.
+
+Supported **API type** values match the dropdown in the form:
+
+- **OpenAI-compatible**
+- **OpenAI Responses**
+- **Anthropic-compatible**
+- **Google Generative AI**
+
+The custom-provider form uses these fields:
+
+- **Provider name** — the display name for the provider.
+- **API type** — one of the supported API types above.
+- **Base URL** — the provider endpoint base URL. It must be a valid `http` or `https` URL, for example `https://api.example.com/v1`.
+- **API key** — optional credential for providers that require authentication.
+- **Available models** — comma-separated model IDs, for example `gpt-4, gpt-3.5-turbo`.
+
+Use **Detect Models** to auto-fill **Available models** from the provider's `/models` endpoint. Detection requires a **Base URL** and may require an **API key**, depending on the provider.
+
+### Add a custom provider
+
+1. Open **Settings → Authentication → Custom Providers**.
+2. Expand **Advanced: Custom Providers** if it is collapsed.
+3. Select **Add Custom Provider**.
+4. Enter a **Provider name**.
+5. Choose the correct **API type**: **OpenAI-compatible**, **OpenAI Responses**, **Anthropic-compatible**, or **Google Generative AI**.
+6. Enter the provider **Base URL**. The value must be a valid `http` or `https` URL.
+7. If the provider requires authentication, enter its **API key**.
+8. Populate **Available models** by either:
+   - entering comma-separated model IDs manually, or
+   - selecting **Detect Models** to query the provider's `/models` endpoint and prepend detected model IDs to the field.
+9. Select **Save Provider**.
+
+Expected outcome: the provider appears in the Custom Providers list with its API type and base URL. Each saved model is then available in model dropdowns as a `{provider}/{modelId}` option, including **Settings → Project Models** default-workflow lanes and workflow model lanes in the workflow editor.
+
+### Edit a custom provider
+
+1. Open **Settings → Authentication → Custom Providers** and expand **Advanced: Custom Providers**.
+2. Find the provider in the list and select its pencil **Edit** action.
+3. Update **Provider name**, **API type**, **Base URL**, **API key**, or **Available models** as needed.
+4. Select **Detect Models** again if you want to refresh or add model IDs from the provider's `/models` endpoint.
+5. Select **Save Changes**.
+
+Expected outcome: the provider list refreshes, and model dropdowns use the updated model list. If you rename the provider or change model IDs, update any **Project Models** or workflow model lane selections that should use the new `{provider}/{modelId}` value.
+
+### Delete a custom provider
+
+1. Open **Settings → Authentication → Custom Providers** and expand **Advanced: Custom Providers**.
+2. Find the provider in the list and select its trash **Delete** action.
+3. Confirm the prompt: `Delete custom provider "<name>"?`.
+
+Expected outcome: the provider is removed from the list, and its models are no longer offered as selectable options in model dropdowns. Review any **Project Models** or workflow model lane values that previously selected that provider.
+
+### Masked API key behavior
+
+Saved API keys are stored in settings but are masked in API responses and UI-loaded provider records. When you edit an existing Custom Provider, the **API key** field starts blank and shows the hint **Leave blank to keep current key** if a key is already saved.
+
+- Leave **API key** blank to preserve the saved key.
+- Enter a new **API key** value to replace the saved key.
+- The masked value shown in responses is never reused or submitted as a real credential by the edit form.
+
+For the stored settings shape, see [`customProviders` in the Settings Reference](./settings-reference.md#customproviders). For the API behavior, including masked keys in responses, see [Architecture → Custom Provider endpoints](./architecture.md#custom-provider-endpoints).
+
 ## Planning Mode
 
 Planning Mode now includes branch controls on the summary screen before you create a task.
@@ -662,6 +727,8 @@ Use blocker fan-out signals on task cards and in the footer status bar to spot b
 Recommended workflow: ordinary chains stay as `Blocks N` so noise stays low, high-fan-out blockers stand out immediately, and only long-lived high-impact blockers trigger explicit escalation.
 
 ### Logs → Agent Log view
+
+The **Chat** tab sits between Definition and Logs and presents a live, chat-styled transcript of task agent output. Consecutive entries are grouped by role and labeled as Planner, Executor, Reviewer, or Merger; legacy log rows without an agent role use the neutral Agent fallback. Consecutive tool/tool-result/tool-error rows inside a role group collapse into one expandable tool-call summary that stays collapsed by default, while thinking entries render in a collapsible block that starts expanded. The transcript opens at the latest output whenever the tab loads or becomes active, then follows new live output when you are already near the bottom while preserving your scroll position when you review older messages. For active, assigned, non-paused agent sessions in `in-progress` or `in-review` (reviewing/merging/fixing) tasks, the composer sends guidance to the running agent through the same steering path used by comments; when no active session is available, the composer is disabled with an explanatory hint.
 
 The **Logs** tab includes an **Agent Log** subview designed for debugging long-running and tool-heavy sessions:
 

@@ -1018,6 +1018,76 @@ describe("executeHeartbeat", () => {
       expect(toolNames).toContain("fn_task_log");
     });
 
+    it("honors engineerBacklogAutoClaim precedence for no-task auto-claim role compatibility", async () => {
+      const oldEnoughForBaseScore = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      const candidateTask = {
+        id: "FN-CANDIDATE",
+        description: "implementation reliability follow-up",
+        title: "Implementation reliability",
+        prompt: "# PROMPT",
+        steps: [],
+        column: "todo",
+        dependencies: [],
+        log: [],
+        attachments: [],
+        createdAt: oldEnoughForBaseScore,
+        updatedAt: oldEnoughForBaseScore,
+        columnMovedAt: oldEnoughForBaseScore,
+      } as unknown as TaskDetail;
+      const scenarios = [
+        { name: "engineer default", role: "engineer", settings: {}, runtimeConfig: {}, shouldClaim: false, promptText: "engineerBacklogAutoClaim disabled" },
+        { name: "engineer project opt-in", role: "engineer", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: {}, shouldClaim: true },
+        { name: "engineer runtime opt-in overrides project off", role: "engineer", settings: { engineerBacklogAutoClaim: false }, runtimeConfig: { engineerBacklogAutoClaim: true }, shouldClaim: true },
+        { name: "engineer runtime opt-out overrides project on", role: "engineer", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: { engineerBacklogAutoClaim: false }, shouldClaim: false, promptText: "engineerBacklogAutoClaim disabled" },
+        { name: "executor unchanged", role: "executor", settings: { engineerBacklogAutoClaim: false }, runtimeConfig: {}, shouldClaim: true },
+        { name: "reviewer blocked with opt-in", role: "reviewer", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: {}, shouldClaim: false, promptText: "executor or opted-in engineer role required" },
+        { name: "custom blocked with opt-in", role: "custom", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: {}, shouldClaim: false, promptText: "executor or opted-in engineer role required" },
+      ] as const;
+
+      for (const scenario of scenarios) {
+        vi.clearAllMocks();
+        mockedAcquireTaskWorktree.mockResolvedValue({
+          worktreePath: "/tmp/worktree-fn-candidate",
+          branch: "fusion/fn-candidate",
+          source: "existing",
+          hydrated: false,
+          isResume: true,
+        });
+        const store = createStoreWithAgentForExec({
+          taskId: undefined,
+          role: scenario.role,
+          soul: "implementation reliability owner",
+          runtimeConfig: scenario.runtimeConfig,
+        });
+        const mockSession = createMockAgentSession();
+        mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+        mockTaskStore = createMockTaskStore({
+          getSettings: vi.fn().mockResolvedValue(scenario.settings),
+          listTasks: vi.fn().mockResolvedValue([candidateTask]),
+          getTask: vi.fn().mockResolvedValue(candidateTask),
+        });
+        (store.claimTaskForAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
+          ok: true,
+          task: { id: "FN-CANDIDATE" },
+        });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        if (scenario.shouldClaim) {
+          expect(store.claimTaskForAgent, scenario.name).toHaveBeenCalledWith(
+            "agent-001",
+            "FN-CANDIDATE",
+            expect.objectContaining({ agentId: "agent-001", source: "timer" }),
+          );
+        } else {
+          expect(store.claimTaskForAgent, scenario.name).not.toHaveBeenCalled();
+          const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+          expect(executionPrompt, scenario.name).toContain(scenario.promptText);
+        }
+      }
+    });
+
     it("auto-claim skips implementation candidates for non-executor agents", async () => {
       const store = createStoreWithAgentForExec({
         taskId: undefined,

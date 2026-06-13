@@ -129,12 +129,14 @@ function SessionsPanel({
               ) : (
                 <button
                   type="button"
-                  className="btn ce-session-cancel"
+                  className="btn-icon ce-session-cancel"
                   data-testid="ce-session-cancel"
                   disabled={disabled}
                   onClick={() => onCancel(s)}
+                  aria-label="Cancel session"
+                  title="Cancel session"
                 >
-                  Cancel
+                  <LucideIcons.Trash2 size={16} aria-hidden="true" />
                 </button>
               )}
             </li>

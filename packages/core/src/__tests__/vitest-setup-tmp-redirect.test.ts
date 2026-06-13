@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { __fusionTmpdirRedirectTestHooks } from "../__test-utils__/vitest-setup";
 
 const createdPaths: string[] = [];
 
@@ -16,6 +17,11 @@ function expectUnderWorkerRoot(path: string): void {
   expect(workerRoot).toBeTruthy();
   expect(path.startsWith(`${workerRoot}${sep}`)).toBe(true);
   expect(dirname(path)).toBe(join(workerRoot!, `redir-${process.pid}`));
+}
+
+function rememberDir(path: string): string {
+  mkdirSync(path, { recursive: true });
+  return remember(path);
 }
 
 afterEach(() => {
@@ -64,5 +70,63 @@ describe("vitest setup tmpdir mkdtemp redirect", () => {
     const path = remember(mkdtempSync(prefix));
 
     expect(path.startsWith(`${tmpdir()}${sep}`)).toBe(true);
+  });
+
+  it("recreates the cached redirect sink after deletion for sync and async mkdtemp", async () => {
+    const sink = __fusionTmpdirRedirectTestHooks.sinkForPid(process.pid);
+    const first = remember(mkdtempSync(join(tmpdir(), "fn-redirect-prime-")));
+    expectUnderWorkerRoot(first);
+    expect(existsSync(sink)).toBe(true);
+
+    rmSync(sink, { recursive: true, force: true });
+    expect(existsSync(sink)).toBe(false);
+
+    const syncPath = remember(mkdtempSync(join(tmpdir(), "fn-redirect-recreated-sync-")));
+    expect(existsSync(syncPath)).toBe(true);
+    expect(dirname(syncPath)).toBe(sink);
+    expect(existsSync(sink)).toBe(true);
+
+    rmSync(sink, { recursive: true, force: true });
+    expect(existsSync(sink)).toBe(false);
+
+    const asyncPath = remember(await mkdtemp(join(tmpdir(), "fn-redirect-recreated-async-")));
+    expect(existsSync(asyncPath)).toBe(true);
+    expect(dirname(asyncPath)).toBe(sink);
+    expect(existsSync(sink)).toBe(true);
+  });
+
+  it("sweeps only dead redirect sinks and preserves current or alive pids", () => {
+    const { registryPath, resetSweepForTest, sinkForPid, sweepDeadTmpdirRedirectSinks } = __fusionTmpdirRedirectTestHooks;
+    const currentSink = rememberDir(sinkForPid(process.pid));
+    const liveForeignPid = process.ppid;
+    const liveForeignSink = rememberDir(sinkForPid(liveForeignPid));
+    const deadPid = 99_999_999;
+    const deadSink = rememberDir(sinkForPid(deadPid));
+
+    writeFileSync(registryPath, `${process.pid}\n${process.pid}\n${liveForeignPid}\n${deadPid}\n`);
+    resetSweepForTest();
+    sweepDeadTmpdirRedirectSinks();
+
+    expect(existsSync(currentSink)).toBe(true);
+    expect(existsSync(liveForeignSink)).toBe(true);
+    expect(existsSync(deadSink)).toBe(false);
+
+    const fallbackDeadSink = rememberDir(sinkForPid(deadPid - 1));
+    rmSync(registryPath, { force: true });
+    resetSweepForTest();
+    sweepDeadTmpdirRedirectSinks();
+
+    expect(existsSync(currentSink)).toBe(true);
+    expect(existsSync(liveForeignSink)).toBe(true);
+    expect(existsSync(fallbackDeadSink)).toBe(false);
+
+    const emptyRegistryDeadSink = rememberDir(sinkForPid(deadPid - 2));
+    writeFileSync(registryPath, "");
+    resetSweepForTest();
+    sweepDeadTmpdirRedirectSinks();
+
+    expect(existsSync(currentSink)).toBe(true);
+    expect(existsSync(liveForeignSink)).toBe(true);
+    expect(existsSync(emptyRegistryDeadSink)).toBe(false);
   });
 });

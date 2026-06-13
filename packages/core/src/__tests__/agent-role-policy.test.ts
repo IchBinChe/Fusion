@@ -31,11 +31,14 @@ describe("agent-role-policy", () => {
       canAgentTakeImplementationTaskForBacklogPickup({ role: "executor" }, { column: "todo" }),
     ).toBe(true);
     expect(
-      canAgentTakeImplementationTask({ role: "executor" }, { column: "todo" }),
+      canAgentTakeImplementationTaskForBacklogPickup({ role: "executor" }, { column: "todo" }, { allowEngineer: true }),
+    ).toBe(true);
+    expect(
+      canAgentTakeImplementationTask({ role: "executor" }, { column: "todo" }, { allowEngineer: true }),
     ).toBe(true);
   });
 
-  it("allows durable engineer only for explicit routing", () => {
+  it("allows durable engineer for explicit routing and opt-in backlog pickup only", () => {
     expect(isEngineerRoleAgent({ role: "engineer" })).toBe(true);
     expect(
       canAgentTakeImplementationTaskForExplicitRouting({ role: "engineer" }, { column: "todo" }),
@@ -43,9 +46,18 @@ describe("agent-role-policy", () => {
     expect(
       canAgentTakeImplementationTaskForBacklogPickup({ role: "engineer" }, { column: "todo" }),
     ).toBe(false);
+    expect(
+      canAgentTakeImplementationTask({ role: "engineer" }, { column: "todo" }),
+    ).toBe(false);
+    expect(
+      canAgentTakeImplementationTaskForBacklogPickup({ role: "engineer" }, { column: "todo" }, { allowEngineer: true }),
+    ).toBe(true);
+    expect(
+      canAgentTakeImplementationTask({ role: "engineer" }, { column: "todo" }, { allowEngineer: true }),
+    ).toBe(true);
   });
 
-  it("keeps reviewer blocked by default", () => {
+  it("keeps reviewer and custom roles blocked from backlog pickup even when engineers opt in", () => {
     expect(isExecutorRoleAgent({ role: "reviewer" })).toBe(false);
     expect(
       canAgentTakeImplementationTaskForExplicitRouting({ role: "reviewer" }, { column: "todo" }),
@@ -53,6 +65,21 @@ describe("agent-role-policy", () => {
     expect(
       canAgentTakeImplementationTaskForBacklogPickup({ role: "reviewer" }, { column: "todo" }),
     ).toBe(false);
+    expect(
+      canAgentTakeImplementationTaskForBacklogPickup({ role: "reviewer" }, { column: "todo" }, { allowEngineer: true }),
+    ).toBe(false);
+    expect(
+      canAgentTakeImplementationTaskForBacklogPickup({ role: "custom" }, { column: "todo" }, { allowEngineer: true }),
+    ).toBe(false);
+  });
+
+  it("does not gate non-implementation columns by role", () => {
+    expect(
+      canAgentTakeImplementationTaskForBacklogPickup({ role: "reviewer" }, { column: "done" }),
+    ).toBe(true);
+    expect(
+      canAgentTakeImplementationTaskForBacklogPickup({ role: "custom" }, { column: "archived" }, { allowEngineer: true }),
+    ).toBe(true);
   });
 
   it("formats mismatch reason with agent/task details", () => {

@@ -1,8 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18next from "i18next";
 import { ActiveAgentsPanel } from "../ActiveAgentsPanel";
 import type { Agent } from "../../api";
 import { useLiveTranscript } from "../../hooks/useLiveTranscript";
+import esApp from "../../../../i18n/locales/es/app.json";
+import frApp from "../../../../i18n/locales/fr/app.json";
+import koApp from "../../../../i18n/locales/ko/app.json";
+import zhCNApp from "../../../../i18n/locales/zh-CN/app.json";
+import zhTWApp from "../../../../i18n/locales/zh-TW/app.json";
 
 // Mock useLiveTranscript
 vi.mock("../../hooks/useLiveTranscript", () => ({
@@ -14,6 +20,14 @@ vi.mock("../../hooks/useLiveTranscript", () => ({
 
 const mockUseLiveTranscript = vi.mocked(useLiveTranscript);
 
+const nonEnglishAppCatalogs = [
+  ["es", esApp],
+  ["fr", frApp],
+  ["ko", koApp],
+  ["zh-CN", zhCNApp],
+  ["zh-TW", zhTWApp],
+] as const;
+
 describe("ActiveAgentsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -21,6 +35,16 @@ describe("ActiveAgentsPanel", () => {
       entries: [],
       isConnected: false,
     });
+  });
+
+  afterEach(async () => {
+    await i18next.changeLanguage("en");
+    for (const [locale] of nonEnglishAppCatalogs) {
+      if (i18next.hasResourceBundle(locale, "app")) {
+        i18next.removeResourceBundle(locale, "app");
+      }
+    }
+    i18next.options.returnEmptyString = true;
   });
 
   it("renders live transcript text from entries", async () => {
@@ -77,6 +101,49 @@ describe("ActiveAgentsPanel", () => {
 
     // Verify the hook was called without projectId
     expect(mockUseLiveTranscript).toHaveBeenCalledWith("FN-001", undefined);
+  });
+
+  it("renders next-heartbeat labels without raw placeholders across non-English locales", async () => {
+    i18next.options.returnEmptyString = false;
+
+    for (const [locale, appCatalog] of nonEnglishAppCatalogs) {
+      i18next.addResourceBundle(locale, "app", appCatalog, true, true);
+      await i18next.changeLanguage(locale);
+
+      const futureAgent: Agent = {
+        id: `agent-future-${locale}`,
+        name: `Future Agent ${locale}`,
+        role: "executor",
+        state: "running",
+        taskId: `FN-${locale}`,
+        lastHeartbeatAt: new Date().toISOString(),
+      } as Agent;
+
+      const futureRender = render(<ActiveAgentsPanel agents={[futureAgent]} />);
+      const futureBadge = futureRender.container.querySelector(".live-agent-card-next-heartbeat");
+      expect(futureBadge, `${locale} next-heartbeat badge`).toBeInTheDocument();
+      expect(futureBadge?.textContent?.trim(), `${locale} next-heartbeat text`).not.toBe("");
+      expect(futureBadge?.textContent, `${locale} next-heartbeat raw placeholder`).not.toContain("{{");
+      futureRender.unmount();
+
+      const overdueAgent: Agent = {
+        id: `agent-overdue-${locale}`,
+        name: `Overdue Agent ${locale}`,
+        role: "executor",
+        state: "running",
+        taskId: `FN-overdue-${locale}`,
+        lastHeartbeatAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      } as Agent;
+
+      const overdueRender = render(<ActiveAgentsPanel agents={[overdueAgent]} />);
+      const overdueBadge = overdueRender.container.querySelector(".live-agent-card-next-heartbeat");
+      expect(overdueBadge, `${locale} heartbeat-overdue badge`).toBeInTheDocument();
+      expect(overdueBadge?.textContent?.trim(), `${locale} heartbeat-overdue text`).not.toBe("");
+      expect(overdueBadge?.textContent, `${locale} heartbeat-overdue raw placeholder`).not.toContain("{{");
+      overdueRender.unmount();
+
+      i18next.removeResourceBundle(locale, "app");
+    }
   });
 
   it("renders empty state when no entries yet", async () => {

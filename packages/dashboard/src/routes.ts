@@ -1848,6 +1848,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Returns: { title: string }
    *
    * Generates a concise title (≤60 characters) from descriptions longer than 200 characters.
+   * Long descriptions are accepted; core truncates model input before prompting.
    * Rate limited: 10 requests per hour per IP
    */
   router.post("/ai/summarize-title", async (req, res) => {
@@ -1863,7 +1864,6 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         summarizeTitle,
         validateDescription,
         MIN_DESCRIPTION_LENGTH,
-        MAX_DESCRIPTION_LENGTH: _MAX_DESCRIPTION_LENGTH,
         RateLimitError: _RateLimitError4,
         ValidationError: _ValidationError2,
         AiServiceError: _AiServiceError2,

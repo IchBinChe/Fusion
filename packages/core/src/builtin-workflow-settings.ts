@@ -13,7 +13,9 @@ import type { WorkflowSettingDefinition } from "./workflow-ir-types.js";
  * hard-move migration, must never be added to `MOVED_SETTINGS_KEYS`, and must
  * not appear in project/global settings schemas. Canonical values are inherited
  * from the post-FN-6232 planning prompt: subtask step threshold `7` (not the
- * older engine copy) and packages/modules threshold `3`.
+ * older engine copy) and packages/modules threshold `3`. Fast-mode policy is
+ * workflow-native here too: `leanPlanning` selects the lean planning variant,
+ * and `autoApproveSpec` skips the independent spec reviewer.
  */
 
 /**
@@ -348,6 +350,20 @@ export const BUILTIN_TRIAGE_POLICY_SETTINGS: WorkflowSettingDefinition[] = [
       { value: "builtin:quick-fix", label: "Quick fix" },
     ],
     description: "Default workflow id for standard coding tasks.",
+  },
+  {
+    id: "leanPlanning",
+    name: "Lean planning",
+    type: "boolean",
+    default: false,
+    description: "Use the lean fast-path planning prompt variant instead of the full triage spec prompt.",
+  },
+  {
+    id: "autoApproveSpec",
+    name: "Auto-approve spec",
+    type: "boolean",
+    default: false,
+    description: "Auto-approve the generated PROMPT.md and skip the independent spec reviewer.",
   },
 ];
 

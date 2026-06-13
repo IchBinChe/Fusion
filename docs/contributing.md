@@ -220,6 +220,63 @@ Use task-ID-scoped conventional commits:
 - `test(FN-XXX): ...`
 - `docs(FN-XXX): ...` (for documentation-only changes)
 
+## Issue Tracking with bd (Beads)
+
+This repository uses `bd` (Beads) for **all** local issue tracking: do not create markdown TODO lists, task lists, or external tracker records for repository work; see [AGENTS.md](../AGENTS.md) for the authoritative agent-specific policy.
+
+Use this end-to-end workflow:
+
+1. **Check ready, unblocked work.** Expected outcome: you see the issue IDs that are ready to claim, with dependency-blocked work filtered out.
+
+   ```bash
+   bd ready --json
+   ```
+
+2. **Claim a task atomically before changing files.** Expected outcome: the selected issue is assigned/claimed so another contributor or agent does not start the same work.
+
+   ```bash
+   bd update <id> --claim --json
+   ```
+
+3. **Create discovered follow-up work with a dependency link.** Expected outcome: separate work is tracked as its own issue and linked back to the issue where it was discovered. Use the appropriate type and priority rather than leaving an inline TODO.
+
+   ```bash
+   bd create "Title" --description="What this issue is about" -t bug|feature|task -p 0-4 --deps discovered-from:<parent-id> --json
+   ```
+
+4. **Close completed work with a reason.** Expected outcome: the issue history records why the work is done.
+
+   ```bash
+   bd close <id> --reason "Completed" --json
+   ```
+
+5. **Sync and push before ending the session.** Expected outcome: both Beads/Dolt issue state and Git commits are available remotely, and `git status` reports that the branch is up to date with origin.
+
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+
+Issue types match the Beads policy in `AGENTS.md`:
+
+- `bug` — something broken
+- `feature` — new functionality
+- `task` — work item such as tests, docs, or refactoring
+- `epic` — large feature with subtasks
+- `chore` — maintenance
+
+Priorities use a `0`–`4` scale:
+
+- `0` — critical: security, data loss, or broken builds
+- `1` — high: major features or important bugs
+- `2` — medium: default, nice-to-have work
+- `3` — low: polish or optimization
+- `4` — backlog: future ideas
+
+This workflow is only for this repository's local issue tracking. It is separate from the product evaluation in [Beads and Dolt Evaluation for Fusion Node Sync](./beads-dolt-sync-evaluation.md), which assesses Beads/Dolt as a possible Fusion node-sync substrate and recommends **against** switching Fusion's storage/sync backend to Beads or Dolt.
+
 ## Project Memory
 
 When enabled, Fusion uses OpenClaw-style memory files:

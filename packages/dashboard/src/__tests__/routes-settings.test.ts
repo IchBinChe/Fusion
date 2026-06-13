@@ -189,6 +189,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     updateGlobalSettings: vi.fn(),
     getSettingsByScope: vi.fn().mockResolvedValue({ global: {}, project: {} }),
     getSettingsByScopeFast: vi.fn().mockResolvedValue({ global: {}, project: {} }),
+    listWorkflowSettingValuesForProject: vi.fn().mockReturnValue({}),
     getGlobalSettingsStore: vi.fn().mockReturnValue(createMockGlobalSettingsStore()),
     logEntry: vi.fn().mockResolvedValue(undefined),
     getAgentLogs: vi.fn().mockResolvedValue([]),
@@ -1375,16 +1376,23 @@ describe("GET /settings/scopes", () => {
     expect(res.body.global.persistAgentThinkingLog).toBe(false);
     expect(res.body.project.maxConcurrent).toBe(4);
     expect(res.body.project.autoMerge).toBe(false);
+    expect(res.body.workflowSettings).toEqual({});
+    expect(res.body.workflowSettings).not.toBeNull();
+    expect(typeof res.body.workflowSettings).toBe("object");
+    expect(Array.isArray(res.body.workflowSettings)).toBe(false);
     expect(res.body.project.persistAgentToolOutput).toBeUndefined();
     expect(res.body.project.persistAgentThinkingLogPermanent).toBeUndefined();
     expect(res.body.project.persistAgentThinkingLogEphemeral).toBeUndefined();
     expect(res.body.project.persistAgentThinkingLog).toBeUndefined();
   });
 
-  it("returns exact response envelope shape with only global and project keys", async () => {
+  it("returns exact response envelope shape with global, project, and workflowSettings keys", async () => {
     (store.getSettingsByScopeFast as ReturnType<typeof vi.fn>).mockResolvedValue({
       global: { themeMode: "dark" },
       project: { maxConcurrent: 4 },
+    });
+    (store.listWorkflowSettingValuesForProject as ReturnType<typeof vi.fn>).mockReturnValue({
+      "builtin:coding": { workflowStepTimeoutMs: 120000 },
     });
 
     const res = await GET(buildApp(), "/api/settings/scopes");
@@ -1393,10 +1401,17 @@ describe("GET /settings/scopes", () => {
     // Assert exact envelope shape
     expect(res.body).toHaveProperty("global");
     expect(res.body).toHaveProperty("project");
+    expect(res.body).toHaveProperty("workflowSettings");
+    expect(res.body.workflowSettings).not.toBeNull();
+    expect(typeof res.body.workflowSettings).toBe("object");
+    expect(Array.isArray(res.body.workflowSettings)).toBe(false);
     // No unexpected top-level keys
     const keys = Object.keys(res.body);
-    expect(keys).toHaveLength(2);
-    expect(keys).toEqual(["global", "project"]);
+    expect(keys).toHaveLength(3);
+    expect(keys).toEqual(["global", "project", "workflowSettings"]);
+    expect(res.body.workflowSettings).toEqual({
+      "builtin:coding": { workflowStepTimeoutMs: 120000 },
+    });
   });
 
   it("uses getSettingsByScopeFast and does not call getSettingsByScope", async () => {
@@ -1579,6 +1594,10 @@ describe("GET /settings/scopes with projectId scoping", () => {
     expect(projectStoreResolver.getOrCreateProjectStore).toHaveBeenCalledWith(projectId);
     expect(scopedStore.getSettingsByScopeFast).toHaveBeenCalled();
     expect(defaultStore.getSettingsByScopeFast).not.toHaveBeenCalled();
+    expect(res.body.workflowSettings).toEqual({});
+    expect(res.body.workflowSettings).not.toBeNull();
+    expect(typeof res.body.workflowSettings).toBe("object");
+    expect(Array.isArray(res.body.workflowSettings)).toBe(false);
     expect(res.body.project.maxConcurrent).toBe(8);
     expect(res.body.project.planningProvider).toBe("anthropic");
   });
@@ -2788,7 +2807,6 @@ describe("POST /api/memory/extract", () => {
           prunedMemory: "## Architecture\n\nDurable architecture notes.",
         });
         this.state.messages.push({ role: "assistant", content: response });
-        return response;
       }),
       dispose: vi.fn(),
     };
@@ -2805,12 +2823,64 @@ describe("POST /api/memory/extract", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("success", true);
-    expect(res.body).toHaveProperty("summary");
-    expect(res.body).toHaveProperty("insightCount");
-    expect(res.body).toHaveProperty("pruned");
+    expect(typeof res.body.summary).toBe("string");
+    expect(res.body.insightCount).toBeGreaterThanOrEqual(1);
+    expect(typeof res.body.pruned).toBe("boolean");
     expect(existsSync(join(rootDir, ".fusion", "memory", "memory-insights.md"))).toBe(true);
     expect(existsSync(join(rootDir, ".fusion", "memory", "memory-audit.md"))).toBe(true);
     expect(existsSync(join(rootDir, ".fusion", "memory", "memory-audit-state.json"))).toBe(true);
+  });
+
+  it("uses prompt return text when the session does not persist assistant state", async () => {
+    mkdirSync(join(rootDir, ".fusion", "memory"), { recursive: true });
+    writeFileSync(join(rootDir, ".fusion", "memory", "MEMORY.md"), "Working memory content for extraction that is long enough.");
+
+    const session = {
+      state: { messages: [] as Array<{ role: string; content: string }> },
+      prompt: vi.fn(async () => JSON.stringify({
+        summary: "Returned extraction",
+        insights: [{ category: "pattern", content: "Prefer returned text when available" }],
+      })),
+      dispose: vi.fn(),
+    };
+
+    vi.mocked(createFnAgent).mockResolvedValue({ session } as never);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/memory/extract",
+      JSON.stringify({}),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.insightCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("returns 503 when the agent produces no assistant text", async () => {
+    mkdirSync(join(rootDir, ".fusion", "memory"), { recursive: true });
+    writeFileSync(join(rootDir, ".fusion", "memory", "MEMORY.md"), "Working memory content for extraction that is long enough.");
+
+    const session = {
+      state: { messages: [] as Array<{ role: string; content: string }> },
+      prompt: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+
+    vi.mocked(createFnAgent).mockResolvedValue({ session } as never);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/memory/extract",
+      JSON.stringify({}),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toContain("AI agent did not produce a response");
   });
 });
 

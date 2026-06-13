@@ -350,7 +350,7 @@ describe("built-in workflows", () => {
       await expect(store.deleteWorkflowDefinition("builtin:coding")).rejects.toThrow(/cannot be deleted/i);
     });
 
-    it("interpreter-deferred built-ins can be selected without compile materialization", async () => {
+    it("branching built-ins can be selected without throwing", async () => {
       for (const workflowId of ["builtin:coding", "builtin:stepwise-coding"]) {
         const task = await store.createTask({ description: `select ${workflowId}`, enabledWorkflowSteps: [] });
 
@@ -362,7 +362,7 @@ describe("built-in workflows", () => {
       }
     });
 
-    it("create-time interpreter-deferred built-in workflowId records selection without throwing", async () => {
+    it("create-time branching built-in workflowId records selection without throwing", async () => {
       const task = await store.createTask({ description: "explicit builtin coding", workflowId: "builtin:coding" });
 
       const detail = await store.getTask(task.id);
@@ -370,7 +370,7 @@ describe("built-in workflows", () => {
       expect(store.getTaskWorkflowSelection(task.id)).toEqual({ workflowId: "builtin:coding", stepIds: [] });
     });
 
-    it("interpreter-deferred built-in project defaults fall back without throwing", async () => {
+    it("branching built-in project defaults do not throw", async () => {
       await expect(store.createTask({ description: "implicit builtin default" })).resolves.toMatchObject({
         description: "implicit builtin default",
       });
@@ -378,7 +378,7 @@ describe("built-in workflows", () => {
       await store.setDefaultWorkflowId("builtin:coding");
       const codingTask = await store.createTask({ description: "default builtin coding" });
       expect((await store.getTask(codingTask.id)).enabledWorkflowSteps ?? []).toEqual([]);
-      expect(store.getTaskWorkflowSelection(codingTask.id)).toBeUndefined();
+      expect(store.getTaskWorkflowSelection(codingTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: [] });
 
       await store.setDefaultWorkflowId("builtin:stepwise-coding");
       const stepwiseTask = await store.createTask({ description: "default builtin stepwise" });

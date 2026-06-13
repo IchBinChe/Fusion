@@ -18,6 +18,7 @@ const {
   mockRecoverInterruptedRuns,
   mockExecutorCtor,
   mockResumeOrphaned,
+  mockResumeTaskForAgent,
   mockTaskStoreSettings,
   mockTaskStoreGetTask,
   mockTaskStoreUpdateSettings,
@@ -36,6 +37,7 @@ const {
   mockRecoverInterruptedRuns: vi.fn().mockResolvedValue(undefined),
   mockExecutorCtor: vi.fn(),
   mockResumeOrphaned: vi.fn().mockResolvedValue(undefined),
+  mockResumeTaskForAgent: vi.fn().mockResolvedValue(undefined),
   mockTaskStoreSettings: {} as Record<string, unknown>,
   mockTaskStoreGetTask: vi.fn().mockResolvedValue(null),
   mockTaskStoreUpdateSettings: vi.fn().mockResolvedValue(undefined),
@@ -193,6 +195,7 @@ vi.mock("../../executor.js", async () => {
       mockExecutorCtor(options);
       const self = {} as Record<string, unknown>;
       self.resumeOrphaned = mockResumeOrphaned;
+      self.resumeTaskForAgent = mockResumeTaskForAgent;
       self.recoverCompletedTask = vi.fn().mockResolvedValue(true);
       self.getExecutingTaskIds = vi.fn().mockReturnValue(new Set());
       self.handleLoopDetected = vi.fn().mockResolvedValue(false);
@@ -244,6 +247,8 @@ describe("InProcessRuntime", () => {
     }
     mockTaskStoreGetTask.mockReset();
     mockTaskStoreGetTask.mockResolvedValue(null);
+    mockResumeTaskForAgent.mockReset();
+    mockResumeTaskForAgent.mockResolvedValue(undefined);
     mockIsGitRepository.mockReset();
     mockIsGitRepository.mockResolvedValue(true);
     mockReapOrphanWorktrees.mockReset();
@@ -699,6 +704,25 @@ describe("InProcessRuntime", () => {
   });
 
   describe("trigger scheduler wiring", () => {
+    it("composes run-completion resume with deferred assignment drain", async () => {
+      await runtime.start();
+      const store = getAgentStore(runtime);
+      const agent = await store.createAgent({ name: "completion-wiring", role: "executor" });
+      const monitor = runtime.getHeartbeatMonitor();
+      const triggerScheduler = runtime.getTriggerScheduler();
+      expect(monitor).toBeDefined();
+      expect(triggerScheduler).toBeDefined();
+      const drainSpy = vi.spyOn(triggerScheduler!, "drainPendingAssignment").mockResolvedValue(undefined);
+
+      const run = await monitor!.startRun(agent.id, { source: "timer" });
+      await monitor!.completeRun(agent.id, run.id, { status: "completed" });
+
+      await vi.waitFor(() => {
+        expect(mockResumeTaskForAgent).toHaveBeenCalledWith(agent.id);
+        expect(drainSpy).toHaveBeenCalledWith(agent.id);
+      });
+    }, 30000);
+
     it("creates trigger scheduler on start", async () => {
       await runtime.start();
       expect(runtime.getTriggerScheduler()).toBeDefined();

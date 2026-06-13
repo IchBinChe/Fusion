@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { PlanningQuestion } from "@fusion/core";
 import type { CeActivityTurn, CeConversationTurn, CeSession } from "../session/session-store.js";
 import { canRenderRichly } from "./ce-question-support.js";
@@ -541,12 +542,14 @@ export function CeFlow(props: CeFlowProps) {
         {onCancel && cancellable ? (
           <button
             type="button"
-            className="btn ce-flow-cancel"
+            className="btn-icon ce-flow-cancel"
             data-testid="ce-flow-cancel"
             onClick={onCancel}
             disabled={Boolean(busy)}
+            aria-label="Cancel session"
+            title="Cancel session"
           >
-            Cancel
+            <Trash2 size={16} aria-hidden="true" />
           </button>
         ) : null}
         {onClose ? (

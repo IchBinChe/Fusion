@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  AI_MERGE_DIRNAME,
+  isAiMergeContainerDir,
   isInsideConfiguredWorktreesDir,
+  resolveAiMergeRootPath,
   resolveTaskWorktreePath,
   resolveTaskWorktreePathForBackend,
   resolveWorktreesDir,
@@ -39,6 +42,27 @@ describe("worktree-paths", () => {
     expect(resolveTaskWorktreePath(rootDir, { worktreesDir: "../{repo}.worktrees" } as any, "fn-123")).toBe(
       resolve(rootDir, "../repo-name.worktrees/fn-123"),
     );
+  });
+
+  it("builds the AI-merge root under the default worktrees dir", () => {
+    expect(resolveAiMergeRootPath(rootDir, undefined)).toBe(join(rootDir, ".worktrees", AI_MERGE_DIRNAME));
+  });
+
+  it("builds the AI-merge root under an absolute custom worktrees dir", () => {
+    expect(resolveAiMergeRootPath(rootDir, { worktreesDir: "/tmp/ext-worktrees" } as any)).toBe(join("/tmp/ext-worktrees", AI_MERGE_DIRNAME));
+  });
+
+  it("builds the AI-merge root under expanded {repo} and ~ worktrees dirs", () => {
+    expect(resolveAiMergeRootPath(rootDir, { worktreesDir: "../{repo}.worktrees" } as any)).toBe(
+      resolve(rootDir, "../repo-name.worktrees", AI_MERGE_DIRNAME),
+    );
+    expect(resolveAiMergeRootPath(rootDir, { worktreesDir: "~/.fn/{repo}/trees" } as any)).toBe(join(homedir(), ".fn/repo-name/trees", AI_MERGE_DIRNAME));
+  });
+
+  it("identifies only the dedicated AI-merge container name", () => {
+    expect(isAiMergeContainerDir(AI_MERGE_DIRNAME)).toBe(true);
+    expect(isAiMergeContainerDir("fusion-ai-merge-fn-1-abc")).toBe(false);
+    expect(isAiMergeContainerDir(".ai-merge-child")).toBe(false);
   });
 
   it("detects paths inside and outside configured dir", () => {

@@ -79,6 +79,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Memory Plugin Contract](./memory-plugin-contract.md) | Pluggable memory backend architecture, interface contract, and migration strategy |
 | [Compound Engineering Plugin](./plugins/compound-engineering.md) | CE workflow dashboard surface: artifact hub, interactive sessions, work→board bridge, and bidirectional sync |
 | [External Plugin Authoring](./plugins/external-authoring.md) | Step-by-step guide for authoring plugins using an installed `fn` CLI (no monorepo access needed) |
+| [External Plugin Proof-Point Runbook](./plugins/external-proof-point-runbook.md) | Repeatable release-validation runbook for proving an external plugin runs against a published Fusion CLI build |
 
 ### Audit Reports
 | Report | Description |

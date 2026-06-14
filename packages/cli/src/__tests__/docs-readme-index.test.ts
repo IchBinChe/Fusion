@@ -7,6 +7,7 @@ const docsReadmePath = resolve(workspaceRoot, "docs", "README.md");
 
 const requiredDocs = [
   "docs/dev-server-modules.md",
+  "docs/plugins/external-proof-point-runbook.md",
   "docs/research/pi-autoresearch-analysis.md",
   "docs/research/research-hardening-preflight.md",
 ] as const;

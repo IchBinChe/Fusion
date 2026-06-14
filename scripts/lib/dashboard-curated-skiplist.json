@@ -6,18 +6,6 @@
       "reason": "asserts the built bundle; runs standalone via `pnpm --filter @fusion/dashboard test:build` (needs a prior vite build), not in the unit gate"
     },
     {
-      "file": "packages/dashboard/app/hooks/__tests__/quickChatLastSessionStorage.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6442)"
-    },
-    {
-      "file": "packages/dashboard/app/hooks/__tests__/useChatRooms.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6442)"
-    },
-    {
-      "file": "packages/dashboard/app/hooks/__tests__/useTaskDiffStats.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6442)"
-    },
-    {
       "file": "packages/dashboard/src/__tests__/evals-routes.test.ts",
       "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
     },

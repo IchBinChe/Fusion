@@ -283,11 +283,15 @@ describe("TaskChatTab", () => {
     expect(screen.getByText(/No agent output yet/)).toBeTruthy();
   });
 
-  it("renders the collapsed expand toggle and calls the toggle handler", () => {
+  it("renders the collapsed expand toggle inside the transcript and calls the toggle handler", () => {
     const onToggleExpanded = vi.fn();
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded={false} onToggleExpanded={onToggleExpanded} />);
 
     const toggle = screen.getByTestId("task-chat-expand-toggle");
+    const transcript = screen.getByTestId("task-chat-transcript");
+    expect(transcript).toContainElement(toggle);
+    expect(document.querySelector(".task-chat-toolbar")).toBeNull();
+    expect(toggle).toHaveClass("task-chat-expand-toggle--overlay");
     expect(toggle).toHaveAttribute("aria-label", "Expand chat to full modal");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(toggle).toHaveTextContent("Expand");
@@ -309,15 +313,26 @@ describe("TaskChatTab", () => {
     mockLogs([], true);
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
 
-    expect(screen.getByTestId("task-chat-expand-toggle")).toBeInTheDocument();
+    const toggle = screen.getByTestId("task-chat-expand-toggle");
+    expect(screen.getByTestId("task-chat-transcript")).toContainElement(toggle);
     expect(screen.getByText("Loading agent output…")).toBeInTheDocument();
   });
 
   it("renders the expand toggle in the empty transcript state", () => {
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
 
-    expect(screen.getByTestId("task-chat-expand-toggle")).toBeInTheDocument();
+    const toggle = screen.getByTestId("task-chat-expand-toggle");
+    expect(screen.getByTestId("task-chat-transcript")).toContainElement(toggle);
     expect(screen.getByText(/No agent output yet/)).toBeInTheDocument();
+  });
+
+  it("renders the expand toggle in the populated transcript state", () => {
+    mockLogs([makeEntry({ agent: "executor", text: "executor output" })]);
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
+
+    const transcript = screen.getByTestId("task-chat-transcript");
+    expect(transcript).toContainElement(screen.getByTestId("task-chat-expand-toggle"));
+    expect(within(transcript).getByText("executor output")).toBeInTheDocument();
   });
 
   it("labels every agent role and the legacy undefined-agent fallback", () => {
@@ -1475,6 +1490,27 @@ describe("TaskChatTab", () => {
     expect(mobileTranscriptRule).not.toContain("max-height");
     expect(css).not.toContain("70vh");
     expect(css).not.toContain("62vh");
+  });
+
+  it("positions the expand toggle as a tokenized transcript overlay with no toolbar shell", () => {
+    const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    const transcriptRule = getCssRuleBlock(css, ".task-chat-transcript");
+    const overlayRule = getCssRuleBlock(css, ".task-chat-expand-toggle--overlay");
+    const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
+    const mobileOverlayRule = getCssRuleBlock(mobileCss, ".task-chat-expand-toggle--overlay");
+
+    expect(css).not.toContain(".task-chat-toolbar");
+    expect(transcriptRule).toContain("position: relative");
+    expect(overlayRule).toContain("position: absolute");
+    expect(overlayRule).toContain("top: var(--space-md)");
+    expect(overlayRule).toContain("right: var(--space-md)");
+    expect(overlayRule).toContain("background: var(--surface)");
+    expect(overlayRule).toContain("border-color: var(--border)");
+    expect(overlayRule).toContain("box-shadow: var(--shadow-sm)");
+    expect(mobileOverlayRule).toContain("top: var(--space-sm)");
+    expect(mobileOverlayRule).toContain("right: var(--space-sm)");
+    expect(mobileOverlayRule).toContain("min-inline-size");
+    expect(mobileOverlayRule).toContain("min-block-size");
   });
 
   it("keeps tokenized sticky styling for the jump-to-bottom control on desktop and mobile", () => {

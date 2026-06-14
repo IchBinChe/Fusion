@@ -614,11 +614,17 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
 
   return (
     <div className="task-chat-tab" data-testid="task-chat-tab">
-      {onToggleExpanded ? (
-        <div className="task-chat-toolbar">
+      <div
+        className="task-chat-transcript"
+        ref={transcriptRef}
+        onScroll={handleTranscriptScroll}
+        aria-live="polite"
+        data-testid="task-chat-transcript"
+      >
+        {onToggleExpanded ? (
           <button
             type="button"
-            className="btn btn-sm task-chat-expand-toggle"
+            className="btn btn-sm task-chat-expand-toggle task-chat-expand-toggle--overlay"
             onClick={onToggleExpanded}
             aria-label={expanded ? "Collapse chat" : "Expand chat to full modal"}
             aria-pressed={expanded}
@@ -627,15 +633,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
             {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
             <span>{expanded ? "Collapse" : "Expand"}</span>
           </button>
-        </div>
-      ) : null}
-      <div
-        className="task-chat-transcript"
-        ref={transcriptRef}
-        onScroll={handleTranscriptScroll}
-        aria-live="polite"
-        data-testid="task-chat-transcript"
-      >
+        ) : null}
         {loading && transcriptItemCount === 0 ? (
           <div className="task-chat-empty" role="status">
             <Loader2 className="animate-spin" aria-hidden="true" />

@@ -425,6 +425,8 @@ interface TaskCardProps {
    * DISTINCT from staleness/stall badges (which U8 suppresses in these states).
    * Undefined when the task has no CLI session → no badge (card unchanged).
    */
+  /** True when the board-level task list proves the near-duplicate canonical is inactive or missing. */
+  nearDuplicateCanonicalInactive?: boolean;
   cliSessionState?: CliCardState;
 }
 
@@ -576,6 +578,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.prNode?.state === next.prNode?.state &&
     previous.prNode?.prNumber === next.prNode?.prNumber &&
     previous.cliSessionState?.agentState === next.cliSessionState?.agentState &&
+    previous.nearDuplicateCanonicalInactive === next.nearDuplicateCanonicalInactive &&
     previous.cardFieldDefs === next.cardFieldDefs &&
     (previous.cardFieldDefs == null && next.cardFieldDefs == null
       ? true
@@ -701,6 +704,7 @@ function TaskCardComponent({
   prNode,
   onOpenPullRequest,
   cliSessionState,
+  nearDuplicateCanonicalInactive,
 }: TaskCardProps) {
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
@@ -1021,10 +1025,16 @@ function TaskCardComponent({
   const showTrackingIndicator = hasGithubTrackingLink
     && !hasMatchingIssueInfoBadge
     && !hasMatchingSourceIssue;
+  /**
+   * FNXC:NearDuplicateDetection 2026-06-14-12:00:
+   * The card chip is a user-facing duplicate affordance, so hide it when a parent with the task list proves the canonical is inactive or missing.
+   * Undefined preserves legacy rendering for embedded card surfaces that cannot resolve the canonical locally.
+   */
   const showNearDuplicateChip = Boolean(task.sourceMetadata?.nearDuplicateOf)
     && task.sourceMetadata?.nearDuplicateDismissed !== true
     && task.column !== "archived"
-    && task.column !== "done";
+    && task.column !== "done"
+    && nearDuplicateCanonicalInactive !== true;
   const branchMetadata = useMemo(() => getVisibleTaskCardBranches(task), [task.id, task.branch, task.baseBranch]);
   const hasBranchMetadata = Boolean(branchMetadata.branch || branchMetadata.baseBranch);
   const isAgentCreated = isAgentCreatedTask(task);

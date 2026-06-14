@@ -21,6 +21,7 @@ import {
   resolveTaskPlanningModel,
   resolveTaskValidatorModel,
 } from "@fusion/core";
+import { isNearDuplicateCanonicalInactive } from "../../../core/src/near-duplicate-canonical";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
 import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, recoverBranchBinding, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
 import type { RecoverBranchBindingOutcome, WorkflowFieldDefinition, CustomFieldRejection } from "../api";
@@ -643,10 +644,19 @@ export function TaskDetailContent({
   const nearDuplicateOf = typeof workingTask.sourceMetadata?.nearDuplicateOf === "string"
     ? workingTask.sourceMetadata.nearDuplicateOf
     : null;
+  const nearDuplicateCanonical = nearDuplicateOf
+    ? tasks.find((candidate) => candidate.id === nearDuplicateOf)
+    : undefined;
+  /**
+   * FNXC:NearDuplicateDetection 2026-06-14-12:00:
+   * The Archive/Keep decision banner is actionable only while the referenced canonical exists and is active.
+   * Suppress the whole affordance for missing, archived, done, or soft-deleted canonicals so no empty banner shell or stale user-decision buttons remain.
+   */
   const showNearDuplicateWarning = Boolean(nearDuplicateOf)
     && workingTask.sourceMetadata?.nearDuplicateDismissed !== true
     && task.column !== "archived"
-    && task.column !== "done";
+    && task.column !== "done"
+    && !isNearDuplicateCanonicalInactive(nearDuplicateCanonical);
   const [sourceAgent, setSourceAgent] = useState<Agent | null>(null);
   const [selectedSourceAgentId, setSelectedSourceAgentId] = useState<string | null>(null);
   const provenanceDisplay = getProvenanceLabel(workingTask, {

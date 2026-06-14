@@ -8,6 +8,7 @@ import {
   type TaskDetail,
   type WorkflowStep,
 } from "@fusion/core";
+import { isNearDuplicateCanonicalInactive } from "../../core/src/near-duplicate-canonical";
 import { Header, useViewportMode } from "./components/Header";
 import { Board } from "./components/Board";
 import { TaskCard } from "./components/TaskCard";
@@ -1469,13 +1470,14 @@ function AppInner() {
 
     // Project view
     if (resolvedPluginTaskView) {
+      const pluginTasks = isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks;
       return (
         <PageErrorBoundary>
           <PluginDashboardViewHost
             taskView={resolvedPluginTaskView as `plugin:${string}:${string}`}
             context={{
               projectId: currentProject?.id,
-              tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks,
+              tasks: pluginTasks,
               workflowSteps,
               subscribePluginEvents,
               openTaskDetail: (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTask(task, initialTab),
@@ -1490,6 +1492,9 @@ function AppInner() {
                   disableDrag={true}
                   prAuthAvailable={prAuthAvailable}
                   autoMergeEnabled={autoMerge}
+                  nearDuplicateCanonicalInactive={typeof task.sourceMetadata?.nearDuplicateOf === "string"
+                    ? isNearDuplicateCanonicalInactive(pluginTasks.find((candidate) => candidate.id === task.sourceMetadata?.nearDuplicateOf))
+                    : undefined}
                 />
               ),
               addToast,

@@ -4347,6 +4347,34 @@ describe("TaskCard near-duplicate chip", () => {
     expect(screen.queryByText("Duplicate of FN-1234")).toBeNull();
   });
 
+  it("hides duplicate chip when parent resolves the canonical as inactive or missing", () => {
+    render(
+      <TaskCard
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        nearDuplicateCanonicalInactive={true}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Duplicate of FN-1234")).toBeNull();
+  });
+
+  it("renders duplicate chip when canonical activity is unknown", () => {
+    render(
+      <TaskCard
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        nearDuplicateCanonicalInactive={undefined}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Duplicate of FN-1234")).toBeInTheDocument();
+  });
+
   it("hides duplicate chip in archived and done columns", () => {
     const { rerender } = render(
       <TaskCard

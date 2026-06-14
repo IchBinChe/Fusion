@@ -2037,6 +2037,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        tasks={[makeTask({ id: "FN-1234" })]}
         onClose={noop}
         onMoveTask={noopMove}
         onDeleteTask={noopDelete}
@@ -2058,6 +2059,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234", nearDuplicateDismissed: true } })}
+        tasks={[makeTask({ id: "FN-1234" })]}
         onClose={noop}
         onMoveTask={noopMove}
         onDeleteTask={noopDelete}
@@ -2070,6 +2072,29 @@ describe("TaskDetailModal", () => {
     expect(screen.queryByText("Potential duplicate detected")).toBeNull();
   });
 
+  it.each([
+    ["archived", makeTask({ id: "FN-1234", column: "archived" })],
+    ["done", makeTask({ id: "FN-1234", column: "done" })],
+    ["missing", undefined],
+  ])("hides near-duplicate decision banner when canonical is %s", (_label, canonical) => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        tasks={canonical ? [canonical] : []}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("Potential duplicate detected")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+  });
+
   it("archives from near-duplicate banner when confirmed", async () => {
     const onArchiveTask = vi.fn().mockResolvedValue(makeTask({ column: "archived" }));
     mockConfirm.mockResolvedValueOnce(true);
@@ -2077,6 +2102,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234" } })}
+        tasks={[makeTask({ id: "FN-1234" })]}
         onClose={noop}
         onMoveTask={noopMove}
         onDeleteTask={noopDelete}

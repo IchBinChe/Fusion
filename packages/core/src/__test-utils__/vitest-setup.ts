@@ -16,7 +16,7 @@ import { afterEach, expect } from "vitest";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isMainThread } from "node:worker_threads";
 import { assertOutsideRealFusionPath } from "../test-safety.js";
@@ -370,13 +370,34 @@ function redirectTmpdirPrefix<T>(prefix: T): T {
   return join(ensureTmpdirRedirectSink(), basename(prefix)) as T;
 }
 
+function isCurrentWorkerHome(path: string | undefined): boolean {
+  if (!path) return false;
+  const resolved = (() => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  })();
+  const relativeHome = relative(WORKER_ROOT, resolved);
+  return Boolean(relativeHome)
+    && !relativeHome.startsWith("..")
+    && !isAbsolute(relativeHome)
+    && basename(resolved).startsWith(TEST_HOME_PREFIX);
+}
+
 function ensureIsolatedHome(): void {
   const existingHome = process.env.HOME ?? process.env.USERPROFILE;
-  if (existingHome && existingHome.includes(tmpdir()) && existingHome.includes(TEST_HOME_PREFIX)) {
+  if (isCurrentWorkerHome(existingHome)) {
     return;
   }
 
   ensureWorkerRoot();
+  /*
+  FNXC:TestIsolation 2026-06-14-00:31:
+  Nested or recursive Vitest lanes may inherit a parent worker's `fn-test-home-*` HOME value, which shares global settings/cache state across files and keeps CLI suites load-sensitive.
+  Reuse HOME only when it belongs to this invocation's worker root; otherwise mint a fresh per-run HOME under `fusion-test-workers-*` so teardown removes it with the worker root.
+  */
   const tempHome = realpathSync(mkdtempSync(join(WORKER_ROOT, `${TEST_HOME_PREFIX}${process.pid}-`)));
   process.env.HOME = tempHome;
   process.env.USERPROFILE = tempHome;

@@ -6,6 +6,7 @@ import { __fusionWorkerRootCleanupTestHooks } from "../__test-utils__/vitest-set
 import setup, {
   __setWorkerRootRmSyncForTests,
   __setWorkerRootSleepMsSyncForTests,
+  removeLegacyTopLevelHomeRoots,
 } from "../__test-utils__/vitest-teardown";
 
 const createdPaths: string[] = [];
@@ -86,6 +87,20 @@ describe("vitest global teardown worker-root cleanup", () => {
     await teardown();
 
     expect(existsSync(workerRoot)).toBe(false);
+  });
+
+  it("sweeps legacy top-level temp HOME roots without walking unrelated temp entries", () => {
+    const tempRoot = remember(mkdtempSync(join(tmpdir(), "fusion-test-home-sweep-root-")));
+    const legacyHome = join(tempRoot, "fn-test-home-stale");
+    const unrelated = join(tempRoot, "fusion-test-workers-current");
+    mkdirSync(legacyHome, { recursive: true });
+    mkdirSync(unrelated, { recursive: true });
+    writeFileSync(join(legacyHome, "payload.txt"), "legacy home state");
+
+    removeLegacyTopLevelHomeRoots(tempRoot);
+
+    expect(existsSync(legacyHome)).toBe(false);
+    expect(existsSync(unrelated)).toBe(true);
   });
 
   it("removes a self-minted fallback worker root during exit cleanup", () => {

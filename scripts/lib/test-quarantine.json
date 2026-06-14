@@ -1,9 +1,9 @@
 {
-  "$comment": "Flaky-test quarantine ledger (deletion ratchet \u2014 see AGENTS.md 'Flaky tests: quarantine on sight' and docs/testing.md 'Quarantine ledger and the deletion ratchet'). A test observed failing without a corresponding real bug is quarantined ON SIGHT: add an entry here AND a matching one-line `exclude` entry in that package's vitest config, in the same commit. Every entry needs a non-empty `reason` (link the failing run) and a `quarantinedAt` date \u2014 the entry expires 14 days later, at which point the test file is DELETED unless someone rescues it with evidence it catches real regressions plus a root-cause fix (never appeasement). There is deliberately no loader module and no automation around this file: it is a dated record, the vitest config exclude is the mechanism, and the sweep is policy executed by whoever touches the suite.",
+  "$comment": "Flaky-test quarantine ledger (deletion ratchet — see AGENTS.md 'Flaky tests: quarantine on sight' and docs/testing.md 'Quarantine ledger and the deletion ratchet'). A test observed failing without a corresponding real bug is quarantined ON SIGHT: add an entry here AND a matching one-line `exclude` entry in that package's vitest config, in the same commit. Every entry needs a non-empty `reason` (link the failing run) and a `quarantinedAt` date — the entry expires 14 days later, at which point the test file is DELETED unless someone rescues it with evidence it catches real regressions plus a root-cause fix (never appeasement). There is deliberately no loader module and no automation around this file: it is a dated record, the vitest config exclude is the mechanism, and the sweep is policy executed by whoever touches the suite.",
   "entries": [
     {
       "file": "packages/engine/src/__tests__/merger-ai-cleanup-active-session.test.ts",
-      "reason": "Flake: pruneExistingAiMergeWorktrees skips active-session paths \u2014 active-session temp AI merge dir was unexpectedly pruned during pnpm --filter @fusion/engine test in FN-6206 verification, while the same file passed standalone. Root cause suspected: realpathSync resolution mismatch or readdirSync mock interaction with activeSessionRegistry singleton under concurrent engine suite load. Discovered during FN-6206.",
+      "reason": "Flake: pruneExistingAiMergeWorktrees skips active-session paths — active-session temp AI merge dir was unexpectedly pruned during pnpm --filter @fusion/engine test in FN-6206 verification, while the same file passed standalone. Root cause suspected: realpathSync resolution mismatch or readdirSync mock interaction with activeSessionRegistry singleton under concurrent engine suite load. Discovered during FN-6206.",
       "quarantinedAt": "2026-06-10"
     },
     {
@@ -59,126 +59,6 @@
     {
       "file": "packages/dashboard/src/__tests__/routes-git.test.ts",
       "reason": "Flake observed during `pnpm test` dashboard api:curated lane on 2026-06-13: `Git Management endpoints > GET /git/branches/:name/commits > respects limit parameter` returned 400 instead of 200 under concurrent dashboard API tests. The same filtered file passed standalone immediately afterward (`pnpm --filter @fusion/dashboard exec vitest run --project dashboard-api-quality src/__tests__/routes-git.test.ts -t \"respects limit parameter\" --silent=passed-only --reporter=dot`, 3/3), indicating suite-load or fixture-state sensitivity rather than a confirmed product bug. Quarantined instead of loosening assertions.",
-      "quarantinedAt": "2026-06-13"
-    },
-    {
-      "file": "packages/cli/src/__tests__/bin.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14: full `@runfusion/fusion` package run timed out in `bin command routing and fallbacks > routes backup create/list/cleanup/restore` at the 5s test timeout after dashboard/desktop changed-package load. A smaller direct run with bin/project-context/task-retry passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/bin.test.ts src/__tests__/project-context.test.ts src/__tests__/task-retry.test.ts --silent=passed-only --reporter=dot`, 83/83), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension.test.ts",
-      "reason": "Flake observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after earlier CLI quarantines: `fn pi extension > research tools > fn_research_run waits and returns terminal run details when wait_for_completion is true` returned queued instead of completed under the full package lane. The same named test passed standalone immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension.test.ts -t \"fn_research_run waits and returns terminal run details\" --silent=passed-only --reporter=dot`, 1/1), indicating suite-order or shared research fixture sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-experiment-finalize.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after earlier CLI quarantines: full package run timed out in `extension fn_experiment_finalize > supports dry-run preview` at the 5s test timeout. A direct run with the newly exposed extension/goal/init offenders passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-experiment-finalize.test.ts src/__tests__/goal-store-resolution.test.ts src/commands/__tests__/ensure-project-registered.test.ts src/commands/__tests__/init.test.ts --silent=passed-only --reporter=dot`, 26/26), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-github-tracking.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `extension github tracking hook wiring > fn_task_create triggers registered task-created hook exactly once` at the 5s test timeout after dashboard/desktop changed-package load. A direct run with the five newly failing CLI files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-github-tracking.test.ts src/__tests__/extension-goal-tools-audit.test.ts src/__tests__/extension-task-tools.test.ts src/__tests__/task-delete-allow-resurrection.test.ts src/__tests__/vitest-workspace-resolution.test.ts --silent=passed-only --reporter=dot`, 11/11), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-goal-tools.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after the first CLI quarantine batch: `extension goal retrieval tools > truncates goal descriptions in fn_goal_list while fn_goal_show keeps full detail` timed out at the 5s test timeout under the full package lane. A smaller direct run with the extension goal/insight/mission/research files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-goal-tools.test.ts src/__tests__/extension-insights.test.ts src/__tests__/extension-mission-goal-tools.test.ts src/__tests__/research-extension-tools.test.ts --silent=passed-only --reporter=dot`, 25/25), indicating suite-load sensitivity.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-goal-tools-audit.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `extension goal tools retrieval audit > emits retrieval audit for fn_goal_list and fn_goal_show branches`, then produced ENOTEMPTY cleanup fallout. A direct run with the five newly failing CLI files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-github-tracking.test.ts src/__tests__/extension-goal-tools-audit.test.ts src/__tests__/extension-task-tools.test.ts src/__tests__/task-delete-allow-resurrection.test.ts src/__tests__/vitest-workspace-resolution.test.ts --silent=passed-only --reporter=dot`, 11/11), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-insights.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after the first CLI quarantine batch: `fn insight extension tools > lists and shows persisted insights` timed out at the 5s test timeout under the full package lane. A smaller direct run with the extension goal/insight/mission/research files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-goal-tools.test.ts src/__tests__/extension-insights.test.ts src/__tests__/extension-mission-goal-tools.test.ts src/__tests__/research-extension-tools.test.ts --silent=passed-only --reporter=dot`, 25/25), indicating suite-load sensitivity.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-mission-goal-tools.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after the first CLI quarantine batch: `extension mission goal tools > returns stable missing mission and goal errors` timed out at the 5s test timeout under the full package lane. A smaller direct run with the extension goal/insight/mission/research files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-goal-tools.test.ts src/__tests__/extension-insights.test.ts src/__tests__/extension-mission-goal-tools.test.ts src/__tests__/research-extension-tools.test.ts --silent=passed-only --reporter=dot`, 25/25), indicating suite-load sensitivity.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-task-tools.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `extension task tools resolve repo root from worktrees > uses canonical project root for fn_task_show and fn_task_list from worktree cwd` at the test's 20s timeout. A direct run with the five newly failing CLI files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-github-tracking.test.ts src/__tests__/extension-goal-tools-audit.test.ts src/__tests__/extension-task-tools.test.ts src/__tests__/task-delete-allow-resurrection.test.ts src/__tests__/vitest-workspace-resolution.test.ts --silent=passed-only --reporter=dot`, 11/11), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/goal-store-resolution.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after earlier CLI quarantines: full package run timed out in `extension goal tools store resolution > returns canonical project goals when invoked from a .fusion/worktrees cwd`, then produced ENOTEMPTY cleanup fallout. A direct run with the newly exposed extension/goal/init offenders passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-experiment-finalize.test.ts src/__tests__/goal-store-resolution.test.ts src/commands/__tests__/ensure-project-registered.test.ts src/commands/__tests__/init.test.ts --silent=passed-only --reporter=dot`, 26/26), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/plugin-sdk-export.test.ts",
-      "reason": "Default CLI package lane failure observed on 2026-06-14: `plugin-sdk export surface > has no @fusion specifiers in built plugin-sdk declaration artifact when present` failed standalone because an existing generated `packages/cli/dist/plugin-sdk/index.d.ts` contained stale `@fusion/core` specifiers. The test inspects optional generated dist output when present, so it is not stable as a source package-lane test in worktrees with ignored build artifacts. Quarantined from the default lane instead of making `pnpm test` depend on rebuilding or deleting ignored dist output.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/project-context.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14: full `@runfusion/fusion` package run timed out in `project-context > resolveProject > should resolve unregistered local project from cwd` at the 5s test timeout after dashboard/desktop changed-package load. A smaller direct run with bin/project-context/task-retry passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/bin.test.ts src/__tests__/project-context.test.ts src/__tests__/task-retry.test.ts --silent=passed-only --reporter=dot`, 83/83), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/research-extension-tools.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after the first CLI quarantine batch: `research extension tools` timed out, hit ENOTEMPTY cleanup fallout, and then observed an empty run list under the full package lane. A smaller direct run with the extension goal/insight/mission/research files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-goal-tools.test.ts src/__tests__/extension-insights.test.ts src/__tests__/extension-mission-goal-tools.test.ts src/__tests__/research-extension-tools.test.ts --silent=passed-only --reporter=dot`, 25/25), indicating suite-load/order sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/task-delete-allow-resurrection.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `task delete allowResurrection plumbing > fn_task_delete forwards allowResurrection=true` at the 5s test timeout after dashboard/desktop changed-package load. A direct run with the five newly failing CLI files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-github-tracking.test.ts src/__tests__/extension-goal-tools-audit.test.ts src/__tests__/extension-task-tools.test.ts src/__tests__/task-delete-allow-resurrection.test.ts src/__tests__/vitest-workspace-resolution.test.ts --silent=passed-only --reporter=dot`, 11/11), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/task-retry.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14: full `@runfusion/fusion` package run timed out in `runTaskRetry > clears the deadlock auto-pause when retrying a failed task` at the 5s test timeout after dashboard/desktop changed-package load. A smaller direct run with bin/project-context/task-retry passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/bin.test.ts src/__tests__/project-context.test.ts src/__tests__/task-retry.test.ts --silent=passed-only --reporter=dot`, 83/83), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/vitest-workspace-resolution.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `CLI Vitest workspace resolution > resolves non-mocked symbols from internal workspace packages when dist outputs are absent` at the 30s test timeout after dashboard/desktop changed-package load. A direct run with the five newly failing CLI files passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-github-tracking.test.ts src/__tests__/extension-goal-tools-audit.test.ts src/__tests__/extension-task-tools.test.ts src/__tests__/task-delete-allow-resurrection.test.ts src/__tests__/vitest-workspace-resolution.test.ts --silent=passed-only --reporter=dot`, 11/11), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/agent-import.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14: full `@runfusion/fusion` package run timed out in `agent-import > skill import > imports skills from tar.gz archive` at the 5s test timeout after dashboard/desktop changed-package load. A smaller direct run with agent-import/dashboard/plugin passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/commands/__tests__/agent-import.test.ts src/commands/__tests__/dashboard.test.ts src/commands/__tests__/plugin.test.ts --silent=passed-only --reporter=dot`, 112/112), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/dashboard.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14: full `@runfusion/fusion` package run timed out in one CentralCore cleanup diagnostics case and then missed the expected warning in a sibling case under package-wide load. A smaller direct run with agent-import/dashboard/plugin passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/commands/__tests__/agent-import.test.ts src/commands/__tests__/dashboard.test.ts src/commands/__tests__/plugin.test.ts --silent=passed-only --reporter=dot`, 112/112), indicating suite-load/order sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/ensure-project-registered.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `ensureCwdProjectRegistered > returns existing registered project without writing files` at the 5s test timeout after dashboard/desktop changed-package load. A smaller direct run with extension-github-tracking and ensure-project-registered passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-github-tracking.test.ts src/commands/__tests__/ensure-project-registered.test.ts --silent=passed-only --reporter=dot`, 5/5), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/init.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm --filter @runfusion/fusion test` on 2026-06-14 after earlier CLI quarantines: full package run timed out in `init command > should append local storage directories to existing .gitignore` at the 5s test timeout. A direct run with the newly exposed extension/goal/init offenders passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-experiment-finalize.test.ts src/__tests__/goal-store-resolution.test.ts src/commands/__tests__/ensure-project-registered.test.ts src/commands/__tests__/init.test.ts --silent=passed-only --reporter=dot`, 26/26), indicating suite-load sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/mission.test.ts",
-      "reason": "Standalone slow CLI test observed during `pnpm test` on 2026-06-14 after earlier CLI quarantines: full `@runfusion/fusion` package run timed out in `mission commands > mission goal commands > operates end-to-end against a real temp-project store` at the 5s test timeout. The same named test also timed out standalone at 5s, then passed only when explicitly run with `--testTimeout=30000` (`pnpm --filter @runfusion/fusion exec vitest run src/commands/__tests__/mission.test.ts -t \"operates end-to-end against a real temp-project store\" --testTimeout=30000 --silent=passed-only --reporter=dot`, 1/1 in 8.48s), so it is quarantined as a slow test instead of appeased with a wider timeout.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/plugin.test.ts",
-      "reason": "Slow/flaky CLI lane observed during `pnpm test` on 2026-06-14: full `@runfusion/fusion` package run timed out in `writes runPluginInstall metadata to central tables only` and leaked cross-test plugin path state into `includes getRootDir on the plugin loader taskStore mock`. A smaller direct run with agent-import/dashboard/plugin passed immediately afterward (`pnpm --filter @runfusion/fusion exec vitest run src/commands/__tests__/agent-import.test.ts src/commands/__tests__/dashboard.test.ts src/commands/__tests__/plugin.test.ts --silent=passed-only --reporter=dot`, 112/112), indicating suite-load/order sensitivity rather than a confirmed product bug.",
-      "quarantinedAt": "2026-06-14"
-    },
-    {
-      "file": "packages/cli/src/__tests__/extension-agent-provisioning.test.ts",
-      "reason": "Slow/flaky CLI lane offender observed during FN-6419 broad `pnpm test` / targeted @runfusion/fusion verification: the extension agent provisioning suite exercises real temp projects and privileged `fn_agent_create`/`fn_agent_delete` extension tools, making it sensitive to package-wide CLI load and temp cleanup races. FN-6421 local cross-check after install found the current quarantined CLI lane green, and the two-offender direct run passed immediately (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-agent-provisioning.test.ts src/commands/__tests__/serve.test.ts --silent=passed-only --reporter=dot`, 55/55), so this is quarantined from the default lane rather than appeased with broader timeouts.",
-      "quarantinedAt": "2026-06-13"
-    },
-    {
-      "file": "packages/cli/src/commands/__tests__/serve.test.ts",
-      "reason": "Slow/flaky CLI lane offender observed during FN-6419 broad `pnpm test` / targeted @runfusion/fusion verification: the serve command suite is a large multi-project integration harness with mocked constructible engine classes, EventEmitter routing, timers, and temp directories, making it sensitive to package-wide CLI load and cleanup races. FN-6421 local cross-check after install found the current quarantined CLI lane green, and the two-offender direct run passed immediately (`pnpm --filter @runfusion/fusion exec vitest run src/__tests__/extension-agent-provisioning.test.ts src/commands/__tests__/serve.test.ts --silent=passed-only --reporter=dot`, 55/55), so this is quarantined from the default lane rather than appeased with wider test timeouts or loosened assertions.",
       "quarantinedAt": "2026-06-13"
     }
   ]

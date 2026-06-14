@@ -6,12 +6,13 @@
  * the run-local worker/home directories as leaks.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const WORKER_ROOT_OWNER_FILE = ".fusion-test-worker-root-owner";
 const FUSION_TEST_RUN_TOKEN_ENV = "FUSION_TEST_RUN_TOKEN";
+const LEGACY_TEST_HOME_PREFIX = "fn-test-home-";
 
 let workerRootRmSync = rmSync;
 let workerRootSleepMsSync = sleepMsSync;
@@ -31,6 +32,29 @@ function sleepMsSync(ms: number): void {
 
 function isEnoent(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+}
+
+export function removeLegacyTopLevelHomeRoots(tempRoot = tmpdir()): void {
+  /*
+  FNXC:TestIsolation 2026-06-14-00:36:
+  FN-6430 found stale top-level `fn-test-home-*` roots after CLI package-load runs; current workers create HOME under `fusion-test-workers-*`, so top-level homes are legacy leftovers that can bleed settings/cache state into nested lanes.
+  Sweep only a single temp-root level by prefix during setup/teardown, never a recursive temp-tree walk.
+  */
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(tempRoot);
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.startsWith(LEGACY_TEST_HOME_PREFIX)) continue;
+    try {
+      workerRootRmSync(join(tempRoot, entry), { recursive: true, force: true });
+    } catch {
+      // Best effort only. A future invocation will retry the bounded prefix sweep.
+    }
+  }
 }
 
 export function removeWorkerRootWithRetry(workerRoot: string, retries = 3, delayMs = 75): void {
@@ -53,6 +77,7 @@ export function removeWorkerRootWithRetry(workerRoot: string, retries = 3, delay
 }
 
 export default function setup(): () => Promise<void> {
+  removeLegacyTopLevelHomeRoots();
   // Use a fresh root for each Vitest invocation. A static shared root makes the
   // setup-time redirect sweep proportional to stale directories left by every
   // prior interrupted run.
@@ -78,5 +103,6 @@ export default function setup(): () => Promise<void> {
     // redirected temp dirs are still closing. Retry boundedly so a brief busy-fd
     // race does not leak the per-invocation fusion-test-workers-* root.
     removeWorkerRootWithRetry(workerRoot);
+    removeLegacyTopLevelHomeRoots();
   };
 }

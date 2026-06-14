@@ -36,6 +36,16 @@
   background: color-mix(in srgb, var(--todo) 8%, transparent);
 }
 
+/*
+FNXC:TaskCardMobilePan 2026-06-13-19:51:
+Mobile board cards must allow horizontal kanban panning from every visible card surface, not only from gaps or progress-count text.
+The global mobile touch-action reset applies to descendants, and browsers intersect touch-action along the touched element's ancestor chain, so the whole non-editing card subtree must opt back into pan-x.
+*/
+.card:not(.card-editing),
+.card:not(.card-editing) * {
+  touch-action: pan-x pan-y;
+}
+
 /* Agent-active glow: animated border glow when an agent is actively working on a task.
    Uses the in-progress column color to stay consistent with the theme. */
 .card.agent-active {

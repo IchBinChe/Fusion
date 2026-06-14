@@ -4923,6 +4923,14 @@ describe("TaskCard Android tap regression", () => {
     expect(onOpenDetail).toHaveBeenCalledTimes(0);
     expect(onClose).toHaveBeenCalledTimes(0);
   });
+
+  it("allows horizontal board pan from every non-editing card descendant on mobile", () => {
+    const css = loadAllAppCssBaseOnly();
+
+    expect(css).toMatch(
+      /\.card:not\(\.card-editing\)\s*,\s*\.card:not\(\.card-editing\)\s+\*\s*\{[^}]*touch-action:\s*pan-x\s+pan-y;[^}]*\}/,
+    );
+  });
 });
 
 describe("TaskCard agent badge", () => {

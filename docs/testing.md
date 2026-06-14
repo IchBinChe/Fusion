@@ -102,6 +102,7 @@ every entry needs a non-empty `reason` (empty reasons are rejected). Skip-list p
   fail in isolation) and `build-output.test.ts` (runs standalone via `test:build`
   after a Vite build). Each carries a one-line reason.
 - <!-- FNXC:DashboardTesting 2026-06-14-08:00: Skip-listed dashboard tests need actionable ownership; placeholder IDs block rescue/delete follow-through, so every non-standalone reason cites a concrete Fusion tracking task. --> Every skip-list `reason` for a pre-existing failing/orphaned test must reference a concrete `FN-NNNN` tracking task; if the test is rescued, remove the entry instead of leaving a tracking placeholder.
+- <!-- FNXC:DashboardTesting 2026-06-14-10:27: FN-6445 closes the useChatRooms.test.ts tracking drift from FN-6442: a skip-list entry that is already matched by any quality project is not a genuine ungated orphan and would overstate the orphan count. --> The guard rejects any skip-list entry whose file is already executed by a quality project. Remove the entry instead; the skip-list is only for genuinely non-executed files.
 - To remove a file from the skip-list: fix the test, confirm it passes under its
   project, delete the skip-list entry. The backfill lane then executes it.
 - The skip-list is shared verbatim with `vitest.config.ts`, which excludes the same

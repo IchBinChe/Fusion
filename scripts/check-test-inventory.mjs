@@ -227,6 +227,15 @@ export function validateDashboardCurated({ includedFiles, allTestFiles, skipList
     if (typeof entry.reason !== "string" || entry.reason.trim().length === 0) {
       errors.push(`skip-list entry for ${entry.file} has an empty "reason"`);
     }
+    /*
+    FNXC:DashboardTesting 2026-06-14-10:27:
+    FN-6445 requires the curated skip-list to enumerate only dashboard tests no quality project executes. FN-6442 found useChatRooms.test.ts was both skip-listed and matched by the hooks/utils quality lane, which overstated the genuinely ungated orphan count; reject that overlap at validation time.
+    */
+    if (includedFiles.has(entry.file)) {
+      errors.push(
+        `skip-list entry for ${entry.file} overlaps a file already executed by a quality project; the skip-list is for genuinely non-executed files only — remove this entry`,
+      );
+    }
     skipByFile.set(entry.file, entry);
   }
 

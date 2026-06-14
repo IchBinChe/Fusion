@@ -100,6 +100,17 @@ test("curated guard: fails on an unregistered (synthetic) test file", () => {
   assert.ok(errors.some((e) => e.includes("synthetic-unregistered.test.ts")));
 });
 
+test("curated guard: rejects a skip-list entry that overlaps an executed quality file", () => {
+  const overlappingFile = "packages/dashboard/app/hooks/__tests__/useChatRooms.test.ts";
+  const { ok, errors } = validateDashboardCurated({
+    includedFiles: new Set([overlappingFile]),
+    allTestFiles: [overlappingFile],
+    skipList: [{ file: overlappingFile, reason: "pre-existing orphan FN-6442" }],
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes(overlappingFile) && e.includes("overlaps")));
+});
+
 test("curated guard: rejects a skip-list entry with an empty reason", () => {
   const { ok, errors } = validateDashboardCurated({
     includedFiles: new Set(),
@@ -110,13 +121,25 @@ test("curated guard: rejects a skip-list entry with an empty reason", () => {
   assert.ok(errors.some((e) => e.includes("empty")));
 });
 
-test("curated guard: a skip-listed file does not trip the unregistered check", () => {
-  const { ok } = validateDashboardCurated({
+test("curated guard: a skip-listed genuine orphan does not trip the overlap check", () => {
+  const { ok, errors } = validateDashboardCurated({
     includedFiles: new Set(),
     allTestFiles: ["packages/dashboard/app/b.test.ts"],
     skipList: [{ file: "packages/dashboard/app/b.test.ts", reason: "pre-existing failure FN-2" }],
   });
-  assert.equal(ok, true);
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("curated guard: overlapping skip-list entry still reports an empty reason", () => {
+  const overlappingFile = "packages/dashboard/app/hooks/__tests__/useChatRooms.test.ts";
+  const { ok, errors } = validateDashboardCurated({
+    includedFiles: new Set([overlappingFile]),
+    allTestFiles: [overlappingFile],
+    skipList: [{ file: overlappingFile, reason: "  " }],
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes(overlappingFile) && e.includes("empty")));
+  assert.ok(errors.some((e) => e.includes(overlappingFile) && e.includes("overlaps")));
 });
 
 test("curated guard: a quarantined file is registered without returning to the skip-list", () => {

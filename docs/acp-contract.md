@@ -161,3 +161,76 @@ FN-6476 was the genuinely-authenticated U9 escalation rerun, but this worktree s
 **FN-6475 sponsorship record (2026-06-15):** upstream sponsorship was authored in [`docs/upstream/claude-code-cli-acp-mcp-permission-forwarding.md`](upstream/claude-code-cli-acp-mcp-permission-forwarding.md) and filed as https://github.com/moabualruz/claude-code-cli-acp/issues/2. This records the requested MCP passthrough plus permission-gate traversal / MCP-layer hook contract only; OQ1 remains **UNRESOLVED / BLOCKED** and the combined Route A verdict remains **NOT GO** until a later authenticated rerun proves both required U9 answers.
 
 **U14 internal mechanisms:** GO for design, subject to U9. Route A should use a second `acp-claude` runtime posture rather than mutating the generic `acp` runtime; inject the ACP bridge client from the engine `registerExtensionProviders` seam into the vendored `@fusion/pi-claude-cli` provider options; and add `AgentRuntimeOptions.mcpServers` to both the engine runtime contract and the ACP plugin-local structural copy, with `newAcpSession` defaulting to `[]` for Route-B compatibility.
+## U9 verdict — MCP-over-ACP through the Claude bridge (2026-06-15)
+
+**U9 MECHANICS = GO** (overturns the prior headless NOT-GO chain; see plan OQ1).
+Spike: pinned `claude-code-cli-acp` 0.1.1 driven directly over ACP (SDK 0.24.0)
+in an **interactive TTY with `claude` logged in**, non-empty `session/new.mcpServers`
+= one stdio `custom-tools` server exposing `fn_task_list`.
+
+- **Auth:** bridged `claude` authenticated via the interactive login session — no `/login` wall.
+- **(1) MCP forwarding:** PROVEN — Claude invoked `mcp__custom-tools__fn_task_list`;
+  the MCP server's `tools/call` executed; result returned via a `tool_call` `session/update`.
+- **(2) Permission gate:** GATED — `session/request_permission` (`allow_once`/`allow_always`/`reject`)
+  fired *before* execution. The ACP permission floor holds; forwarded MCP calls are NOT bypassed.
+
+**Operational precondition (R17):** auth works only where the bridged `claude` can reach
+the login/keychain session. The Fusion daemon/worker context is detached from that session
+→ `Not logged in` (this is why FN-6466/6467/6473/6476 failed). Route-A mechanics are
+unblocked (U10–U13 buildable); **shipping requires the provider's runtime to host an
+authenticated `claude`** (keychain/login access, or file-based creds the daemon can read).
+
+### R17 resolution (2026-06-15): daemon-auth is the HARD ship-gate — creds are Keychain-only
+
+`claude` here stores OAuth creds in the **macOS Keychain** (`genp` / `svce="Claude Code-credentials"`),
+NOT in a file: `~/.claude/.credentials.json` is an empty directory. Therefore forwarding `HOME`
+to the bridge does **not** give the daemon-hosted `claude` its credentials. A detached Fusion
+daemon/worker runs in a different security session with no login-Keychain access → `Not logged in`
+(the root cause of the FN-6466/6467/6473/6476 failures).
+
+**Implication:** U9 mechanics are GO, but **Route A cannot ship to the daemon-hosted `pi-claude-cli`
+provider until daemon→Keychain auth is solved.** Candidate resolutions (each its own follow-up):
+1. Host the provider's bridge in a process with login-Keychain access (run within the user's Aqua
+   session, not a detached launchd daemon).
+2. Provide the bridge's `claude` a file/API-key credential the daemon CAN read — but the user's auth
+   is claude.ai OAuth, and the env allow-list deliberately excludes `ANTHROPIC_API_KEY` from the
+   untrusted bridge; changing that is a security-posture decision.
+3. Grant the daemon explicit Keychain access (`security unlock-keychain` / ACL) — fragile, security-sensitive.
+
+Until one lands, Route A is mechanically proven but operationally blocked on macOS.
+
+### R17 CLOSED (2026-06-15): confirmed by user — Claude CLI works in the live `fn` daemon today
+
+The user confirmed the existing `pi-claude-cli` (`claude -p`) provider authenticates in their
+running Fusion daemon. Since the daemon is launched from their login session, it has macOS
+Keychain access; the ACP bridge's `claude` inherits the same session and authenticates identically.
+**R17 is satisfied for the supported (login-session) daemon.** Residual (documented, not blocking):
+detached/headless launchd daemons would still need a credential-delivery solution — out of scope
+for the supported setup. **Route A (U10–U13) is cleared to build.**
+
+### U11 tool-flow verification PASSED (2026-06-15): enablement gate cleared
+
+Live run against pinned `claude-code-cli-acp` 0.1.1 in an authenticated session,
+returning `cancelled` to every `session/request_permission` (what `streamViaAcp`
+does). Two tests, fresh session each:
+
+- **Forwarded MCP tool (`fn_task_list`):** Claude fired `ToolSearch` first
+  (internal, completed), then `mcp__custom-tools__fn_task_list` — a permission
+  request fired, we cancelled, the call went to `failed`, and the schema server's
+  `tools/call` was NEVER reached (no execution marker). Forwarded tools do not
+  execute when cancelled.
+- **Native Bash:** permission request fired, we cancelled, `Bash` went to
+  `failed`, the side-effect file was never created. Native tools do not execute
+  when cancelled.
+
+Conclusion: the bridge gates tool execution BEHIND `session/request_permission`
+(no TOCTOU window); `streamViaAcp`'s deny-by-default handler + break-early on
+pi-known tools is SAFE. Also validated: the bridged `claude` authenticates only
+with the richer env allow-list (HOME/PATH + USER/SHELL/LANG/XDG_*) that
+`streamViaAcp` forwards — a thin {HOME,PATH} env fails with "Not logged in".
+The Route A enablement gate is CLEARED. Harness: /tmp/acp-toolflow/verify2.mjs.
+
+### Route A architecture notes (2026-06-15, from review)
+
+- **Two parallel MCP-forwarding paths, by design.** U10 wires `mcpServers` through the engine `AgentRuntimeOptions` → ACP plugin adapter `newAcpSession` (for the engine-driven `acp` runtime). U11's `pi-claude-cli` provider does NOT consume that field — `streamViaAcp` drives its OWN inline ACP client and builds `mcpServers` locally via `buildAcpMcpServers` (KTD10: the provider speaks ACP directly via the published bridge path, never through the plugin adapter). The two intersect only at the shared schema-only MCP server shape. Do not "wire U10 into U11" — that would double-forward.
+- **Known residual: ACP-path token usage/cost reads zero.** `streamViaAcp` synthesizes pi events via `createEventBridge` from ACP `session/update`s, which carry no token-usage frames, so `output.usage` stays zero on the ACP path. Cost telemetry undercounts when the kill-switch is enabled. The U12 status surface should not treat zero-usage as a bug; wiring usage (if the bridge ever exposes it) is deferred.

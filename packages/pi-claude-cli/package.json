@@ -19,6 +19,9 @@
     "url": "https://github.com/Runfusion/Fusion",
     "directory": "packages/pi-claude-cli"
   },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "0.24.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"

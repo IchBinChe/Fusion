@@ -82,10 +82,15 @@ export class AcpRuntimeAdapter implements AgentRuntime {
       clientHandler,
     });
 
-    // Open the ACP session over the task worktree (empty mcpServers — KTD5).
+    // Open the ACP session over the task worktree. Forward MCP servers when the
+    // caller supplied them (U10 — Route A); absent/empty keeps the Route B
+    // read-only ask posture. Tool calls still route through the U5 permission floor.
     let sessionId: string;
     try {
-      const opened = await newAcpSession(connection, { cwd: options.cwd });
+      const opened = await newAcpSession(connection, {
+        cwd: options.cwd,
+        mcpServers: options.mcpServers,
+      });
       sessionId = opened.sessionId;
     } catch (err) {
       // Don't leak the subprocess if session/new fails after a good handshake.

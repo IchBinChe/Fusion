@@ -1,6 +1,6 @@
 import { definePlugin } from "@fusion/plugin-sdk";
 import type { FusionPlugin, PluginRuntimeFactory, PluginRuntimeManifestMetadata } from "@fusion/plugin-sdk";
-import { resolveCliSettings } from "./cli-spawn.js";
+import { resolveCliSettings, resolveBundledClaudeBridgeBinary } from "./cli-spawn.js";
 import { AcpRuntimeAdapter } from "./runtime-adapter.js";
 import { killAllProcesses } from "./process-manager.js";
 import { setupHooks, setupManifest } from "./setup.js";
@@ -48,6 +48,25 @@ const plugin: FusionPlugin = definePlugin({
           "ACP Runtime: acpAllowUnrestricted is set — sensitive tool calls from the untrusted agent " +
             "will be auto-approved under an allow-all policy. Prefer an approval-required policy.",
         );
+      }
+      // KTD10 (Route A): publish the bundled `claude-code-cli-acp` bridge path
+      // process-wide so the pi-claude-cli provider's kill-switch can resolve it
+      // WITHOUT a manual FUSION_CLAUDE_ACP_BRIDGE env var. This only PUBLISHES the
+      // path — the ACP transport stays OFF until an operator sets
+      // FUSION_CLAUDE_ACP=1 (the rollout gate). An explicit env override wins, and
+      // the resolver is identity-pinned to the plugin-owned node_modules/.bin shim
+      // so a same-named global binary cannot replace the reviewed bridge.
+      if (!process.env.FUSION_CLAUDE_ACP_BRIDGE) {
+        const resolved = resolveBundledClaudeBridgeBinary();
+        if (resolved.kind === "resolved") {
+          process.env.FUSION_CLAUDE_ACP_BRIDGE = resolved.path;
+          ctx.logger.info(
+            "ACP Runtime: published bundled Claude bridge path for Route A " +
+              "(transport stays off until FUSION_CLAUDE_ACP=1).",
+          );
+        } else {
+          ctx.logger.info(`ACP Runtime: bundled Claude bridge not resolved (${resolved.reason}); Route A unavailable.`);
+        }
       }
     },
   },

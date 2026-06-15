@@ -133,3 +133,44 @@ describe("resolveCliSettings", () => {
     expect(ask.allowUnrestricted).toBe(false);
   });
 });
+
+describe("KTD10 — onLoad publishes the bundled bridge path (Route A)", () => {
+  const savedBridge = process.env.FUSION_CLAUDE_ACP_BRIDGE;
+  const savedFlag = process.env.FUSION_CLAUDE_ACP;
+  afterEach(() => {
+    if (savedBridge === undefined) delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    else process.env.FUSION_CLAUDE_ACP_BRIDGE = savedBridge;
+    if (savedFlag === undefined) delete process.env.FUSION_CLAUDE_ACP;
+    else process.env.FUSION_CLAUDE_ACP = savedFlag;
+  });
+  const fakeCtx = () => ({ settings: {}, logger: { info: () => undefined, warn: () => undefined } });
+
+  it("publishes the bundled bridge path to FUSION_CLAUDE_ACP_BRIDGE when unset", () => {
+    delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    plugin.hooks?.onLoad?.(fakeCtx() as never);
+    expect(process.env.FUSION_CLAUDE_ACP_BRIDGE).toBeDefined();
+    expect(isAbsolute(process.env.FUSION_CLAUDE_ACP_BRIDGE!)).toBe(true);
+    expect(process.env.FUSION_CLAUDE_ACP_BRIDGE).toContain("node_modules/.bin/claude-code-cli-acp");
+  });
+
+  it("does NOT enable the transport — FUSION_CLAUDE_ACP stays unset (kill-switch off)", () => {
+    delete process.env.FUSION_CLAUDE_ACP;
+    delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    plugin.hooks?.onLoad?.(fakeCtx() as never);
+    expect(process.env.FUSION_CLAUDE_ACP).toBeUndefined();
+  });
+
+  it("respects an explicit FUSION_CLAUDE_ACP_BRIDGE override", () => {
+    process.env.FUSION_CLAUDE_ACP_BRIDGE = "/custom/bridge/path";
+    plugin.hooks?.onLoad?.(fakeCtx() as never);
+    expect(process.env.FUSION_CLAUDE_ACP_BRIDGE).toBe("/custom/bridge/path");
+  });
+
+  it("is idempotent — a second onLoad keeps the first published path and does not throw", () => {
+    delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    plugin.hooks?.onLoad?.(fakeCtx() as never);
+    const first = process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    expect(() => plugin.hooks?.onLoad?.(fakeCtx() as never)).not.toThrow();
+    expect(process.env.FUSION_CLAUDE_ACP_BRIDGE).toBe(first);
+  });
+});

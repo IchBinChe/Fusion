@@ -57,6 +57,7 @@ import {
   type SkillSelectionContext,
 } from "./skill-resolver.js";
 import { isContextLimitError } from "./context-limit-detector.js";
+import { applyClaudeAcpEnable } from "./claude-acp-enable.js";
 import { createFusionAuthStorage, getModelRegistryModelsPath } from "./auth-storage.js";
 import { piLog, extensionsLog } from "./logger.js";
 import { readCustomProviders } from "./custom-providers.js";
@@ -1368,10 +1369,18 @@ async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegis
 
   try {
     const agentDir = getPackageManagerAgentDir();
+    const settingsView = createReadOnlyPiSettingsView(cwd, agentDir);
+
+    // Route A enable (experimental, DEFAULT ON): translate
+    // experimentalFeatures.claudeCliAcp into the FUSION_CLAUDE_ACP dispatch the
+    // pi-claude-cli provider reads. Still fail-closed — with no bridge path
+    // published (acp-runtime plugin absent), the provider falls back to `-p`.
+    applyClaudeAcpEnable(settingsView.getGlobalSettings() as Record<string, unknown>);
+
     const packageManager = new DefaultPackageManager({
       cwd,
       agentDir,
-      settingsManager: createReadOnlyPiSettingsView(cwd, agentDir) as any,
+      settingsManager: settingsView as any,
     });
     const resolvedPaths = await packageManager.resolve();
     const packageExtensionPaths = resolvedPaths.extensions

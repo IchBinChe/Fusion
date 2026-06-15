@@ -3170,9 +3170,14 @@ export interface GlobalSettings {
    *    "another-experiment": false
    *  }
    *
-   *  Default: workflow columns, graph executor, dual-observe, and authoritative
-   *  interpreter flags enabled; operators may explicitly set individual flags
-   *  false while rollout controls remain available. */
+   *  Default: workflow columns, graph executor, dual-observe, authoritative
+   *  interpreter, and `claudeCliAcp` flags enabled; operators may explicitly set
+   *  individual flags false while rollout controls remain available.
+   *
+   *  `claudeCliAcp` (default ON): routes the Claude CLI provider through the
+   *  `claude-code-cli-acp` ACP bridge instead of `claude -p`. Effective only when
+   *  the acp-runtime plugin is installed (it publishes the bundled bridge path);
+   *  otherwise the provider fails closed to `-p`. Set false to force `-p`. */
   experimentalFeatures?: Record<string, boolean>;
   /** Per-adapter CLI-agent launch configuration (CLI Agent Executor, U15).
    *  Keyed by adapter id (e.g. `"claude-code"`, `"codex"`, `"generic"`). Each

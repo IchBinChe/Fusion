@@ -35,8 +35,9 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
-import { isAbsolute } from "node:path";
-import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { existsSync, writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   ClientSideConnection,
   ndJsonStream,
@@ -76,6 +77,36 @@ const INACTIVITY_TIMEOUT_MS = 30 * 60_000;
 const MAX_CHUNK_CHARS = 64 * 1024;
 const MAX_TURN_CHARS = 5_000_000;
 const MAX_ID_CHARS = 256;
+
+/**
+ * FNXC:ClaudeAcp 2026-06-15-11:40:
+ * Cross-process signal for the dashboard: when the bridged `claude` can't
+ * authenticate (R17 — e.g. a detached daemon with no keychain), the turn comes
+ * back as "Not logged in · Please run /login" instead of a real answer. We
+ * record that here so `GET /providers/claude-cli/status` can surface it and the
+ * UI can prompt the user to fall back to `-p` or fix auth. A real response
+ * clears it. Best-effort; the path is recomputed identically dashboard-side.
+ */
+export const ACP_BRIDGE_AUTH_SIGNAL_PATH = join(tmpdir(), "fusion-acp-bridge-auth.json");
+const NOT_LOGGED_IN_RE = /not logged in|please run \/login/i;
+let lastAuthFailed: boolean | undefined;
+
+function recordBridgeAuthState(failed: boolean, reason?: string): void {
+  if (lastAuthFailed === failed) return; // only write on transition
+  lastAuthFailed = failed;
+  try {
+    if (failed) {
+      writeFileSync(
+        ACP_BRIDGE_AUTH_SIGNAL_PATH,
+        JSON.stringify({ authFailed: true, at: new Date().toISOString(), reason: reason ?? "Claude in the ACP bridge is not logged in" }),
+      );
+    } else {
+      unlinkSync(ACP_BRIDGE_AUTH_SIGNAL_PATH);
+    }
+  } catch {
+    /* best-effort signal — never let it affect the turn */
+  }
+}
 
 /**
  * Bridge subprocess env allow-list. The bridged `claude` needs HOME (for
@@ -173,6 +204,21 @@ export function streamViaAcp(
       // Downgrade a tool_use turn that surfaced zero pi tool calls → stop, so pi
       // doesn't try to dispatch non-existent tools (mirrors provider.ts:366-375).
       const toolCount = (bridge.getOutput().content ?? []).filter((c) => (c as { type?: string }).type === "toolCall").length;
+      // R17: a turn that is ONLY "Not logged in" (no tools, no real text) means
+      // the bridged `claude` can't authenticate — signal it for the UI. A real
+      // response (tools or non-trivial text) clears the signal.
+      const trimmedText = (bridge.getOutput().content ?? [])
+        .filter((c) => (c as { type?: string }).type === "text")
+        .map((c) => (c as { text?: string }).text ?? "")
+        .join("")
+        .trim();
+      // Only treat it as an auth failure when the WHOLE turn is essentially the
+      // bridge's short "Not logged in · Please run /login" message — not when a
+      // long, legitimate answer merely mentions the phrase (avoids false positives).
+      const isAuthFailure =
+        toolCount === 0 && trimmedText.length > 0 && trimmedText.length <= 80 && NOT_LOGGED_IN_RE.test(trimmedText);
+      if (isAuthFailure) recordBridgeAuthState(true);
+      else if (toolCount > 0 || trimmedText.length > 0) recordBridgeAuthState(false);
       const effective: "stop" | "tool_use" = reason === "tool_use" && toolCount > 0 ? "tool_use" : "stop";
       bridge.handleEvent({ type: "message_delta", delta: { stop_reason: effective === "tool_use" ? "tool_use" : "end_turn" } } as ClaudeApiEvent);
       stream.push({ type: "done", reason: effective === "tool_use" ? "toolUse" : "stop", message: bridge.getOutput() });

@@ -1674,6 +1674,18 @@ export interface ClaudeCliStatus {
     reason?: string;
   } | null;
   ready: boolean;
+  /** Route A ACP transport state (Claude CLI via the claude-code-cli-acp bridge). */
+  acp?: {
+    /** experimentalFeatures.claudeCliAcp (default ON). */
+    enabled: boolean;
+    /** The acp-runtime plugin published a bundled bridge path. */
+    bridgeAvailable: boolean;
+    /** Claude CLI is actually routing through the bridge (enabled + flag + bridge). */
+    active: boolean;
+    /** The bridged `claude` returned "Not logged in" — needs fallback or re-auth (R17). */
+    authFailed: boolean;
+    authReason?: string;
+  };
 }
 
 export interface DroidCliStatus {

@@ -49,6 +49,7 @@ const plugin: FusionPlugin = definePlugin({
             "will be auto-approved under an allow-all policy. Prefer an approval-required policy.",
         );
       }
+      // FNXC:ClaudeAcp 2026-06-15-11:40:
       // KTD10 (Route A): publish the bundled `claude-code-cli-acp` bridge path
       // process-wide so the pi-claude-cli provider's kill-switch can resolve it
       // WITHOUT a manual FUSION_CLAUDE_ACP_BRIDGE env var. This only PUBLISHES the

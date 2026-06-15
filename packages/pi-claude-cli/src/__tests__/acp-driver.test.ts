@@ -6,7 +6,9 @@ import { PassThrough } from "node:stream";
 let scriptedUpdates: Array<Record<string, unknown>> = [];
 
 // Driver validates the bridge path with existsSync — make the fake path "exist".
-vi.mock("node:fs", () => ({ existsSync: () => true }));
+// writeFileSync/unlinkSync back the R17 auth-failure signal (spied).
+const fsSpies = vi.hoisted(() => ({ writeFileSync: vi.fn(), unlinkSync: vi.fn() }));
+vi.mock("node:fs", () => ({ existsSync: () => true, writeFileSync: fsSpies.writeFileSync, unlinkSync: fsSpies.unlinkSync }));
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(() => {
@@ -117,6 +119,35 @@ describe("streamViaAcp — ACP→pi translation (U11)", () => {
     expect(eventsOf(stream).some((e) => e.type === "toolcall_start")).toBe(true);
     const done = eventsOf(stream).find((e) => e.type === "done");
     expect(done!.reason).toBe("toolUse");
+  });
+
+  it("R17 auth-signal: sets on a 'Not logged in' turn, clears on a real response, ignores long answers", async () => {
+    const run = async (text: string) => {
+      scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text } }];
+      streamViaAcp(MODEL, CTX, OPTS);
+      await flush();
+    };
+    const wroteAuthFailed = () =>
+      fsSpies.writeFileSync.mock.calls.some((c) => String(c[1]).includes('"authFailed":true'));
+
+    // Baseline: a real response leaves the signal cleared (lastAuthFailed=false).
+    await run("Here is a normal answer.");
+    fsSpies.writeFileSync.mockClear();
+    fsSpies.unlinkSync.mockClear();
+
+    // 1. A turn that is ONLY the bridge's "Not logged in" message → signal written.
+    await run("Not logged in · Please run /login");
+    expect(wroteAuthFailed()).toBe(true);
+
+    // 2. A real response → signal cleared (unlink).
+    fsSpies.unlinkSync.mockClear();
+    await run("Sure — here's the result you asked for.");
+    expect(fsSpies.unlinkSync).toHaveBeenCalled();
+
+    // 3. A LONG legit answer that merely mentions the phrase → NOT flagged.
+    fsSpies.writeFileSync.mockClear();
+    await run(`If you are not logged in, the CLI prompts you to authenticate. ${"detail ".repeat(20)}`);
+    expect(wroteAuthFailed()).toBe(false);
   });
 
   it("ends with done even when the turn produces no content", async () => {

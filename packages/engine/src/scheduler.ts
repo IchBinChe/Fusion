@@ -2501,9 +2501,35 @@ export class Scheduler {
                 missionAutoTriageEnabled
                 && feature.status !== "blocked"
               ) {
-                if (feature.status === "defined") {
+                if (feature.status !== "defined" && this.isGeneratedFixFeature(feature)) {
                   try {
-                    featureForReconciliation = await missionStore.triageFeature(feature.id);
+                    schedulerLog.warn(
+                      `Blocking stranded generated fix feature ${feature.id}: no linked task and no title-matched task available`,
+                    );
+                    missionStore.updateFeature(feature.id, {
+                      status: "blocked",
+                      loopState: "blocked",
+                      taskId: undefined,
+                    });
+                    totalFixed++;
+                  } catch (error) {
+                    schedulerLog.warn(
+                      `Failed to block stranded fix feature ${feature.id} during reconciliation: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                  }
+                } else if (feature.status === "defined" || feature.status === "triaged" || feature.status === "in-progress") {
+                  try {
+                    const featureToTriage = feature.status === "defined"
+                      ? feature
+                      : missionStore.updateFeature(feature.id, {
+                        status: "defined",
+                        loopState: "idle",
+                        taskId: undefined,
+                      });
+                    if (featureToTriage.status !== feature.status) {
+                      totalFixed++;
+                    }
+                    featureForReconciliation = await missionStore.triageFeature(featureToTriage.id);
                     task = featureForReconciliation.taskId
                       ? await this.store.getTask(featureForReconciliation.taskId)
                       : undefined;
@@ -2523,7 +2549,7 @@ export class Scheduler {
                   }
                 } else {
                   schedulerLog.warn(
-                    `Skipping stranded feature ${feature.id} with status ${feature.status}: no linked task and no title-matched task available`,
+                    `Skipping stranded feature ${feature.id} with terminal status ${feature.status}: no linked task and no title-matched task available`,
                   );
                 }
               }
@@ -2604,5 +2630,9 @@ export class Scheduler {
 
   private getMissionFeatureTitleKey(sliceId: string, title: string): string {
     return `${sliceId}\0${this.normalizeMissionFeatureTitle(title)}`;
+  }
+
+  private isGeneratedFixFeature(feature: Pick<MissionFeature, "generatedFromFeatureId" | "generatedFromRunId">): boolean {
+    return Boolean(feature.generatedFromFeatureId || feature.generatedFromRunId);
   }
 }

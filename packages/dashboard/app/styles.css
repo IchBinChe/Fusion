@@ -158,15 +158,16 @@ html {
   --standalone-bottom-gap: 0px;
 
   /* Shadow tokens */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --shadow-glow: 0 0 8px rgba(88, 166, 255, 0.3);
-  --glow-success: 0 0 8px rgba(46, 160, 67, 0.3);
-  --glow-warning: 0 0 8px rgba(227, 179, 65, 0.3);
-  --glow-danger: 0 0 8px rgba(248, 81, 73, 0.3);
-  --focus-ring: 0 0 0 2px rgba(88, 166, 255, 0.15);
-  --focus-ring-strong: 0 0 0 2px rgba(88, 166, 255, 0.3);
+  /* FNXC:DashboardTheming 2026-06-15-00:00: Global token translucency uses color-mix(in srgb, var(--token) N%, transparent); raw RGB alpha color calls are banned outside var() fallbacks for FN-6489. */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 10%, transparent);
+  --shadow-md: 0 4px 6px color-mix(in srgb, #000000 10%, transparent);
+  --shadow-lg: 0 4px 24px color-mix(in srgb, #000000 40%, transparent);
+  --shadow-glow: 0 0 8px color-mix(in srgb, var(--todo) 30%, transparent);
+  --glow-success: 0 0 8px color-mix(in srgb, var(--cta-border) 30%, transparent);
+  --glow-warning: 0 0 8px color-mix(in srgb, #e3b541 30%, transparent);
+  --glow-danger: 0 0 8px color-mix(in srgb, var(--color-error) 30%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--todo) 15%, transparent);
+  --focus-ring-strong: 0 0 0 2px color-mix(in srgb, var(--todo) 30%, transparent);
 
   /* Animation tokens.
      --duration-* are bare durations, safe anywhere (animation shorthands,
@@ -317,19 +318,19 @@ svg.spin {
   --cta-text: #fff;
   --cta-bg-hover: #2ea043;
   --cta-border-hover: #3fb950;
-  --cta-glow: 0 0 8px rgba(46, 160, 67, 0.3);
+  --cta-glow: 0 0 8px color-mix(in srgb, var(--cta-border) 30%, transparent);
 
   /* === Agent State Colors === */
-  --state-idle-bg: rgba(139, 148, 158, 0.15);
+  --state-idle-bg: color-mix(in srgb, var(--state-idle-text) 15%, transparent);
   --state-idle-text: #8b949e;
   --state-idle-border: #8b949e;
-  --state-active-bg: rgba(46, 160, 67, 0.15);
+  --state-active-bg: color-mix(in srgb, var(--cta-border) 15%, transparent);
   --state-active-text: #3fb950;
   --state-active-border: #3fb950;
-  --state-paused-bg: rgba(227, 179, 65, 0.15);
+  --state-paused-bg: color-mix(in srgb, var(--state-paused-text) 15%, transparent);
   --state-paused-text: #e3b541;
   --state-paused-border: #e3b541;
-  --state-error-bg: rgba(248, 81, 73, 0.15);
+  --state-error-bg: color-mix(in srgb, var(--state-error-text) 15%, transparent);
   --state-error-text: #f85149;
   --state-error-border: #f85149;
 
@@ -425,11 +426,11 @@ svg.spin {
   /* === Mission autopilot indicators === */
   --autopilot-pulse: var(--color-success);
   --autopilot-icon: #eab308;
-  --autopilot-shadow: rgba(34, 197, 94, 0.4);
+  --autopilot-shadow: color-mix(in srgb, var(--color-success) 40%, transparent);
 
   /* === Mission toggle & badge backgrounds === */
-  --toggle-checked-bg: rgba(34, 197, 94, 0.2);
-  --meta-badge-bg: rgba(63, 185, 80, 0.1);
+  --toggle-checked-bg: color-mix(in srgb, var(--color-success) 20%, transparent);
+  --meta-badge-bg: color-mix(in srgb, var(--color-success) 10%, transparent);
 
   /* === Mission event type colors (semantic — adapted for light in [data-theme="light"]) === */
   --event-error-text: #fca5a5;
@@ -437,17 +438,17 @@ svg.spin {
   --event-task-text: #6ee7b7;
   --event-slice-text: #fcd34d;
   --event-autopilot-text: #d8b4fe;
-  --event-error-bg: rgba(239, 68, 68, 0.15);
-  --event-state-bg: rgba(59, 130, 246, 0.15);
-  --event-task-bg: rgba(16, 185, 129, 0.15);
-  --event-slice-bg: rgba(245, 158, 11, 0.15);
-  --event-autopilot-bg: rgba(168, 85, 247, 0.15);
+  --event-error-bg: color-mix(in srgb, #ef4444 15%, transparent);
+  --event-state-bg: color-mix(in srgb, #3b82f6 15%, transparent);
+  --event-task-bg: color-mix(in srgb, #10b981 15%, transparent);
+  --event-slice-bg: color-mix(in srgb, #f59e0b 15%, transparent);
+  --event-autopilot-bg: color-mix(in srgb, #a855f7 15%, transparent);
 
   /* === Card mission badge === */
   --badge-mission-text: #a78bfa;
   --badge-mission-text-hover: #c4b5fd;
-  --badge-mission-bg: rgba(167, 139, 250, 0.12);
-  --badge-mission-bg-hover: rgba(167, 139, 250, 0.22);
+  --badge-mission-bg: color-mix(in srgb, var(--badge-mission-text) 12%, transparent);
+  --badge-mission-bg-hover: color-mix(in srgb, var(--badge-mission-text-hover) 22%, transparent);
 
   /* === Terminal background === */
   --terminal-bg: #1e1e1e;

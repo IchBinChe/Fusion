@@ -972,6 +972,50 @@ describe("GET /providers/claude-cli/status", () => {
     expect(res.body.binary).toMatchObject({ available: true, version: "claude 1.0.0" });
     expect(res.body.extension).toMatchObject({ status: "ok" });
   });
+
+  it("surfaces ACP transport state + the bridge auth-failure signal", async () => {
+    const probeSpy = vi.spyOn(claudeCliProbeModule, "probeClaudeCli").mockResolvedValue({
+      available: true, version: "claude 1.0.0", probeDurationMs: 10,
+    });
+    const signalPath = join(tmpdir(), "fusion-acp-bridge-auth.json");
+    const prevBridge = process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    const prevFlag = process.env.FUSION_CLAUDE_ACP;
+    process.env.FUSION_CLAUDE_ACP_BRIDGE = "/abs/node_modules/.bin/claude-code-cli-acp";
+    process.env.FUSION_CLAUDE_ACP = "1";
+    writeFileSync(signalPath, JSON.stringify({ authFailed: true, reason: "Not logged in" }));
+    try {
+      const res = await GET(buildApp(), "/api/providers/claude-cli/status");
+      expect(res.status).toBe(200);
+      expect(res.body.acp).toMatchObject({ enabled: true, bridgeAvailable: true, active: true, authFailed: true });
+      expect(res.body.acp.authReason).toContain("Not logged in");
+    } finally {
+      probeSpy.mockRestore();
+      rmSync(signalPath, { force: true });
+      if (prevBridge === undefined) delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+      else process.env.FUSION_CLAUDE_ACP_BRIDGE = prevBridge;
+      if (prevFlag === undefined) delete process.env.FUSION_CLAUDE_ACP;
+      else process.env.FUSION_CLAUDE_ACP = prevFlag;
+    }
+  });
+
+  it("reports acp inactive + no auth failure when the bridge isn't published", async () => {
+    const probeSpy = vi.spyOn(claudeCliProbeModule, "probeClaudeCli").mockResolvedValue({
+      available: true, version: "claude 1.0.0", probeDurationMs: 10,
+    });
+    const prevBridge = process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+    rmSync(join(tmpdir(), "fusion-acp-bridge-auth.json"), { force: true });
+    try {
+      const res = await GET(buildApp(), "/api/providers/claude-cli/status");
+      expect(res.body.acp.bridgeAvailable).toBe(false);
+      expect(res.body.acp.active).toBe(false);
+      expect(res.body.acp.authFailed).toBe(false);
+    } finally {
+      probeSpy.mockRestore();
+      if (prevBridge === undefined) delete process.env.FUSION_CLAUDE_ACP_BRIDGE;
+      else process.env.FUSION_CLAUDE_ACP_BRIDGE = prevBridge;
+    }
+  });
 });
 
 describe("Droid CLI auth routes", () => {

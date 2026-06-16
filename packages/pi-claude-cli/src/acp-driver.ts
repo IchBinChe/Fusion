@@ -45,7 +45,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { buildPrompt, buildSystemPrompt, type PiContext } from "./prompt-builder.js";
+import { buildPrompt, buildResumePrompt, buildSystemPrompt, type PiContext } from "./prompt-builder.js";
 import { createEventBridge } from "./event-bridge.js";
 import { registerProcess, captureStderr } from "./process-manager.js";
 import { isPiKnownClaudeTool } from "./tool-mapping.js";
@@ -119,12 +119,43 @@ const BRIDGE_ENV_ALLOWLIST = [
   "TERM", "TERMINFO", "TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "COLORTERM",
 ];
 
-function buildBridgeEnv(supplied?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/**
+ * R17 opt-in (detached-daemon auth): a headless daemon can't reach the macOS
+ * login Keychain, so `claude` reports "Not logged in". When an operator sets
+ * `FUSION_CLAUDE_ACP_FORWARD_AUTH=1` AND provides one of these in the launch
+ * environment, we forward it (and ONLY it) so the bridged `claude` can
+ * authenticate non-interactively. Default OFF — no secret-bearing var ever
+ * reaches the untrusted bridge otherwise. Mirrors the native claude-code
+ * adapter's recognized auth vars.
+ *
+ * Security trade-off (state it where the operator opts in): once forwarded, the
+ * token is visible to the bridge subprocess AND everything it spawns (including
+ * MCP servers that inherit env). It is NOT in prompt/model context, so the model
+ * can't read it, but opting in widens exposure to the bridge process tree.
+ * Prefer a scoped/rotatable `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`).
+ */
+const BRIDGE_AUTH_ENV_KEYS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+
+export function buildBridgeEnv(supplied?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const source = supplied ?? process.env;
   const env: NodeJS.ProcessEnv = {};
   for (const key of BRIDGE_ENV_ALLOWLIST) {
     const v = source[key];
     if (typeof v === "string") env[key] = v;
+  }
+  // Opt-in only: forward a single Claude auth token from the operator's launch
+  // env (always process.env, never the caller-supplied object).
+  if (process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH === "1") {
+    for (const key of BRIDGE_AUTH_ENV_KEYS) {
+      const v = process.env[key];
+      // Treat a whitespace-only value as absent, so a blank higher-preference
+      // var doesn't shadow a real lower-preference token (and we never forward
+      // a useless blank token).
+      if (typeof v === "string" && v.trim().length > 0) {
+        env[key] = v;
+        break; // forward only the highest-preference token that's present
+      }
+    }
   }
   return env;
 }
@@ -163,6 +194,61 @@ function toAcpPromptBlocks(
 }
 
 /**
+ * FNXC:ClaudeAcp 2026-06-15-14:10:
+ * Connection-reuse cache (item 1 / OQ2). Gated behind `FUSION_CLAUDE_ACP_REUSE`
+ * (default OFF). When on, a live bridge connection + ACP session is kept warm
+ * across turns of one conversation (keyed by the stable `options.sessionId`), so
+ * multi-turn lanes skip the cold bridge+claude spawn, the `session/new`
+ * round-trip, AND the full-history resend — sending only `buildResumePrompt`
+ * (delta) on reuse. A stable `router` indirection lets the long-lived connection
+ * handler serve each turn's fresh per-call state. Default OFF → the cold path
+ * below is functionally unchanged.
+ */
+const REUSE_IDLE_MS = 5 * 60_000;
+interface AcpRouter {
+  onUpdate: ((p: { update?: Record<string, unknown> } & Record<string, unknown>) => Promise<void>) | null;
+  onPermission: ((p: Record<string, unknown>) => Promise<{ outcome: { outcome: "cancelled" } }>) | null;
+  // Liveness: invoked when the warm child dies so the turn CURRENTLY owning the
+  // connection fails fast instead of hanging until the inactivity timeout. The
+  // long-lived `child.on("close")` is bound to the cold turn's closure, so
+  // without this a reuse turn's death would never reach its own `failWith`.
+  // Repointed to each turn's `failWith`; nulled on release (idle → just evict).
+  fail: ((msg: string) => void) | null;
+}
+interface CachedAcpConn {
+  conn: ClientSideConnection;
+  child: ChildProcess;
+  acpSessionId: string;
+  cwd: string;
+  inUse: boolean;
+  router: AcpRouter;
+  idleTimer?: ReturnType<typeof setTimeout>;
+  // Monotonic id of the turn currently owning the connection. A stray
+  // session/update from a finished turn is dropped when it no longer matches.
+  activeTurn: number;
+}
+const acpSessionCache = new Map<string, CachedAcpConn>();
+let acpTurnCounter = 0;
+function acpReuseEnabled(): boolean {
+  return process.env.FUSION_CLAUDE_ACP_REUSE === "1";
+}
+/**
+ * Kill a cached connection's child and evict it — but only delete the map key
+ * if it STILL points at this exact entry. A concurrent cold turn may have
+ * replaced the entry under the same key; a stale close handler / idle timer
+ * must not evict (or kill the child of) that newer, live entry. The passed
+ * entry's own child is always killed (it is the dead/finished one).
+ */
+function evictCachedAcpConn(key: string, entry: CachedAcpConn): void {
+  if (acpSessionCache.get(key) === entry) acpSessionCache.delete(key);
+  if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = undefined; }
+  entry.router.onUpdate = null;
+  entry.router.onPermission = null;
+  entry.router.fail = null;
+  try { entry.child.kill("SIGKILL"); } catch { /* registry SIGKILL is authoritative */ }
+}
+
+/**
  * Stream a Claude response via the ACP bridge as an `AssistantMessageEventStream`.
  * Mirrors `streamViaCli`'s contract (start → deltas → done; break-early on tools).
  */
@@ -177,6 +263,12 @@ export function streamViaAcp(
   const bridge = createEventBridge(stream, model);
 
   (async () => {
+    const cwd = options.cwd ?? process.cwd();
+    const reuseKey =
+      acpReuseEnabled() && options.sessionId && context.messages.length > 1
+        ? options.sessionId
+        : undefined;
+
     let child: ChildProcess | undefined;
     let getStderr: (() => string) | undefined;
     let ended = false;
@@ -186,11 +278,50 @@ export function streamViaAcp(
     let sawToolCall = false;
     let inactivity: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
+    // The cache entry this turn is bound to (set on reuse, or after a cold turn
+    // caches its connection). Identity-checked against the map before release.
+    let cacheEntry: CachedAcpConn | undefined;
+    // This turn's monotonic id, stamped onto the shared cache entry when the
+    // turn acquires it. Handlers drop updates once the entry moves to a newer
+    // turn (defends the warm connection against cross-turn content bleed).
+    let myTurn = 0;
 
-    const cleanup = () => {
+    // End the turn. `destroy` kills+evicts the connection; otherwise a cached
+    // connection is released (kept warm for the next turn) and a one-shot
+    // (non-reuse) connection is killed.
+    const endTurn = (destroy: boolean) => {
       if (inactivity) { clearTimeout(inactivity); inactivity = undefined; }
       if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
-      try { child?.kill("SIGKILL"); } catch { /* registry SIGKILL is authoritative */ }
+      const entry = cacheEntry;
+      // A tool-use turn breaks early while `conn.prompt()` is still pending (we
+      // never await it on break). Releasing the connection as warm here would
+      // let the next turn launch a SECOND concurrent prompt on the same ACP
+      // session — protocol corruption. So a tool-use turn always tears down,
+      // exactly like the non-reuse path; only a clean `stop` turn (prompt fully
+      // resolved before finish) keeps the connection warm.
+      const keepWarm =
+        !destroy && !sawToolCall && entry !== undefined && reuseKey !== undefined &&
+        acpSessionCache.get(reuseKey) === entry;
+      if (keepWarm) {
+        // Release the warm connection: drop this turn's handlers (so a late
+        // update can't reach a finished turn or the liveness hook fire stale),
+        // mark idle, and arm an unref'd reaper bound to THIS entry.
+        entry!.router.onUpdate = null;
+        entry!.router.onPermission = null;
+        entry!.router.fail = null;
+        entry!.inUse = false;
+        if (entry!.idleTimer) clearTimeout(entry!.idleTimer);
+        const idle = setTimeout(() => evictCachedAcpConn(reuseKey!, entry!), REUSE_IDLE_MS);
+        idle.unref?.(); // a warm-connection idle timer must not keep the process alive
+        entry!.idleTimer = idle;
+        return;
+      }
+      if (entry !== undefined && reuseKey !== undefined) {
+        // Kills this turn's child; evicts the map key only if still current.
+        evictCachedAcpConn(reuseKey, entry);
+      } else {
+        try { child?.kill("SIGKILL"); } catch { /* registry SIGKILL is authoritative */ }
+      }
     };
     const armInactivity = () => {
       if (inactivity) clearTimeout(inactivity);
@@ -223,7 +354,7 @@ export function streamViaAcp(
       bridge.handleEvent({ type: "message_delta", delta: { stop_reason: effective === "tool_use" ? "tool_use" : "end_turn" } } as ClaudeApiEvent);
       stream.push({ type: "done", reason: effective === "tool_use" ? "toolUse" : "stop", message: bridge.getOutput() });
       stream.end();
-      cleanup();
+      endTurn(false); // clean turn → keep a cached connection warm for next turn
     };
 
     const failWith = (msg: string) => {
@@ -240,7 +371,7 @@ export function streamViaAcp(
         },
       });
       stream.end();
-      cleanup();
+      endTurn(true); // failed turn → destroy the connection (never reuse a broken one)
     };
 
     const openBlock = (kind: "text" | "thinking") => {
@@ -263,9 +394,11 @@ export function streamViaAcp(
       finish("tool_use");
     };
 
-    const clientHandler = {
-      async sessionUpdate(params: { update?: Record<string, unknown> } & Record<string, unknown>) {
+    const handleUpdate = async (params: { update?: Record<string, unknown> } & Record<string, unknown>): Promise<void> => {
         if (ended) return;
+        // The warm connection is shared across turns; ignore a stray update once
+        // the entry has been handed to a newer turn (cross-turn bleed guard).
+        if (cacheEntry && cacheEntry.activeTurn !== myTurn) return;
         armInactivity();
         const u = (params.update ?? params) as Record<string, unknown>;
         const kind = u.sessionUpdate as string;
@@ -292,13 +425,14 @@ export function streamViaAcp(
             surfaceToolAndBreak(claudeName, (u.toolCallId as string) ?? `acp_${blockIndex + 1}`, u.rawInput ?? u.input);
           }
         }
-      },
-      async requestPermission(params: Record<string, unknown>) {
+    };
+
+    const handlePermission = async (params: Record<string, unknown>): Promise<{ outcome: { outcome: "cancelled" } }> => {
         // A permission request means the bridge is about to EXECUTE a tool. For a
         // pi-known tool, surface it to pi and break early (pi executes it); deny
         // by default otherwise. We always return cancelled so the bridge never
         // executes Fusion's tools itself.
-        if (!ended) {
+        if (!ended && !(cacheEntry && cacheEntry.activeTurn !== myTurn)) {
           const tc = (params.toolCall ?? {}) as Record<string, unknown>;
           const claudeName = ((tc._meta as { claudeCode?: { toolName?: string } } | undefined)?.claudeCode?.toolName) ?? (tc.title as string) ?? "";
           if (isPiKnownClaudeTool(claudeName)) {
@@ -306,19 +440,92 @@ export function streamViaAcp(
           }
         }
         return { outcome: { outcome: "cancelled" as const } };
-      },
+    };
+
+    // Usage emission (OQ3) — shared by the cold + reuse paths. Coerces the
+    // untrusted bridge usage payload to finite, non-negative numbers.
+    const emitUsage = (res: unknown): void => {
+      if (sawToolCall) return;
+      const u = (res as { usage?: Record<string, unknown> }).usage;
+      if (!u) return;
+      const num = (x: unknown): number | undefined =>
+        typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : undefined;
+      bridge.handleEvent({
+        type: "message_delta",
+        delta: {},
+        usage: {
+          input_tokens: num(u.inputTokens),
+          output_tokens: num(u.outputTokens),
+          cache_read_input_tokens: num(u.cachedReadTokens),
+          cache_creation_input_tokens: num(u.cachedWriteTokens),
+        },
+      } as ClaudeApiEvent);
     };
 
     try {
+      const withTimeout = <T>(p: Promise<T>, label: string) =>
+        Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`ACP ${label} timeout`)), INITIALIZE_TIMEOUT_MS))]);
+
+      // ── Reuse path: a warm connection for this conversation exists ──────────
+      // Skip spawn + initialize + session/new, and send ONLY the latest-turn
+      // delta (`buildResumePrompt`) because the warm `claude` session already
+      // holds the prior turns server-side (sending full history would duplicate
+      // it). Gated by `reuseKey`, which is undefined unless reuse is enabled.
+      let warm = reuseKey ? acpSessionCache.get(reuseKey) : undefined;
+      // Never reuse a busy connection or one bound to a different cwd.
+      if (warm && (warm.inUse || warm.cwd !== cwd)) warm = undefined;
+      // A reuse turn sends only the delta; if there's nothing new to send, an
+      // empty prompt to the warm session could hang. Drop the warm connection
+      // and cold-start with full history instead.
+      let resumeBlocks: ReturnType<typeof toAcpPromptBlocks> | undefined;
+      if (warm && reuseKey) {
+        const resume = buildResumePrompt(context);
+        const resumeEmpty = typeof resume === "string" ? resume.trim() === "" : resume.length === 0;
+        if (resumeEmpty) { evictCachedAcpConn(reuseKey, warm); warm = undefined; }
+        else resumeBlocks = toAcpPromptBlocks(resume as string | Array<Record<string, unknown>>);
+      }
+      if (warm && reuseKey && resumeBlocks) {
+        cacheEntry = warm;
+        myTurn = ++acpTurnCounter;
+        warm.activeTurn = myTurn;
+        warm.inUse = true;
+        if (warm.idleTimer) { clearTimeout(warm.idleTimer); warm.idleTimer = undefined; }
+        warm.router.onUpdate = handleUpdate;
+        warm.router.onPermission = handlePermission;
+        warm.router.fail = failWith; // a warm-child death now fails THIS turn fast
+        child = warm.child;
+        onAbort = () => failWith("aborted");
+        if (options.signal) options.signal.addEventListener("abort", onAbort, { once: true });
+        armInactivity();
+
+        // ACP ContentBlock[] — text/image shapes match; cast through unknown.
+        const res = await warm.conn.prompt({ sessionId: warm.acpSessionId, prompt: resumeBlocks as unknown as Parameters<typeof warm.conn.prompt>[0]["prompt"] });
+        if (ended) return;
+        emitUsage(res);
+        if (!sawToolCall) finish("stop");
+        return;
+      }
+
+      // ── Cold path: spawn the bridge and open a fresh ACP session ───────────
       if (!isAbsolute(options.bridgePath) || !existsSync(options.bridgePath)) {
         failWith(`ACP bridge path invalid (must be an absolute, existing binary): ${options.bridgePath}`);
         return;
       }
-      child = spawn(options.bridgePath, [], { stdio: ["pipe", "pipe", "pipe"], cwd: options.cwd ?? process.cwd(), env: buildBridgeEnv(options.bridgeEnv) });
+      child = spawn(options.bridgePath, [], { stdio: ["pipe", "pipe", "pipe"], cwd, env: buildBridgeEnv(options.bridgeEnv) });
       registerProcess(child);
       getStderr = captureStderr(child);
-      child.on("error", (e) => failWith(`ACP bridge spawn failed: ${e.message}`));
-      child.on("close", (code) => { if (!ended) failWith(`ACP bridge exited (code ${code ?? "?"})${getStderr ? `: ${getStderr().slice(-500)}` : ""}`); });
+      // Stable router indirection: the long-lived connection + child handlers
+      // always dispatch to whichever turn currently owns the connection. On
+      // reuse we repoint `router.*` at the new turn; `router.fail` lets a
+      // warm-child death fail the CURRENT owner (not the cold turn it spawned).
+      const router: AcpRouter = { onUpdate: handleUpdate, onPermission: handlePermission, fail: failWith };
+      child.on("error", (e) => router.fail?.(`ACP bridge spawn failed: ${e.message}`));
+      child.on("close", (code) => {
+        const msg = `ACP bridge exited (code ${code ?? "?"})${getStderr ? `: ${getStderr().slice(-500)}` : ""}`;
+        const fail = router.fail; // capture before evict nulls it
+        if (reuseKey && cacheEntry) evictCachedAcpConn(reuseKey, cacheEntry); // a dead child can never be reused
+        fail?.(msg); // fail the owning turn (no-op if idle / already ended)
+      });
       onAbort = () => failWith("aborted");
       if (options.signal) options.signal.addEventListener("abort", onAbort, { once: true });
       armInactivity();
@@ -327,10 +534,15 @@ export function streamViaAcp(
         Writable.toWeb(child.stdin!) as unknown as WritableStream<Uint8Array>,
         Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>,
       );
-      const conn = new ClientSideConnection(() => clientHandler, acpStream);
-
-      const withTimeout = <T>(p: Promise<T>, label: string) =>
-        Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`ACP ${label} timeout`)), INITIALIZE_TIMEOUT_MS))]);
+      const conn = new ClientSideConnection(
+        () => ({
+          sessionUpdate: (p) => router.onUpdate?.(p as Parameters<NonNullable<AcpRouter["onUpdate"]>>[0]) ?? Promise.resolve(),
+          requestPermission: (p) =>
+            router.onPermission?.(p as Parameters<NonNullable<AcpRouter["onPermission"]>>[0]) ??
+            Promise.resolve({ outcome: { outcome: "cancelled" as const } }),
+        }),
+        acpStream,
+      );
 
       const init = await withTimeout(
         conn.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } } }),
@@ -339,10 +551,17 @@ export function streamViaAcp(
       if (ended) return;
       if (init.protocolVersion !== PROTOCOL_VERSION) { failWith(`incompatible ACP protocol ${init.protocolVersion}`); return; }
 
-      const opened = await withTimeout(conn.newSession({ cwd: options.cwd ?? process.cwd(), mcpServers: options.mcpServers ?? [] }), "newSession");
+      const opened = await withTimeout(conn.newSession({ cwd, mcpServers: options.mcpServers ?? [] }), "newSession");
       if (ended) return;
 
-      const cwd = options.cwd ?? process.cwd();
+      // Cache the warm connection so the next turn of this conversation reuses
+      // it. Only when reuse is enabled (reuseKey set) and the child is live.
+      if (reuseKey) {
+        myTurn = ++acpTurnCounter;
+        cacheEntry = { conn, child, acpSessionId: opened.sessionId, cwd, inUse: true, router, activeTurn: myTurn };
+        acpSessionCache.set(reuseKey, cacheEntry);
+      }
+
       const systemPrompt = buildSystemPrompt(context, cwd);
       const blocks = [
         ...(systemPrompt ? [{ type: "text" as const, text: `${systemPrompt}\n\n` }] : []),
@@ -350,7 +569,12 @@ export function streamViaAcp(
       ];
 
       // ACP ContentBlock[] — text/image shapes match; cast through unknown.
-      await conn.prompt({ sessionId: opened.sessionId, prompt: blocks as unknown as Parameters<typeof conn.prompt>[0]["prompt"] });
+      const res = await conn.prompt({ sessionId: opened.sessionId, prompt: blocks as unknown as Parameters<typeof conn.prompt>[0]["prompt"] });
+      if (ended) return;
+      // Feed token usage (experimental ACP field) into the bridge BEFORE finish()
+      // so it lands in the `done` message. Tool-use turns break early and never
+      // resolve here, so they inherently report zero usage. Zero-when-absent safe.
+      emitUsage(res);
       if (!sawToolCall) finish("stop");
     } catch (err) {
       failWith(err instanceof Error ? err.message : String(err));

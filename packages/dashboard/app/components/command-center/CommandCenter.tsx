@@ -9,6 +9,7 @@ import { ProductivityArea } from "./areas/ProductivityArea";
 import { EcosystemArea } from "./areas/EcosystemArea";
 import { SignalsArea } from "./areas/SignalsArea";
 import { MissionControlPanel } from "./MissionControlPanel";
+import { SdlcFunnel } from "./SdlcFunnel";
 import "./CommandCenter.css";
 
 type SubViewId =
@@ -49,7 +50,7 @@ interface OverviewStatCard {
  * Headline stat cards (one per measurement area). Values land once Phase A's
  * analytics endpoints exist; until then each card shows the shared empty state.
  */
-function OverviewTab({ hasData }: { hasData: boolean }) {
+function OverviewTab({ hasData, range }: { hasData: boolean; range: DateRange }) {
   const { t } = useTranslation("app");
 
   const cards: OverviewStatCard[] = [
@@ -61,11 +62,23 @@ function OverviewTab({ hasData }: { hasData: boolean }) {
     { id: "signals", label: t("commandCenter.overview.openSignals", "Open signals") },
   ];
 
+  // The throughput funnel reads its own data (activityLog transitions) and shows
+  // its own empty state, so it renders even when the stat-card aggregates have no
+  // data yet.
+  const throughputSection = (
+    <div className="cc-overview-throughput" data-testid="command-center-throughput">
+      <SdlcFunnel range={range} />
+    </div>
+  );
+
   if (!hasData) {
     return (
-      <div className="cc-empty" data-testid="command-center-empty">
-        <Gauge size={28} />
-        <p>{t("commandCenter.empty", "No usage data yet. Run some agents to populate the Command Center.")}</p>
+      <div className="cc-overview">
+        <div className="cc-empty" data-testid="command-center-empty">
+          <Gauge size={28} />
+          <p>{t("commandCenter.empty", "No usage data yet. Run some agents to populate the Command Center.")}</p>
+        </div>
+        {throughputSection}
       </div>
     );
   }
@@ -86,6 +99,7 @@ function OverviewTab({ hasData }: { hasData: boolean }) {
           {t("commandCenter.overview.liveStripPending", "Live Mission Control loads with active sessions.")}
         </span>
       </div>
+      {throughputSection}
     </div>
   );
 }
@@ -110,7 +124,7 @@ export function CommandCenter() {
   // No analytics endpoints yet, so there is no data to show — drives the empty state.
   const hasData = false;
 
-  const [range, setRange] = useState<DateRange>(() => rangeFromPreset(defaultPresets((k, f) => f)[1]));
+  const [range, setRange] = useState<DateRange>(() => rangeFromPreset(defaultPresets((_k, f) => f)[1]));
 
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -159,7 +173,7 @@ export function CommandCenter() {
   function renderActiveTab() {
     switch (activeTab) {
       case "overview":
-        return <OverviewTab hasData={hasData} />;
+        return <OverviewTab hasData={hasData} range={range} />;
       case "tokens":
         return <TokensArea range={range} />;
       case "tools":

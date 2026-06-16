@@ -1,4 +1,6 @@
 import type { Database } from "./db.js";
+import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+import type { WorkflowIrColumn } from "./workflow-ir-types.js";
 
 /**
  * Activity analytics: distinct active nodes/agents per day, sessions, messages,
@@ -63,6 +65,8 @@ export interface ActivityAnalytics {
   stickiness: number;
   /** MTTR placeholder (U13 seam). */
   mttr: MttrSummary;
+  /** SDLC funnel + throughput over the same range (U7). */
+  funnel: SdlcFunnel;
 }
 
 interface CountRow {
@@ -189,5 +193,264 @@ export function aggregateActivityAnalytics(
     stickiness,
     // U13 seam: no incident data source yet — unavailable, not 0.
     mttr: { value: null, unavailable: true },
+    // U7 seam: SDLC funnel/throughput over the same range, mapped by workflow
+    // trait. Uses the built-in workflow's column→trait mapping by default;
+    // callers with a custom workflow IR should call aggregateSdlcFunnel directly
+    // with that workflow's columns so custom column ids map correctly.
+    funnel: aggregateSdlcFunnel(db, query),
+  };
+}
+
+/* ------------------------------------------------------------------------- */
+/* U7 — SDLC funnel + throughput                                             */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * The canonical SDLC funnel stages, in flow order. Workflow columns map onto
+ * these by **trait**, never by column id/name, so custom workflows whose columns
+ * carry the standard traits are placed correctly; anything unrecognized folds
+ * into {@link OTHER_STAGE}.
+ */
+export const SDLC_STAGES = [
+  "triage",
+  "todo",
+  "in-progress",
+  "in-review",
+  "done",
+] as const;
+export type SdlcStage = (typeof SDLC_STAGES)[number];
+
+/** Bucket for columns whose traits don't map to a known SDLC stage. */
+export const OTHER_STAGE = "other" as const;
+export type SdlcStageKey = SdlcStage | typeof OTHER_STAGE;
+
+/**
+ * Trait → stage mapping. A column is placed at the first stage any of its traits
+ * matches, scanning in {@link SDLC_STAGES} order so e.g. an `in-review` column
+ * carrying both `human-review` and `merge` resolves deterministically. Keep this
+ * additive: new workflow traits that imply a stage are added here, not matched by
+ * column name.
+ */
+const TRAIT_TO_STAGE: Record<string, SdlcStage> = {
+  // triage
+  intake: "triage",
+  triage: "triage",
+  // todo
+  "reset-on-entry": "todo",
+  // in-progress
+  wip: "in-progress",
+  timing: "in-progress",
+  "abort-on-exit": "in-progress",
+  // in-review
+  "human-review": "in-review",
+  "merge-blocker": "in-review",
+  merge: "in-review",
+  "stall-detection": "in-review",
+  // done
+  complete: "done",
+};
+
+/** Resolve a column's traits to an SDLC stage, or OTHER if none map. */
+export function stageForTraits(traits: readonly string[]): SdlcStageKey {
+  // Prefer the earliest stage in flow order among matching traits so a column is
+  // anchored to its most representative stage deterministically.
+  let best: SdlcStage | undefined;
+  let bestIdx = Number.POSITIVE_INFINITY;
+  for (const t of traits) {
+    const stage = TRAIT_TO_STAGE[t];
+    if (stage === undefined) continue;
+    const idx = SDLC_STAGES.indexOf(stage);
+    if (idx < bestIdx) {
+      bestIdx = idx;
+      best = stage;
+    }
+  }
+  return best ?? OTHER_STAGE;
+}
+
+/** Minimal column shape needed to map columns to stages by trait. */
+export interface FunnelColumnTraitSource {
+  id: string;
+  traits: { trait: string }[];
+}
+
+/**
+ * Build a `columnId → stage` map from a workflow's columns, mapping each column
+ * by its traits (not its id/name). The `todo` builtin column carries `hold`
+ * (a generic gate trait shared by other columns) so we special-case the
+ * presence of `reset-on-entry` for todo above; columns with no recognized trait
+ * fold to OTHER.
+ */
+export function buildColumnStageMap(
+  columns: readonly FunnelColumnTraitSource[],
+): Map<string, SdlcStageKey> {
+  const map = new Map<string, SdlcStageKey>();
+  for (const col of columns) {
+    map.set(
+      col.id,
+      stageForTraits(col.traits.map((t) => t.trait)),
+    );
+  }
+  return map;
+}
+
+export interface SdlcFunnelQuery extends ActivityAnalyticsQuery {
+  /**
+   * Workflow columns to map by trait. Defaults to the built-in coding workflow's
+   * columns. Pass a custom workflow's columns so its column ids resolve; any
+   * column id seen in the activity log but absent here folds into OTHER.
+   */
+  columns?: readonly FunnelColumnTraitSource[];
+}
+
+/** Per-stage funnel datum. */
+export interface SdlcFunnelStage {
+  stage: SdlcStageKey;
+  /** Distinct tasks that entered this stage within the range. */
+  entered: number;
+  /**
+   * Conversion from the previous SDLC stage (entered / prevEntered) as a 0..1
+   * ratio. `null` for the first stage and when the previous stage had zero
+   * entrants (no divide-by-zero). `other` is excluded from conversion chaining.
+   */
+  conversionFromPrev: number | null;
+}
+
+export interface SdlcFunnel {
+  from: string | null;
+  to: string | null;
+  stages: SdlcFunnelStage[];
+  /** Distinct tasks that entered the first (triage) stage's pipeline in range. */
+  enteredInRange: number;
+  /** Distinct tasks that reached `done` in range. */
+  doneInRange: number;
+  /**
+   * Completion rate = doneInRange / enteredInRange, as a 0..1 ratio. `null` when
+   * the denominator is zero (documented zero-denominator case), never NaN/∞.
+   */
+  completionRate: number | null;
+  /** Number of whole UTC days in the range (>= 1), used for throughput. */
+  rangeDays: number;
+  /** Tasks reaching `done` per day = doneInRange / rangeDays. */
+  throughputPerDay: number;
+}
+
+interface MoveRow {
+  taskId: string | null;
+  to: string | null;
+  ts: string;
+}
+
+function defaultColumns(): FunnelColumnTraitSource[] {
+  const ir = BUILTIN_CODING_WORKFLOW_IR;
+  if (ir.version === "v2") {
+    return (ir.columns as WorkflowIrColumn[]).map((c) => ({
+      id: c.id,
+      traits: c.traits.map((t) => ({ trait: t.trait })),
+    }));
+  }
+  return [];
+}
+
+function countWholeDays(from?: string, to?: string): number {
+  if (from === undefined || to === undefined) return 1;
+  const f = Date.parse(from);
+  const t = Date.parse(to);
+  if (!Number.isFinite(f) || !Number.isFinite(t) || t < f) return 1;
+  const ms = t - f;
+  const days = Math.ceil(ms / 86_400_000);
+  return Math.max(1, days);
+}
+
+/**
+ * Aggregate the SDLC funnel over a date range from `activityLog` transitions.
+ *
+ * **Entry into a stage** = a `task:moved` whose `metadata.to` column maps to that
+ * stage, OR a `task:created` whose initial column maps to it. Counts are distinct
+ * tasks per stage (a task that re-enters a stage is counted once). Columns map to
+ * stages **by trait** via {@link buildColumnStageMap}; unknown columns fold to
+ * OTHER. Completion rate divides done-in-range by entered-in-range with the
+ * zero-denominator case returning `null`.
+ */
+export function aggregateSdlcFunnel(
+  db: Database,
+  query: SdlcFunnelQuery = {},
+): SdlcFunnel {
+  const columns = query.columns ?? defaultColumns();
+  const stageMap = buildColumnStageMap(columns);
+  const stageOf = (columnId: string | null): SdlcStageKey => {
+    if (columnId === null) return OTHER_STAGE;
+    return stageMap.get(columnId) ?? OTHER_STAGE;
+  };
+
+  const range = rangeClauses("timestamp", query);
+  const where = range.where
+    ? `${range.where} AND type = 'task:moved'`
+    : `WHERE type = 'task:moved'`;
+
+  // task:moved carries metadata.to (the destination column id). The funnel is
+  // driven entirely by transitions — a task entering a stage is a move whose
+  // destination column maps to that stage. (task:created carries no column in
+  // metadata, so it is intentionally excluded; the first move records entry.)
+  const rows = db
+    .prepare(
+      `SELECT taskId,
+              json_extract(metadata, '$.to') AS "to",
+              timestamp AS ts
+       FROM activityLog ${where}`,
+    )
+    .all(...range.params) as MoveRow[];
+
+  // Distinct tasks per stage.
+  const perStage = new Map<SdlcStageKey, Set<string>>();
+  const ensure = (s: SdlcStageKey): Set<string> => {
+    let set = perStage.get(s);
+    if (!set) {
+      set = new Set();
+      perStage.set(s, set);
+    }
+    return set;
+  };
+
+  for (const row of rows) {
+    if (row.taskId === null) continue;
+    const stage = stageOf(row.to);
+    ensure(stage).add(row.taskId);
+  }
+
+  const stages: SdlcFunnelStage[] = [];
+  let prevEntered: number | null = null;
+  for (const stage of SDLC_STAGES) {
+    const entered = perStage.get(stage)?.size ?? 0;
+    const conversionFromPrev =
+      prevEntered === null || prevEntered === 0 ? null : entered / prevEntered;
+    stages.push({ stage, entered, conversionFromPrev });
+    prevEntered = entered;
+  }
+  // Append OTHER as a trailing, non-chained bucket if anything landed there.
+  const otherCount = perStage.get(OTHER_STAGE)?.size ?? 0;
+  if (otherCount > 0) {
+    stages.push({ stage: OTHER_STAGE, entered: otherCount, conversionFromPrev: null });
+  }
+
+  // Entered-in-range = distinct tasks that entered the FIRST funnel stage
+  // (triage) in range. completion rate = done / entered.
+  const enteredInRange = perStage.get("triage")?.size ?? 0;
+  const doneInRange = perStage.get("done")?.size ?? 0;
+  const completionRate =
+    enteredInRange === 0 ? null : doneInRange / enteredInRange;
+
+  const rangeDays = countWholeDays(query.from, query.to);
+  const throughputPerDay = doneInRange / rangeDays;
+
+  return {
+    from: query.from ?? null,
+    to: query.to ?? null,
+    stages,
+    enteredInRange,
+    doneInRange,
+    completionRate,
+    rangeDays,
+    throughputPerDay,
   };
 }

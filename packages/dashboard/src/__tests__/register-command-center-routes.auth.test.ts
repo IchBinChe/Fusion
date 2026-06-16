@@ -6,6 +6,10 @@
  * valid bearer token. Mirrors `auth-middleware-integration.test.ts` but exercises
  * the U9 routes specifically (the registrar adds no auth of its own — it inherits
  * the server-level middleware, which is exactly what this asserts).
+ *
+ * FNXC:CommandCenter 2026-06-16-09:44:
+ * U9 Command Center auth coverage (PR #1683): every analytics endpoint, including /live, must 401 when
+ * unauthenticated — the registrar relies entirely on the server-level bearer middleware, so this pins it.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

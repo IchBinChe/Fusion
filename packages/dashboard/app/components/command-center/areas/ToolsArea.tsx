@@ -12,6 +12,10 @@ import { formatCount } from "./areaShared";
  * sorted descending by count (the endpoint already returns `byCategory`
  * descending, but we re-sort defensively so display order never depends on
  * server ordering).
+ *
+ * FNXC:CommandCenter 2026-06-16-09:42:
+ * Tools area of the Command Center (PR #1683). Shows the autonomy ratio plus tool-category usage; display
+ * order is re-sorted client-side so it never silently depends on server ordering.
  */
 export function ToolsArea({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");

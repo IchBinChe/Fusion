@@ -587,5 +587,54 @@ describe("AgentLogger", () => {
       // The tool result payload MUST NOT leak into meta.
       expect(JSON.stringify(meta)).not.toContain("super-secret-output");
     });
+
+    /*
+     * FNXC:Telemetry 2026-06-16-05:47:
+     * Prove the fail-soft telemetry contract: a throwing store.emitUsageEvent must never break
+     * onToolStart/onToolEnd, and tool logging (appendAgentLog) must still proceed. Covers both a
+     * synchronously throwing store and one that returns a rejected Promise.
+     */
+    it("does not throw and still logs the tool when emitUsageEvent throws synchronously", async () => {
+      const store = {
+        appendAgentLog: vi.fn().mockResolvedValue(undefined),
+        emitUsageEvent: vi.fn().mockImplementation(() => {
+          throw new Error("telemetry sink exploded");
+        }),
+      } as unknown as TaskStore & { emitUsageEvent: ReturnType<typeof vi.fn> };
+      const logger = new AgentLogger({ store, taskId: "FN-UE-FAILSOFT", agent: "executor" });
+      logger.setUsageContext({ model: "m", provider: "p", nodeId: "n", agentId: "a" });
+
+      expect(() => logger.onToolStart("Bash", { command: "ls" })).not.toThrow();
+      expect(() => logger.onToolEnd("Bash", false, "output")).not.toThrow();
+
+      // emitUsageEvent was attempted for both start and end despite throwing.
+      expect(store.emitUsageEvent).toHaveBeenCalled();
+
+      // Tool logging still proceeds: tool start + tool_result rows are persisted.
+      await vi.advanceTimersByTimeAsync(0);
+      const calls = (store.appendAgentLog as ReturnType<typeof vi.fn>).mock.calls;
+      const types = calls.map((c) => c[2]);
+      expect(types).toContain("tool");
+      expect(types).toContain("tool_result");
+
+      // Failure is observed via warn, not propagated.
+      expect(loggerWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to emit usage event"));
+    });
+
+    it("does not throw when emitUsageEvent returns a rejected promise", async () => {
+      const store = {
+        appendAgentLog: vi.fn().mockResolvedValue(undefined),
+        emitUsageEvent: vi.fn().mockRejectedValue(new Error("async telemetry failure")),
+      } as unknown as TaskStore & { emitUsageEvent: ReturnType<typeof vi.fn> };
+      const logger = new AgentLogger({ store, taskId: "FN-UE-FAILSOFT-ASYNC" });
+      logger.setUsageContext({ model: "m", provider: "p", nodeId: "n", agentId: "a" });
+
+      expect(() => logger.onToolStart("Read", { path: "a.ts" })).not.toThrow();
+      expect(() => logger.onToolEnd("Read", true, "boom")).not.toThrow();
+
+      // Let the rejected emit-promise settle; the .catch must absorb it.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loggerWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to emit usage event"));
+    });
   });
 });

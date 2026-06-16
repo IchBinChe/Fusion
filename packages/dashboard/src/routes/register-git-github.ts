@@ -2542,6 +2542,12 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       attachedStateStores.add(projectStore);
       githubTrackingStateService.attach(projectStore);
       githubSourceIssueCloseService.attach(projectStore);
+      // FNXC:Knowledge 2026-06-16-14:32:
+      // Knowledge index refresh on task:moved→done must run for every registered project store, not just the primary.
+      // Mirror the GitHubTrackingStateService/GitHubSourceIssueCloseService attach/detach lifecycle so non-primary
+      // projects also re-index completed tasks. attach() is idempotent (guards on its per-store listener Map), so
+      // re-attaching the primary store here is harmless even though start() already attached the default store.
+      knowledgeIndexRefreshService.attach(projectStore);
 
       if (!reconcileScheduledStores.has(projectStore)) {
         reconcileScheduledStores.add(projectStore);
@@ -2598,6 +2604,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       for (const projectStore of attachedStateStores) {
         githubTrackingStateService.detach(projectStore);
         githubSourceIssueCloseService.detach(projectStore);
+        knowledgeIndexRefreshService.detach(projectStore);
       }
       githubTrackingStateService.stop();
     });

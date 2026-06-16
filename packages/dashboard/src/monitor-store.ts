@@ -297,6 +297,41 @@ export function resolveIncident(
   return getIncident(db, open.incidentId);
 }
 
+/**
+ * Sentinel written to `fixTaskId` by {@link claimIncidentForFixTask} to reserve
+ * an open incident BEFORE its fix task exists. It is overwritten with the real
+ * task id by {@link attachFixTask} once the task is created. A claimed-but-not-
+ * yet-attached incident is treated as already-linked by the storm guard
+ * (`fixTaskId` is non-null), so a concurrent caller absorbs rather than creating
+ * a duplicate. Distinguishable from a real task id by its prefix.
+ */
+export const FIX_TASK_CLAIM_SENTINEL_PREFIX = "claiming:";
+
+/**
+ * Atomically claim an open incident for fix-task creation. Performs a single
+ * conditional UPDATE that sets `fixTaskId` to a sentinel only WHERE it is still
+ * NULL, so exactly one concurrent caller can win the claim for a given incident.
+ *
+ * Returns true if THIS caller acquired the claim (and must therefore create +
+ * {@link attachFixTask} the real task), false if another caller already claimed
+ * or linked it (caller should absorb). This closes the create-then-link race:
+ * the only interleaving point in `runMonitorOnRegression` is the `await` on task
+ * creation, which now happens strictly AFTER an exclusive claim is held.
+ */
+export function claimIncidentForFixTask(db: Database, incidentId: string): boolean {
+  const now = new Date().toISOString();
+  const sentinel = `${FIX_TASK_CLAIM_SENTINEL_PREFIX}${incidentId}`;
+  const result = db
+    .prepare(
+      `UPDATE incidents SET fixTaskId = ?, updatedAt = ?
+       WHERE incidentId = ? AND fixTaskId IS NULL`,
+    )
+    .run(sentinel, now, incidentId) as { changes?: number | bigint };
+  const claimed = Number(result.changes ?? 0) > 0;
+  if (claimed) db.bumpLastModified();
+  return claimed;
+}
+
 /** Attach a fix task id to an incident (records the loop-closure linkage). */
 export function attachFixTask(db: Database, incidentId: string, fixTaskId: string): void {
   const now = new Date().toISOString();

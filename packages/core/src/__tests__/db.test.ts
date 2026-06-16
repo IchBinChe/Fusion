@@ -2962,6 +2962,12 @@ describe("migration v120 adds deployments + incidents tables (U13)", () => {
 
       migrated = new Database(fusion);
       migrated.init();
+      // FNXC:Database 2026-06-16-14:30:
+      // The v119→init migration path must restore not just the deployments +
+      // incidents tables but their indexes too — a migration could regress index
+      // creation while table + row assertions still pass. Assert the real index
+      // names the v120 migration creates (idxDeployments*, idxIncidents*) so that
+      // regression is caught.
       expect(migrated.getSchemaVersion()).toBe(120);
       const tables = new Set(
         (
@@ -2974,6 +2980,21 @@ describe("migration v120 adds deployments + incidents tables (U13)", () => {
       );
       expect(tables.has("deployments")).toBe(true);
       expect(tables.has("incidents")).toBe(true);
+      const indexes = new Set(
+        (
+          migrated
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='index' AND (tbl_name='deployments' OR tbl_name='incidents')",
+            )
+            .all() as Array<{ name: string }>
+        ).map((i) => i.name),
+      );
+      expect(indexes.has("idxDeploymentsDeployedAt")).toBe(true);
+      expect(indexes.has("idxDeploymentsService")).toBe(true);
+      expect(indexes.has("idxIncidentsGroupingKey")).toBe(true);
+      expect(indexes.has("idxIncidentsStatus")).toBe(true);
+      expect(indexes.has("idxIncidentsOpenedAt")).toBe(true);
+      expect(indexes.has("idxIncidentsResolvedAt")).toBe(true);
       const task = migrated.prepare("SELECT id FROM tasks WHERE id = ?").get("FN-V119") as { id: string } | undefined;
       expect(task?.id).toBe("FN-V119");
     } finally {

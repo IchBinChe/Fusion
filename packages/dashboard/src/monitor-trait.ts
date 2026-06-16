@@ -8,6 +8,7 @@ import { getTraitRegistry, registerTraitHookImpl } from "@fusion/core";
 import { createSessionDiagnostics } from "./ai-session-diagnostics.js";
 import {
   attachFixTask,
+  claimIncidentForFixTask,
   countRecentAutoFixTasks,
   decideStormGuard,
   ingestIncidentSignal,
@@ -122,6 +123,12 @@ export type MonitorRegressionOutcome =
  * Idempotent across a burst sharing one groupingKey: the FIRST firing past the
  * gate opens the task and links it; every subsequent firing finds the linked
  * incident and absorbs. A Fusion-opened fix task never re-enters this path.
+ *
+ * FNXC:Monitor 2026-06-16-14:05: only one fix task may be opened per open
+ * incident window; concurrent regression ingests must not duplicate. The
+ * create-then-link step is guarded by an atomic incident-level claim
+ * (claimIncidentForFixTask) so the await on task creation cannot interleave two
+ * winners for the same open incident.
  */
 export async function runMonitorOnRegression(
   signal: IncidentSignalInput,
@@ -150,7 +157,22 @@ export async function runMonitorOnRegression(
       return { kind: "suppressed", incidentId, reason: decision.reason };
     }
 
-    // open-fix-task: create exactly one task and link it (closes the loop).
+    // open-fix-task: claim the incident BEFORE the await on task creation. The
+    // claim is an atomic conditional UPDATE (set fixTaskId WHERE fixTaskId IS
+    // NULL), so under concurrent regression ingests for the same open incident
+    // exactly one caller wins. Losers absorb instead of opening a duplicate task
+    // — without this, two callers could both pass decideStormGuard (fixTaskId
+    // still null), both await store.createTask, and both attach, opening two
+    // tasks where only the last link wins.
+    if (!claimIncidentForFixTask(db, incidentId)) {
+      const linked = decision.incident.fixTaskId ?? null;
+      return {
+        kind: "absorbed",
+        incidentId,
+        existingFixTaskId: linked,
+        reason: "fix-task-claimed-concurrently",
+      };
+    }
     const task = await store.createTask(buildFixTaskInput(signal, incidentId));
     attachFixTask(db, incidentId, task.id);
     return { kind: "fix-task-opened", taskId: task.id, incidentId };

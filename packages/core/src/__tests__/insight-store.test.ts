@@ -8,6 +8,10 @@
  * - Stable identity on upsert (id/createdAt preserved)
  * - Deterministic ordering under timestamp ties
  * - Migration: pre-33 DB upgrades to include insight tables
+ *
+ * FNXC:Insights 2026-06-16-09:40:
+ * Touched alongside the Command Center schema work (PR #1683, migrations 118-120) so the insight-store
+ * migration coverage stays valid as later schema versions land; assertions pin the pre-33 upgrade path.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";

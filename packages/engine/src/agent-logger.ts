@@ -172,7 +172,12 @@ export class AgentLogger {
 
   /**
    * Emit a normalized tool `usage_events` row through the task store, if a store,
-   * taskId, and usage context are all available. Fail-soft via store.emitUsageEvent.
+   * taskId, and usage context are all available.
+   *
+   * FNXC:Telemetry 2026-06-16-05:47:
+   * Usage-event emission is fail-soft: telemetry is a side effect of tool logging and must never break it.
+   * `store.emitUsageEvent` is wrapped in try/catch so a throwing (or rejecting) store leaves
+   * `onToolStart`/`onToolEnd` non-throwing and lets agent-log writes proceed. Failures are warned, not propagated.
    */
   private emitToolUsageEvent(
     kind: "tool_call" | "tool_result" | "tool_error",
@@ -181,17 +186,25 @@ export class AgentLogger {
   ): void {
     const ctx = this.usageContext;
     if (!ctx || !this.store || !this.taskId) return;
-    this.store.emitUsageEvent({
-      kind,
-      taskId: this.taskId,
-      agentId: ctx.agentId ?? null,
-      nodeId: ctx.nodeId ?? null,
-      model: ctx.model ?? null,
-      provider: ctx.provider ?? null,
-      toolName,
-      category: categorizeToolName(toolName),
-      ...(meta !== undefined && { meta }),
-    });
+    try {
+      const maybePromise = this.store.emitUsageEvent({
+        kind,
+        taskId: this.taskId,
+        agentId: ctx.agentId ?? null,
+        nodeId: ctx.nodeId ?? null,
+        model: ctx.model ?? null,
+        provider: ctx.provider ?? null,
+        toolName,
+        category: categorizeToolName(toolName),
+        ...(meta !== undefined && { meta }),
+      });
+      // Swallow async rejections too so a Promise-returning store stays fail-soft.
+      void Promise.resolve(maybePromise).catch((err) => {
+        this.log.warn(`Failed to emit usage event (${kind}) for "${toolName}" on ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    } catch (err) {
+      this.log.warn(`Failed to emit usage event (${kind}) for "${toolName}" on ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**

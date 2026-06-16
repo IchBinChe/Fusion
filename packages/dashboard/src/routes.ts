@@ -1993,6 +1993,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   registerUsageRoutes(routeContext);
+  /*
+  FNXC:DashboardRoutes 2026-06-16-09:46:
+  PR #1683 wires the Command Center / SDLC registrars into the dashboard router: U9 analytics+live, U14 knowledge index, U11 external-signal webhooks, U13 monitor ingest/metrics. All inherit the server-level daemon bearer auth and getScopedStore project scoping; the signal/monitor ingest paths add their own per-provider/ingest-secret verification on top — none is an unauthenticated task-creation endpoint.
+  */
   // U9 — Command Center analytics + live snapshot endpoints. Thin adapters over
   // the core aggregators; inherit standard auth + getScopedStore project scoping.
   registerCommandCenterRoutes(routeContext);

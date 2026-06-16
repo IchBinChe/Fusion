@@ -1,3 +1,7 @@
+/*
+FNXC:Database 2026-06-16-09:40:
+Command Center / SDLC work (PR #1683) added usage_events, knowledge_pages, deployments, and incidents tables behind schema migrations 118-120. These legacy-data migration tests guard the separate legacy-import path so the in-DB schema migrations and the legacy importer stay independent.
+*/
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { detectLegacyData, migrateFromLegacy, getMigrationStatus } from "../db-migrate.js";
 import { Database } from "../db.js";

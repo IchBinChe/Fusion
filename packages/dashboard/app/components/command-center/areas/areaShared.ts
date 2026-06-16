@@ -1,5 +1,10 @@
 import type { DateRange } from "../DateRangePicker";
 
+/*
+FNXC:CommandCenter 2026-06-16-09:42:
+Shared Command Center area helpers (PR #1683): date-range query building and count formatting reused across the analytics areas so range-to-query and unavailable-vs-zero rendering stay consistent.
+*/
+
 /**
  * Build the `?from=&to=` query string for an analytics endpoint from a
  * {@link DateRange}. Open bounds (null) are omitted so the server applies its

@@ -6,6 +6,10 @@
  * token. Mirrors `register-command-center-routes.auth.test.ts` — the registrar
  * adds no auth of its own; it inherits the server-level middleware, which is
  * exactly what this asserts.
+ *
+ * FNXC:Knowledge 2026-06-16-09:46:
+ * U14 knowledge-index auth coverage (PR #1683): the index holds sensitive repo/PR content, so every
+ * endpoint must 401 when unauthenticated and never be cross-project readable; this pins that contract.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

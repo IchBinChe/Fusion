@@ -1708,6 +1708,10 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
   const originalListen = dashboardApp.listen.bind(dashboardApp);
   const httpsCreds = options?.https;
+  /*
+  FNXC:Telemetry 2026-06-16-09:47:
+  U10 (PR #1683): the OTLP metrics exporter is started on listen only when FUSION_OTEL_METRICS_ENDPOINT is set (off by default) and its handle is retained here so the server "close" handler can stop the export timer — otherwise the periodic exporter would outlive the server and leak a timer in tests/restarts.
+  */
   // U10: OTLP metrics exporter. Disabled by default — only started when
   // FUSION_OTEL_METRICS_ENDPOINT is explicitly configured. Held here so the
   // server "close" handler can stop its timer.

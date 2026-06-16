@@ -6,6 +6,11 @@ import { Bar } from "../charts/Bar";
 import { AreaShell } from "./AreaShell";
 import { rangeQuery, formatCount, isInvalidRange } from "./areaShared";
 
+/*
+FNXC:CommandCenter 2026-06-16-09:42:
+Signals area of the Command Center (PR #1683). Surfaces external-signal volume/severity (Sentry/Datadog/PagerDuty/webhook ingest from U11) so operators see incoming pressure alongside internal analytics.
+*/
+
 /**
  * Shape the External Signals endpoint will return once U11/U13 land. Until then
  * the endpoint does not exist, so this area degrades to its empty state — it

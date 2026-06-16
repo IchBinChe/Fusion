@@ -1,3 +1,7 @@
+/*
+FNXC:CommandCenter 2026-06-16-09:42:
+Tokens area of the Command Center (PR #1683). Renders token totals + derived cost grouped by model/provider; unpriced models must report cost as unavailable (never $0) so totals are not understated.
+*/
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {

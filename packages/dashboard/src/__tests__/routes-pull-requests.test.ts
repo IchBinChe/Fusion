@@ -1,5 +1,9 @@
 // @vitest-environment node
 
+/*
+FNXC:PullRequests 2026-06-16-09:44:
+U18 auto-resolve-review-comments coverage (PR #1683): extends the PR thread-summary assertions to the fixed/acted thread states the auto-resolution loop produces, so the backward-move-blocked-by-open-PR guard and thread summaries stay correct.
+*/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import type { PrEntity, PrThreadState, Task, TaskStore } from "@fusion/core";

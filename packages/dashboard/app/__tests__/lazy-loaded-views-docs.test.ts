@@ -1,3 +1,8 @@
+/*
+FNXC:CommandCenter 2026-06-16-09:40:
+The Command Center view (PR #1683) is the 21st App-level lazy-loaded view. This test enforces that the
+curated lazy-view inventory in AGENTS.md stays in sync with App.tsx; the count contract moved from 20 to 21.
+*/
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -78,7 +83,7 @@ function extractAppLazyViews(appSource: string): Set<string> {
 }
 
 describe("AGENTS lazy-loaded views inventory", () => {
-  it("documents the App-level lazy views accurately and keeps the curated 20-view list in sync", () => {
+  it("documents the App-level lazy views accurately and keeps the curated 21-view list in sync", () => {
     const agentsDoc = readFileSync(resolve(__dirname, "../../../../AGENTS.md"), "utf-8");
     const appSource = readFileSync(resolve(__dirname, "../App.tsx"), "utf-8");
 

@@ -1,3 +1,8 @@
+/*
+FNXC:Telemetry 2026-06-16-09:44:
+U10 OTLP exporter (PR #1683): export Command Center analytics as OTLP/HTTP JSON to an external collector. Must be OFF by default (no endpoint → nothing starts) and reject non-https endpoints in production; deliberately avoids the heavy @opentelemetry SDK in favor of a minimal, collector-compatible POST.
+*/
+
 /**
  * OpenTelemetry (OTLP) metrics exporter wiring (U10) — dashboard side.
  *

@@ -1,3 +1,7 @@
+/*
+FNXC:CommandCenter 2026-06-16-09:42:
+Command Center area component tests (PR #1683). Pin loading/error/unavailable-vs-zero rendering for each analytics area against mocked fixtures so the "—" sentinel and cost-unavailable contracts can't regress.
+*/
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 

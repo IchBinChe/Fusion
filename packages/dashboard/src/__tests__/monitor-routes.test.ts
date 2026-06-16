@@ -5,6 +5,10 @@
  *  1. the server-level daemon bearer-token middleware (gates all /api/*), and
  *  2. the route-level monitor ingestion secret (FUSION_MONITOR_INGEST_SECRET).
  * An unauthenticated deploy/incident POST returns 401 and records NOTHING.
+ *
+ * FNXC:Monitor 2026-06-16-09:44:
+ * U13 monitor ingest auth coverage (PR #1683): both the daemon bearer middleware and the route-level
+ * ingest secret must hold, and a rejected request must persist nothing — fail-closed, no partial writes.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

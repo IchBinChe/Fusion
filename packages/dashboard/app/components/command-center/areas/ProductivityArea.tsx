@@ -12,6 +12,10 @@ import { formatCount } from "./areaShared";
  * presented as *volume* proxies, kept visually distinct from outcome counters
  * (PRs, commits). Unavailable LOC renders the "—" sentinel with a tooltip,
  * NEVER 0.
+ *
+ * FNXC:CommandCenter 2026-06-16-09:42:
+ * Productivity area of the Command Center (PR #1683). Volume proxies (files/LOC) must read as distinct
+ * from outcome counters (PRs/commits), and missing LOC must render "—", never 0, to avoid implying zero work.
  */
 export function ProductivityArea({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");

@@ -1230,6 +1230,9 @@ CREATE TABLE IF NOT EXISTS usage_events (
 CREATE INDEX IF NOT EXISTS idxUsageEventsTs ON usage_events(ts);
 CREATE INDEX IF NOT EXISTS idxUsageEventsTaskId ON usage_events(taskId);
 CREATE INDEX IF NOT EXISTS idxUsageEventsAgentId ON usage_events(agentId);
+-- FNXC:Database 2026-06-16-14:30:
+-- Command Center tool analytics (aggregateToolAnalytics in tool-analytics.ts) filters usage_events by 'kind' (e.g. 'tool_call', 'session_start') with optional 'ts' bounds on every tool/session count. The (kind, ts) composite index keeps that path from scanning unrelated event kinds as telemetry grows. Added in the same unreleased PR (#1683) that introduces usage_events, so it ships inside migration 118 rather than a new version bump; mirrored there so fresh-init and migrated DBs converge.
+CREATE INDEX IF NOT EXISTS idxUsageEventsKindTs ON usage_events(kind, ts);
 
 -- Persistent, incrementally-refreshed knowledge index (U14). One row per
 -- knowledge page (currently one page per completed task; PR-history pages
@@ -4810,6 +4813,15 @@ export class Database {
     // Migration 118: Queryable usage_events telemetry table (tool calls,
     // messages, session lifecycle). Mirrors the SCHEMA_SQL definition above so
     // a fresh-from-SCHEMA_SQL DB and a migrated DB converge on the same table.
+    // FNXC:Database 2026-06-16-14:30:
+    // The (kind, ts) composite index (idxUsageEventsKindTs) backs the Command
+    // Center analytics path: aggregateToolAnalytics filters usage_events by kind
+    // with optional ts bounds for every tool/session count, and would otherwise
+    // scan unrelated event kinds as telemetry grows. Folded into this migration
+    // (rather than a new SCHEMA_VERSION bump) because usage_events itself is
+    // unreleased — every DB that runs migration 118 runs it from this PR's code,
+    // so no migrated DB can be stuck at v118+ without the index. The IF NOT
+    // EXISTS body stays re-runnable.
     if (version < 118) {
       this.applyMigration(118, () => {
         this.db.exec(`
@@ -4835,6 +4847,9 @@ export class Database {
         `);
         this.db.exec(`
           CREATE INDEX IF NOT EXISTS idxUsageEventsAgentId ON usage_events(agentId)
+        `);
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idxUsageEventsKindTs ON usage_events(kind, ts)
         `);
       });
     }

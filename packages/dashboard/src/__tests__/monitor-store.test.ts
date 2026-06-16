@@ -1,5 +1,11 @@
 // @vitest-environment node
 
+/*
+FNXC:Monitor 2026-06-16-09:48:
+U13 monitor-store coverage (PR #1683): pins deployment/incident persistence and MTTR/deploy/incident
+aggregation that close the SDLC loop, including the incident-level fix-task claim that prevents duplicate
+auto-fix tasks under concurrent regression ingests.
+*/
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";

@@ -1,3 +1,7 @@
+/*
+FNXC:Telemetry 2026-06-16-09:44:
+U10 OTLP exporter coverage (PR #1683): pins the default-off behavior, https-only endpoint validation in production, header redaction, and retry/backoff so the exporter can't silently start, leak secrets, or hot-loop on a failing collector.
+*/
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";

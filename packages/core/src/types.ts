@@ -3382,6 +3382,13 @@ export interface ProjectSettings {
    *  be enforced server-side. Only applies when `mergeStrategy === "pull-request"`.
    *  Default: false. */
   requirePrApproval?: boolean;
+  /** When true (default), the Review-response loop automatically acts on PR review
+   *  threads (human + bot): it dispatches an agent that fixes + pushes + replies, or
+   *  disagrees with reasoning. When false, the loop is inert — review threads are left
+   *  untouched for a human to handle. Independent of `autoMerge`: with auto-resolution
+   *  on but auto-merge off, threads are still resolved but the PR is NOT merged (the
+   *  human checkpoint remains merge). U18, R15. Default: true. */
+  autoResolveReviewComments?: boolean;
   /** Direct-merge commit routing mode.
    *  - "auto": squash single-substantive branches, preserve history for multi-substantive branches
    *  - "always-squash": always use the legacy squash path for direct merges

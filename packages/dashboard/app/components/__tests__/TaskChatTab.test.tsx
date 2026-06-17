@@ -26,6 +26,7 @@ const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLEleme
 const originalClientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
 const originalRequestAnimationFrame = window.requestAnimationFrame;
 const originalCancelAnimationFrame = window.cancelAnimationFrame;
+const originalMatchMediaDescriptor = Object.getOwnPropertyDescriptor(window, "matchMedia");
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -122,6 +123,17 @@ function expectComposerSendableAfterDraft(message = "Please continue") {
 
   fireEvent.change(input, { target: { value: message } });
   expect(sendButton).not.toBeDisabled();
+}
+
+function expectTranscriptTextOrder(...texts: string[]) {
+  const transcriptText = screen.getByTestId("task-chat-transcript").textContent ?? "";
+  let previousIndex = -1;
+  for (const text of texts) {
+    const index = transcriptText.indexOf(text);
+    expect(index, `Expected transcript to contain ${text}`).toBeGreaterThanOrEqual(0);
+    expect(index, `Expected ${text} to appear after the previous transcript text`).toBeGreaterThan(previousIndex);
+    previousIndex = index;
+  }
 }
 
 function expectNoInactiveSessionHint() {
@@ -263,6 +275,7 @@ describe("TaskChatTab", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     restoreMetricDescriptor("scrollTop", originalScrollTopDescriptor);
     restoreMetricDescriptor("scrollHeight", originalScrollHeightDescriptor);
     restoreMetricDescriptor("clientHeight", originalClientHeightDescriptor);
@@ -276,6 +289,11 @@ describe("TaskChatTab", () => {
       writable: true,
       value: originalCancelAnimationFrame,
     });
+    if (originalMatchMediaDescriptor) {
+      Object.defineProperty(window, "matchMedia", originalMatchMediaDescriptor);
+    } else {
+      delete (window as Partial<Window>).matchMedia;
+    }
   });
 
   it("subscribes to live agent logs only when active", () => {
@@ -1253,6 +1271,105 @@ describe("TaskChatTab", () => {
 
     expect(within(transcript).getByText("Please inspect the failing test")).toBeVisible();
     expect(input).toHaveValue("");
+  });
+
+  it("renders a sent user message after pre-existing agent output under client-behind-server clock skew", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-12T00:00:00.000Z"));
+    mockLogs([
+      makeEntry({ agent: "executor", text: "agent output with server timestamp", timestamp: "2026-06-12T00:00:05.000Z" }),
+    ]);
+    const send = deferred<Task>();
+    mockedAddSteeringComment.mockReturnValue(send.promise);
+    render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1" })} projectId="project-1" active addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Message active agent session"), { target: { value: "Please stay below the agent output" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expectTranscriptTextOrder("agent output with server timestamp", "Please stay below the agent output");
+  });
+
+  it.each([
+    ["in-review client-ahead mobile", makeTask({ column: "in-review", assignedAgentId: "agent-1", status: "reviewing" }), "2026-06-12T00:00:10.000Z", true],
+    ["in-progress clock-sync desktop", makeTask({ column: "in-progress", assignedAgentId: "agent-1", status: "queued" }), "2026-06-12T00:00:05.000Z", false],
+  ])("keeps sent user messages at the transcript tail for %s", (_label, task, now, mobile) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(now));
+    mockMatchMedia(mobile);
+    mockLogs([
+      makeEntry({ agent: "executor", text: "pre-existing agent output", timestamp: "2026-06-12T00:00:05.000Z" }),
+    ]);
+    mockedAddSteeringComment.mockReturnValue(deferred<Task>().promise);
+    render(<TaskChatTab task={task} projectId="project-1" active addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Message active agent session"), { target: { value: "Tail guidance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expectTranscriptTextOrder("pre-existing agent output", "Tail guidance");
+  });
+
+  it("renders agent follow-up below the newly-sent user message", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-12T00:00:00.000Z"));
+    const task = makeTask({ steeringComments: [makeSteeringComment({ id: "old-user", text: "historical guidance", createdAt: "2026-06-12T00:00:02.000Z" })] });
+    mockLogs([
+      makeEntry({ agent: "executor", text: "pre-existing output", timestamp: "2026-06-12T00:00:05.000Z" }),
+    ]);
+    mockedAddSteeringComment.mockReturnValue(deferred<Task>().promise);
+    const { rerender } = render(<TaskChatTab task={task} projectId="project-1" active addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Message active agent session"), { target: { value: "New steering" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expectTranscriptTextOrder("historical guidance", "pre-existing output", "New steering");
+
+    mockLogs([
+      makeEntry({ agent: "executor", text: "pre-existing output", timestamp: "2026-06-12T00:00:05.000Z" }),
+      makeEntry({ agent: "executor", text: "agent follow-up after steering", timestamp: "2026-06-12T00:00:06.000Z" }),
+    ]);
+    rerender(<TaskChatTab task={task} projectId="project-1" active addToast={vi.fn()} />);
+
+    expectTranscriptTextOrder("pre-existing output", "New steering", "agent follow-up after steering");
+  });
+
+  it("keeps a reconciled persisted steering comment at the clamped tail without duplication", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-12T00:00:00.000Z"));
+    mockLogs([
+      makeEntry({ agent: "executor", text: "agent output before send", timestamp: "2026-06-12T00:00:05.000Z" }),
+    ]);
+    const send = deferred<Task>();
+    mockedAddSteeringComment.mockReturnValue(send.promise);
+    const persistedComment = makeSteeringComment({ id: "steer-reconciled", text: "Reconciled guidance", createdAt: "2026-06-12T00:00:01.000Z" });
+    const { rerender } = render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Message active agent session"), { target: { value: "Reconciled guidance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expectTranscriptTextOrder("agent output before send", "Reconciled guidance");
+
+    await act(async () => {
+      send.resolve(makeTask({ steeringComments: [persistedComment] }));
+      await send.promise;
+    });
+    rerender(<TaskChatTab task={makeTask({ steeringComments: [persistedComment] })} projectId="project-1" active addToast={vi.fn()} />);
+
+    expectTranscriptTextOrder("agent output before send", "Reconciled guidance");
+    expect(within(screen.getByTestId("task-chat-transcript")).getAllByText("Reconciled guidance")).toHaveLength(1);
+  });
+
+  it("inserts done-task refinement messages immediately at the transcript tail", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-12T00:00:00.000Z"));
+    mockLogs([
+      makeEntry({ agent: "reviewer", text: "final agent summary", timestamp: "2026-06-12T00:00:05.000Z" }),
+    ]);
+    mockedRefineTask.mockReturnValue(deferred<Task>().promise);
+    render(<TaskChatTab task={makeTask({ column: "done", status: "done", assignedAgentId: undefined })} projectId="project-1" active addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Message active agent session"), { target: { value: "Please refine this task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expectTranscriptTextOrder("final agent summary", "Please refine this task");
+    expect(mockedRefineTask).toHaveBeenCalledWith("FN-001", "Please refine this task", "project-1");
   });
 
   it("renders persisted user steering comments but not agent-authored steering comments", () => {

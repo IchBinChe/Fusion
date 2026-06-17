@@ -96,6 +96,14 @@ function getTimestampMs(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function getLatestTranscriptTimestampMs(entries: readonly AgentLogEntry[], userMessages: readonly UserChatMessage[]): number {
+  return Math.max(
+    0,
+    ...entries.map((entry) => getTimestampMs(entry.timestamp)),
+    ...userMessages.map((message) => getTimestampMs(message.createdAt)),
+  );
+}
+
 function getUserMessageDedupKey(message: Pick<SteeringComment, "id" | "text" | "createdAt">): string {
   return message.id ? `id:${message.id}` : `fallback:${message.text}:${message.createdAt}`;
 }
@@ -117,12 +125,12 @@ function mergeUserMessages(persistedComments: readonly SteeringComment[] | undef
     messages.push(message);
   };
 
+  for (const message of optimisticMessages) {
+    addMessage(message);
+  }
   for (const comment of persistedComments ?? []) {
     if (comment.author !== "user") continue;
     addMessage({ id: comment.id, text: comment.text, createdAt: comment.createdAt });
-  }
-  for (const message of optimisticMessages) {
-    addMessage(message);
   }
 
   return messages;
@@ -625,10 +633,16 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     const text = draft.trim();
     if (!text || sending) return;
 
+    const latestTimestampMs = getLatestTranscriptTimestampMs(entries, userMessages);
+    const optimisticCreatedAtMs = Math.max(Date.now(), latestTimestampMs + 1);
+    /*
+    FNXC:TaskDetailChat 2026-06-17-08:12:
+    Freshly-sent user steering must appear immediately at the transcript tail below current agent output and keep that display order after persistence reconciliation, so the agent's follow-up thinking or response renders after the user's bubble even when client and server clocks are skewed.
+    */
     const optimisticMessage: UserChatMessage = {
-      id: `optimistic-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: `optimistic-${task.id}-${optimisticCreatedAtMs}-${Math.random().toString(36).slice(2)}`,
       text,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(optimisticCreatedAtMs).toISOString(),
       optimistic: true,
     };
     setOptimisticMessages((current) => [...current, optimisticMessage]);
@@ -645,7 +659,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
         if (persistedComment) {
           setOptimisticMessages((current) => current.map((message) => (
             message.id === optimisticMessage.id
-              ? { id: persistedComment.id, text: persistedComment.text, createdAt: persistedComment.createdAt, optimistic: true }
+              ? { id: persistedComment.id, text: persistedComment.text, createdAt: message.createdAt, optimistic: true }
               : message
           )));
         }
@@ -658,7 +672,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     } finally {
       setSending(false);
     }
-  }, [addToast, draft, isDoneTask, onTaskUpdated, projectId, sending, task.id]);
+  }, [addToast, draft, entries, isDoneTask, onTaskUpdated, projectId, sending, task.id, userMessages]);
 
   /**
    * FNXC:TaskDetailChat 2026-06-13-19:05:

@@ -340,6 +340,21 @@ const QUICK_CHAT_DEFAULT_PANEL_SIZE: PanelSize = {
   height: 400,
 };
 
+/**
+ * FNXC:QuickChatPanelSize 2026-06-16-23:03:
+ * FN-6502 requires Quick Chat to open taller by default on floating-panel mobile/tablet viewports while portrait mobile stays full-screen through CSS and desktop defaults plus persisted sizes remain unchanged.
+ */
+function getDefaultQuickChatPanelSize(): PanelSize {
+  if (typeof window === "undefined" || window.innerWidth <= QUICK_CHAT_DESKTOP_BREAKPOINT || window.innerWidth > 1024) {
+    return QUICK_CHAT_DEFAULT_PANEL_SIZE;
+  }
+
+  return {
+    width: QUICK_CHAT_DEFAULT_PANEL_SIZE.width,
+    height: Math.max(QUICK_CHAT_DEFAULT_PANEL_SIZE.height, Math.floor(window.innerHeight * 0.8)),
+  };
+}
+
 const ALLOWED_ATTACHMENT_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -650,23 +665,30 @@ function usePanelResize(projectId: string | undefined, fabRight: number, fabBott
   );
 
   const loadPersistedSize = useCallback((): PanelSize => {
+    const defaultSize = getDefaultQuickChatPanelSize();
     if (typeof window === "undefined" || window.innerWidth <= QUICK_CHAT_DESKTOP_BREAKPOINT) {
-      return QUICK_CHAT_DEFAULT_PANEL_SIZE;
+      return defaultSize;
     }
     try {
       const raw = localStorage.getItem(storageKey);
-      if (!raw) return QUICK_CHAT_DEFAULT_PANEL_SIZE;
+      if (!raw) return defaultSize;
       const parsed = JSON.parse(raw) as Partial<PanelSize>;
       if (typeof parsed.width !== "number" || typeof parsed.height !== "number") {
-        return QUICK_CHAT_DEFAULT_PANEL_SIZE;
+        return defaultSize;
       }
       return { width: parsed.width, height: parsed.height };
     } catch {
-      return QUICK_CHAT_DEFAULT_PANEL_SIZE;
+      return defaultSize;
     }
   }, [storageKey]);
 
   const [panelSize, setPanelSize] = useState<PanelSize>(loadPersistedSize);
+  const panelSizeRef = useRef(panelSize);
+  const hasUserResizedPanelRef = useRef(false);
+
+  useEffect(() => {
+    panelSizeRef.current = panelSize;
+  }, [panelSize]);
 
   /**
    * Anchor offset relative to the FAB position.
@@ -682,7 +704,7 @@ function usePanelResize(projectId: string | undefined, fabRight: number, fabBott
   }, [anchorOffset, clampPanelSize, fabBottom, fabRight, isDesktopViewport, isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !isDesktopViewport()) return;
+    if (!isOpen || !isDesktopViewport() || !hasUserResizedPanelRef.current) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify(panelSize));
     } catch {
@@ -772,6 +794,7 @@ function usePanelResize(projectId: string | undefined, fabRight: number, fabBott
           ),
         );
 
+        hasUserResizedPanelRef.current = true;
         setPanelSize(clamped);
         setAnchorOffset({ right: clampedAnchorRight, bottom: clampedAnchorBottom });
       };
@@ -786,7 +809,7 @@ function usePanelResize(projectId: string | undefined, fabRight: number, fabBott
 
         // Persist final size.
         try {
-          localStorage.setItem(storageKey, JSON.stringify({ width: panelSize.width, height: panelSize.height }));
+          localStorage.setItem(storageKey, JSON.stringify(panelSizeRef.current));
         } catch {
           // Best-effort
         }
@@ -802,8 +825,6 @@ function usePanelResize(projectId: string | undefined, fabRight: number, fabBott
       fabBottom,
       fabRight,
       isDesktopViewport,
-      panelSize.height,
-      panelSize.width,
       storageKey,
     ],
   );

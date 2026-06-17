@@ -1455,6 +1455,79 @@ describe("QuickChatFAB session-first UX", () => {
     expect(panel).toHaveStyle({ width: "420px", height: "360px" });
   });
 
+  it("FN-6502: opens taller by default on tablet without persisting the computed size", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("tablet");
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel).toHaveStyle({ width: "320px", height: "720px" });
+    expect(localStorage.getItem("fusion:quick-chat-size-proj-1")).toBeNull();
+  });
+
+  it("FN-6502: keeps the desktop default size unchanged when no persisted size exists", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("desktop");
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel).toHaveStyle({ width: "320px", height: "400px" });
+  });
+
+  it("FN-6502: restores an existing desktop persisted size on desktop", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("desktop");
+    localStorage.setItem("fusion:quick-chat-size-proj-1", JSON.stringify({ width: 500, height: 520 }));
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel).toHaveStyle({ width: "500px", height: "520px" });
+  });
+
+  it("FN-6502: tablet open does not overwrite a pre-existing desktop persisted size", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("tablet");
+    const persistedSize = { width: 500, height: 520 };
+    localStorage.setItem("fusion:quick-chat-size-proj-1", JSON.stringify(persistedSize));
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel).toHaveStyle({ width: "500px", height: "520px" });
+    expect(JSON.parse(localStorage.getItem("fusion:quick-chat-size-proj-1") || "null")).toEqual(persistedSize);
+  });
+
+  it("FN-6502: portrait mobile keeps inline panel sizing disabled for the full-screen CSS sheet", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel.style.width).toBe("");
+    expect(panel.style.height).toBe("");
+    expect(panel.style.right).toBe("");
+    expect(panel.style.bottom).toBe("");
+  });
+
   it("shows jump-to-latest only after leaving live tail and scrolls back on click", async () => {
     mockFetchChatMessages.mockResolvedValueOnce({
       messages: [

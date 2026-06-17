@@ -385,6 +385,7 @@ export function AppModals({
         isOpen={modalManager.terminalOpen}
         onClose={closeTerminalWithNav}
         initialCommand={modalManager.terminalInitialCommand}
+        initialCommandGeneration={modalManager.terminalInitialCommandGeneration}
         projectId={projectId}
       />
 

@@ -345,9 +345,9 @@ Access a fully functional PTY (pseudo-terminal) shell directly from the dashboar
   - `Escape` - Close terminal modal
 
 ### Saved Scripts
-Saved scripts (managed via the Scripts modal or QuickScripts dropdown in the header) launch inside the existing interactive Terminal modal instead of a separate read-only output dialog. This gives users a consistent terminal experience and lets them interact with the shell after the script starts — for example, to inspect output files, run follow-up commands, or debug failures.
+Saved scripts (managed via the Scripts modal or QuickScripts dropdown in the header) launch inside the existing interactive Terminal modal instead of a separate read-only output dialog. Each run opens a dedicated new terminal tab backed by a fresh PTY session, so script output never overwrites an existing shell. This gives users a consistent terminal experience and lets them interact with the shell after the script starts — for example, to inspect output files, run follow-up commands, or debug failures.
 
-**Modal Handoff**: When a script is launched from the Scripts modal, the modal closes immediately so the Terminal modal becomes the topmost surface — the user never sees both overlays stacked. The script command is sent to the terminal as an `initialCommand` once the PTY session connects. Running a different script while the terminal is already open sends the new command without needing to close and reopen the modal.
+**Modal Handoff**: When a script is launched from the Scripts modal, the modal closes immediately so the Terminal modal becomes the topmost surface — the user never sees both overlays stacked. The script command is sent to the new terminal tab as an `initialCommand` once the fresh PTY session connects. Running any script, including the same script again while the terminal is already open, creates another dedicated tab without needing to close and reopen the modal.
 
 **Features**:
 - **Real PTY Terminal**: Spawns a real shell (bash/zsh/powershell) using node-pty for authentic terminal behavior

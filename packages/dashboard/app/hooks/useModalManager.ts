@@ -49,6 +49,7 @@ export interface ModalManager {
   systemStatsOpen: boolean;
   terminalOpen: boolean;
   terminalInitialCommand: string | undefined;
+  terminalInitialCommandGeneration: number;
   filesOpen: boolean;
   todosOpen: boolean;
   fileBrowserWorkspace: string;
@@ -182,6 +183,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [systemStatsOpen, setSystemStatsOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalInitialCommand, setTerminalInitialCommand] = useState<string | undefined>(undefined);
+  const [terminalInitialCommandGeneration, setTerminalInitialCommandGeneration] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
   const [todosOpen, setTodosOpen] = useState(false);
   const [fileBrowserWorkspace, setFileBrowserWorkspace] = useState("project");
@@ -394,6 +396,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const runScript = useCallback(async (_name: string, command: string) => {
     setScriptsOpen(false);
     setTerminalInitialCommand(command);
+    setTerminalInitialCommandGeneration((generation) => generation + 1);
     setTerminalOpen(true);
   }, []);
 
@@ -445,6 +448,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     systemStatsOpen,
     terminalOpen,
     terminalInitialCommand,
+    terminalInitialCommandGeneration,
     filesOpen,
     todosOpen,
     fileBrowserWorkspace,

@@ -140,6 +140,7 @@ describe("useModalManager", () => {
     expect(result.current.scriptsOpen).toBe(true);
     expect(result.current.terminalOpen).toBe(false);
     expect(result.current.terminalInitialCommand).toBeUndefined();
+    expect(result.current.terminalInitialCommandGeneration).toBe(0);
 
     await act(async () => {
       await result.current.runScript("build", "pnpm build");
@@ -148,6 +149,14 @@ describe("useModalManager", () => {
     expect(result.current.scriptsOpen).toBe(false);
     expect(result.current.terminalOpen).toBe(true);
     expect(result.current.terminalInitialCommand).toBe("pnpm build");
+    expect(result.current.terminalInitialCommandGeneration).toBe(1);
+
+    await act(async () => {
+      await result.current.runScript("build", "pnpm build");
+    });
+
+    expect(result.current.terminalInitialCommand).toBe("pnpm build");
+    expect(result.current.terminalInitialCommandGeneration).toBe(2);
   });
 
   it("tracks detail task state and supports tab-specific opens", () => {

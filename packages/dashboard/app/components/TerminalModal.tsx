@@ -209,6 +209,7 @@ interface TerminalModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialCommand?: string;
+  initialCommandGeneration?: number;
   projectId?: string;
 }
 
@@ -227,7 +228,7 @@ interface TerminalModalProps {
  * 
  * The terminal spawns a real shell (bash/zsh/powershell based on platform).
  */
-export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: TerminalModalProps) {
+export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandGeneration = 0, projectId }: TerminalModalProps) {
   const { t } = useTranslation("app");
   const [error, setError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -253,9 +254,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<ITerminalAddon | null>(null);
   const hasInitialCommandRun = useRef<string | false>(false);
-  const initialCommandAtOpenRef = useRef<string | null>(null);
-  const latestInitialCommandRef = useRef<string | undefined>(initialCommand);
-  const pendingInitialCommandRef = useRef<{ command: string; sessionId: string } | null>(null);
+  const pendingInitialCommandRef = useRef<{ command: string; commandKey: string; sessionId: string } | null>(null);
   const creatingInitialCommandTabRef = useRef(false);
   const xtermInitializedRef = useRef<string | false>(false);
   const resizeRef = useRef<((cols: number, rows: number) => void) | null>(null);
@@ -283,7 +282,6 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   fontSizeRef.current = fontSize;
   terminalPreferencesRef.current = terminalPreferences;
   resolvedFontFamilyRef.current = resolvedFontFamily;
-  latestInitialCommandRef.current = initialCommand;
 
   /**
    * Fit xterm and publish cols/rows for a specific terminal session.
@@ -325,7 +323,6 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // effect re-evaluates after a close/reopen cycle (deps may be identical).
   useEffect(() => {
     if (isOpen) {
-      initialCommandAtOpenRef.current = latestInitialCommandRef.current ?? null;
       setOpenGeneration((g) => g + 1);
     }
   }, [isOpen]);
@@ -831,7 +828,6 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     setXtermReady(false);
     setXtermInitError(null);
     hasInitialCommandRun.current = false;
-    initialCommandAtOpenRef.current = null;
     pendingInitialCommandRef.current = null;
     creatingInitialCommandTabRef.current = false;
     setError(null);
@@ -889,45 +885,37 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   }, [xtermReady, activeTab?.sessionId, activeTab?.id, activeTab, connectionStatus, onData, onScrollback, onConnect, onExit, updateTabTitle]);
 
   // Run initial command when connected.
-  // Tracks the last command that was sent so that a new command provided
-  // while the terminal is already open (e.g., running a different script)
-  // will be executed immediately without requiring a modal close/reopen.
-  // Commands provided with a fresh modal open use the auto-created active tab;
-  // later commands create a new tab first so an existing terminal is not
-  // interrupted or overwritten by script output.
+  // Tracks the last command dispatch key so new quick-script invocations can
+  // execute immediately without requiring a modal close/reopen.
+  //
+  // FNXC:Terminal 2026-06-17-00:00:
+  // Quick scripts must always spawn a dedicated terminal tab backed by a fresh PTY session, including first-open, already-open, and same-command rerun paths. Never inject a script into the auto-created or currently active shell because that destructively reuses user context.
+  //
   // Depends on openGeneration so the command re-fires after close/reopen.
   useEffect(() => {
     if (connectionStatus !== "connected" || !initialCommand || !activeTab) {
       return;
     }
 
-    if (hasInitialCommandRun.current === initialCommand) {
+    const commandKey = `${initialCommandGeneration}:${initialCommand}`;
+
+    if (hasInitialCommandRun.current === commandKey) {
       return;
     }
 
     const pendingCommand = pendingInitialCommandRef.current;
-    if (pendingCommand?.command === initialCommand || creatingInitialCommandTabRef.current) {
+    if (pendingCommand?.commandKey === commandKey || creatingInitialCommandTabRef.current) {
       return;
     }
 
-    hasInitialCommandRun.current = initialCommand;
-
-    const commandArrivedWithThisOpen =
-      hasInitialCommandRun.current === initialCommand &&
-      initialCommandAtOpenRef.current === initialCommand;
-
-    if (commandArrivedWithThisOpen) {
-      setTimeout(() => {
-        sendInputRef.current(initialCommand + "\n");
-      }, 500);
-      return;
-    }
+    hasInitialCommandRun.current = commandKey;
 
     creatingInitialCommandTabRef.current = true;
     void createTab()
       .then((newTab) => {
         pendingInitialCommandRef.current = {
           command: initialCommand,
+          commandKey,
           sessionId: newTab.sessionId,
         };
         setPendingInitialCommandGeneration((generation) => generation + 1);
@@ -935,14 +923,14 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
       .catch((err) => {
         const message = getErrorMessage(err);
         setError(t("terminal.createScriptTabError", "Failed to create terminal tab for script: {{message}}", { message }));
-        if (hasInitialCommandRun.current === initialCommand) {
+        if (hasInitialCommandRun.current === commandKey) {
           hasInitialCommandRun.current = false;
         }
       })
       .finally(() => {
         creatingInitialCommandTabRef.current = false;
       });
-  }, [connectionStatus, initialCommand, activeTab, createTab, openGeneration, t]);
+  }, [connectionStatus, initialCommand, initialCommandGeneration, activeTab, createTab, openGeneration, t]);
 
   useEffect(() => {
     const pendingCommand = pendingInitialCommandRef.current;

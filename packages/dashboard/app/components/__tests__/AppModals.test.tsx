@@ -174,6 +174,7 @@ describe("AppModals", () => {
     subtaskResumeSessionId: undefined,
     terminalOpen: false,
     terminalInitialCommand: undefined,
+    terminalInitialCommandGeneration: 0,
     scriptsOpen: false,
     filesOpen: false,
     todosOpen: false,

@@ -122,6 +122,35 @@ function createDeferredPromise<T>() {
   return { promise, resolve, reject };
 }
 
+function mockQuickChatVisualViewport({ height = 800, offsetTop = 0, width = 390 } = {}) {
+  const visualViewport = new EventTarget() as VisualViewport;
+  Object.defineProperties(visualViewport, {
+    height: { value: height, writable: true, configurable: true },
+    width: { value: width, writable: true, configurable: true },
+    offsetTop: { value: offsetTop, writable: true, configurable: true },
+    offsetLeft: { value: 0, writable: true, configurable: true },
+    pageTop: { value: 0, writable: true, configurable: true },
+    pageLeft: { value: 0, writable: true, configurable: true },
+    scale: { value: 1, writable: true, configurable: true },
+  });
+  Object.defineProperty(window, "visualViewport", { value: visualViewport, configurable: true, writable: true });
+  return visualViewport;
+}
+
+async function driveQuickChatVisualViewport(
+  visualViewport: VisualViewport,
+  { height, offsetTop, eventType = "resize" }: { height: number; offsetTop: number; eventType?: "resize" | "scroll" },
+) {
+  Object.defineProperties(visualViewport, {
+    height: { value: height, writable: true, configurable: true },
+    offsetTop: { value: offsetTop, writable: true, configurable: true },
+  });
+
+  await act(async () => {
+    visualViewport.dispatchEvent(new Event(eventType));
+  });
+}
+
 describe("QuickChatFAB session-first UX", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -974,6 +1003,118 @@ describe("QuickChatFAB session-first UX", () => {
     } finally {
       isIOSSpy.mockRestore();
     }
+  });
+
+  it("FN-6498: mobile visualViewport tracking skips duplicate resize/scroll writes and clears stale variables", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 280,
+      viewportHeight: 520,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+    const visualViewport = mockQuickChatVisualViewport({ height: 800, offsetTop: 0 });
+    const styleWriteSpy = vi.spyOn(CSSStyleDeclaration.prototype, "setProperty");
+    const styleRemoveSpy = vi.spyOn(CSSStyleDeclaration.prototype, "removeProperty");
+
+    const rendered = render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    const panel = await screen.findByTestId("quick-chat-panel");
+    await screen.findByTestId("quick-chat-input");
+
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("800px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+    const initialWriteCount = styleWriteSpy.mock.calls.length;
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 520, offsetTop: 0, eventType: "resize" });
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("520px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+    const writesAfterResize = styleWriteSpy.mock.calls.length;
+    expect(writesAfterResize - initialWriteCount).toBe(2);
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 520, offsetTop: 0, eventType: "scroll" });
+    expect(styleWriteSpy.mock.calls.length).toBe(writesAfterResize);
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 360, offsetTop: 24, eventType: "resize" });
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("360px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("24px");
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 800, offsetTop: 0, eventType: "resize" });
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("800px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+
+    rendered.unmount();
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("");
+    expect(styleRemoveSpy).toHaveBeenCalledWith("--vv-height");
+    expect(styleRemoveSpy).toHaveBeenCalledWith("--vv-offset-top");
+
+    styleWriteSpy.mockRestore();
+    styleRemoveSpy.mockRestore();
+  });
+
+  it("FN-6498: close while suppressing dismiss samples resets tracking for reopen", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    const visualViewport = mockQuickChatVisualViewport({ height: 800, offsetTop: 0 });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+    const firstPanel = await screen.findByTestId("quick-chat-panel");
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 360, offsetTop: 24, eventType: "resize" });
+    expect(firstPanel.style.getPropertyValue("--vv-height")).toBe("360px");
+    expect(firstPanel.style.getPropertyValue("--vv-offset-top")).toBe("24px");
+
+    fireEvent.blur(input);
+    expect(firstPanel.style.getPropertyValue("--vv-height")).toBe("");
+    expect(firstPanel.style.getPropertyValue("--vv-offset-top")).toBe("");
+    fireEvent.click(screen.getByTestId("quick-chat-close"));
+    expect(screen.queryByTestId("quick-chat-panel")).toBeNull();
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 800, offsetTop: 0, eventType: "resize" });
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    const reopenedPanel = await screen.findByTestId("quick-chat-panel");
+    expect(reopenedPanel.style.getPropertyValue("--vv-height")).toBe("800px");
+    expect(reopenedPanel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 520, offsetTop: 0, eventType: "resize" });
+    expect(reopenedPanel.style.getPropertyValue("--vv-height")).toBe("520px");
+    expect(reopenedPanel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+  });
+
+  it("FN-6498: desktop quick chat does not attach visualViewport tracking listeners", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("desktop");
+    const visualViewport = mockQuickChatVisualViewport({ height: 800, offsetTop: 0, width: 1024 });
+    const addListenerSpy = vi.spyOn(visualViewport, "addEventListener");
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    expect(await screen.findByTestId("quick-chat-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-chat-resize-n")).toBeInTheDocument();
+    expect(addListenerSpy).not.toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(addListenerSpy).not.toHaveBeenCalledWith("scroll", expect.any(Function));
+  });
+
+  it("FN-6498: missing visualViewport leaves mobile panel on CSS fallback without listeners", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "visualViewport", { value: undefined, configurable: true, writable: true });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const panel = await screen.findByTestId("quick-chat-panel");
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("");
   });
 
   it("uses icon-only model tag without pill styling when mobile header fallback is active", async () => {

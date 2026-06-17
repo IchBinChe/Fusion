@@ -1180,27 +1180,46 @@ export function QuickChatFAB({
   // its own keyboard animation; deferring our write to the next frame
   // makes the panel lag iOS by one paint, which is visible as a slide.
   // Synchronous writes keep the panel locked to the visual viewport.
+  /*
+  FNXC:QuickChatMobileResize 2026-06-16-18:14:
+  FN-6498 requires the mobile fullscreen sheet to track visualViewport samples smoothly across iOS and Android. Keep iOS second-focus offsetTop compensation and keyboard-dismiss pre-grow, but avoid redundant same-sample resize/scroll writes that add layout thrash on Android Chrome interactive-widget=resizes-content.
+  */
   useLayoutEffect(() => {
     if (!isOpen) return;
+    if (!isMobile) return;
     if (typeof window === "undefined" || !window.visualViewport) return;
+    if (window.innerWidth > QUICK_CHAT_DESKTOP_BREAKPOINT) return;
     const panel = panelRef.current;
     if (!panel) return;
 
     const vv = window.visualViewport;
+    let lastAppliedSample: { height: number; offsetTop: number } | null = null;
     const apply = () => {
       if (suppressVvShrinkRef.current) return;
-      panel.style.setProperty("--vv-height", `${vv.height}px`);
-      panel.style.setProperty("--vv-offset-top", `${vv.offsetTop || 0}px`);
+      const nextSample = { height: vv.height, offsetTop: vv.offsetTop || 0 };
+      if (
+        lastAppliedSample
+        && lastAppliedSample.height === nextSample.height
+        && lastAppliedSample.offsetTop === nextSample.offsetTop
+      ) {
+        return;
+      }
+      lastAppliedSample = nextSample;
+      panel.style.setProperty("--vv-height", `${nextSample.height}px`);
+      panel.style.setProperty("--vv-offset-top", `${nextSample.offsetTop}px`);
     };
 
     apply();
     vv.addEventListener("resize", apply);
     vv.addEventListener("scroll", apply);
     return () => {
+      suppressVvShrinkRef.current = false;
       vv.removeEventListener("resize", apply);
       vv.removeEventListener("scroll", apply);
+      panel.style.removeProperty("--vv-height");
+      panel.style.removeProperty("--vv-offset-top");
     };
-  }, [isOpen]);
+  }, [isMobile, isOpen]);
 
   const resolvedModelSelection = selectedModel || configuredDefaultModelSelection;
   const targetModelSelection = useMemo(

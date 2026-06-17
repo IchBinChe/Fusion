@@ -28,6 +28,7 @@ interface UseModalManagerOptions {
 export interface ModalManager {
   // State
   newTaskModalOpen: boolean;
+  newTaskInitialDescription: string | null;
   isPlanningOpen: boolean;
   planningInitialPlan: string | null;
   planningResumeSessionId: string | undefined;
@@ -69,6 +70,7 @@ export interface ModalManager {
 
   // Handlers
   openNewTask: () => void;
+  openNewTaskWithDescription: (description: string) => void;
   closeNewTask: () => void;
 
   openPlanning: () => void;
@@ -155,6 +157,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const { planningSessions } = options;
 
   const [newTaskModalOpen, setNewTaskModalOpen] = useState(false);
+  const [newTaskInitialDescription, setNewTaskInitialDescription] = useState<string | null>(null);
   const [isPlanningOpen, setIsPlanningOpen] = useState(false);
   const [planningInitialPlan, setPlanningInitialPlan] = useState<string | null>(null);
   const [planningResumeSessionId, setPlanningResumeSessionId] = useState<string | undefined>(undefined);
@@ -217,8 +220,18 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       modelOnboardingOpen,
   );
 
-  const openNewTask = useCallback(() => setNewTaskModalOpen(true), []);
-  const closeNewTask = useCallback(() => setNewTaskModalOpen(false), []);
+  const openNewTask = useCallback(() => {
+    setNewTaskInitialDescription(null);
+    setNewTaskModalOpen(true);
+  }, []);
+  const openNewTaskWithDescription = useCallback((description: string) => {
+    setNewTaskInitialDescription(description);
+    setNewTaskModalOpen(true);
+  }, []);
+  const closeNewTask = useCallback(() => {
+    setNewTaskModalOpen(false);
+    setNewTaskInitialDescription(null);
+  }, []);
 
   const openPlanning = useCallback(() => setIsPlanningOpen(true), []);
   const openPlanningWithInitialPlan = useCallback((initialPlan: string) => {
@@ -412,6 +425,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
 
   return {
     newTaskModalOpen,
+    newTaskInitialDescription,
     isPlanningOpen,
     planningInitialPlan,
     planningResumeSessionId,
@@ -447,6 +461,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     modelOnboardingOpen,
     anyModalOpen,
     openNewTask,
+    openNewTaskWithDescription,
     closeNewTask,
     openPlanning,
     openPlanningWithInitialPlan,

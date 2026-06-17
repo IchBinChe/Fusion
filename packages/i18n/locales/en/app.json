@@ -1948,6 +1948,17 @@
     "toggleWordWrap": "Toggle word wrap",
     "wrap": "Wrap"
   },
+  "selectionComment": {
+    "addComment": "Add comment",
+    "addCommentAria": "Add a comment to the selected text and send it to a new task",
+    "cancel": "Cancel",
+    "commentAria": "Comment for the new task",
+    "commentPlaceholder": "Describe the task this snippet should become…",
+    "dialogAria": "Comment on selected text",
+    "selectedSnippet": "Selected snippet",
+    "sendToNewTask": "Send to new task",
+    "title": "Comment on selection"
+  },
   "fileMention": {
     "empty": "No tasks or files found",
     "fileHeader": "Files",

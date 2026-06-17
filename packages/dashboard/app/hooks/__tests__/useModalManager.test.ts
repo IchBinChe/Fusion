@@ -55,6 +55,7 @@ describe("useModalManager", () => {
     );
 
     expect(result.current.newTaskModalOpen).toBe(false);
+    expect(result.current.newTaskInitialDescription).toBeNull();
     expect(result.current.anyModalOpen).toBe(false);
 
     act(() => {
@@ -62,6 +63,7 @@ describe("useModalManager", () => {
     });
 
     expect(result.current.newTaskModalOpen).toBe(true);
+    expect(result.current.newTaskInitialDescription).toBeNull();
     expect(result.current.anyModalOpen).toBe(true);
 
     act(() => {
@@ -69,7 +71,34 @@ describe("useModalManager", () => {
     });
 
     expect(result.current.newTaskModalOpen).toBe(false);
+    expect(result.current.newTaskInitialDescription).toBeNull();
     expect(result.current.anyModalOpen).toBe(false);
+  });
+
+  it("opens the new task modal with a seeded description and resets it on close", () => {
+    const { result } = renderHook(() =>
+      useModalManager({ projectId: "proj_1", planningSessions: [] }),
+    );
+
+    act(() => {
+      result.current.openNewTaskWithDescription("File: README.md\n\nComment:\nCreate a task");
+    });
+
+    expect(result.current.newTaskModalOpen).toBe(true);
+    expect(result.current.newTaskInitialDescription).toContain("README.md");
+
+    act(() => {
+      result.current.closeNewTask();
+    });
+
+    expect(result.current.newTaskModalOpen).toBe(false);
+    expect(result.current.newTaskInitialDescription).toBeNull();
+
+    act(() => {
+      result.current.openNewTask();
+    });
+
+    expect(result.current.newTaskInitialDescription).toBeNull();
   });
 
   it("handles planning open, resume, and close lifecycle", () => {

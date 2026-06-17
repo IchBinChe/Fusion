@@ -404,6 +404,7 @@ export function AppModals({
           onClose={closeFilesWithNav}
           onWorkspaceChange={modalManager.setFileWorkspace}
           projectId={projectId}
+          onSendSelectionToTask={modalManager.openNewTaskWithDescription}
         />
       )}
 
@@ -446,6 +447,7 @@ export function AppModals({
           onCreateTask={handleModalCreateWithOnboardingTracking}
           addToast={addToast}
           projectId={projectId}
+          initialDescription={modalManager.newTaskInitialDescription ?? ""}
         />
       </ModalErrorBoundary>
 

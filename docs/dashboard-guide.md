@@ -450,6 +450,7 @@ Features:
 - Open project markdown files with inline preview
 - Jump directly from a document group to the owning task detail modal
 - Toggle between raw text and rendered markdown using the **Markdown/Plain** button
+- Highlight text in raw or rendered project-file previews, choose **Add comment**, and send the file path, selected snippet, and your comment to the **New Task** dialog
 
 ![Documents view](./screenshots/documents-view.png)
 
@@ -479,6 +480,8 @@ Documents view supports toggling between raw text and formatted markdown when vi
 - **Markdown mode**: Renders markdown with proper formatting (e.g., **bold**, headings, lists, tables)
 
 The toggle button is accessible with `aria-pressed` for screen readers. Toggle state is scoped per-document, so switching between documents resets the view to raw mode.
+
+Project-file previews also support selection comments in both raw and rendered markdown modes. Select text, click **Add comment**, enter a short note, and Fusion opens **New Task** with a seeded description containing the file path, snippet, and comment.
 
 ## Todo View
 
@@ -523,10 +526,11 @@ The Files modal provides a workspace-aware file browser and editor.
 - Use **New File** or **New Folder** in the browser header to create entries in the current folder; new files open in the editor after creation
 - Source/text editing supports a **Line #** header toggle to show or hide line numbers in the editor gutter
 - The line-number preference is saved per project and restored automatically when you switch projects
+- In editable files and markdown preview mode, highlighted text exposes **Add comment** so you can send the file path, selected snippet, best-effort line range, and your note to the **New Task** dialog without copy/paste
 
 ## Memory View
 
-Memory view provides a multi-file editor for project and daily memory files.
+Memory view provides a multi-file editor for project and daily memory files. Its file editors share the same highlighted-text **Add comment** affordance as the Files modal, so memory snippets can seed a New Task with file path, snippet, and comment context.
 
 > Available when the `experimentalFeatures.memoryView` toggle is enabled.
 

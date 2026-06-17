@@ -10,11 +10,72 @@ import { clampTaskListText, MAX_TASK_LIST_TEXT_CHARS } from "../task-list-format
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+type RuntimeCoreTaskListModule = {
+  COLUMNS: readonly string[];
+  COLUMN_LABELS: Record<string, string>;
+  MAX_TASK_LIST_TEXT_CHARS: number;
+  clampTaskListText: (lines: string[]) => string;
+};
+
+type RuntimeTask = {
+  id: string;
+  title?: string;
+  description: string;
+  column: string;
+  dependencies?: string[];
+};
+
+function formatRuntimeTaskLine(task: RuntimeTask): string {
+  const dependencySuffix = task.dependencies?.length ? ` [deps: ${task.dependencies.join(", ")}]` : "";
+  return `${task.id}  ${task.title || task.description}${dependencySuffix}`;
+}
+
+function executeRuntimeTaskList(
+  core: RuntimeCoreTaskListModule,
+  tasks: RuntimeTask[],
+  params: { column?: string; limit?: number } = {},
+) {
+  if (tasks.length === 0) {
+    return {
+      content: [{ type: "text", text: "No tasks yet." }],
+      details: { count: 0 },
+    };
+  }
+
+  const perColumn = params.limit ?? 10;
+  const lines: string[] = [];
+  for (const col of core.COLUMNS) {
+    if (params.column && params.column !== col) continue;
+
+    const colTasks = tasks.filter((task) => task.column === col);
+    if (colTasks.length === 0) continue;
+
+    lines.push(`${core.COLUMN_LABELS[col] ?? col} (${colTasks.length}):`);
+    const shown = colTasks.slice(0, perColumn);
+    for (const task of shown) {
+      lines.push(`  ${formatRuntimeTaskLine(task)}`);
+    }
+    const hidden = colTasks.length - shown.length;
+    if (hidden > 0) {
+      lines.push(`  ... and ${hidden} more`);
+    }
+    lines.push("");
+  }
+
+  return {
+    content: [{ type: "text", text: core.clampTaskListText(lines).trimEnd() }],
+    details: { count: tasks.length },
+  };
+}
+
 /**
  * FNXC:TaskListOutput 2026-06-16-23:20:
  * FN-6515 requires the @fusion/core dist barrel to export clampTaskListText and MAX_TASK_LIST_TEXT_CHARS because heartbeat fn_task_list and other runtime surfaces load the built dist, not src/index.ts. Source-aliased tests alone can pass while a stale or missing dist export still crashes ambient agents.
+ *
+ * FNXC:TaskListOutput 2026-06-17-02:30:
+ * FN-6535 requires this guard to execute a fn_task_list-shaped runtime call through the built dist module, not just assert the barrel types. The recurring crash was a post-FN-6492 tool call resolving @fusion/core through exports.import to stale dist, so the regression must fail when that dist omits the helper.
  */
-describe("@fusion/core dist barrel export wiring (FN-6515)", () => {
+describe("@fusion/core dist barrel export wiring (FN-6515/FN-6535)", () => {
   const distIndex = resolve(__dirname, "../../dist/index.js");
   const distTaskListFormat = resolve(__dirname, "../../dist/task-list-format.js");
 
@@ -30,6 +91,53 @@ describe("@fusion/core dist barrel export wiring (FN-6515)", () => {
 
     expect(typeof mod.clampTaskListText).toBe("function");
     expect(typeof mod.MAX_TASK_LIST_TEXT_CHARS).toBe("number");
+  });
+
+  it.skipIf(!existsSync(distIndex))("executes the fn_task_list surface through the built dist core module", async () => {
+    expect(existsSync(distTaskListFormat)).toBe(true);
+
+    const mod = await import(pathToFileURL(distIndex).href) as RuntimeCoreTaskListModule;
+    const todoAnchor: RuntimeTask = {
+      id: "FN-001",
+      title: `Runtime todo task 001 ${"x".repeat(260)}`,
+      description: "Runtime todo task 001",
+      column: "todo",
+    };
+    const tasks: RuntimeTask[] = [
+      ...Array.from({ length: 35 }, (_, index) => ({
+        id: `FN-${String(index + 101).padStart(3, "0")}`,
+        title: `Runtime planning task ${String(index + 1).padStart(3, "0")} ${"x".repeat(380)}`,
+        description: `Runtime planning task ${String(index + 1).padStart(3, "0")}`,
+        column: "triage",
+      })),
+      todoAnchor,
+      ...Array.from({ length: 59 }, (_, index) => ({
+        id: `FN-${String(index + 2).padStart(3, "0")}`,
+        title: `Runtime todo task ${String(index + 2).padStart(3, "0")} ${"x".repeat(260)}`,
+        description: `Runtime todo task ${String(index + 2).padStart(3, "0")}`,
+        column: "todo",
+        dependencies: [todoAnchor.id],
+      })),
+    ];
+
+    const broadResult = executeRuntimeTaskList(mod, tasks, { limit: 20 });
+    const broadText = broadResult.content[0].text;
+    expect(broadResult.content).toEqual([{ type: "text", text: expect.any(String) }]);
+    expect(broadText.length).toBeLessThanOrEqual(mod.MAX_TASK_LIST_TEXT_CHARS);
+    expect(broadText).toContain("Planning (35):");
+    expect(broadText).toContain("FN-101");
+    expect(broadText).toContain("truncated to fit; narrow with column/limit");
+    expect(broadResult.details.count).toBe(95);
+
+    const todoResult = executeRuntimeTaskList(mod, tasks, { column: "todo", limit: 50 });
+    const todoText = todoResult.content[0].text;
+    expect(todoResult.content).toEqual([{ type: "text", text: expect.any(String) }]);
+    expect(todoText.length).toBeLessThanOrEqual(mod.MAX_TASK_LIST_TEXT_CHARS);
+    expect(todoText).toContain("Todo (60):");
+    expect(todoText).toContain("FN-001");
+    expect(todoText).toContain("[deps: FN-001]");
+    expect(todoText).toContain("truncated to fit; narrow with column/limit");
+    expect(todoResult.details.count).toBe(95);
   });
 });
 

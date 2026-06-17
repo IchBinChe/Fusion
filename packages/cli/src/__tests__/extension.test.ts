@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 /*
@@ -26,6 +28,8 @@ import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_ST
 import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { runTaskPlan } from "../commands/task.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Mock ExtensionAPI that captures registrations ──────────────────
 
@@ -2657,6 +2661,82 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(text).toContain("truncated to fit; narrow with column/limit");
       expect(result.details.count).toBe(60);
     });
+
+    /**
+     * FNXC:TaskListOutput 2026-06-17-02:37:
+     * FN-6535 reproduces the heartbeat failure at the actual CLI tool surface while forcing @fusion/core to resolve through the built dist barrel. The normal CLI suite aliases @fusion/core to source, so this targeted mock is the regression guard for stale exports.import dist artifacts.
+     */
+    it.skipIf(!existsSync(resolve(__dirname, "../../../core/dist/index.js")))(
+      "executes with @fusion/core resolved through the built dist barrel",
+      async () => {
+        const distCoreIndex = resolve(__dirname, "../../../core/dist/index.js");
+        const distTaskListFormat = resolve(__dirname, "../../../core/dist/task-list-format.js");
+        expect(existsSync(distTaskListFormat)).toBe(true);
+
+        const store = new TaskStore(tmpDir);
+        await store.init();
+        try {
+          const first = await store.createTask({
+            title: `Runtime-dist todo task 001 ${"x".repeat(700)}`,
+            description: "Runtime-dist todo task 001",
+            column: "todo",
+          });
+          for (let i = 2; i <= 60; i += 1) {
+            await store.createTask({
+              title: `Runtime-dist todo task ${String(i).padStart(3, "0")} ${"x".repeat(700)}`,
+              description: `Runtime-dist todo task ${String(i).padStart(3, "0")}`,
+              column: "todo",
+              dependencies: [first.id],
+            });
+          }
+        } finally {
+          store.close();
+        }
+
+        vi.resetModules();
+        vi.doMock("@fusion/core", async () => import(pathToFileURL(distCoreIndex).href));
+        try {
+          const { default: runtimeCoreExtension } = await import("../extension.js?fn6535-runtime-core-dist");
+          const runtimeApi = createMockAPI();
+          runtimeCoreExtension(runtimeApi);
+          const listTool = runtimeApi.tools.get("fn_task_list")!;
+
+          const broadResult = await listTool.execute(
+            "list-runtime-dist-broad",
+            { limit: 20 },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          );
+          const broadText = broadResult.content[0].text;
+          expect(broadResult.content).toHaveLength(1);
+          expect(broadResult.content[0].type).toBe("text");
+          expect(broadText.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+          expect(broadText).toContain("Todo (60):");
+          expect(broadText).toContain("truncated to fit; narrow with column/limit");
+
+          const todoResult = await listTool.execute(
+            "list-runtime-dist-todo",
+            { column: "todo", limit: 50 },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          );
+          const todoText = todoResult.content[0].text;
+          expect(todoResult.content).toHaveLength(1);
+          expect(todoResult.content[0].type).toBe("text");
+          expect(todoText.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+          expect(todoText).toContain("Todo (60):");
+          expect(todoText).toContain("FN-001");
+          expect(todoText).toContain("[deps: FN-001]");
+          expect(todoText).toContain("truncated to fit; narrow with column/limit");
+          expect(todoResult.details.count).toBe(60);
+        } finally {
+          vi.doUnmock("@fusion/core");
+          vi.resetModules();
+        }
+      },
+    );
   });
 
   it("returns structured details for invalid task assignment", async () => {

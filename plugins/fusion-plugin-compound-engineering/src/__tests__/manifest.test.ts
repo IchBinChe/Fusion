@@ -58,6 +58,7 @@ describe("compound engineering plugin manifest", () => {
       "ce-plan",
       "ce-work",
       "ce-code-review",
+      "ce-debug",
       "ce-compound",
       "ce-commit",
       "ce-commit-push-pr",

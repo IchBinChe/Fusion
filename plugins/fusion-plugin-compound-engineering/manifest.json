@@ -34,9 +34,9 @@
       "type": "array",
       "itemType": "string",
       "label": "Enabled Stages",
-      "description": "Stage IDs that may be launched from the Compound Engineering view (for example strategy, ideate, brainstorm, plan, work).",
+      "description": "Stage IDs that may be launched from the Compound Engineering view (for example strategy, ideate, brainstorm, plan, work, debug).",
       "group": "Sessions",
-      "defaultValue": ["strategy", "ideate", "brainstorm", "plan", "work"]
+      "defaultValue": ["strategy", "ideate", "brainstorm", "plan", "work", "debug"]
     },
     "reconcileOnHooks": {
       "type": "boolean",

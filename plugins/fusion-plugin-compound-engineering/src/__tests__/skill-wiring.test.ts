@@ -28,16 +28,45 @@ describe("session skill wiring", () => {
     h.close();
   });
 
-  it("start() passes the stage skill id, install path, and project-root cwd to the factory", async () => {
-    const captured: CreateInteractiveAiSessionOptions[] = [];
-    const script: InteractiveAiSessionEvent[] = [
-      { type: "complete", data: { artifact: "# done" } },
-    ];
-    const session = makeScriptedSession(script);
-    const factory = vi.fn(async (opts: CreateInteractiveAiSessionOptions) => {
-      captured.push(opts);
-      return { session };
-    });
+  it.each(["brainstorm", "debug"])(
+    "start() passes the %s stage skill id, install path, and project-root cwd to the factory",
+    async (stageId) => {
+      const captured: CreateInteractiveAiSessionOptions[] = [];
+      const script: InteractiveAiSessionEvent[] = [
+        { type: "complete", data: { artifact: "# done" } },
+      ];
+      const session = makeScriptedSession(script);
+      const factory = vi.fn(async (opts: CreateInteractiveAiSessionOptions) => {
+        captured.push(opts);
+        return { session };
+      });
+      const orch = new CeOrchestrator({
+        ctx: h.ctx,
+        createInteractiveAiSession: factory,
+        projectRoot: h.projectRoot,
+        turnTimeoutMs: 5000,
+      });
+
+      await orch.start(stageId, { openingMessage: "let's go" });
+
+      expect(captured).toHaveLength(1);
+      const opts = captured[0];
+      const stage = getStage(stageId)!;
+      // cwd is the project root, not the skills dir.
+      expect(opts.cwd).toBe(h.projectRoot);
+      // the stage's ce-* skill is requested...
+      expect(opts.requestedSkillNames).toEqual([stage.skillId]);
+      // ...and the plugin-local install root is on the discovery path.
+      expect(opts.additionalSkillPaths).toEqual([resolveDefaultInstallTargetRoot()]);
+      expect(opts.additionalSkillPaths?.[0]).toMatch(/\.fusion-ce-skills$/);
+    },
+  );
+
+  it("rejects debug launch cleanly when the stage is disabled", async () => {
+    h.ctx.settings = { enabledStages: ["strategy", "ideate", "brainstorm", "plan", "work"] };
+    const factory = vi.fn(async () => ({
+      session: makeScriptedSession([{ type: "complete", data: { artifact: "# done" } }]),
+    }));
     const orch = new CeOrchestrator({
       ctx: h.ctx,
       createInteractiveAiSession: factory,
@@ -45,17 +74,9 @@ describe("session skill wiring", () => {
       turnTimeoutMs: 5000,
     });
 
-    await orch.start("brainstorm", { openingMessage: "let's go" });
-
-    expect(captured).toHaveLength(1);
-    const opts = captured[0];
-    const stage = getStage("brainstorm")!;
-    // cwd is the project root, not the skills dir.
-    expect(opts.cwd).toBe(h.projectRoot);
-    // the stage's ce-* skill is requested...
-    expect(opts.requestedSkillNames).toEqual([stage.skillId]);
-    // ...and the plugin-local install root is on the discovery path.
-    expect(opts.additionalSkillPaths).toEqual([resolveDefaultInstallTargetRoot()]);
-    expect(opts.additionalSkillPaths?.[0]).toMatch(/\.fusion-ce-skills$/);
+    await expect(orch.start("debug", { openingMessage: "investigate" })).rejects.toThrow(
+      "CE stage is not enabled: debug",
+    );
+    expect(factory).not.toHaveBeenCalled();
   });
 });

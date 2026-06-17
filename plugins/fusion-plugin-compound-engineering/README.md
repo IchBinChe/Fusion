@@ -27,8 +27,8 @@ Fusion while **reusing the real skills** so the plugin improves as they do.
 
 The primary dashboard view (`viewId: "compound-engineering"`) discovers and
 renders CE artifacts from their conventional locations (`STRATEGY.md`,
-`docs/ideation/`, `docs/brainstorms/`, plan docs, `docs/work/`, `CONCEPTS.md`,
-`docs/solutions/`) and groups them by stage. Artifacts are read through a plugin
+`docs/ideation/`, `docs/brainstorms/`, plan docs, `docs/work/`,
+`docs/debug/`, `CONCEPTS.md`, `docs/solutions/`) and groups them by stage. Artifacts are read through a plugin
 route and rendered self-contained (sandboxed preview). The hub renders explicit
 empty / partial / error states rather than crashing or silently dropping an
 unreadable artifact.
@@ -40,7 +40,8 @@ Artifact HTTP endpoints live under
 
 Each pipeline stage maps to a bundled skill via the **stage registry**
 (`src/session/stage-registry.ts`): `{ stageId, skillId, artifactLocation, icon,
-label }`. Adding a stage is a data entry — no new route, store, or screen.
+label }`. The default launchable stages are Strategy, Ideate, Brainstorm, Plan,
+Work, and Debug. Adding a stage is a data entry — no new route, store, or screen.
 
 The launcher lists the registered (and operator-enabled) stages. Launching a
 stage starts an **interactive** agent session driven by the host's

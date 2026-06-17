@@ -134,8 +134,18 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
 }
 
 .task-chat-group-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
   color: var(--text-muted);
   font-size: var(--space-md);
+}
+
+.task-chat-timestamp {
+  color: var(--text-muted);
+  font-size: calc(var(--space-md) - (var(--space-xs) / 2));
+  white-space: nowrap;
 }
 
 .task-chat-group-bubbles {
@@ -154,6 +164,10 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
 }
 
 .task-chat-user-header {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
   padding-inline: var(--space-sm);
   color: var(--text-muted);
 }
@@ -419,6 +433,11 @@ FN-6507 requires the Task Detail chat send glyph to scale with the larger square
 
   .task-chat-user-header {
     align-self: flex-end;
+    justify-content: flex-end;
+  }
+
+  .task-chat-timestamp {
+    white-space: normal;
   }
 
   .task-chat-entry--user {

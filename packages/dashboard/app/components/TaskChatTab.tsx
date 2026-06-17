@@ -8,6 +8,7 @@ import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { ToastType } from "../hooks/useToast";
 import { getErrorMessage } from "@fusion/core";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
+import { formatRelativeTimeAgo } from "../utils/relativeTimeAgo";
 import { AgentAvatar } from "./AgentAvatar";
 import { clampChatInputHeight, resolveChatInputOverflowY } from "../utils/chatInputAutosize";
 import { markdownComponents } from "./AgentLogViewer";
@@ -401,11 +402,22 @@ function TaskChatSegmentView({ segment }: { segment: TaskChatSegment }) {
   return <TaskChatText entries={segment.entries} />;
 }
 
+/*
+FNXC:TaskChatTimestamps 2026-06-17-15:43:
+FN-6597 requires small relative timestamps on both task-chat agent group headers and user message headers, computed at render time from existing transcript timestamps without adding a live timer.
+*/
 function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
+  const relativeTime = formatRelativeTimeAgo(message.createdAt);
+
   return (
     <section className="task-chat-user-group" aria-label="You message">
       <div className="task-chat-user-header">
         <div className="task-chat-role-label">You</div>
+        {relativeTime ? (
+          <span className="task-chat-timestamp" data-testid="task-chat-user-time">
+            {relativeTime}
+          </span>
+        ) : null}
       </div>
       <article className="task-chat-entry task-chat-entry--user" data-testid="task-chat-entry-user">
         <div className="markdown-body task-chat-markdown">
@@ -748,13 +760,22 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
               icon: getRoleIcon(item.role),
             };
             const segments = segmentGroupEntries(item.entries);
+            const latestEntryTimestamp = item.entries[item.entries.length - 1]?.timestamp ?? "";
+            const relativeTime = formatRelativeTimeAgo(latestEntryTimestamp);
             return (
               <section className="task-chat-group" key={`${item.role ?? "agent"}-${itemIndex}`} aria-label={`${item.label} messages`}>
                 <header className="task-chat-group-header">
                   <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />
                   <div>
                     <div className="task-chat-role-label">{item.label}</div>
-                    <div className="task-chat-group-meta">{item.entries.length === 1 ? "1 entry" : `${item.entries.length} entries`}</div>
+                    <div className="task-chat-group-meta">
+                      <span>{item.entries.length === 1 ? "1 entry" : `${item.entries.length} entries`}</span>
+                      {relativeTime ? (
+                        <span className="task-chat-timestamp" data-testid="task-chat-group-time">
+                          {relativeTime}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </header>
                 <div className="task-chat-group-bubbles">

@@ -1105,7 +1105,6 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   // (which would swallow the next real tap and make the button look dead).
   const handledSendTouchRef = useRef(false);
   const handledSendTouchTimerRef = useRef<number | null>(null);
-  const tabletKeyboardSidebarVisibilityRef = useRef<boolean | null>(null);
   const mode = useViewportMode();
   const isMobile = mode === "mobile";
   const isTablet = mode === "tablet";
@@ -1221,29 +1220,6 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     allowNonMobileViewport: isTablet,
   });
   const tabletKeyboardOpen = isTablet && keyboardOpen;
-
-  useEffect(() => {
-    if (!isTablet) {
-      tabletKeyboardSidebarVisibilityRef.current = null;
-      return;
-    }
-
-    if (keyboardOpen) {
-      setSidebarVisible((currentSidebarVisible) => {
-        if (tabletKeyboardSidebarVisibilityRef.current === null) {
-          tabletKeyboardSidebarVisibilityRef.current = currentSidebarVisible;
-        }
-        return currentSidebarVisible ? false : currentSidebarVisible;
-      });
-      return;
-    }
-
-    if (tabletKeyboardSidebarVisibilityRef.current !== null) {
-      const shouldRestoreSidebar = tabletKeyboardSidebarVisibilityRef.current;
-      tabletKeyboardSidebarVisibilityRef.current = null;
-      setSidebarVisible(shouldRestoreSidebar);
-    }
-  }, [isTablet, keyboardOpen]);
 
   const filteredSkills = useMemo(() => {
     const normalizedFilter = skillFilter.trim().toLowerCase();
@@ -3050,12 +3026,20 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     </div>
   );
 
+  /**
+   * FNXC:ChatTabletKeyboard 2026-06-16-17:46:
+   * FN-6494 reverses the FN-6178/FN-6210 tablet-keyboard auto-hide: a visible chat sidebar must stay visible while the software keyboard is up, but use the minimum bounded width so the session list is not too wide in the reduced viewport. The user's persisted width remains untouched and returns when the keyboard closes; mobile keeps CSS-driven one-pane sizing.
+   */
+  const sidebarInlineStyle: React.CSSProperties | undefined = isMobile
+    ? undefined
+    : { width: `${tabletKeyboardOpen ? Math.min(sidebarWidth, CHAT_SIDEBAR_MIN_WIDTH) : sidebarWidth}px` };
+
   return (
     <div className="chat-view">
       {/* Sidebar */}
       <div
         className={`chat-sidebar${!sidebarVisible ? " chat-sidebar--hidden" : ""}`}
-        style={isMobile ? undefined : { width: `${sidebarWidth}px` }}
+        style={sidebarInlineStyle}
       >
         {chatRoomsEnabled && (
           <div className="chat-sidebar-scope-toggle" role="tablist" data-testid="chat-sidebar-scope-toggle">

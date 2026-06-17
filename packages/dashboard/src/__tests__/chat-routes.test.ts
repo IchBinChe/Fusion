@@ -1664,39 +1664,20 @@ describe("multi-project chat routing", () => {
     vi.restoreAllMocks();
   });
 
-  it("POST /cancel resolves the scoped manager via the engine-aware context (same store as the reader)", async () => {
-    // FNXC:ChatPersistence regression — the scoped writer (cancel/isGenerating/
-    // messages) must resolve through resolveProjectChatContext, the SAME engine-
-    // aware path the reader uses, so writes and reads land in one store. The old
-    // writer diverged via getOrCreateProjectStore and dropped messages on reload.
+  it("POST /cancel uses scoped ChatManager when projectId is provided", async () => {
     mockCancelGeneration.mockReturnValue(false);
-    const engineChatStore = { ...mockChatStoreInstance };
-    const getChatStore = vi.fn(() => engineChatStore);
-    const getTaskStore = vi.fn(() => store);
-    const mockEngine = { getChatStore, getTaskStore };
-    const getEngine = vi.fn((id: string) =>
-      id === secondarySession.projectId ? mockEngine : undefined,
-    );
-    const { createServer } = await import("../server.js");
-    const appWithEngine = createServer(store as any, {
-      chatStore: mockChatStore as any,
-      chatManager: mockChatManager as any,
-      engineManager: { getEngine, getAllEngines: vi.fn().mockReturnValue(new Map()) } as any,
-    });
 
     const response = await request(
-      appWithEngine,
+      app,
       "POST",
       `/api/chat/sessions/${secondarySession.id}/cancel?projectId=${secondarySession.projectId}`,
     );
 
     expect(response.status).toBe(200);
-    // Writer consulted the engine for this project (engine-aware resolution)
-    expect(getEngine).toHaveBeenCalledWith(secondarySession.projectId);
-    expect(getChatStore).toHaveBeenCalled();
-    // The divergent getOrCreateProjectStore path is no longer used
-    expect(mockGetOrCreateProjectStore).not.toHaveBeenCalled();
-    // cancelGeneration still runs on the scoped manager
+    expect((response.body as any).success).toBe(false);
+    // Scoped path: getOrCreateProjectStore is called with the secondary projectId
+    expect(mockGetOrCreateProjectStore).toHaveBeenCalledWith(secondarySession.projectId);
+    // cancelGeneration was called on the scoped manager
     expect(mockCancelGeneration).toHaveBeenCalledWith(secondarySession.id);
   });
 
@@ -1729,9 +1710,8 @@ describe("multi-project chat routing", () => {
 
     expect(response.status).toBe(200);
     expect((response.body as any).sessions).toHaveLength(1);
-    // FNXC:ChatPersistence — scoped isGenerating no longer resolves through the
-    // divergent getOrCreateProjectStore path; it shares the reader's store.
-    expect(mockGetOrCreateProjectStore).not.toHaveBeenCalled();
+    // Scoped path: getOrCreateProjectStore is called for isGenerating resolution
+    expect(mockGetOrCreateProjectStore).toHaveBeenCalledWith(secondarySession.projectId);
     // isGenerating defaults to false (MockChatManager has no getGeneratingSessionIds)
     expect((response.body as any).sessions[0].isGenerating).toBe(false);
   });

@@ -9,7 +9,8 @@ import { CHAT_ALLOWED_MIME_TYPES, CHAT_MAX_ATTACHMENT_SIZE } from "./chat-attach
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import type { ApiRoutesContext } from "./types.js";
-import { getOrCreateScopedChatManager } from "../chat-project-services.js";
+import { getOrCreateScopedChatManager, getOrCreateScopedChatStore } from "../chat-project-services.js";
+import { getOrCreateProjectStore } from "../project-store-resolver.js";
 
 interface ChatRouteDeps {
   parseLastEventId: (req: import("express").Request) => number | undefined;
@@ -111,25 +112,8 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       if (!options?.chatManager) throw new ApiError(503, "Chat manager not available");
       return options.chatManager;
     }
-    /*
-    FNXC:ChatPersistence 2026-06-16-00:00:
-    The POST /chat/sessions/:id/messages writer MUST resolve the same per-project ChatStore the
-    GET /chat/sessions/:id/messages reader uses. Otherwise a sent message persists to one store while
-    the reload reads another, so the message vanishes when the user leaves and returns to the chat.
-    The reader (resolveScopedChatStore -> resolveProjectChatContext) prefers the engine's per-project
-    store/chatStore when an engine exists for the project. This writer previously diverged by going
-    through getOrCreateProjectStore + a fresh getOrCreateScopedChatStore, bypassing the engine, which
-    could bind the ChatManager to a different store instance than the reader. Resolve both writer and
-    reader through resolveProjectChatContext so they always share one store. Quick Chat masked this
-    bug by keeping its thread warm in memory (no server reload); ChatView reloads from the server on
-    return and surfaced the missing rows.
-    */
-    const { store: projectStore, chatStore } = await resolveProjectChatContext({
-      projectId,
-      defaultStore: store,
-      defaultChatStore: options?.chatStore,
-      engineManager: options?.engineManager,
-    });
+    const projectStore = await getOrCreateProjectStore(projectId);
+    const chatStore = getOrCreateScopedChatStore(projectStore);
     return getOrCreateScopedChatManager(projectStore, chatStore, options?.pluginRunner);
   }
   // ── Chat Routes ────────────────────────────────────────────────────────────

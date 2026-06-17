@@ -2591,7 +2591,7 @@ export class TaskExecutor {
           const injectionTargets: Array<{
             kind: "legacy" | "step-session" | "workflow-step";
             seenSteeringIds: Set<string>;
-            inject: (message: string) => Promise<void>;
+            inject: (message: string, comment: import("@fusion/core").SteeringComment) => Promise<"injected" | "queued">;
             legacySession?: AgentSession;
             legacyState?: ActiveExecutorSessionState;
           }> = [];
@@ -2601,7 +2601,10 @@ export class TaskExecutor {
             injectionTargets.push({
               kind: "legacy",
               seenSteeringIds: activeSession.seenSteeringIds,
-              inject: (message) => activeSession.session.steer(message),
+              inject: async (message) => {
+                await activeSession.session.steer(message);
+                return "injected";
+              },
               legacySession: activeSession.session,
               legacyState: activeSession,
             });
@@ -2609,12 +2612,24 @@ export class TaskExecutor {
 
           const stepExecutor = this.activeStepExecutors.get(task.id);
           if (stepExecutor) {
+            /*
+            FNXC:TaskDetailChat 2026-06-17-13:24:
+            Task-detail chat comments must reach the running LLM thread immediately across legacy, step-session, and workflow-step surfaces. Step-session runs can be between per-step AgentSessions when a comment arrives, so keep the executor's task snapshot current and treat zero-session fan-out as a next-prompt fallback while preserving seenSteeringIds exactly-once delivery.
+            */
+            stepExecutor.updateSteeringComments?.(task.steeringComments);
             const seenSteeringIds = this.activeStepExecutorSeenSteeringIds.get(task.id) ?? this.createSeenSteeringIds(task);
             this.activeStepExecutorSeenSteeringIds.set(task.id, seenSteeringIds);
             injectionTargets.push({
               kind: "step-session",
               seenSteeringIds,
-              inject: (message) => stepExecutor.steerActiveSessions(message),
+              inject: async (message, comment) => {
+                const steeredSessionCount = await stepExecutor.steerActiveSessions(message);
+                if (steeredSessionCount > 0) {
+                  stepExecutor.markSteeringCommentsDelivered?.([comment.id]);
+                  return "injected";
+                }
+                return "queued";
+              },
             });
           }
 
@@ -2625,7 +2640,10 @@ export class TaskExecutor {
             injectionTargets.push({
               kind: "workflow-step",
               seenSteeringIds,
-              inject: (message) => workflowSession.steer(message),
+              inject: async (message) => {
+                await workflowSession.steer(message);
+                return "injected";
+              },
             });
           }
 
@@ -2652,8 +2670,12 @@ export class TaskExecutor {
               const commentMessage = formatCommentForInjection(comment);
               try {
                 executorLog.log(`Injecting comment into ${task.id} (${target.kind}): ${summary}`);
-                await target.inject(commentMessage);
-                executorLog.log(`Successfully injected comment into ${task.id} (${target.kind})`);
+                const delivery = await target.inject(commentMessage, comment);
+                if (delivery === "queued") {
+                  executorLog.log(`Queued comment for next ${target.kind} prompt in ${task.id}`);
+                } else {
+                  executorLog.log(`Successfully injected comment into ${task.id} (${target.kind})`);
+                }
 
                 // Log to the task once per comment/tick even if multiple active surfaces exist.
                 if (!loggedCommentIds.has(comment.id)) {

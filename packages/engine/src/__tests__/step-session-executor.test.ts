@@ -697,6 +697,25 @@ Some freeform text without checkboxes.`;
     expect(result).not.toContain("Project Commands");
   });
 
+  it("includes user steering comments as next-session fallback when no active step session existed", () => {
+    const task = makeTaskDetail({
+      prompt: fullPrompt,
+      steeringComments: [
+        {
+          id: "comment-1",
+          author: "user",
+          text: "Please prioritize the API invariant before refactoring.",
+          createdAt: "2026-06-17T13:45:00.000Z",
+        },
+      ],
+    });
+
+    const result = buildStepPrompt(task, 1);
+
+    expect(result).toContain("## Steering Comments");
+    expect(result).toContain("Please prioritize the API invariant before refactoring.");
+  });
+
   it("includes fn_task_done instruction at the end", () => {
     const task = makeTaskDetail({ prompt: fullPrompt });
     const result = buildStepPrompt(task, 1);
@@ -1106,8 +1125,9 @@ describe("StepSessionExecutor", () => {
         steer: steerThree,
       });
 
-      await executor.steerActiveSessions("new guidance");
+      const steeredCount = await executor.steerActiveSessions("new guidance");
 
+      expect(steeredCount).toBe(3);
       expect(steerOne).toHaveBeenCalledWith("new guidance");
       expect(steerTwo).toHaveBeenCalledWith("new guidance");
       expect(steerThree).toHaveBeenCalledWith("new guidance");
@@ -1140,6 +1160,47 @@ describe("StepSessionExecutor", () => {
           taskEnv: { PATH: "/task/bin", TASK_ONLY: "1" },
         }),
       );
+    });
+
+    it("delivers pending steering comments in exactly one subsequent step prompt", async () => {
+      const prompt = makeStepPrompt("FN-001", 2);
+      const task = makeTaskDetail({
+        prompt,
+        steps: [
+          { name: "Step 0", status: "pending" },
+          { name: "Step 1", status: "pending" },
+        ],
+        steeringComments: [
+          {
+            id: "queued-comment",
+            author: "user",
+            text: "Please include the queued guidance.",
+            createdAt: "2026-06-17T13:45:00.000Z",
+          },
+        ],
+      });
+      const settings = makeSettings({ maxParallelSteps: 1 });
+      const prompts: string[] = [];
+      mockedCreateFnAgent.mockImplementation(async () => ({
+        session: makeMockSession(vi.fn(async (message: string) => {
+          prompts.push(message);
+        }) as any),
+      }) as any);
+
+      const executor = new StepSessionExecutor({
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings,
+        pluginRunner: undefined,
+      } as any);
+
+      const result = await executor.executeAll();
+
+      expect(result).toHaveLength(2);
+      expect(prompts[0]).toContain("## Steering Comments");
+      expect(prompts[0]).toContain("Please include the queued guidance.");
+      expect(prompts[1]).not.toContain("Please include the queued guidance.");
     });
 
     it("happy path: 3-step task, all steps succeed", async () => {

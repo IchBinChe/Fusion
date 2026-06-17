@@ -2025,7 +2025,12 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
   const handleSendDispatch = useCallback(async () => {
     const trimmed = messageInput.trim();
-    if (!trimmed) {
+    const files = pendingAttachments.map((attachment) => attachment.file);
+    /**
+     * FNXC:Chat 2026-06-17-02:12:
+     * Main Chat room dispatch must permit attachment-only sends. Block only a truly empty composer so staged files can reach the backend without requiring filler text.
+     */
+    if (!trimmed && files.length === 0) {
       return;
     }
 
@@ -2053,7 +2058,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       clearComposerState();
 
       try {
-        await rooms.sendRoomMessage(trimmed, { files: pendingAttachments.map((attachment) => attachment.file) });
+        await rooms.sendRoomMessage(trimmed, { files });
       } catch (error) {
         if (error instanceof RoomMessageDeliveredButReplyFailedError) {
           const message = error.message.trim()
@@ -3635,8 +3640,66 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
           {rooms.activeRoom && (
             <div className="chat-input-area">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.txt,.json,.yaml,.yml,.log,.csv,.xml,.md"
+                multiple
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  handleAttachmentFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              {pendingAttachments.length > 0 && (
+                <div className="chat-attachment-previews" data-testid="chat-attachment-previews">
+                  {pendingAttachments.map((attachment, index) => (
+                    <div
+                      key={attachment.previewUrl || `${attachment.file.name}-${index}`}
+                      className="chat-attachment-preview"
+                      data-testid={`chat-attachment-preview-${index}`}
+                    >
+                      {attachment.previewUrl ? (
+                        <img src={attachment.previewUrl} alt={attachment.file.name} />
+                      ) : (
+                        <span className="chat-attachment-preview-name">{attachment.file.name}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="chat-attachment-remove"
+                        onClick={() => removeAttachment(index)}
+                        data-testid={`chat-attachment-remove-${index}`}
+                        aria-label={`Remove ${attachment.file.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="chat-input-row">
-                <div className="chat-input-wrapper">
+                <button
+                  type="button"
+                  className="btn-icon chat-attach-btn"
+                  data-testid="chat-attach-btn"
+                  aria-label={t("chat.attachFiles", "Attach files")}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Paperclip size={16} />
+                </button>
+                <div
+                  className={`chat-input-wrapper${isDragOver ? " chat-input-wrapper--dragover" : ""}`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setIsDragOver(true);
+                  }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setIsDragOver(false);
+                    handleAttachmentFiles(event.dataTransfer.files);
+                  }}
+                >
                   <textarea
                     ref={handleComposerRef}
                     className="chat-input-textarea"
@@ -3648,6 +3711,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     onClick={handleInputSelectionChange}
                     onBlur={handleInputBlur}
                     onFocus={handleInputFocus}
+                    onPaste={handlePaste}
                     onTouchStart={(event) => {
                       if (typeof window === "undefined") return;
                       if (window.innerWidth > 768) return;
@@ -3693,7 +3757,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   onClick={() => {
                     void handleSendDispatch();
                   }}
-                  disabled={!messageInput.trim()}
+                  disabled={!messageInput.trim() && pendingAttachments.length === 0}
                   data-testid="chat-send-btn"
                   style={{ touchAction: "manipulation" }}
                 >

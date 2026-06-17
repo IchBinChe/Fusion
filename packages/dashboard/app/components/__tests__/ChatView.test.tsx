@@ -1632,6 +1632,45 @@ describe("ChatView", () => {
     localStorage.removeItem("fusion:chat-scope");
   });
 
+  it("sends room attachments when the composer text is empty", async () => {
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn();
+    setupMockChat({ activeSession: activeSessionFixture, messages: [], sendMessage });
+    setupMockRooms({
+      activeRoom: {
+        id: "room-001",
+        projectId: "proj-123",
+        name: "backend",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      },
+      sendRoomMessage,
+    });
+
+    try {
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+      const textFile = new File(["room"], "room.txt", { type: "text/plain" });
+      fireEvent.change(fileInput, { target: { files: [textFile] } });
+
+      expect(await screen.findByTestId("chat-attachment-previews")).toBeInTheDocument();
+      const sendButton = screen.getByTestId("chat-send-btn");
+      expect(sendButton).not.toBeDisabled();
+
+      await userEvent.click(sendButton);
+
+      await waitFor(() => {
+        expect(sendRoomMessage).toHaveBeenCalledWith("", { files: [textFile] });
+      });
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("chat-attachment-previews")).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("fusion:chat-scope");
+    }
+  });
+
   it("keeps direct chat send behavior unchanged when chat rooms are enabled", async () => {
     localStorage.setItem("fusion:chat-scope", "direct");
     const sendMessage = vi.fn();

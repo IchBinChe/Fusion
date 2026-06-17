@@ -375,7 +375,7 @@ export interface TaskDetailModalProps {
   prAuthAvailable?: boolean;
   autoMergeEnabled?: boolean;
   onOpenWorkflowEditor?: () => void;
-  /** Open the modal with this tab active instead of "definition" */
+  /** Open the modal with this tab active instead of the default Chat view. */
   initialTab?: TabId;
   /** Mobile-only header affordance mode. */
   mobileHeaderMode?: "close" | "back";
@@ -555,7 +555,11 @@ export function TaskDetailContent({
   prAuthAvailable,
   autoMergeEnabled: autoMergeEnabledProp,
   onOpenWorkflowEditor,
-  initialTab = "definition",
+  /**
+   * FNXC:TaskDetailTabs 2026-06-17-00:00:
+   * FN-6532 makes Chat the default task-detail view when no caller supplies an explicit initial tab.
+   */
+  initialTab = "chat",
   mobileHeaderMode = "close",
   embedded = false,
   onRequestClose,
@@ -3063,17 +3067,21 @@ export function TaskDetailContent({
           {!isEditing && (
             <>
           <div className="detail-tabs">
-            <button
-              className={`detail-tab${activeTab === "definition" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("definition")}
-            >
-              {t("taskDetail.tabs.definition", "Definition")}
-            </button>
+            {/*
+              FNXC:TaskDetailTabs 2026-06-17-00:00:
+              FN-6532 requires Chat to be the first task-detail tab while preserving every explicit tab entrypoint.
+            */}
             <button
               className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("chat")}
             >
               {t("taskDetail.tabs.chat", "Chat")}
+            </button>
+            <button
+              className={`detail-tab${activeTab === "definition" ? " detail-tab-active" : ""}`}
+              onClick={() => setActiveTab("definition")}
+            >
+              {t("taskDetail.tabs.definition", "Definition")}
             </button>
             <button
               className={`detail-tab${activeTab === "logs" ? " detail-tab-active" : ""}`}

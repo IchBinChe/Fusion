@@ -162,7 +162,7 @@ describe("AppModals", () => {
   const mockModalManager: ModalManager = {
     // State
     detailTask: null,
-    detailTaskInitialTab: "definition",
+    detailTaskInitialTab: "chat",
     settingsOpen: false,
     settingsInitialSection: undefined,
     githubImportOpen: false,

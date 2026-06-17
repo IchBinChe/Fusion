@@ -5,6 +5,7 @@ import type { SectionId } from "../components/SettingsModal";
 import type { ToastType } from "./useToast";
 
 export type DetailTaskTab =
+  | "chat"
   | "definition"
   | "logs"
   | "changes"
@@ -162,7 +163,11 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [subtaskResumeSessionId, setSubtaskResumeSessionId] = useState<string | undefined>(undefined);
   // Can be Task (optimistic open) or TaskDetail (full data with prompt)
   const [detailTask, setDetailTask] = useState<(Task | TaskDetail) | null>(null);
-  const [detailTaskInitialTab, setDetailTaskInitialTab] = useState<DetailTaskTab>("definition");
+  /**
+   * FNXC:TaskDetailTabs 2026-06-17-00:00:
+   * FN-6532 makes Chat the default task-detail view whenever a task opens without an explicit tab request.
+   */
+  const [detailTaskInitialTab, setDetailTaskInitialTab] = useState<DetailTaskTab>("chat");
   const [detailTaskOrigin, setDetailTaskOrigin] = useState<DetailTaskOrigin | null>(null);
   const [groupModalGroupId, setGroupModalGroupId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -250,9 +255,13 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     setSubtaskResumeSessionId(undefined);
   }, []);
 
+  /**
+   * FNXC:TaskDetailTabs 2026-06-17-00:00:
+   * Open-detail callers that omit initialTab should land on Chat; explicit tab requests preserve caller intent.
+   */
   const openDetailTask = useCallback((
     task: Task | TaskDetail,
-    initialTab: DetailTaskTab = "definition",
+    initialTab: DetailTaskTab = "chat",
     options?: { origin?: DetailTaskOrigin },
   ) => {
     setDetailTask(task);

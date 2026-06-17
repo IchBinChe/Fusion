@@ -75,6 +75,7 @@ describe("TaskDetailModal", () => {
       render(
         <TaskDetailModal
           task={makeTask()}
+          initialTab="definition"
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -114,6 +115,7 @@ describe("TaskDetailModal", () => {
       render(
         <TaskDetailModal
           task={makeTask()}
+          initialTab="definition"
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -202,6 +204,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ dependencies: [] })}
+        initialTab="definition"
         onClose={noop}
         onMoveTask={noopMove}
         onDeleteTask={noopDelete}
@@ -223,6 +226,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ dependencies: ["FN-001", "FN-002"] })}
+        initialTab="definition"
         tasks={allTasks}
         onClose={noop}
         onMoveTask={noopMove}
@@ -258,6 +262,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ dependencies: [] })}
+        initialTab="definition"
         tasks={allTasks}
         onClose={noop}
         onMoveTask={noopMove}
@@ -288,6 +293,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ dependencies: ["FN-001", "FN-002"] })}
+        initialTab="definition"
         onClose={noop}
         onMoveTask={noopMove}
         onDeleteTask={noopDelete}
@@ -379,6 +385,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ dependencies: [] })}
+        initialTab="definition"
         tasks={allTasks}
         onClose={noop}
         onMoveTask={noopMove}
@@ -408,6 +415,7 @@ describe("TaskDetailModal", () => {
     render(
       <TaskDetailModal
         task={makeTask({ dependencies: [] })}
+        initialTab="definition"
         tasks={allTasks}
         onClose={noop}
         onMoveTask={noopMove}
@@ -427,7 +435,7 @@ describe("TaskDetailModal", () => {
   });
 
   describe("tab toggle", () => {
-    it("defaults to the Definition tab", () => {
+    it("defaults to the Chat tab", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -442,18 +450,19 @@ describe("TaskDetailModal", () => {
 
       expect(screen.getByText("Definition")).toBeTruthy();
       expect(screen.getByText("Logs")).toBeTruthy();
-      // Activity and Agent Log are subviews inside the Logs tab, not top-level tabs
-      // They should NOT be visible on the Definition tab
+      // Activity and Agent Log are subviews inside the Logs tab, not top-level tabs.
+      // They should NOT be visible on the default Chat tab.
       expect(screen.queryByText("Activity")).toBeNull();
       expect(screen.queryByText("Agent Log")).toBeNull();
-      // Definition content should be visible
-      expect(container.querySelector(".markdown-body")).toBeTruthy();
-      // Activity section should NOT be visible initially
+      // Chat content should be visible by default.
+      expect(container.querySelector(".detail-section--chat")).toBeTruthy();
+      expect(container.querySelector("[data-testid='task-chat-tab']")).toBeTruthy();
+      // Activity section should NOT be visible initially.
       expect(container.querySelector(".detail-activity")).toBeNull();
-      // Agent log viewer should not be visible
+      // Agent log viewer should not be visible.
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
 
-      // After clicking Logs tab, the subview toggle buttons should appear
+      // After clicking Logs tab, the subview toggle buttons should appear.
       fireEvent.click(screen.getByText("Logs"));
       const logSubviewToggle = container.querySelector(".log-subview-toggle");
       expect(logSubviewToggle).toBeTruthy();
@@ -601,6 +610,7 @@ describe("TaskDetailModal", () => {
             prompt: "# Hello\n\nContent",
             log: [{ timestamp: "2026-01-01T00:00:00Z", action: "Test" }],
           })}
+          initialTab="definition"
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -691,7 +701,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Default: Definition tab active → enabled should be false
+      // Default: Chat tab active → enabled should be false
       const initialCall = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
       expect(initialCall[1]).toBe(false);
 
@@ -744,15 +754,15 @@ describe("TaskDetailModal", () => {
       );
 
       // For an in-progress task (no workflow steps, no merge commit), the
-      // top-level tabs are: Definition, Chat, Logs, Changes, Review, Comments,
+      // top-level tabs are: Chat, Definition, Logs, Changes, Review, Comments,
       // Documents, Model, Workflow, Stats, Routing.
-      const tabTexts = ["Definition", "Chat", "Logs", "Changes", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing"];
+      const tabTexts = ["Chat", "Definition", "Logs", "Changes", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing"];
       const tabs = screen.getAllByRole("button").filter((b) =>
         tabTexts.includes(b.textContent || "")
       );
       expect(tabs.map((tab) => tab.textContent)).toEqual(tabTexts);
-      expect(tabs[0].textContent).toBe("Definition");
-      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[0].textContent).toBe("Chat");
+      expect(tabs[1].textContent).toBe("Definition");
       expect(tabs[2].textContent).toBe("Logs");
 
       // Activity and Agent Log are NOT top-level tabs (they are subviews inside Logs)
@@ -937,6 +947,47 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
     });
 
+    it("FN-6532 defaults to Chat first while preserving explicit tab requests", () => {
+      const { container, rerender } = render(
+        <TaskDetailModal
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>(".detail-tab"));
+      expect(tabs.map((tab) => tab.textContent)).toEqual(expect.arrayContaining(["Chat", "Definition"]));
+      expect(tabs[0]).toHaveTextContent("Chat");
+      const chatTab = screen.getByRole("button", { name: "Chat" });
+      const definitionTab = screen.getByRole("button", { name: "Definition" });
+      expect(chatTab.compareDocumentPosition(definitionTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(chatTab).toHaveClass("detail-tab-active");
+      expect(definitionTab).not.toHaveClass("detail-tab-active");
+      expect(container.querySelector(".detail-section--chat [data-testid='task-chat-tab']")).toBeTruthy();
+
+      rerender(
+        <TaskDetailModal
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          initialTab="logs"
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Logs" })).toHaveClass("detail-tab-active");
+      expect(screen.getByRole("button", { name: "Chat" })).not.toHaveClass("detail-tab-active");
+      expect(container.querySelector(".detail-section--chat")).toBeNull();
+    });
+
     it("FN-6347 applies chat modifiers only while the Chat tab is active", () => {
       const { container } = render(
         <TaskDetailModal
@@ -950,10 +1001,6 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(container.querySelector(".detail-body--chat")).toBeNull();
-      expect(container.querySelector(".detail-section--chat")).toBeNull();
-
-      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
       const chatBody = container.querySelector(".detail-body--chat");
       const chatSection = container.querySelector(".detail-section--chat");
       expect(chatBody).toBeTruthy();

@@ -29,7 +29,6 @@ import {
   resolveSecretAccessPolicy,
   getProjectRootFromWorktree,
   resolveTaskGithubTracking,
-  formatTaskListText,
   type SecretScope,
 } from "@fusion/core";
 import {
@@ -59,6 +58,35 @@ import { existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+type TaskListClamp = (lines: string[], opts?: { maxChars?: number }) => string;
+type TaskListFormatter = (
+  lines: string[],
+  opts?: { maxChars?: number; clamp?: TaskListClamp },
+) => string;
+
+export function inlineTaskListFallback(
+  lines: string[],
+  opts: { maxChars?: number } = {},
+): string {
+  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? 12_000));
+  try {
+    const text = lines.join("\n");
+    if (text.length <= maxChars) {
+      return text;
+    }
+    return text.slice(0, Math.max(0, maxChars - 1)) + "…";
+  } catch {
+    return "";
+  }
+}
+
+export function resolveTaskListFormatter(core: { formatTaskListText?: unknown }): TaskListFormatter {
+  return typeof core.formatTaskListText === "function"
+    ? (core.formatTaskListText as TaskListFormatter)
+    : inlineTaskListFallback;
+}
+
 
 /** #1403: display a column's label, falling back to the raw id for
  *  workflow-defined custom columns that have no legacy label. */
@@ -829,9 +857,13 @@ export default function kbExtension(pi: ExtensionAPI) {
 
       FNXC:TaskListOutput 2026-06-17-05:46:
       FN-6570 resolves the clamp from the runtime @fusion/core namespace and lets formatTaskListText fall back when stale dist/interoperability paths omit clampTaskListText, preventing heartbeat board reads from crashing.
+
+      FNXC:TaskListOutput 2026-06-17-07:25:
+      FN-6573 requires CLI fn_task_list to resolve formatTaskListText from the runtime @fusion/core namespace with a typeof guard and a self-contained bounded fallback. A stale @fusion/core dist missing the FN-6570 formatter export crashed ambient heartbeat agents as `(0 , _core.formatTaskListText) is not a function`; the tool must now return bounded text instead.
       */
+      const formatter = resolveTaskListFormatter(fusionCore);
       return {
-        content: [{ type: "text", text: formatTaskListText(lines, { clamp: fusionCore.clampTaskListText }).trimEnd() }],
+        content: [{ type: "text", text: formatter(lines, { clamp: fusionCore.clampTaskListText }).trimEnd() }],
         details: { count: tasks.length },
       };
     },

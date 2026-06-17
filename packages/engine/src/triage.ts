@@ -27,9 +27,37 @@ import {
   findNearDuplicates,
   isNearDuplicateCanonicalInactive,
   applyFrontendUxCriteria,
-  formatTaskListText,
   type NearDuplicateCandidate,
 } from "@fusion/core";
+
+type TaskListClamp = (lines: string[], opts?: { maxChars?: number }) => string;
+type TaskListFormatter = (
+  lines: string[],
+  opts?: { maxChars?: number; clamp?: TaskListClamp },
+) => string;
+
+export function inlineTaskListFallback(
+  lines: string[],
+  opts: { maxChars?: number } = {},
+): string {
+  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? 12_000));
+  try {
+    const text = lines.join("\n");
+    if (text.length <= maxChars) {
+      return text;
+    }
+    return text.slice(0, Math.max(0, maxChars - 1)) + "…";
+  } catch {
+    return "";
+  }
+}
+
+export function resolveTaskListFormatter(core: { formatTaskListText?: unknown }): TaskListFormatter {
+  return typeof core.formatTaskListText === "function"
+    ? (core.formatTaskListText as TaskListFormatter)
+    : inlineTaskListFallback;
+}
+
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import type {
@@ -1475,9 +1503,13 @@ export class TriageProcessor {
 
         FNXC:TaskListOutput 2026-06-17-05:47:
         FN-6570 guards the triage fn_task_list formatter against stale @fusion/core runtime namespaces where clampTaskListText is absent, so duplicate-detection board reads degrade to bounded text instead of throwing.
+
+        FNXC:TaskListOutput 2026-06-17-07:25:
+        FN-6573 requires engine triage fn_task_list to resolve formatTaskListText from the runtime @fusion/core namespace with a typeof guard and a self-contained bounded fallback. A stale @fusion/core dist missing the FN-6570 formatter export crashed ambient heartbeat agents as `(0 , _core.formatTaskListText) is not a function`; duplicate detection must now return bounded text instead.
         */
+        const formatter = resolveTaskListFormatter(fusionCore);
         return {
-          content: [{ type: "text" as const, text: formatTaskListText(lines, { clamp: fusionCore.clampTaskListText }) }],
+          content: [{ type: "text" as const, text: formatter(lines, { clamp: fusionCore.clampTaskListText }) }],
           details: {},
         };
       },

@@ -23,7 +23,7 @@ vi.mock("../commands/task.js", () => ({
   runTaskPlan: vi.fn(),
 }));
 
-import kbExtension from "../extension.js";
+import kbExtension, { resolveTaskListFormatter } from "../extension.js";
 import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES, MAX_TASK_LIST_TEXT_CHARS, formatTaskListText } from "@fusion/core";
 import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
@@ -2767,7 +2767,7 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       },
     );
 
-    it("degrades to bounded text when the clamp export is unavailable", () => {
+    it("degrades to bounded text when formatter exports are unavailable", () => {
       const boardLinesWithoutParams = [
         "Planning (2):",
         `  FN-001  Planning task ${"x".repeat(6_000)}`,
@@ -2782,14 +2782,21 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       ];
 
       /*
-      FNXC:TaskListOutput 2026-06-17-05:55:
-      FN-6570 exercises the formatter boundary called by the CLI surface because the existing extension harness imports @fusion/core before per-test mocks can safely replace only clampTaskListText with a stale-dist missing export.
-      The two line sets mirror fn_task_list with omitted params and with column/limit provided, proving the surface path now receives bounded text instead of a crashing `(0 , _core.clampTaskListText) is not a function` call.
+      FNXC:TaskListOutput 2026-06-17-07:32:
+      FN-6573 exercises the resolver seam called by the CLI surface because the extension harness imports @fusion/core before per-test mocks can safely replace the large cross-package namespace with a stale dist missing only task-list formatter exports.
+      These line sets mirror fn_task_list with params omitted and with column/limit provided, reproducing the prior missing `formatTaskListText` crash condition and the worse both-helpers-missing condition as bounded text instead of a throw.
       */
-      for (const lines of [boardLinesWithoutParams, boardLinesWithColumnAndLimit]) {
-        const text = formatTaskListText(lines, { clamp: undefined }).trimEnd();
-        expect(text).toBeTruthy();
-        expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+      const staleNamespaces = [
+        { formatTaskListText: undefined, clampTaskListText: formatTaskListText },
+        { formatTaskListText: undefined, clampTaskListText: undefined },
+      ];
+      for (const coreNamespace of staleNamespaces) {
+        const formatter = resolveTaskListFormatter(coreNamespace);
+        for (const lines of [boardLinesWithoutParams, boardLinesWithColumnAndLimit]) {
+          const text = formatter(lines, { clamp: coreNamespace.clampTaskListText }).trimEnd();
+          expect(text).toBeTruthy();
+          expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+        }
       }
     });
   });

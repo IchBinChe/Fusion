@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,11 @@ import type { WorkflowIr } from "@fusion/core";
 import { registerWorkflowRoutes } from "../routes/register-workflow-routes.js";
 import { ApiError, sendErrorResponse } from "../api-error.js";
 import { request } from "../test-request.js";
+import { emitWorkflowSseEvent } from "../sse.js";
+
+vi.mock("../sse.js", () => ({
+  emitWorkflowSseEvent: vi.fn(),
+}));
 
 function linearIr(): WorkflowIr {
   return {
@@ -63,7 +68,7 @@ describe("workflow routes (U4)", () => {
     const router = express.Router();
     registerWorkflowRoutes({
       router,
-      getProjectContext: async () => ({ store, engine: undefined, projectId: undefined }),
+      getProjectContext: async () => ({ store, engine: undefined, projectId: "proj-workflow-routes" }),
       rethrowAsApiError: (err: unknown) => {
         throw err instanceof ApiError ? err : new ApiError(500, err instanceof Error ? err.message : String(err));
       },
@@ -79,6 +84,7 @@ describe("workflow routes (U4)", () => {
     store.close();
     rmSync(rootDir, { recursive: true, force: true });
     rmSync(globalDir, { recursive: true, force: true });
+    vi.mocked(emitWorkflowSseEvent).mockClear();
   });
 
   const post = (path: string, body: unknown) =>
@@ -467,6 +473,72 @@ describe("workflow routes (U4)", () => {
       expect(recon?.preserved).toBe(false);
       expect(recon?.toColumn).toBe("intake");
       expect((await store.getTask(t.id)).column).toBe("intake");
+    });
+
+    it("PUT selection emits workflow invalidation SSE after a re-home", async () => {
+      const wf = await post("/api/workflows", { name: "emit-rehome", ir: customV2("emit-rehome", ["intake", "doing", "done"]) });
+      const wfId = (wf.body as { id: string }).id;
+      const t = await store.createTask({ description: "switcher" });
+      await store.moveTask(t.id, "todo", { moveSource: "user" });
+      vi.mocked(emitWorkflowSseEvent).mockClear();
+
+      const res = await put(`/api/tasks/${t.id}/workflow`, { workflowId: wfId });
+
+      expect(res.status).toBe(200);
+      expect(emitWorkflowSseEvent).toHaveBeenCalledTimes(1);
+      expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
+        "workflow:updated",
+        { taskId: t.id, workflowId: wfId },
+        "proj-workflow-routes",
+      );
+    });
+
+    it("PUT selection emits workflow invalidation SSE when the current column is preserved", async () => {
+      const wf = await post("/api/workflows", { name: "emit-preserved", ir: customV2("emit-preserved", ["intake", "todo", "done"]) });
+      const wfId = (wf.body as { id: string }).id;
+      const t = await store.createTask({ description: "preserved switcher" });
+      await store.moveTask(t.id, "todo", { moveSource: "user" });
+      vi.mocked(emitWorkflowSseEvent).mockClear();
+
+      const res = await put(`/api/tasks/${t.id}/workflow`, { workflowId: wfId });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { reconciliation?: { preserved: boolean } }).reconciliation?.preserved).toBe(true);
+      expect(emitWorkflowSseEvent).toHaveBeenCalledTimes(1);
+      expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
+        "workflow:updated",
+        { taskId: t.id, workflowId: wfId },
+        "proj-workflow-routes",
+      );
+    });
+
+    it("PUT clear emits workflow invalidation SSE with a null workflow id", async () => {
+      const wf = await post("/api/workflows", { name: "emit-clear", ir: customV2("emit-clear", ["intake", "doing", "done"]) });
+      const wfId = (wf.body as { id: string }).id;
+      const t = await store.createTask({ description: "clear switcher" });
+      await store.selectTaskWorkflowAndReconcile(t.id, wfId);
+      vi.mocked(emitWorkflowSseEvent).mockClear();
+
+      const res = await put(`/api/tasks/${t.id}/workflow`, { workflowId: null });
+
+      expect(res.status).toBe(200);
+      expect(emitWorkflowSseEvent).toHaveBeenCalledTimes(1);
+      expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
+        "workflow:updated",
+        { taskId: t.id, workflowId: null },
+        "proj-workflow-routes",
+      );
+    });
+
+    it("PUT selection validation errors do not emit workflow invalidation SSE", async () => {
+      const t = await store.createTask({ description: "invalid switcher" });
+
+      const missing = await put(`/api/tasks/${t.id}/workflow`, {});
+      const invalid = await put(`/api/tasks/${t.id}/workflow`, { workflowId: 42 });
+
+      expect(missing.status).toBe(400);
+      expect(invalid.status).toBe(400);
+      expect(emitWorkflowSseEvent).not.toHaveBeenCalled();
     });
   });
 

@@ -507,7 +507,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
   // Body: { workflowId: string | null }
   router.put("/tasks/:taskId/workflow", async (req, res) => {
     try {
-      const { store } = await getProjectContext(req);
+      const { store, projectId } = await getProjectContext(req);
       const workflowId = (req.body ?? {}).workflowId;
       // Only an explicit null clears the selection. An omitted field
       // (e.g. a malformed `{}` body) must fail validation rather than
@@ -517,6 +517,11 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       }
       if (workflowId === null) {
         await store.clearTaskWorkflowSelection(req.params.taskId);
+        /*
+        FNXC:CustomWorkflows 2026-06-17-07:21:
+        A task-workflow selection or clear changes board lane membership even when the task column is unchanged, because workflow boards group cards by the board-workflows `taskWorkflowIds` mapping. Emit the existing workflow update invalidation after successful mutations so open Board and ListView surfaces refetch that mapping and re-home the card immediately.
+        */
+        emitWorkflowSseEvent("workflow:updated", { taskId: req.params.taskId, workflowId: null }, projectId);
         res.json({ workflowId: null, enabledWorkflowSteps: [] });
         return;
       }
@@ -542,6 +547,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
         }
         throw selectErr;
       }
+      emitWorkflowSseEvent("workflow:updated", { taskId: req.params.taskId, workflowId }, projectId);
       res.json({ workflowId, enabledWorkflowSteps, ...(reconciliation ? { reconciliation } : {}) });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;

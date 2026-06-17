@@ -639,6 +639,68 @@ describe("ListView", () => {
     expect(screen.queryAllByText("Backlog")).toHaveLength(0);
   });
 
+  it("re-homes a preserved-column task to the new workflow after workflow invalidation", async () => {
+    const preservedWorkflow = {
+      id: "wf-preserved",
+      name: "Preserved Flow",
+      columns: [
+        { id: "todo", name: "Todo", flags: { intake: true } },
+        { id: "done", name: "Done", flags: { complete: true } },
+      ],
+    };
+    vi.mocked(fetchBoardWorkflows)
+      .mockResolvedValueOnce({
+        flagEnabled: true,
+        defaultWorkflowId: "builtin:coding",
+        workflows: [
+          {
+            id: "builtin:coding",
+            name: "Coding",
+            columns: [
+              { id: "todo", name: "Todo", flags: { intake: true } },
+              { id: "done", name: "Done", flags: { complete: true } },
+            ],
+          },
+          preservedWorkflow,
+        ],
+        taskWorkflowIds: { "FN-001": "builtin:coding" },
+      })
+      .mockResolvedValueOnce({
+        flagEnabled: true,
+        defaultWorkflowId: "builtin:coding",
+        workflows: [
+          {
+            id: "builtin:coding",
+            name: "Coding",
+            columns: [
+              { id: "todo", name: "Todo", flags: { intake: true } },
+              { id: "done", name: "Done", flags: { complete: true } },
+            ],
+          },
+          preservedWorkflow,
+        ],
+        taskWorkflowIds: { "FN-001": "wf-preserved" },
+      });
+
+    renderListView({
+      tasks: [createMockTask({ id: "FN-001", column: "todo", title: "Preserved workflow task" })],
+    });
+
+    const selector = await screen.findByLabelText("Select workflow") as HTMLSelectElement;
+    await waitFor(() => expect(screen.getByText("Preserved workflow task")).toBeInTheDocument());
+    expect(selector.value).toBe("builtin:coding");
+
+    await act(async () => {
+      listViewSseHandlers["workflow:updated"]?.();
+    });
+
+    await waitFor(() => expect(fetchBoardWorkflows).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("Preserved workflow task")).not.toBeInTheDocument());
+
+    fireEvent.change(selector, { target: { value: "wf-preserved" } });
+    await waitFor(() => expect(screen.getByText("Preserved workflow task")).toBeInTheDocument());
+  });
+
   it("shows a new-workflow action next to the workflow selector", async () => {
     const onCreateWorkflow = vi.fn();
     vi.mocked(fetchBoardWorkflows).mockResolvedValue({

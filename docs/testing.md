@@ -225,6 +225,24 @@ shard artifacts into `.timings/` first (the default lookup directory), or pass
 scheduled job can gate on freshness via `node scripts/ci-test-shard.mjs --check-timings-staleness`,
 which exits non-zero when the snapshot is missing or older than the 30-day budget.
 
+## Weekly test velocity baseline
+
+FN-6612 tracks feedback-loop velocity as signal-per-second, not as a new blocking gate. Refresh the weekly baseline from a clean worktree with:
+
+```bash
+pnpm test:velocity -- --measure --write-report
+```
+
+The script runs `pnpm test:gate`, `pnpm smoke:boot`, and `pnpm test` with bounded async process supervision, then appends the measured row to `scripts/test-velocity-history.json` and rewrites the postable artifact at `docs/test-velocity-baseline.md`. It reads the slowest 20 files from the committed `scripts/test-timings.json` snapshot and the flake/quarantine count plus 14-day deletion-clock buckets directly from `scripts/lib/test-quarantine.json`; do not run the full suite just to populate the slowest-file table.
+
+Use cheap report-only regeneration when measurements already exist:
+
+```bash
+pnpm test:velocity
+```
+
+Each week, copy the `Post to #leads` block from `docs/test-velocity-baseline.md`. If a measured command fails because the local environment is not ready, keep the failure recorded in the report instead of fabricating a time, then fix or rerun separately as appropriate. Do not wire `pnpm test:velocity`, `test:full`, or any slow-suite expansion into PR checks; the merge gate stays the thin Lint, Typecheck, Build, and Gate path.
+
 ## Targeted commands
 
 ```bash

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Gauge } from "lucide-react";
-import type { ActivityAnalytics, TokenAnalytics, ToolAnalytics } from "@fusion/core";
+import type { ActivityAnalytics, LiveSnapshot, TokenAnalytics, ToolAnalytics } from "@fusion/core";
 import { api } from "../../api/legacy";
 import { DateRangePicker, defaultPresets, rangeFromPreset, type DateRange } from "./DateRangePicker";
 import { TokensArea } from "./areas/TokensArea";
@@ -66,6 +66,8 @@ function OverviewTab({ range }: { range: DateRange }) {
   const activity = useAnalyticsArea<ActivityAnalytics>("/command-center/activity", range);
   const [signals, setSignals] = useState<SignalsAnalytics | null>(null);
   const [signalsLoading, setSignalsLoading] = useState(true);
+  const [liveSnapshot, setLiveSnapshot] = useState<LiveSnapshot | null>(null);
+  const [liveSnapshotLoading, setLiveSnapshotLoading] = useState(true);
 
   const signalsQuery = rangeQuery(range);
   const invalidRange = isInvalidRange(range);
@@ -99,12 +101,40 @@ function OverviewTab({ range }: { range: DateRange }) {
     };
   }, [signalsQuery, invalidRange]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setLiveSnapshotLoading(true);
+    void (async () => {
+      try {
+        const result = await api<LiveSnapshot>("/command-center/live");
+        if (!cancelled) {
+          setLiveSnapshot(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setLiveSnapshot(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLiveSnapshotLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const tokenTotal = tokens.data?.totals?.totalTokens ?? 0;
   const toolCalls = tools.data?.toolCalls ?? 0;
   const activeNodes = activity.data?.activeNodes ?? 0;
   const activeAgents = activity.data?.activeAgents ?? 0;
   const tasksDone = activity.data?.funnel?.doneInRange ?? 0;
-  const inProgressTasks = activity.data?.funnel?.stages.find((stage) => stage.stage === "in-progress")?.entered ?? 0;
+  /*
+  FNXC:CommandCenter 2026-06-18-00:00:
+  The Live activity snapshot "tasks in progress" metric must reflect current board state from /command-center/live columns, not the date-range SDLC funnel entered count, because cumulative transitions inflate with history and do not decrease when tasks leave in-progress.
+  */
+  const inProgressTasks = liveSnapshot?.columns.find((column) => column.column === "in-progress")?.count ?? 0;
   const uniqueModels = tokens.data?.groups?.length ?? 0;
   const tokensByModelData = useMemo<BarDatum[]>(
     () =>
@@ -246,7 +276,7 @@ function OverviewTab({ range }: { range: DateRange }) {
         </div>
         <div className="cc-live-strip-metrics" data-testid="command-center-live-snapshot">
           <span className="cc-live-metric" data-testid="command-center-live-tasks-in-progress">
-            <span className="cc-live-metric-value">{formatCount(inProgressTasks)}</span>
+            <span className="cc-live-metric-value">{liveSnapshotLoading ? "—" : formatCount(inProgressTasks)}</span>
             <span className="cc-live-metric-label">{t("commandCenter.overview.tasksInProgress", "tasks in progress")}</span>
           </span>
           <span className="cc-live-metric" data-testid="command-center-live-agents-working">

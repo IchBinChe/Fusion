@@ -114,6 +114,17 @@ function mockOverviewApi({ populated = false }: { populated?: boolean } = {}) {
     if (path.startsWith("/command-center/tools")) return Promise.resolve(populated ? populatedToolsFixture() : emptyToolsFixture());
     if (path.startsWith("/command-center/activity")) return Promise.resolve(populated ? populatedActivityFixture() : emptyActivityFixture());
     if (path.startsWith("/command-center/signals")) return Promise.resolve({ totalSignals: 0, open: 0, resolved: 0, mttr: { value: null, unavailable: true }, bySource: [], bySeverity: [] });
+    if (path === "/command-center/live") {
+      return Promise.resolve({
+        capturedAt: "2026-06-18T00:00:00.000Z",
+        activeSessions: 0,
+        activeRuns: 0,
+        activeNodes: 0,
+        sessions: [],
+        runs: [],
+        columns: [{ column: "in-progress", count: populated ? 1 : 0 }],
+      });
+    }
     return Promise.reject(new Error(`Unhandled api path: ${path}`));
   });
 }
@@ -189,6 +200,7 @@ describe("CommandCenter mobile scroll regression (FN-6595)", () => {
 
     await screen.findByTestId("command-center-overview-charts");
     expect(screen.getByTestId("command-center-overview-chart-tokens")).toBeTruthy();
+    expect(screen.getByTestId("command-center-live-tasks-in-progress")).toBeTruthy();
     assertScrollOwnerContract(screen.getByTestId("command-center-panel-overview"));
   });
 

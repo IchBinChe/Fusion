@@ -113,16 +113,30 @@ function signalsFixture(open = 2) {
   };
 }
 
+function liveFixture(columns: Array<{ column: string; count: number }> = [{ column: "in-progress", count: 3 }]) {
+  return {
+    capturedAt: "2026-06-18T00:00:00.000Z",
+    activeSessions: 0,
+    activeRuns: 0,
+    activeNodes: 0,
+    sessions: [],
+    runs: [],
+    columns,
+  };
+}
+
 function mockOverviewApi({
   tokens = tokenFixture(),
   tools = toolsFixture(),
   activity = activityFixture(),
   signals = signalsFixture(),
+  live = liveFixture(),
 }: {
   tokens?: unknown;
   tools?: unknown;
   activity?: unknown;
   signals?: unknown;
+  live?: unknown;
 } = {}) {
   apiMock.mockImplementation((path: string) => {
     if (path.startsWith("/command-center/tokens")) return Promise.resolve(tokens);
@@ -131,18 +145,25 @@ function mockOverviewApi({
     if (path.startsWith("/command-center/signals")) {
       return signals instanceof Error ? Promise.reject(signals) : Promise.resolve(signals);
     }
+    if (path === "/command-center/live") {
+      return live instanceof Error ? Promise.reject(live) : Promise.resolve(live);
+    }
     return Promise.reject(new Error(`Unhandled api path: ${path}`));
   });
 }
 
 function mockEmptyOverviewApi() {
-  mockOverviewApi({ tokens: tokenFixture(0), tools: toolsFixture(0), activity: emptyActivityFixture(), signals: signalsFixture(0) });
+  mockOverviewApi({ tokens: tokenFixture(0), tools: toolsFixture(0), activity: emptyActivityFixture(), signals: signalsFixture(0), live: liveFixture([{ column: "in-progress", count: 0 }]) });
 }
 
 function statValue(testId: string) {
   return within(screen.getByTestId(testId)).getByText((content, element) =>
     element?.classList.contains("cc-stat-value") === true && content.length > 0,
   ).textContent;
+}
+
+function liveMetricValue(testId = "command-center-live-tasks-in-progress") {
+  return screen.getByTestId(testId).querySelector(".cc-live-metric-value")?.textContent ?? null;
 }
 
 beforeEach(() => {
@@ -184,7 +205,7 @@ describe("CommandCenter shell", () => {
     expect(statValue("command-center-stat-signals")).toBe("2");
     expect(screen.getByTestId("command-center-live-strip")).toBeTruthy();
     expect(screen.getByTestId("command-center-live-snapshot")).toBeTruthy();
-    expect(screen.getByTestId("command-center-live-tasks-in-progress").textContent).toContain("3");
+    await waitFor(() => expect(liveMetricValue()).toBe("3"));
     expect(screen.getByTestId("command-center-live-agents-working").textContent).toContain("2");
     expect(screen.getByTestId("command-center-live-open-signals").textContent).toContain("2");
     expect(screen.getByTestId("command-center-throughput-trend")).toBeTruthy();
@@ -196,6 +217,77 @@ describe("CommandCenter shell", () => {
     expect(within(screen.getByTestId("command-center-overview-chart-tokens")).getByText("gpt-4o")).toBeTruthy();
     expect(within(screen.getByTestId("command-center-overview-chart-tools")).getByText("read")).toBeTruthy();
     expect(screen.getByRole("img", { name: "Daily activity trend" })).toBeTruthy();
+  });
+
+  it("sources live tasks in progress from current column counts instead of funnel entered", async () => {
+    mockOverviewApi({
+      activity: activityFixture({ inProgress: 12 }),
+      live: liveFixture([{ column: "in-progress", count: 2 }]),
+    });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-live-tasks-in-progress");
+    await waitFor(() => expect(liveMetricValue()).toBe("2"));
+    expect(liveMetricValue()).not.toBe("12");
+  });
+
+  it("renders zero when the live in-progress column count is zero", async () => {
+    mockOverviewApi({ live: liveFixture([{ column: "in-progress", count: 0 }]) });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-live-tasks-in-progress");
+    await waitFor(() => expect(liveMetricValue()).toBe("0"));
+  });
+
+  it("defaults to zero when the live snapshot omits the in-progress column", async () => {
+    mockOverviewApi({ live: liveFixture([{ column: "todo", count: 5 }]) });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-live-tasks-in-progress");
+    await waitFor(() => expect(liveMetricValue()).toBe("0"));
+  });
+
+  it("renders a deterministic placeholder while the live snapshot is pending", async () => {
+    const live = new Promise(() => undefined);
+    mockOverviewApi({ live });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-live-tasks-in-progress");
+    expect(liveMetricValue()).toBe("—");
+  });
+
+  it("falls back without crashing when the live snapshot fetch fails", async () => {
+    mockOverviewApi({ live: new Error("live failed") });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-live-tasks-in-progress");
+    await waitFor(() => expect(liveMetricValue()).toBe("0"));
+    expect(screen.queryByTestId("command-center-overview-error")).toBeNull();
+  });
+
+  it("keeps the live in-progress count range-independent while tasks done follows the range", async () => {
+    apiMock.mockImplementation((path: string) => {
+      const allTime = typeof path === "string" && !path.includes("from=");
+      if (path.startsWith("/command-center/tokens")) return Promise.resolve(tokenFixture());
+      if (path.startsWith("/command-center/tools")) return Promise.resolve(toolsFixture());
+      if (path.startsWith("/command-center/activity")) {
+        return Promise.resolve(activityFixture({ doneInRange: allTime ? 21 : 7, inProgress: allTime ? 99 : 12 }));
+      }
+      if (path.startsWith("/command-center/signals")) return Promise.resolve(signalsFixture(2));
+      if (path === "/command-center/live") return Promise.resolve(liveFixture([{ column: "in-progress", count: 4 }]));
+      return Promise.reject(new Error(`Unhandled api path: ${path}`));
+    });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-stat-tasksDone");
+    await waitFor(() => expect(liveMetricValue()).toBe("4"));
+    expect(statValue("command-center-stat-tasksDone")).toBe("7");
+
+    fireEvent.click(screen.getByTestId("cc-date-range-trigger"));
+    fireEvent.click(screen.getByTestId("cc-date-range-preset-all"));
+
+    await waitFor(() => expect(statValue("command-center-stat-tasksDone")).toBe("21"));
+    expect(liveMetricValue()).toBe("4");
   });
 
   it("renders cards for partially populated analytics instead of the empty state", async () => {
@@ -273,6 +365,7 @@ describe("CommandCenter shell", () => {
       if (path.startsWith("/command-center/tools")) return Promise.resolve(toolsFixture(0));
       if (path.startsWith("/command-center/activity")) return Promise.resolve(emptyActivityFixture());
       if (path.startsWith("/command-center/signals")) return Promise.resolve(signalsFixture(0));
+      if (path === "/command-center/live") return Promise.resolve(liveFixture([{ column: "in-progress", count: 0 }]));
       return Promise.reject(new Error(`Unhandled api path: ${path}`));
     });
     render(<CommandCenter />);
@@ -291,6 +384,7 @@ describe("CommandCenter shell", () => {
       if (path.startsWith("/command-center/tools")) return Promise.resolve(populated ? toolsFixture() : toolsFixture(0));
       if (path.startsWith("/command-center/activity")) return Promise.resolve(populated ? activityFixture() : emptyActivityFixture());
       if (path.startsWith("/command-center/signals")) return Promise.resolve(populated ? signalsFixture() : signalsFixture(0));
+      if (path === "/command-center/live") return Promise.resolve(liveFixture([{ column: "in-progress", count: populated ? 3 : 0 }]));
       return Promise.reject(new Error(`Unhandled api path: ${path}`));
     });
     render(<CommandCenter />);

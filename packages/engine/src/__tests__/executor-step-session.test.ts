@@ -115,7 +115,11 @@ describe("Workflow Steps Execution", () => {
     // Should have been called four times: initial + 3 retries
     expect(mockedCreateFnAgent).toHaveBeenCalledTimes(4);
 
-    // Retries still didn't call fn_task_done, so it fails and requeues immediately.
+    /*
+    FNXC:EngineTests 2026-06-18-07:22:
+    FN-6610 confirmed the intended executor.ts no-fn_task_done exhaustion behavior: after three in-session retries, tasks with remaining requeue budget return to todo with progress preserved; only exhausted requeue budget parks them in review.
+    Keep these expectations aligned with Executor.execute()'s MAX_TASK_DONE_REQUEUE_RETRIES branch rather than treating the first in-session exhaustion as terminal.
+    */
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
       status: "queued",
       error: null,

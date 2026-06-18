@@ -219,6 +219,13 @@ const REAL_TMPDIR = (() => {
     return resolve(tmpdir());
   }
 })();
+const REAL_WORKER_ROOT = (() => {
+  try {
+    return realpathSync(WORKER_ROOT);
+  } catch {
+    return resolve(WORKER_ROOT);
+  }
+})();
 
 const TMPDIR_REDIRECT_REGISTRY = join(WORKER_ROOT, ".redir-pids");
 let tmpdirRedirectSink: string | null = null;
@@ -370,7 +377,7 @@ function redirectTmpdirPrefix<T>(prefix: T): T {
   return join(ensureTmpdirRedirectSink(), basename(prefix)) as T;
 }
 
-function isCurrentWorkerHome(path: string | undefined): boolean {
+function isWorkerHomePath(path: string | undefined): boolean {
   if (!path) return false;
   const resolved = (() => {
     try {
@@ -379,11 +386,35 @@ function isCurrentWorkerHome(path: string | undefined): boolean {
       return resolve(path);
     }
   })();
-  const relativeHome = relative(WORKER_ROOT, resolved);
-  return Boolean(relativeHome)
-    && !relativeHome.startsWith("..")
-    && !isAbsolute(relativeHome)
-    && basename(resolved).startsWith(TEST_HOME_PREFIX);
+  const workerRoots = Array.from(new Set([resolve(WORKER_ROOT), REAL_WORKER_ROOT]));
+  return workerRoots.some((root) => {
+    const relativeHome = relative(root, resolved);
+    return Boolean(relativeHome)
+      && !relativeHome.startsWith("..")
+      && !isAbsolute(relativeHome)
+      && basename(resolved).startsWith(TEST_HOME_PREFIX);
+  });
+}
+
+function isCurrentWorkerHome(path: string | undefined): boolean {
+  if (!isWorkerHomePath(path)) return false;
+  if (!existsSync(path!)) {
+    ensureWorkerRoot();
+    mkdirSync(path!, { recursive: true });
+  }
+  return existsSync(path!);
+}
+
+function assignHomeEnv(tempHome: string): void {
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+  if (process.platform === "win32") {
+    const match = tempHome.match(/^([A-Za-z]:)(.*)$/);
+    if (match) {
+      process.env.HOMEDRIVE = match[1];
+      process.env.HOMEPATH = match[2] || "\\";
+    }
+  }
 }
 
 function ensureIsolatedHome(): void {
@@ -397,17 +428,13 @@ function ensureIsolatedHome(): void {
   FNXC:TestIsolation 2026-06-14-00:31:
   Nested or recursive Vitest lanes may inherit a parent worker's `fn-test-home-*` HOME value, which shares global settings/cache state across files and keeps CLI suites load-sensitive.
   Reuse HOME only when it belongs to this invocation's worker root; otherwise mint a fresh per-run HOME under `fusion-test-workers-*` so teardown removes it with the worker root.
+
+  FNXC:TestIsolation 2026-06-18-07:22:
+  FN-6610 requires a live worker's HOME redirect to survive sibling teardown without leaking a new `fn-test-home-*` directory per subprocess.
+  Recreate the owned HOME path when it was swept so repeated git/config subprocesses keep one stable per-worker HOME.
   */
   const tempHome = realpathSync(mkdtempSync(join(WORKER_ROOT, `${TEST_HOME_PREFIX}${process.pid}-`)));
-  process.env.HOME = tempHome;
-  process.env.USERPROFILE = tempHome;
-  if (process.platform === "win32") {
-    const match = tempHome.match(/^([A-Za-z]:)(.*)$/);
-    if (match) {
-      process.env.HOMEDRIVE = match[1];
-      process.env.HOMEPATH = match[2] || "\\";
-    }
-  }
+  assignHomeEnv(tempHome);
 }
 
 ensureIsolatedHome();
@@ -419,6 +446,34 @@ if (isMainThread) {
     mkdtempSync(join(WORKER_ROOT, `w-${process.pid}-`))
   );
   process.chdir(workerTempDir);
+}
+
+function ensureWorkerCwdForSubprocess(): void {
+  if (!isMainThread) return;
+  try {
+    originalCwd();
+    return;
+  } catch {
+    // Recreate below. A child process launched while uv_cwd is invalid fails
+    // before its own command can run, so the subprocess seam must repair cwd.
+  }
+
+  ensureWorkerRoot();
+  if (!workerTempDir || !existsSync(workerTempDir)) {
+    workerTempDir = realpathSync(mkdtempSync(join(WORKER_ROOT, `w-${process.pid}-`)));
+  }
+  process.chdir(workerTempDir);
+}
+
+function ensureRuntimeIsolationForSubprocess(): void {
+  /*
+  FNXC:TestIsolation 2026-06-18-07:22:
+  FN-6610 traced engine-lane git/config failures to live workers inheriting a swept cwd or `fn-test-home-*` directory after setup.
+  Revalidate cwd and HOME immediately before subprocess launch so real-git tests do not depend on setup-time paths surviving sibling teardown or recovery cleanup.
+  */
+  ensureWorkerRoot();
+  ensureIsolatedHome();
+  ensureWorkerCwdForSubprocess();
 }
 
 function installFsGuards(): void {
@@ -882,6 +937,7 @@ function installChildProcessGuards(): void {
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
+    ensureRuntimeIsolationForSubprocess();
     const proc = originalChildProcess.spawn(command, args, options);
     registerTrackedSubprocess(proc, commandLine);
     return proc;
@@ -897,6 +953,7 @@ function installChildProcessGuards(): void {
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
+    ensureRuntimeIsolationForSubprocess();
     return originalChildProcess.spawnSync(command, args, options);
   }) as ChildProcessModule["spawnSync"];
 
@@ -907,6 +964,7 @@ function installChildProcessGuards(): void {
     if (shouldBlockRealTestCli(command)) {
       throw blockedCliError(command);
     }
+    ensureRuntimeIsolationForSubprocess();
     return originalChildProcess.execSync(command, withDefaultTimeout(options));
   }) as ChildProcessModule["execSync"];
 
@@ -920,6 +978,7 @@ function installChildProcessGuards(): void {
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
+    ensureRuntimeIsolationForSubprocess();
     return originalChildProcess.execFileSync(file, args, options);
   }) as ChildProcessModule["execFileSync"];
 
@@ -935,6 +994,7 @@ function installChildProcessGuards(): void {
     }
     const options = typeof optionsOrCallback === "function" ? undefined : optionsOrCallback;
     const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback;
+    ensureRuntimeIsolationForSubprocess();
     const proc = originalChildProcess.exec(command, withDefaultTimeout(options), callback);
     registerTrackedSubprocess(proc, command);
     return proc;
@@ -968,6 +1028,7 @@ function installChildProcessGuards(): void {
     const callback = Array.isArray(argsOrOptions)
       ? (typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback)
       : (typeof argsOrOptions === "function" ? argsOrOptions : typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback);
+    ensureRuntimeIsolationForSubprocess();
     const proc = originalChildProcess.execFile(file, args, withDefaultTimeout(options), callback);
     registerTrackedSubprocess(proc, commandLine);
     return proc;
@@ -996,6 +1057,7 @@ function installChildProcessGuards(): void {
     if (shouldBlockRealTestCli(commandLine)) {
       throw blockedCliError(commandLine);
     }
+    ensureRuntimeIsolationForSubprocess();
     const proc = originalChildProcess.fork(modulePath, args, options);
     registerTrackedSubprocess(proc, commandLine);
     return proc;

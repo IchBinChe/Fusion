@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 120;
+const SCHEMA_VERSION = 121;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -285,6 +285,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   tokenUsageTotalTokens INTEGER,
   tokenUsageFirstUsedAt TEXT,
   tokenUsageLastUsedAt TEXT,
+  tokenUsageModelProvider TEXT,
+  tokenUsageModelId TEXT,
   tokenBudgetSoftAlertedAt TEXT,
   tokenBudgetHardAlertedAt TEXT,
   tokenBudgetOverride TEXT,
@@ -4942,6 +4944,14 @@ export class Database {
         this.db.exec(`
           CREATE INDEX IF NOT EXISTS idxIncidentsResolvedAt ON incidents(resolvedAt)
         `);
+      });
+    }
+
+    // Migration 121: Token-usage model snapshot for Command Center analytics.
+    if (version < 121) {
+      this.applyMigration(121, () => {
+        this.addColumnIfMissing("tasks", "tokenUsageModelProvider", "TEXT");
+        this.addColumnIfMissing("tasks", "tokenUsageModelId", "TEXT");
       });
     }
 

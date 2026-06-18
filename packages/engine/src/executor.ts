@@ -3332,6 +3332,23 @@ export class TaskExecutor {
     return merged;
   }
 
+  private tokenUsageWithModelSnapshot(
+    tokenUsage: TaskTokenUsage,
+    session: AgentSession | undefined,
+    existing: TaskTokenUsage | undefined,
+  ): TaskTokenUsage {
+    const model = (session as { model?: { provider?: string; id?: string } } | undefined)?.model;
+    return {
+      ...tokenUsage,
+      /*
+       * FNXC:TokenAnalytics 2026-06-18-16:23:
+       * Persist the actually-used session model as an analytics snapshot while leaving task.modelProvider/task.modelId untouched so normal model-resolution hierarchy is not pinned by usage bookkeeping.
+       */
+      modelProvider: model?.provider ?? existing?.modelProvider,
+      modelId: model?.id ?? existing?.modelId,
+    };
+  }
+
   private async extractSessionTokenUsage(
     session: AgentSession | undefined,
   ): Promise<Pick<TaskTokenUsage, "inputTokens" | "outputTokens" | "cachedTokens" | "cacheWriteTokens" | "totalTokens"> | undefined> {
@@ -3414,18 +3431,19 @@ export class TaskExecutor {
     const task = await this.store.getTask(taskId);
     const merged = this.accumulateTokenUsage(task.tokenUsage, delta);
     if (!merged) return;
+    const tokenUsage = this.tokenUsageWithModelSnapshot(merged, activeSession, task.tokenUsage);
 
     tokenCacheMetricsLog.log(JSON.stringify({
       taskId,
       agentId: task.assignedAgentId ?? undefined,
       role: "executor",
-      inputTokens: merged.inputTokens,
-      cachedTokens: merged.cachedTokens,
-      cacheWriteTokens: merged.cacheWriteTokens,
-      hitRatio: merged.inputTokens + merged.cachedTokens > 0 ? merged.cachedTokens / (merged.inputTokens + merged.cachedTokens) : 0,
+      inputTokens: tokenUsage.inputTokens,
+      cachedTokens: tokenUsage.cachedTokens,
+      cacheWriteTokens: tokenUsage.cacheWriteTokens,
+      hitRatio: tokenUsage.inputTokens + tokenUsage.cachedTokens > 0 ? tokenUsage.cachedTokens / (tokenUsage.inputTokens + tokenUsage.cachedTokens) : 0,
     }));
 
-    await this.store.updateTask(taskId, { tokenUsage: merged });
+    await this.store.updateTask(taskId, { tokenUsage });
   }
 
   /**
@@ -7303,7 +7321,12 @@ export class TaskExecutor {
               return;
             }
 
+            const previousStepTokenUsage = accumulatedStepTokenUsage;
             accumulatedStepTokenUsage = this.accumulateTokenUsage(accumulatedStepTokenUsage, result.tokenUsage);
+            if (accumulatedStepTokenUsage) {
+              // FNXC:TokenAnalytics 2026-06-18-16:23: Step-scoped token writes must not clear the analytics-only actually-used model snapshot captured by the central session seams.
+              accumulatedStepTokenUsage = this.tokenUsageWithModelSnapshot(accumulatedStepTokenUsage, undefined, previousStepTokenUsage);
+            }
             tokenUsageRecordedSteps.add(stepIndex);
             if (!accumulatedStepTokenUsage) {
               return;
@@ -7348,7 +7371,11 @@ export class TaskExecutor {
             if (!result.tokenUsage || tokenUsageRecordedSteps.has(result.stepIndex)) {
               continue;
             }
+            const previousStepTokenUsage = accumulatedStepTokenUsage;
             accumulatedStepTokenUsage = this.accumulateTokenUsage(accumulatedStepTokenUsage, result.tokenUsage);
+            if (accumulatedStepTokenUsage) {
+              accumulatedStepTokenUsage = this.tokenUsageWithModelSnapshot(accumulatedStepTokenUsage, undefined, previousStepTokenUsage);
+            }
           }
 
           if (accumulatedStepTokenUsage) {

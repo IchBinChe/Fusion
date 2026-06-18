@@ -17,6 +17,8 @@ interface TaskSeed {
   lastUsedAt: string | null;
   modelProvider?: string | null;
   modelId?: string | null;
+  tokenUsageModelProvider?: string | null;
+  tokenUsageModelId?: string | null;
   nodeId?: string | null;
   agentId?: string | null;
 }
@@ -27,9 +29,9 @@ function insertTask(db: Database, t: TaskSeed): void {
        (id, description, "column", createdAt, updatedAt,
         tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageLastUsedAt,
-        modelProvider, modelId, checkoutNodeId, assignedAgentId)
+        modelProvider, modelId, tokenUsageModelProvider, tokenUsageModelId, checkoutNodeId, assignedAgentId)
      VALUES (?, 'desc', 'todo', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z',
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     t.id,
     t.inputTokens ?? null,
@@ -40,6 +42,8 @@ function insertTask(db: Database, t: TaskSeed): void {
     t.lastUsedAt,
     t.modelProvider ?? null,
     t.modelId ?? null,
+    t.tokenUsageModelProvider ?? null,
+    t.tokenUsageModelId ?? null,
     t.nodeId ?? null,
     t.agentId ?? null,
   );
@@ -88,6 +92,52 @@ describe("token-analytics", () => {
     expect(groups.get("model-B")!.nTasks).toBe(2);
     // groups sorted descending by totalTokens
     expect(result.groups[0].key).toBe("model-A");
+  });
+
+  it("groups resolved-via-settings token usage by the actually-used model snapshot", () => {
+    insertTask(db, { id: "t1", inputTokens: 100, outputTokens: 50, totalTokens: 150, lastUsedAt: "2026-03-01T00:00:00.000Z", modelId: null, modelProvider: null, tokenUsageModelId: "claude-sonnet-4-5", tokenUsageModelProvider: "anthropic" });
+    insertTask(db, { id: "t2", inputTokens: 25, outputTokens: 25, totalTokens: 50, lastUsedAt: "2026-03-02T00:00:00.000Z", modelId: null, modelProvider: null, tokenUsageModelId: "gpt-5", tokenUsageModelProvider: "openai" });
+    insertTask(db, { id: "t3", inputTokens: 30, outputTokens: 20, totalTokens: 50, lastUsedAt: "2026-03-03T00:00:00.000Z", modelId: null, modelProvider: null, tokenUsageModelId: "gpt-5", tokenUsageModelProvider: "openai" });
+
+    const result = aggregateTokenAnalytics(db, { groupBy: "model" });
+
+    const groups = new Map(result.groups.map((g) => [g.key, g]));
+    expect([...groups.keys()].sort()).toEqual(["claude-sonnet-4-5", "gpt-5"]);
+    expect(groups.get("claude-sonnet-4-5")).toMatchObject({ totalTokens: 150, inputTokens: 100, outputTokens: 50, nTasks: 1 });
+    expect(groups.get("gpt-5")).toMatchObject({ totalTokens: 100, inputTokens: 55, outputTokens: 45, nTasks: 2 });
+    expect(groups.has(null)).toBe(false);
+  });
+
+  it("groups providers by the token-usage snapshot before task own-provider", () => {
+    insertTask(db, { id: "t1", inputTokens: 100, totalTokens: 100, lastUsedAt: "2026-03-01T00:00:00.000Z", modelProvider: null, tokenUsageModelProvider: "anthropic", tokenUsageModelId: "claude-sonnet-4-5" });
+    insertTask(db, { id: "t2", inputTokens: 200, totalTokens: 200, lastUsedAt: "2026-03-02T00:00:00.000Z", modelProvider: null, tokenUsageModelProvider: "openai", tokenUsageModelId: "gpt-5" });
+    insertTask(db, { id: "t3", inputTokens: 25, totalTokens: 25, lastUsedAt: "2026-03-03T00:00:00.000Z", modelProvider: "legacy-provider", tokenUsageModelProvider: "openai", tokenUsageModelId: "gpt-5" });
+
+    const result = aggregateTokenAnalytics(db, { groupBy: "provider" });
+
+    expect(new Map(result.groups.map((g) => [g.key, g.totalTokens]))).toEqual(
+      new Map([["anthropic", 100], ["openai", 225]]),
+    );
+  });
+
+  it("falls back to legacy task model columns when no token snapshot exists", () => {
+    insertTask(db, { id: "legacy", inputTokens: 40, totalTokens: 40, lastUsedAt: "2026-03-01T00:00:00.000Z", modelProvider: "anthropic", modelId: "legacy-model" });
+
+    const result = aggregateTokenAnalytics(db, { groupBy: "model" });
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0]).toMatchObject({ key: "legacy-model", totalTokens: 40, nTasks: 1 });
+  });
+
+  it("keeps own-model and resolved-model token snapshots as distinct model groups", () => {
+    insertTask(db, { id: "own", inputTokens: 100, totalTokens: 100, lastUsedAt: "2026-03-01T00:00:00.000Z", modelProvider: "anthropic", modelId: "own-model", tokenUsageModelProvider: "anthropic", tokenUsageModelId: "own-model" });
+    insertTask(db, { id: "resolved", inputTokens: 75, totalTokens: 75, lastUsedAt: "2026-03-02T00:00:00.000Z", modelProvider: null, modelId: null, tokenUsageModelProvider: "openai", tokenUsageModelId: "resolved-model" });
+
+    const result = aggregateTokenAnalytics(db, { groupBy: "model" });
+
+    expect(new Map(result.groups.map((g) => [g.key, g.totalTokens]))).toEqual(
+      new Map([["own-model", 100], ["resolved-model", 75]]),
+    );
   });
 
   it("groups by provider, node, and agent", () => {

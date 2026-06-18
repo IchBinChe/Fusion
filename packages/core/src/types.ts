@@ -1814,6 +1814,16 @@ export interface TaskTokenUsage {
   firstUsedAt: string;
   /** ISO-8601 timestamp of the most recent recorded usage event for this task. */
   lastUsedAt: string;
+  /**
+   * FNXC:TokenAnalytics 2026-06-18-16:23:
+   * Snapshot the provider of the actually-used model for analytics only. This is intentionally distinct from task.modelProvider, which is an own-model override used by model resolution and must not be written by token bookkeeping.
+   */
+  modelProvider?: string;
+  /**
+   * FNXC:TokenAnalytics 2026-06-18-16:23:
+   * Snapshot the id of the actually-used model for analytics only. This is intentionally distinct from task.modelId, which is an own-model override used by model resolution and must not be written by token bookkeeping.
+   */
+  modelId?: string;
 }
 
 export interface TaskTokenBudget {

@@ -105,6 +105,8 @@ interface TaskTokenRow {
   totalTokens: number | null;
   modelProvider: string | null;
   modelId: string | null;
+  tokenUsageModelProvider: string | null;
+  tokenUsageModelId: string | null;
   checkoutNodeId: string | null;
   assignedAgentId: string | null;
   tokenUsageLastUsedAt: string;
@@ -113,9 +115,13 @@ interface TaskTokenRow {
 function groupKeyFor(row: TaskTokenRow, groupBy: TokenGroupBy): string | null {
   switch (groupBy) {
     case "model":
-      return row.modelId;
+      /*
+       * FNXC:TokenAnalytics 2026-06-18-16:23:
+       * By-model analytics must prefer the analytics-only actually-used model snapshot because task.modelId is only an own-model override. Fall back to legacy task.modelId so pre-snapshot rows keep their historical grouping and never throw.
+       */
+      return row.tokenUsageModelId ?? row.modelId;
     case "provider":
-      return row.modelProvider;
+      return row.tokenUsageModelProvider ?? row.modelProvider;
     case "node":
       return row.checkoutNodeId;
     case "agent":
@@ -243,6 +249,8 @@ export function aggregateTokenAnalytics(
          tokenUsageTotalTokens   AS totalTokens,
          modelProvider,
          modelId,
+         tokenUsageModelProvider,
+         tokenUsageModelId,
          checkoutNodeId,
          assignedAgentId,
          tokenUsageLastUsedAt

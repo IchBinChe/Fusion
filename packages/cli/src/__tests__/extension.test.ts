@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -27,6 +26,7 @@ import kbExtension, { resolveTaskListFormatter } from "../extension.js";
 import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES, MAX_TASK_LIST_TEXT_CHARS, formatTaskListText } from "@fusion/core";
 import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
+import { hasBuiltCoreDistBarrel } from "@fusion/test-utils";
 import { runTaskPlan } from "../commands/task.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -2694,13 +2694,14 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
     /**
      * FNXC:TaskListOutput 2026-06-17-02:37:
      * FN-6535 reproduces the heartbeat failure at the actual CLI tool surface while forcing @fusion/core to resolve through the built dist barrel. The normal CLI suite aliases @fusion/core to source, so this targeted mock is the regression guard for stale exports.import dist artifacts.
+     *
+     * FNXC:CoreTests 2026-06-18-01:35:
+     * FN-6627 aligns the skip gate with every built @fusion/core dist artifact this runtime-dist mock loads, so a partial stale dist skips cleanly while a complete dist still exercises the heartbeat fn_task_list surface.
      */
-    it.skipIf(!existsSync(resolve(__dirname, "../../../core/dist/index.js")))(
+    it.skipIf(!hasBuiltCoreDistBarrel(resolve(__dirname, "../../../core/dist")))(
       "executes with @fusion/core resolved through the built dist barrel",
       async () => {
         const distCoreIndex = resolve(__dirname, "../../../core/dist/index.js");
-        const distTaskListFormat = resolve(__dirname, "../../../core/dist/task-list-format.js");
-        expect(existsSync(distTaskListFormat)).toBe(true);
 
         const store = new TaskStore(tmpDir);
         await store.init();

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -7,6 +6,7 @@ import {
   MAX_TASK_LIST_TEXT_CHARS as SOURCE_BARREL_MAX_TASK_LIST_TEXT_CHARS,
   formatTaskListText as sourceBarrelFormatTaskListText,
 } from "../index.js";
+import { hasBuiltCoreDistBarrel } from "@fusion/test-utils";
 import { clampTaskListText, formatTaskListText, MAX_TASK_LIST_TEXT_CHARS } from "../task-list-format.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -78,18 +78,21 @@ function executeRuntimeTaskList(
  * FN-6535 requires this guard to execute a fn_task_list-shaped runtime call through the built dist module, not just assert the barrel types. The recurring crash was a post-FN-6492 tool call resolving @fusion/core through exports.import to stale dist, so the regression must fail when that dist omits the helper.
  */
 describe("@fusion/core dist barrel export wiring (FN-6515/FN-6535)", () => {
-  const distIndex = resolve(__dirname, "../../dist/index.js");
-  const distTaskListFormat = resolve(__dirname, "../../dist/task-list-format.js");
+  const distDir = resolve(__dirname, "../../dist");
+  const hasCompleteDistBarrel = hasBuiltCoreDistBarrel(distDir);
+  const distIndex = resolve(distDir, "index.js");
   let builtDistCore: RuntimeCoreTaskListModule | undefined;
 
   /*
   FNXC:CoreTests 2026-06-17-13:40:
   FN-6591 requires the FN-6515/FN-6535 dist-barrel guard to settle under broad @fusion/core suite load without timeout, retry, or worker appeasement.
   Load the built dist barrel once for every dist assertion so heartbeat fn_task_list coverage still exercises the real runtime export path while avoiding duplicate dynamic-import pressure in the timed test bodies.
+
+  FNXC:CoreTests 2026-06-18-01:35:
+  FN-6627 requires this guard to skip when the built @fusion/core dist barrel is absent or partial, because the runtime import path depends on both index.js and task-list-format.js.
   */
   beforeAll(async () => {
-    if (!existsSync(distIndex)) return;
-    expect(existsSync(distTaskListFormat)).toBe(true);
+    if (!hasCompleteDistBarrel) return;
     builtDistCore = await import(pathToFileURL(distIndex).href) as RuntimeCoreTaskListModule;
   });
 
@@ -99,7 +102,7 @@ describe("@fusion/core dist barrel export wiring (FN-6515/FN-6535)", () => {
     expect(typeof SOURCE_BARREL_MAX_TASK_LIST_TEXT_CHARS).toBe("number");
   });
 
-  it.skipIf(!existsSync(distIndex))("re-exports task-list formatting helpers from the built dist barrel", () => {
+  it.skipIf(!hasCompleteDistBarrel)("re-exports task-list formatting helpers from the built dist barrel", () => {
     const mod = builtDistCore;
 
     expect(mod).toBeDefined();
@@ -108,7 +111,7 @@ describe("@fusion/core dist barrel export wiring (FN-6515/FN-6535)", () => {
     expect(typeof mod?.MAX_TASK_LIST_TEXT_CHARS).toBe("number");
   });
 
-  it.skipIf(!existsSync(distIndex))("executes the fn_task_list surface through the built dist core module", () => {
+  it.skipIf(!hasCompleteDistBarrel)("executes the fn_task_list surface through the built dist core module", () => {
     const mod = builtDistCore as RuntimeCoreTaskListModule;
     const todoAnchor: RuntimeTask = {
       id: "FN-001",

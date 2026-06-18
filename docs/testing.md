@@ -10,6 +10,18 @@ CI blocks PRs on exactly four checks (`.github/workflows/pr-checks.yml`): **Lint
 
 Gate membership is the explicit allow-list in `packages/engine/vitest.config.ts` (`engine-core` project). Admission requires evidence of value (the test catches real regressions); tests never graduate in by default. A flaky gate test is evicted by deleting its allow-list line — the eviction PR does not need the flaky test to pass. The whole `engine-core` project must stay under ~60s wall-clock.
 
+## Weekly signal-per-second baseline
+
+Refresh and publish the test feedback-loop baseline in #leads once per weekly cycle:
+
+```bash
+pnpm test:gate  # capture wall-time in ms
+pnpm test       # capture wall-time in ms
+node scripts/test-feedback-baseline.mjs --record --gate-ms <ms> --test-ms <ms> --print-leads
+```
+
+The generated `docs/test-feedback-loop-baseline.md` is the publication artifact: it reports gate wall-time, `pnpm test` wall-time, the slowest 20 test files from `scripts/test-timings.json`, and the current quarantine/flake count from `scripts/lib/test-quarantine.json`. Keep the trend flat or net-negative; use the slowest-file list to drive FN-5048 rewrites and deletion-ratchet reviews instead of adding low-signal coverage.
+
 **The gate's blind spot, stated honestly:** typecheck + build + boot smoke + curated suite does not run the union suite a merge creates. Logic regressions outside the curated set land non-blocking by design — that is the accepted trade: the old broad gate caught no recalled real bugs while consuming ~70% of shipping time in flake triage.
 
 ## Required workspace gates

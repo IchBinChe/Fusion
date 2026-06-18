@@ -34,6 +34,7 @@
     "test:scripts": "node --test scripts/__tests__/*.test.mjs",
     "fn:cache-stats": "node scripts/cache-stats.mjs",
     "test:full": "node scripts/test-changed.mjs --full --no-cache && pnpm --filter @fusion/engine test:slow",
+    "test:feedback-baseline": "node scripts/test-feedback-baseline.mjs",
     "test:ci:shard": "node scripts/ci-test-shard.mjs",
     "test:serial": "FUSION_TEST_CONCURRENCY=1 FUSION_TEST_WORKSPACE_CONCURRENCY=1 pnpm test:full",
     "test:fast": "FUSION_TEST_CONCURRENCY=4 FUSION_TEST_WORKSPACE_CONCURRENCY=4 pnpm test:full",

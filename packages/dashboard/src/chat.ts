@@ -26,6 +26,7 @@ import type {
   Settings,
   TaskStore,
 } from "@fusion/core";
+import type { SkillSelectionContext } from "@fusion/engine";
 import { summarizeTitle } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
@@ -116,6 +117,79 @@ const diagnostics: DiagnosticsLogger = {
     _diagnostics.error(message, ...args);
   },
 };
+
+const SKILL_COMMAND_PATTERN = /(^|\s)\/skill:([^\s]+)/gi;
+
+function bareChatSkillCommandName(name: string): string {
+  return name
+    .replace(/\/SKILL\.md$/i, "")
+    .replace(/[.,;!?)]*$/g, "")
+    .trim();
+}
+
+function pushDedupedSkillName(names: string[], seen: Set<string>, name: string): void {
+  const bareName = bareChatSkillCommandName(name);
+  if (!bareName) {
+    return;
+  }
+  const key = bareName.toLowerCase();
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  names.push(bareName);
+}
+
+function parseSkillCommands(content: string): { requestedSkillNames: string[]; strippedContent: string } {
+  const requestedSkillNames: string[] = [];
+  const seen = new Set<string>();
+  let foundCommand = false;
+
+  const strippedContent = content.replace(SKILL_COMMAND_PATTERN, (match, leadingWhitespace: string, rawName: string) => {
+    foundCommand = true;
+    pushDedupedSkillName(requestedSkillNames, seen, rawName);
+    return leadingWhitespace ? " " : "";
+  });
+
+  if (!foundCommand) {
+    return { requestedSkillNames, strippedContent: content };
+  }
+
+  return {
+    requestedSkillNames,
+    strippedContent: strippedContent.replace(/\s+/g, " ").trim(),
+  };
+}
+
+function mergeTypedSkillCommands(
+  baseSkillSelection: SkillSelectionContext | undefined,
+  typedSkillNames: string[],
+  projectRootDir: string,
+  sessionPurpose: string,
+): SkillSelectionContext | undefined {
+  if (typedSkillNames.length === 0) {
+    return baseSkillSelection;
+  }
+
+  const requestedSkillNames: string[] = [];
+  const seen = new Set<string>();
+  for (const name of baseSkillSelection?.requestedSkillNames ?? []) {
+    pushDedupedSkillName(requestedSkillNames, seen, name);
+  }
+  for (const name of typedSkillNames) {
+    pushDedupedSkillName(requestedSkillNames, seen, name);
+  }
+
+  /*
+  FNXC:ChatSkills 2026-06-17-18:16:
+  The advertised chat `/skill:{name}` command must request that skill for the model-loop session while keeping execution settings authoritative; this merge only adds requested names to the existing skill-selection context so the resolver still filters disabled or excluded skills.
+  */
+  return {
+    projectRootDir: baseSkillSelection?.projectRootDir ?? projectRootDir,
+    requestedSkillNames,
+    sessionPurpose: baseSkillSelection?.sessionPurpose ?? sessionPurpose,
+  };
+}
 
 async function ensureEngineReady(): Promise<void> {
   if (buildAgentChatPromptFn) {
@@ -1318,6 +1392,7 @@ export class ChatManager {
       diagnostics,
     );
     const attachmentContentBlock = formatChatAttachmentContents(attachmentContents);
+    const parsedSkillCommands = parseSkillCommands(input.content);
     const roomPromptParts = [
       `You are replying as ${input.responder.name} in room #${input.roomName}.`,
       "Reply to the latest user room message in the context of this shared room thread.",
@@ -1327,7 +1402,7 @@ export class ChatManager {
         summaryMaxChars: roomCompactionSettings.summaryMaxChars,
       }),
       "Latest user message to answer:",
-      input.content,
+      parsedSkillCommands.strippedContent,
     ];
     if (attachmentContentBlock) {
       roomPromptParts.push(attachmentContentBlock);
@@ -1347,6 +1422,12 @@ export class ChatManager {
       this.rootDir,
       this.getPluginRunnerForSkillSelection(),
     );
+    const mergedRoomSkillSelection = mergeTypedSkillCommands(
+      roomSkillContext.skillSelectionContext,
+      parsedSkillCommands.requestedSkillNames,
+      this.rootDir,
+      "heartbeat",
+    );
 
     const resolvedSession = await createResolvedAgentSession({
       sessionPurpose: "heartbeat",
@@ -1355,8 +1436,11 @@ export class ChatManager {
       /*
       FNXC:ChatSkills 2026-06-16-19:13:
       Chat-room responder sessions must request the responder agent skills plus enabled plugin skills so chat-only agent replies can use skills such as ce-debug just like heartbeat/executor lanes.
+
+      FNXC:ChatSkills 2026-06-17-18:16:
+      Room responders share the chat slash-command contract: `/skill:{name}` is removed from the prompt text and merged into heartbeat skill selection without changing persisted room-message text.
       */
-      ...(roomSkillContext.skillSelectionContext ? { skillSelection: roomSkillContext.skillSelectionContext } : {}),
+      ...(mergedRoomSkillSelection ? { skillSelection: mergedRoomSkillSelection } : {}),
       cwd: this.rootDir,
       systemPrompt,
       tools: "coding",
@@ -1559,6 +1643,8 @@ export class ChatManager {
         updatedAt: new Date().toISOString(),
       });
 
+      const parsedSkillCommands = parseSkillCommands(content);
+
       const hasMentionCandidates = /@[\w-]+/.test(content);
       const mentionAgents = hasMentionCandidates ? await this.listAgentsForMentions() : [];
       const mentions = hasMentionCandidates ? await this.parseMentions(content, mentionAgents) : [];
@@ -1670,7 +1756,7 @@ export class ChatManager {
       }
 
       // Resolve #file references in the current message before sending to AI
-      const resolvedContent = await resolveFileReferences(content, this.rootDir);
+      const resolvedContent = await resolveFileReferences(parsedSkillCommands.strippedContent, this.rootDir);
 
       const attachmentSummary = attachments && attachments.length > 0
         ? `[User attached: ${attachments
@@ -1815,6 +1901,12 @@ export class ChatManager {
         this.rootDir,
         this.getPluginRunnerForSkillSelection(),
       );
+      const mergedChatSkillSelection = mergeTypedSkillCommands(
+        chatSkillContext.skillSelectionContext,
+        parsedSkillCommands.requestedSkillNames,
+        this.rootDir,
+        "executor",
+      );
       agentResult = await createResolvedAgentSession({
         sessionPurpose: "executor",
         ...(agentRuntimeHint ? { runtimeHint: agentRuntimeHint } : {}),
@@ -1823,7 +1915,7 @@ export class ChatManager {
         FNXC:ChatSkills 2026-06-16-19:13:
         Regular chat and QuickChat must request bound-agent skills plus enabled plugin skills so dashboard chat loads capabilities such as ce-debug instead of creating skill-less sessions.
         */
-        ...(chatSkillContext.skillSelectionContext ? { skillSelection: chatSkillContext.skillSelectionContext } : {}),
+        ...(mergedChatSkillSelection ? { skillSelection: mergedChatSkillSelection } : {}),
         ...sessionOptions,
       });
       this.activeGenerations.set(sessionId, { abortController, agentResult, generationId });

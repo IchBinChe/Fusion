@@ -24,6 +24,7 @@ fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
 - Each message is stored as a `user-to-agent` MessageStore message from `cli` with `metadata.wakeRecipient=true`.
 - Agent replies are polled from your inbox and printed as they arrive.
 - Dashboard-created agent chat sessions request the target agent's declared `metadata.skills` plus enabled plugin-contributed skills, so skills such as `ce-debug` are available in chat when the contributing plugin is enabled. Model-only QuickChat sessions request enabled plugin skills, and room responder sessions request the responder agent's skills.
+- In dashboard model-loop chat (main chat, QuickChat, and room responders), typing `/skill:{name}` requests that skill for the current AI session and strips the slash token from the prompt sent to the model. The requested skill is still subject to the normal enabled/disabled execution-skill filters; CLI-agent-backed PTY chat keeps raw terminal input semantics and does not interpret this command.
 
 ### Flags
 

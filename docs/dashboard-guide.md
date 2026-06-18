@@ -290,6 +290,7 @@ Quick Chat is an optional floating panel for fast, project-scoped assistant conv
 
 - Controlled by the project setting `showQuickChatFAB`
 - Supports agent mentions (`@agent`) and shared `#` task/file mentions
+- Supports `/skill:{name}` in model-loop chat to request a specific enabled skill for that session; the slash token is removed from the model prompt while the original user message remains in chat history
 - Uses the same model/provider infrastructure as full Chat view
 - On small screens, compact tool-call summaries in the floating panel intentionally stay single-line (count + tool names + status) to preserve message density
 - The panel header uses a session-first flow: the main dropdown lists persisted sessions (preferring `session.title`, then falling back to deterministic `Session N` labels)

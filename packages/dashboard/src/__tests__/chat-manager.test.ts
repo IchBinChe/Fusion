@@ -706,6 +706,164 @@ describe("ChatManager.sendMessage", () => {
     expect(createOptions.skillSelection.requestedSkillNames).toEqual(["fusion", "ce-debug"]);
   });
 
+  it("loads a single-segment /skill command and strips it from the chat prompt", async () => {
+    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: promptSpy,
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Skill command ready" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: { skills: ["agent-debug"] },
+    });
+
+    const chatManager = createChatManager();
+    await chatManager.sendMessage("chat-001", "/skill:ce-debug please debug this");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["agent-debug", "ce-debug"]);
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    const promptContent = promptSpy.mock.calls[0]?.[0] as string;
+    expect(promptContent).toBe("please debug this");
+    expect(promptContent).not.toContain("/skill:");
+    expect(mockChatStore.addMessage).toHaveBeenCalledWith("chat-001", expect.objectContaining({
+      role: "user",
+      content: "/skill:ce-debug please debug this",
+    }));
+  });
+
+  it("loads two-segment and multiple /skill commands in typed order", async () => {
+    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: promptSpy,
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Multiple skills ready" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: { skills: [] },
+    });
+
+    const chatManager = createChatManager();
+    await chatManager.sendMessage("chat-001", "start /skill:review/pr please /skill:gamma now");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["fusion", "review/pr", "gamma"]);
+    const promptContent = promptSpy.mock.calls[0]?.[0] as string;
+    expect(promptContent).toBe("start please now");
+    expect(promptContent).not.toContain("/skill:");
+  });
+
+  it("dedupes typed /skill commands against agent and plugin skills case-insensitively", async () => {
+    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: promptSpy,
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Deduped" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: { skills: ["ce-debug"] },
+    });
+    const pluginRunner = {
+      getPluginSkills: vi.fn(() => [
+        { pluginId: "fusion-plugin-compound-engineering", skill: { name: "review/pr", enabled: true } },
+      ]),
+    };
+
+    const chatManager = createChatManager(pluginRunner);
+    await chatManager.sendMessage("chat-001", "/skill:CE-DEBUG /skill:review/pr/SKILL.md use both");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["ce-debug", "review/pr"]);
+    const names = createOptions.skillSelection.requestedSkillNames.filter((name: string) => name.toLowerCase() === "ce-debug");
+    expect(names).toHaveLength(1);
+    expect(promptSpy.mock.calls[0]?.[0]).toBe("use both");
+  });
+
+  it("creates skill selection for model-only QuickChat when /skill is typed without plugin skills", async () => {
+    mockChatStore.getSession.mockReturnValue({
+      id: "chat-001",
+      agentId: null,
+      status: "active",
+    });
+    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: promptSpy,
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Model-only skill ready" }] },
+        },
+      };
+    });
+
+    const chatManager = createChatManager();
+    await chatManager.sendMessage("chat-001", "/skill:foo answer directly");
+
+    expect(createOptions.skillSelection).toMatchObject({
+      projectRootDir: "/tmp/test",
+      sessionPurpose: "executor",
+    });
+    expect(createOptions.skillSelection.requestedSkillNames).toContain("foo");
+    expect(promptSpy.mock.calls[0]?.[0]).toBe("answer directly");
+  });
+
+  it("leaves skill selection and prompt content unchanged when no /skill command is present", async () => {
+    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: promptSpy,
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Plain reply" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: { skills: ["agent-debug"] },
+    });
+
+    const chatManager = createChatManager();
+    await chatManager.sendMessage("chat-001", "plain hello");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["agent-debug"]);
+    expect(promptSpy.mock.calls[0]?.[0]).toBe("plain hello");
+  });
+
   it("keeps agent skills when the chat plugin runner lacks skill discovery", async () => {
     let createOptions: any;
     __setCreateResolvedAgentSession(async (options: any) => {

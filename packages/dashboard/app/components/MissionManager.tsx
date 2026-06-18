@@ -104,6 +104,7 @@ import {
 } from "../api";
 import type { AutopilotState, MissionInterviewDraftSummary } from "./mission-types";
 import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
 
 const MISSION_SIDEBAR_DEFAULT_WIDTH = 300;
 const MISSION_SIDEBAR_MIN_WIDTH = 220;
@@ -396,24 +397,31 @@ type MissionHealthState = "healthy" | "warning" | "error";
 
 const HOUR_MS = 60 * 60 * 1000;
 
+/*
+FNXC:MissionTimestamps 2026-06-17-17:34:
+FN-6601 uses the shared relative-time bucket helper while preserving MissionManager's missing-value em dash and days-forever fallback.
+*/
 function getRelativeTime(timestamp: string | undefined, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string {
   if (!timestamp) return "—";
 
   const ts = new Date(timestamp).getTime();
   if (Number.isNaN(ts)) return "—";
 
-  const diffMs = Date.now() - ts;
-  if (diffMs < 0) return t("missions.relativeTimeJustNow", "just now");
+  const bucket = getRelativeTimeBucket(timestamp);
+  if (!bucket) return t("missions.relativeTimeJustNow", "just now");
 
-  const diffMinutes = Math.floor(diffMs / (60 * 1000));
-  if (diffMinutes < 1) return t("missions.relativeTimeJustNow", "just now");
-  if (diffMinutes < 60) return t("missions.relativeTimeMinutes", "{{count}}m ago", { count: diffMinutes });
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return t("missions.relativeTimeHours", "{{count}}h ago", { count: diffHours });
-
-  const diffDays = Math.floor(diffHours / 24);
-  return t("missions.relativeTimeDays", "{{count}}d ago", { count: diffDays });
+  switch (bucket.bucket) {
+    case "just-now":
+      return t("missions.relativeTimeJustNow", "just now");
+    case "minutes":
+      return t("missions.relativeTimeMinutes", "{{count}}m ago", { count: bucket.count });
+    case "hours":
+      return t("missions.relativeTimeHours", "{{count}}h ago", { count: bucket.count });
+    case "days":
+    case "weeks":
+    case "older":
+      return t("missions.relativeTimeDays", "{{count}}d ago", { count: bucket.days });
+  }
 }
 
 function getMissionHealthState(health?: MissionHealth): MissionHealthState {

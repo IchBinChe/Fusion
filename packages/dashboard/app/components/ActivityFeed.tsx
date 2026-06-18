@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { ActivityFeedEntry } from "../api";
+import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
 
 export interface ActivityFeedProps {
   entries: ActivityFeedEntry[];
@@ -48,19 +49,30 @@ const TYPE_CONFIG: Record<ActivityFeedEntry["type"], {
   "project:isolation-transition": { label: "Isolation", icon: Folder, color: "var(--color-info)" },
 };
 
+/*
+FNXC:ActivityFeedTimestamps 2026-06-17-17:27:
+FN-6601 routes ActivityFeed through the shared relative-time bucket helper while preserving this surface's capitalized "Just now" label and locale-date fallback.
+*/
 function formatRelativeTime(timestamp: string): string {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
+  const bucket = getRelativeTimeBucket(timestamp);
+  if (!bucket) {
+    const date = new Date(timestamp);
+    return Number.isFinite(date.getTime()) ? "Just now" : date.toLocaleDateString();
+  }
 
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
+  switch (bucket.bucket) {
+    case "just-now":
+      return "Just now";
+    case "minutes":
+      return `${bucket.count}m ago`;
+    case "hours":
+      return `${bucket.count}h ago`;
+    case "days":
+      return `${bucket.count}d ago`;
+    case "weeks":
+    case "older":
+      return bucket.date.toLocaleDateString();
+  }
 }
 
 function formatFullTime(timestamp: string): string {

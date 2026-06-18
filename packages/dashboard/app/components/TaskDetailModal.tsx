@@ -62,6 +62,7 @@ import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../u
 import { getTaskAgeStalenessCopy } from "../utils/taskAgeStalenessCopy";
 import { findInReviewStallLogEntry, IN_REVIEW_STALL_LOG_REGEX } from "../utils/findInReviewStallLogEntry";
 import { getTaskLogEntryAction, getTaskLogEntryOutcome } from "../utils/taskLogEntryDisplay";
+import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
 
 interface ModelSelection {
   provider?: string;
@@ -256,18 +257,30 @@ function getStepStatusColor(status: string): string {
 }
 
 function formatTimestamp(iso: string): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
+  /*
+   * FNXC:RelativeTime 2026-06-17-20:48:
+   * FN-6618 routes TaskDetailModal timestamp math through getRelativeTimeBucket while preserving lowercase compact labels, future-as-just-now behavior, and the legacy Invalid Date fallback for unparseable input.
+   */
+  const bucket = getRelativeTimeBucket(iso);
+  if (!bucket) {
+    const timestampMs = Date.parse(iso);
+    if (Number.isFinite(timestampMs) && Date.now() - timestampMs < 0) return "just now";
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
 
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  switch (bucket.bucket) {
+    case "just-now":
+      return "just now";
+    case "minutes":
+      return `${bucket.count}m ago`;
+    case "hours":
+      return `${bucket.count}h ago`;
+    case "days":
+      return `${bucket.count}d ago`;
+    case "weeks":
+    case "older":
+      return bucket.date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
 }
 
 function formatBytes(bytes: number): string {

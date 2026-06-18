@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GitManagerModal } from "../GitManagerModal";
@@ -149,6 +149,10 @@ const mockTasks: Task[] = [
 ];
 
 describe("GitManagerModal", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseViewportMode.mockReturnValue("desktop");
@@ -1141,6 +1145,36 @@ describe("GitManagerModal", () => {
       const dateSpan = panel.querySelector(".gm-branch-date");
       expect(dateSpan).toBeTruthy();
       expect(dateSpan!.textContent).toBe("—");
+    });
+  });
+
+  it("preserves branch relative-date buckets including the 30 day threshold", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-17T20:00:00.000Z"));
+    (fetchGitBranches as any).mockResolvedValue([
+      { name: "now", isCurrent: true, lastCommitDate: "2026-06-17T19:59:30.000Z" },
+      { name: "minutes", isCurrent: false, lastCommitDate: "2026-06-17T19:55:00.000Z" },
+      { name: "hours", isCurrent: false, lastCommitDate: "2026-06-17T17:00:00.000Z" },
+      { name: "twenty-nine", isCurrent: false, lastCommitDate: "2026-05-19T20:00:00.000Z" },
+      { name: "thirty", isCurrent: false, lastCommitDate: "2026-05-18T20:00:00.000Z" },
+      { name: "future", isCurrent: false, lastCommitDate: "2026-06-17T20:00:01.000Z" },
+    ]);
+
+    render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /branches/i }));
+
+    await waitFor(() => {
+      const panel = screen.getByTestId("branches-panel");
+      const dateTexts = Array.from(panel.querySelectorAll(".gm-branch-date")).map((node) => node.textContent);
+      expect(dateTexts).toEqual(expect.arrayContaining([
+        "just now",
+        "5m ago",
+        "3h ago",
+        "29d ago",
+        new Date("2026-05-18T20:00:00.000Z").toLocaleDateString(),
+      ]));
     });
   });
 

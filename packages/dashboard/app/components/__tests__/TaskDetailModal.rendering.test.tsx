@@ -380,6 +380,50 @@ describe("TaskDetailModal", () => {
         expect(timestamps).toHaveTextContent("Created May 1");
         expect(timestamps).toHaveTextContent("Updated May 2");
       });
+
+      it("preserves byte-identical timestamp buckets and edge cases", () => {
+        const { rerender } = render(
+          <TaskDetailModal
+            initialTab="definition"
+            task={makeTask({
+              sourceType: "dashboard_ui",
+              createdAt: "2026-05-11T11:59:30.000Z",
+              updatedAt: "2026-05-11T11:55:00.000Z",
+            })}
+            onClose={noop}
+            onMoveTask={noopMove}
+            onDeleteTask={noopDelete}
+            onMergeTask={noopMerge}
+            onOpenDetail={noopOpenDetail}
+            addToast={noop}
+          />,
+        );
+
+        let timestamps = screen.getByLabelText("Task timestamps");
+        expect(timestamps).toHaveTextContent("Created just now");
+        expect(timestamps).toHaveTextContent("Updated 5m ago");
+
+        rerender(
+          <TaskDetailModal
+            initialTab="definition"
+            task={makeTask({
+              sourceType: "dashboard_ui",
+              createdAt: "not-a-date",
+              updatedAt: "2026-05-11T12:00:01.000Z",
+            })}
+            onClose={noop}
+            onMoveTask={noopMove}
+            onDeleteTask={noopDelete}
+            onMergeTask={noopMerge}
+            onOpenDetail={noopOpenDetail}
+            addToast={noop}
+          />,
+        );
+
+        timestamps = screen.getByLabelText("Task timestamps");
+        expect(timestamps).toHaveTextContent("Created Invalid Date");
+        expect(timestamps).toHaveTextContent("Updated just now");
+      });
     });
   });
 

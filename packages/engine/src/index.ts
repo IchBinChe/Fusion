@@ -184,7 +184,6 @@ export {
   type AutostashHandle,
 } from "./merger.js";
 export {
-  registerMergeTraitHooks,
   resolveMergePolicy,
   type ResolvedMergePolicy,
   type MergeFileScopeMode,

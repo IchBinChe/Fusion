@@ -854,9 +854,10 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
 
       const perColumn = params.limit ?? 10;
+      const requestedColumn = params.column as ColumnId | undefined;
       const lines: string[] = [];
       for (const col of COLUMNS) {
-        if (params.column && params.column !== col) continue;
+        if (requestedColumn && requestedColumn !== col) continue;
 
         const colTasks = tasks.filter((t) => t.column === col);
         if (colTasks.length === 0) continue;
@@ -873,6 +874,10 @@ export default function kbExtension(pi: ExtensionAPI) {
         lines.push("");
       }
 
+      const emptyStateText = requestedColumn
+        ? `No tasks in ${columnLabel(requestedColumn)} (${requestedColumn}).`
+        : "No matching tasks.";
+
       /*
       FNXC:TaskListOutput 2026-06-16-17:47:
       FN-6492 routes CLI fn_task_list through the shared clamp so large column-filtered board reads remain text-only instead of being converted to host attachments.
@@ -882,10 +887,16 @@ export default function kbExtension(pi: ExtensionAPI) {
 
       FNXC:TaskListOutput 2026-06-17-07:25:
       FN-6573 requires CLI fn_task_list to resolve formatTaskListText from the runtime @fusion/core namespace with a typeof guard and a self-contained bounded fallback. A stale @fusion/core dist missing the FN-6570 formatter export crashed ambient heartbeat agents as `(0 , _core.formatTaskListText) is not a function`; the tool must now return bounded text instead.
+
+      FNXC:TaskListOutput 2026-06-18-04:46:
+      FN-6630 refines FN-6492 by requiring filtered fn_task_list calls against empty target columns to return explicit empty-state text. Host runtimes can imageify empty content blocks as `(see attached image)`, so this call site must never emit empty or whitespace-only text.
       */
       const formatter = resolveTaskListFormatter(fusionCore);
+      const text = lines.length === 0
+        ? emptyStateText
+        : formatter(lines, { clamp: fusionCore.clampTaskListText }).trimEnd();
       return {
-        content: [{ type: "text", text: formatter(lines, { clamp: fusionCore.clampTaskListText }).trimEnd() }],
+        content: [{ type: "text", text: text.trim().length > 0 ? text : emptyStateText }],
         details: { count: tasks.length },
       };
     },

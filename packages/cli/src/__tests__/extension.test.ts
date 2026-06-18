@@ -23,7 +23,7 @@ vi.mock("../commands/task.js", () => ({
 }));
 
 import kbExtension, { resolveTaskListFormatter } from "../extension.js";
-import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES, MAX_TASK_LIST_TEXT_CHARS, formatTaskListText } from "@fusion/core";
+import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES, MAX_TASK_LIST_TEXT_CHARS, formatTaskListText, COLUMN_LABELS } from "@fusion/core";
 import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { hasBuiltCoreDistBarrel } from "@fusion/test-utils";
@@ -2588,6 +2588,37 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       }
     });
 
+    it("returns explicit text for empty active-column filters on a non-empty board", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        await store.createTask({ description: "Finished task keeps the board non-empty", column: "done" });
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      for (const column of ["triage", "todo", "in-progress", "in-review"] as const) {
+        const result = await listTool.execute(
+          `empty-${column}`,
+          { column },
+          undefined,
+          undefined,
+          makeCtx(tmpDir),
+        );
+        const text = result.content[0].text;
+
+        expect(result.content).toHaveLength(1);
+        expect(result.content[0].type).toBe("text");
+        expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+        expect(text).toBeTruthy();
+        expect(text.trim()).not.toBe("");
+        expect(text).toContain(COLUMN_LABELS[column]);
+        expect(text).toContain(column);
+        expect(result.details.count).toBe(1);
+      }
+    });
+
     it("keeps small column-filtered listings complete without the clamp marker", async () => {
       const store = new TaskStore(tmpDir);
       await store.init();
@@ -2611,10 +2642,13 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(result.content).toHaveLength(1);
       expect(result.content[0].type).toBe("text");
       expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+      expect(text).toBeTruthy();
+      expect(text.trim()).not.toBe("");
       expect(text).toContain("Todo (2):");
       expect(text).toContain("FN-001");
       expect(text).toContain("FN-002");
       expect(text).toContain("[deps: FN-001]");
+      expect(text).not.toContain("No tasks in Todo (todo).");
       expect(text).not.toContain("truncated to fit; narrow with column/limit");
       expect(result.details.count).toBe(2);
     });

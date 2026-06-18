@@ -377,6 +377,9 @@ FN-6604 corrects the FN-6507 no-op where var(--space-lg) resolved to the same 16
 
 FNXC:TaskDetailChat 2026-06-18-06:36:
 FN-6639 corrects the FN-6604 sizing because var(--space-xl) rendered a 24px glyph that filled only about 60% of the 40px button and still looked too small on mobile. Use var(--space-2xl) so Send and Loader2 render at 32px, about 80% fill, on desktop and mobile while preserving the tap box alignment.
+
+FNXC:TaskDetailChat 2026-06-18-12:00:
+FN-6660 corrects the repeated mobile sizing misses from FN-6507, FN-6604, and FN-6639: those passes only grew the glyph token inside a fixed 40px box, so the mobile affordance was never larger than desktop and still felt too small. Grow only the mobile box to calc(var(--space-2xl) + var(--space-lg)) and the mobile glyph to calc(var(--space-2xl) + var(--space-sm)), roughly 83% fill, while raising the mobile composer textarea min-height to the same 48px token sum for bottom alignment. Desktop stays intentionally unchanged.
 */
 .task-chat-send {
   --btn-icon-size: var(--space-2xl);
@@ -479,9 +482,15 @@ FN-6639 corrects the FN-6604 sizing because var(--space-xl) rendered a 24px glyp
     gap: var(--space-xs);
   }
 
+  .task-chat-input {
+    min-height: calc(var(--space-2xl) + var(--space-lg));
+  }
+
   .task-chat-send {
-    --btn-icon-size: var(--space-2xl);
-    inline-size: calc(var(--space-2xl) + var(--space-sm));
-    min-inline-size: calc(var(--space-2xl) + var(--space-sm));
+    --btn-icon-size: calc(var(--space-2xl) + var(--space-sm));
+    inline-size: calc(var(--space-2xl) + var(--space-lg));
+    min-inline-size: calc(var(--space-2xl) + var(--space-lg));
+    block-size: calc(var(--space-2xl) + var(--space-lg));
+    min-block-size: calc(var(--space-2xl) + var(--space-lg));
   }
 }

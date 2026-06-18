@@ -2072,24 +2072,32 @@ describe("TaskChatTab", () => {
     const sendRule = getCssRuleBlock(css, ".task-chat-send");
     const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
     const mobileSendRule = getCssRuleBlock(mobileCss, ".task-chat-send");
+    const mobileInputRule = getCssRuleBlock(mobileCss, ".task-chat-input");
     const tokenValues = getRootTokenPxValues(sharedStyles);
     const defaultIconSizePx = tokenValues["--icon-size-md"];
     const desktopIconSizePx = resolveCssPxToken(getCssDeclaration(sendRule, "--btn-icon-size"), tokenValues);
-    const mobileIconSizePx = resolveCssPxToken(getCssDeclaration(mobileSendRule, "--btn-icon-size"), tokenValues);
+    const mobileIconSizePx = resolveCssCalcSumPx(getCssDeclaration(mobileSendRule, "--btn-icon-size"), tokenValues);
     const desktopBoxSizePx = resolveCssCalcSumPx(getCssDeclaration(sendRule, "inline-size"), tokenValues);
     const mobileBoxSizePx = resolveCssCalcSumPx(getCssDeclaration(mobileSendRule, "inline-size"), tokenValues);
+    const mobileInputMinHeightPx = resolveCssCalcSumPx(getCssDeclaration(mobileInputRule, "min-height"), tokenValues);
 
     expect(defaultIconSizePx).toBe(16);
     expect(desktopIconSizePx).toBeGreaterThan(defaultIconSizePx);
     expect(mobileIconSizePx).toBeGreaterThan(defaultIconSizePx);
+    expect(mobileBoxSizePx).toBeGreaterThan(desktopBoxSizePx);
+    expect(mobileIconSizePx).toBeGreaterThan(desktopIconSizePx);
     expect(desktopIconSizePx / desktopBoxSizePx).toBeGreaterThanOrEqual(0.75);
-    expect(mobileIconSizePx / mobileBoxSizePx).toBeGreaterThanOrEqual(0.75);
+    expect(mobileIconSizePx / mobileBoxSizePx).toBeGreaterThanOrEqual(0.8);
+    expect(mobileInputMinHeightPx).toBe(mobileBoxSizePx);
     expect(sendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-sm))");
     expect(sendRule).toContain("min-inline-size: calc(var(--space-2xl) + var(--space-sm))");
     expect(sendRule).toContain("block-size: calc(var(--space-2xl) + var(--space-sm))");
     expect(sendRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-sm))");
-    expect(mobileSendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-sm))");
-    expect(mobileSendRule).toContain("min-inline-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(mobileSendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-lg))");
+    expect(mobileSendRule).toContain("min-inline-size: calc(var(--space-2xl) + var(--space-lg))");
+    expect(mobileSendRule).toContain("block-size: calc(var(--space-2xl) + var(--space-lg))");
+    expect(mobileSendRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-lg))");
+    expect(mobileInputRule).toContain("min-height: calc(var(--space-2xl) + var(--space-lg))");
   });
 
   it("keeps task chat timestamp styling tokenized and mobile-safe", () => {
@@ -2132,8 +2140,8 @@ describe("TaskChatTab", () => {
     expect(mobileComposerRule).toContain("align-items: flex-end");
     expect(mobileComposerRule).not.toContain("flex-direction: column");
     expect(mobileComposerRule).not.toContain("align-items: stretch");
-    expect(mobileSendRule).toContain("--btn-icon-size: var(--space-2xl)");
-    expect(mobileSendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(mobileSendRule).toContain("--btn-icon-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(mobileSendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-lg))");
     expect(css).toContain(".task-chat-tool-group-summary");
     expect(css).toContain(".task-chat-tool-group-names");
     expect(css).toContain(".task-chat-tool-group-error-count");

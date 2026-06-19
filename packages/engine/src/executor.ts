@@ -8,8 +8,8 @@ const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
-import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker } from "@fusion/core";
+import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -35,6 +35,7 @@ import {
   type ForeachActiveContext,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
+import { MERGE_REGION_KINDS } from "./workflow-graph-executor.js";
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
 import type {
   AuditPrimitiveInput,
@@ -6433,7 +6434,55 @@ export class TaskExecutor {
   }
 
   private isMergeGraphFailure(failedNode: string | undefined): boolean {
-    return failedNode === "merge" || failedNode === "requestMerge";
+    /*
+    FNXC:WorkflowLifecycle 2026-06-19-00:00:
+    FN-6735 requires every workflow merge-region node id to classify as a merge-seam graph failure. A benign pause/resume abort can surface as the synthetic legacy `merge`, `requestMerge`, or a primitive merge-region id, and all must route through bounded merge retry rather than terminal operator-action parking.
+    */
+    if (!failedNode) return false;
+    if (failedNode === "merge" || failedNode === "requestMerge") return true;
+    if (MERGE_REGION_KINDS.has(failedNode as WorkflowIrNodeKind)) return true;
+    return failedNode === "merge-manual-hold" || failedNode === "merge-retry";
+  }
+
+  private isTerminalMergeGraphFailureValue(value: string | undefined): boolean {
+    if (!value) return false;
+    const normalized = value.toLowerCase();
+    return normalized.includes("conflict")
+      || normalized.includes("contamination")
+      || normalized.includes("foreign")
+      || normalized.includes("retry-exhausted")
+      || normalized.includes("retries exhausted")
+      || normalized.includes("max retries");
+  }
+
+  private async isRetryableBenignMergePauseAbort(
+    live: TaskDetail,
+    result: WorkflowGraphTaskRunResult,
+    abortProvenance: "global-pause" | "merge-seam" | "hard-cancel" | "completion-finalize" | undefined,
+    pausedAborted: boolean,
+  ): Promise<boolean> {
+    /*
+    FNXC:WorkflowLifecycle 2026-06-19-00:05:
+    FN-6735 treats a generic engine pause/resume abort at the merge seam as transient only when the row is still a clean in-review auto-merge candidate: no user/global pause, no pre-existing failure, no merge-confirmed partial landing, no terminal conflict/contamination value, within mergeRetries budget, and still eligible for auto-merge or shared-branch local integration. Anything outside those guards keeps the existing terminal operator-action park.
+    */
+    if (!pausedAborted) return false;
+    if (abortProvenance === "global-pause" || live.userPaused === true) return false;
+    if (abortProvenance === "completion-finalize") return false;
+    if (live.column !== "in-review" || live.status != null || live.error != null) return false;
+    if (live.mergeDetails?.mergeConfirmed === true) return false;
+    if (this.isTerminalMergeGraphFailureValue(this.graphFailureValue(result))) return false;
+    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+    if (!this.isMergeGraphFailure(failedNode)) return false;
+    let settings: Settings | undefined;
+    try {
+      settings = await this.store.getSettings();
+    } catch {
+      return false;
+    }
+    const sharedBranchMember = isSharedBranchGroupMemberIntegration(live);
+    if (!sharedBranchMember && !allowsAutoMergeProcessing(live, settings)) return false;
+    if ((live.mergeRetries ?? 0) >= resolveMaxAutoMergeRetries(settings)) return false;
+    return true;
   }
 
   private async routeGraphMergeFailureToRetry(
@@ -6443,7 +6492,7 @@ export class TaskExecutor {
   ): Promise<boolean> {
     if (!this.mergeRequester) return false;
     const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1] ?? "unknown";
-    const message = `Workflow graph merge failure at node '${failedNode}' routed to bounded auto-merge retry${abortProvenance === "merge-seam" ? " after merge-seam abort" : ""}`;
+    const message = `Workflow graph merge failure at node '${failedNode}' routed to bounded auto-merge retry${abortProvenance === "merge-seam" ? " after merge-seam abort" : abortProvenance === "hard-cancel" || abortProvenance === undefined ? " after benign pause/resume abort" : ""}`;
     executorLog.warn(`${live.id}: ${message}`);
     await this.store.logEntry(live.id, message, undefined, this.getRunContextFor(live.id));
     try {
@@ -6524,6 +6573,11 @@ export class TaskExecutor {
           || (live.paused && !mergeSeamAborted && !suppressFinalizedCompletionAbort)
           || (pausedAborted && !mergeSeamAborted && !completionFinalizeAborted && !suppressFinalizedCompletionAbort),
       );
+      if (genuinePauseAbort && await this.isRetryableBenignMergePauseAbort(live, result, abortProvenance, pausedAborted)) {
+        if (await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
+          return;
+        }
+      }
       if (genuinePauseAbort) {
         /*
         FNXC:WorkflowLifecycle 2026-06-15-01:45:
@@ -6559,7 +6613,19 @@ export class TaskExecutor {
         return;
       }
       const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
-      if (this.isMergeGraphFailure(failedNode) && await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
+      const mergeGraphFailure = this.isMergeGraphFailure(failedNode);
+      const failureValue = this.graphFailureValue(result);
+      if (mergeGraphFailure && !this.isTerminalMergeGraphFailureValue(failureValue) && await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
+        return;
+      }
+      if (mergeGraphFailure && this.isTerminalMergeGraphFailureValue(failureValue) && live.column !== "done" && live.column !== "archived") {
+        const message = `Workflow graph terminal merge failure at node '${failedNode ?? "unknown"}' (${failureValue}) — operator action required`;
+        executorLog.warn(`${task.id}: ${message}`);
+        await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
+        if (live.status == null && live.error == null) {
+          await this.store.updateTask(task.id, { error: message, status: "failed" }, this.getRunContextFor(task.id));
+        }
+        await this.persistTokenUsage(task.id);
         return;
       }
       if (live.column !== "in-progress") {
@@ -6568,7 +6634,6 @@ export class TaskExecutor {
         await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
         return;
       }
-      const failureValue = this.graphFailureValue(result);
       if (this.isAwaitingGraphFailureValue(failureValue)) {
         /*
         FNXC:WorkflowLifecycle 2026-06-15-12:00:

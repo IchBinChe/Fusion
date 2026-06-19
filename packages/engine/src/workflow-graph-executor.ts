@@ -180,7 +180,7 @@ const TERMINAL_FAILURE: WorkflowGraphExecutorResult = {
  * seam so observable lifecycle behavior stays byte-identical with the legacy
  * executor. Consolidate with a core export when one exists.
  */
-const MERGE_REGION_KINDS = new Set<WorkflowIrNodeKind>([
+export const MERGE_REGION_KINDS = new Set<WorkflowIrNodeKind>([
   "merge-gate",
   "merge-attempt",
   "manual-merge-hold",

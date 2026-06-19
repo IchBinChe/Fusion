@@ -133,6 +133,20 @@ describe("TaskForm", () => {
     vi.mocked(fetchGitBranches).mockResolvedValue([]);
   });
 
+  it("renders xhigh in the shared thinking-level selector", async () => {
+    renderTaskForm({
+      thinkingLevel: "",
+      onThinkingLevelChange: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /More options/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /Thinking/i })).toBeTruthy();
+    });
+    expect(screen.getByRole("option", { name: /Very High/i })).toHaveAttribute("value", "xhigh");
+  });
+
   it("renders description field with AI refine button when text is present", () => {
     renderTaskForm({ description: "Some text" });
 

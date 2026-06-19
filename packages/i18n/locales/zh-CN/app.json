@@ -1007,6 +1007,7 @@
     "templateCompact": "紧凑",
     "templateDefault": "默认",
     "thinkingHigh": "高",
+    "thinkingXhigh": "极高",
     "thinkingLevel": "思考级别",
     "thinkingLow": "低",
     "thinkingMedium": "中",
@@ -3388,6 +3389,7 @@
     "options": {
       "default": "默认值",
       "high": "高",
+      "xhigh": "极高",
       "low": "低",
       "medium": "中等",
       "minimal": "最小",
@@ -6210,6 +6212,7 @@
     "subtaskButton": "子任务",
     "thinkingDefault": "默认（{{level}}）",
     "thinkingHigh": "高",
+    "thinkingXhigh": "极高",
     "thinkingLabel": "思考",
     "thinkingLow": "低",
     "thinkingMedium": "中",

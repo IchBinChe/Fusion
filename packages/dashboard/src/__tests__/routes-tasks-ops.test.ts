@@ -3052,21 +3052,21 @@ describe("PATCH /tasks/:id", () => {
     expect(res.body.error).toContain("enabledWorkflowSteps must be an array of strings");
   });
 
-  it("forwards thinkingLevel to store.updateTask", async () => {
+  it("forwards xhigh thinkingLevel to store.updateTask", async () => {
     (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...FAKE_TASK_DETAIL,
-      thinkingLevel: "high",
+      thinkingLevel: "xhigh",
     });
 
     const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
-      thinkingLevel: "high",
+      thinkingLevel: "xhigh",
     }), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(200);
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
-      thinkingLevel: "high",
+      thinkingLevel: "xhigh",
     });
   });
 

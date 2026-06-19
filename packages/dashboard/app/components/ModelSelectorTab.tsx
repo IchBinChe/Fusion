@@ -499,6 +499,7 @@ export function ModelSelectorTab({ task, addToast, onTaskUpdated, settings }: Mo
               <option value="low">{t("models.options.low", "Low")}</option>
               <option value="medium">{t("models.options.medium", "Medium")}</option>
               <option value="high">{t("models.options.high", "High")}</option>
+              <option value="xhigh">{t("models.options.xhigh", "Very High")}</option>
             </select>
             <small>{t("models.descriptions.thinkingLevel", "Controls the reasoning effort for the AI agent. Higher levels use more tokens.")}</small>
           </div>

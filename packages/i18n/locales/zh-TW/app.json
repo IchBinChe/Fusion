@@ -1007,6 +1007,7 @@
     "templateCompact": "緊湊",
     "templateDefault": "預設",
     "thinkingHigh": "高",
+    "thinkingXhigh": "極高",
     "thinkingLevel": "思考級別",
     "thinkingLow": "低",
     "thinkingMedium": "中",
@@ -3388,6 +3389,7 @@
     "options": {
       "default": "預設值",
       "high": "高",
+      "xhigh": "極高",
       "low": "低",
       "medium": "中等",
       "minimal": "最小",
@@ -6210,6 +6212,7 @@
     "subtaskButton": "子任務",
     "thinkingDefault": "預設（{{level}}）",
     "thinkingHigh": "高",
+    "thinkingXhigh": "極高",
     "thinkingLabel": "思考",
     "thinkingLow": "低",
     "thinkingMedium": "中",

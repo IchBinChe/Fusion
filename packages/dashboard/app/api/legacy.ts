@@ -3411,7 +3411,7 @@ export interface AgentOnboardingSummary {
   name: string;
   role: AgentCapability | "custom";
   instructionsText: string;
-  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   maxTurns: number;
   title?: string;
   icon?: string;
@@ -3444,7 +3444,7 @@ export interface ExistingAgentOnboardingConfig {
   reportsTo?: string;
   skills?: string[];
   model?: string;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   maxTurns?: number;
   runtimeHint?: string;
   heartbeatIntervalMs?: number;
@@ -6352,7 +6352,7 @@ export interface AgentGenerationSpec {
   /** Detailed system prompt in markdown */
   systemPrompt: string;
   /** Suggested thinking level */
-  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Suggested max turns (1-500) */
   maxTurns: number;
 }

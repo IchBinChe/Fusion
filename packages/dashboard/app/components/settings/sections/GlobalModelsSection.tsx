@@ -132,6 +132,7 @@ export function GlobalModelsSection({
         if (selectedModel && !selectedModel.reasoning) return null;
         return (
           <div className="form-group">
+            {/* FNXC:Settings-ThinkingLevel 2026-06-19-14:55: This global selector renders the canonical THINKING_LEVELS list so newly added `xhigh` stays available anywhere the default reasoning effort is configured. */}
             <label htmlFor="defaultThinkingLevel">Thinking Effort</label>
             <select
               id="defaultThinkingLevel"

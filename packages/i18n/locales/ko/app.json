@@ -1007,6 +1007,7 @@
     "templateCompact": "간결",
     "templateDefault": "기본",
     "thinkingHigh": "높음",
+    "thinkingXhigh": "매우 높음",
     "thinkingLevel": "사고 수준",
     "thinkingLow": "낮음",
     "thinkingMedium": "보통",
@@ -3388,6 +3389,7 @@
     "options": {
       "default": "기본값",
       "high": "높음",
+      "xhigh": "매우 높음",
       "low": "낮음",
       "medium": "중간",
       "minimal": "최소",
@@ -6210,6 +6212,7 @@
     "subtaskButton": "하위 작업",
     "thinkingDefault": "기본값 ({{level}})",
     "thinkingHigh": "높음",
+    "thinkingXhigh": "매우 높음",
     "thinkingLabel": "사고",
     "thinkingLow": "낮음",
     "thinkingMedium": "중간",

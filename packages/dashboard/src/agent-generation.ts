@@ -132,7 +132,7 @@ export interface AgentGenerationSpec {
   /** Detailed system prompt in markdown */
   systemPrompt: string;
   /** Suggested thinking level */
-  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Suggested max turns (1-500) */
   maxTurns: number;
 }
@@ -400,7 +400,7 @@ export function parseGenerationResponse(text: string): AgentGenerationSpec {
     role: typeof obj.role === "string" ? obj.role : "custom",
     description: typeof obj.description === "string" ? obj.description : "",
     systemPrompt: typeof obj.systemPrompt === "string" ? obj.systemPrompt : "",
-    thinkingLevel: ["off", "minimal", "low", "medium", "high"].includes(obj.thinkingLevel as string)
+    thinkingLevel: ["off", "minimal", "low", "medium", "high", "xhigh"].includes(obj.thinkingLevel as string)
       ? (obj.thinkingLevel as AgentGenerationSpec["thinkingLevel"])
       : "off",
     maxTurns: typeof obj.maxTurns === "number"

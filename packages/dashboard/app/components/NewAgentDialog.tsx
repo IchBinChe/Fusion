@@ -35,7 +35,7 @@ const AGENT_ROLES: { value: AgentCapability; icon: string }[] = [
   { value: "custom", icon: "✦" },
 ];
 
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 /** Set of valid AgentCapability values for mapping generated roles */
 const VALID_CAPABILITIES = new Set<string>(["triage", "executor", "reviewer", "merger", "scheduler", "engineer", "custom"]);
@@ -682,6 +682,7 @@ export function NewAgentDialog({
                   <option value="low">{t("agents.thinkingLow", "Low")}</option>
                   <option value="medium">{t("agents.thinkingMedium", "Medium")}</option>
                   <option value="high">{t("agents.thinkingHigh", "High")}</option>
+                  <option value="xhigh">{t("agents.thinkingXhigh", "Very High")}</option>
                 </select>
               </div>
               <div className="agent-dialog-field">

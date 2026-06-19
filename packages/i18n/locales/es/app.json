@@ -1034,6 +1034,7 @@
     "templateCompact": "Compacto",
     "templateDefault": "Predeterminado",
     "thinkingHigh": "Alto",
+    "thinkingXhigh": "Muy alto",
     "thinkingLevel": "Nivel de pensamiento",
     "thinkingLow": "Bajo",
     "thinkingMedium": "Medio",
@@ -3389,6 +3390,7 @@
     "options": {
       "default": "Predeterminado",
       "high": "Alto",
+      "xhigh": "Muy alto",
       "low": "Bajo",
       "medium": "Medio",
       "minimal": "Mínimo",
@@ -6211,6 +6213,7 @@
     "subtaskButton": "Subtarea",
     "thinkingDefault": "Predeterminado ({{level}})",
     "thinkingHigh": "Alto",
+    "thinkingXhigh": "Muy alto",
     "thinkingLabel": "Pensamiento",
     "thinkingLow": "Bajo",
     "thinkingMedium": "Medio",

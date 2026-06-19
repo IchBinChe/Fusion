@@ -9,7 +9,7 @@ export interface AgentOnboardingSummary {
   name: string;
   role: AgentCapability | "custom";
   instructionsText: string;
-  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   maxTurns: number;
   title?: string;
   icon?: string;
@@ -42,7 +42,7 @@ export interface ExistingAgentOnboardingConfig {
   reportsTo?: string;
   skills?: string[];
   model?: string;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   maxTurns?: number;
   runtimeHint?: string;
   heartbeatIntervalMs?: number;

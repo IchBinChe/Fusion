@@ -1527,7 +1527,7 @@ export function TaskDetailContent({
     }
 
     const currentThinkingLevel = task.thinkingLevel ?? "";
-    if (editThinkingLevel !== currentThinkingLevel) updates.thinkingLevel = editThinkingLevel !== "" ? (editThinkingLevel as "minimal" | "low" | "medium" | "high") : null;
+    if (editThinkingLevel !== currentThinkingLevel) updates.thinkingLevel = editThinkingLevel !== "" ? (editThinkingLevel as "minimal" | "low" | "medium" | "high" | "xhigh") : null;
     if ((task.nodeId ?? undefined) !== editNodeId) updates.nodeId = editNodeId ?? null;
     if (editReviewLevel !== task.reviewLevel) updates.reviewLevel = editReviewLevel;
     if (editPriority !== normalizeTaskPriorityValue(task.priority)) updates.priority = editPriority;

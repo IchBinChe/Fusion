@@ -1041,6 +1041,7 @@ export default interface Resources {
       "thinkingMedium": "Medium",
       "thinkingMinimal": "Minimal",
       "thinkingOff": "Off",
+      "thinkingXhigh": "Very High",
       "throughput": "Throughput",
       "title": "Agents",
       "titleLabel": "Title",
@@ -1197,7 +1198,6 @@ export default interface Resources {
       "cancelButton": "Cancel",
       "clearConversationFailed": "Failed to clear conversation",
       "closeQuickChat": "Close quick chat",
-      "workingStatus": "Working…",
       "conversationArchived": "Conversation archived",
       "conversationDeleted": "Conversation deleted",
       "copyFailed": "Copy failed",
@@ -1252,6 +1252,16 @@ export default interface Resources {
       "noSkillsAvailable": "No skills available",
       "noSkillsFound": "No skills found",
       "openQuickChat": "Open quick chat",
+      "questionAnsweredLabel": "Answered",
+      "questionAnsweredWithoutContent": "A later user reply answered this question.",
+      "questionConfirmNo": "No",
+      "questionConfirmYes": "Yes",
+      "questionResponseEyebrow": "Assistant question",
+      "questionResponseLabel": "Question from assistant",
+      "questionSelectHint": "Answer all questions to continue the chat.",
+      "questionSubmit": "Send answer",
+      "questionSubmittedAnswerLabel": "Submitted answer",
+      "questionTextPlaceholder": "Type your answer here…",
       "queuedMessage": "Queued: {{preview}}",
       "quickChatTitle": "Quick Chat",
       "relativeTimeDays_one": "{{count}}d ago",
@@ -1307,6 +1317,7 @@ export default interface Resources {
       "typeMessage": "Type a message...",
       "unreadMessages": "Unread messages",
       "untitledSession": "Untitled",
+      "workingStatus": "Working…",
       "you": "You"
     },
     "chatRooms": {
@@ -1433,6 +1444,91 @@ export default interface Resources {
       "stopPartialFailure": "Stopped {{paused}} of {{total}} tasks; {{failed}} failed",
       "stoppedTasks_one": "Stopped {{count}} task{{plural}}",
       "stoppedTasks_other": "Stopped {{count}} task{{plural}}"
+    },
+    "commandCenter": {
+      "areaPending": "This area renders once metrics data is available.",
+      "controls": {
+        "concurrency": {
+          "description": "Tune live scheduler capacity.",
+          "error": "Unable to load concurrency settings",
+          "maxConcurrent": "Max concurrent tasks",
+          "maxTriageConcurrent": "Max triage concurrent",
+          "maxWorktrees": "Max worktrees",
+          "title": "Concurrency"
+        },
+        "engine": {
+          "description": "Stopping the engine halts all AI work.",
+          "title": "AI engine"
+        },
+        "heartbeat": {
+          "description": "Pause or resume the scheduling heartbeat.",
+          "disabledByStop": "Start the AI engine before resuming the heartbeat.",
+          "pause": "Pause heartbeat",
+          "resume": "Resume heartbeat",
+          "title": "Heartbeat control"
+        },
+        "orgChart": {
+          "description": "Read-only view of the running agent hierarchy.",
+          "empty": "No agents are reporting in yet.",
+          "error": "Unable to load org chart",
+          "loading": "Loading org chart…",
+          "title": "Agent org chart"
+        },
+        "status": {
+          "error": "Unable to load live scheduler status",
+          "lastActivity": "Last activity",
+          "loading": "Loading…",
+          "maxConcurrent": "Max concurrent",
+          "noActivity": "No recent activity",
+          "paused": "Paused",
+          "ready": "Ready",
+          "running": "Running",
+          "saveError": "Save failed",
+          "saved": "Saved",
+          "saving": "Saving…",
+          "stopped": "Stopped"
+        },
+        "theme": {
+          "description": "Switch the dashboard theme with live color previews.",
+          "title": "Theme"
+        },
+        "title": "Operator controls"
+      },
+      "empty": "No usage data yet. Run some agents to populate the Command Center.",
+      "heading": "Command Center",
+      "loading": "Loading command center...",
+      "overview": {
+        "activeNodes": "Active nodes",
+        "autonomy": "Autonomy ratio",
+        "liveStrip": "Live activity",
+        "liveStripPending": "Live Mission Control loads with active sessions.",
+        "openSignals": "Open signals",
+        "tasksDone": "Tasks done",
+        "tokensCost": "Tokens & cost",
+        "uniqueModels": "Unique models"
+      },
+      "range": {
+        "allTime": "All time",
+        "custom": "Custom range",
+        "dialogLabel": "Select date range",
+        "from": "From",
+        "invalidRange": "Start date must be on or before end date",
+        "last24h": "Last 24h",
+        "last30d": "Last 30 days",
+        "last7d": "Last 7 days",
+        "to": "To"
+      },
+      "tablistLabel": "Command Center sections",
+      "tabs": {
+        "activity": "Activity",
+        "ecosystem": "Ecosystem",
+        "missionControl": "Mission Control",
+        "overview": "Overview",
+        "productivity": "Productivity",
+        "reliability": "Reliability",
+        "tokens": "Tokens",
+        "tools": "Tools"
+      }
     },
     "comments": {
       "addButton": "Add Comment",
@@ -2412,6 +2508,7 @@ export default interface Resources {
       "browseFiles": "Browse Files",
       "chatView": "Chat view",
       "closeSearch": "Close search",
+      "commandCenterView": "Command Center",
       "createTaskWithPlanning": "Create a task with AI planning",
       "devServerView": "Dev Server",
       "documentsView": "Documents view",
@@ -3433,7 +3530,8 @@ export default interface Resources {
         "low": "Low",
         "medium": "Medium",
         "minimal": "Minimal",
-        "off": "Off"
+        "off": "Off",
+        "xhigh": "Very High"
       },
       "placeholders": {
         "selectExecutor": "Select executor model…",
@@ -3458,6 +3556,7 @@ export default interface Resources {
       "automation": "Automation",
       "chat": "Chat",
       "chatUnreadAriaLabel": "Unread chat response",
+      "commandCenter": "Command Center",
       "devServer": "Dev Server",
       "documents": "Documents",
       "evals": "Evals",
@@ -4910,6 +5009,17 @@ export default interface Resources {
       "title": "Secrets",
       "valueLabel": "Value"
     },
+    "selectionComment": {
+      "addComment": "Add comment",
+      "addCommentAria": "Add a comment to the selected text and send it to a new task",
+      "cancel": "Cancel",
+      "commentAria": "Comment for the new task",
+      "commentPlaceholder": "Describe the task this snippet should become…",
+      "dialogAria": "Comment on selected text",
+      "selectedSnippet": "Selected snippet",
+      "sendToNewTask": "Send to new task",
+      "title": "Comment on selection"
+    },
     "sessionBanner": {
       "cli": {
         "advance": "Advance",
@@ -5632,8 +5742,8 @@ export default interface Resources {
       "takeControl": "Take Control",
       "takingControl": "Taking control...",
       "titleLabel": "Title",
-      "waitingForThinking": "Waiting for AI progress updates...",
-      "untitled": "Untitled"
+      "untitled": "Untitled",
+      "waitingForThinking": "Waiting for AI progress updates..."
     },
     "syncLog": {
       "entryCount_one": "{{count}} entry",
@@ -6315,6 +6425,7 @@ export default interface Resources {
       "thinkingMedium": "Medium",
       "thinkingMinimal": "Minimal",
       "thinkingOff": "Off",
+      "thinkingXhigh": "Very High",
       "titleLabel": "Title",
       "titlePlaceholder": "Task title",
       "useDropdown": "Use dropdown",
@@ -6916,6 +7027,7 @@ export default interface Resources {
       "cycleBlocked": "That connection would create a cycle — only rework edges inside a for-each template may loop back",
       "deleteEdge": "Delete edge",
       "deleteNode": "Delete node",
+      "duplicateBlocked": "That connection already exists",
       "edgeCondition": "Condition",
       "edgeConditionLabel": "Condition: {{condition}}",
       "edgeInspector": "Edge",
@@ -6945,6 +7057,9 @@ export default interface Resources {
       "joinMode": "Join mode",
       "joinQuorum": "Quorum (n)",
       "mergeBoundaryNote": "Steps before this marker run pre-merge; steps after run post-merge.",
+      "mobileConnect": "Connect",
+      "mobileConnectChooseTarget": "Choose a target…",
+      "mobileConnectTarget": "Target node",
       "parseArtifact": "Artifact",
       "parseParser": "Parser",
       "quorumN": "Quorum count (n)",
@@ -6960,6 +7075,9 @@ export default interface Resources {
       "reviewPlan": "Plan review",
       "reviewType": "Review type",
       "splitNote": "Branches run concurrently from this node. Execute and merge seams are not allowed inside a branch.",
+      "startEntryColumn": "Entry column",
+      "startEntryColumnAuto": "— Auto (first column)",
+      "startNote": "The start node marks where a task enters the workflow.",
       "stepExecuteLabel": "Step execute",
       "summaryAwaitInput": "Waits for user input",
       "summaryCodeDefault": "TypeScript",

@@ -11,8 +11,14 @@ export {
 } from "./capacity.js";
 export type { CapacityRiskSignal } from "./capacity.js";
 
-/** Valid thinking effort levels for AI agent sessions, controlling the cost/quality tradeoff of reasoning. */
-export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
+/**
+ * Valid thinking effort levels for AI agent sessions, controlling the cost/quality tradeoff of reasoning.
+ * Includes extra-high for maximum-effort requests on reasoning-capable models.
+ *
+ * FNXC:Settings-ThinkingLevel 2026-06-19-14:55:
+ * The central thinking-level enum must expose `xhigh` so UI settings and API validation can pass maximum reasoning requests through to CLI adapters. Runtime adapters map `xhigh` to `high` for non-Opus models and `max` for Opus models.
+ */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /**

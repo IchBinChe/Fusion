@@ -15,6 +15,7 @@ import type {
 } from "@fusion/core";
 import {
   COLUMNS,
+  THINKING_LEVELS,
   TASK_PRIORITIES,
   VALID_TRANSITIONS,
   computeContentFingerprint,
@@ -922,7 +923,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const validatedPlanningModelId = validateOptionalModelField(planningModelId, "planningModelId");
 
       // Validate thinkingLevel if provided
-      const validThinkingLevels = ["off", "minimal", "low", "medium", "high"];
+      const validThinkingLevels = [...THINKING_LEVELS];
       if (thinkingLevel !== undefined && thinkingLevel !== null && !validThinkingLevels.includes(thinkingLevel)) {
         throw badRequest(`thinkingLevel must be one of: ${validThinkingLevels.join(", ")}`);
       }
@@ -2922,7 +2923,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const validatedAssigneeUserId = validateModelField(assigneeUserId, "assigneeUserId");
 
       // Validate thinkingLevel if provided
-      const validThinkingLevels = ["off", "minimal", "low", "medium", "high"];
+      const validThinkingLevels = [...THINKING_LEVELS];
       if (thinkingLevel !== undefined && thinkingLevel !== null && !validThinkingLevels.includes(thinkingLevel)) {
         throw new Error(`thinkingLevel must be one of: ${validThinkingLevels.join(", ")}`);
       }

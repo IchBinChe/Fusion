@@ -689,6 +689,31 @@ describe("session failure diagnostics", () => {
     warnSpy.mockRestore();
   });
 
+  it("passes xhigh through to sessions without engine-side narrowing", async () => {
+    const createAgentSessionMock = vi.mocked(createAgentSession);
+    const sessionWithThinking = {
+      model: { provider: "test", id: "primary-model" },
+      prompt: vi.fn(),
+      subscribe: vi.fn(),
+      dispose: vi.fn(),
+      setThinkingLevel: vi.fn(),
+      sessionFile: undefined,
+    } as unknown as AgentSession;
+
+    createAgentSessionMock.mockReset();
+    createAgentSessionMock.mockResolvedValueOnce({ session: sessionWithThinking } as any);
+
+    await createFnAgent({
+      cwd: "/test/project",
+      systemPrompt: "Test xhigh thinking pass-through",
+      defaultProvider: "test",
+      defaultModelId: "primary-model",
+      defaultThinkingLevel: "xhigh",
+    });
+
+    expect(sessionWithThinking.setThinkingLevel).toHaveBeenCalledWith("xhigh");
+  });
+
   it("retries prompt on thinking/reasoning conflict without switching fallback models", async () => {
     const createAgentSessionMock = vi.mocked(createAgentSession);
 

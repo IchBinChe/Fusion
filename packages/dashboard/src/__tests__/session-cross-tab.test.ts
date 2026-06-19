@@ -45,6 +45,7 @@ describe("cross-tab session locking", () => {
   let db: Database;
   let aiSessionStore: AiSessionStore;
   let app: express.Express;
+  let apiRouter: express.Router & { dispose?: () => void };
 
   beforeEach(async () => {
     tmpRoot = mkdtempSync(join(tmpdir(), "kb-session-cross-tab-"));
@@ -60,10 +61,25 @@ describe("cross-tab session locking", () => {
 
     app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(taskStore, { aiSessionStore }));
+    /*
+    FNXC:DashboardSessionTests 2026-06-19-15:55:
+    This harness exercises AI session lock routes only. Hide TaskStore's EventEmitter hooks before mounting createApiRoutes so unrelated route services do not subscribe background workers that can reopen or scan the temp .fusion tree after the test-owned store closes.
+    */
+    Object.defineProperties(taskStore, {
+      on: { value: undefined, configurable: true },
+      off: { value: undefined, configurable: true },
+    });
+    apiRouter = createApiRoutes(taskStore, { aiSessionStore }) as express.Router & { dispose?: () => void };
+    app.use("/api", apiRouter);
   });
 
   afterEach(async () => {
+    try {
+      apiRouter.dispose?.();
+    } catch {
+      // no-op
+    }
+    aiSessionStore.stopScheduledCleanup();
     try {
       taskStore.close();
     } catch {
@@ -74,8 +90,16 @@ describe("cross-tab session locking", () => {
     } catch {
       // no-op
     }
-    // FNXC:DashboardSessionTests 2026-06-14-09:20: TaskStore.close() closes watcher/database handles synchronously but their filesystem close callbacks settle on the next event-loop turn; drain that turn before deleting .fusion.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    /*
+    FNXC:DashboardSessionTests 2026-06-14-09:20:
+    TaskStore.close() closes watcher/database handles synchronously but their filesystem close callbacks settle on the next event-loop turn; drain that turn before deleting .fusion.
+
+    FNXC:DashboardSessionTests 2026-06-19-15:39:
+    FN-6742 reproduced ENOTEMPTY under the loaded dashboard API backfill shard because route-owned disposables and nested .fusion close callbacks can outlive a single check-phase drain. Dispose the API router first, then drain several check phases before tmpRoot removal so cleanup proves closed handles instead of masking live writers with retry-rm loops.
+    */
+    for (let i = 0; i < 4; i += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
     await rm(tmpRoot, { recursive: true, force: true });
   });
 

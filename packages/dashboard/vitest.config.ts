@@ -278,9 +278,12 @@ Quarantine the focus-timing flake under the deletion ratchet instead of changing
 FNXC:DashboardTestQuarantine 2026-06-19-08:17:
 FN-6726 workspace verification observed the WorkflowNodeEditor duplicate-merge-seam template conflict test fail only in the broad components-b shard, then pass on targeted rerun.
 Quarantine the concurrency-sensitive workflow editor file under the deletion ratchet instead of changing unrelated template insertion behavior or appeasing the test.
+
+FNXC:DashboardTestQuarantine 2026-06-19-15:40:
+FN-6742 rescued session-cross-tab before the 2026-07-03 deletion ratchet by reproducing ENOTEMPTY in dashboard-api-quality-backfill and fixing the test-owned route/close-callback teardown seam.
+Keep it out of this exclude list so loaded API shards keep exercising cross-tab locking, beacon release, stale-lock expiry, SSE summaries, and stale-session cleanup.
 */
 const quarantinedDashboardTests: string[] = [
-  "src/__tests__/session-cross-tab.test.ts",
   "app/components/__tests__/QuickEntryBox.test.tsx",
   "app/components/__tests__/WorkflowNodeEditor.test.tsx",
 ];

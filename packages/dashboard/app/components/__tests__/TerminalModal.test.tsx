@@ -168,6 +168,16 @@ describe("TerminalModal", () => {
       };
     } as never);
     vi.clearAllMocks();
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
     terminalKeyEventHandler = null;
     terminalDataHandler = null;
     mockTerminalInstance.onData.mockImplementation((cb: (data: string) => void) => {
@@ -699,6 +709,147 @@ describe("TerminalModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Tab" }));
       expect(mockSendInput).toHaveBeenCalledWith("\t");
+    });
+
+    it("keeps desktop hardware-keyboard focus while every shortcut category delivers bytes", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        expect(mockTerminalInstance.open).toHaveBeenCalled();
+        expect(terminalDataHandler).not.toBeNull();
+      });
+
+      const terminalDiv = screen.getByTestId("terminal-xterm");
+      const helperTextarea = document.createElement("textarea");
+      helperTextarea.className = "xterm-helper-textarea";
+      const focusSpy = vi.spyOn(helperTextarea, "focus");
+      terminalDiv.appendChild(helperTextarea);
+      helperTextarea.focus();
+      expect(document.activeElement).toBe(helperTextarea);
+
+      fireEvent.click(screen.getByTestId("terminal-shortcut-toggle"));
+      const assertMouseDownPreservesFocus = (button: HTMLElement) => {
+        const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        button.dispatchEvent(mouseDown);
+        expect(mouseDown.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(helperTextarea);
+      };
+
+      mockSendInput.mockClear();
+      mockTerminalInstance.focus.mockClear();
+      focusSpy.mockClear();
+
+      const ctrlButton = screen.getByTestId("terminal-modifier-ctrl");
+      assertMouseDownPreservesFocus(ctrlButton);
+      fireEvent.click(ctrlButton);
+      expect(mockTerminalInstance.focus).toHaveBeenCalled();
+      expect(focusSpy).toHaveBeenCalled();
+      expect(mockSendInput).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "C" }));
+      fireEvent.click(screen.getByRole("button", { name: "ESC" }));
+      fireEvent.click(screen.getByRole("button", { name: "Tab" }));
+      fireEvent.click(screen.getByTestId("terminal-arrow-up"));
+
+      expect(mockSendInput.mock.calls.map(([value]) => value)).toEqual([
+        "\x03",
+        "\x1b",
+        "\t",
+        "\x1b[A",
+      ]);
+      expect(document.activeElement).toBe(helperTextarea);
+
+      act(() => {
+        terminalDataHandler?.("a");
+      });
+      expect(mockSendInput).toHaveBeenLastCalledWith("a");
+    });
+
+    it("keeps touch-primary shortcut buttons from stranding hardware-keyboard focus", async () => {
+      const previousInnerWidth = window.innerWidth;
+      const previousOntouchstart = window.ontouchstart;
+      const matchMediaSpy = vi
+        .spyOn(window, "matchMedia")
+        .mockImplementation((query: string) => ({
+          matches:
+            query === "(hover: none) and (pointer: coarse)" ||
+            query.includes("max-width: 768px"),
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }));
+
+      Object.defineProperty(window, "innerWidth", {
+        value: 375,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, "ontouchstart", {
+        value: null,
+        writable: true,
+        configurable: true,
+      });
+
+      let unmount = () => {};
+
+      try {
+        ({ unmount } = render(<TerminalModal isOpen={true} onClose={mockOnClose} />));
+
+        await waitFor(() => {
+          expect(mockTerminalInstance.open).toHaveBeenCalled();
+        });
+
+        const terminalDiv = screen.getByTestId("terminal-xterm");
+        const helperTextarea = document.createElement("textarea");
+        helperTextarea.className = "xterm-helper-textarea";
+        const focusSpy = vi.spyOn(helperTextarea, "focus");
+        terminalDiv.appendChild(helperTextarea);
+        helperTextarea.focus();
+
+        fireEvent.click(screen.getByTestId("terminal-shortcut-toggle"));
+        const arrowUpButton = screen.getByTestId("terminal-arrow-up");
+        const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        arrowUpButton.dispatchEvent(mouseDown);
+        expect(mouseDown.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(helperTextarea);
+
+        mockSendInput.mockClear();
+        mockTerminalInstance.focus.mockClear();
+        focusSpy.mockClear();
+
+        fireEvent.click(screen.getByTestId("terminal-modifier-ctrl"));
+        fireEvent.click(screen.getByRole("button", { name: "C" }));
+        fireEvent.click(screen.getByRole("button", { name: "ESC" }));
+        fireEvent.click(screen.getByRole("button", { name: "Tab" }));
+        fireEvent.click(arrowUpButton);
+
+        expect(mockSendInput.mock.calls.map(([value]) => value)).toEqual([
+          "\x03",
+          "\x1b",
+          "\t",
+          "\x1b[A",
+        ]);
+        expect(mockTerminalInstance.focus).toHaveBeenCalled();
+        expect(focusSpy).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(helperTextarea);
+      } finally {
+        unmount();
+        matchMediaSpy.mockRestore();
+        Object.defineProperty(window, "innerWidth", {
+          value: previousInnerWidth,
+          writable: true,
+          configurable: true,
+        });
+        Object.defineProperty(window, "ontouchstart", {
+          value: previousOntouchstart,
+          writable: true,
+          configurable: true,
+        });
+      }
     });
 
     it("sends literal ANSI arrow sequences independent of sticky modifiers", async () => {

@@ -270,8 +270,15 @@ Keep chat-routes out of this list so SSE lifecycle coverage remains active and t
 FNXC:DashboardTestQuarantine 2026-06-19-03:22:
 FN-6690 workspace verification observed session-cross-tab fail only during the broad dashboard API backfill shard with temp-directory cleanup ENOTEMPTY, then pass on isolated rerun.
 Quarantine the cleanup-flaky file under the deletion ratchet rather than changing timing or session-locking behavior outside the lazy-view CSS chunk scope.
+
+FNXC:DashboardTestQuarantine 2026-06-19-05:20:
+FN-6697 workspace verification observed the QuickEntryBox post-submit focus restoration test fail only in the broad dashboard app backfill shard, then pass on targeted rerun.
+Quarantine the focus-timing flake under the deletion ratchet instead of changing unrelated terminal shortcut behavior or appeasing the test.
 */
-const quarantinedDashboardTests: string[] = ["src/__tests__/session-cross-tab.test.ts"];
+const quarantinedDashboardTests: string[] = [
+  "src/__tests__/session-cross-tab.test.ts",
+  "app/components/__tests__/QuickEntryBox.test.tsx",
+];
 
 const qualityApiTests = [
   // Critical HTTP/server behavior: auth, task/project/settings mutation,

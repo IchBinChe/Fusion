@@ -5,6 +5,11 @@
       "file": "packages/dashboard/src/__tests__/session-cross-tab.test.ts",
       "reason": "FN-6690 local workspace `pnpm test` observed ENOTEMPTY while removing the test's temp .fusion directory in dashboard-api-quality-backfill shard; isolated rerun passed, indicating cleanup flake rather than a lazy-view CSS regression.",
       "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/QuickEntryBox.test.tsx",
+      "reason": "FN-6697 local workspace `pnpm test` observed the post-submission focus restoration test fail in the broad dashboard app backfill shard, while a targeted rerun of QuickEntryBox with MailboxModal passed the QuickEntryBox assertions; quarantine the focus-timing flake instead of appeasing it while the terminal shortcut fix remains scoped.",
+      "quarantinedAt": "2026-06-19"
     }
   ]
 }

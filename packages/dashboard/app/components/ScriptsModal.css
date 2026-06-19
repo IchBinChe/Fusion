@@ -1185,9 +1185,12 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 /* ── Activity Log Modal ─────────────────────────────────────────── */
 
 .activity-log-modal {
-  max-height: 80vh;
+  width: min(95vw, 640px);
+  max-width: 95vw;
+  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - 16px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .activity-log-header {
@@ -1255,7 +1258,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   flex: 1;
   overflow-y: auto;
   padding: var(--space-lg) var(--space-xl);
-  min-height: 300px;
+  min-height: 0;
 }
 
 .activity-log-empty {

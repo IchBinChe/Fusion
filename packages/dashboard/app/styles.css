@@ -120,6 +120,7 @@ html {
   /* Typography */
   --font-primary: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* FNXC:DashboardStyling 2026-06-19-05:50: FN-6703 defines the xs font-size token so tokenized mobile mailbox tabs satisfy the dashboard CSS token-validity guard without relying on an undefined fallback. */
   --font-size-xs: 0.8rem;
 
   /* Spacing Scale */
@@ -668,7 +669,7 @@ html .column.drag-over * {
  * Runtime provider settings card — unified layout used by Hermes / OpenClaw /
  * Paperclip cards. Header (large logo + name + status), description, form,
  * footer action row.
- * FNXC:DashboardCssTokens 2026-06-19-05:07: Most font-size values remain intentionally raw; --font-size-xs exists for mobile tab-size reuse where token validity tests require a defined custom property.
+ * FNXC:DashboardStyling 2026-06-19-05:50: Runtime-card font-size values remain intentionally raw; --font-size-xs is now the defined dashboard token used by mobile mailbox tabs where token-validity tests require a real custom property.
  * ------------------------------------------------------------------------- */
 
 .runtime-card {

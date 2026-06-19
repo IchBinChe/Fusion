@@ -786,10 +786,11 @@
     display: none;
   }
 
+  /* FNXC:DashboardStyling 2026-06-19-05:50: FN-6703 requires both mobile mailbox tab presentations to use var(--font-size-xs, 0.8rem) so the regression test and token-validity guard share the same contract. */
   .mailbox-modal .mailbox-tab {
     flex-shrink: 0;
     padding: var(--space-sm) var(--space-md);
-    font-size: 0.8rem;
+    font-size: var(--font-size-xs, 0.8rem);
   }
 
   .mailbox-modal .mailbox-content {
@@ -881,7 +882,7 @@
   .mailbox-view .mailbox-tab {
     flex-shrink: 0;
     padding: var(--space-sm) var(--space-md);
-    font-size: 0.8rem;
+    font-size: var(--font-size-xs, 0.8rem);
   }
 
   .mailbox-view .mailbox-content {

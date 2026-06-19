@@ -920,9 +920,28 @@ describe("TeamArea", () => {
   });
 });
 
+function pluginActivationFixture(overrides: Partial<{ activations: number; unavailable: boolean }> = {}) {
+  const activations = overrides.activations ?? 0;
+  const unavailable = overrides.unavailable ?? true;
+  return {
+    from: "2026-06-08",
+    to: null,
+    activations,
+    byPlugin: unavailable ? [] : [{ pluginId: "fusion-plugin-example", count: activations }],
+    unavailable,
+  };
+}
+
+function mockEcosystemResponses(tokens: unknown, activations: unknown): void {
+  apiMock.mockImplementation((path: string) => {
+    if (path.startsWith("/command-center/plugin-activations")) return Promise.resolve(activations);
+    return Promise.resolve(tokens);
+  });
+}
+
 describe("EcosystemArea", () => {
   it("renders populated model pie and trend line without NaN", async () => {
-    apiMock.mockResolvedValueOnce(tokenFixture());
+    mockEcosystemResponses(tokenFixture(), pluginActivationFixture());
     render(<EcosystemArea range={range7d} />);
 
     await screen.findByTestId("cc-area-ecosystem");
@@ -931,7 +950,38 @@ describe("EcosystemArea", () => {
     expect(screen.getByTestId("cc-ecosystem-line")).toBeTruthy();
     expect(screen.getByRole("img", { name: "Task share by model" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "Ecosystem trend" })).toBeTruthy();
+    expect(screen.getByTestId("cc-ecosystem-plugins-unavailable").textContent).toBe("—");
     expect(screen.getByTestId("cc-area-ecosystem").textContent).not.toContain("NaN");
+  });
+
+  it("renders the real plugin activation count only when activation data exists", async () => {
+    mockEcosystemResponses(tokenFixture(), pluginActivationFixture({ activations: 12, unavailable: false }));
+    render(<EcosystemArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-ecosystem");
+    expect(screen.getByTestId("cc-ecosystem-plugins-value").textContent).toBe("12");
+    expect(screen.queryByTestId("cc-ecosystem-plugins-unavailable")).toBeNull();
+  });
+
+  it("keeps the plugin sentinel for unavailable activation data and never renders 0", async () => {
+    mockEcosystemResponses(tokenFixture(), pluginActivationFixture({ activations: 0, unavailable: true }));
+    render(<EcosystemArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-ecosystem");
+    expect(screen.getByTestId("cc-ecosystem-plugins-unavailable").textContent).toBe("—");
+    expect(screen.queryByTestId("cc-ecosystem-plugins-value")).toBeNull();
+  });
+
+  it("does not show the empty state when activation data exists without model data", async () => {
+    mockEcosystemResponses(
+      { ...tokenFixture(), groups: [], series: [], totals: { ...tokenFixture().totals, totalTokens: 0, nTasks: 0 } },
+      pluginActivationFixture({ activations: 1, unavailable: false }),
+    );
+    render(<EcosystemArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-ecosystem");
+    expect(screen.queryByTestId("cc-area-ecosystem-empty")).toBeNull();
+    expect(screen.getByTestId("cc-ecosystem-plugins-value").textContent).toBe("1");
   });
 
   it("renders empty, loading, and error states without ecosystem chart shells", async () => {

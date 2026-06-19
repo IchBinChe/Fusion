@@ -15,6 +15,61 @@
       "file": "packages/dashboard/app/components/__tests__/WorkflowNodeEditor.test.tsx",
       "reason": "FN-6726 local workspace `pnpm test` observed the duplicate-merge-seam template conflict assertion fail only in the broad dashboard components-b shard, while a targeted rerun of that exact test passed; quarantine the workflow editor concurrency flake instead of appeasing unrelated template insertion behavior while the Command Center token containment fix remains scoped.",
       "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/core/src/__tests__/activity-analytics.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed this core file fail only in the broad changed-package core lane (hook/test timeout, ENOTEMPTY cleanup, or missed deferred hook under suite load); immediate targeted rerun of all five files passed, so quarantine the suite-load flake instead of appeasing it with wider timeouts/retries.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/core/src/__tests__/db.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed this core file fail only in the broad changed-package core lane (hook/test timeout, ENOTEMPTY cleanup, or missed deferred hook under suite load); immediate targeted rerun of all five files passed, so quarantine the suite-load flake instead of appeasing it with wider timeouts/retries.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/core/src/__tests__/store-concurrent-writes.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed this core file fail only in the broad changed-package core lane (hook/test timeout, ENOTEMPTY cleanup, or missed deferred hook under suite load); immediate targeted rerun of all five files passed, so quarantine the suite-load flake instead of appeasing it with wider timeouts/retries.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/core/src/__tests__/store-create-summarize-deferred-hook.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed this core file fail only in the broad changed-package core lane (hook/test timeout, ENOTEMPTY cleanup, or missed deferred hook under suite load); immediate targeted rerun of all five files passed, so quarantine the suite-load flake instead of appeasing it with wider timeouts/retries.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/core/src/__tests__/vitest-teardown-worker-root-cleanup.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed this core file fail only in the broad changed-package core lane (hook/test timeout, ENOTEMPTY cleanup, or missed deferred hook under suite load); immediate targeted rerun of all five files passed, so quarantine the suite-load flake instead of appeasing it with wider timeouts/retries.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/core/src/__tests__/settings-export.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed this core file time out in beforeEach only in the broad changed-package core lane; immediate targeted rerun passed in 5.1s, so quarantine the suite-load hook flake instead of appeasing it with wider hook timeouts/retries.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/cli/src/__tests__/extension-goal-tools.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed extension-goal-tools timing out and leaking state only in the broad changed-package CLI lane; immediate targeted rerun with the CLI failure batch passed this file, so quarantine the suite-load flake instead of widening the 5s test timeout or weakening goal-list assertions.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/cli/src/__tests__/extension-mission-goal-tools.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed extension-mission-goal-tools timing out and leaving ENOTEMPTY cleanup only in the broad changed-package CLI lane; immediate targeted rerun with the CLI failure batch passed this file, so quarantine the suite-load flake instead of timeout/retry appeasement.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/cli/src/__tests__/extension-task-tools.test.ts",
+      "reason": "FN-6705 verification observed extension-task-tools timeout under both the broad changed-package CLI lane and a direct rerun while unrelated task surfaces still passed; quarantine the load-sensitive repo-root integration file under the deletion ratchet instead of raising testTimeout.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/cli/src/__tests__/extension.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed extension.test fn_task_list cases time out and hit ENOTEMPTY cleanup only in the broad changed-package CLI lane; immediate targeted rerun with the CLI failure batch passed this file, so quarantine the suite-load flake instead of appeasing it.",
+      "quarantinedAt": "2026-06-19"
+    },
+    {
+      "file": "packages/cli/src/__tests__/research-extension-tools.test.ts",
+      "reason": "FN-6705 local workspace `pnpm test` observed research-extension-tools timing/assertion drift only in the broad changed-package CLI lane; immediate targeted rerun with the CLI failure batch passed this file, so quarantine the suite-load flake instead of loosening assertions or adding retries.",
+      "quarantinedAt": "2026-06-19"
     }
   ]
 }

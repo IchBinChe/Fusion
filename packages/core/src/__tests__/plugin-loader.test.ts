@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { mkdtempSync, existsSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PluginLoader, resolvePluginEntryPath } from "../plugin-loader.js";
@@ -120,10 +119,51 @@ function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-plugin-loader-test-"));
 }
 
-function droidPluginModulePath(): string {
-  return fileURLToPath(
-    new URL("../../../../plugins/fusion-plugin-droid-runtime/src/index.ts", import.meta.url),
-  );
+async function writeDroidRuntimePluginModule(dir: string): Promise<string> {
+  const filepath = join(dir, "droid-runtime.js");
+  await mkdir(dir, { recursive: true });
+
+  /*
+  FNXC:PluginLoaderTests 2026-06-19-09:22:
+  The plugin loader regression only needs the Droid runtime manifest/UI/runtime contract, not the full Droid provider transitive import graph. Keep this fixture Droid-shaped so the broad core package lane verifies register→loadAllPlugins→loadPlugin behavior without suite-load-sensitive runtime imports timing out unrelated analytics work.
+  */
+  const moduleCode = `
+const droidRuntimeMetadata = {
+  runtimeId: "droid",
+  name: "Droid Runtime",
+  description: "Drives the Droid CLI for Fusion agents",
+  version: "0.1.0",
+};
+
+const plugin = {
+  manifest: {
+    id: "fusion-plugin-droid-runtime",
+    name: "Droid Runtime Plugin",
+    version: "0.1.0",
+    description: "Droid runtime plugin for Fusion",
+    runtime: droidRuntimeMetadata,
+  },
+  state: "installed",
+  hooks: {},
+  uiSlots: [
+    { slotId: "settings-provider-card", label: "Droid CLI Provider", componentPath: "./components/settings-provider-card.js", order: 10 },
+    { slotId: "settings-integration-card", label: "Droid CLI Integration", componentPath: "./components/settings-integration-card.js", order: 20 },
+    { slotId: "onboarding-provider-card", label: "Droid CLI Provider", componentPath: "./components/onboarding-provider-card.js", order: 10 },
+    { slotId: "onboarding-setup-help", label: "Droid CLI Setup Help", componentPath: "./components/onboarding-setup-help.js", order: 20 },
+    { slotId: "post-onboarding-recommendation", label: "Droid CLI Recommendation", componentPath: "./components/post-onboarding-recommendation.js", order: 10 },
+  ],
+  runtime: {
+    metadata: droidRuntimeMetadata,
+    factory: async () => ({ id: "droid-runtime-adapter" }),
+  },
+};
+
+export default plugin;
+export { plugin };
+`;
+
+  await writeFile(filepath, moduleCode);
+  return filepath;
 }
 
 describe("resolvePluginEntryPath", () => {
@@ -198,6 +238,7 @@ const mockTaskStore = {
   logActivity: vi.fn(),
   getRootDir: () => "/tmp/plugin-loader-test-root",
   getPluginStore: vi.fn(),
+  recordPluginActivation: vi.fn(),
 } as any;
 
 type MockStructuredLogger = {
@@ -407,6 +448,95 @@ describe("PluginLoader", () => {
       expect(loader.isPluginLoaded("load-test")).toBe(true);
     });
 
+    it("records activation analytics only for a genuine successful plugin load", async () => {
+      await pluginStore.init();
+
+      const plugin = makePlugin(makeManifest({ id: "activation-load", version: "2.3.4" }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginModule(pluginDir, "activation-load.js", plugin);
+
+      await pluginStore.registerPlugin({
+        manifest: plugin.manifest,
+        path: pluginPath,
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await loader.loadPlugin("activation-load");
+      await loader.loadPlugin("activation-load");
+
+      expect(mockTaskStore.recordPluginActivation).toHaveBeenCalledTimes(1);
+      expect(mockTaskStore.recordPluginActivation).toHaveBeenCalledWith({
+        pluginId: "activation-load",
+        source: "plugin",
+        pluginVersion: "2.3.4",
+      });
+    });
+
+    it("records workflow extension activations with the extension source", async () => {
+      await pluginStore.init();
+
+      const plugin = makePlugin(makeManifest({
+        id: "activation-extension",
+        workflowExtensions: [{ extensionId: "move-policy", name: "Move Policy", kind: "move-policy" }],
+      }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginModule(pluginDir, "activation-extension.js", plugin);
+
+      await pluginStore.registerPlugin({ manifest: plugin.manifest, path: pluginPath });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await loader.loadPlugin("activation-extension");
+
+      expect(mockTaskStore.recordPluginActivation).toHaveBeenCalledWith({
+        pluginId: "activation-extension",
+        source: "extension",
+        pluginVersion: "1.0.0",
+      });
+    });
+
+    it("does not record activation analytics for disabled or failed loads", async () => {
+      await pluginStore.init();
+
+      const disabledPlugin = makePlugin(makeManifest({ id: "activation-disabled" }));
+      const invalidPlugin = makePlugin(makeManifest({ id: "activation-invalid" }));
+      invalidPlugin.manifest = { ...invalidPlugin.manifest, version: "not-semver" };
+      const pluginDir = join(rootDir, "plugins");
+      const disabledPath = await writePluginModule(pluginDir, "activation-disabled.js", disabledPlugin);
+      const invalidPath = await writePluginModule(pluginDir, "activation-invalid.js", invalidPlugin);
+
+      await pluginStore.registerPlugin({ manifest: disabledPlugin.manifest, path: disabledPath });
+      await pluginStore.disablePlugin("activation-disabled");
+      await pluginStore.registerPlugin({
+        manifest: { ...invalidPlugin.manifest, version: "1.0.0" },
+        path: invalidPath,
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await expect(loader.loadPlugin("activation-disabled")).rejects.toThrow("disabled");
+      await expect(loader.loadPlugin("activation-invalid")).rejects.toThrow("Invalid plugin manifest");
+
+      expect(mockTaskStore.recordPluginActivation).not.toHaveBeenCalled();
+    });
+
+    it("keeps loading fail-soft when activation analytics recording fails", async () => {
+      await pluginStore.init();
+
+      const plugin = makePlugin(makeManifest({ id: "activation-recording-failure" }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginModule(pluginDir, "activation-recording-failure.js", plugin);
+
+      await pluginStore.registerPlugin({ manifest: plugin.manifest, path: pluginPath });
+      mockTaskStore.recordPluginActivation.mockImplementationOnce(() => {
+        throw new Error("analytics unavailable");
+      });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const loaded = await loader.loadPlugin("activation-recording-failure");
+
+      expect(loaded.manifest.id).toBe("activation-recording-failure");
+      expect(loader.isPluginLoaded("activation-recording-failure")).toBe(true);
+    });
+
     it("loads the migrated Droid plugin through register→loadAllPlugins→loadPlugin pipeline", async () => {
       await pluginStore.init();
 
@@ -423,9 +553,12 @@ describe("PluginLoader", () => {
         },
       } as const;
 
+      const pluginDir = join(rootDir, "plugins");
+      const droidPath = await writeDroidRuntimePluginModule(pluginDir);
+
       await pluginStore.registerPlugin({
         manifest: droidManifest,
-        path: droidPluginModulePath(),
+        path: droidPath,
       });
 
       const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
@@ -725,6 +858,7 @@ export default plugin;
       const updated = await pluginStore.getPlugin("bad-plugin");
       expect(updated.state).toBe("error");
       expect(updated.error).toContain("Plugin crashed!");
+      expect(mockTaskStore.recordPluginActivation).not.toHaveBeenCalled();
     });
   });
 
@@ -1139,6 +1273,27 @@ export default plugin;
       );
     });
 
+    it("records activation analytics for successful reloads", async () => {
+      await pluginStore.init();
+
+      const plugin = makePlugin(makeManifest({ id: "activation-reload", version: "3.4.5" }));
+      const pluginDir = join(rootDir, "plugins");
+      const pluginPath = await writePluginModule(pluginDir, "activation-reload.js", plugin);
+
+      await pluginStore.registerPlugin({ manifest: plugin.manifest, path: pluginPath });
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+
+      await loader.loadPlugin("activation-reload");
+      await loader.reloadPlugin("activation-reload");
+
+      expect(mockTaskStore.recordPluginActivation).toHaveBeenCalledTimes(2);
+      expect(mockTaskStore.recordPluginActivation).toHaveBeenLastCalledWith({
+        pluginId: "activation-reload",
+        source: "plugin",
+        pluginVersion: "3.4.5",
+      });
+    });
+
     it("logs reload failures", async () => {
       await pluginStore.init();
 
@@ -1170,6 +1325,7 @@ export default plugin;
         `Reload failed for ${pluginId}, rolling back:`,
         expect.any(Error),
       );
+      expect(mockTaskStore.recordPluginActivation).toHaveBeenCalledTimes(1);
     });
 
     it("logs rollback failures", async () => {

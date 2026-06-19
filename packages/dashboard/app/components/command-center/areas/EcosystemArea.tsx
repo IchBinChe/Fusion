@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { TokenAnalytics } from "@fusion/core";
+import type { PluginActivationAnalytics, TokenAnalytics } from "@fusion/core";
 import type { DateRange } from "../DateRangePicker";
 import { Bar } from "../charts/Bar";
 import { LineChart, PieChart } from "../charts/recharts";
@@ -13,17 +13,21 @@ import { formatCount } from "./areaShared";
  * model (per KTD/plan: "reuses the tokens endpoint grouped by model where
  * possible"). Shows the unique-active-model count and a per-model activity bar
  * (tasks per model as the activity proxy — token rows carry `nTasks`, not a
- * session count). Plugin activation count has no current event source, so it
- * renders its unavailable sentinel rather than a misleading 0. Empty state when
- * no models have been used.
+ * session count). Plugin activation count uses the project-scoped activation
+ * event source and renders the unavailable sentinel when no activation rows
+ * exist in range rather than a misleading 0.
  *
- * FNXC:CommandCenter 2026-06-19-00:00:
- * FN-6705 owns real plugin activation recording. Keep the Plugin activations card at `—` until activation events are persisted and aggregated; model/task token trends are real but are not a plugin proxy.
+ * FNXC:CommandCenterEcosystem 2026-06-19-08:10:
+ * Plugin activations now come from recorded load/reload events. Show a real count only when the activation endpoint reports in-range rows; no rows, loading, or plugin-analytics errors must keep the honest `—` sentinel.
  */
 export function EcosystemArea({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");
   const { data, isLoading, error } = useAnalyticsArea<TokenAnalytics>(
     "/command-center/tokens?groupBy=model&granularity=day",
+    range,
+  );
+  const { data: pluginActivations, isLoading: pluginActivationsLoading } = useAnalyticsArea<PluginActivationAnalytics>(
+    "/command-center/plugin-activations",
     range,
   );
 
@@ -70,12 +74,14 @@ export function EcosystemArea({ range }: { range: DateRange }) {
   const hasModelPie = perModelPieData.some((datum) => datum.value > 0);
   const hasTokenTrend = (data?.series ?? []).length > 0;
 
-  const isEmpty = !data || uniqueModels === 0;
+  const hasPluginActivations = pluginActivations?.unavailable === false;
+  const isEmpty = (!data || uniqueModels === 0) && !hasPluginActivations;
+  const shellLoading = isLoading || (pluginActivationsLoading && !data);
 
   return (
     <AreaShell
       testId="ecosystem"
-      isLoading={isLoading}
+      isLoading={shellLoading}
       error={error}
       isEmpty={isEmpty}
       emptyMessage={t("commandCenter.ecosystem.empty", "No models or plugins active in the selected range.")}
@@ -90,13 +96,17 @@ export function EcosystemArea({ range }: { range: DateRange }) {
           <div className="card cc-stat-card" data-testid="cc-ecosystem-plugins">
             <div className="cc-stat-label">{t("commandCenter.ecosystem.plugins", "Plugin activations")}</div>
             <div className="cc-stat-value">
-              <span
-                className="cc-unavailable"
-                title={t("commandCenter.ecosystem.pluginsUnavailable", "Plugin-activation metrics are not yet recorded")}
-                data-testid="cc-ecosystem-plugins-unavailable"
-              >
-                —
-              </span>
+              {hasPluginActivations ? (
+                <span data-testid="cc-ecosystem-plugins-value">{formatCount(pluginActivations?.activations ?? 0)}</span>
+              ) : (
+                <span
+                  className="cc-unavailable"
+                  title={t("commandCenter.ecosystem.pluginsUnavailable", "Plugin-activation metrics are not yet recorded")}
+                  data-testid="cc-ecosystem-plugins-unavailable"
+                >
+                  —
+                </span>
+              )}
             </div>
           </div>
         </div>

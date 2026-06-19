@@ -47,6 +47,8 @@ export type {
   TaskCommitAssociation,
   TaskCommitAssociationConfidence,
   TaskCommitAssociationMatchSource,
+  PluginActivation,
+  PluginActivationInput,
 } from "./types.js";
 export * from "./mesh-replication-protocol.js";
 export * from "./mesh-task-replication.js";
@@ -576,6 +578,12 @@ export type {
   LanguageCount,
   LocSummary,
 } from "./productivity-analytics.js";
+export { aggregatePluginActivations } from "./plugin-activation-analytics.js";
+export type {
+  PluginActivationAnalytics,
+  PluginActivationAnalyticsQuery,
+  PluginActivationPluginCount,
+} from "./plugin-activation-analytics.js";
 export { aggregateTeamAnalytics } from "./team-analytics.js";
 export type {
   TeamAnalytics,

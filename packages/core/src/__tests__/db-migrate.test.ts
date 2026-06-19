@@ -4,7 +4,7 @@ Command Center / SDLC work (PR #1683) added usage_events, knowledge_pages, deplo
 */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { detectLegacyData, migrateFromLegacy, getMigrationStatus } from "../db-migrate.js";
-import { Database } from "../db.js";
+import { Database, SCHEMA_VERSION } from "../db.js";
 import { mkdir, writeFile, rm, readdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdtempSync, existsSync } from "node:fs";
@@ -721,7 +721,7 @@ describe("schema migration", () => {
 
     const row = db.prepare("SELECT deletedAt FROM tasks WHERE id = 'FN-legacy'").get() as { deletedAt: string | null };
     expect(row.deletedAt).toBeNull();
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -783,7 +783,7 @@ describe("schema migration", () => {
       sourceIssueUrl: "https://github.com/runfusion/fusion/issues/10",
       sourceIssueClosedAt: null,
     });
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -816,7 +816,7 @@ describe("schema migration", () => {
       { id: "WS-001", mode: "prompt", gateMode: "advisory" },
       { id: "WS-002", mode: "script", gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -866,7 +866,7 @@ describe("schema migration", () => {
       reviewerContextRetryCount: 0,
       reviewerFallbackRetryCount: 0,
     });
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -895,7 +895,7 @@ describe("schema migration", () => {
 
     const columns = db.prepare("PRAGMA table_info(milestones)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("acceptanceCriteria");
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -936,7 +936,7 @@ describe("schema migration", () => {
     const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
     expect(missionColumns.map((column) => column.name)).toContain("autoMerge");
 
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -970,7 +970,7 @@ describe("schema migration", () => {
       { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
       { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -1007,7 +1007,7 @@ describe("schema migration", () => {
 
     const indexes = db.prepare("PRAGMA index_list(mission_goals)").all() as Array<{ name: string }>;
     expect(indexes.some((index) => index.name === "idxMissionGoalsGoalId")).toBe(true);
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -1068,7 +1068,7 @@ describe("schema migration", () => {
     expect(customFieldsColumn).toBeDefined();
     expect(customFieldsColumn?.dflt_value).toBe("'{}'");
 
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -1106,7 +1106,7 @@ describe("schema migration", () => {
     const indexes = db.prepare("PRAGMA index_list(workflow_settings)").all() as Array<{ name: string }>;
     expect(indexes.some((index) => index.name === "idx_workflow_settings_project")).toBe(true);
 
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -1188,7 +1188,7 @@ describe("schema migration", () => {
     expect(indexNames).toContain("idx_cli_sessions_chatSessionId");
     expect(indexNames).toContain("idx_cli_sessions_project_state");
 
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -1220,7 +1220,7 @@ describe("schema migration", () => {
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("cliExecutorAdapterId");
 
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -1230,7 +1230,7 @@ describe("schema migration", () => {
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toContain("cli_sessions");
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -1287,20 +1287,20 @@ describe("schema migration", () => {
       .get() as { migrated_fragment_id: string | null };
     expect(stepRow.migrated_fragment_id).toBeNull();
 
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
   it("migration 109 is idempotent on re-init", () => {
     const db = new Database(fusionDir);
     db.init();
-    expect(db.getSchemaVersion()).toBe(123);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
 
     // Re-open the same on-disk DB: already at 109, the 109 block must be a no-op.
     const reopened = new Database(fusionDir);
     reopened.init();
-    expect(reopened.getSchemaVersion()).toBe(123);
+    expect(reopened.getSchemaVersion()).toBe(SCHEMA_VERSION);
     const workflowColumns = reopened.prepare("PRAGMA table_info(workflows)").all() as Array<{ name: string }>;
     expect(workflowColumns.filter((c) => c.name === "kind")).toHaveLength(1);
     const stepColumns = reopened.prepare("PRAGMA table_info(workflow_steps)").all() as Array<{ name: string }>;

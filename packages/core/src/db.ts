@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 123;
+const SCHEMA_VERSION = 124;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -1238,6 +1238,19 @@ CREATE INDEX IF NOT EXISTS idxUsageEventsAgentId ON usage_events(agentId);
 -- FNXC:Database 2026-06-16-14:30:
 -- Command Center tool analytics (aggregateToolAnalytics in tool-analytics.ts) filters usage_events by 'kind' (e.g. 'tool_call', 'session_start') with optional 'ts' bounds on every tool/session count. The (kind, ts) composite index keeps that path from scanning unrelated event kinds as telemetry grows. Added in the same unreleased PR (#1683) that introduces usage_events, so it ships inside migration 118 rather than a new version bump; mirrored there so fresh-init and migrated DBs converge.
 CREATE INDEX IF NOT EXISTS idxUsageEventsKindTs ON usage_events(kind, ts);
+
+-- Project-scoped plugin/extension activation events for Command Center Ecosystem analytics.
+-- FNXC:CommandCenterEcosystem 2026-06-19-00:00:
+-- Plugin activations are a real project-scoped event source for the Ecosystem plugin-activations metric. If this table has no in-range rows, the dashboard must keep the honest unavailable sentinel and must not render 0 as a fabricated metric.
+CREATE TABLE IF NOT EXISTS plugin_activations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pluginId TEXT NOT NULL,
+  source TEXT NOT NULL,
+  pluginVersion TEXT,
+  activatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idxPluginActivationsActivatedAt ON plugin_activations(activatedAt);
+CREATE INDEX IF NOT EXISTS idxPluginActivationsPluginId ON plugin_activations(pluginId);
 
 -- Persistent, incrementally-refreshed knowledge index (U14). One row per
 -- knowledge page (currently one page per completed task; PR-history pages
@@ -4974,6 +4987,26 @@ export class Database {
       this.applyMigration(123, () => {
         this.addColumnIfMissing("task_commit_associations", "additions", "INTEGER");
         this.addColumnIfMissing("task_commit_associations", "deletions", "INTEGER");
+      });
+    }
+
+    // Migration 124: project-scoped plugin activation events for Command Center Ecosystem analytics.
+    // Mirrors the SCHEMA_SQL definition above so fresh-init and migrated DBs converge.
+    // FNXC:CommandCenterEcosystem 2026-06-19-00:00:
+    // Activation rows are the only source for the Ecosystem plugin-activations metric; no rows means unavailable, never a fabricated zero.
+    if (version < 124) {
+      this.applyMigration(124, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS plugin_activations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pluginId TEXT NOT NULL,
+            source TEXT NOT NULL,
+            pluginVersion TEXT,
+            activatedAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idxPluginActivationsActivatedAt ON plugin_activations(activatedAt);
+          CREATE INDEX IF NOT EXISTS idxPluginActivationsPluginId ON plugin_activations(pluginId);
+        `);
       });
     }
 

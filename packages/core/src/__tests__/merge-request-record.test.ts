@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { SCHEMA_VERSION } from "../db.js";
 import { TaskStore } from "../store.js";
 
 function makeTmpDir(): string {
@@ -38,7 +39,7 @@ describe("TaskStore merge request record + completion handoff marker", () => {
       .all() as Array<{ name: string }>;
 
     expect(tableRows).toEqual([{ name: "completion_handoff_markers" }, { name: "merge_requests" }]);
-    expect(db.getSchemaVersion()).toBe(120);
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
   });
 
   it("upserts merge request records", async () => {

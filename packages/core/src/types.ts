@@ -5849,6 +5849,28 @@ export interface AgentPromptsConfig {
   roleAssignments?: Partial<Record<AgentCapability, string>>;
 }
 
+// ── Plugin Activation Types ──────────────────────────────────────────────────
+
+/**
+ * Project-scoped plugin/extension activation event persisted in `plugin_activations`.
+ * FNXC:CommandCenterEcosystem 2026-06-19-00:00:
+ * Command Center Ecosystem uses these rows as the only source for Plugin activations; an absent row set means unavailable, not zero.
+ */
+export interface PluginActivation {
+  id: number;
+  pluginId: string;
+  source: string;
+  pluginVersion: string | null;
+  activatedAt: string;
+}
+
+export interface PluginActivationInput {
+  pluginId: string;
+  source: string;
+  pluginVersion?: string | null;
+  activatedAt?: string;
+}
+
 // ── Run Audit Types ───────────────────────────────────────────────────────────
 
 /** Domain categories for run-audit events.

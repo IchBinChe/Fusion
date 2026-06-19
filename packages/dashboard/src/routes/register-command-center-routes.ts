@@ -3,6 +3,7 @@ import {
   aggregateToolAnalytics,
   aggregateActivityAnalytics,
   aggregateProductivityAnalytics,
+  aggregatePluginActivations,
   aggregateTeamAnalytics,
   aggregateGithubIssueAnalytics,
   aggregateSignalsAnalytics,
@@ -307,6 +308,25 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err, "Failed to aggregate signal analytics");
+    }
+  });
+
+  /**
+   * GET /api/command-center/plugin-activations
+   * Project-scoped plugin/extension activation rows for Ecosystem analytics.
+   */
+  router.get("/command-center/plugin-activations", async (req, res) => {
+    try {
+      const store = await getScopedStore(req);
+      const range = resolveRange(req.query);
+      const result = aggregatePluginActivations(store.getDatabase(), {
+        from: range.from,
+        to: range.to,
+      });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to aggregate plugin activation analytics");
     }
   });
 

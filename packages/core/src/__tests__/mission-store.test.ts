@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { MissionStore, deriveMilestoneAcceptanceCriteriaFromFeatures } from "../mission-store.js";
 import { GoalStore } from "../goal-store.js";
-import { Database } from "../db.js";
+import { Database, SCHEMA_VERSION } from "../db.js";
 import type { MissionFeature } from "../mission-types.js";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -3745,8 +3745,8 @@ describe("MissionStore", () => {
   // ── Loop State & Validator Run Schema Tests ───────────────────────────
 
   describe("Loop State & Validator Run Schema (v31)", () => {
-    it("schema version is 101 after migration", () => {
-      expect(db.getSchemaVersion()).toBe(120);
+    it("schema version is current after migration", () => {
+      expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     });
 
     it("mission_features table has loop state columns", () => {

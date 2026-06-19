@@ -21,8 +21,8 @@
  *     port is requested from the OS (listen on 0) and double-checked against
  *     the reserved list.
  *   - Never kills anything except the child process it spawned itself.
- *   - Runs with an isolated $HOME (mkdtemp) so it cannot read or corrupt a
- *     developer's real fusion.db or auth state.
+ *   - Runs with an isolated $HOME and throwaway cwd project (mkdtemp) so it
+ *     cannot read or corrupt a developer's real fusion.db, task artifacts, or auth state.
  *
  * Exit code is the verdict: 0 = boots and serves, non-zero = broken, with
  * captured child stderr on stdout for CI logs.
@@ -112,7 +112,7 @@ async function main() {
   }
   console.log("boot-smoke: `fn --help` OK");
 
-  // 2. Real server boot on an ephemeral port with an isolated HOME.
+  // 2. Real server boot on an ephemeral port with isolated HOME/project state.
   // The ephemeral-port probe is inherently TOCTOU (probe closes before the
   // server binds), so an EADDRINUSE loss on a busy machine retries with a
   // fresh port instead of failing the gate.
@@ -144,14 +144,24 @@ async function main() {
  */
 async function bootAndVerify(attempt, registerCleanup) {
   const port = await getEphemeralPort();
-  const isolatedHome = mkdtempSync(path.join(tmpdir(), "fusion-boot-smoke-"));
+  const isolatedHome = mkdtempSync(path.join(tmpdir(), "fusion-boot-smoke-home-"));
+  const isolatedProject = mkdtempSync(path.join(tmpdir(), "fusion-boot-smoke-project-"));
   let stderrBuf = "";
 
   const child = spawn(
     process.execPath,
-    [cliBin, "serve", "--port", String(port), "--host", "127.0.0.1"],
+    [
+      cliBin,
+      "serve",
+      "--port",
+      String(port),
+      "--host",
+      "127.0.0.1",
+      // FNXC:BootSmoke 2026-06-19-12:36: The boot smoke verifies HTTP startup, not autonomous task execution. Run against an isolated throwaway project and use --paused so a developer worktree with an in-progress task or missing task-local artifacts cannot make the merge gate fail before /api/health serves.
+      "--paused",
+    ],
     {
-      cwd: repoRoot,
+      cwd: isolatedProject,
       env: {
         ...process.env,
         HOME: isolatedHome,
@@ -175,6 +185,7 @@ async function bootAndVerify(attempt, registerCleanup) {
       // ESRCH: child already reaped between the check and the kill — fine.
     }
     rmSync(isolatedHome, { recursive: true, force: true });
+    rmSync(isolatedProject, { recursive: true, force: true });
   });
 
   const exitedEarly = new Promise((resolve) => {
@@ -193,6 +204,7 @@ async function bootAndVerify(attempt, registerCleanup) {
       console.log(`boot-smoke: port :${port} lost to another process (EADDRINUSE), retrying with a fresh port (attempt ${attempt}/${BOOT_ATTEMPTS})`);
       await exitedEarly; // child is already dead or dying; wait so cleanup is race-free
       rmSync(isolatedHome, { recursive: true, force: true });
+      rmSync(isolatedProject, { recursive: true, force: true });
       return "retry-port";
     }
     fail(err.message, stderrBuf);

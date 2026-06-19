@@ -270,6 +270,31 @@ export class PluginLoader extends EventEmitter<{
     }
   }
 
+  /**
+   * Record a successful plugin or workflow-extension activation without letting analytics persistence change loader behavior.
+   *
+   * FNXC:CommandCenterEcosystem 2026-06-19-08:00:
+   * Command Center Ecosystem plugin-activation counts must be backed by real project-scoped load/reload events. Analytics writes are fail-soft so a DB problem never prevents a plugin or extension from activating.
+   */
+  private recordActivationEvent(pluginId: string, plugin: FusionPlugin): void {
+    try {
+      this.options.taskStore.recordPluginActivation({
+        pluginId,
+        source: this.resolveActivationSource(plugin),
+        pluginVersion: plugin.manifest.version,
+      });
+    } catch (error) {
+      this.log.warn(`Failed to record plugin activation for ${pluginId}:`, error);
+    }
+  }
+
+  private resolveActivationSource(plugin: FusionPlugin): "plugin" | "extension" {
+    const hasWorkflowExtensions =
+      (plugin.workflowExtensions?.length ?? 0) > 0 ||
+      (plugin.manifest.workflowExtensions?.length ?? 0) > 0;
+    return hasWorkflowExtensions ? "extension" : "plugin";
+  }
+
   // ── Plugin Loading ─────────────────────────────────────────────────
 
   /**
@@ -369,6 +394,7 @@ export class PluginLoader extends EventEmitter<{
         throw loadErr;
       }
 
+      this.recordActivationEvent(pluginId, plugin);
       this.emit("plugin:loaded", { pluginId, plugin });
       return plugin;
     } catch (err) {
@@ -534,6 +560,7 @@ export class PluginLoader extends EventEmitter<{
 
       this.log.log(`Plugin ${pluginId} reloaded successfully`);
 
+      this.recordActivationEvent(pluginId, newPlugin);
       this.emit("plugin:reloaded", { pluginId, plugin: newPlugin });
       return newPlugin;
     } catch (err) {

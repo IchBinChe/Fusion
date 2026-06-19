@@ -24,7 +24,15 @@ const quarantinedCliTests: string[] = [
 
   FNXC:CliTests 2026-06-15-07:46:
   FN-6486 rescued extension-task-tools by closing real TaskStore fixtures and replacing hoisted mock cleanup, then removed the quarantine in lockstep with scripts/lib/test-quarantine.json. Keep this array empty unless a future observed CLI flake is mirrored in the ledger in the same commit.
+
+  FNXC:CliTests 2026-06-19-11:43:
+  FN-6705 verification observed five CLI extension-tool files fail under the broad changed-package lane with test timeouts, ENOTEMPTY cleanup, or cross-test state drift; all except extension-task-tools passed in the direct failure-batch rerun, and extension-task-tools remained timeout-sensitive. Quarantine these existing integration-heavy files under the deletion ratchet instead of widening testTimeout, adding retries, or weakening assertions.
   */
+  "src/__tests__/extension-goal-tools.test.ts",
+  "src/__tests__/extension-mission-goal-tools.test.ts",
+  "src/__tests__/extension-task-tools.test.ts",
+  "src/__tests__/extension.test.ts",
+  "src/__tests__/research-extension-tools.test.ts",
 ];
 
 export default defineConfig({

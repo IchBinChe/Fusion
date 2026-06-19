@@ -105,6 +105,13 @@ function seedSignalMetrics(db: Database, opts: { prefix: string; source: string;
   }
 }
 
+function seedPluginActivation(db: Database, opts: { pluginId: string; activatedAt: string; source?: string; version?: string | null }): void {
+  db.prepare(
+    `INSERT INTO plugin_activations (pluginId, source, pluginVersion, activatedAt)
+     VALUES (?, ?, ?, ?)`,
+  ).run(opts.pluginId, opts.source ?? "plugin", opts.version ?? null, opts.activatedAt);
+}
+
 function seedGithubIssueMetrics(db: Database, opts: { prefix: string; repo: string; filed: number; fixed: number }): void {
   for (let i = 0; i < opts.filed; i += 1) {
     db.prepare(
@@ -365,6 +372,28 @@ describe("register-command-center-routes", () => {
     // A's task had 100 input tokens (total 200); B's had 999 (total 1998).
     expect((a.body as { totals: { totalTokens: number } }).totals.totalTokens).toBe(200);
     expect((b.body as { totals: { totalTokens: number } }).totals.totalTokens).toBe(1998);
+  });
+
+  it("plugin activation endpoint returns scoped JSON and preserves unavailable for empty ranges", async () => {
+    seedPluginActivation(dbA, { pluginId: "plugin.a", activatedAt: "2026-03-10T00:00:00.000Z" });
+    seedPluginActivation(dbA, { pluginId: "plugin.a", activatedAt: "2026-03-11T00:00:00.000Z" });
+    seedPluginActivation(dbB, { pluginId: "plugin.b", activatedAt: "2026-03-10T00:00:00.000Z" });
+    const range = "from=2026-03-01T00:00:00.000Z&to=2026-03-31T00:00:00.000Z";
+
+    const a = await request(app, "GET", `/api/command-center/plugin-activations?${range}&projectId=proj-a`);
+    const b = await request(app, "GET", `/api/command-center/plugin-activations?${range}&projectId=proj-b`);
+    const empty = await request(app, "GET", "/api/command-center/plugin-activations?from=2026-04-01T00:00:00.000Z&to=2026-04-30T00:00:00.000Z&projectId=proj-a");
+
+    expect(a.status).toBe(200);
+    expect(a.body).toMatchObject({ activations: 2, unavailable: false });
+    expect((a.body as { byPlugin: Array<{ pluginId: string; count: number }> }).byPlugin).toEqual([
+      { pluginId: "plugin.a", count: 2 },
+    ]);
+    expect(b.body).toMatchObject({ activations: 1, unavailable: false });
+    expect((b.body as { byPlugin: Array<{ pluginId: string; count: number }> }).byPlugin).toEqual([
+      { pluginId: "plugin.b", count: 1 },
+    ]);
+    expect(empty.body).toMatchObject({ activations: 0, byPlugin: [], unavailable: true });
   });
 
   it("team endpoint stays project scoped", async () => {

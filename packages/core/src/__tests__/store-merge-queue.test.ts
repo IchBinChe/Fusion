@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { SCHEMA_VERSION } from "../db.js";
 import { TaskStore, MergeQueueInvalidColumnError, MergeQueueLeaseOwnershipError, MergeQueueTaskNotFoundError } from "../store.js";
 
 function makeTmpDir(): string {
@@ -60,7 +61,7 @@ describe("TaskStore merge queue", () => {
       expect.arrayContaining(["idx_mergeQueue_lease_ready", "idx_mergeQueue_leaseExpiresAt"]),
     );
 
-    expect(store.getDatabase().getSchemaVersion()).toBe(120);
+    expect(store.getDatabase().getSchemaVersion()).toBe(SCHEMA_VERSION);
   });
 
   it("migrates a legacy v88 database and preserves task rows", async () => {

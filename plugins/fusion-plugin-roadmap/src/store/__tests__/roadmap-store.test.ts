@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { Database, createDatabase } from "@fusion/core";
+import { Database, SCHEMA_VERSION, createDatabase } from "@fusion/core";
 import { RoadmapStore } from "../roadmap-store.js";
 import { ensureRoadmapSchema } from "../../roadmap-schema.js";
 import type {
@@ -743,10 +743,9 @@ describe("RoadmapStore", () => {
   });
 
   describe("schema version", () => {
-    it("schema version is 119 after init", () => {
-      // Tracks @fusion/core's SCHEMA_VERSION (the roadmap store layers on core's
-      // Database). Bump this in lockstep when core adds a migration.
-      expect(db.getSchemaVersion()).toBe(120);
+    it("schema version is current after init", () => {
+      // FNXC:RoadmapSchemaTesting 2026-06-19-08:56: Roadmap tests should assert the shared core schema contract, not stale literal versions, because roadmap storage is layered on @fusion/core Database.
+      expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     });
   });
 

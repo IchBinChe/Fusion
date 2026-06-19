@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { Database, createDatabase, fromJson } from "../db.js";
+import { SCHEMA_VERSION, Database, createDatabase, fromJson } from "../db.js";
 import { InsightStore, computeInsightFingerprint } from "../insight-store.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -1004,7 +1004,7 @@ describe("Migration: pre-33 DB upgrade", () => {
       // Step 1: Create a fresh database at v33 (runs all migrations up to 33)
       const db1 = createDatabase(legacyDir);
       db1.init();
-      expect(db1.getSchemaVersion()).toBe(120);
+      expect(db1.getSchemaVersion()).toBe(SCHEMA_VERSION);
       db1.close();
 
       // Step 2: Manually downgrade to version 32 and drop insight tables
@@ -1039,7 +1039,7 @@ describe("Migration: pre-33 DB upgrade", () => {
       expect(tableNamesBefore).not.toContain("project_insight_runs");
       // Now run init — this triggers the v32→v33 migration
       db3.init();
-      expect(db3.getSchemaVersion()).toBe(120);
+      expect(db3.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
       // Step 4: Verify insight tables exist after migration
       const tablesAfter = db3.prepare(
@@ -1070,12 +1070,12 @@ describe("Migration: pre-33 DB upgrade", () => {
     try {
       const db1 = createDatabase(testDir);
       db1.init();
-      expect(db1.getSchemaVersion()).toBe(120);
+      expect(db1.getSchemaVersion()).toBe(SCHEMA_VERSION);
       db1.close();
 
       const db2 = createDatabase(testDir);
       expect(() => db2.init()).not.toThrow();
-      expect(db2.getSchemaVersion()).toBe(120);
+      expect(db2.getSchemaVersion()).toBe(SCHEMA_VERSION);
       db2.close();
     } finally {
       rmSync(testDir, { recursive: true, force: true });
@@ -1089,7 +1089,7 @@ describe("Migration: pre-33 DB upgrade", () => {
       // Step 1: Create a fresh DB and run migrations
       const db1 = createDatabase(compatDir);
       db1.init();
-      expect(db1.getSchemaVersion()).toBe(120);
+      expect(db1.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
       // Step 2: Strip lifecycle and cancelledAt columns by recreating the
       // table without them. This simulates a DB that was created before the

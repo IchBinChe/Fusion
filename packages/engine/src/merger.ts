@@ -3833,7 +3833,7 @@ async function generateAiMergeSubject(
  * is a denormalized convenience for lineage lookups, not a correctness
  * invariant, so a missed write must not block the merge.
  */
-async function recordCommitAssociationFromHead(
+export async function recordCommitAssociationFromHead(
   store: TaskStore,
   rootDir: string,
   taskId: string,
@@ -3857,6 +3857,17 @@ async function recordCommitAssociationFromHead(
     );
     return;
   }
+  let additions: number | undefined;
+  let deletions: number | undefined;
+  try {
+    const shortstat = (await execAsync("git show --shortstat --format= HEAD", { cwd: rootDir })).stdout;
+    const parsed = parseShortstatSummary(shortstat);
+    additions = parsed.insertions;
+    deletions = parsed.deletions;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    mergerLog.warn(`${taskId}: commit-association diff stats unavailable; persisting lineage without LOC stats (${message})`);
+  }
   await store.upsertTaskCommitAssociation({
     taskLineageId: lineageId,
     taskIdSnapshot: taskId,
@@ -3865,6 +3876,8 @@ async function recordCommitAssociationFromHead(
     authoredAt,
     matchedBy: "canonical-lineage-trailer",
     confidence: "canonical",
+    additions,
+    deletions,
   });
 }
 
@@ -10385,6 +10398,8 @@ export async function aiMergeTask(
           authoredAt: mergeDetails.mergedAt ?? new Date().toISOString(),
           matchedBy: "canonical-lineage-trailer",
           confidence: "canonical",
+          additions: mergeDetails.insertions,
+          deletions: mergeDetails.deletions,
         });
       }
     }

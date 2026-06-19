@@ -3,14 +3,15 @@ import type { Database } from "./db.js";
 /**
  * Productivity analytics: files modified (count + language distribution) from
  * `tasks.modifiedFiles`, commit associations from `task_commit_associations`,
- * pull requests from `pull_requests`, and LOC from commit diff stats.
+ * pull requests from `pull_requests`, and LOC from merge-time commit diff stats.
  *
- * **LOC availability.** Fusion does not currently persist commit diff line
- * stats (the `task_commit_associations` schema has no additions/deletions
- * columns). LOC is therefore reported as the documented unavailable sentinel —
- * `{ value: null, unavailable: true }` — **never `0`**, so a missing data source
- * is never mistaken for "zero lines changed". When a diff-stats source is added,
- * fill {@link LocSummary.value} and clear `unavailable`.
+ * **LOC availability.** Fusion persists nullable `additions`/`deletions` on
+ * `task_commit_associations` when merge paths can capture git shortstat output.
+ * LOC is reported as a real value only when at least one in-range association
+ * has non-null stats. If the range has no recorded stats, the documented
+ * unavailable sentinel — `{ value: null, unavailable: true }` — is preserved,
+ * **never `0`**, so missing historical data is not mistaken for "zero lines
+ * changed".
  *
  * Inclusivity: `from`/`to` bounds are inclusive. Tasks are filtered by
  * `updatedAt` (the last time the task — and therefore its modifiedFiles — was
@@ -32,8 +33,8 @@ export interface LanguageCount {
 }
 
 /**
- * LOC summary. `value` is null and `unavailable` true until a commit diff-stats
- * source exists — never `0`.
+ * LOC summary. `value` is null and `unavailable` true when no in-range commit
+ * association has diff stats — never `0` for unknown data.
  */
 export interface LocSummary {
   value: number | null;
@@ -51,12 +52,19 @@ export interface ProductivityAnalytics {
   commits: number;
   /** Rows in `pull_requests` in range. */
   pullRequests: number;
-  /** LOC from commit diff stats — unavailable until a source exists. */
+  /** LOC from commit association diff stats when at least one in-range row has stats. */
   loc: LocSummary;
 }
 
 interface CountRow {
   count: number;
+}
+
+interface CommitStatsRow {
+  count: number;
+  additions: number | null;
+  deletions: number | null;
+  statsRows: number;
 }
 
 interface ModifiedFilesRow {
@@ -73,8 +81,8 @@ function languageOf(path: string): string {
 
 /**
  * Aggregate productivity metrics over a date range. Empty range yields zeroed
- * structures (not nulls); LOC is always the unavailable sentinel until a
- * diff-stats source is wired.
+ * structures (not nulls); LOC remains the unavailable sentinel unless at least
+ * one in-range commit association carries diff stats.
  */
 export function aggregateProductivityAnalytics(
   db: Database,
@@ -135,13 +143,20 @@ export function aggregateProductivityAnalytics(
   }
   const commitWhere =
     commitClauses.length > 0 ? `WHERE ${commitClauses.join(" AND ")}` : "";
-  const commits = (
-    db
-      .prepare(
-        `SELECT COUNT(*) AS count FROM task_commit_associations ${commitWhere}`,
-      )
-      .get(...commitParams) as CountRow
-  ).count;
+  const commitStats = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS count,
+         SUM(additions) AS additions,
+         SUM(deletions) AS deletions,
+         COUNT(CASE WHEN additions IS NOT NULL OR deletions IS NOT NULL THEN 1 END) AS statsRows
+       FROM task_commit_associations ${commitWhere}`,
+    )
+    .get(...commitParams) as CommitStatsRow;
+  const commits = commitStats.count;
+  const loc: LocSummary = commitStats.statsRows > 0
+    ? { value: (commitStats.additions ?? 0) + (commitStats.deletions ?? 0), unavailable: false }
+    : { value: null, unavailable: true };
 
   // Pull requests. `pull_requests.createdAt` is an INTEGER epoch-ms column, so
   // convert the ISO bounds to epoch ms for comparison.
@@ -169,7 +184,6 @@ export function aggregateProductivityAnalytics(
     byLanguage,
     commits,
     pullRequests,
-    // No commit diff-stats source yet — unavailable, never 0.
-    loc: { value: null, unavailable: true },
+    loc,
   };
 }

@@ -1327,6 +1327,8 @@ async function finalizeMerged(
         authoredAt: mergedAt,
         matchedBy: "canonical-lineage-trailer",
         confidence: "canonical",
+        additions: insertions,
+        deletions,
       }).catch(() => undefined);
     }
   }

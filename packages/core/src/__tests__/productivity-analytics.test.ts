@@ -14,13 +14,19 @@ function insertTaskWithFiles(db: Database, id: string, files: string[], updatedA
   ).run(id, updatedAt, updatedAt, JSON.stringify(files));
 }
 
-function insertCommit(db: Database, id: string, sha: string, authoredAt: string): void {
+function insertCommit(
+  db: Database,
+  id: string,
+  sha: string,
+  authoredAt: string,
+  stats: { additions?: number | null; deletions?: number | null } = {},
+): void {
   db.prepare(
     `INSERT INTO task_commit_associations
        (id, taskLineageId, taskIdSnapshot, commitSha, commitSubject, authoredAt,
-        matchedBy, confidence, createdAt, updatedAt)
-     VALUES (?, 'lin-1', 't-1', ?, 'subj', ?, 'canonical-lineage-trailer', 'canonical', ?, ?)`,
-  ).run(id, sha, authoredAt, authoredAt, authoredAt);
+        matchedBy, confidence, additions, deletions, createdAt, updatedAt)
+     VALUES (?, 'lin-1', 't-1', ?, 'subj', ?, 'canonical-lineage-trailer', 'canonical', ?, ?, ?, ?)`,
+  ).run(id, sha, authoredAt, stats.additions ?? null, stats.deletions ?? null, authoredAt, authoredAt);
 }
 
 function insertPr(db: Database, id: string, createdAtMs: number): void {
@@ -74,11 +80,42 @@ describe("productivity-analytics", () => {
     expect(result.pullRequests).toBe(2);
   });
 
-  it("reports LOC as unavailable (null + unavailable:true), never 0", () => {
+  it("reports LOC as unavailable (null + unavailable:true), never 0 when no stats exist", () => {
     insertTaskWithFiles(db, "t1", ["src/a.ts"], "2026-03-01T00:00:00.000Z");
+    insertCommit(db, "c-null", "sha-null", "2026-03-01T00:00:00.000Z");
     const result = aggregateProductivityAnalytics(db, {});
     expect(result.loc).toEqual({ value: null, unavailable: true });
     expect(result.loc.value).not.toBe(0);
+  });
+
+  it("sums additions and deletions into LOC when commit stats exist", () => {
+    insertCommit(db, "c1", "sha1", "2026-03-01T00:00:00.000Z", { additions: 10, deletions: 5 });
+    insertCommit(db, "c2", "sha2", "2026-03-02T00:00:00.000Z", { additions: 3, deletions: 2 });
+    insertCommit(db, "c-old", "sha-old", "2025-01-01T00:00:00.000Z", { additions: 100, deletions: 100 });
+
+    const result = aggregateProductivityAnalytics(db, { from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T00:00:00.000Z" });
+    expect(result.commits).toBe(2);
+    expect(result.loc).toEqual({ value: 20, unavailable: false });
+  });
+
+  it("keeps the LOC sentinel when in-range commit rows have only null stats", () => {
+    insertCommit(db, "c1", "sha1", "2026-03-01T00:00:00.000Z");
+    insertCommit(db, "c2", "sha2", "2026-03-02T00:00:00.000Z", { additions: null, deletions: null });
+
+    const result = aggregateProductivityAnalytics(db, { from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T00:00:00.000Z" });
+    expect(result.commits).toBe(2);
+    expect(result.loc).toEqual({ value: null, unavailable: true });
+    expect(result.loc.value).not.toBe(0);
+  });
+
+  it("sums only valued LOC rows while allowing partial commit-stat coverage", () => {
+    insertCommit(db, "c-null", "sha-null", "2026-03-01T00:00:00.000Z");
+    insertCommit(db, "c-additions", "sha-additions", "2026-03-02T00:00:00.000Z", { additions: 7 });
+    insertCommit(db, "c-deletions", "sha-deletions", "2026-03-03T00:00:00.000Z", { deletions: 4 });
+
+    const result = aggregateProductivityAnalytics(db, { from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T00:00:00.000Z" });
+    expect(result.commits).toBe(3);
+    expect(result.loc).toEqual({ value: 11, unavailable: false });
   });
 
   it("empty range returns zeroed structures, not nulls", () => {

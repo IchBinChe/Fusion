@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 122;
+const SCHEMA_VERSION = 123;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -476,6 +476,8 @@ CREATE TABLE IF NOT EXISTS task_commit_associations (
   matchedBy TEXT NOT NULL CHECK (matchedBy IN ('canonical-lineage-trailer', 'legacy-task-id-trailer', 'legacy-subject', 'manual-reconciliation')),
   confidence TEXT NOT NULL CHECK (confidence IN ('canonical', 'legacy', 'ambiguous')),
   note TEXT,
+  additions INTEGER,
+  deletions INTEGER,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   UNIQUE(taskLineageId, commitSha, matchedBy)
@@ -4962,6 +4964,16 @@ export class Database {
     if (version < 122) {
       this.applyMigration(122, () => {
         this.addColumnIfMissing("tasks", "sourceIssueClosedAt", "TEXT");
+      });
+    }
+
+    // Migration 123: nullable merge-time diff stats for Command Center LOC analytics.
+    // FNXC:CommandCenterProductivity 2026-06-19-00:00:
+    // Productivity LOC must distinguish unknown historical commit stats from real zero-line commits. Store merge-time additions/deletions as nullable columns with no default; null means stats were unavailable, not zero.
+    if (version < 123) {
+      this.applyMigration(123, () => {
+        this.addColumnIfMissing("task_commit_associations", "additions", "INTEGER");
+        this.addColumnIfMissing("task_commit_associations", "deletions", "INTEGER");
       });
     }
 

@@ -560,6 +560,8 @@ interface TaskCommitAssociationRow {
   matchedBy: TaskCommitAssociationMatchSource;
   confidence: TaskCommitAssociationConfidence;
   note: string | null;
+  additions: number | null;
+  deletions: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -16202,14 +16204,16 @@ ${notificationsSection}`;
     });
     this.db.prepare(
       `INSERT INTO task_commit_associations
-       (id, taskLineageId, taskIdSnapshot, commitSha, commitSubject, authoredAt, matchedBy, confidence, note, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, taskLineageId, taskIdSnapshot, commitSha, commitSubject, authoredAt, matchedBy, confidence, note, additions, deletions, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(taskLineageId, commitSha, matchedBy) DO UPDATE SET
          taskIdSnapshot = excluded.taskIdSnapshot,
          commitSubject = excluded.commitSubject,
          authoredAt = excluded.authoredAt,
          confidence = excluded.confidence,
          note = excluded.note,
+         additions = excluded.additions,
+         deletions = excluded.deletions,
          updatedAt = excluded.updatedAt`,
     ).run(
       association.id,
@@ -16221,6 +16225,8 @@ ${notificationsSection}`;
       association.matchedBy,
       association.confidence,
       association.note ?? null,
+      association.additions ?? null,
+      association.deletions ?? null,
       association.createdAt,
       association.updatedAt,
     );
@@ -16231,7 +16237,12 @@ ${notificationsSection}`;
     const rows = this.db.prepare(
       `SELECT * FROM task_commit_associations WHERE taskLineageId = ? ORDER BY authoredAt DESC, createdAt DESC`,
     ).all(lineageId) as TaskCommitAssociationRow[];
-    return rows.map((row) => normalizeTaskCommitAssociation({ ...row, note: row.note ?? undefined }));
+    return rows.map((row) => normalizeTaskCommitAssociation({
+      ...row,
+      note: row.note ?? undefined,
+      additions: row.additions ?? undefined,
+      deletions: row.deletions ?? undefined,
+    }));
   }
 
   async replaceLegacyTaskCommitAssociations(

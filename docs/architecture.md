@@ -855,7 +855,7 @@ Operator setup + troubleshooting guide: **[Remote Access runbook](./remote-acces
 Key server capabilities:
 - REST APIs for tasks, git, GitHub, agents, missions, planning, automations/routines, settings
 - System stats snapshot and vitest process controls APIs (`GET /api/system-stats`, `POST /api/kill-vitest`) exposing dashboard process/system telemetry (including app CPU percentage and host memory rendered as numeric values, radial gauges, and trend sparklines in the Command Center System area), task/agent aggregates, and manual vitest process termination
-- Command Center analytics APIs (`GET /api/command-center/tokens`, `/tools`, `/activity`, `/productivity`, `/team`, `/github`, `/signals`, `/live`) are project-scoped dashboard routes; `/signals` aggregates real local `incidents` rows for total/open/resolved counts, MTTR, and source/severity/status breakdowns and returns honest empty/unavailable sentinels instead of synthetic signal volume.
+- Command Center analytics APIs (`GET /api/command-center/tokens`, `/tools`, `/activity`, `/productivity`, `/team`, `/github`, `/signals`, `/live`) are project-scoped dashboard routes. `/productivity` reads Lines changed from nullable `task_commit_associations.additions`/`deletions` merge-time diff stats and keeps the unavailable sentinel when no in-range association has stats. `/signals` aggregates real local `incidents` rows for total/open/resolved counts, MTTR, and source/severity/status breakdowns and returns honest empty/unavailable sentinels instead of synthetic signal volume.
 - Remote access APIs (`/api/remote/*`) for provider config, activation, tunnel lifecycle, status, token issuance, authenticated URL generation, and QR payload generation
   - Operational runbook (prereqs/security/troubleshooting): [`docs/remote-access.md`](./remote-access.md)
   - `/api/remote/tunnel/start`, `/api/remote/tunnel/stop`, and `/api/remote/tunnel/kill-external` cover tunnel lifecycle and external funnel cleanup.
@@ -1457,6 +1457,8 @@ Dashboard session-diff route registration (`packages/dashboard/src/routes/regist
 - `canonical` = immutable lineage trailer match (highest confidence)
 - `legacy` = recovered via legacy task-id/subject matching
 - `ambiguous` = manual reconciliation where historical task-id attribution could be misleading
+
+Commit associations also carry optional `additions`/`deletions` shortstat counts captured by merge paths. These nullable fields are the Command Center Productivity LOC source: analytics sum additions + deletions only when at least one in-range row has stats, and preserve the `—` unavailable sentinel when all matching rows are `NULL` so unknown historical data is never rendered as `0`.
 
 ### Done-task files-changed sources of truth
 

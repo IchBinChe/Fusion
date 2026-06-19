@@ -334,7 +334,7 @@ describe("Database", () => {
     });
 
     it("seeds schema version", () => {
-      expect(db.getSchemaVersion()).toBe(122);
+      expect(db.getSchemaVersion()).toBe(123);
     });
 
     it("includes tokenUsageCacheWriteTokens on freshly initialized tasks table", () => {
@@ -393,7 +393,7 @@ describe("Database", () => {
 
     it("is idempotent - calling init() twice does not fail", () => {
       expect(() => db.init()).not.toThrow();
-      expect(db.getSchemaVersion()).toBe(122);
+      expect(db.getSchemaVersion()).toBe(123);
     });
     it("does not overwrite existing config on re-init", () => {
       // Update the config
@@ -1463,7 +1463,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29 (includes v1→v2 through v26→v29)
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -1488,15 +1488,15 @@ describe("schema migrations", () => {
     const db = new Database(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     // Re-init should not fail
     db.init();
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     // Re-init should not fail
     db.init();
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     db.close();
   });
@@ -1531,7 +1531,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("priority");
@@ -1572,7 +1572,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1644,7 +1644,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     const colNames = cols.map((col) => col.name);
@@ -1923,7 +1923,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as Array<{ name: string }>;
     expect(cols.map((col) => col.name)).toContain("attachments");
@@ -1997,7 +1997,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'agentRatings'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "agentRatings" }]);
@@ -2021,7 +2021,7 @@ describe("schema migrations", () => {
 
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'mission_events'").all() as Array<{ name: string }>;
     expect(tables).toEqual([{ name: "mission_events" }]);
@@ -2125,7 +2125,7 @@ describe("schema migrations", () => {
     db.init();
 
     // Verify version bumped to 29
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
 
     // Verify new columns exist and existing data is intact
     const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -2308,6 +2308,48 @@ describe("schema migrations", () => {
     db.close();
   });
 
+  it("migration v123 adds nullable task commit association diff-stat columns", () => {
+    tmpDir = makeTmpDir();
+    const fusionDir = join(tmpDir, ".fusion");
+    const localDb = new Database(fusionDir);
+
+    localDb.exec(`
+      CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS task_commit_associations (
+        id TEXT PRIMARY KEY,
+        taskLineageId TEXT NOT NULL,
+        taskIdSnapshot TEXT NOT NULL,
+        commitSha TEXT NOT NULL,
+        commitSubject TEXT NOT NULL,
+        authoredAt TEXT NOT NULL,
+        matchedBy TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        note TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE(taskLineageId, commitSha, matchedBy)
+      );
+    `);
+    localDb.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '122')");
+    localDb.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    localDb.exec(`INSERT INTO task_commit_associations
+      (id, taskLineageId, taskIdSnapshot, commitSha, commitSubject, authoredAt, matchedBy, confidence, createdAt, updatedAt)
+      VALUES ('assoc-1', 'lin-1', 'FN-6704', 'abc123', 'subject', '2026-06-19T00:00:00.000Z', 'canonical-lineage-trailer', 'canonical', '2026-06-19T00:00:00.000Z', '2026-06-19T00:00:00.000Z')`);
+
+    localDb.init();
+
+    expect(localDb.getSchemaVersion()).toBe(123);
+    const columns = localDb.prepare("PRAGMA table_info(task_commit_associations)").all() as Array<{ name: string; notnull: number; dflt_value: string | null }>;
+    const additions = columns.find((column) => column.name === "additions");
+    const deletions = columns.find((column) => column.name === "deletions");
+    expect(additions).toMatchObject({ notnull: 0, dflt_value: null });
+    expect(deletions).toMatchObject({ notnull: 0, dflt_value: null });
+    const row = localDb.prepare("SELECT additions, deletions FROM task_commit_associations WHERE id = 'assoc-1'").get() as { additions: number | null; deletions: number | null };
+    expect(row).toEqual({ additions: null, deletions: null });
+
+    localDb.close();
+  });
+
   it("migration v74 adds tokenUsageCacheWriteTokens without data loss", () => {
     tmpDir = makeTmpDir();
     const fusionDir = join(tmpDir, ".fusion");
@@ -2344,7 +2386,7 @@ describe("schema migrations", () => {
 
     localDb.init();
 
-    expect(localDb.getSchemaVersion()).toBe(122);
+    expect(localDb.getSchemaVersion()).toBe(123);
     const columns = localDb.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("tokenUsageCacheWriteTokens");
 
@@ -2655,7 +2697,7 @@ describe("createDatabase factory", () => {
     const db = createDatabase(fusionDir);
     db.init();
 
-    expect(db.getSchemaVersion()).toBe(122);
+    expect(db.getSchemaVersion()).toBe(123);
     expect(db.getLastModified()).toBeGreaterThan(0);
 
     db.close();
@@ -2809,7 +2851,7 @@ describe("migration v77 task token budget columns", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(122);
+      expect(migrated.getSchemaVersion()).toBe(123);
       const rows = migrated.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
       const names = new Set(rows.map((row) => row.name));
       expect(names.has("tokenBudgetSoftAlertedAt")).toBe(true);
@@ -2840,7 +2882,7 @@ describe("migration v106 adds tasks.transitionPending (FN-1417)", () => {
     const fresh = new Database(fusion);
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(122);
+      expect(fresh.getSchemaVersion()).toBe(123);
       const names = new Set(
         (fresh.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((r) => r.name),
       );
@@ -2868,7 +2910,7 @@ describe("migration v106 adds tasks.transitionPending (FN-1417)", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(122);
+      expect(migrated.getSchemaVersion()).toBe(123);
       const names = new Set(
         (migrated.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map((r) => r.name),
       );
@@ -2894,7 +2936,7 @@ describe("migration v107 adds workflow_run_branches + index (FN-1417)", () => {
     const fresh = new Database(fusion);
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(122);
+      expect(fresh.getSchemaVersion()).toBe(123);
       const table = fresh
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'workflow_run_branches'")
         .get() as { name: string } | undefined;
@@ -2928,7 +2970,7 @@ describe("migration v107 adds workflow_run_branches + index (FN-1417)", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(122);
+      expect(migrated.getSchemaVersion()).toBe(123);
       const table = migrated
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'workflow_run_branches'")
         .get() as { name: string } | undefined;
@@ -2954,7 +2996,7 @@ describe("migration v120 adds deployments + incidents tables (U13)", () => {
     const fresh = new Database(fusion);
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(122);
+      expect(fresh.getSchemaVersion()).toBe(123);
       const tables = new Set(
         (
           fresh
@@ -3007,7 +3049,7 @@ describe("migration v120 adds deployments + incidents tables (U13)", () => {
       // creation while table + row assertions still pass. Assert the real index
       // names the v120 migration creates (idxDeployments*, idxIncidents*) so that
       // regression is caught.
-      expect(migrated.getSchemaVersion()).toBe(122);
+      expect(migrated.getSchemaVersion()).toBe(123);
       const tables = new Set(
         (
           migrated
@@ -3066,7 +3108,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
       migrated = new Database(fusion);
       migrated.init();
-      expect(migrated.getSchemaVersion()).toBe(122);
+      expect(migrated.getSchemaVersion()).toBe(123);
       const tables = migrated
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;
@@ -3093,7 +3135,7 @@ describe("migration v67 drops orphan project auth tables", () => {
 
     try {
       fresh.init();
-      expect(fresh.getSchemaVersion()).toBe(122);
+      expect(fresh.getSchemaVersion()).toBe(123);
       const tables = fresh
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'project_auth_%'")
         .all() as Array<{ name: string }>;

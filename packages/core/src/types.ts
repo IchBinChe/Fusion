@@ -4387,6 +4387,8 @@ export interface TaskCommitAssociation {
   matchedBy: TaskCommitAssociationMatchSource;
   confidence: TaskCommitAssociationConfidence;
   note?: string;
+  additions?: number;
+  deletions?: number;
   createdAt: string;
   updatedAt: string;
 }

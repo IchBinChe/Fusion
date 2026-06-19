@@ -19,6 +19,7 @@ import { ToolsArea } from "../ToolsArea";
 import { ProductivityArea } from "../ProductivityArea";
 import { GithubArea } from "../GithubArea";
 import { SignalsArea } from "../SignalsArea";
+import { TeamArea } from "../TeamArea";
 import { ActivityArea } from "../ActivityArea";
 import { EcosystemArea } from "../EcosystemArea";
 import { useAnalyticsArea } from "../useAnalyticsArea";
@@ -102,6 +103,50 @@ function githubFixture() {
     byRepo: [
       { repo: "acme/alpha", filed: 4, fixed: 1 },
       { repo: "acme/beta", filed: 1, fixed: 2 },
+    ],
+  };
+}
+
+function emptyTeamFixture() {
+  return {
+    from: null,
+    to: null,
+    totals: {
+      tokens: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, totalTokens: 0, nTasks: 0 },
+      cost: { usd: null, unavailable: false, stale: false },
+      filesChanged: 0,
+      tasksCompleted: 0,
+      tasksInProgress: 0,
+      tasksInReview: 0,
+    },
+    agents: [],
+  };
+}
+
+function populatedTeamFixture() {
+  return {
+    ...emptyTeamFixture(),
+    totals: {
+      tokens: { inputTokens: 900, outputTokens: 450, cachedTokens: 150, cacheWriteTokens: 0, totalTokens: 1500, nTasks: 2 },
+      cost: { usd: 4.25, unavailable: false, stale: false },
+      filesChanged: 7,
+      tasksCompleted: 3,
+      tasksInProgress: 1,
+      tasksInReview: 0,
+    },
+    agents: [
+      {
+        agentId: "agent-alpha",
+        agentName: "Alpha Agent",
+        role: "executor",
+        state: "running",
+        tokens: { inputTokens: 900, outputTokens: 450, cachedTokens: 150, cacheWriteTokens: 0, totalTokens: 1500, nTasks: 2 },
+        cost: { usd: 4.25, unavailable: false, stale: false },
+        filesChanged: 7,
+        tasksCompleted: 3,
+        tasksInProgress: 1,
+        tasksInReview: 0,
+      },
     ],
   };
 }
@@ -713,19 +758,114 @@ describe("ProductivityArea", () => {
   });
 });
 
+describe("TeamArea", () => {
+  it("renders the per-agent pie for populated team analytics", async () => {
+    apiMock.mockResolvedValue({
+      ...populatedTeamFixture(),
+      agents: [
+        ...populatedTeamFixture().agents,
+        {
+          ...populatedTeamFixture().agents[0],
+          agentId: "agent-beta",
+          agentName: "Beta Agent",
+          tokens: { ...populatedTeamFixture().agents[0].tokens, totalTokens: 500 },
+          tasksCompleted: 1,
+        },
+      ],
+    });
+    render(<TeamArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-team");
+    expect(screen.getByTestId("cc-team-pie")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Token share by agent" })).toBeTruthy();
+    expect(screen.getByTestId("cc-team-tokens-chart")).toBeTruthy();
+    expect(screen.getByTestId("cc-team-completed-chart")).toBeTruthy();
+    expect(screen.getByTestId("cc-team-pie").textContent).not.toContain("NaN");
+  });
+
+  it("keeps the team pie safe for single-item and non-finite data", async () => {
+    apiMock.mockResolvedValue({
+      ...populatedTeamFixture(),
+      agents: [{ ...populatedTeamFixture().agents[0], tokens: { ...populatedTeamFixture().agents[0].tokens, totalTokens: Number.NaN } }],
+    });
+    render(<TeamArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-team");
+    expect(screen.queryByTestId("cc-area-team-empty")).toBeNull();
+    expect(screen.queryByTestId("cc-team-pie")).toBeNull();
+    expect(screen.getByTestId("cc-area-team").textContent).not.toContain("NaN");
+  });
+
+  it("renders empty, loading, and error states without a team pie shell", async () => {
+    apiMock.mockResolvedValueOnce(emptyTeamFixture());
+    const empty = render(<TeamArea range={range7d} />);
+    await screen.findByTestId("cc-area-team-empty");
+    expect(screen.queryByTestId("cc-team-pie")).toBeNull();
+    empty.unmount();
+
+    apiMock.mockImplementationOnce(() => new Promise(() => undefined));
+    const pending = render(<TeamArea range={range7d} />);
+    expect(screen.getByTestId("cc-area-team-loading")).toBeTruthy();
+    expect(screen.queryByTestId("cc-team-pie")).toBeNull();
+    pending.unmount();
+
+    apiMock.mockRejectedValueOnce(new Error("team failed"));
+    render(<TeamArea range={range7d} />);
+    await screen.findByTestId("cc-area-team-error");
+    expect(screen.queryByTestId("cc-team-pie")).toBeNull();
+  });
+});
+
 describe("EcosystemArea", () => {
-  it("renders populated and empty model chart states without NaN or empty chart shells", async () => {
+  it("renders populated model pie and trend line without NaN", async () => {
     apiMock.mockResolvedValueOnce(tokenFixture());
-    const { unmount } = render(<EcosystemArea range={range7d} />);
+    render(<EcosystemArea range={range7d} />);
+
     await screen.findByTestId("cc-area-ecosystem");
     expect(screen.getByRole("list", { name: "Tasks per model" })).toBeTruthy();
+    expect(screen.getByTestId("cc-ecosystem-pie")).toBeTruthy();
+    expect(screen.getByTestId("cc-ecosystem-line")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Task share by model" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Ecosystem trend" })).toBeTruthy();
     expect(screen.getByTestId("cc-area-ecosystem").textContent).not.toContain("NaN");
-    unmount();
+  });
 
-    apiMock.mockResolvedValueOnce({ ...tokenFixture(), groups: [], totals: { ...tokenFixture().totals, totalTokens: 0, nTasks: 0 } });
-    render(<EcosystemArea range={range7d} />);
+  it("renders empty, loading, and error states without ecosystem chart shells", async () => {
+    apiMock.mockResolvedValueOnce({ ...tokenFixture(), groups: [], series: [], totals: { ...tokenFixture().totals, totalTokens: 0, nTasks: 0 } });
+    const empty = render(<EcosystemArea range={range7d} />);
     await screen.findByTestId("cc-area-ecosystem-empty");
     expect(screen.queryByRole("list", { name: "Tasks per model" })).toBeNull();
+    expect(screen.queryByTestId("cc-ecosystem-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-ecosystem-line")).toBeNull();
+    empty.unmount();
+
+    apiMock.mockImplementationOnce(() => new Promise(() => undefined));
+    const pending = render(<EcosystemArea range={range7d} />);
+    expect(screen.getByTestId("cc-area-ecosystem-loading")).toBeTruthy();
+    expect(screen.queryByTestId("cc-ecosystem-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-ecosystem-line")).toBeNull();
+    pending.unmount();
+
+    apiMock.mockRejectedValueOnce(new Error("ecosystem failed"));
+    render(<EcosystemArea range={range7d} />);
+    await screen.findByTestId("cc-area-ecosystem-error");
+    expect(screen.queryByTestId("cc-ecosystem-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-ecosystem-line")).toBeNull();
+  });
+
+  it("keeps ecosystem recharts safe for single-item and non-finite data", async () => {
+    apiMock.mockResolvedValue({
+      ...tokenFixture(),
+      groups: [{ ...tokenFixture().groups[0], nTasks: Number.NaN }],
+      series: [{ ...tokenFixture().series[0], totalTokens: Number.POSITIVE_INFINITY, nTasks: -1 }],
+    });
+    render(<EcosystemArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-ecosystem");
+    expect(screen.queryByTestId("cc-ecosystem-pie")).toBeNull();
+    expect(screen.getByTestId("cc-ecosystem-line")).toBeTruthy();
+    expect(screen.getByTestId("cc-area-ecosystem").textContent).not.toContain("NaN");
+    expect(screen.getByTestId("cc-area-ecosystem").textContent).not.toContain("Infinity");
   });
 });
 
@@ -738,6 +878,10 @@ describe("GithubArea", () => {
     expect(screen.getByTestId("cc-github-filed").textContent).toContain("5");
     expect(screen.getByTestId("cc-github-fixed").textContent).toContain("3");
     expect(screen.getByTestId("cc-github-net").textContent).toContain("2");
+    expect(screen.getByTestId("cc-github-pie")).toBeTruthy();
+    expect(screen.getByTestId("cc-github-line")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Filed vs fixed share" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Filed vs fixed line" })).toBeTruthy();
     expect(screen.getByTestId("cc-github-daily-trend")).toBeTruthy();
     expect(screen.getByRole("img", { name: "Filed" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "Fixed" })).toBeTruthy();
@@ -753,6 +897,8 @@ describe("GithubArea", () => {
     await screen.findByTestId("cc-area-github");
     expect(screen.getByTestId("cc-area-github").textContent).toContain("No GitHub issue activity");
     expect(screen.getByTestId("cc-github-backfill-button")).toBeTruthy();
+    expect(screen.queryByTestId("cc-github-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-github-line")).toBeNull();
     expect(screen.queryByTestId("cc-github-daily-trend")).toBeNull();
     expect(screen.queryByTestId("cc-github-by-repo")).toBeNull();
   });
@@ -761,12 +907,16 @@ describe("GithubArea", () => {
     apiMock.mockImplementationOnce(() => new Promise(() => undefined));
     const { unmount } = render(<GithubArea range={range7d} />);
     expect(screen.getByTestId("cc-area-github-loading")).toBeTruthy();
+    expect(screen.queryByTestId("cc-github-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-github-line")).toBeNull();
     unmount();
 
     apiMock.mockRejectedValueOnce(new Error("github failed"));
     render(<GithubArea range={range7d} />);
     await screen.findByTestId("cc-area-github-error");
     expect(screen.getByTestId("cc-area-github-error").textContent).toContain("github failed");
+    expect(screen.queryByTestId("cc-github-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-github-line")).toBeNull();
   });
 
   it("handles undefined chart arrays and zero values without NaN output", async () => {
@@ -774,9 +924,29 @@ describe("GithubArea", () => {
     render(<GithubArea range={range7d} />);
 
     await screen.findByTestId("cc-area-github");
+    expect(screen.getByTestId("cc-github-pie")).toBeTruthy();
+    expect(screen.queryByTestId("cc-github-line")).toBeNull();
     expect(screen.queryByTestId("cc-github-daily-trend")).toBeNull();
     expect(screen.queryByTestId("cc-github-by-repo")).toBeNull();
     expect(screen.getByTestId("cc-area-github").textContent).not.toContain("NaN");
+  });
+
+  it("keeps GitHub recharts safe for single-item and non-finite daily data", async () => {
+    apiMock.mockResolvedValue({
+      ...githubFixture(),
+      filed: 1,
+      fixed: 1,
+      net: 0,
+      daily: [{ date: "2026-06-08", filed: Number.NaN, fixed: Number.POSITIVE_INFINITY }],
+      byRepo: [{ repo: "acme/broken", filed: Number.NaN, fixed: -1 }],
+    });
+    render(<GithubArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-github");
+    expect(screen.getByTestId("cc-github-pie")).toBeTruthy();
+    expect(screen.getByTestId("cc-github-line")).toBeTruthy();
+    expect(screen.getByTestId("cc-area-github").textContent).not.toContain("NaN");
+    expect(screen.getByTestId("cc-area-github").textContent).not.toContain("Infinity");
   });
 
   it("rejects an inverted custom range client-side without fetching", async () => {
@@ -917,6 +1087,7 @@ describe("GithubArea", () => {
   });
 });
 
+// FN-6684 Mission Control decision: no extra pie/line test here because MissionControlPanel already renders the live SDLC Funnel for its only quantitative distribution; adding a pie would duplicate that affordance.
 describe("SignalsArea", () => {
   it("renders the empty state (not an error) when the signals endpoint is missing", async () => {
     apiMock.mockRejectedValue(new Error("API returned HTML instead of JSON (404)"));
@@ -924,9 +1095,10 @@ describe("SignalsArea", () => {
     await screen.findByTestId("cc-area-signals-empty");
     // Must not surface the error UI.
     expect(screen.queryByTestId("cc-area-signals-error")).toBeNull();
+    expect(screen.queryByTestId("cc-signals-pie")).toBeNull();
   });
 
-  it("renders signal metrics when data is present", async () => {
+  it("renders signal metrics and status pie when data is present", async () => {
     apiMock.mockResolvedValue({
       totalSignals: 8,
       open: 3,
@@ -939,5 +1111,37 @@ describe("SignalsArea", () => {
     await screen.findByTestId("cc-area-signals");
     expect(screen.getByTestId("cc-signals-total").textContent).toContain("8");
     expect(screen.getByTestId("cc-signals-mttr").textContent).toContain("42");
+    expect(screen.getByTestId("cc-signals-pie")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Signal status share" })).toBeTruthy();
+  });
+
+  it("keeps signals pie safe for single-item and non-finite source/severity data", async () => {
+    apiMock.mockResolvedValue({
+      totalSignals: 1,
+      open: 1,
+      resolved: 0,
+      mttr: { value: null, unavailable: true },
+      bySource: [{ source: "broken", count: Number.NaN }],
+      bySeverity: [{ severity: "broken", count: Number.POSITIVE_INFINITY }],
+    });
+    render(<SignalsArea range={range7d} />);
+    await screen.findByTestId("cc-area-signals");
+    expect(screen.getByTestId("cc-signals-pie")).toBeTruthy();
+    expect(screen.getByTestId("cc-area-signals").textContent).not.toContain("NaN");
+    expect(screen.getByTestId("cc-area-signals").textContent).not.toContain("Infinity");
+  });
+
+  it("renders settled zero signals without a pie shell", async () => {
+    apiMock.mockResolvedValue({
+      totalSignals: 0,
+      open: 0,
+      resolved: 0,
+      mttr: { value: null, unavailable: true },
+      bySource: [],
+      bySeverity: [],
+    });
+    render(<SignalsArea range={range7d} />);
+    await screen.findByTestId("cc-area-signals-empty");
+    expect(screen.queryByTestId("cc-signals-pie")).toBeNull();
   });
 });

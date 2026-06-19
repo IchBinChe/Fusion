@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../../api/legacy";
 import type { DateRange } from "../DateRangePicker";
 import { Bar } from "../charts/Bar";
+import { PieChart } from "../charts/recharts";
 import { AreaShell } from "./AreaShell";
 import { rangeQuery, formatCount, isInvalidRange } from "./areaShared";
 
@@ -73,8 +74,20 @@ export function SignalsArea({ range }: { range: DateRange }) {
       (data?.bySeverity ?? []).map((s) => ({ label: s.severity, value: s.count, valueLabel: formatCount(s.count) })),
     [data?.bySeverity],
   );
+  /*
+  FNXC:CommandCenterCharts 2026-06-19-00:00:
+  Signals has no per-day series yet, so the chart affordance is an additive status pie from the already-fetched open/resolved counts; do not fabricate a line trend until the endpoint returns time buckets.
+  */
+  const statusPieData = useMemo(
+    () => [
+      { label: t("commandCenter.signals.open", "Open"), value: data?.open ?? 0 },
+      { label: t("commandCenter.signals.resolved", "Resolved"), value: data?.resolved ?? 0 },
+    ],
+    [data?.open, data?.resolved, t],
+  );
 
   const isEmpty = !data || data.totalSignals === 0;
+  const hasStatusPie = !isEmpty && statusPieData.some((datum) => datum.value > 0);
 
   return (
     <AreaShell
@@ -119,6 +132,13 @@ export function SignalsArea({ range }: { range: DateRange }) {
           </div>
         </div>
       </div>
+
+      {hasStatusPie ? (
+        <div className="cc-area-section" data-testid="cc-signals-pie">
+          <h3 className="cc-area-section-title">{t("commandCenter.signals.statusShare", "Signal status share")}</h3>
+          <PieChart data={statusPieData} ariaLabel={t("commandCenter.signals.statusShare", "Signal status share")} />
+        </div>
+      ) : null}
 
       <div className="cc-area-section">
         <h3 className="cc-area-section-title">{t("commandCenter.signals.bySource", "By source")}</h3>

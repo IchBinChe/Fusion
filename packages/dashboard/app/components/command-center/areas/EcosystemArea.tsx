@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TokenAnalytics } from "@fusion/core";
 import type { DateRange } from "../DateRangePicker";
 import { Bar } from "../charts/Bar";
+import { LineChart, PieChart } from "../charts/recharts";
 import { AreaShell } from "./AreaShell";
 import { useAnalyticsArea } from "./useAnalyticsArea";
 import { formatCount } from "./areaShared";
@@ -19,7 +20,7 @@ import { formatCount } from "./areaShared";
 export function EcosystemArea({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");
   const { data, isLoading, error } = useAnalyticsArea<TokenAnalytics>(
-    "/command-center/tokens?groupBy=model",
+    "/command-center/tokens?groupBy=model&granularity=day",
     range,
   );
 
@@ -42,6 +43,29 @@ export function EcosystemArea({ range }: { range: DateRange }) {
         })),
     [models, t],
   );
+  /*
+  FNXC:CommandCenterCharts 2026-06-19-00:00:
+  Ecosystem charts must reuse the existing token analytics endpoint: per-model task counts become the pie, and optional token buckets become a trend line without fabricating series when the endpoint returns none.
+  */
+  const perModelPieData = useMemo(
+    () => perModelBars.map((datum) => ({ label: datum.label, value: datum.value })),
+    [perModelBars],
+  );
+  const tokenTrendSeries = useMemo(
+    () => [
+      {
+        label: t("commandCenter.ecosystem.tokenTrendSeries", "Tokens"),
+        values: (data?.series ?? []).map((point) => point.totalTokens),
+      },
+      {
+        label: t("commandCenter.ecosystem.taskTrendSeries", "Tasks"),
+        values: (data?.series ?? []).map((point) => point.nTasks),
+      },
+    ],
+    [data?.series, t],
+  );
+  const hasModelPie = perModelPieData.some((datum) => datum.value > 0);
+  const hasTokenTrend = (data?.series ?? []).length > 0;
 
   const isEmpty = !data || uniqueModels === 0;
 
@@ -74,6 +98,20 @@ export function EcosystemArea({ range }: { range: DateRange }) {
           </div>
         </div>
       </div>
+
+      {hasModelPie ? (
+        <div className="cc-area-section" data-testid="cc-ecosystem-pie">
+          <h3 className="cc-area-section-title">{t("commandCenter.ecosystem.modelShareTitle", "Task share by model")}</h3>
+          <PieChart data={perModelPieData} ariaLabel={t("commandCenter.ecosystem.modelShareTitle", "Task share by model")} />
+        </div>
+      ) : null}
+
+      {hasTokenTrend ? (
+        <div className="cc-area-section" data-testid="cc-ecosystem-line">
+          <h3 className="cc-area-section-title">{t("commandCenter.ecosystem.trendTitle", "Ecosystem trend")}</h3>
+          <LineChart series={tokenTrendSeries} ariaLabel={t("commandCenter.ecosystem.trendTitle", "Ecosystem trend")} />
+        </div>
+      ) : null}
 
       <div className="cc-area-section">
         <h3 className="cc-area-section-title">{t("commandCenter.ecosystem.perModelTitle", "Tasks per model")}</h3>

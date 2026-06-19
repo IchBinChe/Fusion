@@ -8,6 +8,7 @@ import type { CostResult, TeamAgentSummary, TeamAnalytics } from "@fusion/core";
 import type { DateRange } from "../DateRangePicker";
 import { Bar, type BarDatum } from "../charts/Bar";
 import { Sparkline } from "../charts/Sparkline";
+import { PieChart } from "../charts/recharts";
 import { AreaShell } from "./AreaShell";
 import { useAnalyticsArea } from "./useAnalyticsArea";
 import { formatCost, formatCount } from "./areaShared";
@@ -120,6 +121,14 @@ export function TeamArea({ range }: { range: DateRange }) {
     () => buildBarData(agents, (agent) => agent.tokens.totalTokens, unknownAgent),
     [agents, unknownAgent],
   );
+  /*
+  FNXC:CommandCenterCharts 2026-06-19-00:00:
+  The Team surface needs a real per-agent pie chart without a new endpoint; map the existing per-agent token totals additively so loading, empty, bar, sparkline, and table affordances remain unchanged.
+  */
+  const tokenPieData = useMemo(
+    () => tokenBarData.map((datum) => ({ label: datum.label, value: datum.value })),
+    [tokenBarData],
+  );
   const completedBarData = useMemo(
     () => buildBarData(agents, (agent) => agent.tasksCompleted, unknownAgent),
     [agents, unknownAgent],
@@ -178,6 +187,12 @@ export function TeamArea({ range }: { range: DateRange }) {
       </div>
 
       <div className="cc-area-section cc-team-chart-grid">
+        {hasTokenChart ? (
+          <div className="cc-team-chart-panel" data-testid="cc-team-pie">
+            <h3 className="cc-area-section-title">{t("commandCenter.team.tokenShareByAgent", "Token share by agent")}</h3>
+            <PieChart data={tokenPieData} ariaLabel={t("commandCenter.team.tokenShareByAgent", "Token share by agent")} />
+          </div>
+        ) : null}
         <div className="cc-team-chart-panel" data-testid="cc-team-tokens-chart">
           <h3 className="cc-area-section-title">{t("commandCenter.team.tokensByAgent", "Tokens by agent")}</h3>
           {hasTokenChart ? (

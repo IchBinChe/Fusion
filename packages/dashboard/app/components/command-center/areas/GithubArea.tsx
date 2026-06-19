@@ -11,6 +11,7 @@ import type { GithubSourceIssueClosedAtBackfillResult } from "../../../api/legac
 import type { DateRange } from "../DateRangePicker";
 import { Bar } from "../charts/Bar";
 import { Sparkline } from "../charts/Sparkline";
+import { LineChart, PieChart } from "../charts/recharts";
 import { AreaShell } from "./AreaShell";
 import { useAnalyticsArea } from "./useAnalyticsArea";
 import { formatCount } from "./areaShared";
@@ -97,12 +98,31 @@ export function GithubArea({ range }: { range: DateRange }) {
       })),
     [byRepo, t],
   );
+  /*
+  FNXC:CommandCenterCharts 2026-06-19-00:00:
+  GitHub charts must remain local-task-store only: filed/fixed totals become the pie, and the already-fetched daily filed/fixed buckets become a real trend line while existing sparklines and repository bars stay additive.
+  */
+  const issueFlowPieData = useMemo(
+    () => [
+      { label: t("commandCenter.github.filed", "Filed by Fusion"), value: data?.filed ?? 0 },
+      { label: t("commandCenter.github.fixed", "Fixed by Fusion"), value: data?.fixed ?? 0 },
+    ],
+    [data?.filed, data?.fixed, t],
+  );
+  const issueFlowLineSeries = useMemo(
+    () => [
+      { label: t("commandCenter.github.filedTrend", "Filed"), values: filedValues },
+      { label: t("commandCenter.github.fixedTrend", "Fixed"), values: fixedValues },
+    ],
+    [filedValues, fixedValues, t],
+  );
 
   const filed = data?.filed ?? 0;
   const fixed = data?.fixed ?? 0;
   const net = data?.net ?? filed - fixed;
   const isEmpty = !data || (filed === 0 && fixed === 0);
   const hasDailyTrend = daily.length > 0;
+  const hasIssueFlowPie = filed + fixed > 0;
   const hasRepoBreakdown = repoBars.length > 0;
   const backfillStatusClass = backfillError || (backfillResult?.errors ?? 0) > 0
     ? "cc-github-backfill-status--error"
@@ -188,6 +208,20 @@ export function GithubArea({ range }: { range: DateRange }) {
           </div>
         </div>
       </div>
+
+      {hasIssueFlowPie ? (
+        <div className="cc-area-section" data-testid="cc-github-pie">
+          <h3 className="cc-area-section-title">{t("commandCenter.github.issueFlowShare", "Filed vs fixed share")}</h3>
+          <PieChart data={issueFlowPieData} ariaLabel={t("commandCenter.github.issueFlowShare", "Filed vs fixed share")} />
+        </div>
+      ) : null}
+
+      {hasDailyTrend ? (
+        <div className="cc-area-section" data-testid="cc-github-line">
+          <h3 className="cc-area-section-title">{t("commandCenter.github.dailyLine", "Filed vs fixed line")}</h3>
+          <LineChart series={issueFlowLineSeries} ariaLabel={t("commandCenter.github.dailyLine", "Filed vs fixed line")} />
+        </div>
+      ) : null}
 
       {hasDailyTrend ? (
         <div className="cc-area-section" data-testid="cc-github-daily-trend">

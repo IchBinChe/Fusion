@@ -112,6 +112,10 @@ describe("SystemStatsArea", () => {
     expect(screen.getByTestId("cc-system-heap-gauge")).toHaveTextContent("90%");
     expect(screen.getByTestId("cc-system-cpu-trend")).toBeInTheDocument();
     expect(screen.getByTestId("cc-system-memory-trend")).toBeInTheDocument();
+    expect(screen.getByTestId("cc-system-line")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Resource trend" })).toBeInTheDocument();
+    expect(screen.getByTestId("cc-system-pie")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Task distribution" })).toBeInTheDocument();
     expect(screen.getByTestId("cc-system-tasks-bar")).toHaveTextContent("in-progress");
     expect(screen.getByTestId("cc-system-agents-bar")).toHaveTextContent("active");
     expect(screen.getByTestId("cc-system-details-grid")).toHaveTextContent("RSS");
@@ -127,6 +131,7 @@ describe("SystemStatsArea", () => {
     await screen.findByTestId("cc-area-system");
     expect(screen.getByTestId("cc-system-cpu-gauge")).toHaveTextContent("—");
     expect(screen.getByTestId("cc-system-cpu-gauge")).toHaveTextContent("Sampling");
+    expect(screen.getByTestId("cc-system-line")).toBeInTheDocument();
     expect(screen.getByTestId("cc-area-system")).not.toHaveTextContent("NaN");
   });
 
@@ -149,6 +154,8 @@ describe("SystemStatsArea", () => {
     expect(within(agentBars).getByText("idle")).toBeInTheDocument();
     expect(within(taskBars).getAllByText("0").length).toBeGreaterThan(0);
     expect(within(agentBars).getAllByText("0").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("cc-system-pie")).toBeNull();
+    expect(screen.getByTestId("cc-system-line")).toBeInTheDocument();
     expect(screen.getByTestId("cc-area-system")).not.toHaveTextContent("NaN");
   });
 
@@ -177,6 +184,8 @@ describe("SystemStatsArea", () => {
     render(<SystemStatsArea />);
 
     expect(await screen.findByTestId("cc-area-system-error")).toHaveTextContent("initial failure");
+    expect(screen.queryByTestId("cc-system-pie")).toBeNull();
+    expect(screen.queryByTestId("cc-system-line")).toBeNull();
   });
 
   it("confirms before killing Vitest and persists settings changes", async () => {

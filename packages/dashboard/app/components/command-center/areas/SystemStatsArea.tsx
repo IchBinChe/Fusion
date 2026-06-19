@@ -12,6 +12,7 @@ import {
 import { Bar, type BarDatum } from "../charts/Bar";
 import { RadialGauge } from "../charts/RadialGauge";
 import { Sparkline } from "../charts/Sparkline";
+import { LineChart, PieChart } from "../charts/recharts";
 import { AreaShell } from "./AreaShell";
 import { formatCount } from "./areaShared";
 import "./SystemStatsArea.css";
@@ -234,6 +235,27 @@ export function SystemStatsArea({ projectId }: { projectId?: string }) {
     const labels = Object.keys(byColumn).length > 0 ? Object.keys(byColumn) : DEFAULT_TASK_COLUMNS;
     return labels.map((label) => ({ label, value: byColumn[label] ?? 0, valueLabel: formatCount(byColumn[label] ?? 0) }));
   }, [taskStats?.byColumn]);
+  /*
+  FNXC:CommandCenterCharts 2026-06-19-00:00:
+  System charts reuse the existing `/api/system-stats` payload: task columns become an additive workload pie, and the bounded resource sample buffer becomes a CPU/memory/heap line without introducing another polling endpoint or scroll owner.
+  */
+  const taskPieData = useMemo(
+    () => taskBarData.map((datum) => ({ label: datum.label, value: datum.value })),
+    [taskBarData],
+  );
+  const resourceLineSeries = useMemo(
+    () => [
+      { label: t("commandCenter.system.cpuSeries", "CPU"), values: samples.map((sample) => clampPercent(sample.cpuPercent)) },
+      {
+        label: t("commandCenter.system.memorySeries", "Memory"),
+        values: samples.map((sample) => clampPercent(sample.usedSystemMemPercent)),
+      },
+      { label: t("commandCenter.system.heapSeries", "Heap"), values: samples.map((sample) => clampPercent(sample.heapUsedPercent)) },
+    ],
+    [samples, t],
+  );
+  const hasTaskPie = taskPieData.some((datum) => datum.value > 0);
+  const hasResourceTrend = samples.length > 0;
 
   const agentBarData = useMemo<BarDatum[]>(() => {
     const agents = taskStats?.agents;
@@ -312,6 +334,12 @@ export function SystemStatsArea({ projectId }: { projectId?: string }) {
 
       <div className="cc-area-section">
         <h3 className="cc-area-section-title">{t("commandCenter.system.trendsTitle", "Live trends")}</h3>
+        {hasResourceTrend ? (
+          <div className="card cc-stat-card" data-testid="cc-system-line">
+            <div className="cc-stat-label">{t("commandCenter.system.resourceTrend", "Resource trend")}</div>
+            <LineChart series={resourceLineSeries} ariaLabel={t("commandCenter.system.resourceTrend", "Resource trend")} />
+          </div>
+        ) : null}
         <div className="cc-stat-grid">
           <div className="card cc-stat-card" data-testid="cc-system-cpu-trend">
             <div className="cc-stat-label">{t("commandCenter.system.cpuTrend", "CPU over time")}</div>
@@ -331,6 +359,12 @@ export function SystemStatsArea({ projectId }: { projectId?: string }) {
       <div className="cc-area-section">
         <h3 className="cc-area-section-title">{t("commandCenter.system.workloadTitle", "Workload")}</h3>
         <div className="cc-system-chart-grid">
+          {hasTaskPie ? (
+            <div className="card cc-stat-card" data-testid="cc-system-pie">
+              <div className="cc-stat-label">{t("commandCenter.system.taskShare", "Task distribution")}</div>
+              <PieChart data={taskPieData} ariaLabel={t("commandCenter.system.taskShare", "Task distribution")} />
+            </div>
+          ) : null}
           <div className="card cc-stat-card" data-testid="cc-system-tasks-bar">
             <div className="cc-stat-label">{t("systemStats.sectionTasks", "Tasks")}</div>
             <Bar data={taskBarData} ariaLabel={t("systemStats.sectionTasksAriaLabel", "Task stats")} />

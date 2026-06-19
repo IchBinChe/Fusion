@@ -385,7 +385,21 @@ describe("CommandCenter mobile scroll regression (FN-6595)", () => {
 
     for (const tab of ["tokens", "tools", "activity", "productivity", "team", "ecosystem", "github", "signals", "system"]) {
       const panel = await openChartTab(tab);
-      if (tab === "system") await screen.findByTestId("cc-area-system");
+      if (tab === "team") expect(screen.getByTestId("cc-team-pie")).toBeTruthy();
+      if (tab === "ecosystem") {
+        expect(screen.getByTestId("cc-ecosystem-pie")).toBeTruthy();
+        expect(screen.getByTestId("cc-ecosystem-line")).toBeTruthy();
+      }
+      if (tab === "github") {
+        expect(screen.getByTestId("cc-github-pie")).toBeTruthy();
+        expect(screen.getByTestId("cc-github-line")).toBeTruthy();
+      }
+      if (tab === "signals") expect(screen.getByTestId("cc-signals-pie")).toBeTruthy();
+      if (tab === "system") {
+        await screen.findByTestId("cc-area-system");
+        expect(screen.getByTestId("cc-system-pie")).toBeTruthy();
+        expect(screen.getByTestId("cc-system-line")).toBeTruthy();
+      }
       assertScrollOwnerContract(panel);
       assertNoChartScrollSteal(panel);
       expect(panel.textContent).not.toContain("NaN");

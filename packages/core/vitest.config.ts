@@ -42,8 +42,10 @@ const quarantinedCoreTests = [
 
   FNXC:CoreTests 2026-06-20-05:19:
   FN-6790 found no task-documents quarantine half-state on HEAD and rescued the ENOENT-rename class by quiescing deferred task-created write/hook work on TaskStore.close(). Keep task-documents loaded; do not add a ledger/config exclude unless a new loaded run fails after this lifecycle seam is ruled out.
+
+  FNXC:CoreTests 2026-06-20-09:48:
+  FN-6795 reloaded the remaining 2026-06-19 store-concurrent-writes quarantine under the full @fusion/core package lane and no longer reproduced SQLite BEGIN IMMEDIATE exhaustion. Rescue the file by keeping this exclude list empty in lockstep with scripts/lib/test-quarantine.json; future lock flakes need a fresh root-cause seam, not timeout/retry/worker appeasement.
   */
-  "src/__tests__/store-concurrent-writes.test.ts",
 ];
 
 export default defineConfig({

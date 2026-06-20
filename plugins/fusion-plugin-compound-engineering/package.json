@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "tsc && node scripts/copy-css.mjs",
+    "pretest": "node ../../scripts/ensure-test-artifacts.mjs",
     "test": "vitest run --silent=passed-only --reporter=dot"
   },
   "dependencies": {

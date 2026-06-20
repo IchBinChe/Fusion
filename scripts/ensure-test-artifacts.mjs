@@ -63,6 +63,18 @@ export const REQUIRED_BUILD_PACKAGES = [
     requiredArtifacts: ["plugins/fusion-plugin-paperclip-runtime/dist/index.js"],
     staleAgainstGlobs: [{ sourcePath: "plugins/fusion-plugin-paperclip-runtime/src" }],
   },
+  {
+    // dist-freshness.test.ts reads the compiled settings + orchestrator to guard
+    // against stale dist (FN-6596). dist/ is build output, so a fresh CI checkout
+    // must build the plugin before its tests run or the guard throws "dist/ is
+    // missing". Build these artifacts up front like the other bundled plugins.
+    name: "@fusion-plugin-examples/compound-engineering",
+    requiredArtifacts: [
+      "plugins/fusion-plugin-compound-engineering/dist/settings.js",
+      "plugins/fusion-plugin-compound-engineering/dist/session/orchestrator.js",
+    ],
+    staleAgainstGlobs: [{ sourcePath: "plugins/fusion-plugin-compound-engineering/src" }],
+  },
 ];
 
 // ---------------------------------------------------------------------------

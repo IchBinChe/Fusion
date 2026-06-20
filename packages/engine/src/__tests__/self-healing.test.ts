@@ -9414,4 +9414,163 @@ describe("FN-5335 triple-proof no-action unit coverage", () => {
     });
   });
 
+  describe("reconcileInReviewUnmetDependencies — FN-6793", () => {
+    const makeTask = (overrides: Partial<Task>): Task => ({
+      id: "FN-T",
+      description: "test",
+      column: "todo",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+      prompt: "",
+      ...overrides,
+    } as Task);
+
+    const setup = (initialTasks: Task[], settings: Partial<Settings> = {}) => {
+      const tasks = new Map(initialTasks.map((task) => [task.id, task]));
+      const store = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, autoMerge: true, ...settings } as any),
+        listTasks: vi.fn(async () => [...tasks.values()]),
+        moveTask: vi.fn(async (taskId: string, column: Task["column"]) => {
+          const current = tasks.get(taskId);
+          if (!current) throw new Error(`missing ${taskId}`);
+          const updated = { ...current, column } as Task;
+          tasks.set(taskId, updated);
+          return updated;
+        }),
+        updateTask: vi.fn(async (taskId: string, updates: Partial<Task>) => {
+          const current = tasks.get(taskId);
+          if (!current) throw new Error(`missing ${taskId}`);
+          const updated = { ...current, ...updates } as Task;
+          tasks.set(taskId, updated);
+          return updated;
+        }),
+      });
+      const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      return { store, manager, tasks };
+    };
+
+    it("rebounds in-review tasks with live unmet dependencies and emits run-audit", async () => {
+      const { store, manager, tasks } = setup([
+        makeTask({ id: "FN-6778", column: "in-review", dependencies: ["FN-6777"], worktree: "/tmp/wt", branch: "fusion/fn-6778" }),
+        makeTask({ id: "FN-6777", column: "todo", status: "queued" }),
+        makeTask({ id: "FN-6791", column: "in-review", dependencies: ["FN-6770", "FN-6771", "FN-6780", "FN-DONE"] }),
+        makeTask({ id: "FN-6770", column: "in-progress" }),
+        makeTask({ id: "FN-6771", column: "todo" }),
+        makeTask({ id: "FN-6780", column: "todo", status: "queued" }),
+        makeTask({ id: "FN-DONE", column: "done" }),
+      ]);
+
+      await expect(manager.reconcileInReviewUnmetDependencies()).resolves.toBe(2);
+
+      expect(store.moveTask).toHaveBeenCalledWith("FN-6778", "todo", expect.objectContaining({
+        preserveProgress: true,
+        preserveWorktree: true,
+        preserveResumeState: true,
+        moveSource: "engine",
+        recoveryRehome: true,
+      }));
+      expect(store.updateTask).toHaveBeenCalledWith("FN-6778", { status: "queued", blockedBy: "FN-6777" });
+      expect(store.updateTask).toHaveBeenCalledWith("FN-6791", { status: "queued", blockedBy: "FN-6770" });
+      expect(tasks.get("FN-6778")?.column).toBe("todo");
+      expect(tasks.get("FN-6778")?.blockedBy).toBe("FN-6777");
+      expect(tasks.get("FN-6791")?.blockedBy).toBe("FN-6770");
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-in-review-unmet-dependencies",
+        target: "FN-6778",
+        metadata: expect.objectContaining({ unmetDeps: ["FN-6777"], blockedBy: "FN-6777" }),
+      }));
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-in-review-unmet-dependencies",
+        target: "FN-6791",
+        metadata: expect.objectContaining({ unmetDeps: ["FN-6770", "FN-6771", "FN-6780"], blockedBy: "FN-6770" }),
+      }));
+      manager.stop();
+    });
+
+    it("leaves satisfied, archived, and missing dependencies untouched", async () => {
+      const { store, manager } = setup([
+        makeTask({ id: "FN-OK", column: "in-review", dependencies: ["FN-DONE", "FN-REVIEW", "FN-ARCHIVED", "FN-MISSING"] }),
+        makeTask({ id: "FN-DONE", column: "done" }),
+        makeTask({ id: "FN-REVIEW", column: "in-review" }),
+        makeTask({ id: "FN-ARCHIVED", column: "archived" }),
+      ]);
+
+      await expect(manager.reconcileInReviewUnmetDependencies()).resolves.toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-OK", expect.objectContaining({ status: "queued" }));
+      manager.stop();
+    });
+
+    it.each([{ userPaused: true }, { paused: true }])("does not move paused in-review tasks: %o", async (pauseState) => {
+      const { store, manager } = setup([
+        makeTask({ id: "FN-P", column: "in-review", dependencies: ["FN-D"], ...pauseState }),
+        makeTask({ id: "FN-D", column: "todo" }),
+      ]);
+
+      await expect(manager.reconcileInReviewUnmetDependencies()).resolves.toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalled();
+      manager.stop();
+    });
+
+    it("honors autoMerge false as terminal-until-merged", async () => {
+      const { store, manager } = setup([
+        makeTask({ id: "FN-AUTO", column: "in-review", dependencies: ["FN-D"] }),
+        makeTask({ id: "FN-D", column: "todo" }),
+      ], { autoMerge: false });
+
+      await expect(manager.reconcileInReviewUnmetDependencies()).resolves.toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalled();
+      manager.stop();
+    });
+
+    it.each([{ globalPause: true }, { enginePaused: true }])("short-circuits while paused: %o", async (pausedSettings) => {
+      const { store, manager } = setup([
+        makeTask({ id: "FN-PAUSED-ENGINE", column: "in-review", dependencies: ["FN-D"] }),
+        makeTask({ id: "FN-D", column: "todo" }),
+      ], pausedSettings);
+
+      await expect(manager.reconcileInReviewUnmetDependencies()).resolves.toBe(0);
+      expect(store.listTasks).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+      manager.stop();
+    });
+
+    it("emits no-action audit when a live execution surface still owns the task", async () => {
+      const { store, manager } = setup([
+        makeTask({ id: "FN-ACTIVE", column: "in-review", dependencies: ["FN-D"] }),
+        makeTask({ id: "FN-D", column: "todo" }),
+      ]);
+      const isTaskActive = vi.fn((taskId: string) => taskId === "FN-ACTIVE");
+      manager.stop();
+      const guardedManager = new SelfHealingManager(store, { rootDir: "/tmp/test-project", isTaskActive });
+
+      await expect(guardedManager.reconcileInReviewUnmetDependencies()).resolves.toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-in-review-unmet-dependencies-no-action",
+        target: "FN-ACTIVE",
+      }));
+      guardedManager.stop();
+    });
+
+    it("emits no-action audit when a task is checked out", async () => {
+      const { store, manager } = setup([
+        makeTask({ id: "FN-CHECKED", column: "in-review", dependencies: ["FN-D"], checkedOutBy: "agent-1" }),
+        makeTask({ id: "FN-D", column: "todo" }),
+      ]);
+
+      await expect(manager.reconcileInReviewUnmetDependencies()).resolves.toBe(0);
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-in-review-unmet-dependencies-no-action",
+        target: "FN-CHECKED",
+      }));
+      manager.stop();
+    });
+  });
+
 });

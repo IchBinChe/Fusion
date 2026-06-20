@@ -9,6 +9,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind } from "@fusion/core";
+import { getUnmetSchedulingDependencies } from "./scheduler.js";
 import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
@@ -6886,6 +6887,50 @@ export class TaskExecutor {
     return { ok: true };
   }
 
+  private async blockOuterDispatchWhenDependenciesUnmet(task: Task): Promise<boolean> {
+    if (!task.dependencies || task.dependencies.length === 0) return false;
+
+    const settings = await this.store.getSettings();
+    const tasks = await this.store.listTasks({ includeArchived: false, slim: true });
+    const liveTask = tasks.find((candidate) => candidate.id === task.id) ?? task;
+    const markerAcceptedByTaskId = new Map<string, boolean>();
+    if (settings.mergeRequestContractShadowEnabled === true) {
+      for (const depId of liveTask.dependencies) {
+        markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+      }
+    }
+    const unmetDeps = getUnmetSchedulingDependencies(
+      liveTask,
+      tasks,
+      settings.mergeRequestContractShadowEnabled === true ? { markerAcceptedByTaskId } : undefined,
+    );
+    if (unmetDeps.length === 0) return false;
+
+    /*
+    FNXC:DependencyGating 2026-06-20-07:30:
+    Workflow-graph and workflow-authoritative executor dispatches can be invoked outside the classic scheduler loop, so they must re-apply the shared scheduling dependency gate before graph routing, column-agent seams, or review handoff can run.
+    Requeue with blockedBy instead of executing so missing or soft-deleted dependency residue keeps the scheduler helper's non-blocking semantics while live todo/queued/in-progress/triage dependencies block every dispatch surface.
+    */
+    if (liveTask.column !== "todo") {
+      await this.store.moveTask(liveTask.id, "todo", {
+        preserveProgress: true,
+        preserveWorktree: true,
+        preserveResumeState: true,
+        moveSource: "engine",
+        recoveryRehome: true,
+      });
+    }
+    await this.store.updateTask(liveTask.id, { status: "queued", blockedBy: unmetDeps[0] }, this.getRunContextFor(liveTask.id));
+    await this.store.logEntry(
+      liveTask.id,
+      `queued — unmet dependencies: ${unmetDeps.join(", ")}`,
+      "Executor pre-dispatch dependency gate blocked workflow/authoritative execution.",
+      this.getRunContextFor(liveTask.id),
+    );
+    executorLog.log(`${liveTask.id}: executor dispatch blocked by unmet dependencies: ${unmetDeps.join(", ")}`);
+    return true;
+  }
+
   async execute(task: Task): Promise<void> {
     this.completionFinalizedTaskIds.delete(task.id);
     // Workflow graph interpreter routing (cutover M-C): graph-selected tasks
@@ -6899,6 +6944,7 @@ export class TaskExecutor {
         executorLog.log(`execute() called for ${task.id} while graph routing is active — skipping duplicate`);
         return;
       }
+      if (await this.blockOuterDispatchWhenDependenciesUnmet(task)) return;
       const graphOwned = await this.maybeExecuteWorkflowGraph(task);
       if (graphOwned) return;
       const authoritativeOwned = await this.options.workflowAuthoritativeDispatch?.(task);

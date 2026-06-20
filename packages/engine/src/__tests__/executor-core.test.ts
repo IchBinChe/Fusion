@@ -151,6 +151,74 @@ describe("buildExecutionPrompt", () => {
   });
 });
 
+describe("TaskExecutor dependency dispatch gate", () => {
+  beforeEach(() => {
+    resetExecutorMocks();
+  });
+
+  const task = (overrides: Partial<Task> = {}): Task => ({
+    id: "FN-DP",
+    title: "Dependent task",
+    description: "Dependent task",
+    column: "in-progress",
+    dependencies: ["FN-DEP"],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    prompt: "# Test",
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+    ...overrides,
+  } as Task);
+
+  it("requeues workflow-authoritative dispatch when a live dependency is unmet", async () => {
+    const dependent = task();
+    const dependency = task({ id: "FN-DEP", column: "todo", dependencies: [] });
+    const store = createMockStore();
+    store.listTasks.mockResolvedValue([dependent, dependency]);
+    store.getTask.mockResolvedValue(dependent);
+    const workflowAuthoritativeDispatch = vi.fn().mockResolvedValue(true);
+    const executor = new TaskExecutor(store, "/tmp/test", { workflowAuthoritativeDispatch });
+    const graphDispatch = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await executor.execute(dependent);
+
+    expect(graphDispatch).not.toHaveBeenCalled();
+    expect(workflowAuthoritativeDispatch).not.toHaveBeenCalled();
+    expect(store.moveTask).toHaveBeenCalledWith("FN-DP", "todo", expect.objectContaining({
+      preserveProgress: true,
+      preserveWorktree: true,
+      preserveResumeState: true,
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-DP", { status: "queued", blockedBy: "FN-DEP" }, undefined);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-DP",
+      "queued — unmet dependencies: FN-DEP",
+      "Executor pre-dispatch dependency gate blocked workflow/authoritative execution.",
+      undefined,
+    );
+  });
+
+  it("allows workflow-authoritative dispatch when dependencies are satisfied or absent", async () => {
+    const dependent = task({ dependencies: ["FN-DONE", "FN-REVIEW", "FN-ARCHIVED", "FN-MISSING"] });
+    const store = createMockStore();
+    store.listTasks.mockResolvedValue([
+      dependent,
+      task({ id: "FN-DONE", column: "done", dependencies: [] }),
+      task({ id: "FN-REVIEW", column: "in-review", dependencies: [] }),
+      task({ id: "FN-ARCHIVED", column: "archived", dependencies: [] }),
+    ]);
+    store.getTask.mockResolvedValue(dependent);
+    const workflowAuthoritativeDispatch = vi.fn().mockResolvedValue(true);
+    const executor = new TaskExecutor(store, "/tmp/test", { workflowAuthoritativeDispatch });
+
+    await executor.execute(dependent);
+
+    expect(workflowAuthoritativeDispatch).toHaveBeenCalledWith(dependent);
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-DP", expect.objectContaining({ status: "queued" }), expect.anything());
+  });
+});
+
 describe("TaskExecutor review addressing transitions", () => {
   beforeEach(() => {
     resetExecutorMocks();

@@ -409,6 +409,42 @@ describe("getUnmetSchedulingDependencies", () => {
 
     expect(getUnmetSchedulingDependencies(task, [task, dep])).toEqual([]);
   });
+
+  it("blocks only live unsatisfied dependency columns across dispatch surfaces", () => {
+    const task = createMockTask({
+      id: "FN-T",
+      dependencies: [
+        "FN-TODO",
+        "FN-QUEUED",
+        "FN-INPROGRESS",
+        "FN-TRIAGE",
+        "FN-DONE",
+        "FN-REVIEW",
+        "FN-ARCHIVED",
+        "FN-SOFT-DELETED",
+        "FN-MISSING",
+      ],
+    });
+    const tasks = [
+      task,
+      createMockTask({ id: "FN-TODO", column: "todo" }),
+      createMockTask({ id: "FN-QUEUED", column: "todo", status: "queued" }),
+      createMockTask({ id: "FN-INPROGRESS", column: "in-progress" }),
+      createMockTask({ id: "FN-TRIAGE", column: "triage" }),
+      createMockTask({ id: "FN-DONE", column: "done" }),
+      createMockTask({ id: "FN-REVIEW", column: "in-review" }),
+      createMockTask({ id: "FN-ARCHIVED", column: "archived" }),
+      // Soft-deleted dependency records are absent from listTasks(), matching the
+      // executor/scheduler shared helper's missing-id-is-not-blocking contract.
+    ];
+
+    expect(getUnmetSchedulingDependencies(task, tasks)).toEqual([
+      "FN-TODO",
+      "FN-QUEUED",
+      "FN-INPROGRESS",
+      "FN-TRIAGE",
+    ]);
+  });
 });
 
 describe("isRunnableQueuedOverlapCandidate", () => {

@@ -1164,6 +1164,7 @@ export class SelfHealingManager {
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
       { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies().then(() => undefined) },
       { name: "reconcile-dependency-blocking-leases", fn: () => this.reconcileDependencyBlockingLeases().then(() => undefined) },
+      { name: "reconcile-in-review-unmet-dependencies", fn: () => this.reconcileInReviewUnmetDependencies().then(() => undefined) },
       { name: "reconcile-dependency-cycles", fn: () => this.reconcileDependencyCycles().then(() => undefined) },
       { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts().then(() => undefined) },
       { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts().then(() => undefined) },
@@ -2177,6 +2178,7 @@ export class SelfHealingManager {
           { name: "recover-stale-transition-pending", fn: () => this.runStaleTransitionPendingSweep() },
           { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies() },
           { name: "reconcile-dependency-blocking-leases", fn: () => this.reconcileDependencyBlockingLeases() },
+          { name: "reconcile-in-review-unmet-dependencies", fn: () => this.reconcileInReviewUnmetDependencies() },
           // FN-6782: reclaim in-memory worktree slots whose holder is no longer
           // in-progress (defense-in-depth for the pause-abort leak; conservative,
           // gated by clearPhantomExecutorBinding's live-session refusal).
@@ -4973,6 +4975,116 @@ export class SelfHealingManager {
           unmetDeps,
           deadlockEvidence,
           clearedOverlapBlockedBy: deadlockingDependency.overlapBlockedBy === holder.id,
+        },
+      });
+      recovered++;
+    }
+
+    return recovered;
+  }
+
+  private evaluateInReviewUnmetDependencyReboundSafety(task: Task, settings: Settings, unmetDeps: string[]): { ok: boolean; stalenessMs: number; reason: string; metadata: Record<string, unknown> } {
+    const livePaths = activeSessionRegistry.pathsForTask(task.id);
+    const hasActiveRegisteredPath = livePaths.some((path) => activeSessionRegistry.isPathActive(path));
+    const sessionDead = !hasActiveRegisteredPath && !executingTaskLock.has(task.id) && this.options.isTaskActive?.(task.id) !== true;
+    const anchorMs = task.columnMovedAt ? Date.parse(task.columnMovedAt) : Date.parse(task.updatedAt ?? "");
+    const stalenessMs = Number.isFinite(anchorMs) ? Math.max(0, Date.now() - anchorMs) : Number.POSITIVE_INFINITY;
+    const ok = sessionDead && !task.checkedOutBy;
+    return {
+      ok,
+      stalenessMs,
+      reason: "in-review-unmet-dependencies",
+      metadata: {
+        taskId: task.id,
+        unmetDeps,
+        blockedBy: unmetDeps[0] ?? null,
+        priorColumn: task.column,
+        priorStatus: task.status ?? null,
+        priorWorktree: task.worktree ?? null,
+        priorBranch: task.branch ?? null,
+        stalenessMs,
+        sessionDead,
+        livePaths,
+        hasActiveRegisteredPath,
+        hasExecutingTaskLock: executingTaskLock.has(task.id),
+        taskActive: this.options.isTaskActive?.(task.id) === true,
+        checkedOutBy: task.checkedOutBy ?? null,
+        autoMerge: settings.autoMerge ?? null,
+      },
+    };
+  }
+
+  async reconcileInReviewUnmetDependencies(): Promise<number> {
+    const settings = await this.store.getSettings();
+    if (settings.globalPause || settings.enginePaused) return 0;
+
+    let tasks: Task[] = [];
+    try {
+      tasks = await this.store.listTasks({ includeArchived: false, slim: true });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.warn(`reconcileInReviewUnmetDependencies: failed to list tasks: ${errorMessage}`);
+      return 0;
+    }
+
+    const markerAcceptedByTaskId = new Map<string, boolean>();
+    if (settings.mergeRequestContractShadowEnabled === true) {
+      const dependencyIds = new Set(tasks.flatMap((task) => task.dependencies));
+      for (const depId of dependencyIds) {
+        markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+      }
+    }
+    const dependencyOptions = settings.mergeRequestContractShadowEnabled === true
+      ? { markerAcceptedByTaskId }
+      : undefined;
+
+    let recovered = 0;
+    for (const task of tasks) {
+      if (task.column !== "in-review" || task.deletedAt) continue;
+      if (task.paused === true || task.userPaused === true) continue;
+      if (!allowsAutoMergeProcessing(task, settings)) continue;
+
+      const unmetDeps = getUnmetSchedulingDependencies(task, tasks, dependencyOptions);
+      if (unmetDeps.length === 0) continue;
+
+      const proof = this.evaluateInReviewUnmetDependencyReboundSafety(task, settings, unmetDeps);
+      if (!proof.ok) {
+        await this.emitBackwardMoveNoAction(
+          task,
+          "reconcile-in-review-unmet-dependencies",
+          "task:reconcile-in-review-unmet-dependencies-no-action",
+          proof,
+        );
+        continue;
+      }
+
+      await this.store.moveTask(task.id, "todo", {
+        preserveProgress: true,
+        preserveWorktree: true,
+        preserveResumeState: true,
+        moveSource: "engine",
+        recoveryRehome: true,
+      });
+      await this.store.updateTask(task.id, { status: "queued", blockedBy: unmetDeps[0] });
+      await this.store.logEntry(
+        task.id,
+        `Auto-rebounded (FN-6793): in-review task had unmet dependencies: ${unmetDeps.join(", ")}`,
+      );
+      await createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("fn6793-in-review-unmet-dependencies", task.id),
+        agentId: "self-healing",
+        taskId: task.id,
+        taskLineageId: task.lineageId,
+        phase: "reconcile-in-review-unmet-dependencies",
+      }).database({
+        type: "task:reconcile-in-review-unmet-dependencies" as DatabaseMutationType,
+        target: task.id,
+        metadata: {
+          taskId: task.id,
+          unmetDeps,
+          blockedBy: unmetDeps[0] ?? null,
+          priorColumn: "in-review",
+          priorStatus: task.status ?? null,
         },
       });
       recovered++;

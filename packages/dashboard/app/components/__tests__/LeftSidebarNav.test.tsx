@@ -2,8 +2,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { LeftSidebarNav } from "../LeftSidebarNav";
-import type { PluginDashboardViewEntry } from "../../api";
+import type { PluginDashboardViewEntry, ProjectInfo } from "../../api";
 import type { TaskView } from "../../hooks/useViewState";
+
+const projects: ProjectInfo[] = [
+  {
+    id: "alpha",
+    name: "Alpha",
+    path: "/workspace/alpha",
+    status: "active",
+    isolationMode: "in-process",
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+  },
+  {
+    id: "beta",
+    name: "Beta",
+    path: "/workspace/beta",
+    status: "paused",
+    isolationMode: "in-process",
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+  },
+];
 
 const pluginViews: PluginDashboardViewEntry[] = [
   {
@@ -27,6 +48,12 @@ const pluginViews: PluginDashboardViewEntry[] = [
     },
   },
 ];
+
+function expectNoSidebarBrandOrProjectAffordances(container: HTMLElement) {
+  expect(screen.queryByTestId("sidebar-nav-project-selector")).toBeNull();
+  expect(container.querySelector(".left-sidebar-nav__logo-mark")).toBeNull();
+  expect(container.querySelector(".left-sidebar-nav__wordmark")).toBeNull();
+}
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof LeftSidebarNav>> = {}) {
   const onChangeView = vi.fn();
@@ -61,7 +88,9 @@ describe("LeftSidebarNav", () => {
   });
 
   it("renders core destinations, enabled overflow destinations, plugins, and bottom settings", () => {
-    renderSidebar();
+    const { container } = renderSidebar();
+
+    expectNoSidebarBrandOrProjectAffordances(container);
 
     for (const testId of [
       "sidebar-nav-board",
@@ -192,14 +221,43 @@ describe("LeftSidebarNav", () => {
     expect(screen.getByTestId(testId).getAttribute("aria-current")).toBe("page");
   });
 
+  it.each([
+    ["without view-all callback", {}],
+    ["with empty project list", { projects: [], currentProject: null, onSelectProject: vi.fn(), onViewAllProjects: vi.fn() }],
+    [
+      "with a single project",
+      { projects: projects.slice(0, 1), currentProject: projects[0], onSelectProject: vi.fn(), onViewAllProjects: vi.fn() },
+    ],
+    ["with multiple projects", { projects, currentProject: projects[0], onSelectProject: vi.fn(), onViewAllProjects: vi.fn() }],
+  ] satisfies Array<[string, Partial<ComponentProps<typeof LeftSidebarNav>>]>)(
+    "does not render duplicate sidebar brand or project selector %s",
+    (_label, overrides) => {
+      const { container } = renderSidebar(overrides);
+      const sidebar = screen.getByTestId("left-sidebar-nav");
+
+      expectNoSidebarBrandOrProjectAffordances(container);
+      expect(screen.getByTestId("sidebar-nav-collapse-toggle")).toBeDefined();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeDefined();
+
+      fireEvent.click(screen.getByTestId("sidebar-nav-collapse-toggle"));
+      expect(sidebar.className).toContain("left-sidebar-nav--collapsed");
+      expectNoSidebarBrandOrProjectAffordances(container);
+      expect(screen.getByTestId("sidebar-nav-collapse-toggle")).toBeDefined();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeDefined();
+    },
+  );
+
   it("toggles collapsed rail mode, keeps bottom settings reachable, and restores it on remount", () => {
     const firstRender = renderSidebar();
     const sidebar = screen.getByTestId("left-sidebar-nav");
 
+    expect(screen.getByTestId("sidebar-nav-collapse-toggle")).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByTestId("sidebar-nav-collapse-toggle"));
     expect(sidebar.className).toContain("left-sidebar-nav--collapsed");
+    expect(screen.getByTestId("sidebar-nav-collapse-toggle")).toHaveAttribute("aria-pressed", "true");
     expect(window.localStorage.getItem("fusion:left-sidebar-collapsed")).toBe("true");
     expect(screen.queryByTestId("sidebar-nav-resize-handle")).toBeNull();
+    expect(screen.getByTestId("sidebar-nav-board")).toBeDefined();
     expect(screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer")).not.toBeNull();
     expect(within(sidebar).getAllByRole("button").at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
 
@@ -207,6 +265,7 @@ describe("LeftSidebarNav", () => {
     renderSidebar();
     expect(screen.getByTestId("left-sidebar-nav").className).toContain("left-sidebar-nav--collapsed");
     expect(screen.getByTestId("sidebar-nav-settings")).toBeDefined();
+    expect(screen.getByTestId("sidebar-nav-board")).toBeDefined();
   });
 
   it("clamps and persists drag resize width", () => {

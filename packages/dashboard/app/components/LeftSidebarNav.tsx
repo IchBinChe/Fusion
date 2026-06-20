@@ -1,5 +1,4 @@
 import "./LeftSidebarNav.css";
-import "./ProjectSelector.css";
 
 /*
 FNXC:Navigation 2026-06-19-00:00:
@@ -33,7 +32,6 @@ import type { ProjectInfo, PluginDashboardViewEntry } from "../api";
 import type { TaskView } from "../hooks/useViewState";
 import { buildPluginTaskViewId } from "../plugins/pluginViewRegistry";
 import { getPluginNavIcon } from "./pluginNavIcon";
-import { ProjectSelector as StandaloneProjectSelector } from "./ProjectSelector";
 
 export interface LeftSidebarExperimentalFeatures {
   insights?: boolean;
@@ -119,15 +117,6 @@ export interface LeftSidebarNavProps {
   onViewAllProjects?: () => void;
 }
 
-function FusionLogo() {
-  return (
-    <svg className="left-sidebar-nav__logo-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M12 7v10M7.5 9.5l9 5M16.5 9.5l-9 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function formatCount(count: number): string {
   return count > 99 ? "99+" : String(count);
 }
@@ -171,10 +160,6 @@ export function LeftSidebarNav({
   pluginDashboardViews = [],
   showAgentsTab = false,
   showSkillsTab = false,
-  projects = [],
-  currentProject = null,
-  onSelectProject,
-  onViewAllProjects,
 }: LeftSidebarNavProps) {
   const { t } = useTranslation("app");
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
@@ -410,9 +395,11 @@ export function LeftSidebarNav({
       aria-label={t("nav.sidebarAriaLabel", "Sidebar navigation")}
       style={isCollapsed ? undefined : { width: sidebarWidth, minWidth: sidebarWidth }}
     >
+      {/*
+      FNXC:Navigation 2026-06-20-00:00:
+      The sidebar no longer renders its own Fusion logo, wordmark, or project dropdown because those affordances already live in the top Header. Keep this brand row as the collapse control host so expanded and rail states retain a reachable toggle without leaving empty logo/project shells.
+      */}
       <div className="left-sidebar-nav__brand" data-testid="sidebar-nav-brand">
-        <FusionLogo />
-        <span className="left-sidebar-nav__wordmark">{t("dashboard.brandName", "Fusion")}</span>
         <button
           type="button"
           className="btn-icon left-sidebar-nav__collapse-toggle"
@@ -424,18 +411,6 @@ export function LeftSidebarNav({
         >
           {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
-      </div>
-
-      <div className="left-sidebar-nav__project-selector" data-testid="sidebar-nav-project-selector">
-        {onViewAllProjects ? (
-          <StandaloneProjectSelector
-            projects={projects}
-            currentProject={currentProject}
-            onSelect={onSelectProject}
-            onViewAll={onViewAllProjects}
-            allowSingleProject
-          />
-        ) : null}
       </div>
 
       <nav className="left-sidebar-nav__list" aria-label={t("nav.primaryNavAriaLabel", "Primary navigation")}>

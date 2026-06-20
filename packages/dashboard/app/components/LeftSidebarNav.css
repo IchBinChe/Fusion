@@ -19,46 +19,15 @@ The experimental sidebar is a persistent desktop/tablet navigation replacement f
 .left-sidebar-nav__brand {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-sm);
   padding: var(--space-md);
   border-bottom: 1px solid var(--border);
   min-height: calc(var(--space-2xl) + var(--space-xl));
 }
 
-.left-sidebar-nav__logo-mark {
-  width: var(--space-xl);
-  height: var(--space-xl);
-  flex-shrink: 0;
-  color: var(--logo-accent);
-}
-
-.left-sidebar-nav__wordmark {
-  flex: 1;
-  min-width: 0;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
 .left-sidebar-nav__collapse-toggle {
   flex-shrink: 0;
-}
-
-.left-sidebar-nav__project-selector {
-  padding: var(--space-sm);
-  border-bottom: 1px solid var(--border);
-}
-
-.left-sidebar-nav__project-selector:empty {
-  display: none;
-}
-
-.left-sidebar-nav__project-selector .project-selector {
-  width: 100%;
-}
-
-.left-sidebar-nav__project-selector .project-selector-trigger {
-  width: 100%;
-  min-width: 0;
 }
 
 .left-sidebar-nav__list {
@@ -192,8 +161,6 @@ The experimental sidebar is a persistent desktop/tablet navigation replacement f
   min-width: var(--left-sidebar-nav-rail-width);
 }
 
-.left-sidebar-nav--collapsed .left-sidebar-nav__wordmark,
-.left-sidebar-nav--collapsed .left-sidebar-nav__project-selector,
 .left-sidebar-nav--collapsed .left-sidebar-nav__label,
 .left-sidebar-nav--collapsed .left-sidebar-nav__badge {
   display: none;

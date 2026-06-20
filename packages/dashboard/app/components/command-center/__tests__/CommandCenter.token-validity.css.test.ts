@@ -101,16 +101,27 @@ function expectRuleContainsDeclaration(ruleBlock: string, property: string, valu
 
 /*
 FNXC:CommandCenterStyling 2026-06-19-00:00:
-FN-6726 guards Command Center stat and live-metric value containment at the emitted CSS-rule level because jsdom cannot measure min-content overflow from large comma-grouped token totals.
+FN-6726 guarded Command Center stat and live-metric value containment at the emitted CSS-rule level because jsdom cannot measure min-content overflow from large comma-grouped token totals.
+
+FNXC:CommandCenterStyling 2026-06-19-22:18:
+FN-6784 changes the containment contract from wrapping to single-line numbers with container-query font shrink. This raw CSS assertion must fail if overflow-wrap:anywhere returns or if the card/metric containers stop exposing inline-size query units.
 */
-describe("Command Center stat value overflow containment (FN-6726)", () => {
+describe("Command Center stat value no-wrap shrink containment (FN-6784)", () => {
   const css = readFileSync(join(COMMAND_CENTER_DIR, "CommandCenter.css"), "utf8");
 
-  it("keeps stat and live metric values shrinkable and wrappable", () => {
+  it("keeps stat and live metric values single-line with container-query font clamps", () => {
+    const containers = [".cc-stat-card", ".cc-live-metric"];
+    for (const selector of containers) {
+      const block = extractRuleBlock(css, selector);
+      expectRuleContainsDeclaration(block, "container-type", /inline-size/);
+    }
+
     for (const selector of [".cc-stat-value", ".cc-live-metric-value"]) {
       const block = extractRuleBlock(css, selector);
       expectRuleContainsDeclaration(block, "min-width", /0/);
-      expectRuleContainsDeclaration(block, "overflow-wrap", /anywhere|break-word/);
+      expectRuleContainsDeclaration(block, "white-space", /nowrap/);
+      expectRuleContainsDeclaration(block, "font-size", /clamp\([^;]*cqi[^;]*\)/);
+      expect(block, `${selector} must not restore digit-group wrapping`).not.toMatch(/(^|\n)\s*overflow-wrap\s*:\s*(anywhere|break-word)\s*;/);
     }
   });
 });

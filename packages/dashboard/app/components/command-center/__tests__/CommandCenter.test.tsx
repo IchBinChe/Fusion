@@ -484,7 +484,7 @@ describe("CommandCenter shell", () => {
 
     await screen.findByTestId("command-center-stat-tokens");
     expect(statValue("command-center-stat-tokens")).toBe("1,234,567,890");
-    expect(screen.getByTestId("command-center-live-tokens").textContent).toContain("1,234,567,890");
+    expect(liveMetricValue("command-center-live-tokens")).toBe("1,234,567,890");
   });
 
   it("live-polls token totals for the Overview card and live strip", async () => {
@@ -597,6 +597,7 @@ describe("CommandCenter shell", () => {
     await screen.findByTestId("command-center-stat-nodes");
     expect(screen.queryByTestId("command-center-empty")).toBeNull();
     expect(statValue("command-center-stat-tokens")).toBe("0");
+    expect(liveMetricValue("command-center-live-tokens")).toBe("0");
     expect(statValue("command-center-stat-nodes")).toBe("1");
     expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
     expect(screen.queryByTestId("command-center-overview-loading")).toBeNull();

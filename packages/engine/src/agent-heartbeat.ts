@@ -204,8 +204,11 @@ const REPORTS_STALE_INTERVAL_MULTIPLIER = 1.5;
 
 /**
  * Minimum staleness threshold floor for very short heartbeat intervals.
+ * 10 minutes: long-running but legitimately-busy agents (e.g. a verification
+ * step running a multi-minute test command, during which the agent does not
+ * tick/heartbeat) must not be misread as dead and reclaimed mid-run.
  */
-const MIN_HEARTBEAT_STALENESS_MS = 5 * 60_000;
+const MIN_HEARTBEAT_STALENESS_MS = 10 * 60_000;
 
 /** Format milliseconds into a human-readable duration string (e.g. "5m", "1h 20m", "2h"). */
 export function formatDuration(ms: number): string {

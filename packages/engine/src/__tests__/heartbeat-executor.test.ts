@@ -460,15 +460,18 @@ describe("executeHeartbeat", () => {
       expect(section).toMatch(/\| Long Interval \| active \| FN-209 \| .* \| healthy \|/);
     });
 
-    it("buildReportsHealthSection enforces a 5-minute minimum staleness floor", async () => {
+    it("buildReportsHealthSection enforces a 10-minute minimum staleness floor", async () => {
       const now = Date.now();
       const store = createStoreWithAgentForExec();
       vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
         id,
         runtimeConfig: { heartbeatIntervalMs: 1_000 },
       }) as unknown as Agent);
+      // 7 minutes silent with a 1s interval: under the old 5-minute floor this
+      // would read as stale, but the 10-minute floor must still treat a busy
+      // long-running agent as healthy (e.g. mid multi-minute test command).
       vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
-        { id: "agent-fast", name: "Fast Poller", state: "active", taskId: "FN-210", lastHeartbeatAt: new Date(now - 2 * 60_000).toISOString(), updatedAt: new Date(now - 2 * 60_000).toISOString() } as Agent,
+        { id: "agent-fast", name: "Fast Poller", state: "active", taskId: "FN-210", lastHeartbeatAt: new Date(now - 7 * 60_000).toISOString(), updatedAt: new Date(now - 7 * 60_000).toISOString() } as Agent,
       ]);
       const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
 

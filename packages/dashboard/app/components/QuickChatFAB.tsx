@@ -1214,6 +1214,9 @@ export function QuickChatFAB({
 
   FNXC:QuickChatMobileResize 2026-06-16-23:45:
   FN-6503 requires the first Android open to re-sample visualViewport after the stealth-input to composer focus handoff. Android Chrome can settle the keyboard shrink without a later resize observed by this panel effect, so focusin runs an immediate synchronous apply plus a short settle tail while resize/scroll remain synchronous for iOS animation lock-step.
+
+  FNXC:QuickChatMobileResize 2026-06-19-23:57:
+  FN-6757 keeps distinct visualViewport samples synchronous, but marks Android Chrome's constant-layout-viewport keyboard path for CSS easing. iOS Safari shrinks window.innerHeight with vv.height or reports a non-zero offsetTop on re-focus, so it stays off the smoothing class and avoids the one-paint lag caused by rAF throttling.
   */
   useLayoutEffect(() => {
     if (!isOpen) return;
@@ -1225,6 +1228,17 @@ export function QuickChatFAB({
 
     const vv = window.visualViewport;
     let lastAppliedSample: { height: number; offsetTop: number } | null = null;
+    let androidViewportSmoothingObserved = false;
+    const updateAndroidViewportSmoothing = (nextSample: { height: number; offsetTop: number }) => {
+      const layoutViewportShrink = window.innerHeight - nextSample.height;
+      const isAndroidResizeContentSample = nextSample.offsetTop === 0 && layoutViewportShrink > 1;
+      if (nextSample.offsetTop !== 0) {
+        androidViewportSmoothingObserved = false;
+      } else if (isAndroidResizeContentSample) {
+        androidViewportSmoothingObserved = true;
+      }
+      panel.classList.toggle("quick-chat-panel--vv-height-smoothing", androidViewportSmoothingObserved);
+    };
     const apply = () => {
       if (suppressVvShrinkRef.current) return;
       const nextSample = { height: vv.height, offsetTop: vv.offsetTop || 0 };
@@ -1236,6 +1250,7 @@ export function QuickChatFAB({
         return;
       }
       lastAppliedSample = nextSample;
+      updateAndroidViewportSmoothing(nextSample);
       panel.style.setProperty("--vv-height", `${nextSample.height}px`);
       panel.style.setProperty("--vv-offset-top", `${nextSample.offsetTop}px`);
     };
@@ -1307,6 +1322,7 @@ export function QuickChatFAB({
         window.clearTimeout(timeoutId);
       }
       cancelTailPoll();
+      panel.classList.remove("quick-chat-panel--vv-height-smoothing");
       panel.style.removeProperty("--vv-height");
       panel.style.removeProperty("--vv-offset-top");
     };
@@ -2533,6 +2549,7 @@ export function QuickChatFAB({
       && panelRef.current
     ) {
       suppressVvShrinkRef.current = true;
+      panelRef.current.classList.remove("quick-chat-panel--vv-height-smoothing");
       panelRef.current.style.removeProperty("--vv-height");
       panelRef.current.style.removeProperty("--vv-offset-top");
       window.setTimeout(() => {

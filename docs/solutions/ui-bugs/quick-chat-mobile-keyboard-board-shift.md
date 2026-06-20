@@ -49,6 +49,8 @@ This keeps the board's footer/mobile-nav padding classes present for the entire 
 
 FN-6498 found a separate Quick Chat viewport-tracking jank source inside `QuickChatFAB.tsx`: mobile `visualViewport` `resize` and `scroll` events can report the same `{ height, offsetTop }` sample during one keyboard animation tick, especially on Android Chrome with `interactive-widget=resizes-content`. The sheet should still own `--vv-height` / `--vv-offset-top`, but same-sample writes are deduped so the overlay does not add redundant style/layout invalidation while the board-shift suppression described above keeps the board underneath stable.
 
+FN-6757 extends that mitigation for Android Chrome's distinct resize-content samples. When `visualViewport.height` shrinks below the stable layout viewport and `offsetTop` stays `0`, Quick Chat adds a height-only smoothing class so the fullscreen sheet eases through the keyboard animation instead of visibly stepping through every browser sample. The actual `--vv-height` writes remain synchronous and deduped, so the final sample is authoritative and FN-6503's Android `focusin` tail can still converge on late keyboard geometry. Non-zero `offsetTop` samples (the iOS keyboard path) do not enable smoothing because the sheet's translateY alignment must track the visual viewport immediately.
+
 ## Regression coverage
 
 Cover the invariant at the pure helper seam:

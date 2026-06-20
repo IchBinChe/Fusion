@@ -1313,6 +1313,147 @@ describe("QuickChatFAB session-first UX", () => {
     styleRemoveSpy.mockRestore();
   });
 
+  it("FN-6757: eases Android resize-content viewport samples without extra writes or stale variables", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 280,
+      viewportHeight: 520,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+    const visualViewport = mockQuickChatVisualViewport({ height: 800, offsetTop: 0 });
+    const styleWriteSpy = vi.spyOn(CSSStyleDeclaration.prototype, "setProperty");
+
+    const rendered = render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    const panel = await screen.findByTestId("quick-chat-panel");
+    const input = await screen.findByTestId("quick-chat-input");
+
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("800px");
+    expect(panel).not.toHaveClass("quick-chat-panel--vv-height-smoothing");
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 760, offsetTop: 0, eventType: "resize" });
+    expect(panel).toHaveClass("quick-chat-panel--vv-height-smoothing");
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("760px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+    const writesAfterFirstAndroidSample = styleWriteSpy.mock.calls.length;
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 760, offsetTop: 0, eventType: "scroll" });
+    expect(styleWriteSpy.mock.calls.length).toBe(writesAfterFirstAndroidSample);
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 600, offsetTop: 0, eventType: "resize" });
+    await driveQuickChatVisualViewport(visualViewport, { height: 520, offsetTop: 0, eventType: "scroll" });
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("520px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+
+    setQuickChatVisualViewportSample(visualViewport, { height: 500, offsetTop: 0 });
+    fireEvent.focusIn(input);
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("500px");
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 800, offsetTop: 0, eventType: "resize" });
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("800px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("0px");
+
+    rendered.unmount();
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("");
+    expect(panel).not.toHaveClass("quick-chat-panel--vv-height-smoothing");
+    expect(screen.queryByTestId("quick-chat-resize-n")).toBeNull();
+
+    styleWriteSpy.mockRestore();
+  });
+
+  it("FN-6757: keeps iOS offsetTop re-focus synchronous and outside Android smoothing", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 440,
+      viewportHeight: 360,
+      viewportOffsetTop: 24,
+      keyboardOpen: true,
+    });
+    const visualViewport = mockQuickChatVisualViewport({ height: 800, offsetTop: 0 });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    const panel = await screen.findByTestId("quick-chat-panel");
+    const input = await screen.findByTestId("quick-chat-input");
+
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 360 });
+    setQuickChatVisualViewportSample(visualViewport, { height: 360, offsetTop: 24 });
+    fireEvent.focusIn(input);
+
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("360px");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("24px");
+    expect(panel).not.toHaveClass("quick-chat-panel--vv-height-smoothing");
+
+    fireEvent.blur(input);
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("");
+    expect(panel.style.getPropertyValue("--vv-offset-top")).toBe("");
+    expect(panel).not.toHaveClass("quick-chat-panel--vv-height-smoothing");
+  });
+
+  it("FN-6757: resize smoothing preserves populated Latest gate and streaming state", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockUseMobileKeyboard.mockReturnValue({
+      keyboardOverlap: 280,
+      viewportHeight: 520,
+      viewportOffsetTop: 0,
+      keyboardOpen: true,
+    });
+    const visualViewport = mockQuickChatVisualViewport({ height: 800, offsetTop: 0 });
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        { id: "msg-populated", sessionId: "session-model", role: "assistant", content: "Existing answer", createdAt: "2026-06-19T00:00:00.000Z" },
+      ],
+    });
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      handlers.onChunk?.("streaming answer");
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+    const panel = await screen.findByTestId("quick-chat-panel");
+    const messages = await screen.findByTestId("quick-chat-messages");
+    let scrollTopValue = 700;
+    Object.defineProperty(messages, "scrollHeight", { configurable: true, get: () => 1200 });
+    Object.defineProperty(messages, "clientHeight", { configurable: true, get: () => 240 });
+    Object.defineProperty(messages, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    fireEvent.scroll(messages);
+    expect(screen.getByTestId("quick-chat-jump-to-latest")).toBeInTheDocument();
+
+    await driveQuickChatVisualViewport(visualViewport, { height: 760, offsetTop: 0, eventType: "resize" });
+    await driveQuickChatVisualViewport(visualViewport, { height: 520, offsetTop: 0, eventType: "scroll" });
+    expect(panel).toHaveClass("quick-chat-panel--vv-height-smoothing");
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("520px");
+    expect(screen.getByTestId("quick-chat-jump-to-latest")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("quick-chat-input"), { target: { value: "continue" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+    expect(await screen.findByTestId("quick-chat-streaming-message")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-chat-waiting")).toHaveTextContent("Working…");
+    expect(panel.style.getPropertyValue("--vv-height")).toBe("520px");
+
+    fireEvent.click(screen.getByTestId("quick-chat-jump-to-latest"));
+    expect(scrollTopValue).toBe(1200);
+  });
+
   it("FN-6503: re-samples Android first-open keyboard settle on composer focus handoff", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     window.dispatchEvent(new Event("resize"));

@@ -962,6 +962,14 @@ Quick chat session rows include a separate rename button so selecting a session,
     z-index: 1100;
   }
 
+  .quick-chat-panel.quick-chat-panel--vv-height-smoothing {
+    /*
+    FNXC:QuickChatMobileResize 2026-06-19-23:57:
+    Android Chrome interactive-widget=resizes-content can emit coarse visualViewport heights while the keyboard animates. Ease only the height-bound properties after that Android-shaped constant-innerHeight shrink is detected; transform stays synchronous so iOS offsetTop compensation remains locked to Safari's keyboard frame.
+    */
+    transition: height var(--transition-fast), max-height var(--transition-fast);
+  }
+
   .quick-chat-session-dropdown {
     left: 0;
     right: 0;

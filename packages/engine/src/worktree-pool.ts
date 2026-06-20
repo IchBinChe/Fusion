@@ -849,30 +849,30 @@ export async function cleanupOrphanedWorktrees(
  * @returns Number of orphan directories removed
  */
 /**
- * Resolve a worktree's `.git` pointer to the gitdir admin path it references.
+ * Decide whether a worktree's `.git` pointer is *dangling* — present on disk but
+ * referencing a `.git/worktrees/<name>` admin entry that no longer exists. A
+ * dangling pointer is FN-6782 leak residue: invisible to `git worktree list` /
+ * `prune`, yet it collides with freshly generated worktree names.
  *
- * Returns:
- * - `"directory"` if `.git` is a real directory (a normal repo, not a worktree
- *   link) — callers should treat that as "leave it alone".
- * - an absolute path string for a `gitdir: <path>` link file (relative targets
- *   are resolved against the worktree directory).
- * - `null` if the pointer can't be read or parsed.
- *
- * Callers decide whether the target exists; a missing target means the link is
- * dangling (leak residue) and the directory is safe to reap.
+ * Returns `true` ONLY when the pointer is confidently classifiable as dangling:
+ * a `gitdir: <path>` link file (relative targets resolved against the worktree
+ * dir) whose target is confirmed missing. Returns `false` for everything else —
+ * a real `.git` directory, a live gitdir target, an unparseable pointer, OR any
+ * read/stat failure. The conservative default matters: callers reap on `true`,
+ * so a transient read error (EACCES/EBUSY) on a genuinely-live worktree's `.git`
+ * must never be misread as dangling and force-removed.
  */
-function resolveGitdirPointer(dotGitPath: string): string | "directory" | null {
+function dotGitPointerIsDangling(dotGitPath: string): boolean {
   try {
-    if (lstatSync(dotGitPath).isDirectory()) {
-      return "directory";
-    }
+    if (lstatSync(dotGitPath).isDirectory()) return false;
     const raw = readFileSync(dotGitPath, "utf8").trim();
     const match = /^gitdir:\s*(.+)$/.exec(raw);
-    if (!match) return null;
+    if (!match) return false;
     const target = match[1].trim();
-    return isAbsolute(target) ? target : resolve(dirname(dotGitPath), target);
+    const resolved = isAbsolute(target) ? target : resolve(dirname(dotGitPath), target);
+    return !existsSync(resolved);
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -940,10 +940,9 @@ export async function reapOrphanWorktrees(
     // dangling pointers like any other half-initialized orphan.
     const dotGit = join(resolvedFull, ".git");
     if (existsSync(dotGit)) {
-      const gitdirTarget = resolveGitdirPointer(dotGit);
-      if (gitdirTarget === "directory" || (gitdirTarget && existsSync(gitdirTarget))) {
-        // Valid registration (or a real .git dir) — leave it; assertValidWorktreeSession
-        // will handle it on the next agent start.
+      if (!dotGitPointerIsDangling(dotGit)) {
+        // Valid registration, a real .git dir, or a pointer we couldn't positively classify as
+        // dangling — leave it; assertValidWorktreeSession handles it on the next agent start.
         worktreePoolLog.log(`reapOrphanWorktrees: skipping ${name} (has .git entry but not in registered list — may be partially registered)`);
         continue;
       }

@@ -1156,5 +1156,26 @@ describe("reapOrphanWorktrees", () => {
     expect(removed).toBe(0);
     expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/live-wt", expect.anything());
   });
+
+  it("does NOT reap a dir whose .git is unparseable (conservative — only confirmed-dangling pointers)", async () => {
+    // A transient read error or a garbage .git (no `gitdir:` line) must not be treated as
+    // dangling — reaping on uncertainty could delete a genuinely-live worktree.
+    mockedReaddirSync.mockReturnValue([makeDirEntry("maybe-wt")] as any);
+    mockedLstatSync.mockImplementation((p: any) =>
+      (String(p).endsWith("/.git")
+        ? { isDirectory: () => false, isSymbolicLink: () => false }
+        : { isDirectory: () => true, isSymbolicLink: () => false }) as any,
+    );
+    mockedReadFileSync.mockReturnValue("not a gitdir pointer at all\n" as any);
+    mockedExistsSync.mockImplementation((p) => {
+      const s = String(p);
+      return s === "/root/.worktrees" || s === "/root/.worktrees/maybe-wt/.git";
+    });
+
+    const removed = await reapOrphanWorktrees("/root");
+
+    expect(removed).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/maybe-wt", expect.anything());
+  });
 });
 

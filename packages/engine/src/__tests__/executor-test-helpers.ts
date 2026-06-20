@@ -219,6 +219,7 @@ vi.mock("node:child_process", async () => {
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   realpathSync: vi.fn((path: string) => path),
+  lstatSync: vi.fn(() => ({ isSymbolicLink: () => false, isDirectory: () => true })),
 }));
 
 export const mockExecuteAll: Mock<() => Promise<unknown[]>> = vi.fn().mockResolvedValue([]);

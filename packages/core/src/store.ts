@@ -1556,6 +1556,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private configLock: Promise<void> = Promise.resolve();
   /** Startup/open guard for distributed_task_id_state reconciliation. */
   private taskIdStateReconciled = false;
+  /** Set when startup auto-recovery rebuilt a corrupt fusion.db; lets the orphan reconcile bypass its recency window so rows dropped by `.recover` are recovered even with old task.json mtimes. */
+  private dbWasCorruptionRecovered = false;
   /** Cached startup/refresh integrity report for allocator-related task ID anomalies. */
   private taskIdIntegrityReport: TaskIdIntegrityReport = {
     status: "ok",
@@ -1817,6 +1819,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         try {
           const recovery = Database.recoverIfCorrupt(this.fusionDir);
           if (recovery.status === "recovered") {
+            // A `.recover` rebuild can drop task rows whose task.json survived on disk. Let the
+            // orphan reconcile below bypass its recency window so those rows are recovered even
+            // when their (possibly old) task.json mtime would otherwise fail the gate.
+            this.dbWasCorruptionRecovered = true;
             storeLog.warn("Recovered corrupt fusion.db on startup", {
               phase: "init:db-autorecover",
               corruptBackupPath: recovery.corruptBackupPath,
@@ -1890,7 +1896,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.taskIdStateReconciled = false;
     this.reconcileDistributedTaskIdStateOnOpen();
     try {
-      await this.reconcileOrphanedTaskDirs();
+      await this.reconcileOrphanedTaskDirs({ ignoreRecencyWindow: this.dbWasCorruptionRecovered });
     } catch (err) {
       storeLog.warn("Orphaned task-dir reconcile failed during init (non-fatal)", {
         phase: "init:orphaned-task-dir-reconcile",
@@ -3238,7 +3244,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
    * FNXC:TaskStoreConsistency 2026-06-20-00:00:
    * Heartbeat-created tasks persisted on disk but missing from the SQLite index were invisible to fn_task_list/fn_task_show (FN-6783/FN-6784). Reconcile re-imports orphaned task.json rows non-destructively and uses the same exists-anywhere guard as create-time ID allocation so soft-deleted, archived, and tombstoned IDs are never resurrected.
    */
-  async reconcileOrphanedTaskDirs(): Promise<{ recovered: string[]; skipped: Array<{ id: string; reason: string }> }> {
+  async reconcileOrphanedTaskDirs(
+    opts: { ignoreRecencyWindow?: boolean } = {},
+  ): Promise<{ recovered: string[]; skipped: Array<{ id: string; reason: string }> }> {
     const result: { recovered: string[]; skipped: Array<{ id: string; reason: string }> } = {
       recovered: [],
       skipped: [],
@@ -3247,6 +3255,24 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     if (this.inMemoryDb || !existsSync(this.tasksDir)) {
       return result;
     }
+
+    // The recency window stops legacy hard-deleted dirs (no tombstone) from being silently
+    // resurrected onto a populated board. But the sweep's other job is recovering rows lost to
+    // DB corruption or a restore-from-old-backup — where the surviving task.json files keep
+    // their original (often >7-day-old) mtimes and the DB is empty. Detect that case: when the
+    // live task table is empty, bypass the recency gate so corruption recovery isn't defeated by
+    // the same guard added to stop resurrection. Callers may also force the bypass explicitly.
+    let dbHasLiveTasks = true;
+    try {
+      const row = this.db
+        .prepare('SELECT EXISTS(SELECT 1 FROM tasks WHERE deletedAt IS NULL LIMIT 1) AS present')
+        .get() as { present?: number } | undefined;
+      dbHasLiveTasks = (row?.present ?? 0) === 1;
+    } catch {
+      // If the count probe fails, keep the gate on (conservative — don't mass-resurrect).
+      dbHasLiveTasks = true;
+    }
+    const applyRecencyWindow = !opts.ignoreRecencyWindow && dbHasLiveTasks;
 
     let entries: Dirent[];
     try {
@@ -3279,24 +3305,27 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       // DB row would otherwise be silently re-imported onto the live board (the
       // "all task IDs reset / starting over" failure). Only reconcile dirs whose
       // task.json was modified within the recency window; older orphans are left for
-      // explicit recovery (unarchive/restore) or directory cleanup.
-      try {
-        const { mtimeMs } = await stat(taskJsonPath);
-        const ageMs = Date.now() - mtimeMs;
-        if (ageMs > RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS) {
-          result.skipped.push({ id, reason: "stale-orphan-dir-beyond-recency-window" });
-          storeLog.warn("Skipping stale orphaned task-dir reconcile (beyond recency window)", {
-            phase: "reconcileOrphanedTaskDirs:recency",
-            taskId: id,
-            taskJsonPath,
-            ageMs,
-            maxAgeMs: RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS,
-          });
+      // explicit recovery (unarchive/restore) or directory cleanup. Skipped entirely when
+      // the DB is empty / a caller forces recovery (corruption/restore path — see above).
+      if (applyRecencyWindow) {
+        try {
+          const { mtimeMs } = await stat(taskJsonPath);
+          const ageMs = Date.now() - mtimeMs;
+          if (ageMs > RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS) {
+            result.skipped.push({ id, reason: "stale-orphan-dir-beyond-recency-window" });
+            storeLog.warn("Skipping stale orphaned task-dir reconcile (beyond recency window)", {
+              phase: "reconcileOrphanedTaskDirs:recency",
+              taskId: id,
+              taskJsonPath,
+              ageMs,
+              maxAgeMs: RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS,
+            });
+            continue;
+          }
+        } catch (error) {
+          result.skipped.push({ id, reason: `stat-failed: ${error instanceof Error ? error.message : String(error)}` });
           continue;
         }
-      } catch (error) {
-        result.skipped.push({ id, reason: `stat-failed: ${error instanceof Error ? error.message : String(error)}` });
-        continue;
       }
 
       let task: Task;

@@ -124,6 +124,12 @@ describe("TaskStore orphaned task-dir reconciliation", () => {
   it("skips a stale orphan task dir beyond the recency window (no resurrection of old deleted tasks)", async () => {
     // Regression: legacy hard-deletes left no tombstone, so an ancient task.json lingering
     // on disk was silently re-imported onto the live board ("all task IDs reset" failure).
+    // A live task must exist so the recency window applies (an empty DB bypasses it — see
+    // the corruption-recovery tests below).
+    await store.createTaskWithReservedId(
+      { description: "Keeps the board non-empty" },
+      { taskId: "FN-9200", applyDefaultWorkflowSteps: false, invokeTaskCreatedHook: false },
+    );
     const orphan = await createDiskOnlyTask("FN-9110");
     // Backdate the task.json well beyond the 7-day recency window.
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
@@ -137,6 +143,51 @@ describe("TaskStore orphaned task-dir reconciliation", () => {
       expect.objectContaining({ id: orphan.id, reason: "stale-orphan-dir-beyond-recency-window" }),
     ]));
     await expect(store.getTask(orphan.id)).rejects.toThrow("Task FN-9110 not found");
+  });
+
+  it("recovers a stale orphan dir just inside the recency window (boundary)", async () => {
+    await store.createTaskWithReservedId(
+      { description: "Keeps the board non-empty" },
+      { taskId: "FN-9201", applyDefaultWorkflowSteps: false, invokeTaskCreatedHook: false },
+    );
+    const orphan = await createDiskOnlyTask("FN-9111");
+    // ~6 days old — comfortably inside the 7-day window.
+    const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+    const taskJsonPath = join(rootDir, ".fusion", "tasks", orphan.id, "task.json");
+    await utimes(taskJsonPath, sixDaysAgo, sixDaysAgo);
+
+    const result = await store.reconcileOrphanedTaskDirs();
+
+    expect(result.recovered).toContain(orphan.id);
+  });
+
+  it("bypasses the recency window when the live task table is empty (corruption / restore recovery)", async () => {
+    // Restore-from-old-backup: surviving task.json files keep their original (old) mtimes and
+    // the DB has no live rows. The recency gate must NOT strand them — that is the exact
+    // recovery the sweep exists for.
+    const orphan = await createDiskOnlyTask("FN-9112");
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const taskJsonPath = join(rootDir, ".fusion", "tasks", orphan.id, "task.json");
+    await utimes(taskJsonPath, thirtyDaysAgo, thirtyDaysAgo);
+
+    const result = await store.reconcileOrphanedTaskDirs();
+
+    expect(result.recovered).toContain(orphan.id);
+  });
+
+  it("bypasses the recency window when the caller forces it (ignoreRecencyWindow)", async () => {
+    await store.createTaskWithReservedId(
+      { description: "Keeps the board non-empty" },
+      { taskId: "FN-9202", applyDefaultWorkflowSteps: false, invokeTaskCreatedHook: false },
+    );
+    const orphan = await createDiskOnlyTask("FN-9113");
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const taskJsonPath = join(rootDir, ".fusion", "tasks", orphan.id, "task.json");
+    await utimes(taskJsonPath, thirtyDaysAgo, thirtyDaysAgo);
+
+    const result = await store.reconcileOrphanedTaskDirs({ ignoreRecencyWindow: true });
+
+    expect(result.recovered).toContain(orphan.id);
   });
 
   it("skips malformed task.json and directories without task.json without throwing", async () => {

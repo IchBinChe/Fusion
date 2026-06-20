@@ -78,6 +78,50 @@ describe("FN-4973: executor worktree conflict cleanup", () => {
     expect(activeSessionRegistry.lookupByPath(CONFLICT_PATH)?.taskId).toBe("FN-OTHER");
   });
 
+  it("recovers a genuine orphan dir when git reports 'is not a working tree'", async () => {
+    // FN-6782: a leaked orphan dir (dir on disk, admin entry gone) makes `git worktree remove`
+    // fail with "is not a working tree". The stale-path recovery should prune, clean up, and
+    // return true so fresh creation can proceed.
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    store.listTasks.mockResolvedValue([]);
+
+    vi.spyOn(worktreePoolModule, "removeWorktree").mockRejectedValue(
+      new Error("fatal: '/tmp/test/.worktrees/stale-self-owned' is not a working tree"),
+    );
+
+    const result = await (executor as any).cleanupConflictingWorktree(CONFLICT_PATH, "fusion/fn-4973", "FN-4973");
+
+    expect(result).toBe(true);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-4973",
+      expect.stringContaining("Cleaned up stale conflicting worktree"),
+      CONFLICT_PATH,
+    );
+  });
+
+  it("refuses stale-path cleanup (no force-rm) for a conflict path outside .worktrees/", async () => {
+    // Security regression: the recovery's rm must be bounded to .worktrees/. A git admin entry
+    // can point anywhere; an out-of-bounds path must be refused, not force-removed.
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    store.listTasks.mockResolvedValue([]);
+    const OUTSIDE_PATH = "/tmp/test/not-worktrees/escapee";
+
+    vi.spyOn(worktreePoolModule, "removeWorktree").mockRejectedValue(
+      new Error("fatal: '/tmp/test/not-worktrees/escapee' is not a working tree"),
+    );
+
+    const result = await (executor as any).cleanupConflictingWorktree(OUTSIDE_PATH, "fusion/fn-4973", "FN-4973");
+
+    expect(result).toBe(false);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-4973",
+      expect.stringContaining("Refused stale-path cleanup"),
+      OUTSIDE_PATH,
+    );
+  });
+
   it("reconciles once on race-window ActiveSessionWorktreeRemovalError then retries removal", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");

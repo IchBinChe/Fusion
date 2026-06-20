@@ -6,7 +6,7 @@ import { setImmediate as setImmediateCb } from "node:timers";
 // Internal git plumbing intentionally bypasses sandbox backends.
 const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
@@ -14260,11 +14260,50 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       //      registered it (e.g. a leaked worktree dir that outlived its admin entry). This
       //      is the FN-6782 leak residue that collides with freshly generated worktree names.
       //   3. `No such file or directory` / ENOENT — the path is already gone.
-      const staleConflictPath =
+      //
+      // Exclude spawn failures (e.g. `spawn git ENOENT` when the git binary is missing or not
+      // on PATH): those are environment errors, not "path is not a worktree" signals, and must
+      // not be misread as a successful stale-path cleanup.
+      const err = error as NodeJS.ErrnoException;
+      const isSpawnFailure = typeof err?.syscall === "string" && err.syscall.startsWith("spawn");
+      const staleConflictPath = !isSpawnFailure && (
         /validation failed, cannot remove working tree/i.test(errorMessage) ||
         /is not a working tree/i.test(errorMessage) ||
-        /no such file or directory|ENOENT/i.test(errorMessage);
+        /no such file or directory|ENOENT/i.test(errorMessage)
+      );
       if (staleConflictPath) {
+        // The error string alone is NOT authoritative — it can name an unrelated path, or fire
+        // on a live worktree under a racing/transient failure. Re-verify on disk before any
+        // destructive action and refuse to force-remove anything that is still a real worktree,
+        // out of bounds, reached through a symlink, or actively owned by a live session. Only a
+        // genuine orphan directory inside the configured worktrees tree is safe to delete.
+        const settings = await this.store.getSettings();
+        const stillRegistered = await isRegisteredGitWorktree(this.rootDir, worktreePath).catch(() => true);
+        const activeOwner = await this.findActiveWorktreeOwner(worktreePath, taskId).catch(() => "unknown");
+        let safeToRemove = isInsideWorktreesDir(this.rootDir, worktreePath, settings) && !stillRegistered && activeOwner === null;
+        if (safeToRemove && existsSync(worktreePath)) {
+          try {
+            if (lstatSync(worktreePath).isSymbolicLink()) {
+              safeToRemove = false;
+            } else if (!isInsideWorktreesDir(this.rootDir, realpathSync(worktreePath), settings)) {
+              safeToRemove = false;
+            }
+          } catch {
+            // Stat failed (path vanished mid-check) — nothing to remove; the prune/branch
+            // cleanup below is still safe to run.
+          }
+        }
+        if (!safeToRemove) {
+          // A real/registered/out-of-bounds/owned/symlinked path we must not touch. Surface as a
+          // cleanup failure so the operator-recovery path handles it instead of silently
+          // claiming success (and never `rm -rf`-ing something we shouldn't).
+          await this.store.logEntry(
+            taskId,
+            `Refused stale-path cleanup — path is not a safe orphan (registered=${stillRegistered}, owner=${activeOwner ?? "none"})`,
+            worktreePath,
+          );
+          return false;
+        }
         try {
           await execAsync("git worktree prune", {
             cwd: this.rootDir,
@@ -14277,11 +14316,13 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         }
         // An orphan directory ("is not a working tree") won't be removed by prune — git
         // doesn't track it. Force-remove the leftover dir so the colliding name is free.
-        try {
-          await rm(worktreePath, { recursive: true, force: true });
-        } catch (rmErr: unknown) {
-          const rmMsg = rmErr instanceof Error ? rmErr.message : String(rmErr);
-          executorLog.warn(`${taskId}: failed to remove orphan worktree directory ${worktreePath}: ${rmMsg}`);
+        if (existsSync(worktreePath)) {
+          try {
+            await rm(worktreePath, { recursive: true, force: true });
+          } catch (rmErr: unknown) {
+            const rmMsg = rmErr instanceof Error ? rmErr.message : String(rmErr);
+            executorLog.warn(`${taskId}: failed to remove orphan worktree directory ${worktreePath}: ${rmMsg}`);
+          }
         }
         try {
           await execAsync(`git branch -D "${branch}"`, { cwd: this.rootDir });

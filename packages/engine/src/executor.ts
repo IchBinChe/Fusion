@@ -6701,6 +6701,20 @@ export class TaskExecutor {
             const todoBenign = `Workflow graph run ended during ${pauseProvenance} with task re-queued to todo — benign, cleared for normal scheduling`;
             executorLog.log(`${task.id}: ${todoBenign}`);
             await this.store.logEntry(task.id, todoBenign, undefined, this.getRunContextFor(task.id));
+            // FNXC:WorkflowLifecycle 2026-06-20: reconcile a stale persisted
+            // failure with the benign reclassification. A pause-abort parked
+            // `status:"failed"` on an earlier non-todo observation stays
+            // dispatchable (scheduler.ts filters column+paused, NOT status) and
+            // re-enters this branch in `todo`; `recoverPausedAbortFailures` that
+            // would clear it is suppressed during global/engine pause
+            // (self-healing.ts). Leaving the row failed contradicts the benign
+            // log: the board shows it failed AND the deferred failure
+            // notification fires (notification-service fire-time check sees
+            // status === "failed"). Clear status/error here so the row matches
+            // the log and the pending notification is suppressed at dispatch.
+            if (live.status != null || live.error != null) {
+              await this.store.updateTask(task.id, { status: null, error: null }, this.getRunContextFor(task.id));
+            }
             await this.persistTokenUsage(task.id);
             return;
           }

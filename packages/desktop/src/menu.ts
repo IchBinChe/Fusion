@@ -23,6 +23,10 @@ function runMenuAction(label: string, action: (() => Promise<void> | void) | und
 }
 
 function buildConnectionSubmenu(options: AppMenuOptions): MenuItemConstructorOptions {
+  /*
+   * FNXC:DesktopConnectionMenu 2026-06-21-02:04:
+   * Desktop users need menu-level controls to start the embedded local server, shut it down, or connect to a remote server without returning to first-run setup.
+   */
   return {
     label: "Connection",
     submenu: [

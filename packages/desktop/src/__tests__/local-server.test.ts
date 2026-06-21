@@ -38,6 +38,10 @@ const mocks = vi.hoisted(() => {
   const centralCore = {
     init: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
+    getProjectByPath: vi.fn(async () => ({ id: "project-1", name: "Repo", path: "/repo", status: "active" })),
+    listProjects: vi.fn(async () => []),
+    registerProject: vi.fn(async ({ path, name }: { path: string; name: string }) => ({ id: "project-1", name, path, status: "initializing" })),
+    updateProject: vi.fn(async (id: string, patch: Record<string, unknown>) => ({ id, name: "Repo", path: "/repo", status: patch.status ?? "active" })),
   };
   const engine = { id: "engine-1" };
   const engineMap = new Map([["project-1", engine]]);
@@ -46,6 +50,7 @@ const mocks = vi.hoisted(() => {
     startReconciliation: vi.fn(),
     stopAll: vi.fn(async () => undefined),
     getAllEngines: vi.fn(() => engineMap),
+    ensureEngine: vi.fn(async () => engine),
     onProjectAccessed: vi.fn(),
   };
 
@@ -97,6 +102,8 @@ describe("DesktopLocalServerManager", () => {
     expect(manager.getPort()).toBe(4545);
     expect(manager.getState().status).toBe("ready");
     expect(mocks.engineManager.startAll).toHaveBeenCalledTimes(1);
+    expect(mocks.centralCore.getProjectByPath).toHaveBeenCalledWith("/repo");
+    expect(mocks.engineManager.ensureEngine).toHaveBeenCalledWith("project-1");
     expect(mocks.createServer).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -128,6 +135,37 @@ describe("DesktopLocalServerManager", () => {
 
     await expect(manager.start()).rejects.toThrow("init failed");
     expect(manager.getState()).toMatchObject({ status: "error", error: "init failed" });
+  });
+
+  it("cleans up engine and central core when server creation fails", async () => {
+    mocks.createServer.mockImplementationOnce(() => {
+      throw new Error("server failed");
+    });
+    const { DesktopLocalServerManager } = await import("../local-server.ts");
+    const manager = new DesktopLocalServerManager("/repo");
+
+    await expect(manager.start()).rejects.toThrow("server failed");
+
+    expect(mocks.engineManager.stopAll).toHaveBeenCalled();
+    expect(mocks.centralCore.close).toHaveBeenCalled();
+    expect(mocks.store.close).toHaveBeenCalled();
+    expect(manager.getState()).toMatchObject({ status: "error", error: "server failed" });
+  });
+
+  it("registers an active runtime-root project when no projects exist", async () => {
+    mocks.centralCore.getProjectByPath.mockResolvedValueOnce(undefined);
+    const { DesktopLocalServerManager } = await import("../local-server.ts");
+    const manager = new DesktopLocalServerManager("/repo");
+
+    await manager.start();
+
+    expect(mocks.centralCore.registerProject).toHaveBeenCalledWith({
+      path: "/repo",
+      name: "repo",
+      isolationMode: "in-process",
+    });
+    expect(mocks.centralCore.updateProject).toHaveBeenCalledWith("project-1", { status: "active" });
+    expect(mocks.engineManager.ensureEngine).toHaveBeenCalledWith("project-1");
   });
 
   it("returns existing runtime when start is called twice", async () => {

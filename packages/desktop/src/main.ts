@@ -238,12 +238,16 @@ export async function initializeApp(): Promise<void> {
     onChangeLaunchMode: async () => {
       await resetLaunchModeAndReload(createdWindow);
     },
+    /*
+     * FNXC:DesktopRuntimeMode 2026-06-21-02:04:
+     * Menu-driven local/remote switching must only persist local mode after the embedded runtime starts successfully; shutdown stops the local server without rewriting the launch-mode preference.
+     */
     onStartLocalRuntime: async () => {
       if (!localRuntimeManager) return;
-      currentRemoteLaunch = null;
-      currentDesktopLaunchMode = "local";
       localRuntimeStartupAttempted = false;
       await startLocalRuntimeOnce();
+      currentRemoteLaunch = null;
+      currentDesktopLaunchMode = "local";
       await saveDesktopLaunchMode("local");
       createdWindow.webContents.reload();
     },

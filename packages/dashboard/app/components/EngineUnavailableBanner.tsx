@@ -25,11 +25,10 @@ export function EngineUnavailableBanner({ isVisible }: EngineUnavailableBannerPr
         <p className="engine-unavailable-banner__body">
           <Trans
             i18nKey="app:engineUnavailable.body"
-            defaults="This dashboard can display project data, but task automation will not run until you restart Fusion with the engine. Stop this server and run <sourceCmd>pnpm local</sourceCmd> from a source checkout, or <cliCmd>fn dashboard</cliCmd> from an installed CLI. On older source checkouts, use <legacyCmd>pnpm local -- --engine</legacyCmd>."
+            defaults="This dashboard can display project data, but task automation will not run until you restart Fusion with the engine. Stop this server and run <sourceCmd>pnpm local</sourceCmd> from a source checkout, or <cliCmd>fn dashboard</cliCmd> from an installed CLI."
             components={{
               sourceCmd: <code />,
               cliCmd: <code />,
-              legacyCmd: <code />,
             }}
           />
         </p>

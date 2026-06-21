@@ -1,6 +1,9 @@
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import type { Server } from "node:http";
+
+import { ensureDesktopRuntimeProject } from "./engine-runtime.js";
+
 type TaskStoreLike = {
   init(): Promise<void>;
   watch(): Promise<void>;
@@ -61,11 +64,16 @@ export class DesktopLocalServerManager {
        * This legacy desktop local server path still needs to launch project engines so every embedded desktop server follows the same executable-by-default contract.
        */
       const centralCore = new CentralCore();
-      await centralCore.init();
       const engineManager = new ProjectEngineManager(centralCore);
+      cleanup = async () => {
+        await engineManager.stopAll();
+        await centralCore.close?.();
+      };
+      await centralCore.init();
+      const rootProject = await ensureDesktopRuntimeProject(centralCore, this.rootDir);
       await engineManager.startAll();
       engineManager.startReconciliation();
-      const primaryEngine = [...engineManager.getAllEngines().values()][0];
+      const primaryEngine = await engineManager.ensureEngine(rootProject.id);
       const app = createServer(store as never, {
         engine: primaryEngine,
         engineManager,
@@ -73,10 +81,6 @@ export class DesktopLocalServerManager {
         onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
       });
       server = app.listen(0);
-      cleanup = async () => {
-        await engineManager.stopAll();
-        await centralCore.close?.();
-      };
 
       await Promise.race([
         once(server, "listening"),

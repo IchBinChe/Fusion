@@ -2380,7 +2380,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     if (isTTY && tui) {
       // Determine engine mode
       const settings = await store.getSettings();
-      const engineMode = noEngine ? "dev" : settings.enginePaused ? "paused" : "active";
+      const engineMode = noEngine ? "no-engine" : settings.enginePaused ? "paused" : "active";
       const startupDurationMs = Date.now() - dashboardStartedAt;
 
       const systemInfo: SystemInfo = {
@@ -2905,7 +2905,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       tui.log(`Dashboard started at ${baseUrl}`);
       if (engineMode === "active") {
         tui.log("AI engine active");
-      } else if (engineMode === "dev") {
+      } else if (engineMode === "no-engine") {
         tui.log("AI engine disabled (--no-engine)");
       } else {
         tui.log("AI engine paused");

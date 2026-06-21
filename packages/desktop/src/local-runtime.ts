@@ -2,6 +2,8 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { ensureDesktopRuntimeProject } from "./engine-runtime.js";
+
 export type RuntimeSource = "embedded-local" | "external-cli" | "none";
 export type RuntimeState = "stopped" | "starting" | "running" | "error";
 
@@ -41,7 +43,7 @@ async function createStoreDefault(rootDir: string): Promise<TaskStoreLike> {
   return new TaskStore(rootDir) as TaskStoreLike;
 }
 
-async function createDashboardServerDefault(store: TaskStoreLike, _rootDir: string): Promise<{ server: Server; cleanup: RuntimeCleanup }> {
+async function createDashboardServerDefault(store: TaskStoreLike, rootDir: string): Promise<{ server: Server; cleanup: RuntimeCleanup }> {
   const { CentralCore } = await import("@fusion/core");
   const { createServer } = await import("@fusion/dashboard");
   const { ProjectEngineManager } = await import("@fusion/engine");
@@ -51,25 +53,33 @@ async function createDashboardServerDefault(store: TaskStoreLike, _rootDir: stri
    * Embedded desktop local mode should be an executable Fusion node, not a dashboard-only shell. Start all registered project engines and pass the manager to the API server so project-scoped routes can start newly accessed engines.
    */
   const centralCore = new CentralCore();
-  await centralCore.init();
   const engineManager = new ProjectEngineManager(centralCore);
-  await engineManager.startAll();
-  engineManager.startReconciliation();
-  const primaryEngine = [...engineManager.getAllEngines().values()][0];
-  const app = createServer(store as never, {
-    engine: primaryEngine,
-    engineManager,
-    centralCore,
-    onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
-  });
-
-  return {
-    server: app.listen(0),
-    cleanup: async () => {
-      await engineManager.stopAll();
-      await centralCore.close?.();
-    },
+  const cleanup = async () => {
+    await engineManager.stopAll();
+    await centralCore.close?.();
   };
+
+  try {
+    await centralCore.init();
+    const rootProject = await ensureDesktopRuntimeProject(centralCore, rootDir);
+    await engineManager.startAll();
+    engineManager.startReconciliation();
+    const primaryEngine = await engineManager.ensureEngine(rootProject.id);
+    const app = createServer(store as never, {
+      engine: primaryEngine,
+      engineManager,
+      centralCore,
+      onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
+    });
+
+    return {
+      server: app.listen(0),
+      cleanup,
+    };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }
 
 function parsePort(raw: string | undefined): number | undefined {

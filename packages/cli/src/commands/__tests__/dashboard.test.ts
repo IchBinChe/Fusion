@@ -2229,6 +2229,15 @@ describe("runDashboard — --no-engine mode", () => {
     });
   });
 
+  it("does not start engine components when dev mode is launched with noEngine", async () => {
+    const { TriageProcessor, TaskExecutor, Scheduler } = await import("@fusion/engine");
+    await runDashboard(0, { open: false, dev: true, noEngine: true });
+
+    expect(TriageProcessor).not.toHaveBeenCalled();
+    expect(TaskExecutor).not.toHaveBeenCalled();
+    expect(Scheduler).not.toHaveBeenCalled();
+  });
+
   it("shows 'AI engine: ✓ active' when not in dev mode", async () => {
     await runDashboard(0, { open: false });
 

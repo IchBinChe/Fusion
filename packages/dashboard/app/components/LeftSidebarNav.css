@@ -87,12 +87,12 @@ The collapse toggle lives in the footer above Settings instead of floating on th
 }
 
 /*
-FNXC:DashboardStyling 2026-06-20-20:56:
-The active sidebar item must use the defined --status-todo-bg token so the dashboard CSS token-validity gate stays green. FN-6809 replaces the undefined --todo-bg reference without changing the rendered todo status treatment.
+FNXC:DashboardStyling 2026-06-21-11:16:
+The left sidebar active highlight and resize accent must use the per-theme --accent token so the selected state reflects the active color theme instead of the workflow todo-status blue. FN-6830 keeps this requirement in the base sidebar rules so every theme inherits it without per-theme overrides.
 */
 .left-sidebar-nav__item--active {
-  background: var(--status-todo-bg);
-  color: var(--todo);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
 }
 
 .left-sidebar-nav__icon-wrap {
@@ -161,7 +161,7 @@ The narrower resizable sidebar must preserve row rhythm by truncating labels ins
 
 .left-sidebar-nav__resize-handle:hover::after,
 .left-sidebar-nav__resize-handle:focus-visible::after {
-  background: var(--todo);
+  background: var(--accent);
 }
 
 .left-sidebar-nav__resize-handle:focus-visible {

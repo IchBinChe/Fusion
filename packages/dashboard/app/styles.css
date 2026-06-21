@@ -122,6 +122,9 @@ html {
   --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   /* FNXC:DashboardStyling 2026-06-19-05:50: FN-6703 defines the xs font-size token so tokenized mobile mailbox tabs satisfy the dashboard CSS token-validity guard without relying on an undefined fallback. */
   --font-size-xs: 0.8rem;
+  /* FNXC:DashboardStyling 2026-06-21-11:24: Dashboard components must use defined typography tokens so the raw CSS token-validity gate catches real missing custom properties instead of shared type-scale omissions. */
+  --font-size-base: 1rem;
+  --line-height-tight: 1.25;
 
   /* Spacing Scale */
   --space-xs: 4px;

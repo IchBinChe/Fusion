@@ -61,6 +61,21 @@ test("deriveBudgetMs: clamps to floor and ceiling", () => {
   );
 });
 
+test("deriveBudgetMs: shard floor pins heavy slices above the false-kill window", () => {
+  // FNXC:TestInfrastructure 2026-06-20-21:52:
+  // Regression guard for the 5min -> 15min shard-floor raise. A value whose
+  // expected×multiplier lands in the *old* un-clamped window (300s..900s) must
+  // now clamp UP to the 15min floor. 150s × 3.5 = 525s, which was returned
+  // verbatim under the old 5min floor but is below the new one. Pinning the
+  // concrete floor value here means an accidental revert to 5min fails loudly
+  // instead of silently re-tightening the engine/core slices into SIGKILLs.
+  assert.equal(CLASS_BUDGET_BANDS.shard.floor, 15 * 60_000);
+  assert.equal(
+    deriveBudgetMs({ klass: "shard", expectedDurationMs: 150_000, timingsFresh: true }),
+    CLASS_BUDGET_BANDS.shard.floor,
+  );
+});
+
 test("deriveBudgetMs: unknown class falls back to the changed band", () => {
   assert.equal(deriveBudgetMs({ klass: "nonexistent" }), CLASS_BUDGET_BANDS.changed.ceiling);
 });

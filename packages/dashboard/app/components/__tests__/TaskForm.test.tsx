@@ -27,6 +27,7 @@ vi.mock("../../api", () => ({
   }),
   // U6/R3: TaskForm now fetches whole workflows (not steps) for the picker.
   fetchWorkflows: vi.fn().mockResolvedValue([]),
+  fetchWorkflowOptionalSteps: vi.fn().mockResolvedValue([]),
   fetchGlobalSettings: vi.fn().mockResolvedValue({}),
   refineText: vi.fn().mockResolvedValue("Refined text"),
   getRefineErrorMessage: vi.fn((err) => err?.message || "Failed to refine text. Please try again."),

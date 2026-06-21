@@ -31,6 +31,7 @@ vi.mock("../../api", () => ({
   // U6/R3: TaskForm's picker fetches whole workflows; the per-step
   // fetchWorkflowSteps + post-create selectTaskWorkflow flow is gone.
   fetchWorkflows: vi.fn().mockResolvedValue([]),
+  fetchWorkflowOptionalSteps: vi.fn().mockResolvedValue([]),
   fetchGlobalSettings: vi.fn().mockResolvedValue({}),
   fetchGitBranches: vi.fn().mockResolvedValue([]),
   fetchAgents: vi.fn().mockResolvedValue([]),
@@ -236,6 +237,89 @@ describe("NewTaskModal", () => {
           description: "Test description",
         }),
       );
+    });
+  });
+
+  describe("optional workflow steps (U4)", () => {
+    const WF = {
+      id: "wf-x",
+      name: "Custom",
+      kind: "workflow" as const,
+      description: "",
+      ir: { version: "v1" as const, name: "Custom", nodes: [], edges: [] },
+      layout: {},
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const STEP = {
+      templateId: "browser-verification",
+      name: "Browser Verification",
+      description: "Verify web application functionality using browser automation",
+      icon: "globe",
+      phase: "pre-merge" as const,
+      defaultOn: false,
+    };
+
+    it("includes a toggled-on optional step in the create payload", async () => {
+      const { fetchWorkflows, fetchWorkflowOptionalSteps } = await import("../../api");
+      vi.mocked(fetchWorkflows).mockResolvedValue([WF]);
+      vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([STEP]);
+
+      const { props } = renderNewTaskModal();
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+        target: { value: "Verify the login page" },
+      });
+      fireEvent.change(await screen.findByTestId("task-workflow-select"), { target: { value: "wf-x" } });
+
+      const trigger = await screen.findByTestId("task-optional-steps-trigger");
+      expect(trigger).toHaveTextContent("Steps: none");
+      fireEvent.click(trigger);
+      fireEvent.click(await screen.findByTestId("wf-optional-steps-dropdown-option-browser-verification"));
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+      await waitFor(() => {
+        expect(props.onCreateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ enabledWorkflowSteps: ["browser-verification"] }),
+        );
+      });
+    });
+
+    it("seeds defaultOn steps as pre-enabled and submits them without toggling", async () => {
+      const { fetchWorkflows, fetchWorkflowOptionalSteps } = await import("../../api");
+      vi.mocked(fetchWorkflows).mockResolvedValue([WF]);
+      vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([{ ...STEP, defaultOn: true }]);
+
+      const { props } = renderNewTaskModal();
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "task" } });
+      fireEvent.change(await screen.findByTestId("task-workflow-select"), { target: { value: "wf-x" } });
+
+      const trigger = await screen.findByTestId("task-optional-steps-trigger");
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: 1 selected"));
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+      await waitFor(() => {
+        expect(props.onCreateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ enabledWorkflowSteps: ["browser-verification"] }),
+        );
+      });
+    });
+
+    it("renders no dropdown and omits enabledWorkflowSteps for 'No workflow'", async () => {
+      const { fetchWorkflows, fetchWorkflowOptionalSteps } = await import("../../api");
+      vi.mocked(fetchWorkflows).mockResolvedValue([WF]);
+      vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([STEP]);
+
+      const { props } = renderNewTaskModal();
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "task" } });
+      // "No workflow" → null selection → no optional-steps fetch, no dropdown.
+      fireEvent.change(await screen.findByTestId("task-workflow-select"), { target: { value: "__none__" } });
+
+      expect(screen.queryByTestId("task-optional-steps-trigger")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+      await waitFor(() => {
+        const call = vi.mocked(props.onCreateTask).mock.calls.at(-1)?.[0];
+        expect(call).not.toHaveProperty("enabledWorkflowSteps");
+      });
     });
   });
 

@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, type GlobalSettings, type Task, type TaskPriority, type Settings, type WorkflowDefinition } from "@fusion/core";
+import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, type GlobalSettings, type Task, type TaskPriority, type Settings, type WorkflowDefinition, type ResolvedWorkflowOptionalStep } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
-import { fetchModels, fetchSettings, fetchWorkflows, refineText, getRefineErrorMessage, updateGlobalSettings, fetchGlobalSettings, fetchGitBranches, type RefinementType, type ModelInfo, type NodeInfo } from "../api";
+import { fetchModels, fetchSettings, fetchWorkflows, fetchWorkflowOptionalSteps, refineText, getRefineErrorMessage, updateGlobalSettings, fetchGlobalSettings, fetchGitBranches, type RefinementType, type ModelInfo, type NodeInfo } from "../api";
+import { WorkflowOptionalStepsDropdown } from "./WorkflowOptionalStepsDropdown";
 import { applyPresetToSelection, getRecommendedPresetForSize } from "../utils/modelPresets";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { NodeHealthDot } from "./NodeHealthDot";
@@ -99,6 +100,11 @@ export interface TaskFormProps {
   // edit-mode workflow management lives in the task detail Workflow tab.
   selectedWorkflowId?: string | null;
   onWorkflowIdChange?: (workflowId: string | null) => void;
+  // Optional workflow steps the task can opt into. TaskForm fetches + seeds these
+  // from the selected workflow's `defaultOn` and lifts the enabled set to the
+  // parent (which puts it in the create payload). Only active in create mode.
+  enabledWorkflowSteps?: string[];
+  onEnabledWorkflowStepsChange?: (ids: string[]) => void;
 
   // Attachments
   pendingImages: PendingImage[];
@@ -176,6 +182,8 @@ export function TaskForm({
   onSelectedPresetIdChange,
   selectedWorkflowId,
   onWorkflowIdChange,
+  enabledWorkflowSteps,
+  onEnabledWorkflowStepsChange,
   pendingImages,
   onImagesChange,
   tasks,
@@ -235,6 +243,8 @@ export function TaskForm({
   // U6/R3: full workflow definitions for the picker (fragments excluded below).
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [workflowsLoading, setWorkflowsLoading] = useState(false);
+  const [optionalSteps, setOptionalSteps] = useState<ResolvedWorkflowOptionalStep[]>([]);
+  const [optionalStepsLoading, setOptionalStepsLoading] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [baseBranchOptions, setBaseBranchOptions] = useState<string[]>([]);
   const [baseBranchCustomMode, setBaseBranchCustomMode] = useState(false);
@@ -284,6 +294,56 @@ export function TaskForm({
       .then((nextGlobalSettings) => setGlobalSettings(nextGlobalSettings))
       .catch(() => setGlobalSettings(null));
   }, [isActive, projectId, onWorkflowIdChange]);
+
+  // Optional workflow steps for the currently-selected workflow (create mode only).
+  // `null` selection ("No workflow") → no steps; `undefined` → project default.
+  const effectiveOptionalWorkflowId =
+    selectedWorkflowId === null
+      ? null
+      : (selectedWorkflowId ?? settings?.defaultWorkflowId ?? null);
+  useEffect(() => {
+    if (!onWorkflowIdChange) return; // edit mode: optional steps are managed in the Workflow tab.
+    let cancelled = false;
+    setOptionalSteps([]);
+    if (!effectiveOptionalWorkflowId) {
+      onEnabledWorkflowStepsChange?.([]);
+      return;
+    }
+    setOptionalStepsLoading(true);
+    fetchWorkflowOptionalSteps(effectiveOptionalWorkflowId, projectId)
+      .then((steps) => {
+        if (cancelled) return;
+        setOptionalSteps(steps);
+        // Re-seed the enabled set from each step's defaultOn on every workflow change.
+        onEnabledWorkflowStepsChange?.(steps.filter((s) => s.defaultOn).map((s) => s.templateId));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOptionalSteps([]);
+        onEnabledWorkflowStepsChange?.([]);
+      })
+      .finally(() => {
+        if (!cancelled) setOptionalStepsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // onEnabledWorkflowStepsChange intentionally omitted: a new identity each render
+    // must not re-trigger the fetch/re-seed (would clobber user toggles).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onWorkflowIdChange, effectiveOptionalWorkflowId, projectId]);
+
+  const enabledOptionalStepIds = enabledWorkflowSteps ?? [];
+  const toggleOptionalStep = useCallback(
+    (templateId: string) => {
+      const current = enabledWorkflowSteps ?? [];
+      const next = current.includes(templateId)
+        ? current.filter((id) => id !== templateId)
+        : [...current, templateId];
+      onEnabledWorkflowStepsChange?.(next);
+    },
+    [enabledWorkflowSteps, onEnabledWorkflowStepsChange],
+  );
 
   const availablePresets = settings?.modelPresets || [];
   const selectedPreset = availablePresets.find((preset) => preset.id === selectedPresetId);
@@ -1340,6 +1400,23 @@ export function TaskForm({
           <small className="workflow-select-help" data-testid="task-workflow-help">
             {t("taskForm.workflowHelp", "The selected workflow's steps run automatically around this task's execution.")}
           </small>
+          {optionalStepsLoading ? (
+            <small className="workflow-optional-steps-loading" data-testid="task-optional-steps-loading">
+              {t("taskForm.optionalStepsLoading", "Loading optional steps…")}
+            </small>
+          ) : (
+            optionalSteps.length > 0 && (
+              <div className="task-form-optional-steps" data-testid="task-form-optional-steps">
+                <WorkflowOptionalStepsDropdown
+                  steps={optionalSteps}
+                  enabledIds={enabledOptionalStepIds}
+                  onToggle={toggleOptionalStep}
+                  disabled={disabled}
+                  triggerTestId="task-optional-steps-trigger"
+                />
+              </div>
+            )
+          )}
         </div>
       )}
 

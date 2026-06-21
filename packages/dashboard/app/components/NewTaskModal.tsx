@@ -61,6 +61,9 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   // `null` = explicit "No workflow", `string` = a specific workflow. Materialized
   // atomically at create time via the `workflowId` create parameter.
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null | undefined>(undefined);
+  // Optional workflow steps the user opted into; TaskForm fetches + seeds these
+  // from the selected workflow's defaultOn and lifts the enabled set up here.
+  const [enabledWorkflowSteps, setEnabledWorkflowSteps] = useState<string[]>([]);
   const [reviewLevel, setReviewLevel] = useState<number | undefined>(undefined);
   const [autoMerge, setAutoMerge] = useState<boolean | undefined>(undefined);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
@@ -241,6 +244,9 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
         //  - null      → explicit "No workflow" (store skips default materialization)
         //  - string    → that workflow, materialized atomically at create time.
         ...(selectedWorkflowId !== undefined ? { workflowId: selectedWorkflowId } : {}),
+        // Optional steps the user toggled on (omit when none so the store keeps its
+        // default materialization behavior).
+        ...(enabledWorkflowSteps.length ? { enabledWorkflowSteps } : {}),
         ...(selectedAgentId ? { assignedAgentId: selectedAgentId } : {}),
         modelPresetId: presetMode === "preset" ? selectedPresetId || undefined : undefined,
         modelProvider: executorModel && executorSlashIdx !== -1 ? executorModel.slice(0, executorSlashIdx) : undefined,
@@ -318,7 +324,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, enabledWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -506,6 +512,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             onSelectedPresetIdChange={setSelectedPresetId}
             selectedWorkflowId={selectedWorkflowId}
             onWorkflowIdChange={setSelectedWorkflowId}
+            enabledWorkflowSteps={enabledWorkflowSteps}
+            onEnabledWorkflowStepsChange={setEnabledWorkflowSteps}
             pendingImages={pendingImages}
             onImagesChange={setPendingImages}
             tasks={tasks}

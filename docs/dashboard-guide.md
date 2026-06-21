@@ -1280,7 +1280,7 @@ Non-Command-Center dashboard CSS uses `--text` as the canonical primary text tok
 
 ### Theme system
 
-Dark/light modes via `data-theme`; 57 color themes via `data-color-theme` (lazy-loaded from `app/public/theme-data.css`), including the Shadcn zinc-neutral theme with an orange default highlight/accent. Air is the minimal, borderless, paper-like preset with near-monochrome tokens and CSS-only chrome flattening.
+Dark/light modes via `data-theme`; 66 color themes via `data-color-theme` (lazy-loaded from `app/public/theme-data.css`), including the Shadcn zinc-neutral theme with an orange default highlight/accent and its color family: Shadcn Blue/Green/Red/Purple/Pink/Orange/Yellow, Shadcn Mono (grayscale with red accent), and Shadcn Black (pure black and white). Air is the minimal, borderless, paper-like preset with near-monochrome tokens and CSS-only chrome flattening.
 
 - **Base tokens** (`--bg`, `--surface`, etc.) — redefine in `:root`, `[data-theme="light"]`, and every theme block.
 - **Semantic tokens** (`--autopilot-pulse`, `--event-error-text`, `--badge-mission-*`, `--fab-*`) — `:root` + `[data-theme="light"]` only; no per-color-theme overrides.

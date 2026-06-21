@@ -4189,12 +4189,11 @@ export class TaskExecutor {
       // no FUSION_HEADLESS, so a board task can only ever park (a human can answer
       // via the await-input card button), never silently skip approval. When such
       // an entrypoint is added, it sets `unattended` here.
-      const unattendedRun = false;
-      if (unattendedRun) {
-        this.graphUnattendedRuns.add(task.id);
-      } else {
-        this.graphUnattendedRuns.delete(task.id);
-      }
+      // No entrypoint sets this today, so clear any stale entry; a board run never
+      // sets FUSION_HEADLESS. When an LFG/pipeline/disable-model-invocation
+      // entrypoint is added, call `this.graphUnattendedRuns.add(task.id)` here and
+      // the finally below clears it.
+      this.graphUnattendedRuns.delete(task.id);
 
       const runner = new WorkflowGraphTaskRunner({
         store: {
@@ -4299,6 +4298,20 @@ export class TaskExecutor {
       }
       return true;
     } finally {
+      // FNXC:WorkflowGraph 2026-06-20-23:35:
+      // Terminate child agents spawned by this graph run's coding-mode skill steps.
+      // U8 registered fn_spawn_agent for coding-mode steps, but the graph path
+      // returns from execute() at the graphOwned early-return — BEFORE execute()'s
+      // outer finally that calls terminateAllChildren. Without this, graph-step
+      // children orphan their sessions/worktrees, and their ids accumulate in the
+      // per-parent spawn budget (spawnedAgents[taskId]), starving later steps'
+      // fan-out (e.g. ce-code-review's reviewer panel). Mirror the non-graph
+      // cleanup; run it before the per-run graph bookkeeping below.
+      try {
+        await this.terminateAllChildren(task.id);
+      } catch (err) {
+        executorLog.warn(`terminateAllChildren failed for graph task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       this.graphRouting.delete(task.id);
       // Clear per-run step-inversion pins (KTD-8: pinned only for the run's life).
       this.graphStepSessionPinned.delete(task.id);
@@ -12709,6 +12722,18 @@ You have access to the file system to review changes.${verdictBlock}`;
           ...(effectiveSkillSelection?.sessionPurpose ? { sessionPurpose: effectiveSkillSelection.sessionPurpose } : { sessionPurpose: "executor" }),
           requestedSkillNames: mergedNames,
         };
+      }
+      // FNXC:WorkflowSteps 2026-06-20-23:35:
+      // A named skill with no discovery path silently degrades to the role-fallback
+      // skill (the exact pre-fix bug this change exists to kill). If the injected
+      // FUSION_CE_SKILLS_DIR never arrived (degraded/throwing plugin, missing install
+      // dir), warn loudly so an env-threading regression is visible on a board run
+      // instead of failing silent with a green hand-fed test.
+      if (workflowStep.skillName && workflowStep.skillName.trim() && !ceSkillsDir) {
+        await this.store.logEntry(
+          task.id,
+          `[skill-load] Workflow step '${workflowStep.name}' requests skill '${workflowStep.skillName}' but FUSION_CE_SKILLS_DIR is unset — the skill cannot be discovered; the step runs with role-fallback skills only.`,
+        );
       }
       const additionalSkillPaths = ceSkillsDir ? [ceSkillsDir] : undefined;
 

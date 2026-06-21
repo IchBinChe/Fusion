@@ -38,6 +38,7 @@ function visible(input: WorkflowStepInput) {
     prompt: input.mode === "script" ? undefined : (input.prompt ?? ""),
     scriptName: input.scriptName,
     toolMode: input.mode === "script" ? undefined : input.toolMode,
+    skillName: input.mode === "script" ? undefined : input.skillName,
     modelProvider: input.modelProvider,
     modelId: input.modelId,
   };
@@ -52,6 +53,7 @@ function visibleStep(s: WorkflowStep) {
     prompt: s.mode === "script" ? undefined : (s.prompt ?? ""),
     scriptName: s.mode === "script" ? s.scriptName : undefined,
     toolMode: s.mode === "script" ? undefined : (s.toolMode ?? "readonly"),
+    skillName: s.mode === "script" ? undefined : s.skillName,
     modelProvider: s.mode === "prompt" ? s.modelProvider : undefined,
     modelId: s.mode === "prompt" ? s.modelId : undefined,
   };
@@ -87,6 +89,18 @@ describe("stepsToWorkflowIr — round-trip parity (R4/KTD-2)", () => {
         toolMode: "readonly",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
+        phase: "pre-merge",
+      }),
+      // U1 / INVERSION CONTRACT: a skill-executor step (pre-merge, grouped with
+      // the other pre-merge steps so declaration order matches compiled order)
+      // must round-trip its skillName through stepInputToNode → nodeToStepInput.
+      step({
+        id: "WS-6",
+        name: "CE skill step",
+        mode: "prompt",
+        gateMode: "advisory",
+        prompt: "Invoke the skill",
+        skillName: "compound-engineering:ce-work",
         phase: "pre-merge",
       }),
       step({

@@ -339,6 +339,29 @@ const deepLaneEnabled = process.env.FUSION_DASHBOARD_DEEP === "1";
 const deepAppInclude = deepLaneEnabled ? ["app/**/*.test.{ts,tsx}"] : [];
 const deepApiInclude = deepLaneEnabled ? ["src/**/*.test.{ts,tsx}"] : [];
 
+// Footgun guard: with the deep lanes gated off, selecting one explicitly
+// (`vitest run --project dashboard-app`) matches zero files and exits green in
+// milliseconds — a silent no-op that reads as a passing run. Warn loudly so a
+// manual invocation isn't mistaken for coverage. Exact token match avoids firing
+// on the curated `dashboard-app-*` shard projects. The deep scripts set
+// FUSION_DASHBOARD_DEEP=1, so this never fires through the intended entry points.
+if (!deepLaneEnabled) {
+  const selectedProjects = process.argv.flatMap((arg, index) =>
+    arg === "--project"
+      ? [process.argv[index + 1]]
+      : arg.startsWith("--project=")
+        ? [arg.slice("--project=".length)]
+        : [],
+  );
+  if (selectedProjects.some((name) => name === "dashboard-app" || name === "dashboard-api")) {
+    console.warn(
+      "[dashboard/vitest] --project dashboard-app/dashboard-api selected without FUSION_DASHBOARD_DEEP=1: " +
+        "these deep lanes are empty by default and will match zero test files. " +
+        "Use the test:app / test:api / test:deep / test:build scripts, which set the flag.",
+    );
+  }
+}
+
 export const dashboardQualityProjectGlobs = {
   "dashboard-app-quality-foundation-api": {
     include: qualityAppFoundationApiShardTests,

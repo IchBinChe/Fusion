@@ -1976,7 +1976,6 @@ describe("TaskChatTab", () => {
     ["in-progress task without an assigned or checked-out agent", makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })],
     ["paused in-progress task", makeTask({ column: "in-progress", status: "queued", paused: true })],
     ["user-paused in-progress task", makeTask({ column: "in-progress", status: "queued", userPaused: true })],
-    ["in-review task without an assigned or checked-out agent", makeTask({ column: "in-review", status: "reviewing", assignedAgentId: undefined, checkedOutBy: undefined })],
     ["paused in-review task", makeTask({ column: "in-review", status: "reviewing", paused: true })],
     ["user-paused in-review task", makeTask({ column: "in-review", status: "reviewing", userPaused: true })],
   ])("keeps the composer sendable with idle guidance for %s", (_label, task) => {
@@ -1984,6 +1983,39 @@ describe("TaskChatTab", () => {
 
     expectIdleSessionHint();
     expectComposerSendableAfterDraft();
+  });
+
+  it.each(["reviewing", "merging", "merging-fix", "fixing"])(
+    "treats an actively-reviewing in-review task as an active session even without an assignment (ephemeral mode): %s status",
+    (status) => {
+      // A reviewer/merger runs ephemerally with no assignedAgentId/checkedOutBy,
+      // so an in-review task in an active review/merge status must NOT show the
+      // idle "no agent is working" hint.
+      render(
+        <TaskChatTab
+          task={makeTask({ column: "in-review", status, assignedAgentId: undefined, checkedOutBy: undefined })}
+          active
+          addToast={vi.fn()}
+          sessionLive={false}
+        />,
+      );
+
+      expectActiveSessionCopy();
+      expect(screen.getByLabelText("Message active agent session")).not.toBeDisabled();
+    },
+  );
+
+  it("keeps a null-status in-review task (awaiting human review) idle without an assignment", () => {
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-review", status: undefined, assignedAgentId: undefined, checkedOutBy: undefined })}
+        active
+        addToast={vi.fn()}
+        sessionLive={false}
+      />,
+    );
+
+    expectIdleSessionHint();
   });
 
   it.each([

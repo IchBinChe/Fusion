@@ -9,6 +9,7 @@ import {
   fragmentSeamConflicts,
   copyIrWithFreshIds,
   columnsOf,
+  optionalStepsOf,
   columnForY,
   bandTop,
   columnsToBandNodes,
@@ -1501,5 +1502,86 @@ describe("copyIrWithFreshIds", () => {
     // Values preserved by position (t1's offset stays with the remapped t1 key).
     const t1NewId = result.layout[`${newGroupId}::${template.nodes[0].id}`];
     expect(t1NewId).toEqual({ x: 10, y: 20 });
+  });
+});
+
+describe("optionalSteps round-trip (U2)", () => {
+  const v2WithOptional = (optionalSteps?: { templateId: string; defaultOn?: boolean }[]) =>
+    makeDef(
+      parseWorkflowIr({
+        version: "v2",
+        name: "wf-opt",
+        columns: [
+          { id: "triage", name: "Triage", traits: [] },
+          { id: "done", name: "Done", traits: [{ trait: "complete" }] },
+        ],
+        nodes: [
+          { id: "start", kind: "start", column: "triage" },
+          { id: "end", kind: "end", column: "done" },
+        ],
+        edges: [{ from: "start", to: "end" }],
+        ...(optionalSteps ? { optionalSteps } : {}),
+      }),
+    );
+
+  it("optionalStepsOf reads declarations from a v2 IR and returns a copy", () => {
+    const def = v2WithOptional([{ templateId: "browser-verification", defaultOn: true }]);
+    const read = optionalStepsOf(def);
+    expect(read).toEqual([{ templateId: "browser-verification", defaultOn: true }]);
+    // mutating the result does not mutate the source IR
+    read[0].defaultOn = false;
+    expect(optionalStepsOf(def)).toEqual([{ templateId: "browser-verification", defaultOn: true }]);
+  });
+
+  it("optionalStepsOf returns [] for v1 and for v2 without optionalSteps", () => {
+    const v1 = makeDef({
+      version: "v1",
+      name: "legacy",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "end", kind: "end" },
+      ],
+      edges: [{ from: "start", to: "end" }],
+    });
+    expect(optionalStepsOf(v1)).toEqual([]);
+    expect(optionalStepsOf(v2WithOptional())).toEqual([]);
+  });
+
+  it("flowToIr preserves optionalSteps across a full irToFlow round-trip", () => {
+    const def = v2WithOptional([{ templateId: "browser-verification", defaultOn: true }]);
+    const { nodes, edges } = irToFlow(def);
+    const { ir: out } = flowToIr("wf-opt", nodes, edges, columnsOf(def), [], [], optionalStepsOf(def));
+    expect((out as { optionalSteps?: unknown }).optionalSteps).toEqual([
+      { templateId: "browser-verification", defaultOn: true },
+    ]);
+  });
+
+  it("serializes as v2 when optionalSteps present but no custom columns/fields/settings", () => {
+    const { ir: out } = flowToIr(
+      "opt-only",
+      [
+        { id: "start", type: "workflowNode", position: { x: 0, y: 0 }, data: { kind: "start" } },
+        { id: "end", type: "workflowNode", position: { x: 0, y: 200 }, data: { kind: "end" } },
+      ] as unknown as FlowNode<WorkflowFlowNodeData>[],
+      [{ id: "e1", source: "start", target: "end" }],
+      [],
+      [],
+      [],
+      [{ templateId: "browser-verification" }],
+    );
+    expect(out.version).toBe("v2");
+    expect((out as { optionalSteps?: unknown }).optionalSteps).toEqual([
+      { templateId: "browser-verification" },
+    ]);
+  });
+
+  it("omits the optionalSteps key entirely when empty (R6 byte-identity)", () => {
+    const def = v2WithOptional();
+    const { nodes, edges } = irToFlow(def);
+    const { ir: out } = flowToIr("wf-opt", nodes, edges, columnsOf(def), [], [], []);
+    expect("optionalSteps" in out).toBe(false);
+    // and with the arg omitted entirely
+    const { ir: out2 } = flowToIr("wf-opt", nodes, edges, columnsOf(def));
+    expect("optionalSteps" in out2).toBe(false);
   });
 });

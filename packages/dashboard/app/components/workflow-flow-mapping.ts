@@ -9,6 +9,7 @@ import type {
   WorkflowDefinition,
   WorkflowFieldDefinition,
   WorkflowSettingDefinition,
+  WorkflowOptionalStep,
 } from "@fusion/core";
 import type { WorkflowFlowNodeData, WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
 
@@ -434,6 +435,7 @@ export function flowToIr(
   columns?: WorkflowIrColumn[],
   fields?: WorkflowFieldDefinition[],
   settings?: WorkflowSettingDefinition[],
+  optionalSteps?: WorkflowOptionalStep[],
 ): { ir: WorkflowIr; layout: Record<string, { x: number; y: number }> } {
   const realNodes = nodes.filter((n) => !isColumnBandNode(n.id));
   // Partition by parentId: foreach group children reassemble into that group's
@@ -453,9 +455,12 @@ export function flowToIr(
   );
   const hasFields = Array.isArray(fields) && fields.length > 0;
   const hasSettings = Array.isArray(settings) && settings.length > 0;
-  // Fields and settings are v2-only declarations: a workflow with either but no
-  // custom columns still serializes as v2 (with the synthesized default columns).
-  const v2 = (Array.isArray(columns) && columns.length > 0) || hasFields || hasSettings;
+  const hasOptionalSteps = Array.isArray(optionalSteps) && optionalSteps.length > 0;
+  // Fields, settings, and optional steps are v2-only declarations: a workflow with
+  // any of them but no custom columns still serializes as v2 (with the synthesized
+  // default columns). Empty/absent → not a v2 signal (R6 byte-identity).
+  const v2 =
+    (Array.isArray(columns) && columns.length > 0) || hasFields || hasSettings || hasOptionalSteps;
   const layout: Record<string, { x: number; y: number }> = {};
 
   /** Project one flow node (top-level or template child) into an IR node. */
@@ -555,6 +560,12 @@ export function flowToIr(
         options: s.options ? s.options.map((o) => ({ ...o })) : undefined,
         render: s.render ? { ...s.render } : undefined,
       }));
+    }
+    if (hasOptionalSteps) {
+      // Optional-step DECLARATIONS round-trip through the editor opaquely (they are
+      // not graph nodes; the resolver + server validator are the source of truth).
+      // Omitted entirely when empty so legacy graphs stay byte-identical (R6).
+      (ir as { optionalSteps?: unknown }).optionalSteps = optionalSteps!.map((o) => ({ ...o }));
     }
     return { ir, layout };
   }
@@ -965,6 +976,16 @@ export function settingsOf(def: WorkflowDefinition): WorkflowSettingDefinition[]
     options: s.options ? s.options.map((o) => ({ ...o })) : undefined,
     render: s.render ? { ...s.render } : undefined,
   }));
+}
+
+/** Extract the editor's working optional-step declaration list from a definition.
+ *  v2 with `optionalSteps` → a shallow copy; v1 or none → empty. Display metadata
+ *  (name/icon/phase) is NOT carried here — it is resolved from the step-template
+ *  catalog at render time so the resolver stays the single source of truth. */
+export function optionalStepsOf(def: WorkflowDefinition): WorkflowOptionalStep[] {
+  const ir = def.ir as { optionalSteps?: WorkflowOptionalStep[] };
+  if (!isV2(def.ir) || !Array.isArray(ir.optionalSteps)) return [];
+  return ir.optionalSteps.map((o) => ({ ...o }));
 }
 
 /** Seed graph for a brand-new workflow: start → end with room to insert steps. */

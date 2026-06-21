@@ -115,6 +115,7 @@ export interface LeftSidebarNavProps {
   currentProject?: ProjectInfo | null;
   onSelectProject?: (project: ProjectInfo) => void;
   onViewAllProjects?: () => void;
+  footerVisible?: boolean;
 }
 
 function formatCount(count: number): string {
@@ -160,6 +161,7 @@ export function LeftSidebarNav({
   pluginDashboardViews = [],
   showAgentsTab = false,
   showSkillsTab = false,
+  footerVisible = false,
 }: LeftSidebarNavProps) {
   const { t } = useTranslation("app");
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
@@ -390,7 +392,7 @@ export function LeftSidebarNav({
 
   return (
     <aside
-      className={`left-sidebar-nav${isCollapsed ? " left-sidebar-nav--collapsed" : ""}`}
+      className={`left-sidebar-nav${isCollapsed ? " left-sidebar-nav--collapsed" : ""}${footerVisible ? " left-sidebar-nav--with-footer" : ""}`}
       data-testid="left-sidebar-nav"
       aria-label={t("nav.sidebarAriaLabel", "Sidebar navigation")}
       style={isCollapsed ? undefined : { width: sidebarWidth, minWidth: sidebarWidth }}

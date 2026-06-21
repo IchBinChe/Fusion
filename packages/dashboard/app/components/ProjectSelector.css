@@ -580,6 +580,7 @@
  * On mobile the token is overridden to 32px to match the shorter footer.
  */
 .dashboard-project-shell {
+  --executor-footer-height: 36px;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -602,7 +603,6 @@
 }
 
 .project-content--with-footer {
-  --executor-footer-height: 36px;
   padding-bottom: var(--executor-footer-height);
 }
 

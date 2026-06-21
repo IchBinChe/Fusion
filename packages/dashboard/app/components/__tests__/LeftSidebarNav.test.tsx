@@ -57,6 +57,12 @@ function expectNoSidebarBrandOrProjectAffordances(container: HTMLElement) {
   expect(container.querySelector(".left-sidebar-nav__wordmark")).toBeNull();
 }
 
+function expectSettingsLastInFooter() {
+  const footer = screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer");
+  expect(footer).not.toBeNull();
+  expect(footer?.lastElementChild).toBe(screen.getByTestId("sidebar-nav-settings"));
+}
+
 function renderSidebar(overrides: Partial<ComponentProps<typeof LeftSidebarNav>> = {}) {
   const onChangeView = vi.fn();
   const props: ComponentProps<typeof LeftSidebarNav> = {
@@ -125,6 +131,36 @@ describe("LeftSidebarNav", () => {
     expect(footer?.parentElement).toBe(sidebar);
     const sidebarButtons = within(sidebar).getAllByRole("button");
     expect(sidebarButtons.at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
+  });
+
+  it.each([
+    ["expanded", false],
+    ["collapsed", true],
+  ])("applies footer clearance only when the executor footer is visible in %s mode", (_label, collapsed) => {
+    if (collapsed) {
+      window.localStorage.setItem("fusion:left-sidebar-collapsed", "true");
+    }
+
+    const withFooter = renderSidebar({ footerVisible: true });
+    const sidebarWithFooter = screen.getByTestId("left-sidebar-nav");
+    expect(sidebarWithFooter).toHaveClass("left-sidebar-nav--with-footer");
+    if (collapsed) {
+      expect(sidebarWithFooter).toHaveClass("left-sidebar-nav--collapsed");
+    }
+    expectSettingsLastInFooter();
+
+    withFooter.unmount();
+    if (collapsed) {
+      window.localStorage.setItem("fusion:left-sidebar-collapsed", "true");
+    }
+
+    renderSidebar();
+    const sidebarWithoutFooter = screen.getByTestId("left-sidebar-nav");
+    expect(sidebarWithoutFooter).not.toHaveClass("left-sidebar-nav--with-footer");
+    if (collapsed) {
+      expect(sidebarWithoutFooter).toHaveClass("left-sidebar-nav--collapsed");
+    }
+    expectSettingsLastInFooter();
   });
 
   it("gates optional destinations on their matching feature flags and props while preserving bottom settings", () => {

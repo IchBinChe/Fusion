@@ -1036,7 +1036,8 @@ function AppInner() {
   Experimental left sidebar navigation replaces the Header view shortcuts with a persistent sidebar on non-mobile project screens, while mobile continues to use the bottom navigation bar as the only primary navigation surface.
   */
   const leftSidebarNavEnabled = experimentalFeatures.leftSidebarNav === true;
-  const sidebarActive = leftSidebarNavEnabled && !isMobile && viewMode === "project" && !!currentProject;
+  const executorFooterVisible = viewMode === "project" && !!currentProject;
+  const sidebarActive = leftSidebarNavEnabled && !isMobile && executorFooterVisible;
   const agentOnboardingEnabled = experimentalFeatures.agentOnboarding === true;
   const agentsEnabled = true;
 
@@ -2136,15 +2137,16 @@ function AppInner() {
             currentProject={currentProject}
             onSelectProject={handleSelectProject}
             onViewAllProjects={handleViewAllProjects}
+            footerVisible={executorFooterVisible}
           />
         )}
         <div
-          className={`project-content${viewMode === "project" && currentProject && (!isMobile || !mobileKeyboardOpen) ? " project-content--with-footer" : ""}${isMobile && !mobileKeyboardOpen ? " project-content--with-mobile-nav" : ""}`}
+          className={`project-content${executorFooterVisible && (!isMobile || !mobileKeyboardOpen) ? " project-content--with-footer" : ""}${isMobile && !mobileKeyboardOpen ? " project-content--with-mobile-nav" : ""}`}
         >
           {renderMainContent()}
         </div>
       </div>
-      {viewMode === "project" && currentProject && (
+      {executorFooterVisible && currentProject && (
         <ExecutorStatusBar
           tasks={isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks}
           projectId={currentProject.id}

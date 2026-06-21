@@ -415,6 +415,16 @@ describe("validateCliPresenceAsync", () => {
     const result = await validateCliPresenceAsync();
     expect(result.ok).toBe(false);
   });
+
+  it("resolves ok=false instead of rejecting when droid spawn throws synchronously", async () => {
+    (spawn as any).mockImplementationOnce(() => {
+      throw new Error("Real AI CLI launch blocked during tests: droid --version");
+    });
+
+    await expect(validateCliPresenceAsync()).resolves.toMatchObject({
+      ok: false,
+    });
+  });
 });
 
 describe("validateCliAuthAsync", () => {
@@ -447,6 +457,21 @@ describe("validateCliAuthAsync", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     expect(await validateCliAuthAsync()).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("not authenticated"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("resolves false instead of rejecting when droid auth spawn throws synchronously", async () => {
+    (spawn as any).mockImplementationOnce(() => {
+      throw new Error(
+        "Real AI CLI launch blocked during tests: droid auth status",
+      );
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(validateCliAuthAsync()).resolves.toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("not authenticated"),
     );

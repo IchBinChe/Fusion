@@ -39,7 +39,9 @@ test("deriveBudgetMs: no fresh timing falls back to the per-class ceiling", () =
 
 test("deriveBudgetMs: fresh timing tightens within the band", () => {
   // expected×multiplier between floor and ceiling → use the tightened value.
-  const expected = 200_000; // 200s
+  // 300s × 3.5 = 1050s, which sits between the shard floor (15min) and
+  // ceiling (30min) so the tightened value is used un-clamped.
+  const expected = 300_000; // 300s
   const derived = deriveBudgetMs({ klass: "shard", expectedDurationMs: expected, timingsFresh: true });
   assert.equal(derived, Math.round(expected * DEFAULT_BUDGET_MULTIPLIER));
   assert.ok(derived >= CLASS_BUDGET_BANDS.shard.floor);
@@ -56,6 +58,21 @@ test("deriveBudgetMs: clamps to floor and ceiling", () => {
   assert.equal(
     deriveBudgetMs({ klass: "shard", expectedDurationMs: 10 ** 9, timingsFresh: true }),
     CLASS_BUDGET_BANDS.shard.ceiling,
+  );
+});
+
+test("deriveBudgetMs: shard floor pins heavy slices above the false-kill window", () => {
+  // FNXC:TestInfrastructure 2026-06-20-21:52:
+  // Regression guard for the 5min -> 15min shard-floor raise. A value whose
+  // expected×multiplier lands in the *old* un-clamped window (300s..900s) must
+  // now clamp UP to the 15min floor. 150s × 3.5 = 525s, which was returned
+  // verbatim under the old 5min floor but is below the new one. Pinning the
+  // concrete floor value here means an accidental revert to 5min fails loudly
+  // instead of silently re-tightening the engine/core slices into SIGKILLs.
+  assert.equal(CLASS_BUDGET_BANDS.shard.floor, 15 * 60_000);
+  assert.equal(
+    deriveBudgetMs({ klass: "shard", expectedDurationMs: 150_000, timingsFresh: true }),
+    CLASS_BUDGET_BANDS.shard.floor,
   );
 });
 

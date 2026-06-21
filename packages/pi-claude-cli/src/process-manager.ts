@@ -219,10 +219,20 @@ export function captureStderr(proc: ChildProcess): () => string {
  * does this on every chat send), sync probes freeze every other request.
  * This async variant uses spawn so the loop keeps turning while the subprocess
  * starts up.
+ *
+ * FNXC:CliRuntime 2026-06-20-17:25:
+ * FN-6808/FN-6801 require this fire-and-forget auth/presence probe to never reject. Catch synchronous spawn throws from the Vitest child-process guard or platform launch errors and resolve 127, matching the async error sentinel so callers degrade to unauthenticated/not-present instead of surfacing unhandled promise rejections.
  */
 function runClaudeProbe(args: string[], timeoutMs = 5000): Promise<number> {
   return new Promise((resolve) => {
-    const proc = spawn("claude", args, { stdio: "ignore" });
+    let proc: ChildProcess;
+    try {
+      proc = spawn("claude", args, { stdio: "ignore" });
+    } catch {
+      resolve(127);
+      return;
+    }
+
     const timer = setTimeout(() => {
       try {
         proc.kill("SIGKILL");

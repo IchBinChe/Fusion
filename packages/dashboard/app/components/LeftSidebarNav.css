@@ -8,12 +8,21 @@ The experimental sidebar is a persistent desktop/tablet navigation replacement f
   position: relative;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   width: var(--left-sidebar-nav-width);
   min-width: var(--left-sidebar-nav-width);
   min-height: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
   color: var(--text);
+}
+
+/*
+FNXC:Navigation 2026-06-20-00:00:
+The left sidebar is a sibling of project-content, so it does not inherit project-content footer padding. When the fixed executor status bar is rendered, reserve the shared --executor-footer-height on the aside so the bottom Settings button remains visible and clickable above the footer.
+*/
+.left-sidebar-nav--with-footer {
+  padding-bottom: var(--executor-footer-height);
 }
 
 .left-sidebar-nav__collapse-toggle {

@@ -1852,6 +1852,7 @@ function AppInner() {
             onCreateWorkflow={openCreateWorkflowWithNav}
             workflowColumnsEnabled={experimentalFeatures.workflowColumns === true}
             settingsLoaded={settingsLoaded}
+            workflowControlsInHeader={sidebarActive}
           />
         </PageErrorBoundary>
       );
@@ -1892,6 +1893,7 @@ function AppInner() {
           onCreateWorkflow={openCreateWorkflowWithNav}
           workflowColumnsEnabled={experimentalFeatures.workflowColumns === true}
           settingsLoaded={settingsLoaded}
+          workflowControlsInHeader={sidebarActive}
         />
       </PageErrorBoundary>
     );

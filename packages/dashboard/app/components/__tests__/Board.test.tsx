@@ -1096,6 +1096,83 @@ describe("Board", () => {
       expect(screen.queryByTestId("board-workflow-collapse-toggle")).toBeNull();
     });
 
+    it("relocates workflow selector, edit, and create controls into the header slot", async () => {
+      const onCreateWorkflow = vi.fn();
+      const onOpenWorkflowEditor = vi.fn();
+      const headerSlot = document.createElement("div");
+      headerSlot.id = "header-workflow-slot";
+      headerSlot.className = "header-workflow-slot";
+      document.body.appendChild(headerSlot);
+      enableFlag(
+        { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
+        [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
+      );
+      try {
+        renderBoard({
+          tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "intake" })],
+          onCreateWorkflow,
+          onOpenWorkflowEditor,
+          workflowControlsInHeader: true,
+        });
+
+        const selector = await screen.findByTestId("workflow-switcher");
+        await waitFor(() => expect(headerSlot.querySelector(".board-workflow-toolbar")).not.toBeNull());
+        expect(headerSlot.contains(selector)).toBe(true);
+        expect(headerSlot.querySelector(".board-workflow-edit-btn")).not.toBeNull();
+        expect(headerSlot.querySelector(".board-workflow-create-btn")).not.toBeNull();
+        expect(document.querySelector(".board-workflow-view > .board-workflow-toolbar")).toBeNull();
+
+        fireEvent.click(selector);
+        fireEvent.click(screen.getByTestId("workflow-switcher-option-wf-custom"));
+        await waitFor(() => expect(screen.getByTestId("column-intake")).toBeDefined());
+        expect(screen.queryByTestId("column-todo")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+        expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
+      } finally {
+        headerSlot.remove();
+      }
+    });
+
+    it("keeps the board workflow toolbar inline when header relocation is inactive", async () => {
+      const headerSlot = document.createElement("div");
+      headerSlot.id = "header-workflow-slot";
+      document.body.appendChild(headerSlot);
+      enableFlag({ "FN-1": "builtin:coding", "FN-2": "wf-custom" }, [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW]);
+      try {
+        renderBoard({
+          tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "intake" })],
+          onCreateWorkflow: vi.fn(),
+          onOpenWorkflowEditor: vi.fn(),
+        });
+
+        await screen.findByTestId("workflow-switcher");
+        await waitFor(() => expect(document.querySelector(".board-workflow-view > .board-workflow-toolbar")).not.toBeNull());
+        expect(headerSlot.querySelector(".board-workflow-toolbar")).toBeNull();
+      } finally {
+        headerSlot.remove();
+      }
+    });
+
+    it("does not leave a board workflow shell when header relocation has no controls", async () => {
+      const headerSlot = document.createElement("div");
+      headerSlot.id = "header-workflow-slot";
+      document.body.appendChild(headerSlot);
+      enableFlag({ "FN-1": "builtin:coding" }, [DEFAULT_WORKFLOW]);
+      try {
+        renderBoard({
+          tasks: [mkTask({ id: "FN-1" })],
+          workflowControlsInHeader: true,
+        });
+
+        await waitFor(() => expect(screen.getByTestId("column-todo")).toBeDefined());
+        expect(screen.queryByTestId("workflow-switcher")).toBeNull();
+        expect(document.querySelector(".board-workflow-toolbar")).toBeNull();
+        expect(headerSlot.childElementCount).toBe(0);
+      } finally {
+        headerSlot.remove();
+      }
+    });
+
     it("renders one selected workflow at a time and switches workflows from the dropdown", async () => {
       const onCreateWorkflow = vi.fn();
       const onOpenWorkflowEditor = vi.fn();

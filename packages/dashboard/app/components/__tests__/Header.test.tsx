@@ -150,6 +150,27 @@ describe("Header", () => {
       expect(screen.getByTitle("List view")).toBeDefined();
     });
 
+    it("renders the workflow portal slot instead of the view toggle on desktop sidebar nav", () => {
+      renderHeader({ onChangeView: noop, leftSidebarNavActive: true }, "desktop");
+      expect(screen.getByTestId("header-workflow-slot")).toBeInTheDocument();
+      expect(screen.queryByTitle("Board view")).toBeNull();
+      expect(screen.queryByTitle("List view")).toBeNull();
+    });
+
+    it("renders the workflow portal slot instead of the view toggle on tablet sidebar nav", () => {
+      renderHeader({ onChangeView: noop, leftSidebarNavActive: true }, "tablet");
+      expect(screen.getByTestId("header-workflow-slot")).toBeInTheDocument();
+      expect(screen.queryByTitle("Board view")).toBeNull();
+      expect(screen.queryByTitle("List view")).toBeNull();
+    });
+
+    it("does not render the workflow portal slot on mobile sidebar nav", () => {
+      renderHeader({ onChangeView: noop, leftSidebarNavActive: true }, "mobile");
+      expect(screen.queryByTestId("header-workflow-slot")).toBeNull();
+      expect(screen.queryByTitle("Board view")).not.toBeNull();
+      expect(screen.queryByTitle("List view")).not.toBeNull();
+    });
+
     it("shows board view as active by default", () => {
       renderHeader({ onChangeView: noop });
       const boardBtn = screen.getByTitle("Board view");

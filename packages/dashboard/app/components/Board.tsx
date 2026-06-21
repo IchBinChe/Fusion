@@ -6,6 +6,7 @@ import "./Lane.css";
 import "./Board.css";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
@@ -80,6 +81,8 @@ interface BoardProps {
   workflowColumnsEnabled?: boolean;
   /** Whether app settings have loaded; false gates the legacy board until the workflow flag is known. */
   settingsLoaded?: boolean;
+  /** Relocates workflow controls into the Header portal slot when sidebar navigation owns the inline chrome. */
+  workflowControlsInHeader?: boolean;
 }
 
 
@@ -144,12 +147,16 @@ function BoardWorkflowSkeleton({ empty = false }: { empty?: boolean }) {
   );
 }
 
-export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded }: BoardProps) {
+export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
   const { t } = useTranslation("app");
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const archivedLoadedRef = useRef(false);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
   const boardRef = useRef<HTMLElement | null>(null);
+  const [headerWorkflowSlot, setHeaderWorkflowSlot] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    return document.getElementById("header-workflow-slot");
+  });
   const blockerFanoutMap = useBlockerFanout(tasks, {
     staleHighFanoutAgeThresholdMs: staleHighFanoutBlockerAgeThresholdMs,
   });
@@ -163,6 +170,14 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     done: [],
     archived: [],
   });
+
+  useEffect(() => {
+    if (!workflowControlsInHeader || typeof document === "undefined") {
+      setHeaderWorkflowSlot(null);
+      return;
+    }
+    setHeaderWorkflowSlot(document.getElementById("header-workflow-slot"));
+  }, [workflowControlsInHeader]);
 
   useEffect(() => {
     recordResumeEvent({
@@ -555,44 +570,54 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   }
 
   if (workflowMode && selectedWorkflow) {
-    return (
-      <div className="board-workflow-view">
-        {(workflowOptions.length > 1 || onCreateWorkflow || onOpenWorkflowEditor) && (
-          <div className="board-workflow-toolbar">
-            {workflowOptions.length > 1 && (
-              <div className="board-workflow-selector">
-                <WorkflowSwitcher
-                  workflows={workflowOptions}
-                  value={selectedWorkflow.id}
-                  onChange={setSelectedWorkflowId}
-                  counts={workflowStatusCounts}
-                />
-              </div>
-            )}
-            {onOpenWorkflowEditor && (
-              <button
-                type="button"
-                className="btn btn-icon btn-sm board-workflow-edit-btn"
-                onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
-                title={t("board.workflow.edit", "Edit workflows")}
-                aria-label={t("board.workflow.edit", "Edit workflows")}
-              >
-                <Pencil size={15} />
-              </button>
-            )}
-            {onCreateWorkflow && (
-              <button
-                type="button"
-                className="btn btn-icon btn-sm board-workflow-create-btn"
-                onClick={onCreateWorkflow}
-                title={t("board.workflow.new", "New workflow")}
-                aria-label={t("board.workflow.new", "New workflow")}
-              >
-                <Plus size={15} />
-              </button>
-            )}
+    const shouldRenderWorkflowControls = workflowOptions.length > 1 || onCreateWorkflow || onOpenWorkflowEditor;
+    const workflowToolbar = shouldRenderWorkflowControls ? (
+      <div className="board-workflow-toolbar">
+        {workflowOptions.length > 1 && (
+          <div className="board-workflow-selector">
+            <WorkflowSwitcher
+              workflows={workflowOptions}
+              value={selectedWorkflow.id}
+              onChange={setSelectedWorkflowId}
+              counts={workflowStatusCounts}
+            />
           </div>
         )}
+        {onOpenWorkflowEditor && (
+          <button
+            type="button"
+            className="btn btn-icon btn-sm board-workflow-edit-btn"
+            onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
+            title={t("board.workflow.edit", "Edit workflows")}
+            aria-label={t("board.workflow.edit", "Edit workflows")}
+          >
+            <Pencil size={15} />
+          </button>
+        )}
+        {onCreateWorkflow && (
+          <button
+            type="button"
+            className="btn btn-icon btn-sm board-workflow-create-btn"
+            onClick={onCreateWorkflow}
+            title={t("board.workflow.new", "New workflow")}
+            aria-label={t("board.workflow.new", "New workflow")}
+          >
+            <Plus size={15} />
+          </button>
+        )}
+      </div>
+    ) : null;
+    /*
+    FNXC:WorkflowControls 2026-06-20-00:00:
+    Board owns workflow selection state, so the existing selector/edit/create toolbar is portaled to Header only when the left sidebar is the active tablet/desktop navigation surface. If the Header slot is not mounted yet, render inline as the safe fallback so controls are never lost.
+    */
+    const relocatedWorkflowToolbar = workflowControlsInHeader && headerWorkflowSlot && workflowToolbar
+      ? createPortal(workflowToolbar, headerWorkflowSlot)
+      : null;
+
+    return (
+      <div className="board-workflow-view">
+        {workflowControlsInHeader && headerWorkflowSlot ? relocatedWorkflowToolbar : workflowToolbar}
         <main
           className="board board-workflow-columns"
           id="board"

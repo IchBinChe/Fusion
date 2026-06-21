@@ -810,6 +810,115 @@ describe("ListView", () => {
     expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
   });
 
+  it("relocates the list workflow selector and create action into the header slot without adding edit", async () => {
+    const onCreateWorkflow = vi.fn();
+    const headerSlot = document.createElement("div");
+    headerSlot.id = "header-workflow-slot";
+    headerSlot.className = "header-workflow-slot";
+    document.body.appendChild(headerSlot);
+    vi.mocked(fetchBoardWorkflows).mockResolvedValue({
+      flagEnabled: true,
+      defaultWorkflowId: "builtin:coding",
+      workflows: [
+        {
+          id: "builtin:coding",
+          name: "Coding",
+          columns: [
+            { id: "triage", name: "Triage", flags: { intake: true } },
+            { id: "done", name: "Done", flags: { complete: true } },
+          ],
+        },
+        {
+          id: "wf-custom",
+          name: "Custom",
+          columns: [
+            { id: "backlog", name: "Backlog", flags: { intake: true } },
+            { id: "complete", name: "Complete", flags: { complete: true } },
+          ],
+        },
+      ],
+      taskWorkflowIds: { "FN-001": "builtin:coding", "FN-002": "wf-custom" },
+    });
+    try {
+      renderListView({
+        tasks: [
+          createMockTask({ id: "FN-001", column: "triage", title: "Coding task" }),
+          createMockTask({ id: "FN-002", column: "backlog", title: "Custom task" }),
+        ],
+        onCreateWorkflow,
+        workflowControlsInHeader: true,
+      });
+
+      const selector = await screen.findByTestId("workflow-switcher");
+      await waitFor(() => expect(headerSlot.querySelector(".list-workflow-control")).not.toBeNull());
+      expect(headerSlot.contains(selector)).toBe(true);
+      expect(headerSlot.querySelector(".list-workflow-create-btn")).not.toBeNull();
+      expect(headerSlot.querySelector(".board-workflow-edit-btn")).toBeNull();
+      expect(document.querySelector(".list-view > .list-workflow-control")).toBeNull();
+
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByTestId("workflow-switcher-option-wf-custom"));
+      await waitFor(() => expect(screen.getByText("Custom task")).toBeInTheDocument());
+      expect(screen.queryByText("Coding task")).not.toBeInTheDocument();
+    } finally {
+      headerSlot.remove();
+    }
+  });
+
+  it("keeps list workflow controls inline when header relocation is inactive", async () => {
+    const headerSlot = document.createElement("div");
+    headerSlot.id = "header-workflow-slot";
+    document.body.appendChild(headerSlot);
+    vi.mocked(fetchBoardWorkflows).mockResolvedValue({
+      flagEnabled: true,
+      defaultWorkflowId: "builtin:coding",
+      workflows: [
+        { id: "builtin:coding", name: "Coding", columns: [{ id: "triage", name: "Triage", flags: { intake: true } }] },
+        { id: "wf-custom", name: "Custom", columns: [{ id: "backlog", name: "Backlog", flags: { intake: true } }] },
+      ],
+      taskWorkflowIds: { "FN-001": "builtin:coding" },
+    });
+    try {
+      renderListView({
+        tasks: [createMockTask({ id: "FN-001", column: "triage", title: "Coding task" })],
+        onCreateWorkflow: vi.fn(),
+      });
+
+      await screen.findByTestId("workflow-switcher");
+      await waitFor(() => expect(document.querySelector(".list-view .list-workflow-control")).not.toBeNull());
+      expect(headerSlot.querySelector(".list-workflow-control")).toBeNull();
+    } finally {
+      headerSlot.remove();
+    }
+  });
+
+  it("does not leave a list workflow shell when header relocation has no controls", async () => {
+    const headerSlot = document.createElement("div");
+    headerSlot.id = "header-workflow-slot";
+    document.body.appendChild(headerSlot);
+    vi.mocked(fetchBoardWorkflows).mockResolvedValue({
+      flagEnabled: true,
+      defaultWorkflowId: "builtin:coding",
+      workflows: [
+        { id: "builtin:coding", name: "Coding", columns: [{ id: "triage", name: "Triage", flags: { intake: true } }] },
+      ],
+      taskWorkflowIds: { "FN-001": "builtin:coding" },
+    });
+    try {
+      renderListView({
+        tasks: [createMockTask({ id: "FN-001", column: "triage", title: "Coding task" })],
+        workflowControlsInHeader: true,
+      });
+
+      await waitFor(() => expect(screen.getByText("Coding task")).toBeInTheDocument());
+      expect(screen.queryByTestId("workflow-switcher")).toBeNull();
+      expect(document.querySelector(".list-workflow-control")).toBeNull();
+      expect(headerSlot.childElementCount).toBe(0);
+    } finally {
+      headerSlot.remove();
+    }
+  });
+
   it("keeps embedded selection visible when filters hide the selected row", async () => {
     const viewportSpy = mockDesktopViewport();
     const tasks = [

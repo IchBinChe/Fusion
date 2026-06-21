@@ -195,6 +195,9 @@ export function Header({
   /*
   FNXC:Navigation 2026-06-19-00:00:
   When experimental left sidebar navigation is active on tablet/desktop, Header must suppress its view-toggle and More-views trigger so there is one canonical non-mobile navigation surface and no orphaned chevron remains.
+
+  FNXC:WorkflowControls 2026-06-20-00:00:
+  The hidden Header view-toggle location becomes the workflow-control portal slot only when left sidebar navigation is active on tablet/desktop. Mobile and flag-off paths keep workflow controls inline so the board/list chrome remains byte-identical.
   */
   const hideHeaderViewNav = leftSidebarNavActive && !isMobile;
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
@@ -988,6 +991,14 @@ export function Header({
           >
             <Activity size={16} />
           </button>
+        )}
+
+        {hideHeaderViewNav && (
+          <div
+            id="header-workflow-slot"
+            className="header-workflow-slot"
+            data-testid="header-workflow-slot"
+          />
         )}
 
         {/* View Toggle - always inline, even on mobile */}

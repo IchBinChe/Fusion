@@ -95,6 +95,40 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   position: relative;
 }
 
+.header-workflow-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.header-workflow-slot:empty {
+  display: none;
+}
+
+.header-workflow-slot .board-workflow-toolbar,
+.header-workflow-slot .list-workflow-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.header-workflow-slot .board-workflow-selector {
+  margin-left: 0;
+}
+
+@media (max-width: 768px) {
+  .header-workflow-slot {
+    display: none;
+  }
+}
+
 .quick-scripts-dropdown {
   position: relative;
 }

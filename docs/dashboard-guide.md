@@ -25,6 +25,8 @@ Enable **Left Sidebar Navigation** from **Settings → Experimental Features** t
 
 When enabled on desktop or tablet project screens, the sidebar contains the primary destinations (Board, List, Agents, Command Center, Missions, Chat, Documents, Mailbox, and plugin primary views), Header overflow destinations as regular entries (Research, Insights, Skills, Memory, Secrets, Stash Recovery, Evals, Goals, Dev Server, Todos, and plugin overflow views when their flags/plugins are enabled), and a Settings button pinned to the bottom. The Header retains the Fusion brand and project selector, keeps its non-navigation controls, and hides the view-toggle row and **More views** trigger so there is only one canonical navigation surface.
 
+While the sidebar is active on desktop/tablet project screens, Board and List workflow controls move into the Header slot that replaces the hidden view toggle. Board keeps its workflow selector plus edit/create workflow buttons; List keeps its workflow selector plus create workflow button. The standalone workflow row above the board/list content is removed in this mode. When the flag is off, outside project screens, or on mobile, workflow controls remain inline exactly as before.
+
 A small right-border toggle collapses or expands the sidebar without consuming a navigation row; collapsed rail mode keeps accessible labels/titles preserved, and the expanded width can be resized from the right-edge separator. Collapsed state and expanded width are saved in browser `localStorage` (`fusion:left-sidebar-collapsed` and `fusion:left-sidebar-width`) and restored on reload.
 
 On mobile viewports (`<=768px`), the sidebar is not rendered even when the experiment is enabled. The existing bottom `MobileNavBar` remains the navigation surface.

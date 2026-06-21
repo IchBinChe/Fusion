@@ -1,5 +1,6 @@
 import "./ListView.css";
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive, Plus } from "lucide-react";
@@ -244,6 +245,8 @@ interface ListViewProps {
   onCreateWorkflow?: () => void;
   workflowColumnsEnabled?: boolean;
   settingsLoaded?: boolean;
+  /** Relocates workflow controls into the Header portal slot when sidebar navigation owns the inline chrome. */
+  workflowControlsInHeader?: boolean;
 }
 
 const LEGACY_LIST_COLUMNS: BoardWorkflowColumn[] = COLUMNS.map((column) => ({
@@ -310,6 +313,7 @@ export function ListView({
   onCreateWorkflow,
   workflowColumnsEnabled,
   settingsLoaded,
+  workflowControlsInHeader = false,
 }: ListViewProps) {
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
@@ -329,9 +333,21 @@ export function ListView({
   });
   const boardWorkflows = boardWorkflowsState?.projectId === projectId && boardWorkflowsState ? boardWorkflowsState.payload : null;
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [headerWorkflowSlot, setHeaderWorkflowSlot] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    return document.getElementById("header-workflow-slot");
+  });
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
   const { confirm, confirmWithChoice } = useConfirm();
+
+  useEffect(() => {
+    if (!workflowControlsInHeader || typeof document === "undefined") {
+      setHeaderWorkflowSlot(null);
+      return;
+    }
+    setHeaderWorkflowSlot(document.getElementById("header-workflow-slot"));
+  }, [workflowControlsInHeader]);
 
   // Column visibility state - initialize from localStorage or reduced default columns
   const [visibleColumns, setVisibleColumns] = useState<Set<ListColumn>>(() => readVisibleColumns(projectId));
@@ -1605,7 +1621,7 @@ export function ListView({
     if (!workflowMode) return null;
     const showSelect = workflowOptions.length > 1 && selectedWorkflow;
     if (!showSelect && !onCreateWorkflow) return null;
-    return (
+    const workflowControl = (
       <div className="list-workflow-control">
         {showSelect && selectedWorkflow && (
           <WorkflowSwitcher
@@ -1629,6 +1645,13 @@ export function ListView({
         )}
       </div>
     );
+    /*
+    FNXC:WorkflowControls 2026-06-20-00:00:
+    ListView keeps its own workflow selection state and only portals its existing selector/create controls into Header when the sidebar header slot exists. It intentionally does not add the Board-only edit affordance.
+    */
+    return workflowControlsInHeader && headerWorkflowSlot
+      ? createPortal(workflowControl, headerWorkflowSlot)
+      : workflowControl;
   };
 
   const renderViewOptionsPanel = (panelId: string) => (

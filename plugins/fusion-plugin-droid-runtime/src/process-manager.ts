@@ -160,6 +160,14 @@ export function forceKillProcess(proc: ChildProcess): void {
 const activeProcesses = new Set<ChildProcess>();
 
 /**
+ * Hard ceiling on a single `droid models`/`droid model list` discovery spawn.
+ * The droid CLI can keep stdout open via its stream-jsonrpc backend, so this
+ * bound guarantees the spawn is SIGKILLed and the promise settles. Kept short
+ * because discovery runs on the dashboard's per-session extension load path.
+ */
+const DROID_MODEL_DISCOVERY_TIMEOUT_MS = 10_000;
+
+/**
  * Register a subprocess in the global process registry.
  * The process is automatically removed from the registry when it exits.
  *
@@ -284,65 +292,73 @@ export async function validateCliAuthAsync(): Promise<boolean> {
   return false;
 }
 
-export async function discoverDroidModels(): Promise<string[]> {
-  const attempts: string[][] = [
-    ["models", "--json"],
-    ["model", "list", "--json"],
-    ["models"],
-  ];
-
-  for (const args of attempts) {
-    const models = await new Promise<string[] | null>((resolve) => {
-      let proc: ChildProcess;
-      try {
-        proc = spawn("droid", args, { stdio: ["ignore", "pipe", "ignore"] });
-      } catch {
-        resolve(null);
-        return;
-      }
-
-      let out = "";
-      proc.stdout?.on("data", (chunk: Buffer) => {
-        out += chunk.toString();
-      });
-      proc.once("error", () => resolve(null));
-      proc.once("exit", (code) => {
-        if (code !== 0) return resolve(null);
-        const trimmed = out.trim();
-        if (!trimmed) return resolve([]);
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (Array.isArray(parsed)) {
-            return resolve(
-              parsed
-                .map((entry) =>
-                  typeof entry === "string"
-                    ? entry
-                    : typeof entry?.id === "string"
-                      ? entry.id
-                      : typeof entry?.name === "string"
-                        ? entry.name
-                        : undefined,
-                )
-                .filter((id): id is string => Boolean(id)),
-            );
-          }
-        } catch {
-          // not json, fall through to line parsing
-        }
-        resolve(
-          trimmed
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean),
-        );
-      });
-    });
-
-    if (models && models.length > 0) {
-      return Array.from(new Set(models));
+/**
+ * Parse model IDs out of `droid exec --help`. The help text lists the catalog
+ * under `Available Models:` and `Custom Models:` headers, each entry indented as
+ * `  <model-id>   <description>`. The trailing `Model details:` section (lines
+ * like `  - Claude Opus 4.8: ...`) is intentionally excluded — those are prose,
+ * not IDs. Exported for unit testing.
+ */
+export function parseDroidModelsFromHelp(helpText: string): string[] {
+  const ids: string[] = [];
+  let collecting = false;
+  for (const line of helpText.split(/\r?\n/)) {
+    // Section header at column 0, e.g. "Available Models:" / "Custom Models:".
+    if (/^[A-Za-z][A-Za-z ]*Models:\s*$/.test(line)) {
+      collecting = true;
+      continue;
     }
+    // Any other non-indented, non-empty line ends the current section
+    // (notably "Model details:").
+    if (collecting && line.trim() && !/^\s/.test(line)) {
+      collecting = false;
+    }
+    if (!collecting) continue;
+    // Indented "  <id>   <description>"; the id is the first whitespace-delimited
+    // token (handles `custom:CC:-Opus-4.6-(Max)-0` and the like — no spaces).
+    const match = line.match(/^\s+(\S+)\s{2,}\S/);
+    if (match) ids.push(match[1]);
   }
+  return Array.from(new Set(ids));
+}
 
-  return [];
+export async function discoverDroidModels(): Promise<string[]> {
+  // The droid CLI has no `models`/`model list` command — those parse as a
+  // *prompt* and launch a hung agent session. The catalog is printed by
+  // `droid exec --help` (and exits cleanly).
+  return new Promise<string[]>((resolve) => {
+    let proc: ChildProcess;
+    try {
+      proc = spawn("droid", ["exec", "--help"], { stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      resolve([]);
+      return;
+    }
+
+    // FNXC:CliRuntime 2026-06-21: keep discovery bounded. `droid exec --help`
+    // exits on its own, but a SIGKILL-on-timeout guard ensures a wedged spawn
+    // can never leak (the prior `droid models` form launched a persistent
+    // stream-jsonrpc backend that never exited, piling up into a process storm
+    // because the dashboard re-loads this extension per chat-send).
+    let settled = false;
+    const settle = (value: string[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        if (!proc.killed) proc.kill("SIGKILL");
+      } catch {
+        // already dead
+      }
+      resolve(value);
+    };
+    const timer = setTimeout(() => settle([]), DROID_MODEL_DISCOVERY_TIMEOUT_MS);
+
+    let out = "";
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      out += chunk.toString();
+    });
+    proc.once("error", () => settle([]));
+    proc.once("exit", () => settle(parseDroidModelsFromHelp(out)));
+  });
 }

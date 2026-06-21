@@ -1006,9 +1006,13 @@ export interface AgentOptions {
   permanentAgentGating?: PermanentAgentGatingContext;
 }
 
-function resolveCustomProviderApiType(apiType: string): "anthropic" | "openai-responses" | "openai-completions" {
+function resolveCustomProviderApiType(apiType: string): "anthropic-messages" | "openai-responses" | "openai-completions" {
   if (apiType === "anthropic-compatible") {
-    return "anthropic";
+    // pi-ai registers the Anthropic Messages API under the key
+    // "anthropic-messages" (see @earendil-works/pi-ai register-builtins).
+    // Returning bare "anthropic" throws "No API provider registered for
+    // api: anthropic" at stream time, so map to the real registry key.
+    return "anthropic-messages";
   }
   if (apiType === "openai-responses") {
     return "openai-responses";

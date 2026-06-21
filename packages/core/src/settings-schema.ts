@@ -65,6 +65,7 @@ type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey>;
 export const DEFAULT_GLOBAL_SETTINGS = {
   themeMode: "dark",
   colorTheme: "default",
+  shadcnCustomColors: undefined,
   dashboardFontScalePct: 100,
   language: undefined,
   defaultProvider: undefined,

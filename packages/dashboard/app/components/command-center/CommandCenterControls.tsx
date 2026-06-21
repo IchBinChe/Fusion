@@ -11,8 +11,11 @@ export interface CommandCenterControlsProps {
   projectId?: string;
   colorTheme: ColorTheme;
   themeMode: ThemeMode;
+  shadcnCustomColors?: Record<string, string>;
+  resolvedThemeMode?: "dark" | "light";
   onColorThemeChange: (theme: ColorTheme) => void;
   onThemeModeChange: (mode: ThemeMode) => void;
+  onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
 }
 
 type AsyncState<T> =
@@ -63,7 +66,7 @@ function StatusPill({ paused, label }: { paused: boolean; label: string }) {
   );
 }
 
-export function CommandCenterControls({ projectId, colorTheme, themeMode, onColorThemeChange, onThemeModeChange }: CommandCenterControlsProps) {
+export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcnCustomColors = {}, resolvedThemeMode = themeMode === "light" ? "light" : "dark", onColorThemeChange, onThemeModeChange, onShadcnCustomColorsChange = () => {} }: CommandCenterControlsProps) {
   const { t } = useTranslation("app");
   const {
     globalPaused,
@@ -188,8 +191,11 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, onColo
           <ThemeDropdown
             colorTheme={colorTheme}
             themeMode={themeMode}
+            shadcnCustomColors={shadcnCustomColors}
+            resolvedThemeMode={resolvedThemeMode}
             onColorThemeChange={onColorThemeChange}
             onThemeModeChange={onThemeModeChange}
+            onShadcnCustomColorsChange={onShadcnCustomColorsChange}
           />
         </section>
 

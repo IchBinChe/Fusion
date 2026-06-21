@@ -1358,26 +1358,158 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
   --accent-text: #ffffff;
 }
 
-[data-color-theme="shadcn"] .card.agent-active {
+/*
+FNXC:Theming 2026-06-20-18:30:
+FN-6816 keeps shadcn-custom visually identical to the base shadcn theme until sanitized user token overrides are applied inline by the dashboard theme hook.
+*/
+[data-color-theme="shadcn-custom"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #60a5fa;
+  --in-progress: #38bdf8;
+  --in-progress-rgb: 56, 189, 248;
+  --in-review: #34d399;
+  --triage: #f59e0b;
+  --done: #71717a;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --transition-instant: 0.05s ease;
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.15s ease;
+  --transition-slow: 0.2s ease;
+
+  --cta-bg: #fafafa;
+  --cta-border: #fafafa;
+  --cta-text: #18181b;
+  --cta-bg-hover: #e4e4e7;
+  --cta-border-hover: #e4e4e7;
+  --cta-glow: none;
+  --logo-accent: var(--text);
+  --color-info: #38bdf8;
+  --accent: #f97316;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="shadcn-custom"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #2563eb;
+  --in-progress: #0284c7;
+  --in-progress-rgb: 2, 132, 199;
+  --in-review: #16a34a;
+  --triage: #d97706;
+  --done: #a1a1aa;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #18181b;
+  --cta-border: #18181b;
+  --cta-text: #fafafa;
+  --cta-bg-hover: #27272a;
+  --cta-border-hover: #27272a;
+  --cta-glow: none;
+  --logo-accent: var(--text);
+  --color-info: #0284c7;
+  --accent: #ea580c;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="shadcn"] .card.agent-active,
+[data-color-theme="shadcn-custom"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
 }
 
-[data-color-theme="shadcn"][data-theme="light"] .card.agent-active {
+[data-color-theme="shadcn"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-custom"][data-theme="light"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
 }
 
-[data-color-theme="shadcn"] .btn {
+[data-color-theme="shadcn"] .btn,
+[data-color-theme="shadcn-custom"] .btn {
   text-transform: none;
   letter-spacing: normal;
   font-weight: 500;
 }
 
 [data-color-theme="shadcn"] .btn-primary,
-[data-color-theme="shadcn"] .btn-task-create {
+[data-color-theme="shadcn"] .btn-task-create,
+[data-color-theme="shadcn-custom"] .btn-primary,
+[data-color-theme="shadcn-custom"] .btn-task-create {
   background: var(--cta-bg);
   border-color: var(--cta-border);
   color: var(--cta-text);
@@ -1385,7 +1517,9 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
 }
 
 [data-color-theme="shadcn"] .btn-primary:hover,
-[data-color-theme="shadcn"] .btn-task-create:hover {
+[data-color-theme="shadcn"] .btn-task-create:hover,
+[data-color-theme="shadcn-custom"] .btn-primary:hover,
+[data-color-theme="shadcn-custom"] .btn-task-create:hover {
   background: var(--cta-bg-hover);
   border-color: var(--cta-border-hover);
   color: var(--cta-text);
@@ -1393,7 +1527,9 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
 }
 
 [data-color-theme="shadcn"] .card,
-[data-color-theme="shadcn"] .column {
+[data-color-theme="shadcn"] .column,
+[data-color-theme="shadcn-custom"] .card,
+[data-color-theme="shadcn-custom"] .column {
   border-width: var(--btn-border-width);
 }
 

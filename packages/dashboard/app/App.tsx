@@ -448,7 +448,7 @@ function AppInner() {
   const effectiveProjects = isRemote && remoteData.projects.length > 0 ? remoteData.projects : projects;
   
   // Theme management - required before useViewState
-  const { themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct } = useTheme();
+  const { themeMode, colorTheme, dashboardFontScalePct, shadcnCustomColors, resolvedThemeMode, setThemeMode, setColorTheme, setDashboardFontScalePct, setShadcnCustomColors } = useTheme();
 
   // Background AI sessions - required before useModalManager
   const { sessions: bgSessions, generating: bgGenerating, needsInput: bgNeedsInput, planningSessions: bgPlanningSessions, dismissSession: bgDismiss } = useBackgroundSessions(currentProject?.id);
@@ -1797,8 +1797,11 @@ function AppInner() {
               projectId={currentProject?.id}
               colorTheme={colorTheme}
               themeMode={themeMode}
+              shadcnCustomColors={shadcnCustomColors}
+              resolvedThemeMode={resolvedThemeMode}
               onColorThemeChange={setColorTheme}
               onThemeModeChange={setThemeMode}
+              onShadcnCustomColorsChange={setShadcnCustomColors}
               addToast={addToast}
               nodesEnabled={nodesEnabled}
             />
@@ -2254,7 +2257,7 @@ function AppInner() {
         }}
         taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, retryTask, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}
-        settings={{ prAuthAvailable, autoMerge, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
+        settings={{ prAuthAvailable, autoMerge, themeMode, colorTheme, dashboardFontScalePct, shadcnCustomColors, resolvedThemeMode, setThemeMode, setColorTheme, setDashboardFontScalePct, setShadcnCustomColors }}
         onSettingsClose={handleSettingsCloseWithNav}
         onReopenOnboarding={reopenOnboardingWithNav}
         onOpenApprovals={(_approvalId) => handleTaskViewChange("mailbox")}

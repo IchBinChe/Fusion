@@ -60,6 +60,25 @@ describe("ThemeDropdown", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
+  it("shows the shadcn custom picker only for shadcn-custom", () => {
+    const { rerender } = render(<ThemeDropdown colorTheme="default" onColorThemeChange={vi.fn()} />);
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(<ThemeDropdown colorTheme="shadcn" onColorThemeChange={vi.fn()} />);
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(
+      <ThemeDropdown
+        colorTheme="shadcn-custom"
+        themeMode="light"
+        resolvedThemeMode="light"
+        shadcnCustomColors={{ "--accent": "#123456" }}
+        onColorThemeChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("shadcn-color-picker")).toBeDefined();
+  });
+
   it("renders compact theme mode controls when mode props are supplied", () => {
     const onThemeModeChange = vi.fn();
     render(

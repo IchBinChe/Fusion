@@ -99,8 +99,11 @@ interface CommandCenterProps {
   projectId?: string;
   colorTheme?: ColorTheme;
   themeMode?: ThemeMode;
+  shadcnCustomColors?: Record<string, string>;
+  resolvedThemeMode?: "dark" | "light";
   onColorThemeChange?: (theme: ColorTheme) => void;
   onThemeModeChange?: (mode: ThemeMode) => void;
+  onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
   addToast?: (message: string, type?: ToastType) => void;
   nodesEnabled?: boolean;
 }
@@ -110,8 +113,11 @@ function OverviewTab({
   projectId,
   colorTheme = "default",
   themeMode = "system",
+  shadcnCustomColors = {},
+  resolvedThemeMode = themeMode === "light" ? "light" : "dark",
   onColorThemeChange = () => {},
   onThemeModeChange = () => {},
+  onShadcnCustomColorsChange = () => {},
 }: { range: DateRange } & CommandCenterProps) {
   const { t } = useTranslation("app");
   const tokens = useAnalyticsArea<TokenAnalytics>("/command-center/tokens?groupBy=model", range, {
@@ -259,8 +265,11 @@ function OverviewTab({
       projectId={projectId}
       colorTheme={colorTheme}
       themeMode={themeMode}
+      shadcnCustomColors={shadcnCustomColors}
+      resolvedThemeMode={resolvedThemeMode}
       onColorThemeChange={onColorThemeChange}
       onThemeModeChange={onThemeModeChange}
+      onShadcnCustomColorsChange={onShadcnCustomColorsChange}
     />
   );
   const throughputSection = (
@@ -440,8 +449,11 @@ export function CommandCenter({
   projectId,
   colorTheme = "default",
   themeMode = "system",
+  shadcnCustomColors = {},
+  resolvedThemeMode = themeMode === "light" ? "light" : "dark",
   onColorThemeChange = () => {},
   onThemeModeChange = () => {},
+  onShadcnCustomColorsChange = () => {},
   addToast = () => {},
   nodesEnabled = false,
 }: CommandCenterProps = {}) {
@@ -504,8 +516,11 @@ export function CommandCenter({
             projectId={projectId}
             colorTheme={colorTheme}
             themeMode={themeMode}
+            shadcnCustomColors={shadcnCustomColors}
+            resolvedThemeMode={resolvedThemeMode}
             onColorThemeChange={onColorThemeChange}
             onThemeModeChange={onThemeModeChange}
+            onShadcnCustomColorsChange={onShadcnCustomColorsChange}
           />
         );
       case "tokens":

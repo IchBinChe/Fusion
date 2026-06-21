@@ -330,6 +330,8 @@ export const COLOR_THEMES = [
   "neon-bloom",
   "sepia",
   "shadcn",
+  // FNXC:DashboardTheming 2026-06-20-18:20: FN-6816 adds the user-customizable shadcn variant; keep this union in lockstep with dashboard theme options, swatches, theme-data base blocks, and the shadcn custom color token list.
+  "shadcn-custom",
   // FNXC:DashboardTheming 2026-06-19-16:07: FN-6756 extends the published color-theme union with shadcn-family accent variants; keep dashboard theme options, bootstrap validation, swatches, and theme-data token blocks in lockstep with this ordered list.
   // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 renames the grayscale-base mono theme to shadcn-mono-red and adds the remaining mono accent variants; keep Shadcn Gray adjacent to Shadcn Black so the color-family order stays stable with FN-6814.
   // FNXC:DashboardTheming 2026-06-21-00:00: FN-6815 adds shadcn-gray-blue as the slate-neutral blue-gray sibling; keep it adjacent to Shadcn Gray so the published union mirrors dashboard option order.
@@ -2959,6 +2961,8 @@ export interface GlobalSettings {
   themeMode?: ThemeMode;
   /** Color theme preference for accent colors and styling. Default: "default". */
   colorTheme?: ColorTheme;
+  /** Token→hex override map for the customizable shadcn theme. Applied only when `colorTheme === "shadcn-custom"`; dashboard sanitizes keys and values before writing CSS custom properties. */
+  shadcnCustomColors?: Record<string, string>;
   /** Dashboard font size scale percentage. Bounded to 85-125. Default: 100. */
   dashboardFontScalePct?: number;
   /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.

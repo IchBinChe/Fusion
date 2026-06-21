@@ -127,6 +127,17 @@ describe("ThemeSelector", () => {
     expect(screen.getByLabelText("Lavender theme")).toBeDefined();
     expect(screen.getByLabelText("Neon Bloom theme")).toBeDefined();
     expect(screen.getByLabelText("Sepia theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Custom theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Blue theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Green theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Red theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Purple theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Pink theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Orange theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Yellow theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Mono theme")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Black theme")).toBeDefined();
   });
 
   it("renders every shared swatch class from themeOptions", () => {
@@ -641,6 +652,59 @@ describe("ThemeSelector", () => {
     fireEvent.click(screen.getByLabelText("Reset to default theme"));
     expect(onThemeModeChange).toHaveBeenCalledWith("dark");
     expect(onColorThemeChange).toHaveBeenCalledWith("default");
+  });
+
+  it("shows the shadcn custom picker only for shadcn-custom", () => {
+    const { rerender } = render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="default"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="shadcn"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(
+      <ThemeSelector
+        themeMode="light"
+        colorTheme="shadcn-custom"
+        shadcnCustomColors={{ "--accent": "#123456" }}
+        resolvedThemeMode="light"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("shadcn-color-picker")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Custom theme").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("reset to defaults clears shadcn custom color overrides", () => {
+    const onShadcnCustomColorsChange = vi.fn();
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="shadcn-custom"
+        shadcnCustomColors={{ "--accent": "#123456" }}
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+        onShadcnCustomColorsChange={onShadcnCustomColorsChange}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("Reset to default theme"));
+    expect(onShadcnCustomColorsChange).toHaveBeenCalledWith({});
   });
 
   it("each color theme has a swatch with four explicit sample colors", () => {

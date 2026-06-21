@@ -19,6 +19,7 @@ vi.mock("../../api", () => ({
 const THEME_MODE_STORAGE_KEY = "kb-dashboard-theme-mode";
 const COLOR_THEME_STORAGE_KEY = "kb-dashboard-color-theme";
 const FONT_SCALE_STORAGE_KEY = "kb-dashboard-font-scale-pct";
+const SHADCN_CUSTOM_COLORS_STORAGE_KEY = "kb-dashboard-shadcn-custom-colors";
 
 const mockFetchGlobalSettings = vi.mocked(fetchGlobalSettings);
 const mockUpdateGlobalSettings = vi.mocked(updateGlobalSettings);
@@ -79,6 +80,9 @@ describe("useTheme", () => {
     document.documentElement.removeAttribute("data-theme");
     document.documentElement.removeAttribute("data-color-theme");
     document.documentElement.style.fontSize = "";
+    for (const cssVar of ["--accent", "--bg", "--surface", "--card", "--border", "--text", "--text-muted", "--todo", "--in-progress", "--in-review", "--triage", "--done", "--color-success", "--color-warning", "--color-error"]) {
+      document.documentElement.style.removeProperty(cssVar);
+    }
 
     // Reset static theme-data link to mirror index.html markup
     document.querySelectorAll('link[id="theme-data"]').forEach((link) => link.remove());
@@ -149,6 +153,28 @@ describe("useTheme", () => {
     });
     expect(localStorageMock[FONT_SCALE_STORAGE_KEY]).toBe("110");
     expect(document.documentElement.style.fontSize).toBe("110%");
+  });
+
+  it("hydrates shadcn custom colors from backend on mount", async () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-custom";
+    mockFetchGlobalSettings.mockResolvedValue({
+      colorTheme: "shadcn-custom",
+      shadcnCustomColors: {
+        "--accent": "#aabbcc",
+        "--bg": "url(bad)",
+        "--unknown": "#000000",
+      },
+    });
+
+    const { result } = renderHook(() => useTheme());
+
+    await waitFor(() => {
+      expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#aabbcc" });
+    });
+    expect(result.current.colorTheme).toBe("shadcn-custom");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#aabbcc");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
+    expect(JSON.parse(localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY])).toEqual({ "--accent": "#aabbcc" });
   });
 
   it("prefers backend over localStorage on hydration", async () => {
@@ -551,6 +577,70 @@ describe("useTheme", () => {
     document.head.removeChild(style);
   });
 
+  it("applies sanitized shadcn-custom inline overrides and falls back for missing tokens", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-custom";
+    localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY] = JSON.stringify({
+      "--accent": "#123456",
+      "--bg": "red",
+      "--unknown": "#000000",
+    });
+
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.colorTheme).toBe("shadcn-custom");
+    expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#123456" });
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#123456");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
+  });
+
+  it("removes shadcn-custom inline overrides when switching away", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-custom";
+    localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY] = JSON.stringify({ "--accent": "#123456", "--bg": "#ffffff" });
+
+    const { result } = renderHook(() => useTheme());
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#123456");
+
+    act(() => {
+      result.current.setColorTheme("shadcn");
+    });
+
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("shadcn");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
+  });
+
+  it("persists sanitized shadcn-custom colors through the write-through setter", () => {
+    const { result } = renderHook(() => useTheme());
+
+    act(() => {
+      result.current.setShadcnCustomColors({ "--accent": "#fff", "--text": "url(bad)" });
+    });
+
+    expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#fff" });
+    expect(JSON.parse(localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY])).toEqual({ "--accent": "#fff" });
+    expect(mockUpdateGlobalSettings).toHaveBeenCalledWith({ shadcnCustomColors: { "--accent": "#fff" } });
+  });
+
+  it("hydrates partial shadcn-custom colors from backend without overriding in-flight user edits", async () => {
+    let resolveFetch: (value: Partial<Settings>) => void;
+    const pendingFetch = new Promise<Partial<Settings>>((resolve) => {
+      resolveFetch = resolve;
+    });
+    mockFetchGlobalSettings.mockReturnValue(pendingFetch);
+
+    const { result } = renderHook(() => useTheme());
+    act(() => {
+      result.current.setShadcnCustomColors({ "--accent": "#abcdef" });
+    });
+
+    resolveFetch!({ shadcnCustomColors: { "--accent": "#111111", "--bg": "#222222" } });
+    await waitFor(() => {
+      expect(mockFetchGlobalSettings).toHaveBeenCalledTimes(1);
+    });
+
+    expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#abcdef" });
+  });
+
   it("applies representative shadcn color-family design tokens with neutralized glow effects", () => {
     const style = document.createElement("style");
     const baseCss = readFileSync(resolve(PACKAGE_ROOT, "app/styles.css"), "utf8");
@@ -772,6 +862,7 @@ describe("getThemeInitScript", () => {
     expect(script).toContain(THEME_MODE_STORAGE_KEY);
     expect(script).toContain(COLOR_THEME_STORAGE_KEY);
     expect(script).toContain(FONT_SCALE_STORAGE_KEY);
+    expect(script).toContain(SHADCN_CUSTOM_COLORS_STORAGE_KEY);
   });
 
   it("includes every supported theme in the validated theme list", () => {
@@ -800,6 +891,23 @@ describe("getThemeInitScript", () => {
     expect(script).toContain("prefers-color-scheme");
     expect(script).toContain("systemDark");
     expect(script).toContain("effectiveMode");
+  });
+
+  it("pre-hydration script applies only sanitized shadcn-custom overrides", () => {
+    const script = getThemeInitScript();
+    localStorage.setItem(COLOR_THEME_STORAGE_KEY, "shadcn-custom");
+    localStorage.setItem(SHADCN_CUSTOM_COLORS_STORAGE_KEY, JSON.stringify({
+      "--accent": "#FF8800",
+      "--bg": "red",
+      "--text": "#fff",
+    }));
+
+    window.eval(script);
+
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("shadcn-custom");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#FF8800");
+    expect(document.documentElement.style.getPropertyValue("--text")).toBe("#fff");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
   });
 
   it("pre-hydration script resolves theme-data path like runtime loader", () => {

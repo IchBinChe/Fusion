@@ -358,8 +358,14 @@ interface SettingsModalProps {
   onColorThemeChange?: (theme: ColorTheme) => void;
   /** Current dashboard font scale percentage */
   dashboardFontScalePct?: number;
+  /** Current shadcn-custom color overrides */
+  shadcnCustomColors?: Record<string, string>;
+  /** Resolved theme mode for shadcn-custom defaults */
+  resolvedThemeMode?: "dark" | "light";
   /** Called when dashboard font scale changes */
   onDashboardFontScaleChange?: (scalePct: number) => void;
+  /** Called when shadcn-custom color overrides change */
+  onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
   /** Optional callback when user wants to reopen the onboarding guide */
   onReopenOnboarding?: () => void;
   /** Optional callback to open approvals/mailbox view. */
@@ -609,7 +615,10 @@ export function SettingsModal({
   onThemeModeChange,
   onColorThemeChange,
   dashboardFontScalePct = 100,
+  shadcnCustomColors = {},
+  resolvedThemeMode,
   onDashboardFontScaleChange,
+  onShadcnCustomColorsChange,
   onReopenOnboarding,
   onOpenApprovals,
   onOpenWorkflowSettings,
@@ -2615,9 +2624,12 @@ export function SettingsModal({
             themeMode={themeMode}
             colorTheme={colorTheme}
             dashboardFontScalePct={dashboardFontScalePct}
+            shadcnCustomColors={shadcnCustomColors}
+            resolvedThemeMode={resolvedThemeMode}
             onThemeModeChange={onThemeModeChange}
             onColorThemeChange={onColorThemeChange}
             onDashboardFontScaleChange={onDashboardFontScaleChange}
+            onShadcnCustomColorsChange={onShadcnCustomColorsChange}
             sessionBannersHidden={sessionBannersHidden}
             setSessionBannersHidden={setSessionBannersHidden}
           />

@@ -75,9 +75,12 @@ interface AppModalsProps {
     themeMode: ThemeMode;
     colorTheme: ColorTheme;
     dashboardFontScalePct: number;
+    shadcnCustomColors: Record<string, string>;
+    resolvedThemeMode: "dark" | "light";
     setThemeMode: (mode: ThemeMode) => void;
     setColorTheme: (theme: ColorTheme) => void;
     setDashboardFontScalePct: (scalePct: number) => void;
+    setShadcnCustomColors: (colors: Record<string, string>) => void;
   };
   /** Optional override for the settings modal close handler. When provided, this is called instead of modalManager.closeSettings. */
   onSettingsClose?: () => void;
@@ -324,7 +327,10 @@ export function AppModals({
               onThemeModeChange={settings.setThemeMode}
               onColorThemeChange={settings.setColorTheme}
               dashboardFontScalePct={settings.dashboardFontScalePct}
+              shadcnCustomColors={settings.shadcnCustomColors}
+              resolvedThemeMode={settings.resolvedThemeMode}
               onDashboardFontScaleChange={settings.setDashboardFontScalePct}
+              onShadcnCustomColorsChange={settings.setShadcnCustomColors}
               onReopenOnboarding={onReopenOnboarding}
               onOpenApprovals={onOpenApprovals}
               onOpenWorkflowSettings={() => {

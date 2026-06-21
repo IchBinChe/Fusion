@@ -9,13 +9,16 @@ export interface AppearanceSectionProps extends SectionBaseProps {
     themeMode: ThemeMode;
     colorTheme: ColorTheme;
     dashboardFontScalePct: number;
+    shadcnCustomColors?: Record<string, string>;
+    resolvedThemeMode?: "dark" | "light";
     onThemeModeChange?: (mode: ThemeMode) => void;
     onColorThemeChange?: (theme: ColorTheme) => void;
     onDashboardFontScaleChange?: (scalePct: number) => void;
+    onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
     sessionBannersHidden: boolean;
     setSessionBannersHidden: (hidden: boolean) => void;
 }
-export function AppearanceSection({ scopeBanner, setForm, themeMode, colorTheme, dashboardFontScalePct, onThemeModeChange, onColorThemeChange, onDashboardFontScaleChange, sessionBannersHidden, setSessionBannersHidden, }: AppearanceSectionProps) {
+export function AppearanceSection({ scopeBanner, setForm, themeMode, colorTheme, dashboardFontScalePct, shadcnCustomColors = {}, resolvedThemeMode, onThemeModeChange, onColorThemeChange, onDashboardFontScaleChange, onShadcnCustomColorsChange, sessionBannersHidden, setSessionBannersHidden, }: AppearanceSectionProps) {
     const { t } = useTranslation("app");
     return (<>
       {scopeBanner}
@@ -29,6 +32,9 @@ export function AppearanceSection({ scopeBanner, setForm, themeMode, colorTheme,
         }} onDashboardFontScaleChange={(scalePct) => {
             setForm((f) => ({ ...f, dashboardFontScalePct: scalePct }));
             onDashboardFontScaleChange?.(scalePct);
+        }} shadcnCustomColors={shadcnCustomColors} resolvedThemeMode={resolvedThemeMode} onShadcnCustomColorsChange={(colors) => {
+            setForm((f) => ({ ...f, shadcnCustomColors: colors }));
+            onShadcnCustomColorsChange?.(colors);
         }}/>
       <LanguageSelector />
       <div className="form-group">

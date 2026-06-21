@@ -2466,6 +2466,144 @@ describe("StepSessionExecutor integration", () => {
     }));
   });
 
+  it("REGRESSION (FN-6722): pause-abort with step progress preserves branch + resume state on requeue to todo", async () => {
+    // A mid-run abort on a task that already completed steps (with commits on its
+    // branch) must not reset progress or drop the branch when bounced to todo —
+    // otherwise the next dispatch re-plans from Step 0 and the committed work is
+    // stranded (observed as FN-6722 "lost all progress / stuck"). The teardown
+    // must move with preserveResumeState and keep the branch pointer.
+    // Single-session mode — this is the teardown that logs the exact FN-6722
+    // string "Execution paused — agent terminated, moved to todo" (executor.ts
+    // ~9280). Reject the session work with pausedAborted set so execute() enters
+    // that catch-block teardown, exactly as the FN-6722 hard-cancel did.
+    const store = createMockStore();
+    const taskState = createTaskWithSteps({
+      description: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "pending" },
+      ],
+      currentStep: 1,
+      branch: "fusion/fn-200",
+    });
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      runStepsInNewSessions: false,
+    });
+    store.getTask.mockImplementation(async () => ({ ...taskState }));
+
+    const session = {
+      prompt: vi.fn().mockRejectedValue(new Error("aborted by hard-cancel")),
+      dispose: vi.fn(),
+      subscribe: vi.fn(),
+      on: vi.fn(),
+      abortBash: vi.fn(),
+      state: {},
+      sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+      getSessionStats: vi.fn().mockReturnValue({ tokens: {} }),
+    };
+    mockedCreateFnAgent.mockResolvedValue({ session } as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    // Mark the in-flight run hard-cancelled so the rejection routes through the
+    // pausedAborted teardown branch rather than the generic failure sink.
+    (executor as any).pausedAborted.add("FN-200");
+    await executor.execute(taskState);
+
+    // Confirm we exercised the single-session catch-block teardown.
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-200",
+      "Execution paused — agent terminated, moved to todo",
+      undefined,
+      expect.anything(),
+    );
+    // Resume state preserved (steps NOT reset to pending)...
+    expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveResumeState: true });
+    // ...and the branch pointer to the committed work is NOT cleared.
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-200",
+      expect.objectContaining({ branch: undefined }),
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-200",
+      expect.objectContaining({ branch: null }),
+    );
+  });
+
+  it("REGRESSION (FN-6722): pause-abort preserves progress committed mid-session by a freshly-dispatched task", async () => {
+    // The dispatch-time `task` snapshot is frozen — a task dispatched fresh
+    // (currentStep 0, all steps pending) that commits step progress to the store
+    // mid-session shows that progress ONLY via the store read (`latestTask`),
+    // never via `task`. The teardown must read `latestTask` so this first-run
+    // case is preserved too; reading the stale `task` here would clear the branch
+    // and reset steps — the same FN-6722 failure mode.
+    const store = createMockStore();
+
+    // Dispatch-time snapshot: no progress yet.
+    const task = createTaskWithSteps({
+      description: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      steps: [
+        { name: "Step 0", status: "pending" },
+        { name: "Step 1", status: "pending" },
+      ],
+      currentStep: 0,
+    });
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      runStepsInNewSessions: false,
+    });
+    // Store snapshot the teardown re-reads: the agent committed Step 0 + a branch
+    // during the session. column stays in-progress so the 9227 early-return guard
+    // (which needs column === "todo") does not fire and we reach the teardown.
+    store.getTask.mockResolvedValue({
+      ...task,
+      column: "in-progress",
+      currentStep: 1,
+      branch: "fusion/fn-200",
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "pending" },
+      ],
+    } as any);
+
+    const session = {
+      prompt: vi.fn().mockRejectedValue(new Error("aborted by hard-cancel")),
+      dispose: vi.fn(),
+      subscribe: vi.fn(),
+      on: vi.fn(),
+      abortBash: vi.fn(),
+      state: {},
+      sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+      getSessionStats: vi.fn().mockReturnValue({ tokens: {} }),
+    };
+    mockedCreateFnAgent.mockResolvedValue({ session } as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    (executor as any).pausedAborted.add("FN-200");
+    await executor.execute(task);
+
+    // Progress visible only via latestTask must still be preserved.
+    expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveResumeState: true });
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-200",
+      expect.objectContaining({ branch: undefined }),
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-200",
+      expect.objectContaining({ branch: null }),
+    );
+  });
+
   it("REGRESSION: untrackTask called with bare task ID during pause in step-session mode", async () => {
     const store = createStepSessionStore();
 

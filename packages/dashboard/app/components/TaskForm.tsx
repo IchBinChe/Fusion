@@ -306,6 +306,9 @@ export function TaskForm({
     let cancelled = false;
     setOptionalSteps([]);
     if (!effectiveOptionalWorkflowId) {
+      // Clear any in-flight loading state (a prior fetch may have been cancelled
+      // mid-flight when switching to "No workflow"), so the loading row never sticks.
+      setOptionalStepsLoading(false);
       onEnabledWorkflowStepsChange?.([]);
       return;
     }

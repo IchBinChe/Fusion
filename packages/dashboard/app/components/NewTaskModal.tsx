@@ -164,6 +164,10 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       dependencies.length > 0 ||
       pendingImages.length > 0 ||
       selectedWorkflowId !== undefined ||
+      // Optional workflow steps the user toggled count as unsaved work. (Workflows
+      // whose steps are defaultOn:false — today's only shipped step — seed an empty
+      // set, so this stays false until the user actually opts a step in.)
+      enabledWorkflowSteps.length > 0 ||
       executorModel !== "" ||
       validatorModel !== "" ||
       planningModel !== "" ||
@@ -179,7 +183,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       githubTrackingEnabled ||
       githubRepoOverrideTrimmed !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, selectedWorkflowId, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, selectedWorkflowId, enabledWorkflowSteps, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
   const handleClose = useCallback(async () => {
     if (hasDirtyState) {

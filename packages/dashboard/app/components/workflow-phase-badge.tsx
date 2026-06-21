@@ -1,4 +1,8 @@
 /**
+ * FNXC:WorkflowOptionalSteps 2026-06-21-00:00:
+ * One phase chip (pre-merge / post-merge) shared by every workflow-step surface so
+ * the badge looks identical across the results tab, authoring panel, and dropdown.
+ *
  * Shared phase chip for workflow steps (pre-merge / post-merge). Extracted from
  * WorkflowResultsTab so the node-editor optional-steps panel and the optional-step
  * dropdown render an identical badge without duplicating markup.

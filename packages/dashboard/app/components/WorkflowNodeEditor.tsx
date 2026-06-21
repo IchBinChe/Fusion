@@ -2502,6 +2502,7 @@ function InnerEditor({
                       optionalSteps={optionalSteps}
                       onChange={setOptionalSteps}
                       readOnly={isBuiltin}
+                      pluginTemplates={pluginTemplates.map((p) => p.template)}
                     />
                   )}
                 </section>
@@ -2812,6 +2813,7 @@ function InnerEditor({
                             optionalSteps={optionalSteps}
                             onChange={setOptionalSteps}
                             readOnly={isBuiltin}
+                            pluginTemplates={pluginTemplates.map((p) => p.template)}
                           />
                         </div>
                       )}

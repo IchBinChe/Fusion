@@ -1,4 +1,9 @@
 /**
+ * FNXC:WorkflowOptionalSteps 2026-06-21-00:00:
+ * Users selecting optional workflow steps at task creation need one consistent
+ * multi-select control across every creation surface, with full keyboard + screen-
+ * reader support, so the quick-add card and the full New Task modal behave identically.
+ *
  * WorkflowOptionalStepsDropdown — a controlled multi-select for a workflow's
  * optional steps, shared by the quick-add card (U5) and the full New Task modal
  * (U4) so both creation surfaces present the same interaction.
@@ -109,10 +114,11 @@ export function WorkflowOptionalStepsDropdown({
       : t("workflowOptionalSteps.triggerCount", "Steps: {{count}} selected", { count: selectedCount });
 
   const onTriggerKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+    // ArrowUp also opens (ARIA listbox authoring guidance), landing on the last option.
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       setIsOpen(true);
-      setActiveIndex(0);
+      setActiveIndex(e.key === "ArrowUp" ? steps.length - 1 : 0);
     }
   };
 
@@ -161,8 +167,8 @@ export function WorkflowOptionalStepsDropdown({
             ref={panelRef}
             className="wf-optional-steps-dropdown-panel"
             role="listbox"
+            aria-multiselectable="true"
             aria-label={t("workflowOptionalSteps.title", "Optional steps")}
-            aria-labelledby={labelId}
             data-testid="wf-optional-steps-dropdown-panel"
             style={{ top: position.top, left: position.left, minWidth: position.width }}
             onKeyDown={onPanelKeyDown}

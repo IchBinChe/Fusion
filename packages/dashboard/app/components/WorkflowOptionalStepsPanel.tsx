@@ -1,4 +1,9 @@
 /**
+ * FNXC:WorkflowOptionalSteps 2026-06-21-00:00:
+ * Workflow authors need to declare which step templates are optional and set each
+ * one's defaultOn from the visual editor (persisted on the IR's `optionalSteps`
+ * array) so optional steps are authorable without hand-editing IR.
+ *
  * WorkflowOptionalStepsPanel — the workflow editor's optional-step authoring
  * surface. Sibling to {@link WorkflowFieldsPanel} / WorkflowSettingsPanel: lives
  * alongside the canvas in {@link WorkflowNodeEditor} and mutates the IR's

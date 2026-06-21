@@ -1083,6 +1083,10 @@ export function InlineCreateCard({
                 className="inline-create-optional-steps"
                 aria-label={t("inline.optionalWorkflowSteps", "Optional workflow steps")}
               >
+                {/* FNXC:TaskCreation 2026-06-21-00:00:
+                    Inline quick-add uses the shared optional-steps dropdown so it matches
+                    the modal/quick-add keyboard + a11y behavior and toggles the same
+                    enabledWorkflowSteps set submitted on create. */}
                 <WorkflowOptionalStepsDropdown
                   steps={optionalSteps}
                   enabledIds={enabledOptionalStepIds}

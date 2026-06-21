@@ -58,6 +58,59 @@ describe("WorkflowSwitcher", () => {
     expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
   });
 
+  it("fires onOpen only on click-driven closed-to-open transitions", () => {
+    const onOpen = vi.fn();
+    render(<WorkflowSwitcher workflows={workflows} value="coding" onChange={vi.fn()} counts={countMap()} onOpen={onOpen} />);
+
+    const trigger = screen.getByTestId("workflow-switcher");
+    expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("listbox", { name: "Workflow" })).toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["ArrowDown", "ArrowUp", "Enter", " "])("fires onOpen when %s opens the dropdown from the keyboard", (key) => {
+    const onOpen = vi.fn();
+    render(<WorkflowSwitcher workflows={workflows} value="coding" onChange={vi.fn()} counts={countMap()} onOpen={onOpen} />);
+
+    const trigger = screen.getByTestId("workflow-switcher");
+    expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(trigger, { key });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("listbox", { name: "Workflow" })).toBeInTheDocument();
+  });
+
+  it("does not fire onOpen when Escape or outside mousedown closes and fires again after reopening", () => {
+    const onOpen = vi.fn();
+    render(<WorkflowSwitcher workflows={workflows} value="coding" onChange={vi.fn()} counts={countMap()} onOpen={onOpen} />);
+
+    const trigger = screen.getByTestId("workflow-switcher");
+    fireEvent.click(trigger);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    fireEvent.mouseDown(document.body);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(onOpen).toHaveBeenCalledTimes(3);
+  });
+
   it("calls onChange when an option is selected", () => {
     const onChange = vi.fn();
     render(<WorkflowSwitcher workflows={workflows} value="coding" onChange={onChange} counts={countMap()} />);

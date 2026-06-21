@@ -12,6 +12,8 @@ export interface WorkflowSwitcherProps {
   value: string;
   onChange: (id: string) => void;
   counts: Map<string, WorkflowStatusCounts>;
+  /** Fired each time the dropdown transitions from closed to open so consumers can refresh count data. */
+  onOpen?: () => void;
   label?: string;
   onEditWorkflow?: (workflowId: string) => void;
   onCreateWorkflow?: () => void;
@@ -42,8 +44,12 @@ function getCounts(counts: Map<string, WorkflowStatusCounts>, workflowId: string
  * FNXC:WorkflowSwitcher 2026-06-20-15:34:
  * Workflow edit and creation affordances moved into the shared dropdown so Board and ListView cannot leave separate toolbar icon shells behind.
  * Each option row owns a sibling edit button, and New workflow remains visible in a non-scrolling footer while long workflow lists scroll.
+ *
+ * FNXC:WorkflowSwitcher 2026-06-21-00:00:
+ * Opening the dropdown must refresh workflow count data because task-to-workflow assignments do not emit board-workflows invalidation events.
+ * Fire onOpen only on closed-to-open transitions so consumers can refetch without close-time calls or render loops.
  */
-export function WorkflowSwitcher({ workflows, value, onChange, counts, label: labelProp, onEditWorkflow, onCreateWorkflow }: WorkflowSwitcherProps) {
+export function WorkflowSwitcher({ workflows, value, onChange, counts, onOpen, label: labelProp, onEditWorkflow, onCreateWorkflow }: WorkflowSwitcherProps) {
   const { t } = useTranslation("app");
   const label = labelProp ?? t("workflowSwitcher.label", "Workflow");
   const todoLabel = t("workflowSwitcher.todo", "Todo");
@@ -62,6 +68,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const onOpenRef = useRef(onOpen);
 
   const selectedIndex = useMemo(() => Math.max(0, workflows.findIndex((workflow) => workflow.id === value)), [value, workflows]);
   const selectedWorkflow = workflows[selectedIndex] ?? workflows[0] ?? null;
@@ -95,6 +102,10 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
 
     setDropdownPosition({ top, left, width, maxHeight });
   }, []);
+
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  }, [onOpen]);
 
   useEffect(() => {
     setPortalRoot(document.body);
@@ -141,6 +152,21 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
     }
   }, [highlightedIndex, isOpen]);
 
+  const openDropdown = useCallback(() => {
+    if (isOpen) return;
+    onOpenRef.current?.();
+    setIsOpen(true);
+  }, [isOpen]);
+
+  const toggleDropdown = useCallback(() => {
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    onOpenRef.current?.();
+    setIsOpen(true);
+  }, [isOpen]);
+
   const selectWorkflow = useCallback((workflowId: string) => {
     onChange(workflowId);
     setIsOpen(false);
@@ -164,7 +190,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
       case "ArrowDown":
         event.preventDefault();
         if (!isOpen) {
-          setIsOpen(true);
+          openDropdown();
         } else {
           setHighlightedIndex((current) => (workflows.length ? (current + 1) % workflows.length : 0));
         }
@@ -172,7 +198,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
       case "ArrowUp":
         event.preventDefault();
         if (!isOpen) {
-          setIsOpen(true);
+          openDropdown();
         } else {
           setHighlightedIndex((current) => (workflows.length ? (current - 1 + workflows.length) % workflows.length : 0));
         }
@@ -184,7 +210,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
           const workflow = workflows[highlightedIndex];
           if (workflow) selectWorkflow(workflow.id);
         } else {
-          setIsOpen(true);
+          openDropdown();
         }
         break;
       case "Escape":
@@ -195,7 +221,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
         setIsOpen(false);
         break;
     }
-  }, [highlightedIndex, isOpen, selectWorkflow, workflows]);
+  }, [highlightedIndex, isOpen, openDropdown, selectWorkflow, workflows]);
 
   if (!selectedWorkflow) return null;
 
@@ -310,7 +336,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
         aria-expanded={isOpen}
         aria-controls={isOpen ? listboxId : undefined}
         aria-label={t("workflowSwitcher.triggerAria", "Select workflow. Current workflow: {{name}}", { name: selectedWorkflow.name })}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={toggleDropdown}
         onKeyDown={handleKeyDown}
       >
         <span className="workflow-switcher-trigger-main">

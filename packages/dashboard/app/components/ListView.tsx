@@ -430,34 +430,40 @@ export function ListView({
     setBoardWorkflowsState(cached ? { projectId, payload: cached } : null);
   }, [projectId, shouldHydrateBoardWorkflowsCache]);
 
+  /*
+  FNXC:WorkflowControls 2026-06-21-00:00:
+  Opening the workflow switcher must refresh the board-workflows payload because task workflow assignment changes do not emit workflow definition SSE events.
+  Share this path with mount, visibility/focus, and workflow-definition SSE refetches so desktop sidebar and mobile toolbar counts cannot drift.
+  */
+  const refreshBoardWorkflows = useCallback(() => {
+    const seq = ++boardWorkflowsFetchSeqRef.current;
+    fetchBoardWorkflows(projectId)
+      .then((payload) => {
+        if (seq === boardWorkflowsFetchSeqRef.current) {
+          setBoardWorkflowsState({ projectId, payload });
+          writeBoardWorkflowsCache(projectId, payload);
+        }
+      })
+      .catch(() => {
+        if (seq === boardWorkflowsFetchSeqRef.current) {
+          setBoardWorkflowsState({ projectId, payload: { flagEnabled: false, defaultWorkflowId: "builtin:coding", workflows: [], taskWorkflowIds: {} } });
+        }
+      });
+  }, [projectId]);
+
   useEffect(() => {
-    const runFetch = () => {
-      const seq = ++boardWorkflowsFetchSeqRef.current;
-      fetchBoardWorkflows(projectId)
-        .then((payload) => {
-          if (seq === boardWorkflowsFetchSeqRef.current) {
-            setBoardWorkflowsState({ projectId, payload });
-            writeBoardWorkflowsCache(projectId, payload);
-          }
-        })
-        .catch(() => {
-          if (seq === boardWorkflowsFetchSeqRef.current) {
-            setBoardWorkflowsState({ projectId, payload: { flagEnabled: false, defaultWorkflowId: "builtin:coding", workflows: [], taskWorkflowIds: {} } });
-          }
-        });
-    };
-    runFetch();
+    refreshBoardWorkflows();
     const onVisible = () => {
-      if (typeof document === "undefined" || document.visibilityState === "visible") runFetch();
+      if (typeof document === "undefined" || document.visibilityState === "visible") refreshBoardWorkflows();
     };
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
     if (typeof window !== "undefined") window.addEventListener("focus", onVisible);
     const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
     const unsubscribe = subscribeSse(`/api/events${query}`, {
       events: {
-        "workflow:created": runFetch,
-        "workflow:updated": runFetch,
-        "workflow:deleted": runFetch,
+        "workflow:created": refreshBoardWorkflows,
+        "workflow:updated": refreshBoardWorkflows,
+        "workflow:deleted": refreshBoardWorkflows,
       },
     });
     return () => {
@@ -466,7 +472,7 @@ export function ListView({
       if (typeof window !== "undefined") window.removeEventListener("focus", onVisible);
       unsubscribe();
     };
-  }, [projectId]);
+  }, [projectId, refreshBoardWorkflows]);
 
   // Persist selection to localStorage
   useEffect(() => {
@@ -1630,6 +1636,7 @@ export function ListView({
           value={selectedWorkflow.id}
           onChange={setSelectedWorkflowId}
           counts={workflowStatusCounts}
+          onOpen={refreshBoardWorkflows}
           label={t("listView.workflowLabel", "Workflow")}
           onEditWorkflow={onOpenWorkflowEditor}
           onCreateWorkflow={onCreateWorkflow}

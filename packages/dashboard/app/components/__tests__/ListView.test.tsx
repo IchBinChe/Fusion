@@ -658,6 +658,45 @@ describe("ListView", () => {
     expect(screen.queryAllByText("Backlog")).toHaveLength(0);
   });
 
+  it("re-fetches board-workflows when the workflow switcher opens", async () => {
+    vi.mocked(fetchBoardWorkflows).mockResolvedValue({
+      flagEnabled: true,
+      defaultWorkflowId: "builtin:coding",
+      workflows: [
+        {
+          id: "builtin:coding",
+          name: "Coding",
+          columns: [
+            { id: "todo", name: "Todo", flags: { hold: true } },
+            { id: "done", name: "Done", flags: { complete: true } },
+          ],
+        },
+        {
+          id: "wf-custom",
+          name: "Custom Flow",
+          columns: [
+            { id: "backlog", name: "Backlog", flags: { intake: true } },
+            { id: "done", name: "Done", flags: { complete: true } },
+          ],
+        },
+      ],
+      taskWorkflowIds: { "FN-001": "builtin:coding" },
+    });
+
+    renderListView({
+      tasks: [createMockTask({ id: "FN-001", column: "todo", title: "Workflow task" })],
+    });
+
+    const trigger = await screen.findByTestId("workflow-switcher");
+    await waitFor(() => expect(fetchBoardWorkflows).toHaveBeenCalledTimes(1));
+    vi.mocked(fetchBoardWorkflows).mockClear();
+
+    fireEvent.click(trigger);
+
+    expect(fetchBoardWorkflows).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("listbox", { name: "Workflow" })).toBeInTheDocument();
+  });
+
   it("re-homes a preserved-column task to the new workflow after workflow invalidation", async () => {
     const preservedWorkflow = {
       id: "wf-preserved",

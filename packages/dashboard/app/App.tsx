@@ -1245,8 +1245,8 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closePlanning });
   }, [modalManager, pushNav]);
 
-  const openPlanningWithInitialPlanWithNav = useCallback((initialPlan: string) => {
-    modalManager.openPlanningWithInitialPlan(initialPlan);
+  const openPlanningWithInitialPlanWithNav = useCallback((initialPlan: string, workflowId?: string | null) => {
+    modalManager.openPlanningWithInitialPlan(initialPlan, workflowId);
     pushNav({ type: "modal", close: modalManager.closePlanning });
   }, [modalManager, pushNav]);
 
@@ -1255,8 +1255,8 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closePlanning });
   }, [modalManager, pushNav]);
 
-  const openSubtaskBreakdownWithNav = useCallback((description: string) => {
-    modalManager.openSubtaskBreakdown(description);
+  const openSubtaskBreakdownWithNav = useCallback((description: string, workflowId?: string | null) => {
+    modalManager.openSubtaskBreakdown(description, workflowId);
     pushNav({ type: "modal", close: modalManager.closeSubtask });
   }, [modalManager, pushNav]);
 

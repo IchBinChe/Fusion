@@ -224,6 +224,8 @@ Planning Mode now includes branch controls on the summary screen before you crea
 
 These values are sent with the Planning Mode create-task request as `branchSelection`, so created tasks persist branch/base-branch settings consistently with other branch-aware task creation flows.
 
+When Planning Mode or Subtask Breakdown is opened from a workflow-filtered board lane, the create request also carries that active workflow selection. Single-task planning saves, planning breakdown saves, and subtask-breakdown saves create their tasks directly on the selected workflow lane instead of briefly landing on the default board.
+
 Completed single-task planning sessions remain in the Planning Mode history after you create the task, and selecting one restores the completed summary instead of restarting the composer. History rows are deduplicated by session id even if the initial load and live session updates arrive out of order, and deleting a history entry now waits for the server delete to persist (failures keep the row visible and surface an error instead of silently disappearing until refresh).
 
 ## New Task Modal Branch Strategy

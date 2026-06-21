@@ -219,11 +219,11 @@ interface ListViewProps {
   /**
    * Called when the user clicks the "Plan" button in the quick entry box.
    */
-  onPlanningMode?: (initialPlan: string) => void;
+  onPlanningMode?: (initialPlan: string, workflowId?: string | null) => void;
   /**
    * Called when the user clicks the "Subtask" button in the quick entry box.
    */
-  onSubtaskBreakdown?: (description: string) => void;
+  onSubtaskBreakdown?: (description: string, workflowId?: string | null) => void;
   /**
    * Called when tasks are updated (e.g., after bulk model update).
    * Allows parent to refresh task list or handle optimistically.

@@ -203,6 +203,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setSelectedPresetId("");
     setPresetMode("default");
     setSelectedWorkflowId(undefined);
+    setEnabledWorkflowSteps([]);
     setSelectedAgentId(null);
     setShowAgentPicker(false);
     setReviewLevel(undefined);
@@ -307,6 +308,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setSelectedPresetId("");
       setPresetMode("default");
       setSelectedWorkflowId(undefined);
+      setEnabledWorkflowSteps([]);
       setSelectedAgentId(null);
       setShowAgentPicker(false);
       setReviewLevel(undefined);

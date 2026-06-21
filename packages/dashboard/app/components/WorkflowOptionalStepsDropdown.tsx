@@ -52,6 +52,7 @@ export function WorkflowOptionalStepsDropdown({
   const [position, setPosition] = useState<PanelPosition | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
   const labelId = useId();
 
   const reposition = useCallback(() => {
@@ -90,6 +91,13 @@ export function WorkflowOptionalStepsDropdown({
     setIsOpen(false);
     triggerRef.current?.focus();
   }, []);
+
+  // Focus the active option when the panel opens or the active index changes —
+  // driven by an effect (not an inline ref callback) so a re-render from toggling
+  // a step does not steal focus back to the active option on every commit.
+  useEffect(() => {
+    if (isOpen && position) optionRefs.current[activeIndex]?.focus();
+  }, [isOpen, position, activeIndex]);
 
   // Empty state: render nothing (committed behavior, shared with the modal).
   if (steps.length === 0) return null;
@@ -168,7 +176,7 @@ export function WorkflowOptionalStepsDropdown({
                   aria-checked={checked}
                   tabIndex={i === activeIndex ? 0 : -1}
                   ref={(el) => {
-                    if (i === activeIndex && isOpen) el?.focus();
+                    optionRefs.current[i] = el;
                   }}
                   className={`wf-optional-steps-dropdown-option${i === activeIndex ? " is-active" : ""}`}
                   data-testid={`wf-optional-steps-dropdown-option-${step.templateId}`}

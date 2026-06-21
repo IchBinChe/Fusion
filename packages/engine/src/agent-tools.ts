@@ -28,6 +28,7 @@ import { computeApprovalDedupeKey } from "./agent-action-gate.js";
 import { MessageDeliveryAutoRecoveryHandler } from "./auto-recovery-handlers/message-delivery.js";
 import { emitGoalRetrievalAudit } from "./goal-anchoring-audit.js";
 import { recordRetry } from "./retry-burned-logger.js";
+import { acquireWorkspaceRepoWorktree } from "./worktree-acquisition.js";
 
 // ── Tool parameter schemas (canonical definitions) ────────────────────────
 
@@ -55,6 +56,15 @@ export const taskCreateParams = Type.Object({
 export const taskLogParams = Type.Object({
   message: Type.String({ description: "What happened" }),
   outcome: Type.Optional(Type.String({ description: "Result or consequence (optional)" })),
+});
+
+export const acquireRepoWorktreeParams = Type.Object({
+  repo: Type.String({
+    description:
+      "Relative path of the sub-repo within the workspace to acquire a worktree in " +
+      "(e.g. 'wolf-server'). Must be one of the repos listed in the workspace. " +
+      "If already acquired, returns the existing worktree path immediately.",
+  }),
 });
 
 export const taskDocumentWriteParams = Type.Object({
@@ -3578,6 +3588,60 @@ export function createReadMessagesTool(messageStore: MessageStore, agentId: stri
           details: {},
         };
       }
+    },
+  };
+}
+
+export function createAcquireRepoWorktreeTool(opts: {
+  workspaceRootDir: string;
+  workspaceRepos: string[];
+  task: import("@fusion/core").Task;
+  store: TaskStore;
+  settings: Partial<Settings>;
+  logger?: { log: (m: string) => void; warn: (m: string) => void };
+  secretsStore?: Pick<import("@fusion/core").SecretsStore, "listEnvExportable">;
+  runContext?: RunMutationContext;
+}): ToolDefinition {
+  const { workspaceRootDir, workspaceRepos, task, store, settings, logger, secretsStore, runContext } = opts;
+  return {
+    name: "fn_acquire_repo_worktree",
+    label: "Acquire Repo Worktree",
+    description:
+      "Acquire an isolated git worktree for a sub-repo in this workspace. " +
+      "Call this before editing files in a sub-repo; work in the returned path. " +
+      `Available repos: ${workspaceRepos.join(", ")}.`,
+    parameters: acquireRepoWorktreeParams,
+    execute: async (_id: string, params: Static<typeof acquireRepoWorktreeParams>) => {
+      const { repo } = params;
+      if (!workspaceRepos.includes(repo)) {
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Unknown repo: "${repo}". Available: ${workspaceRepos.join(", ")}` }],
+          details: {},
+          isError: true,
+        };
+      }
+      const freshTask = await store.getTask(task.id);
+      const result = await acquireWorkspaceRepoWorktree({
+        repoRelPath: repo,
+        workspaceRootDir,
+        task: freshTask,
+        store,
+        settings,
+        logger,
+        secretsStore,
+      });
+      await store.logEntry(
+        task.id,
+        result.alreadyAcquired
+          ? `fn_acquire_repo_worktree: reusing existing worktree for ${repo} at ${result.worktreePath}`
+          : `fn_acquire_repo_worktree: created worktree for ${repo} at ${result.worktreePath} (branch: ${result.branch})`,
+        undefined,
+        runContext,
+      );
+      return {
+        content: [{ type: "text" as const, text: `Worktree ready at: ${result.worktreePath} (branch: ${result.branch}, alreadyAcquired: ${result.alreadyAcquired})` }],
+        details: result,
+      };
     },
   };
 }

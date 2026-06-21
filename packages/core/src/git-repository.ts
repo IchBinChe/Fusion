@@ -98,3 +98,69 @@ function extractCommandErrorMessage(error: unknown): string {
 
   return String(error);
 }
+
+/**
+ * Scans `dir` one level deep for sub-directories that are git repositories.
+ * Returns relative paths of found repos, sorted alphabetically.
+ */
+export async function detectWorkspaceRepos(dir: string): Promise<string[]> {
+  let entries: string[];
+  try {
+    const { readdir } = await import("node:fs/promises");
+    entries = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const { stat } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const found: string[] = [];
+  for (const entry of entries) {
+    const candidate = join(dir, entry, ".git");
+    try {
+      const s = await stat(candidate);
+      if (s.isDirectory() || s.isFile()) found.push(entry);
+    } catch {
+      // not a git repo
+    }
+  }
+  return found.sort();
+}
+
+export interface WorkspaceConfig {
+  repos: string[];
+}
+
+const WORKSPACE_CONFIG_FILENAME = "workspace.json";
+
+export async function loadWorkspaceConfig(rootDir: string): Promise<WorkspaceConfig | null> {
+  const { readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const configPath = join(rootDir, ".fusion", WORKSPACE_CONFIG_FILENAME);
+  try {
+    const raw = await readFile(configPath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      "repos" in parsed &&
+      Array.isArray((parsed as { repos: unknown }).repos)
+    ) {
+      return parsed as WorkspaceConfig;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveWorkspaceConfig(rootDir: string, config: WorkspaceConfig): Promise<void> {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const fusionDir = join(rootDir, ".fusion");
+  await mkdir(fusionDir, { recursive: true });
+  await writeFile(
+    join(fusionDir, WORKSPACE_CONFIG_FILENAME),
+    JSON.stringify(config, null, 2),
+    "utf-8",
+  );
+}

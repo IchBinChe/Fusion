@@ -54,6 +54,13 @@ A Feature auto-generated from a failed Validator Run to carry the remediation wo
 ### Project
 A registered workspace that Fusion can operate on: it has a canonical local path, project-scoped settings and data, and must be backed by a usable Git work tree before task execution can create worktrees from it.
 
+A **workspace** is a special Project variant where the registered path is not
+itself a Git repository, but contains multiple Git repositories as direct
+sub-directories. Fusion discovers sub-repos at init time and records them in
+`.fusion/workspace.json`. In workspace mode, task execution does not require a
+single root-level worktree; instead, the agent acquires per-repo worktrees
+on demand via `fn_acquire_repo_worktree`.
+
 ### Project Identity
 The durable identity a registered Project carries locally so it can be reattached to the central registry after central state is lost or rebuilt, preserving rows keyed by the same project id instead of minting a replacement.
 

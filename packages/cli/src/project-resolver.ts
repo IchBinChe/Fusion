@@ -16,6 +16,8 @@ import {
   isValidSqliteDatabaseFile,
   readProjectIdentity,
   writeProjectIdentity,
+  detectWorkspaceRepos,
+  saveWorkspaceConfig,
   type RegisteredProject,
   type TaskStore,
 } from "@fusion/core";
@@ -625,6 +627,23 @@ export async function registerProjectInteractive(
 
   // Check for .fusion/ directory
   if (!isKbProject(absPath)) {
+    // Check if this is a non-git directory containing sub-repos (workspace mode)
+    const { spawnSync } = await import("node:child_process");
+    const gitCheck = spawnSync("git", ["-C", absPath, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+    const isGitRepo = gitCheck.status === 0 && gitCheck.stdout.trim() === "true";
+
+    if (!isGitRepo) {
+      const subRepos = await detectWorkspaceRepos(absPath);
+      if (subRepos.length > 0) {
+        console.log(`\n  Found ${subRepos.length} git repositories in ${absPath}:`);
+        subRepos.forEach((r: string) => console.log(`    • ${r}`));
+        console.log(`\n  Initializing as a Fusion workspace...\n`);
+        await saveWorkspaceConfig(absPath, { repos: subRepos });
+        // Fall through to normal .fusion init
+      }
+      // else: fall through to existing error path
+    }
+
     if (interactive) {
       console.log(`\n  No .fusion/ directory found in ${absPath}`);
       const shouldInit = await promptConfirm("Initialize fn here first?", true);

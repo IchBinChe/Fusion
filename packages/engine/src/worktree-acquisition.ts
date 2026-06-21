@@ -595,3 +595,56 @@ async function verifyResumeBranchNotMisbound(input: {
     logger?.warn?.(`${taskId}: resume re-anchor failed (continuing — executor preflight will handle): ${formatError(err)}`);
   }
 }
+
+export interface AcquireWorkspaceRepoWorktreeOptions {
+  repoRelPath: string;
+  workspaceRootDir: string;
+  task: Task;
+  store: TaskStore;
+  settings: Partial<Settings>;
+  logger?: { log: (m: string) => void; warn: (m: string) => void; error?: (m: string) => void };
+  secretsStore?: Pick<SecretsStore, "listEnvExportable">;
+}
+
+export async function acquireWorkspaceRepoWorktree(
+  opts: AcquireWorkspaceRepoWorktreeOptions,
+): Promise<{ worktreePath: string; branch: string; alreadyAcquired: boolean }> {
+  const { repoRelPath, workspaceRootDir, task, store, settings, logger, secretsStore } = opts;
+  const { join } = await import("node:path");
+
+  const existing = task.workspaceWorktrees?.[repoRelPath];
+  if (existing) {
+    return { ...existing, alreadyAcquired: true };
+  }
+
+  const repoAbsPath = join(workspaceRootDir, repoRelPath);
+
+  /*
+  FNXC:WorkspaceWorktree 2026-06-21-00:00:
+  Workspace mode acquires one worktree per sub-repo for a single task. `acquireTaskWorktree`
+  is single-repo: it reads `task.worktree`/`task.branch` to decide resume-vs-fresh and rewrites
+  those singular fields on the task row after each acquisition. Passing the live task straight
+  through means the second repo's acquisition sees the first repo's `task.worktree` (which exists
+  on disk), classifies it as a resume, and reuses repo A's worktree inside repo B — cross-repo
+  contamination. Clear the singular worktree/branch fields on the copy handed to the single-repo
+  helper so each sub-repo always gets a fresh worktree; per-repo state is tracked in
+  `task.workspaceWorktrees`, not the singular column.
+  */
+  const result = await acquireTaskWorktree({
+    task: { ...task, worktree: undefined, branch: undefined },
+    rootDir: repoAbsPath,
+    store,
+    settings,
+    logger,
+    secretsStore,
+    runInitCommand: true,
+  });
+
+  const updated: Record<string, { worktreePath: string; branch: string }> = {
+    ...(task.workspaceWorktrees ?? {}),
+    [repoRelPath]: { worktreePath: result.worktreePath, branch: result.branch },
+  };
+  await store.updateTask(task.id, { workspaceWorktrees: updated });
+
+  return { worktreePath: result.worktreePath, branch: result.branch, alreadyAcquired: false };
+}

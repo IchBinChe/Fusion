@@ -415,6 +415,42 @@ describe("createServer health and headless mode", () => {
     expect(res.body.engine).toEqual({ available: true });
   });
 
+  it("reports the engine available when another fusion process owns it", async () => {
+    // The manager could not acquire the singleton lock (engine owned by another
+    // process on this machine) so it owns no engine instances, but it knows one
+    // is running. The banner must stay hidden.
+    const store = createMockStore();
+    const app = createServer(store, {
+      engineManager: {
+        getAllEngines: vi.fn().mockReturnValue(new Map()),
+        hasRunningEngine: vi.fn().mockReturnValue(true),
+        getEngine: vi.fn(),
+      } as any,
+    });
+
+    const res = await GET(app, "/api/health");
+
+    expect(res.status).toBe(200);
+    expect(res.body.engine).toEqual({ available: true });
+  });
+
+  it("falls back to owned engines when hasRunningEngine is unavailable", async () => {
+    // Backward-compat: an older engineManager / test double without
+    // hasRunningEngine must still report availability from getAllEngines().
+    const store = createMockStore();
+    const app = createServer(store, {
+      engineManager: {
+        getAllEngines: vi.fn().mockReturnValue(new Map([["p1", {}]])),
+        getEngine: vi.fn(),
+      } as any,
+    });
+
+    const res = await GET(app, "/api/health");
+
+    expect(res.status).toBe(200);
+    expect(res.body.engine).toEqual({ available: true });
+  });
+
   it("reports degraded status when database corruption is detected", async () => {
     const store = createMockStore({
       getDatabaseHealth: vi.fn().mockReturnValue({

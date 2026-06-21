@@ -37,6 +37,10 @@ vi.mock("../project-engine.js", () => {
 
 import { ProjectEngineManager } from "../project-engine-manager.js";
 import { ProjectEngine } from "../project-engine.js";
+import {
+  acquireEngineSingleton,
+  EngineAlreadyRunningError,
+} from "../engine-singleton-lock.js";
 import type { RegisteredProject, CentralCore } from "@fusion/core";
 
 function createMockCentralCore(projects: RegisteredProject[]): CentralCore {
@@ -700,6 +704,165 @@ describe("ProjectEngineManager", () => {
       expect(() => manager.stopReconciliation()).not.toThrow();
 
       await manager.stopAll();
+    });
+  });
+
+  describe("engine owned by another fusion process", () => {
+    // These tests override the singleton-lock mock with persistent rejections.
+    // Restore the default "acquire succeeds" behaviour after each so later
+    // tests/describes are unaffected even if an assertion throws mid-test.
+    afterEach(() => {
+      const acquire = acquireEngineSingleton as ReturnType<typeof vi.fn>;
+      acquire.mockReset();
+      acquire.mockResolvedValue({
+        release: vi.fn().mockResolvedValue(undefined),
+        socketPath: "/tmp/test.sock",
+        lockFilePath: "/tmp/test.lock",
+      });
+    });
+
+    it("reports a running engine when the singleton lock is held elsewhere", async () => {
+      const manager = new ProjectEngineManager(centralCore);
+
+      // Another fusion process on this machine already owns the engine: the
+      // singleton lock cannot be acquired.
+      (acquireEngineSingleton as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new EngineAlreadyRunningError("proj_aaa", "socket"),
+      );
+
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toBeInstanceOf(
+        EngineAlreadyRunningError,
+      );
+
+      // We do not own an engine instance...
+      expect(manager.getEngine("proj_aaa")).toBeUndefined();
+      expect(manager.getAllEngines().size).toBe(0);
+
+      // ...but an engine IS running on the machine, so the dashboard must not
+      // show an "engine not running" banner.
+      expect(manager.hasRunningEngine()).toBe(true);
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(true);
+    });
+
+    it("logs the refusal only once across repeated reconciliation attempts", async () => {
+      const manager = new ProjectEngineManager(centralCore);
+      const acquire = acquireEngineSingleton as ReturnType<typeof vi.fn>;
+
+      acquire.mockRejectedValue(
+        new EngineAlreadyRunningError("proj_aaa", "socket"),
+      );
+
+      const warnSpy = vi.spyOn(
+        (await import("../logger.js")).runtimeLog,
+        "warn",
+      );
+
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toBeInstanceOf(
+        EngineAlreadyRunningError,
+      );
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toBeInstanceOf(
+        EngineAlreadyRunningError,
+      );
+
+      const refusals = warnSpy.mock.calls.filter(([msg]) =>
+        String(msg).includes("Refusing to start engine for proj_aaa"),
+      );
+      expect(refusals).toHaveLength(1);
+
+      warnSpy.mockRestore();
+    });
+
+    it("takes over and clears the external marker once the lock is free", async () => {
+      const manager = new ProjectEngineManager(centralCore);
+      const acquire = acquireEngineSingleton as ReturnType<typeof vi.fn>;
+
+      acquire.mockRejectedValueOnce(
+        new EngineAlreadyRunningError("proj_aaa", "socket"),
+      );
+
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toBeInstanceOf(
+        EngineAlreadyRunningError,
+      );
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(true);
+
+      // The other process exits; the next attempt acquires the lock (the
+      // default mock resolves) and we take ownership.
+      const engine = await manager.ensureEngine("proj_aaa");
+      expect(engine).toBeDefined();
+      expect(manager.getEngine("proj_aaa")).toBeDefined();
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(false);
+      expect(manager.hasRunningEngine()).toBe(true);
+    });
+
+    it("stays quiet across reconciliation ticks for an externally-owned engine", async () => {
+      // Drives the reconciliation wrapper (not just a direct ensureEngine call):
+      // across many intervals neither the inner "Refusing to start" warning nor
+      // the outer "Failed to start engine..." reconciliation warning should
+      // repeat for the same externally-owned engine.
+      vi.useFakeTimers();
+      const manager = new ProjectEngineManager(centralCore);
+      const acquire = acquireEngineSingleton as ReturnType<typeof vi.fn>;
+      acquire.mockRejectedValue(
+        new EngineAlreadyRunningError("proj_aaa", "socket"),
+      );
+      const warnSpy = vi.spyOn(
+        (await import("../logger.js")).runtimeLog,
+        "warn",
+      );
+
+      manager.startReconciliation(1000);
+      // Immediate tick + several scheduled ticks.
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      manager.stopReconciliation();
+
+      const refusals = warnSpy.mock.calls.filter(([msg]) =>
+        String(msg).includes("Refusing to start engine for proj_aaa"),
+      );
+      const failures = warnSpy.mock.calls.filter(([msg]) =>
+        String(msg).includes("Failed to start engine for project proj_aaa"),
+      );
+      expect(refusals).toHaveLength(1); // deduped to first detection
+      expect(failures).toHaveLength(0); // reconciliation swallows expected error
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(true);
+
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("clears the external marker even if the takeover start fails", async () => {
+      // External owner first, then it exits so acquire succeeds — but
+      // engine.start() throws. The marker must be cleared (at acquire time) so
+      // hasRunningEngine() does not report a phantom engine that never started.
+      const manager = new ProjectEngineManager(centralCore);
+      const acquire = acquireEngineSingleton as ReturnType<typeof vi.fn>;
+
+      acquire.mockRejectedValueOnce(
+        new EngineAlreadyRunningError("proj_aaa", "socket"),
+      );
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toBeInstanceOf(
+        EngineAlreadyRunningError,
+      );
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(true);
+
+      // Owner exits: acquire succeeds (default mock), but the engine fails to start.
+      (ProjectEngine as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        function (config: any) {
+          return {
+            start: vi.fn().mockRejectedValue(new Error("boom")),
+            stop: vi.fn().mockResolvedValue(undefined),
+            getTaskStore: vi.fn().mockReturnValue({ projectId: config.projectId }),
+            _config: config,
+          };
+        },
+      );
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toThrow("boom");
+
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(false);
+      expect(manager.getEngine("proj_aaa")).toBeUndefined();
+      expect(manager.hasRunningEngine()).toBe(false);
     });
   });
 });

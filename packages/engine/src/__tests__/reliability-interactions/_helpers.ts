@@ -12,6 +12,22 @@ export function git(cwd: string, command: string): string {
   return execSync(command, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 }
 
+export function reliabilityTestTempParent(): string {
+  /*
+  FNXC:ReliabilityFixtures 2026-06-20-21:24:
+  FN-6817 traced merge-reuse-task-worktree flakes to reliability fixtures escaping the per-invocation Vitest worker root.
+  Keep project roots and their `-worktrees` siblings under FUSION_TEST_WORKER_ROOT so concurrent package lanes and teardown cannot collide through the shared OS temp root.
+  */
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
+function assertInitializedGitRepository(rootDir: string): void {
+  const insideWorkTree = git(rootDir, "git rev-parse --is-inside-work-tree");
+  if (insideWorkTree !== "true") {
+    throw new Error(`Reliability fixture git init did not create a usable repository at ${rootDir}`);
+  }
+}
+
 export type ReliabilityFixture = {
   rootDir: string;
   store: TaskStore;
@@ -40,8 +56,10 @@ export async function makeReliabilityFixture(input: {
   task?: Partial<Task>;
   settings?: Partial<Settings>;
 } = {}): Promise<ReliabilityFixture> {
-  const rootDir = await mkdtemp(join(tmpdir(), "fusion-reliability-"));
+  const rootDir = await mkdtemp(join(reliabilityTestTempParent(), "fusion-reliability-"));
+  const worktreeRoot = `${rootDir}-worktrees`;
   git(rootDir, "git init -b main");
+  assertInitializedGitRepository(rootDir);
   git(rootDir, 'git config user.email "test@example.com"');
   git(rootDir, 'git config user.name "Test User"');
   await writeFile(join(rootDir, "README.md"), "# fixture\n", "utf-8");
@@ -87,6 +105,7 @@ export async function makeReliabilityFixture(input: {
       manager.stop();
       store.close();
       await rm(rootDir, { recursive: true, force: true });
+      await rm(worktreeRoot, { recursive: true, force: true });
     },
     writeAndCommit: async (file, content, message) => {
       const absolute = join(rootDir, file);

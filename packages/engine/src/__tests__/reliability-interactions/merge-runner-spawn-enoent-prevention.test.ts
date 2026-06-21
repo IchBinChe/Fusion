@@ -1,5 +1,7 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../pi.js", () => ({
@@ -80,6 +82,35 @@ describe("FN-6278 reliability interactions: merge runner cwd preflight", () => {
   beforeEach(() => {
     activeSessionRegistry.clear();
     executingTaskLock._clearForTest();
+  });
+
+  it.skipIf(!hasGit)("FN-6817: roots the shared reliability fixture under the Vitest worker root", async () => {
+    const previousWorkerRoot = process.env.FUSION_TEST_WORKER_ROOT;
+    const workerRoot = await mkdtemp(join(tmpdir(), "fn-6817-worker-root-"));
+    process.env.FUSION_TEST_WORKER_ROOT = workerRoot;
+    let fixture: Awaited<ReturnType<typeof makeReliabilityFixture>> | undefined;
+
+    try {
+      fixture = await makeReliabilityFixture({ taskId: "FN-6817-RI-WORKER-ROOT" });
+      const worktreeRoot = `${fixture.rootDir}-worktrees`;
+      await mkdir(worktreeRoot, { recursive: true });
+
+      expect(fixture.rootDir.startsWith(`${workerRoot}${sep}`)).toBe(true);
+      expect(worktreeRoot.startsWith(`${workerRoot}${sep}`)).toBe(true);
+      expect(git(fixture.rootDir, "git rev-parse --is-inside-work-tree")).toBe("true");
+
+      await fixture.cleanup();
+      fixture = undefined;
+      expect(existsSync(worktreeRoot)).toBe(false);
+    } finally {
+      if (fixture) await fixture.cleanup();
+      if (previousWorkerRoot === undefined) {
+        delete process.env.FUSION_TEST_WORKER_ROOT;
+      } else {
+        process.env.FUSION_TEST_WORKER_ROOT = previousWorkerRoot;
+      }
+      await rm(workerRoot, RM);
+    }
   });
 
   it.skipIf(!hasGit)("reacquires before spawning git when the reuse worktree cwd vanished", async () => {

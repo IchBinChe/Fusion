@@ -830,5 +830,39 @@ describe("ProjectEngineManager", () => {
       warnSpy.mockRestore();
       vi.useRealTimers();
     });
+
+    it("clears the external marker even if the takeover start fails", async () => {
+      // External owner first, then it exits so acquire succeeds — but
+      // engine.start() throws. The marker must be cleared (at acquire time) so
+      // hasRunningEngine() does not report a phantom engine that never started.
+      const manager = new ProjectEngineManager(centralCore);
+      const acquire = acquireEngineSingleton as ReturnType<typeof vi.fn>;
+
+      acquire.mockRejectedValueOnce(
+        new EngineAlreadyRunningError("proj_aaa", "socket"),
+      );
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toBeInstanceOf(
+        EngineAlreadyRunningError,
+      );
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(true);
+
+      // Owner exits: acquire succeeds (default mock), but the engine fails to start.
+      (ProjectEngine as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        function (config: any) {
+          return {
+            start: vi.fn().mockRejectedValue(new Error("boom")),
+            stop: vi.fn().mockResolvedValue(undefined),
+            getTaskStore: vi.fn().mockReturnValue({ projectId: config.projectId }),
+            _config: config,
+          };
+        },
+      );
+      await expect(manager.ensureEngine("proj_aaa")).rejects.toThrow("boom");
+
+      expect(manager.getExternalEngineIds().has("proj_aaa")).toBe(false);
+      expect(manager.getEngine("proj_aaa")).toBeUndefined();
+      expect(manager.hasRunningEngine()).toBe(false);
+    });
   });
 });

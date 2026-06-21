@@ -479,6 +479,11 @@ export class ProjectEngineManager {
       throw err;
     });
     this.singletonLocks.set(projectId, singleton);
+    // Acquiring the singleton proves no other process owns the engine, so clear
+    // any prior "owned by another process" marker now — before engine.start().
+    // If start fails below we release the lock and a later tick retries; leaving
+    // the marker set here would make hasRunningEngine() report a phantom engine.
+    this.externalEngines.delete(projectId);
 
     const engine = new ProjectEngine(
       runtimeConfig,
@@ -497,8 +502,6 @@ export class ProjectEngineManager {
 
     this.engines.set(projectId, engine);
     this.starting.delete(projectId);
-    // We now own the engine — clear any prior "owned by another process" marker.
-    this.externalEngines.delete(projectId);
     runtimeLog.log(
       `Started engine for ${project.name ?? projectId} (${projectId})`,
     );

@@ -34,12 +34,15 @@ const DEFAULT_CONCURRENCY_VALUES: ConcurrencyValues = {
 };
 
 const CONCURRENCY_SLIDER_LIMITS: Record<keyof ConcurrencyValues, { min: number; max: number }> = {
-  maxConcurrent: { min: 1, max: 10 },
-  maxTriageConcurrent: { min: 1, max: 10 },
-  maxWorktrees: { min: 1, max: 20 },
+  maxConcurrent: { min: 1, max: 50 },
+  maxTriageConcurrent: { min: 1, max: 50 },
+  maxWorktrees: { min: 1, max: 50 },
 };
 
 /*
+FNXC:CommandCenter 2026-06-21-00:00:
+Operator concurrency sliders must allow dragging each scheduler capacity control up to 50 by default while still expanding beyond 50 for already-persisted higher values so FN-6768 truthful readouts remain intact.
+
 FNXC:CommandCenter 2026-06-19-13:45:
 Overview controls keep only global AI engine, Theme, and Concurrency controls. Agent org chart and Heartbeat control belong to the Team tab so team-specific hierarchy and scheduler heartbeat affordances are not duplicated across Command Center sections.
 */

@@ -108,12 +108,21 @@ describe("resolveWorkflowOptionalSteps (optional-group nodes)", () => {
     ]);
   });
 
-  it("does not resolve the built-in coding/stepwise workflows yet (legacy optionalSteps migrate in U6)", () => {
-    // U3 re-points the resolver SOURCE to optional-group nodes; the built-ins
-    // still carry the legacy `optionalSteps` declaration and gain optional-group
-    // nodes in U6. Until then they resolve to an empty toggle list.
-    expect(resolveWorkflowOptionalSteps(BUILTIN_CODING_WORKFLOW_IR)).toEqual([]);
-    expect(resolveWorkflowOptionalSteps(BUILTIN_STEPWISE_CODING_WORKFLOW_IR)).toEqual([]);
+  it("resolves the built-in coding/stepwise browser-verification optional-group (U6)", () => {
+    // U6 migrated both built-ins: `browser-verification` is now an optional-group
+    // node (default OFF), so the resolver advertises exactly one toggle entry per
+    // built-in, keyed by the group node id `browser-verification`.
+    const expected = [
+      {
+        templateId: "browser-verification",
+        name: "Browser Verification",
+        description: "",
+        phase: "pre-merge" as const,
+        defaultOn: false,
+      },
+    ];
+    expect(resolveWorkflowOptionalSteps(BUILTIN_CODING_WORKFLOW_IR)).toEqual(expected);
+    expect(resolveWorkflowOptionalSteps(BUILTIN_STEPWISE_CODING_WORKFLOW_IR)).toEqual(expected);
   });
 });
 

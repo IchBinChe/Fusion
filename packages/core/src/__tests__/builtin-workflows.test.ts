@@ -9,6 +9,7 @@ import {
   isBuiltinWorkflowPluginGated,
 } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { builtinPromptConfig, BUILTIN_SEAM_PROMPTS } from "../builtin-workflow-prompts.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
 import { resolveColumnFlags } from "../trait-registry.js";
 import { compileWorkflowToSteps } from "../workflow-compiler.js";
@@ -207,6 +208,7 @@ describe("built-in workflows", () => {
     expect(execute?.id).toBe("draft");
     expect(execute?.config?.name).toBe("Draft content");
     expect(String(execute?.config?.prompt ?? "")).toContain("marketing copywriter");
+    expect(String(execute?.config?.prompt ?? "")).toContain("fn_task_document_write");
     expect(String(execute?.config?.prompt ?? "").length).toBeGreaterThan(100);
     expect(review?.id).toBe("editorial");
     expect(review?.config?.name).toBe("Editorial review");
@@ -224,6 +226,13 @@ describe("built-in workflows", () => {
     const authoredNodeIds = design!.ir.nodes.filter((node) => node.id !== "start" && node.id !== "end").map((node) => node.id);
     expect(authoredNodeIds).toEqual(["execute", "design-review", "review", "merge"]);
 
+    const execute = design!.ir.nodes.find((node) => node.id === "execute");
+    expect(execute?.config?.seam).toBe("execute");
+    expect(execute?.config?.name).toBe("Execute");
+    const executePrompt = String(execute?.config?.prompt ?? "");
+    expect(executePrompt).toContain("fn_task_document_write");
+    expect(executePrompt).toContain("preview");
+
     const designReview = design!.ir.nodes.find((node) => node.id === "design-review");
     expect(designReview?.kind).toBe("gate");
     expect(designReview?.config?.name).toBe("Design review");
@@ -233,6 +242,19 @@ describe("built-in workflows", () => {
     expect(prompt).toContain("visual hierarchy");
     expect(prompt).toContain("design tokens");
     expect(prompt).toContain("responsive behavior");
+  });
+
+  it("leaves coding-oriented built-in prompts and shared seam defaults on their existing paths", () => {
+    const reviewHeavy = getBuiltinWorkflow("builtin:review-heavy")!;
+    const security = reviewHeavy.ir.nodes.find((node) => node.id === "security");
+    expect(security?.config?.prompt).toBe(
+      "Review the diff for security issues: injection, auth/authorization gaps, secret handling, unsafe deserialization. Block on any exploitable finding.",
+    );
+
+    expect(builtinPromptConfig("execute", "Execute").prompt).toBe(BUILTIN_SEAM_PROMPTS.execute);
+    expect(
+      getBuiltinWorkflow("builtin:quick-fix")!.ir.nodes.find((node) => node.id === "execute")?.config?.prompt,
+    ).toBe(BUILTIN_SEAM_PROMPTS.execute);
   });
 
   it("repeated catalog reads and listings keep builtin:coding in the enabled order", () => {

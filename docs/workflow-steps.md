@@ -15,6 +15,9 @@ The built-in catalog now includes a business lead-generation workflow with custo
 
 FNXC:WorkflowRouting 2026-06-21-04:25:
 Triage and planning agents must preserve the project default workflow unless the user explicitly requests a different workflow. No-commit markers describe expected artifact behavior only; they no longer imply automatic Quick fix workflow selection.
+
+FNXC:Docs 2026-06-21-12:00:
+FN-6906 makes non-coding built-in prompts artifact-oriented: marketing drafts, lead enrichment/outreach, and design previews are persisted with fn_task_document_write, while fn_artifact_register remains conditional until the artifact tool is available.
 -->
 
 Fusion workflows define the task lifecycle policy that moves work from an idea to delivery. The default coding path is **Plan/Triage → Execute → Workflow steps → Review → Merge**, but that path is now represented as a workflow selection rather than only as fixed engine behavior. A task with no explicit workflow resolves to `builtin:coding`; an explicit missing/corrupt custom workflow fails closed instead of silently falling back.
@@ -36,12 +39,12 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 | Coding | `builtin:coding` | Default coding lifecycle and fallback for tasks without an explicit selection. |
 | Quick fix | `builtin:quick-fix` | Short path for trivial or no-commit/decision work; omits the standard review stage. |
 | Review-heavy | `builtin:review-heavy` | Standard execute/review/merge path with an additional gated security review. |
-| Marketing | `builtin:marketing` | Content pipeline with custom Ideation, Backlog, Drafting, Editorial review, Published, and Archived columns plus marketing brief/draft/editorial prompts; it reuses the standard lifecycle traits and merge-primitive region. |
+| Marketing | `builtin:marketing` | Content pipeline with custom Ideation, Backlog, Drafting, Editorial review, Published, and Archived columns plus structured marketing brief/draft/editorial prompts; drafts are persisted as task documents for review while the workflow reuses standard lifecycle traits and merge primitives. |
 | Compound engineering | `builtin:compound-engineering` | Plugin-gated workflow that invokes Compound Engineering skills for planning, work, review, PR/feedback, and learnings capture. |
 | Stepwise coding | `builtin:stepwise-coding` | Graph-executor workflow that models per-step parse/execute/review/rework explicitly. |
-| Design | `builtin:design` | UI-heavy work path that implements, runs a gated design/UX review, then performs the standard review and merge. |
+| Design | `builtin:design` | UI-heavy work path that implements, persists a user-facing design preview task document, runs a gated design/UX review, then performs the standard review and merge. |
 | PR lifecycle | `builtin:pr-workflow` | Reusable PR lifecycle graph fragment (create PR → await review → respond → gate → merge); it is a fragment, not directly selectable as a task workflow. |
-| Lead generation | `builtin:lead-generation` | Selectable business workflow for sourcing, qualifying, enriching, and contacting leads with custom lead fields and stage columns; requires the workflow graph executor for custom board columns. |
+| Lead generation | `builtin:lead-generation` | Selectable business workflow for sourcing, qualifying, enriching, and contacting leads with custom lead fields, stage columns, and reviewable enrichment/outreach task documents; requires the workflow graph executor for custom board columns. |
 
 ### Custom workflow authoring
 
@@ -101,7 +104,7 @@ The default built-in catalog entry `builtin:coding` is backed by the canonical `
 
 `builtin:stepwise-coding` is a separate graph variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review/rework as authored graph structure.
 
-`builtin:marketing` is a non-coding content workflow with marketing-specific columns (`ideation`, `backlog`, `drafting`, `editorial-review`, `published`, `archived`) and prompt seams for content brief, draft, and editorial review. It uses the same lifecycle traits (`intake`, `hold`, `wip`, `merge-blocker`, `human-review`, `complete`, `archived`) and the same merge-gate/branch-group/merge-attempt primitive region as coding workflows, so scheduler, capacity, review blocking, and merge orchestration behavior remain standard.
+`builtin:marketing` is a non-coding content workflow with marketing-specific columns (`ideation`, `backlog`, `drafting`, `editorial-review`, `published`, `archived`) and prompt seams for content brief, draft, and editorial review. Its draft stage saves the primary content deliverable as a task document for human review, while the workflow uses the same lifecycle traits (`intake`, `hold`, `wip`, `merge-blocker`, `human-review`, `complete`, `archived`) and the same merge-gate/branch-group/merge-attempt primitive region as coding workflows, so scheduler, capacity, review blocking, and merge orchestration behavior remain standard.
 
 During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` to select a workflow for the task being specified, or pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
 

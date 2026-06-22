@@ -306,13 +306,25 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
   /**
    * FNXC:Workflows 2026-06-20-00:00:
    * Fusion needs a built-in design lane for UI-heavy work. Gate changes on the frontend-ux-design review criteria before the standard review and merge so visual hierarchy, spacing, typography, token consistency, component reuse, responsive behavior, and fit with the design language are checked without custom workflow assembly.
+   *
+   * FNXC:Workflows 2026-06-21-12:00:
+   * FN-6906 requires non-coding design execution to produce a user-facing preview artifact, not just code changes. The execute prompt must keep the execute seam while requiring fn_task_document_write key design-preview as the guaranteed review path and optional fn_artifact_register registration when the previewable-artifact tool exists.
    */
   linear({
     id: "builtin:design",
     name: "Design (built-in)",
     description: "Implement, then run a design/UX review gate before the standard review and merge — for UI-heavy work.",
     nodes: [
-      { id: "execute", kind: "prompt", config: builtinPromptConfig("execute", "Execute") },
+      {
+        id: "execute",
+        kind: "prompt",
+        config: {
+          seam: "execute",
+          name: "Execute",
+          prompt:
+            "You are a product-minded UI implementer for design-heavy work. Use the task description, existing UI patterns, relevant design tokens, component library conventions, and any prior planning output to implement the requested frontend/UI change while preserving the product design language. Structure your work output with: 1) implementation summary, 2) files or components changed, 3) design decisions and token/component reuse, 4) accessibility and responsive behavior considerations, and 5) verification notes. After implementation, produce a visual preview for the user: capture before/after states when possible via screenshots, a rendered HTML/markdown preview, or a Storybook story/reference that shows the changed state across relevant viewports. Persist the preview reference and notes as a task document using fn_task_document_write with key \"design-preview\" so the human can preview the UI change before review or merge. If an artifact-registry tool (fn_artifact_register) is available, also register the preview or deliverable as a previewable artifact. Good design execution is consistent, accessible, responsive, token-driven, and easy for the reviewer to inspect; avoid hardcoded visual one-offs, unreviewable screenshots with no context, and changes that cannot be previewed.",
+        },
+      },
       {
         id: "design-review",
         kind: "gate",
@@ -320,7 +332,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           name: "Design review",
           gateMode: "gate",
           prompt:
-            "You are a UX design reviewer. Review frontend/UI changes for visual polish and consistency with existing UI patterns and design tokens. Check visual hierarchy and information flow; spacing, typography, margins, padding, gaps, and type scale; color and token consistency, including CSS custom properties/design tokens and no hardcoded colors; reuse of existing components instead of one-off styling or duplication; responsive behavior across viewports; and fit with the product design language, including border radius, shadows, transitions, and icon style. Block merge on real visual-quality regressions such as layout breaks, broken responsive behavior, hardcoded color/token violations, inconsistent component patterns, or design-language mismatches. Do not block or nit when the diff has no frontend/UI impact or no real design issue exists.",
+            "You are a UX design reviewer. Use the task description, implementation diff, existing UI patterns, design tokens, and the design-preview task document produced by the execute node to review frontend/UI changes for visual polish and consistency. Structure the review with: 1) verdict and whether the preview is sufficient for human inspection, 2) visual hierarchy and information-flow findings, 3) spacing, typography, margins, padding, gaps, and type-scale findings, 4) color and token consistency, including CSS custom properties/design tokens and no hardcoded colors, 5) component reuse versus one-off styling or duplication, 6) responsive behavior across relevant viewports, and 7) fit with the product design language, including border radius, shadows, transitions, and icon style. Good design review references the preview or explains why it is missing, focuses on user-visible regressions, and blocks merge on real visual-quality issues such as layout breaks, broken responsive behavior, hardcoded color/token violations, inconsistent component patterns, or design-language mismatches. Do not block or nit when the diff has no frontend/UI impact or no real design issue exists.",
         },
       },
       { id: "review", kind: "prompt", config: builtinPromptConfig("review", "Review") },

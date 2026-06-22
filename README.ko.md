@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./demo/assets/fusion-logo.png" alt="Fusion" width="120" />
-
-# Fusion
+# <img src="./demo/assets/fusion-logo-orange.svg" alt="" width="34" align="center" /> Fusion
 
 ### 거친 아이디어에서 프로덕션 코드까지 — 자동으로.
 
-**멀티 노드 에이전트 오케스트레이터** — 태스크, 에이전트, 미션, git, 파일, 워크트리를 어떤 모델에서도, 로컬 또는 클라우드에서 실행합니다.
+### 🏭 멀티 에이전트 오케스트레이터가 운영하는 소프트웨어 공장.
+
+원하는 것을 설명하세요 — AI 에이전트 팀이 **계획하고, 만들고, 검토하고, 배포**해 드립니다. Fusion은 여러분의 소프트웨어 공장입니다: 태스크, 에이전트, 미션, git, 파일, 워크트리를 가로질러 어떤 모델로든, 로컬 또는 클라우드에서 실행되는 코드 조립 라인입니다.
 
 [**runfusion.ai →**](https://runfusion.ai) · [문서](./docs/README.md) · [GitHub](https://github.com/Runfusion/Fusion) · [npm](https://www.npmjs.com/package/@runfusion/fusion) · [Discord](https://discord.gg/ksrfuy7WYR)
 
@@ -42,6 +42,72 @@
 보드 하나로. 어디서든 제어. 노트북, Mac mini, Linux 서버, 클라우드 VM, 휴대폰 — 모두 연결됩니다.
 
 > Trello와 유사하지만, 태스크의 명세 작성, 실행, 납품을 AI가 수행합니다. [dustinbyrne/kb](https://github.com/dustinbyrne/kb)의 훌륭한 작업을 기반으로 구축되었습니다.
+
+---
+
+## 빠른 시작
+
+**설치 없이 npm에서 바로:**
+
+```bash
+npx runfusion.ai
+```
+
+이 명령은 대시보드를 실행합니다. 하위 명령은 다음과 같이 전달됩니다: `npx runfusion.ai task create "fix X"`, `npx runfusion.ai --help` 등. (또는 명시적으로: `npx @runfusion/fusion dashboard`.)
+
+**원라인 설치 프로그램** (macOS & Linux — Homebrew를 자동 선택하고, 없으면 npm으로 대체):
+
+```bash
+curl -fsSL https://runfusion.ai/install.sh | sh
+fusion dashboard
+```
+
+**Homebrew** (macOS & Linux):
+
+```bash
+brew tap runfusion/fusion
+brew install fusion
+fusion dashboard            # 또는: fn dashboard
+```
+
+또는 원라인(자동 탭 추가): `brew install runfusion/fusion/fusion`.
+
+**npm 전역 설치**:
+
+```bash
+npm install -g @runfusion/fusion
+fn dashboard                # 또는: fusion dashboard
+```
+
+**클론으로 시작** (개발용):
+
+```bash
+pnpm dev dashboard
+```
+
+터미널에 출력되는 `Open:` URL을 클릭하세요. URL에는 베어러 토큰
+(`http://localhost:4040/?token=fn_...`)이 포함되어 있으며, 브라우저가 첫 방문 시
+`localStorage`에 캡처하여 이후 자동으로 재사용합니다. 서버 측에서 Fusion은
+첫 번째 인증된 실행 시 `~/.fusion/settings.json`에 대시보드/데몬 토큰을
+저장하고, 이후 시작 시 재사용합니다(`--token`, `FUSION_DASHBOARD_TOKEN`,
+`FUSION_DAEMON_TOKEN`으로 재정의하거나 `--no-auth`로 인증을 비활성화하지 않는 한).
+전체 우선순위 및 재설정/취소 옵션은
+[CLI 참조 → fn dashboard → Authentication](./docs/cli-reference.md#fn-dashboard)을
+참조하세요.
+
+### 최초 실행 설정
+
+Fusion을 처음 시작하면 세 단계로 안내하는 **온보딩 마법사**가 열립니다:
+
+1. **AI 설정** — 간소화된 빠른 시작 공급자 목록(권장 공급자 및 이미 연결된 공급자)을 사용하고, 추가 공급자나 설정 세부 사항이 필요한 경우에만 **고급 공급자 설정**을 펼칩니다. 시작하려면 공급자 하나만 있으면 됩니다. 더 이상 사용되지 않는 Google Gemini CLI / Antigravity 공급자 항목은 의도적으로 숨겨져 있으며, Google/Gemini API 키, Google Generative AI, Vertex, Cloud Code 경로는 계속 지원됩니다.
+2. **GitHub (선택 사항)** — 이슈 임포트 및 PR 관리를 위해 GitHub 연결
+3. **첫 번째 태스크** — 첫 번째 태스크를 생성하거나 GitHub에서 임포트(활성 프로젝트가 없는 경우, 온보딩이 먼저 프로젝트 디렉터리 등록/선택을 안내합니다)
+
+마법사는 **해제 가능하며 비차단적** — **지금 건너뛰기**를 클릭하면 즉시 대시보드를 사용할 수 있습니다. 나중에 **설정 → 인증 → 온보딩 가이드 다시 열기**에서 재실행할 수 있습니다.
+
+### 모바일
+
+Capacitor + PWA 워크플로우는 [MOBILE.md](./MOBILE.md)를 참조하세요.
 
 ---
 
@@ -83,6 +149,122 @@
 | 🔬 **리서치** | 웹 검색, GitHub, 로컬 문서, LLM 합성을 활용한 경계 있는 리서치 실행(계획 및 합성 흐름에서 런타임 내장 WebSearch/WebFetch 지원 포함). 결과를 태스크로 전환합니다. ([문서](./docs/research.md)) |
 | 🧪 **자기 개선** | 에이전트가 자신의 출력물을 돌아보고 코드베이스를 학습하면서 프롬프트를 업데이트합니다. |
 | 🔓 **오픈 소스. MIT.** | 벤더 종속 없음. 자체 하드웨어에서 실행. 매주 배포. |
+
+---
+
+## 실제 동작 모습
+
+<!--
+FNXC:Docs 2026-06-21-19:55:
+README must lead with a smaller wordmark and a visual showcase of the latest surfaces (Command Center, selectable workflows, agent chat, multi-agent chat rooms, agent mail) so the value lands fast.
+Each feature pairs a short looping GIF with value copy; Command Center additionally carries real fleet stats, the token/productivity/team graph trio, and the 70+-theme grid (incl. shadcn light/mono/orange/black) to make the data pop.
+Media lives in demo/assets/ (committed, GitHub-inline GIFs); stat numbers are sourced from a live seeded fleet — refresh them if the captures are re-shot.
+Each feature keeps its original Tokyo Night capture and adds a Shadcn Light + Shadcn Dark Gray pair; the theme showcase is split into a light-themes grid and a dark-themes grid. Workflow GIFs feature the Stepwise coding graph with node-level zoom/pan.
+-->
+
+Fusion의 최신 화면들을 한눈에 — 미션 컨트롤, 시각적 워크플로, 에이전트 채팅, 멀티 에이전트 룸, 에이전트 간 메일.
+
+### 🛰️ Command Center — 에이전트 플릿을 위한 미션 컨트롤
+
+<div align="center">
+  <img src="./demo/assets/command-center.gif" alt="Fusion Command Center: live concurrency gauges, token charts, and fleet telemetry across tabs" width="900" />
+</div>
+
+에이전트들이 하는 모든 일을 위한 한 화면. 실시간 스케줄러 용량을 조정하고, 모델별 토큰 소비를 실시간으로 지켜보며, 확실한 수치로 가치를 입증하세요.
+
+<table>
+<tr>
+<td width="33%"><img src="./demo/assets/command-center-tokens.png" alt="Tokens by model, token trend, and tokens-over-time charts" /><br/><sub><b>토큰</b> — 모델별 소비, 캐시 대 입력 대 출력, 시간 경과별.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-productivity.png" alt="Productivity: commits, human-hours saved, task duration percentiles, and files by language" /><br/><sub><b>생산성</b> — 성과, 소요 시간 백분위, 언어 구성.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-team.png" alt="Agent org chart with token share and tokens-by-agent breakdown" /><br/><sub><b>팀</b> — 에이전트 조직도와 에이전트별 토큰 점유율.</sub></td>
+</tr>
+</table>
+
+> Tokens · Tools · Activity · Productivity · Team · Ecosystem · GitHub · Signals · System · Reliability · Mission Control — 모든 탭은 동일한 라이브 플릿을 바라보는 서로 다른 렌즈입니다.
+
+**동일한 플릿, 당신의 방식대로** — Command Center(그리고 대시보드 전체)는 **70개 이상의 색상 테마**로 실시간 리스킨됩니다. 여기 Shadcn Light와 Shadcn Dark Gray로 표시된 모습입니다:
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/command-center-light.gif" alt="Command Center in Shadcn Light theme" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/command-center-gray.gif" alt="Command Center in Shadcn Dark Gray theme" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>12가지 라이트 테마 &amp; 12가지 다크 테마</b> (클릭하여 펼치기)</summary>
+
+<br/>
+
+<div align="center">
+  <img src="./demo/assets/command-center-themes-light.png" alt="Command Center across 12 light color themes" width="900" />
+  <br/><br/>
+  <img src="./demo/assets/command-center-themes-dark.png" alt="Command Center across 12 dark color themes" width="900" />
+</div>
+
+</details>
+
+### 🔁 시각적으로 작성하는 선택 가능한 워크플로
+
+<div align="center">
+  <img src="./demo/assets/workflows.gif" alt="Fusion Workflow Editor: switching between built-in workflow graphs" width="820" />
+</div>
+
+태스크가 아이디어에서 머지까지 거치는 여정이 곧 **워크플로**이며 — 직접 선택하고 다듬을 수 있습니다. 내장 워크플로(Coding, Quick fix, Review-heavy, Stepwise, PR lifecycle, Compound engineering 등)를 고르고, 그래프를 살펴본 뒤, 시각적 [워크플로 편집기](./docs/workflow-editor.md)에서 복제하여 컬럼, 게이트, 모델 레인, 검토 정책을 커스터마이즈하세요. 엔진 포크는 필요 없습니다.
+
+다음은 **Stepwise coding** 그래프입니다 — 다음 단계로 넘어가기 전에 모든 단계를 계획, 실행, 검토합니다 — Shadcn Light와 Dark Gray에서 노드별로 살펴봅니다:
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/workflows-light.gif" alt="Stepwise coding workflow graph in Shadcn Light, panning across nodes" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/workflows-gray.gif" alt="Stepwise coding workflow graph in Shadcn Dark Gray, panning across nodes" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 🗨️ 에이전트 채팅 — 실행 중인 에이전트와 대화
+
+<div align="center">
+  <img src="./demo/assets/agent-chat.gif" alt="Fusion agent chat: a threaded conversation with an agent diagnosing a failed task" width="900" />
+</div>
+
+어떤 모델에서든 어떤 에이전트와도 직접 채팅 및 태스크별 채팅을 할 수 있습니다. 태스크가 왜 실패했는지 묻고, 접근 방식을 조정하고, 첨부파일을 넣고, 인채팅 질문 카드에 답하고, 멈췄던 지점에서 스트림을 재개하세요 — 전체에 걸쳐 완전한 마크다운 및 코드 렌더링을 지원합니다.
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-chat-light.png" alt="Agent chat thread in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-chat-gray.png" alt="Agent chat thread in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 👥 멀티 에이전트 채팅 룸
+
+<div align="center">
+  <img src="./demo/assets/chat-rooms.gif" alt="Fusion chat room: CEO, Product Manager, and CTO agents coordinating in #leads" width="900" />
+</div>
+
+여러 에이전트를 한 룸에 넣고 서로 조율하게 하세요. 구성원을 언급하면 직접 응답하고, 주변 구성원은 제한 내에서 대화에 참여할 수 있습니다. 여기서는 **CEO**, **Product Manager**, **CTO** 에이전트가 `#leads`에서 태스크 소유권을 정렬합니다 — 사람의 개입 없이. ([채팅 문서](./docs/dashboard-guide.md#chat-view))
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/chat-rooms-light.gif" alt="Multi-agent chat room in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/chat-rooms-gray.gif" alt="Multi-agent chat room in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 📬 에이전트 메일 — 에이전트 간 받은편지함
+
+<div align="center">
+  <img src="./demo/assets/agent-mail.gif" alt="Fusion mailbox: inter-agent messages with triage summaries and approvals" width="900" />
+</div>
+
+위임, 확인, 인계를 위한 내장 메일박스. 에이전트는 트리아지 요약을 제출하고, 승인을 요청하고, 플릿 전반에 걸쳐 작업을 조율합니다 — Inbox, Outbox, Agents, Approvals 보기를 제공하여 모든 교환을 감사할 수 있습니다.
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-mail-light.gif" alt="Agent mailbox in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-mail-gray.gif" alt="Agent mailbox in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
 
 ---
 
@@ -221,72 +403,6 @@ npx companies.sh add paperclipai/companies/gstack
 <br />
 
 > **Hermes**, **Paperclip**, **OpenClaw**는 **실험적** 런타임 플러그인입니다 — API와 와이어 형식은 마이너 릴리스 사이에 변경될 수 있습니다.
-
----
-
-## 빠른 시작
-
-**설치 없이 npm에서 바로:**
-
-```bash
-npx runfusion.ai
-```
-
-이 명령은 대시보드를 실행합니다. 하위 명령은 다음과 같이 전달됩니다: `npx runfusion.ai task create "fix X"`, `npx runfusion.ai --help` 등. (또는 명시적으로: `npx @runfusion/fusion dashboard`.)
-
-**원라인 설치 프로그램** (macOS & Linux — Homebrew를 자동 선택하고, 없으면 npm으로 대체):
-
-```bash
-curl -fsSL https://runfusion.ai/install.sh | sh
-fusion dashboard
-```
-
-**Homebrew** (macOS & Linux):
-
-```bash
-brew tap runfusion/fusion
-brew install fusion
-fusion dashboard            # 또는: fn dashboard
-```
-
-또는 원라인(자동 탭 추가): `brew install runfusion/fusion/fusion`.
-
-**npm 전역 설치**:
-
-```bash
-npm install -g @runfusion/fusion
-fn dashboard                # 또는: fusion dashboard
-```
-
-**클론으로 시작** (개발용):
-
-```bash
-pnpm dev dashboard
-```
-
-터미널에 출력되는 `Open:` URL을 클릭하세요. URL에는 베어러 토큰
-(`http://localhost:4040/?token=fn_...`)이 포함되어 있으며, 브라우저가 첫 방문 시
-`localStorage`에 캡처하여 이후 자동으로 재사용합니다. 서버 측에서 Fusion은
-첫 번째 인증된 실행 시 `~/.fusion/settings.json`에 대시보드/데몬 토큰을
-저장하고, 이후 시작 시 재사용합니다(`--token`, `FUSION_DASHBOARD_TOKEN`,
-`FUSION_DAEMON_TOKEN`으로 재정의하거나 `--no-auth`로 인증을 비활성화하지 않는 한).
-전체 우선순위 및 재설정/취소 옵션은
-[CLI 참조 → fn dashboard → Authentication](./docs/cli-reference.md#fn-dashboard)을
-참조하세요.
-
-### 최초 실행 설정
-
-Fusion을 처음 시작하면 세 단계로 안내하는 **온보딩 마법사**가 열립니다:
-
-1. **AI 설정** — 간소화된 빠른 시작 공급자 목록(권장 공급자 및 이미 연결된 공급자)을 사용하고, 추가 공급자나 설정 세부 사항이 필요한 경우에만 **고급 공급자 설정**을 펼칩니다. 시작하려면 공급자 하나만 있으면 됩니다. 더 이상 사용되지 않는 Google Gemini CLI / Antigravity 공급자 항목은 의도적으로 숨겨져 있으며, Google/Gemini API 키, Google Generative AI, Vertex, Cloud Code 경로는 계속 지원됩니다.
-2. **GitHub (선택 사항)** — 이슈 임포트 및 PR 관리를 위해 GitHub 연결
-3. **첫 번째 태스크** — 첫 번째 태스크를 생성하거나 GitHub에서 임포트(활성 프로젝트가 없는 경우, 온보딩이 먼저 프로젝트 디렉터리 등록/선택을 안내합니다)
-
-마법사는 **해제 가능하며 비차단적** — **지금 건너뛰기**를 클릭하면 즉시 대시보드를 사용할 수 있습니다. 나중에 **설정 → 인증 → 온보딩 가이드 다시 열기**에서 재실행할 수 있습니다.
-
-### 모바일
-
-Capacitor + PWA 워크플로우는 [MOBILE.md](./MOBILE.md)를 참조하세요.
 
 ---
 

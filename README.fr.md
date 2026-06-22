@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./demo/assets/fusion-logo.png" alt="Fusion" width="120" />
-
-# Fusion
+# <img src="./demo/assets/fusion-logo-orange.svg" alt="" width="34" align="center" /> Fusion
 
 ### De l'idée brute au code de production — automatiquement.
 
-**Orchestrateur d'agents multi-nœuds** — tâches, agents, missions, git, fichiers et worktrees, avec n'importe quel modèle, local ou cloud.
+### 🏭 Une usine logicielle, pilotée par un orchestrateur multi-agents.
+
+Décrivez ce que vous voulez — une équipe d'agents IA le **planifie, le construit, le révise et le livre** pour vous. Fusion est votre usine logicielle : une chaîne de montage pour le code qui s'étend sur les tâches, les agents, les missions, git, les fichiers et les worktrees, avec n'importe quel modèle, local ou cloud.
 
 [**runfusion.ai →**](https://runfusion.ai) · [Docs](./docs/README.md) · [GitHub](https://github.com/Runfusion/Fusion) · [npm](https://www.npmjs.com/package/@runfusion/fusion) · [Discord](https://discord.gg/ksrfuy7WYR)
 
@@ -45,6 +45,73 @@ Un tableau. Contrôlé de n'importe où. Laptop, Mac mini, serveur Linux, VM clo
 
 ---
 
+## Démarrage rapide
+
+**Sans installation, directement depuis npm :**
+
+```bash
+npx runfusion.ai
+```
+
+Cela lance le tableau de bord. Les sous-commandes passent directement : `npx runfusion.ai task create "fix X"`, `npx runfusion.ai --help`, etc. (Ou de façon verbeuse : `npx @runfusion/fusion dashboard`.)
+
+**Installateur en une ligne** (macOS et Linux — choisit automatiquement Homebrew, bascule sur npm en secours) :
+
+```bash
+curl -fsSL https://runfusion.ai/install.sh | sh
+fusion dashboard
+```
+
+**Homebrew** (macOS et Linux) :
+
+```bash
+brew tap runfusion/fusion
+brew install fusion
+fusion dashboard            # ou : fn dashboard
+```
+
+Ou en une ligne (tap automatique) : `brew install runfusion/fusion/fusion`.
+
+**npm global** :
+
+```bash
+npm install -g @runfusion/fusion
+fn dashboard                # ou : fusion dashboard
+```
+
+**Depuis un clone** (pour le développement) :
+
+```bash
+pnpm dev dashboard
+```
+
+Cliquez ensuite sur l'URL `Open:` affichée dans le terminal. Elle intègre un jeton bearer
+(`http://localhost:4040/?token=fn_...`) que le navigateur capture dans
+`localStorage` à la première visite et réutilise automatiquement par la suite. Côté
+serveur, Fusion persiste désormais le jeton du tableau de bord/démon dans
+`~/.fusion/settings.json` à la première exécution authentifiée et le réutilise
+lors des démarrages ultérieurs, sauf si vous le remplacez (`--token`,
+`FUSION_DASHBOARD_TOKEN`, `FUSION_DAEMON_TOKEN`) ou désactivez l'authentification
+avec `--no-auth`. Voir
+[Référence CLI → fn dashboard → Authentification](./docs/cli-reference.md#fn-dashboard)
+pour la précédence complète et les options de réinitialisation/révocation.
+
+### Configuration au premier lancement
+
+Au premier lancement, Fusion ouvre l'**assistant d'intégration** en trois étapes guidées :
+
+1. **Configuration IA** — Utilisez la liste simplifiée de fournisseurs de démarrage rapide (fournisseurs recommandés et fournisseurs déjà connectés), puis développez les **Paramètres avancés du fournisseur** uniquement si vous avez besoin de fournisseurs supplémentaires ou de détails de configuration. Un seul fournisseur suffit pour commencer. Les entrées de fournisseurs dépréciés Google Gemini CLI / Antigravity sont intentionnellement masquées ; les chemins clé API Google/Gemini, Google Generative AI, Vertex et Cloud Code restent pris en charge.
+2. **GitHub (optionnel)** — Connectez GitHub pour l'import de tickets et la gestion des PR
+3. **Première tâche** — Créez votre première tâche ou importez depuis GitHub (si aucun projet n'est actif, l'assistant vous invite d'abord à enregistrer/sélectionner un répertoire de projet)
+
+L'assistant est **dismissable et non bloquant** — cliquez sur **Ignorer pour l'instant** pour utiliser le tableau de bord immédiatement. Relancez-le plus tard depuis **Paramètres → Authentification → Rouvrir le guide d'intégration**.
+
+### Mobile
+
+Pour le workflow Capacitor + PWA, voir [MOBILE.md](./MOBILE.md).
+
+---
+
 ## Le flux
 
 ```
@@ -71,18 +138,134 @@ Chaque tâche affiche son plan, ses révisions, ses diffs et ses modifications d
 |  |  |
 |---|---|
 | 🧠 **Planification IA** | Décrivez une tâche en langage naturel. Les agents de planification la transforment en plan `PROMPT.md` avec étapes, périmètre des fichiers et critères d'acceptation. |
-| 🔁 **Portes de workflow** | Plan → Révision → Exécution → Révision à chaque étape. Les portes pré-fusion bloquent le mauvais code ; les portes post-fusion effectuent des vérifications informatives. |
+| 🔁 **Workflows sélectionnables** | Les workflows intégrés couvrent le codage, les correctifs rapides, le travail à forte révision, l'exécution par étapes, le Compound Engineering activé par plugin et les fragments de cycle de vie de PR. Choisissez un workflow par tâche ou créez-en des personnalisés dans l'[Éditeur de workflows](./docs/workflow-editor.md). |
 | 🌳 **Isolation par worktree** | Chaque tâche s'exécute dans sa propre branche et son propre worktree (`fusion/{task-id}`). Tâches parallèles. Zéro conflit. Délégation [worktrunk](https://github.com/max-sixty/worktrunk) optionnelle via [`worktrunk.enabled`](./docs/settings-reference.md#worktree-backend-settings) (voir [abstraction WorktreeBackend](./docs/architecture.md#worktreebackend-abstraction)). |
-| ⚡ **Fusion intelligente** | Toutes les portes franchies ? Fusion effectue un squash-merge et passe à la suite. Activez la validation manuelle où vous le souhaitez. |
+| ⚡ **Fusion intelligente** | Toutes les portes franchies ? Fusion effectue un squash-merge et passe à la suite. Activez la validation manuelle où vous le souhaitez, héritez du défaut global d'auto-fusion en direct, ou définissez des remplacements auto/manuel explicites par tâche. |
 | 🛰️ **Maillage multi-nœuds** | Laptop, Mac mini, serveur Linux, VM cloud, téléphone — tout synchronisé. Bureau, mobile, web. |
-| 🧩 **N'importe quel modèle** | Anthropic, OpenAI, Ollama et plus encore. Local et cloud coexistent. |
+| 🧩 **N'importe quel modèle** | Anthropic, OpenAI, Ollama, Google Generative AI, Z.ai, runtimes locaux et [fournisseurs personnalisés](./docs/dashboard-guide.md#custom-providers) définis par l'utilisateur. Local et cloud coexistent, avec des voies de modèle/fallback de workflow configurables par projet. |
 | 🏢 **Entreprises d'agents** | Importez des équipes prédéfinies — plus de 440 agents répartis dans 16 entreprises — et faites-les fonctionner de façon autonome pendant des semaines. |
-| 📬 **Messagerie inter-agents** | Boîte aux lettres intégrée entre agents. Déléguer, clarifier, coordonner. |
+| 📬 **Messagerie inter-agents** | Boîte aux lettres intégrée entre agents. Déléguer, clarifier, coordonner ; les agents au rôle d'ingénieur peuvent activer la réclamation automatique du backlog quand vous voulez de l'aide à l'implémentation au-delà du retrait réservé à l'exécuteur. |
 | 🗨️ **Chat d’agents** | Chat direct, chat de tâche, pièces jointes, cartes de questions, flux reprenables et salles multi-agents expérimentales où les membres mentionnés répondent directement et les membres ambiants peuvent participer jusqu’à un plafond. ([Docs Chat](./docs/dashboard-guide.md#chat-view)) |
 | 🗺️ **Missions** | Planification hiérarchique (Mission → Jalon → Tranche → Fonctionnalité → Tâche) avec pilotage automatique et contrats de validation. |
 | 🔬 **Recherche** | Exécutions de recherche délimitées avec recherche web, GitHub, docs locaux et synthèse LLM (plus prise en charge intégrée de WebSearch/WebFetch dans les flux de planification et de synthèse lorsque disponible). Transformez les résultats en tâches. ([Docs](./docs/research.md)) |
 | 🧪 **Auto-amélioration** | Les agents réfléchissent à leurs propres résultats et mettent à jour leurs prompts au fur et à mesure qu'ils apprennent votre base de code. |
 | 🔓 **Open source. MIT.** | Pas d'enfermement propriétaire. Faites-le tourner sur votre propre matériel. Livraisons hebdomadaires. |
+
+---
+
+## Voir en action
+
+<!--
+FNXC:Docs 2026-06-21-19:55:
+README must lead with a smaller wordmark and a visual showcase of the latest surfaces (Command Center, selectable workflows, agent chat, multi-agent chat rooms, agent mail) so the value lands fast.
+Each feature pairs a short looping GIF with value copy; Command Center additionally carries real fleet stats, the token/productivity/team graph trio, and the 70+-theme grid (incl. shadcn light/mono/orange/black) to make the data pop.
+Media lives in demo/assets/ (committed, GitHub-inline GIFs); stat numbers are sourced from a live seeded fleet — refresh them if the captures are re-shot.
+Each feature keeps its original Tokyo Night capture and adds a Shadcn Light + Shadcn Dark Gray pair; the theme showcase is split into a light-themes grid and a dark-themes grid. Workflow GIFs feature the Stepwise coding graph with node-level zoom/pan.
+-->
+
+Les surfaces les plus récentes de Fusion, en un coup d'œil — contrôle de mission, workflows visuels, chat d'agents, salles multi-agents et messagerie inter-agents.
+
+### 🛰️ Command Center — le contrôle de mission de votre flotte d'agents
+
+<div align="center">
+  <img src="./demo/assets/command-center.gif" alt="Fusion Command Center: live concurrency gauges, token charts, and fleet telemetry across tabs" width="900" />
+</div>
+
+Un seul écran pour tout ce que font vos agents. Ajustez la capacité du planificateur en direct, suivez la dépense de tokens par modèle en temps réel et prouvez la valeur avec des chiffres concrets.
+
+<table>
+<tr>
+<td width="33%"><img src="./demo/assets/command-center-tokens.png" alt="Tokens by model, token trend, and tokens-over-time charts" /><br/><sub><b>Tokens</b> — dépense par modèle, en cache vs. entrée vs. sortie, dans le temps.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-productivity.png" alt="Productivity: commits, human-hours saved, task duration percentiles, and files by language" /><br/><sub><b>Productivité</b> — résultats, percentiles de durée, mix de langages.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-team.png" alt="Agent org chart with token share and tokens-by-agent breakdown" /><br/><sub><b>Équipe</b> — organigramme des agents et part de tokens par agent.</sub></td>
+</tr>
+</table>
+
+> Tokens · Outils · Activité · Productivité · Équipe · Écosystème · GitHub · Signaux · Système · Fiabilité · Mission Control — chaque onglet est un angle différent sur la même flotte en direct.
+
+**La même flotte, à votre façon** — Command Center (et tout le tableau de bord) se re-thématise en direct sur **plus de 70 thèmes de couleurs**. Le voici en Shadcn Light et Shadcn Dark Gray :
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/command-center-light.gif" alt="Command Center in Shadcn Light theme" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/command-center-gray.gif" alt="Command Center in Shadcn Dark Gray theme" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>Une douzaine de thèmes clairs &amp; une douzaine de thèmes sombres</b> (cliquer pour développer)</summary>
+
+<br/>
+
+<div align="center">
+  <img src="./demo/assets/command-center-themes-light.png" alt="Command Center across 12 light color themes" width="900" />
+  <br/><br/>
+  <img src="./demo/assets/command-center-themes-dark.png" alt="Command Center across 12 dark color themes" width="900" />
+</div>
+
+</details>
+
+### 🔁 Workflows sélectionnables, créés visuellement
+
+<div align="center">
+  <img src="./demo/assets/workflows.gif" alt="Fusion Workflow Editor: switching between built-in workflow graphs" width="820" />
+</div>
+
+Le parcours d'une tâche, de l'idée à la fusion, est un **workflow** — et c'est à vous de le choisir et de le façonner. Choisissez un workflow intégré (Coding, Quick fix, Review-heavy, Stepwise, PR lifecycle, Compound engineering et plus encore), inspectez son graphe, puis dupliquez et personnalisez les colonnes, les portes, les voies de modèle et la politique de révision dans l'[Éditeur de workflows](./docs/workflow-editor.md) visuel. Aucun fork du moteur requis.
+
+Voici le graphe **Stepwise coding** — planifier, exécuter et réviser chaque étape avant la suivante — exploré nœud par nœud en Shadcn Light et Dark Gray :
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/workflows-light.gif" alt="Stepwise coding workflow graph in Shadcn Light, panning across nodes" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/workflows-gray.gif" alt="Stepwise coding workflow graph in Shadcn Dark Gray, panning across nodes" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 🗨️ Chat d'agents — parlez à vos agents, en plein vol
+
+<div align="center">
+  <img src="./demo/assets/agent-chat.gif" alt="Fusion agent chat: a threaded conversation with an agent diagnosing a failed task" width="900" />
+</div>
+
+Chat direct et chat par tâche avec n'importe quel agent, sur n'importe quel modèle. Demandez pourquoi une tâche a échoué, orientez une approche, déposez des pièces jointes, répondez aux cartes de questions intégrées et reprenez les flux là où vous les avez laissés — rendu complet du markdown et du code de bout en bout.
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-chat-light.png" alt="Agent chat thread in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-chat-gray.png" alt="Agent chat thread in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 👥 Salles de chat multi-agents
+
+<div align="center">
+  <img src="./demo/assets/chat-rooms.gif" alt="Fusion chat room: CEO, Product Manager, and CTO agents coordinating in #leads" width="900" />
+</div>
+
+Placez plusieurs agents dans une salle et laissez-les se coordonner. Mentionnez un membre et il répond directement ; les membres ambiants peuvent rejoindre la conversation jusqu'à un plafond. Ici, les agents **CEO**, **Product Manager** et **CTO** s'accordent sur l'attribution des tâches dans `#leads` — sans humain dans la boucle. ([Docs Chat](./docs/dashboard-guide.md#chat-view))
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/chat-rooms-light.gif" alt="Multi-agent chat room in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/chat-rooms-gray.gif" alt="Multi-agent chat room in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 📬 Messagerie d'agents — une boîte de réception entre vos agents
+
+<div align="center">
+  <img src="./demo/assets/agent-mail.gif" alt="Fusion mailbox: inter-agent messages with triage summaries and approvals" width="900" />
+</div>
+
+Une boîte aux lettres intégrée pour la délégation, la clarification et les passations. Les agents déposent des résumés de triage, demandent des approbations et coordonnent le travail à travers la flotte — avec les vues Boîte de réception, Boîte d'envoi, Agents et Approbations, pour que vous puissiez auditer chaque échange.
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-mail-light.gif" alt="Agent mailbox in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-mail-gray.gif" alt="Agent mailbox in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
 
 ---
 
@@ -221,73 +404,6 @@ npx companies.sh add paperclipai/companies/gstack
 <br />
 
 > **Hermes**, **Paperclip** et **OpenClaw** sont des plugins de runtime **expérimentaux** — les API et les formats de communication peuvent évoluer entre les versions mineures.
-
----
-
-## Démarrage rapide
-
-**Sans installation, directement depuis npm :**
-
-```bash
-npx runfusion.ai
-```
-
-Cela lance le tableau de bord. Les sous-commandes passent directement : `npx runfusion.ai task create "fix X"`, `npx runfusion.ai --help`, etc. (Ou de façon verbeuse : `npx @runfusion/fusion dashboard`.)
-
-**Installateur en une ligne** (macOS et Linux — choisit automatiquement Homebrew, bascule sur npm en secours) :
-
-```bash
-curl -fsSL https://runfusion.ai/install.sh | sh
-fusion dashboard
-```
-
-**Homebrew** (macOS et Linux) :
-
-```bash
-brew tap runfusion/fusion
-brew install fusion
-fusion dashboard            # ou : fn dashboard
-```
-
-Ou en une ligne (tap automatique) : `brew install runfusion/fusion/fusion`.
-
-**npm global** :
-
-```bash
-npm install -g @runfusion/fusion
-fn dashboard                # ou : fusion dashboard
-```
-
-**Depuis un clone** (pour le développement) :
-
-```bash
-pnpm dev dashboard
-```
-
-Cliquez ensuite sur l'URL `Open:` affichée dans le terminal. Elle intègre un jeton bearer
-(`http://localhost:4040/?token=fn_...`) que le navigateur capture dans
-`localStorage` à la première visite et réutilise automatiquement par la suite. Côté
-serveur, Fusion persiste désormais le jeton du tableau de bord/démon dans
-`~/.fusion/settings.json` à la première exécution authentifiée et le réutilise
-lors des démarrages ultérieurs, sauf si vous le remplacez (`--token`,
-`FUSION_DASHBOARD_TOKEN`, `FUSION_DAEMON_TOKEN`) ou désactivez l'authentification
-avec `--no-auth`. Voir
-[Référence CLI → fn dashboard → Authentification](./docs/cli-reference.md#fn-dashboard)
-pour la précédence complète et les options de réinitialisation/révocation.
-
-### Configuration au premier lancement
-
-Au premier lancement, Fusion ouvre l'**assistant d'intégration** en trois étapes guidées :
-
-1. **Configuration IA** — Utilisez la liste simplifiée de fournisseurs de démarrage rapide (fournisseurs recommandés et fournisseurs déjà connectés), puis développez les **Paramètres avancés du fournisseur** uniquement si vous avez besoin de fournisseurs supplémentaires ou de détails de configuration. Un seul fournisseur suffit pour commencer. Les entrées de fournisseurs dépréciés Google Gemini CLI / Antigravity sont intentionnellement masquées ; les chemins clé API Google/Gemini, Google Generative AI, Vertex et Cloud Code restent pris en charge.
-2. **GitHub (optionnel)** — Connectez GitHub pour l'import de tickets et la gestion des PR
-3. **Première tâche** — Créez votre première tâche ou importez depuis GitHub (si aucun projet n'est actif, l'assistant vous invite d'abord à enregistrer/sélectionner un répertoire de projet)
-
-L'assistant est **dismissable et non bloquant** — cliquez sur **Ignorer pour l'instant** pour utiliser le tableau de bord immédiatement. Relancez-le plus tard depuis **Paramètres → Authentification → Rouvrir le guide d'intégration**.
-
-### Mobile
-
-Pour le workflow Capacitor + PWA, voir [MOBILE.md](./MOBILE.md).
 
 ---
 

@@ -77,7 +77,7 @@ import {
   resolveExecutorSessionModel,
 } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import { reviewStep, type ReviewVerdict } from "./reviewer.js";
+import { reviewStep, type ReviewVerdict, type ReviewResult } from "./reviewer.js";
 import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -5664,9 +5664,14 @@ export class TaskExecutor {
         const settings = await mergeEffectiveSettings(this.store, detail, await this.store.getSettings());
 
         const sem = this.options.semaphore;
-        const invokeReviewer = () =>
+        // FNXC:Workspace 2026-06-22-00:30: KTD3 — step-inversion review seam loops per sub-repo.
+        // `reviewStep` stays single-cwd; THIS CALLER loops. Single-cwd by default reviews
+        // `worktreePath`; in workspace mode that is the browse-only non-git root, so we instead spawn
+        // one reviewer per acquired sub-repo (cwd = repo.worktreePath) via reviewWorkspacePerRepo and
+        // aggregate as a conjunction. `invokeReviewerForCwd` is the per-cwd reviewStep call both modes share.
+        const invokeReviewerForCwd = (cwd: string) =>
           reviewStep(
-            worktreePath,
+            cwd,
             seamTask.id,
             stepIndex,
             stepName,
@@ -5702,10 +5707,18 @@ export class TaskExecutor {
               onSessionEnded: (s) => this.unregisterSubagentSession(seamTask.id, s),
             },
           );
+        const runForCwd = (cwd: string) => {
+          const invoke = () => invokeReviewerForCwd(cwd);
+          return sem ? sem.runNested(invoke) : invoke();
+        };
+        const invokeReviewer = () =>
+          this.workspaceConfig
+            ? this.reviewWorkspacePerRepo(detail, (cwd) => runForCwd(cwd))
+            : runForCwd(worktreePath);
 
         let review: { verdict: ReviewVerdict; review: string; summary: string };
         try {
-          review = sem ? await sem.runNested(invokeReviewer) : await invokeReviewer();
+          review = await invokeReviewer();
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           reviewerLog.error(`${seamTask.id}: step-review failed: ${message}`);
@@ -10855,24 +10868,62 @@ export class TaskExecutor {
       return { blocked: false };
     }
 
-    const [uncommittedTouchedFiles, branchCommittedFiles] = await Promise.all([
-      this.captureUncommittedModifiedFiles(worktreePath),
-      this.captureModifiedFiles(worktreePath, task.baseCommitSha, task.id, audit, "scope-leak-guard"),
-    ]);
-
-    const touchedFiles = [...new Set([...uncommittedTouchedFiles, ...branchCommittedFiles])];
-    if (touchedFiles.length === 0) {
-      return { blocked: false };
+    // FNXC:Workspace 2026-06-22-00:30: KTD4 — per-repo scope-leak guard.
+    // The singular capture below runs `captureUncommittedModifiedFiles` + `captureModifiedFiles`
+    // against `worktreePath`. In workspace mode `worktreePath` is the browse-only non-git workspace
+    // root, so both silently return [] (git failures swallowed) and the uncommitted-in-scope block
+    // never fires — a workspace task could complete with off-scope changes in any sub-repo. So we
+    // ITERATE every acquired sub-repo (cwd = repo.worktreePath, base = repo.baseCommitSha),
+    // repo-prefix each repo's touched files (`<repoRel>/<file>`) so they compare against the task's
+    // repo-prefixed declared File Scope, and block on the FIRST repo carrying off-scope changes —
+    // naming the repo. The task-level preamble above (scopeOverride / declaredScope / enforcementMode)
+    // is shared and runs once. Return shape is preserved: `{blocked:false} | {blocked:true; message}`.
+    let touchedFiles: string[];
+    let offendingRepo: string | undefined;
+    if (this.workspaceConfig) {
+      const workspaceWorktrees = task.workspaceWorktrees ?? {};
+      const aggregatedOffScope: string[] = [];
+      for (const [repoRel, repo] of Object.entries(workspaceWorktrees)) {
+        const [repoUncommitted, repoCommitted] = await Promise.all([
+          this.captureUncommittedModifiedFiles(repo.worktreePath),
+          this.captureModifiedFiles(repo.worktreePath, repo.baseCommitSha, task.id, audit, "scope-leak-guard"),
+        ]);
+        const repoTouched = [...new Set([...repoUncommitted, ...repoCommitted])].map((f) => `${repoRel}/${f}`);
+        const repoOffScope = repoTouched
+          .filter((filePath) => !workflowPathMatchesDeclaredScope(filePath, declaredScope))
+          .filter((filePath) => !isAlwaysAllowedScopeLeakPath(filePath));
+        if (repoOffScope.length > 0) {
+          // First offending repo wins (mirrors verifyWorktreeInvariants' first-failing-repo return).
+          if (!offendingRepo) offendingRepo = repoRel;
+          aggregatedOffScope.push(...repoOffScope);
+        }
+      }
+      touchedFiles = aggregatedOffScope;
+      if (touchedFiles.length === 0) {
+        return { blocked: false };
+      }
+    } else {
+      const [uncommittedTouchedFiles, branchCommittedFiles] = await Promise.all([
+        this.captureUncommittedModifiedFiles(worktreePath),
+        this.captureModifiedFiles(worktreePath, task.baseCommitSha, task.id, audit, "scope-leak-guard"),
+      ]);
+      touchedFiles = [...new Set([...uncommittedTouchedFiles, ...branchCommittedFiles])];
+      if (touchedFiles.length === 0) {
+        return { blocked: false };
+      }
     }
 
-    const offScopeFiles = touchedFiles
-      .filter((filePath) => !workflowPathMatchesDeclaredScope(filePath, declaredScope))
-      // FN-4811 follow-up: by convention every task may add its own changeset entry
-      // under `.changeset/`, so changeset files are always considered in-scope and
-      // never flagged by the scope-leak guard. The file-scope invariant at squash and
-      // the broader contamination guards still catch cross-task changeset leakage at
-      // a higher signal-to-noise ratio than the per-execution scope-leak warning.
-      .filter((filePath) => !isAlwaysAllowedScopeLeakPath(filePath));
+    const offScopeFiles = (this.workspaceConfig
+      // In workspace mode `touchedFiles` is already the off-scope set (filtered per repo above).
+      ? touchedFiles
+      : touchedFiles
+        .filter((filePath) => !workflowPathMatchesDeclaredScope(filePath, declaredScope))
+        // FN-4811 follow-up: by convention every task may add its own changeset entry
+        // under `.changeset/`, so changeset files are always considered in-scope and
+        // never flagged by the scope-leak guard. The file-scope invariant at squash and
+        // the broader contamination guards still catch cross-task changeset leakage at
+        // a higher signal-to-noise ratio than the per-execution scope-leak warning.
+        .filter((filePath) => !isAlwaysAllowedScopeLeakPath(filePath)));
     if (offScopeFiles.length === 0) {
       return { blocked: false };
     }
@@ -10887,14 +10938,16 @@ export class TaskExecutor {
 
     const offScopePreview = renderListPreview(offScopeFiles);
     const declaredScopePreview = renderListPreview(declaredScope);
-    const message = `[scope-leak] reviewLevel=${reviewLevel} enforcement=${enforcementMode} off-scope touched files [${offScopePreview}]; declared scope [${declaredScopePreview}]; total off-scope=${offScopeFiles.length} total scope=${declaredScope.length}`;
+    // Name the offending sub-repo in workspace mode so the operator/agent knows where to revert.
+    const repoTag = offendingRepo ? ` repo=${offendingRepo}` : "";
+    const message = `[scope-leak] reviewLevel=${reviewLevel} enforcement=${enforcementMode}${repoTag} off-scope touched files [${offScopePreview}]; declared scope [${declaredScopePreview}]; total off-scope=${offScopeFiles.length} total scope=${declaredScope.length}`;
     executorLog.warn(`${task.id}: ${message}`);
     await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
 
     if (enforcementMode === "block") {
       return {
         blocked: true,
-        message: `Plan-Only scope-leak guard refused fn_task_done. Off-scope paths: [${offScopePreview}]. Revert them before retrying (for example: git checkout -- <paths>).`,
+        message: `Plan-Only scope-leak guard refused fn_task_done${offendingRepo ? ` (sub-repo ${offendingRepo})` : ""}. Off-scope paths: [${offScopePreview}]. Revert them before retrying (for example: git checkout -- <paths>).`,
       };
     }
 
@@ -11337,8 +11390,13 @@ export class TaskExecutor {
           // result, so the soft breach of `limit` does not push real
           // LLM-active concurrency above the configured cap.
           const sem = options.semaphore;
-          const invokeReviewer = () => reviewStep(
-            worktreePath, taskId, step, step_name,
+          // FNXC:Workspace 2026-06-22-00:30: KTD3 — in-session fn_review_step loops per sub-repo.
+          // `reviewStep` stays single-cwd; THIS CALLER loops. Single-cwd by default reviews `worktreePath`;
+          // in workspace mode that is the browse-only non-git root, so we spawn one reviewer per acquired
+          // sub-repo (cwd = repo.worktreePath) via reviewWorkspacePerRepo and aggregate as a conjunction.
+          // `invokeReviewerForCwd` is the per-cwd reviewStep call both modes share.
+          const invokeReviewerForCwd = (cwd: string) => reviewStep(
+            cwd, taskId, step, step_name,
             reviewType, promptContent, baseline,
             {
               onText: (delta) => options.onAgentText?.(taskId, delta),
@@ -11377,9 +11435,13 @@ export class TaskExecutor {
               onSessionEnded: (s) => this.unregisterSubagentSession(taskId, s),
             },
           );
-          const result = sem
-            ? await sem.runNested(invokeReviewer)
-            : await invokeReviewer();
+          const runForCwd = (cwd: string) => {
+            const invoke = () => invokeReviewerForCwd(cwd);
+            return sem ? sem.runNested(invoke) : invoke();
+          };
+          const result = this.workspaceConfig
+            ? await this.reviewWorkspacePerRepo(currentTask, (cwd) => runForCwd(cwd))
+            : await runForCwd(worktreePath);
 
           await store.logEntry(
             taskId,
@@ -12401,6 +12463,70 @@ ${failureFeedback}
       }
     }
     return aggregated;
+  }
+
+  /**
+   * FNXC:Workspace 2026-06-22-00:30: KTD3 — per-repo review by looping the EXISTING single-cwd reviewStep.
+   * The reviewer is an AGENT spawned with `cwd = worktree`, told (in prompt text, reviewer.ts) to run `git diff`
+   * itself — it does NOT read a diff passed in code. So per-repo review = ONE reviewer agent per sub-repo. We keep
+   * `reviewStep` single-cwd; the CALLERS loop. This helper is the shared loop+aggregate so both review entry points
+   * (`createReviewStepTool` and the step-inversion `stepReview` seam) iterate identically: it invokes the caller's
+   * own `invokeForCwd(cwd)` once per acquired worktree (cwd = repo.worktreePath) and aggregates the repo-tagged
+   * verdicts as a CONJUNCTION — the task is "reviewed" only if EVERY repo passes; the FIRST non-APPROVE repo's
+   * verdict becomes the aggregate verdict (mirroring verifyWorktreeInvariants' first-failing-repo return), and its
+   * findings are repo-tagged. A zero-acquire workspace task (empty map) returns UNAVAILABLE so the caller routes it
+   * rather than fabricating an APPROVE.
+   *
+   * Verdict severity for the conjunction: any RETHINK/REVISE/UNAVAILABLE fails the whole review; only all-APPROVE
+   * (or all-skipped UNAVAILABLE-advisory, handled by the caller) approves. We surface the first failing repo's exact
+   * verdict so the caller's existing verdict→edge mapping (APPROVE done-marking, REVISE block, RETHINK reset,
+   * UNAVAILABLE retry) is unchanged.
+   */
+  private async reviewWorkspacePerRepo(
+    task: Task,
+    invokeForCwd: (cwd: string, repoRel: string) => Promise<ReviewResult>,
+  ): Promise<ReviewResult> {
+    const workspaceWorktrees = task.workspaceWorktrees ?? {};
+    const entries = Object.entries(workspaceWorktrees);
+    if (entries.length === 0) {
+      // No acquired worktree — surface UNAVAILABLE so the caller routes it rather than
+      // fabricating an authoritative APPROVE for an un-reviewable workspace task.
+      return {
+        verdict: "UNAVAILABLE",
+        review: "No acquired sub-repo worktree to review (workspace task with zero worktrees).",
+        summary: "Skipped: no sub-repo worktree",
+      };
+    }
+
+    const reviewSections: string[] = [];
+    const summarySections: string[] = [];
+    let firstFailing: { repo: string; result: ReviewResult } | undefined;
+    for (const [repoRel, repo] of entries) {
+      const result = await invokeForCwd(repo.worktreePath, repoRel);
+      // Tag every per-repo finding with its sub-repo so downstream readers attribute it correctly.
+      reviewSections.push(`### [${repoRel}] ${result.verdict}\n${result.review}`);
+      summarySections.push(`[${repoRel}] ${result.verdict}: ${result.summary}`);
+      if (result.verdict !== "APPROVE" && !firstFailing) {
+        firstFailing = { repo: repoRel, result };
+      }
+    }
+
+    if (firstFailing) {
+      // Conjunction failed: the aggregate carries the FIRST failing repo's verdict (so the caller's
+      // verdict→edge mapping is identical to single-cwd), with the full repo-tagged review body.
+      return {
+        verdict: firstFailing.result.verdict,
+        review: `Workspace review failed in sub-repo \`${firstFailing.repo}\` (verdict ${firstFailing.result.verdict}). Per-repo verdicts:\n\n${reviewSections.join("\n\n")}`,
+        summary: `${firstFailing.repo}: ${firstFailing.result.verdict} — ${summarySections.join(" | ")}`,
+      };
+    }
+
+    // Every sub-repo approved → the task is reviewed (conjunction satisfied).
+    return {
+      verdict: "APPROVE",
+      review: `All ${entries.length} sub-repo(s) approved. Per-repo verdicts:\n\n${reviewSections.join("\n\n")}`,
+      summary: `APPROVE across ${entries.length} sub-repo(s): ${summarySections.join(" | ")}`,
+    };
   }
 
   private async captureUncommittedModifiedFiles(worktreePath: string): Promise<string[]> {

@@ -2127,6 +2127,7 @@ function AppInner() {
           <LeftSidebarNav
             view={taskView}
             onChangeView={handleTaskViewChange}
+            onNewTask={openNewTaskWithNav}
             onOpenSettings={openSettingsWithNav}
             todosEnabled={todosEnabled}
             mailboxUnreadCount={mailboxUnreadCount}

@@ -34,6 +34,29 @@ The collapse toggle lives in the footer above Settings instead of floating on th
   justify-content: flex-start;
 }
 
+/*
+FNXC:Navigation 2026-06-21-20:45:
+The persistent desktop/tablet sidebar needs a centered New Task CTA at the top so task creation is reachable from any project screen. It uses the shared row label and rail hiding behavior so expanded mode shows icon plus text while collapsed mode remains an icon-only button with the same global dialog trigger.
+*/
+.left-sidebar-nav__new-task {
+  flex-shrink: 0;
+  justify-content: center;
+  align-self: stretch;
+  width: auto;
+  margin: var(--space-sm) var(--space-sm) 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.left-sidebar-nav__new-task:hover,
+.left-sidebar-nav__new-task:focus-visible {
+  background: color-mix(in srgb, var(--accent) 88%, var(--surface));
+  color: var(--accent-text);
+}
+
 .left-sidebar-nav__list {
   display: flex;
   flex: 1;
@@ -182,6 +205,10 @@ The narrower resizable sidebar must preserve row rhythm by truncating labels ins
   justify-content: center;
   padding-right: 0;
   padding-left: 0;
+}
+
+.left-sidebar-nav--collapsed .left-sidebar-nav__new-task {
+  justify-content: center;
 }
 
 @media (max-width: 768px) {

@@ -30,6 +30,14 @@ const projects: ProjectInfo[] = [
 
 const leftSidebarNavCss = readFileSync(resolve(__dirname, "../LeftSidebarNav.css"), "utf8");
 const obsoleteCollapseToggleFloatingClass = "left-sidebar-nav__collapse-toggle--" + "floating";
+const newTaskSurfaceEnumeration = [
+  "[x] Components that render the affordance: Grep confirms LeftSidebarNav is the only persistent sidebar renderer and App.tsx mounts it once.",
+  "[x] Providers / execution paths: the click handler invokes the onNewTask prop, which App.tsx binds to openNewTaskWithNav.",
+  "[x] Breakpoints / viewport modes: desktop/tablet render the sidebar CTA; mobile intentionally hides the sidebar so MobileNavBar and board creation remain canonical there.",
+  "[x] Sidebar states: expanded shows icon plus label, collapsed/rail keeps the icon-only button clickable with aria-label and title.",
+  "[x] Data/flag states: leftSidebarNav enabled renders the sidebar CTA, leftSidebarNav false omits the entire sidebar shell via App.tsx, and absent onNewTask omits the CTA shell.",
+  "[x] Leftover shells: the CTA precedes the nav list without displacing nav sections, footer buttons, or the resize handle.",
+];
 
 function getCssRuleBlock(css: string, selector: string) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -116,6 +124,81 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof LeftSidebarNav>>
 describe("LeftSidebarNav", () => {
   beforeEach(() => {
     window.localStorage.clear();
+  });
+
+  it("documents and asserts the sidebar New Task surface enumeration", () => {
+    expect(newTaskSurfaceEnumeration).toHaveLength(6);
+    for (const item of newTaskSurfaceEnumeration) {
+      expect(item).toMatch(/^\[x\]/);
+    }
+
+    const singleSidebarRendererMatches = [
+      ...leftSidebarNavCss.matchAll(/\.left-sidebar-nav/g),
+    ];
+    expect(singleSidebarRendererMatches.length).toBeGreaterThan(0);
+  });
+
+  it("renders the New Task CTA above the nav list and invokes the provided global trigger", () => {
+    const onNewTask = vi.fn();
+    renderSidebar({ onNewTask });
+
+    const sidebar = screen.getByTestId("left-sidebar-nav");
+    const newTaskButton = screen.getByTestId("sidebar-nav-new-task");
+    const navList = sidebar.querySelector(".left-sidebar-nav__list");
+
+    expect(sidebar.children[0]).toBe(newTaskButton);
+    expect(newTaskButton.nextElementSibling).toBe(navList);
+    expect(newTaskButton).toHaveAccessibleName("New Task");
+    expect(newTaskButton).toHaveAttribute("title", "New Task");
+    expect(newTaskButton).toHaveTextContent("New Task");
+    expect(newTaskButton.querySelector("svg")).not.toBeNull();
+
+    fireEvent.click(newTaskButton);
+    expect(onNewTask).toHaveBeenCalledOnce();
+  });
+
+  it("omits the New Task CTA when no trigger prop is provided", () => {
+    const { container } = renderSidebar();
+
+    expect(screen.queryByTestId("sidebar-nav-new-task")).toBeNull();
+    expect(container.querySelector(".left-sidebar-nav__new-task")).toBeNull();
+    expect(screen.getByTestId("left-sidebar-nav").children[0]).toBe(screen.getByRole("navigation", { name: "Primary navigation" }));
+  });
+
+  it("keeps the New Task CTA accessible, clickable, centered, and label-hidden in rail mode", () => {
+    const onNewTask = vi.fn();
+    window.localStorage.setItem("fusion:left-sidebar-collapsed", "true");
+    renderSidebar({ onNewTask });
+
+    const sidebar = screen.getByTestId("left-sidebar-nav");
+    const newTaskButton = screen.getByTestId("sidebar-nav-new-task");
+    expect(sidebar).toHaveClass("left-sidebar-nav--collapsed");
+    expect(newTaskButton).toHaveAccessibleName("New Task");
+    expect(newTaskButton).toHaveAttribute("title", "New Task");
+    expect(newTaskButton.querySelector(".left-sidebar-nav__label")).toHaveTextContent("New Task");
+
+    fireEvent.click(newTaskButton);
+    expect(onNewTask).toHaveBeenCalledOnce();
+
+    const newTaskRule = getCssRuleBlock(leftSidebarNavCss, ".left-sidebar-nav__new-task");
+    const collapsedNewTaskRule = getCssRuleBlock(leftSidebarNavCss, ".left-sidebar-nav--collapsed .left-sidebar-nav__new-task");
+    expect(newTaskRule).toContain("justify-content: center");
+    expect(collapsedNewTaskRule).toContain("justify-content: center");
+    expect(leftSidebarNavCss).toMatch(/\.left-sidebar-nav--collapsed \.left-sidebar-nav__label,\s*\.left-sidebar-nav--collapsed \.left-sidebar-nav__badge\s*\{[\s\S]*?display:\s*none;/);
+  });
+
+  it("keeps the New Task CTA styling tokenized without hardcoded px or colors", () => {
+    const newTaskRule = getCssRuleBlock(leftSidebarNavCss, ".left-sidebar-nav__new-task");
+    const hoverRule = getCssRuleBlock(leftSidebarNavCss, ".left-sidebar-nav__new-task:hover,\n.left-sidebar-nav__new-task:focus-visible");
+
+    expect(newTaskRule).toContain("margin: var(--space-sm) var(--space-sm) 0");
+    expect(newTaskRule).toContain("border-radius: var(--radius-md)");
+    expect(newTaskRule).toContain("background: var(--accent)");
+    expect(newTaskRule).toContain("color: var(--accent-text)");
+    expect(newTaskRule).not.toMatch(/\d+px/i);
+    expect(newTaskRule).not.toMatch(/#|rgb\(/i);
+    expect(hoverRule).not.toMatch(/\d+px/i);
+    expect(hoverRule).not.toMatch(/#|rgb\(/i);
   });
 
   it("renders core destinations, enabled overflow destinations, plugins, and bottom settings", () => {

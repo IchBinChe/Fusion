@@ -19,6 +19,7 @@ import {
   Mail,
   MessageSquare,
   Monitor,
+  Plus,
   Search,
   Settings,
   Sparkles,
@@ -100,6 +101,7 @@ function persistCollapsed(collapsed: boolean): void {
 export interface LeftSidebarNavProps {
   view: TaskView;
   onChangeView: (view: TaskView) => void;
+  onNewTask?: () => void;
   onOpenSettings?: () => void;
   todosEnabled?: boolean;
   mailboxUnreadCount?: number;
@@ -148,6 +150,7 @@ function getSidebarPluginLabel(entry: PluginDashboardViewEntry): string {
 export function LeftSidebarNav({
   view,
   onChangeView,
+  onNewTask,
   onOpenSettings,
   mailboxUnreadCount = 0,
   mailboxPendingApprovalCount = 0,
@@ -216,6 +219,8 @@ export function LeftSidebarNav({
     setSidebarWidth(nextWidth);
     persistSidebarWidth(nextWidth);
   }, [isCollapsed, sidebarWidth]);
+
+  const newTaskLabel = t("nav.newTask", "New Task");
 
   const primaryPluginViews = useMemo(
     () => sortPluginViews(pluginDashboardViews.filter((entry) => entry.view.placement === "primary")),
@@ -397,6 +402,19 @@ export function LeftSidebarNav({
       aria-label={t("nav.sidebarAriaLabel", "Sidebar navigation")}
       style={isCollapsed ? undefined : { width: sidebarWidth, minWidth: sidebarWidth }}
     >
+      {onNewTask ? (
+        <button
+          type="button"
+          className="btn left-sidebar-nav__item left-sidebar-nav__new-task"
+          aria-label={newTaskLabel}
+          title={newTaskLabel}
+          data-testid="sidebar-nav-new-task"
+          onClick={onNewTask}
+        >
+          <Plus size={16} />
+          <span className="left-sidebar-nav__label">{newTaskLabel}</span>
+        </button>
+      ) : null}
       <nav className="left-sidebar-nav__list" aria-label={t("nav.primaryNavAriaLabel", "Primary navigation")}>
         <div className="left-sidebar-nav__section">{primaryEntries.map(renderEntry)}</div>
         <div className="left-sidebar-nav__section left-sidebar-nav__section--secondary">{secondaryEntries.map(renderEntry)}</div>

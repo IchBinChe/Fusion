@@ -22,15 +22,31 @@ const execAsync = promisify(exec);
  *
  * Returns `undefined` only when every git invocation fails (caller treats a
  * missing base as non-fatal).
+ *
+ * FNXC:Workspace 2026-06-21-20:10:
+ * `integrationBranch` is an OPTIONAL TRAILING param defaulting to the historic
+ * "main" literal so the single-repo executor caller and the real-git tests stay
+ * green without change. Workspace mode (U2/KTD3) passes each sub-repo's RESOLVED
+ * integration branch so per-repo base capture forks against the right branch
+ * instead of a hardcoded "main". The local-first ordering (merge-base HEAD
+ * <local> then origin/<branch>) is preserved per-branch to keep the
+ * inflation-prevention invariant (FN-5937) intact for non-main integration
+ * branches too.
  */
 export async function resolveCapturedBaseCommitSha(
   worktreePath: string,
   logger?: { warn: (msg: string) => void },
+  integrationBranch: string = "main",
 ): Promise<string | undefined> {
+  const branch = integrationBranch.trim() || "main";
+  // Shell-quote defensively; integration branch names are normalized upstream
+  // but may carry slashes (e.g. "release/2026-06") that are valid in refs.
+  const localRef = JSON.stringify(branch);
+  const originRef = JSON.stringify(`origin/${branch}`);
   let baseCommitSha: string | undefined;
   try {
     const { stdout } = await execAsync(
-      "git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main",
+      `git merge-base HEAD ${localRef} 2>/dev/null || git merge-base HEAD ${originRef}`,
       { cwd: worktreePath, encoding: "utf-8" },
     );
     baseCommitSha = stdout.trim() || undefined;

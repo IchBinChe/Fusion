@@ -1,4 +1,13 @@
-export type ActiveSessionKind = "executor" | "step-session" | "workflow-step" | "step-session-parallel" | "ai-merge";
+/*
+FNXC:Workspace 2026-06-21-20:10:
+"workspace-repo-acquire" is a DISTINCT registry kind reserved for the
+acquisition-time same-sub-repo exclusivity entry (U2/KTD4). It is keyed by the
+sub-repo absolute path (NOT the worktree path) so two concurrent workspace tasks
+contending for the SAME sub-repo are serialized. Keeping it distinct from
+"executor"/"step-session" means it does not collide with the executor's later
+session registration on the produced worktree path.
+*/
+export type ActiveSessionKind = "executor" | "step-session" | "workflow-step" | "step-session-parallel" | "ai-merge" | "workspace-repo-acquire";
 
 export interface ActiveSessionRegistration {
   taskId: string;

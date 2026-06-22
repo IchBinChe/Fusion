@@ -34,6 +34,10 @@ import {
 import type { RunAuditor } from "./run-audit.js";
 import { writeSecretsEnvFile } from "./secrets-env-writer.js";
 import { removeDesktopBuildArtifacts } from "./worktree-desktop-artifacts.js";
+import { installTaskWorktreeIdentityGuard } from "./worktree-hooks.js";
+import { resolveCapturedBaseCommitSha } from "./base-commit-capture.js";
+import { resolveIntegrationBranch } from "./integration-branch.js";
+import { activeSessionRegistry, type ActiveSessionRegistry } from "./active-session-registry.js";
 
 const execAsync = promisify(exec);
 
@@ -604,47 +608,184 @@ export interface AcquireWorkspaceRepoWorktreeOptions {
   settings: Partial<Settings>;
   logger?: { log: (m: string) => void; warn: (m: string) => void; error?: (m: string) => void };
   secretsStore?: Pick<SecretsStore, "listEnvExportable">;
+  audit?: Pick<RunAuditor, "git" | "filesystem">;
+  runContext?: RunMutationContext;
+  /** Test seam: inject the path-keyed exclusivity registry (defaults to the process singleton). */
+  registry?: ActiveSessionRegistry;
 }
+
+/*
+FNXC:Workspace 2026-06-21-20:10:
+Acquisition-time exclusivity owner key for the same-sub-repo lock (U2/KTD4). The
+registry record is keyed by the sub-repo ABSOLUTE path and carries this distinct
+ownerKey so it never collides with the executor's later "executor"/"step-session"
+registration on the produced WORKTREE path.
+*/
+const WORKSPACE_REPO_ACQUIRE_OWNER_KEY = "workspace-repo-acquire";
 
 export async function acquireWorkspaceRepoWorktree(
   opts: AcquireWorkspaceRepoWorktreeOptions,
-): Promise<{ worktreePath: string; branch: string; alreadyAcquired: boolean }> {
-  const { repoRelPath, workspaceRootDir, task, store, settings, logger, secretsStore } = opts;
+): Promise<{ worktreePath: string; branch: string; baseCommitSha?: string; alreadyAcquired: boolean }> {
+  const { repoRelPath, workspaceRootDir, task, store, settings, logger, secretsStore, audit, runContext } = opts;
+  const registry = opts.registry ?? activeSessionRegistry;
   const { join } = await import("node:path");
 
   const existing = task.workspaceWorktrees?.[repoRelPath];
   if (existing) {
+    /*
+    FNXC:Workspace 2026-06-21-20:10:
+    Idempotency across (taskId, repo): a re-acquire of an already-acquired sub-repo
+    returns the persisted entry verbatim — no second identity-guard install, no
+    re-capture of the base SHA, no second exclusivity registration.
+    */
     return { ...existing, alreadyAcquired: true };
   }
 
   const repoAbsPath = join(workspaceRootDir, repoRelPath);
 
   /*
-  FNXC:WorkspaceWorktree 2026-06-21-19:05:
-  Workspace mode acquires one worktree per sub-repo for a single task. `acquireTaskWorktree`
-  is single-repo: it reads `task.worktree`/`task.branch` to decide resume-vs-fresh and rewrites
-  those singular fields on the task row after each acquisition. Passing the live task straight
-  through means the second repo's acquisition sees the first repo's `task.worktree` (which exists
-  on disk), classifies it as a resume, and reuses repo A's worktree inside repo B — cross-repo
-  contamination. Clear the singular worktree/branch fields on the copy handed to the single-repo
-  helper so each sub-repo always gets a fresh worktree; per-repo state is tracked in
-  `task.workspaceWorktrees`, not the singular column.
+  FNXC:Workspace 2026-06-21-20:10:
+  Same-sub-repo exclusivity (KTD4): register the sub-repo absolute path in the
+  path-keyed activeSessionRegistry BEFORE acquiring so two concurrent workspace
+  tasks contending for the SAME sub-repo are serialized. WorktreePool is a recycle
+  cache, not a cross-task lock, and disjoint-scope contention on one sub-repo is
+  otherwise unprotected (file-scope leases don't catch it). The entry is keyed by
+  the sub-repo path with a distinct ownerKey so it does not collide with the
+  executor's later session registration on the produced worktree path. We release
+  it once acquisition completes (success or failure) — it guards the acquisition
+  critical section, not the whole task lifetime.
   */
-  const result = await acquireTaskWorktree({
-    task: { ...task, worktree: undefined, branch: undefined },
-    rootDir: repoAbsPath,
-    store,
-    settings,
-    logger,
-    secretsStore,
-    runInitCommand: true,
+  const exclusivityHolder = registry.lookupByPath(repoAbsPath);
+  if (exclusivityHolder && exclusivityHolder.ownerKey === WORKSPACE_REPO_ACQUIRE_OWNER_KEY && exclusivityHolder.taskId !== task.id) {
+    const message = `sub-repo ${repoRelPath} is being acquired by ${exclusivityHolder.taskId}; serializing concurrent workspace acquisition`;
+    logger?.warn(`${task.id}: ${message}`);
+    await store.logEntry(task.id, message, undefined, runContext);
+    const err = new WorkspaceRepoAcquireBusyError(repoRelPath, exclusivityHolder.taskId, task.id);
+    await audit?.git({
+      type: "worktree:workspace-repo-acquire-busy",
+      target: repoAbsPath,
+      metadata: { repoRelPath, holderTaskId: exclusivityHolder.taskId, requestingTaskId: task.id },
+    });
+    throw err;
+  }
+  registry.registerPath(repoAbsPath, {
+    taskId: task.id,
+    kind: "workspace-repo-acquire",
+    ownerKey: WORKSPACE_REPO_ACQUIRE_OWNER_KEY,
   });
 
-  const updated: Record<string, { worktreePath: string; branch: string }> = {
-    ...(task.workspaceWorktrees ?? {}),
-    [repoRelPath]: { worktreePath: result.worktreePath, branch: result.branch },
-  };
-  await store.updateTask(task.id, { workspaceWorktrees: updated });
+  try {
+    /*
+    FNXC:WorkspaceWorktree 2026-06-21-19:05:
+    Workspace mode acquires one worktree per sub-repo for a single task. `acquireTaskWorktree`
+    is single-repo: it reads `task.worktree`/`task.branch` to decide resume-vs-fresh and rewrites
+    those singular fields on the task row after each acquisition. Passing the live task straight
+    through means the second repo's acquisition sees the first repo's `task.worktree` (which exists
+    on disk), classifies it as a resume, and reuses repo A's worktree inside repo B — cross-repo
+    contamination. Clear the singular worktree/branch fields on the copy handed to the single-repo
+    helper so each sub-repo always gets a fresh worktree; per-repo state is tracked in
+    `task.workspaceWorktrees`, not the singular column.
+    */
+    const result = await acquireTaskWorktree({
+      task: { ...task, worktree: undefined, branch: undefined },
+      rootDir: repoAbsPath,
+      store,
+      settings,
+      logger,
+      secretsStore,
+      audit,
+      runContext,
+      runInitCommand: true,
+    });
 
-  return { worktreePath: result.worktreePath, branch: result.branch, alreadyAcquired: false };
+    /*
+    FNXC:Workspace 2026-06-21-20:10:
+    Identity guard (single-repo parity): acquireTaskWorktree above runs WITHOUT a
+    createWorktree override, so the default native backend installs NO identity
+    hooks for a sub-repo worktree. Install the same guard the executor installs for
+    single-repo tasks (executor.ts identity-guard call), passing the SAME settings
+    args (commitMsgHookEnabled / taskPrefix / first taskAttributionTrailerName) so a
+    commit on a non-fusion/<id> branch is refused inside every sub-repo worktree too.
+    */
+    await installTaskWorktreeIdentityGuard({
+      worktreePath: result.worktreePath,
+      taskId: task.id,
+      commitMsgHookEnabled: settings.commitMsgHookEnabled,
+      taskPrefix: settings.taskPrefix,
+      taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+    });
+
+    /*
+    FNXC:Workspace 2026-06-21-20:10:
+    Per-repo base SHA (KTD3): resolve THIS sub-repo's integration branch with the
+    shared settings.integrationBranch override STRIPPED. resolveIntegrationBranch
+    checks settings.integrationBranch FIRST, so without stripping it every sub-repo
+    would resolve to the shared workspace branch — defeating per-repo resolution.
+    With it undefined, each sub-repo falls through to its own origin/HEAD. Capture
+    the base local-first against that branch so local-ahead-of-origin integration
+    tips don't inflate the per-repo diff (FN-5937 invariant, per sub-repo).
+    */
+    const integrationBranch = await resolveIntegrationBranch(
+      repoAbsPath,
+      { ...settings, integrationBranch: undefined },
+      { logger },
+    );
+    const baseCommitSha = await resolveCapturedBaseCommitSha(result.worktreePath, logger, integrationBranch);
+
+    const updated: Record<string, { worktreePath: string; branch: string; baseCommitSha?: string }> = {
+      ...(task.workspaceWorktrees ?? {}),
+      [repoRelPath]: { worktreePath: result.worktreePath, branch: result.branch, baseCommitSha },
+    };
+    await store.updateTask(task.id, { workspaceWorktrees: updated });
+
+    return { worktreePath: result.worktreePath, branch: result.branch, baseCommitSha, alreadyAcquired: false };
+  } catch (err) {
+    /*
+    FNXC:Workspace 2026-06-21-20:10:
+    Acquisition failure must surface an error and leave an audit trail (no swallowed
+    stall): persist the failure as an audit event + task log, then re-throw so the
+    caller observes the failure rather than silently proceeding with an unacquired
+    sub-repo.
+    */
+    if (!(err instanceof WorkspaceRepoAcquireBusyError)) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger?.error?.(`${task.id}: workspace sub-repo acquisition failed for ${repoRelPath}: ${message}`);
+      await store.logEntry(task.id, `Workspace sub-repo acquisition failed for ${repoRelPath}: ${message}`, undefined, runContext);
+      await audit?.git({
+        type: "worktree:workspace-repo-acquire-failed",
+        target: repoAbsPath,
+        metadata: { repoRelPath, taskId: task.id, error: message },
+      });
+    }
+    throw err;
+  } finally {
+    /*
+    FNXC:Workspace 2026-06-21-20:10:
+    Release the acquisition-time exclusivity entry only when WE hold it. The busy-path
+    throw above does NOT enter this try (it short-circuits before registerPath), so a
+    serialized loser never unregisters the winner's entry.
+    */
+    const held = registry.lookupByPath(repoAbsPath);
+    if (held && held.taskId === task.id && held.ownerKey === WORKSPACE_REPO_ACQUIRE_OWNER_KEY) {
+      registry.unregisterPath(repoAbsPath);
+    }
+  }
+}
+
+/*
+FNXC:Workspace 2026-06-21-20:10:
+Thrown when a second workspace task tries to acquire a sub-repo already inside
+another task's acquisition critical section (KTD4). Distinct from generic
+acquisition failures so the caller (and tests) can tell "serialized, retry later"
+apart from "this sub-repo is broken".
+*/
+export class WorkspaceRepoAcquireBusyError extends Error {
+  constructor(
+    public readonly repoRelPath: string,
+    public readonly holderTaskId: string,
+    public readonly requestingTaskId: string,
+  ) {
+    super(`workspace sub-repo ${repoRelPath} acquisition is in progress for task ${holderTaskId}`);
+    this.name = "WorkspaceRepoAcquireBusyError";
+  }
 }

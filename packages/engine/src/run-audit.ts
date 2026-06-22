@@ -99,6 +99,11 @@ export type GitMutationType =
   | "worktree:incomplete-detected"
   | "worktree:reanchored"
   | "worktree:auto-recovered"
+  // FNXC:Workspace 2026-06-21-20:10: workspace per-repo acquisition audit events (U2).
+  // -busy: another task holds the same sub-repo's acquisition exclusivity lock (KTD4).
+  // -failed: a sub-repo worktree acquisition threw; surfaced + audited, never swallowed.
+  | "worktree:workspace-repo-acquire-busy"
+  | "worktree:workspace-repo-acquire-failed"
   /**
    * worktrunk run-audit metadata shape:
    *

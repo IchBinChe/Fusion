@@ -2246,8 +2246,14 @@ export interface Task {
   /**
    * Workspace mode only. Keyed by repo path relative to workspace rootDir.
    * Each entry records the on-disk worktree path and git branch for one sub-repo.
+   *
+   * FNXC:Workspace 2026-06-21-20:10:
+   * `baseCommitSha` is the per-repo fork-point captured at acquisition (U2/KTD3)
+   * against that sub-repo's RESOLVED integration branch, local-first. It is the
+   * per-repo analogue of the single-repo base-commit capture and prevents
+   * cross-repo files-changed inflation when local integration is ahead of origin.
    */
-  workspaceWorktrees?: Record<string, { worktreePath: string; branch: string }>;
+  workspaceWorktrees?: Record<string, { worktreePath: string; branch: string; baseCommitSha?: string }>;
   steps: TaskStep[];
   currentStep: number;
   /**

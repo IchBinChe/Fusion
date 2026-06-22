@@ -136,29 +136,33 @@ The embedded planning title must read like other embedded-view titles (Command C
   position: relative;
 }
 
-/* Sidebar */
+/*
+FNXC:Planning 2026-06-23-01:15:
+Embedded Planning is a real two-pane view mirroring Missions (mission-manager__split): the left sidebar is a full-height flex column (list scrolls, footer pinned to bottom) and the right detail pane fills the remaining width AND height. The sidebar surface/border/width treatment matches mission-manager__sidebar — var(--surface) background, a single border-right divider — so the two views read consistently. The flex chain planning-view -> planning-modal--embedded -> planning-modal-body keeps the whole layout filling the main-content pane to the bottom.
+*/
 .planning-sidebar {
-  width: 260px;
+  width: calc(var(--space-lg) * 18.75);
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  background: var(--card);
+  border-right: var(--btn-border-width) solid var(--border);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
 
-.planning-sidebar-header {
-  padding: var(--space-md);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+/*
+FNXC:Planning 2026-06-23-01:15:
+The sidebar footer pins the primary "New session" action to the bottom (parity with mission-manager__sidebar-footer) with the show/hide-archived link beneath it. A top border separates it from the scrolling list.
+*/
+.planning-sidebar-footer {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: var(--space-sm);
-}
-
-.planning-sidebar-footer {
-  padding: var(--space-sm) var(--space-md) var(--space-md);
+  padding: var(--space-md);
+  border-top: var(--btn-border-width) solid var(--border);
+  flex-shrink: 0;
   text-align: center;
 }
 
@@ -181,37 +185,18 @@ The embedded planning title must read like other embedded-view titles (Command C
   box-shadow: var(--focus-ring-strong);
 }
 
+/*
+FNXC:Planning 2026-06-23-01:15:
+The New session button carries the shared "btn btn-primary" classes so its size/color match Missions' primary sidebar CTA (mission-manager__sidebar-cta) exactly; this local rule only stretches it full-width and centers the icon+label. The .active state (no session selected) keeps the primary fill and adds an inset ring so the user can tell they're on the new-session view without losing the Missions color match.
+*/
 .planning-sidebar-new {
-  display: flex;
-  align-items: center;
+  width: 100%;
   justify-content: center;
   gap: var(--space-sm);
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  font-size: calc(var(--space-sm) + var(--space-xs) * 1.25);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.planning-sidebar-new:hover {
-  background: var(--card-hover);
-  border-color: var(--todo);
 }
 
 .planning-sidebar-new.active {
-  background: color-mix(in srgb, var(--todo) 15%, transparent);
-  border-color: var(--todo);
-  color: var(--todo);
-}
-
-.planning-sidebar-new:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-strong);
+  box-shadow: inset 0 0 0 var(--btn-border-width) var(--cta-text);
 }
 
 .planning-sidebar-list {

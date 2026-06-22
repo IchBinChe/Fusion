@@ -3156,17 +3156,10 @@ function PlanningSessionList({
   const { t } = useTranslation("app");
   return (
     <aside className="planning-sidebar" aria-label={t("planning.planningSessions", "Planning sessions")}>
-      <div className="planning-sidebar-header">
-        <button
-          className={`planning-sidebar-new ${selectedSessionId === null ? "active" : ""}`}
-          onClick={onNewSession}
-          type="button"
-        >
-          <MessageSquarePlus size={16} />
-          <span>{t("planning.newSession", "New session")}</span>
-        </button>
-      </div>
-
+      {/*
+      FNXC:Planning 2026-06-23-01:15:
+      The embedded Planning view reads as a real two-pane layout matching Missions: the left sidebar is a full-height flex column whose session list scrolls and whose primary action ("New session") is pinned to a bottom footer (parity with MissionManager's mission-manager__sidebar-footer + sidebar-cta). The header that previously held the New session button is removed so the list owns the top of the sidebar like the Missions list.
+      */}
       <div className="planning-sidebar-list">
         {sessions.length === 0 && !loading && (
           <div className="planning-sidebar-empty text-muted">
@@ -3266,6 +3259,18 @@ function PlanningSessionList({
         })}
       </div>
       <div className="planning-sidebar-footer">
+        {/*
+        FNXC:Planning 2026-06-23-01:15:
+        The New session CTA mirrors Missions' primary sidebar action: it reuses the shared "btn btn-primary" look (same base button class MissionManager pairs with mission-manager__sidebar-cta) so size and color match the Missions create button exactly, full-width and bottom-anchored. The "active" state (no session selected) keeps a subtle accent so the user can tell they're on the new-session view.
+        */}
+        <button
+          className={`btn btn-primary planning-sidebar-new ${selectedSessionId === null ? "active" : ""}`}
+          onClick={onNewSession}
+          type="button"
+        >
+          <MessageSquarePlus size={16} />
+          <span>{t("planning.newSession", "New session")}</span>
+        </button>
         <a
           href="#"
           className="planning-sidebar-toggle-archived-link"

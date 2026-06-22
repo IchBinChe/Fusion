@@ -224,6 +224,19 @@ List items must NOT dictate the list pane width. Paired with the pane's min-widt
   color: var(--text);
 }
 
+/*
+FNXC:GitHubImport 2026-06-23-02:00:
+Top import action sits at the end of the non-scrolling preview-pane header (space-between pushes it opposite the Preview title / Back button).
+margin-left:auto keeps it pinned right even when the mobile Back button is absent. The button height stays compact so the header does not grow taller than the prior single-line heading.
+*/
+.github-import-action-top {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
 .github-import-pane-content {
   flex: 1;
   min-height: 0;

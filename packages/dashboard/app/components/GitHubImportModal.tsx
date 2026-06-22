@@ -969,6 +969,12 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
               data-testid="github-import-preview-pane"
               aria-labelledby="github-import-preview-heading"
             >
+              {/*
+              FNXC:GitHubImport 2026-06-23-02:00:
+              The Import action lives in a non-scrolling header row at the TOP of the preview pane (above the scrollable pane-content), acting on the currently-selected issue/PR.
+              This replaces the old bottom action bar for the embedded sidebar destination, which has no modal to cancel — so the embedded view drops the Cancel/footer entirely (the non-embedded modal keeps its bottom Cancel+Import bar below).
+              On narrow/mobile the same header stays reachable: selecting an item swaps to the preview view, the Back button and the top Import button both render in this header, and import works without any bottom bar.
+              */}
               <div className="github-import-pane-header">
                 {isMobile && (
                   <button
@@ -982,6 +988,16 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                   </button>
                 )}
                 <h4 id="github-import-preview-heading">{t("git.previewHeading", "Preview")}</h4>
+                <button
+                  className="btn btn-primary github-import-action-top"
+                  data-testid="github-import-action-top"
+                  onClick={handleImport}
+                  disabled={
+                    (activeTab === "issues" ? selectedIssueNumber === null : selectedPullNumber === null) || importing
+                  }
+                >
+                  {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}
+                </button>
               </div>
 
               <div className="github-import-pane-content">
@@ -1149,20 +1165,27 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
           </div>
         </div>
 
-        <div className="modal-actions github-import-modal__actions">
-          <button className="btn" onClick={onClose} disabled={importing}>
-            {t("common.cancel", "Cancel")}
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleImport}
-            disabled={
-              (activeTab === "issues" ? selectedIssueNumber === null : selectedPullNumber === null) || importing
-            }
-          >
-            {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}
-          </button>
-        </div>
+        {/*
+        FNXC:GitHubImport 2026-06-23-02:00:
+        Bottom Cancel+Import bar is kept ONLY for the non-embedded modal presentation, which needs a Cancel to dismiss the dialog.
+        In the embedded sidebar (isEmbedded) there is no modal to cancel and the Import action now lives in the preview-pane top header, so the bottom bar is removed entirely.
+        */}
+        {!isEmbedded && (
+          <div className="modal-actions github-import-modal__actions">
+            <button className="btn" onClick={onClose} disabled={importing}>
+              {t("common.cancel", "Cancel")}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleImport}
+              disabled={
+                (activeTab === "issues" ? selectedIssueNumber === null : selectedPullNumber === null) || importing
+              }
+            >
+              {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}
+            </button>
+          </div>
+        )}
     </div>
   );
 

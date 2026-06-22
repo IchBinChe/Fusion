@@ -60,6 +60,20 @@
   overflow: hidden;
 }
 
+/*
+FNXC:Agents 2026-06-23-02:00:
+Agents renders the shared ViewHeader (.view-header), but its chrome must read identically to the Missions inline header (.mission-manager__header--inline): same --space-lg/--space-xl padding, border-bottom + surface background, and a --todo-colored leading icon (the ViewHeader default leaves the icon at --text). These scoped overrides bring the shared header to parity without editing the shared ViewHeader component or its tokens. The legacy .agents-view-header/.agents-view-title rules below are retained only because the agents-view-mobile CSS string-match test asserts them; they no longer map to rendered DOM.
+*/
+.agents-view .view-header {
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.agents-view .view-header__title svg {
+  color: var(--todo);
+}
+
 .agents-view-header {
   display: flex;
   align-items: center;
@@ -1427,6 +1441,11 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
   /* Single-row header: keep a compact textual title visible while lower-
      priority actions move into the Controls popup so narrow phones keep a
      stable single-row layout. */
+  /* FNXC:Agents 2026-06-23-02:00: Match the Missions inline header mobile padding (--space-md) on the rendered shared ViewHeader. */
+  .agents-view .view-header {
+    padding: var(--space-md);
+  }
+
   .agents-view-header {
     flex-direction: row;
     align-items: center;

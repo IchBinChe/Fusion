@@ -153,6 +153,39 @@ describe("GitHubImportModal", () => {
       expect(onClose).not.toHaveBeenCalled();
     });
 
+    // FNXC:GitHubImport 2026-06-23-02:00: embedded sidebar drops the bottom Cancel+Import bar (no modal to cancel)
+    // and surfaces the import action at the TOP of the preview pane via github-import-action-top. The non-embedded
+    // modal keeps its bottom Cancel+Import bar.
+    it("removes the bottom action bar in embedded mode but keeps the top import button", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import Tasks")).toBeTruthy();
+      });
+      // No bottom Cancel+Import bar in embedded mode.
+      expect(container.querySelector(".github-import-modal__actions")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Cancel/i })).toBeNull();
+      // Top import action present.
+      expect(screen.getByTestId("github-import-action-top")).toBeTruthy();
+    });
+
+    it("keeps the bottom action bar with Cancel in modal mode plus the top import button", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import from GitHub")).toBeTruthy();
+      });
+      expect(container.querySelector(".github-import-modal__actions")).not.toBeNull();
+      expect(screen.getByRole("button", { name: /Cancel/i })).toBeTruthy();
+      expect(screen.getByTestId("github-import-action-top")).toBeTruthy();
+    });
+
     it("keeps the modal overlay and Escape-to-close in modal mode", async () => {
       vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
       const { container } = render(
@@ -521,7 +554,7 @@ describe("GitHubImportModal", () => {
         expect(screen.getByText("First Issue")).toBeTruthy();
       });
 
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       expect(importButton.disabled).toBe(true);
     });
 
@@ -539,7 +572,7 @@ describe("GitHubImportModal", () => {
       });
 
       fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
-      fireEvent.click(screen.getByRole("button", { name: /Import$/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
         expect(apiImportGitHubIssue).toHaveBeenCalledWith("dustinbyrne", "kb", 1, "project-1");
@@ -565,7 +598,7 @@ describe("GitHubImportModal", () => {
         expect(screen.getByText("First Issue")).toBeTruthy();
       });
 
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
       expect(importButton.disabled).toBe(false);
 
@@ -577,7 +610,7 @@ describe("GitHubImportModal", () => {
       });
 
       await waitFor(() => {
-        expect((screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByTestId("github-import-action-top") as HTMLButtonElement).disabled).toBe(true);
       });
 
       rerender(
@@ -1087,7 +1120,7 @@ describe("GitHubImportModal", () => {
         expect(previewPane.classList.contains("active")).toBe(true);
       });
 
-      fireEvent.click(screen.getByRole("button", { name: /Import$/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
         expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 1, "project-1");
@@ -1495,7 +1528,7 @@ describe("GitHubImportModal", () => {
       });
 
       // Import button should be disabled
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       expect(importButton.disabled).toBe(true);
     });
 
@@ -1517,7 +1550,7 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
 
       // Click Import
-      fireEvent.click(screen.getByRole("button", { name: /Import$/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
         expect(apiImportGitHubPull).toHaveBeenCalledWith("dustinbyrne", "kb", 1, "project-1");
@@ -1542,7 +1575,7 @@ describe("GitHubImportModal", () => {
         expect(screen.getByText("Test PR")).toBeTruthy();
       });
 
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
       expect(importButton.disabled).toBe(false);
 
@@ -1554,7 +1587,7 @@ describe("GitHubImportModal", () => {
       });
 
       await waitFor(() => {
-        expect((screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByTestId("github-import-action-top") as HTMLButtonElement).disabled).toBe(true);
       });
 
       rerender(

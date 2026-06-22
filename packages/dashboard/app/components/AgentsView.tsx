@@ -1231,6 +1231,9 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
       {/*
       FNXC:Navigation 2026-06-22-01:10:
       Agents adopts the shared ViewHeader (Command Center-modeled) title row for cross-view consistency. The deeply-integrated controls (view-toggle, controls popup, refresh, import, new-agent) keep working by passing the existing agents-view-controls cluster through the header actions prop. The agents-view-controls / agents-view-primary-actions class names are preserved so existing scoped CSS (incl. mobile rules covered by the CSS string-match test) still applies.
+
+      FNXC:Agents 2026-06-23-02:00:
+      The Agents header must read identically to the Missions header. Both use icon size 20 + a 1.125rem/600 title via ViewHeader / .mission-manager__title. To fully match, AgentsView.css scopes .agents-view .view-header to the Missions inline header chrome (--space-lg/--space-xl padding, border-bottom, surface background) and colors the leading icon --todo (the same token .mission-manager__header-icon uses), since the shared ViewHeader leaves the icon at --text.
       */}
       <ViewHeader
         icon={Bot}

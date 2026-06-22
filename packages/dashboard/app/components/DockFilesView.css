@@ -7,13 +7,23 @@ FNXC:Files 2026-06-22-00:00:
 Responsive single-panel vs two-pane layout driven entirely by a CSS container query.
 The root is a query container (container-type: inline-size, container-name: dock-files). Both the tree pane (.dock-files-view__tree) and the viewer pane (.dock-files-view__viewer) are always rendered in the DOM; CSS decides visibility per container width.
 - NARROW (default, in the dock): single-panel stack. The tree fills the root. When a file is selected (root [data-selected="true"]) the viewer pane covers the stack and the tree is hidden; BACK returns to the tree.
-- WIDE (>=720px, the RightDockExpandModal pop-out): two-pane side-by-side. Tree pinned left (clamped width, scrollable), viewer flex:1 on the right (scrollable). Both always visible regardless of data-selected; BACK is hidden because the tree never disappears.
+- WIDE (>=640px, the RightDockExpandModal pop-out): two-pane side-by-side. Tree pinned left (clamped width, scrollable), viewer flex:1 on the right (scrollable). Both always visible regardless of data-selected; BACK is hidden because the tree never disappears.
+
+FNXC:Files 2026-06-22-01:00:
+Breakpoint lowered 720px -> 640px and root forced to width:100%. The expand modal body has horizontal padding/overflow, so the root's content-box landed just under 720px at common laptop widths and the query never fired, leaving the pop-out stacked. 640px triggers two-pane for any realistic pop-out while staying above the narrow dock width.
 */
 .dock-files-view {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  /*
+  FNXC:Files 2026-06-22-01:00:
+  The root must fill its host (right-dock body OR the wide RightDockExpandModal body) so the inline-size query
+  measures the true available width. Without width:100% the flex root only measured its shrunk content width, so
+  the @container breakpoint never fired in the expand modal and the layout stayed stacked. Pair with width:100%.
+  */
+  width: 100%;
   /* FNXC:Files — establish the query container so child panes can respond to the dock vs expand-modal width. */
   container-type: inline-size;
   container-name: dock-files;
@@ -106,11 +116,11 @@ Hidden until a file is selected; when selected it overlays the tree as the singl
 }
 
 /*
-FNXC:Files 2026-06-22-00:00:
-WIDE container (>=720px): two-pane side-by-side. Activated when DockFilesView is rendered in the wide RightDockExpandModal.
+FNXC:Files 2026-06-22-01:00:
+WIDE container (>=640px): two-pane side-by-side. Activated when DockFilesView is rendered in the wide RightDockExpandModal.
 Both panes are always visible; data-selected no longer toggles visibility here.
 */
-@container dock-files (min-width: 720px) {
+@container dock-files (min-width: 640px) {
   .dock-files-view {
     flex-direction: row;
   }

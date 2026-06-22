@@ -129,12 +129,23 @@ The right dock OVERLAYS the page content (floats over the right edge) instead of
   white-space: nowrap;
 }
 
+/*
+FNXC:RightDockEmbedded 2026-06-22-00:00:
+The dock body is the shared narrow host (~280-420px) for embedded tool views while the viewport stays desktop.
+Make it an inline-size query container named `right-dock-body` so each hosted view can mirror its phone-width
+(@media max-width:768px) single-column layout off the DOCK width instead of the viewport, which the view's own
+@media rules can never see here. Views without their own `--embedded` variant (DevServerView, SecretsView,
+PullRequestView) attach their @container rules to this container; ActivityLog/GitManager use their own embedded
+container. NOTE: the wide right-dock expand modal is NOT this container, so its layout is unaffected.
+*/
 .right-dock__body {
   display: flex;
   flex: 1;
   min-height: 0;
   min-width: 0;
   overflow: auto;
+  container-type: inline-size;
+  container-name: right-dock-body;
 }
 
 .right-dock__body > * {
@@ -170,6 +181,13 @@ The right dock OVERLAYS the page content (floats over the right edge) instead of
   white-space: nowrap;
 }
 
+/*
+FNXC:RightDockFiles 2026-06-22-01:00:
+The expand body is a flex host that must let its single rendered view stretch to the FULL body width and height,
+not shrink to content. The child (e.g. .dock-files-view) gets flex:1 + min-width:0 so its CSS container query
+measures the real pop-out width and can flip to the wide two-pane layout. Keep min-width:0/min-height:0 here so a
+wide child cannot collapse the flex line.
+*/
 .right-dock-expand-modal__body {
   display: flex;
   flex: 1;

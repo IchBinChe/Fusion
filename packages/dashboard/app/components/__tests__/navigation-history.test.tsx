@@ -142,7 +142,7 @@ vi.mock("../../components/model-onboarding-state", () => ({
   getOnboardingCompletedAt: () => null,
   getSkippedSteps: () => [],
   getStepData: () => null,
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 vi.mock("../../components/Board", () => ({

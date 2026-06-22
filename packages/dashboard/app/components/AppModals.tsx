@@ -89,6 +89,8 @@ interface AppModalsProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open mailbox approvals from Settings. */
   onOpenApprovals?: (approvalId?: string) => void;
+  /** Enables planning-style agent onboarding entry points inside setup. */
+  agentOnboardingEnabled?: boolean;
 }
 
 export function AppModals({
@@ -110,6 +112,7 @@ export function AppModals({
   onSettingsClose,
   onReopenOnboarding,
   onOpenApprovals,
+  agentOnboardingEnabled = false,
 }: AppModalsProps) {
   const { pushNav, removeNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
@@ -471,11 +474,14 @@ export function AppModals({
           <SetupWizardModal
             onProjectRegistered={projectActions.handleSetupComplete}
             onClose={closeSetupWizardWithNav}
+            agentOnboardingEnabled={agentOnboardingEnabled}
+            includeAgentStep={!modalManager.modelOnboardingOpen}
           />
         </Suspense>
       )}
 
-      {modalManager.modelOnboardingOpen && (
+      {/* FNXC:Onboarding 2026-06-22-05:06: Brand-new onboarding owns AI/GitHub first, then opens the project setup wizard only as the Project step sub-flow. Hide model onboarding while that project wizard is mounted so users never see both flows at once. */}
+      {modalManager.modelOnboardingOpen && !modalManager.setupWizardOpen && (
         <ModelOnboardingModal
           onComplete={projectActions.handleModelOnboardingComplete}
           addToast={addToast}
@@ -485,6 +491,7 @@ export function AppModals({
           onOpenGitHubImport={handleOpenGitHubImport}
           firstCreatedTask={firstCreatedTask}
           onViewTask={handleOnboardingViewTask}
+          agentOnboardingEnabled={agentOnboardingEnabled}
         />
       )}
 

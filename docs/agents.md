@@ -693,6 +693,14 @@ Before clicking **Create**, the final review step remains editable for identity/
 
 The final `createAgent(...)` call always uses the latest values from these step-2 controls.
 
+### First-run setup first agent
+
+After first-project registration, first-run setup asks whether to create a first persistent agent before entering the dashboard. The CEO preset is selected by default because this first agent is framed as an optional coordinator that can help create tasks and keep direction across sessions.
+
+Users can choose a preset, create the project agent, or skip it and create agents later from the Agents view. Agents are optional for task work: Fusion still starts temporary agents to plan, code, review, and merge tasks.
+
+When `experimentalFeatures.agentOnboarding` is enabled, first-run setup also offers the same draft-first **AI Interview** path used by the New Agent dialog. Applying the interview draft updates the setup preview, but persistence remains explicit through **Create Agent**.
+
 ### Experimental planning-style onboarding
 
 The **New Agent** dialog is the canonical launch point for agent creation.

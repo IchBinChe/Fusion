@@ -128,12 +128,8 @@ export interface UseViewStateResult {
 export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   const {
     projectsLoading,
-    projectsError,
     currentProjectLoading,
     currentProject,
-    projectsLength,
-    setupWizardOpen,
-    openSetupWizard,
     themeMode,
     setThemeMode,
   } = options;
@@ -217,26 +213,11 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     }
   }, [projectsLoading, currentProjectLoading, currentProject, viewMode]);
 
-  useEffect(() => {
-    if (projectsLoading || currentProjectLoading) return;
-    if (setupWizardOpen) return;
-    if (projectsError) return;
-    if (projectsLength > 0 || currentProject) return;
-
-    const timer = window.setTimeout(() => {
-      openSetupWizard();
-    }, 500);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    projectsLoading,
-    projectsError,
-    projectsLength,
-    currentProjectLoading,
-    currentProject,
-    setupWizardOpen,
-    openSetupWizard,
-  ]);
+  /*
+  FNXC:Onboarding 2026-06-22-05:06:
+  Brand-new users should enter the unified onboarding sequence first: AI setup, GitHub, Project, Agent, then First Task.
+  Do not auto-open the project-only setup wizard just because there are zero projects; that wizard is opened from the Project step or explicit Add Project actions.
+  */
 
   const handleChangeTaskView = useCallback((newView: TaskView) => {
     setTaskView(newView);

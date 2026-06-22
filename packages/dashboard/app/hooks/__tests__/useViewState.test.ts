@@ -234,7 +234,7 @@ describe("useViewState", () => {
     });
   });
 
-  it("calls openSetupWizard when no projects and no current project after loading", async () => {
+  it("does NOT call openSetupWizard automatically when no projects exist", async () => {
     vi.useFakeTimers();
     const openSetupWizard = vi.fn();
 
@@ -252,7 +252,7 @@ describe("useViewState", () => {
       vi.advanceTimersByTime(500);
     });
 
-    expect(openSetupWizard).toHaveBeenCalledTimes(1);
+    expect(openSetupWizard).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Agent, AgentOnboardingSummary, ConversationHistoryEntry, ExistingAgentOnboardingConfig, OnboardingMode } from "../api";
 import {
@@ -43,6 +43,7 @@ export function ExperimentalAgentOnboardingModal({
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<ConversationHistoryEntry[]>([]);
   const isEditMode = mode === "edit";
+  const activeRef = useRef(isOpen);
 
   const resetState = useCallback(() => {
     setViewState("initial");
@@ -62,9 +63,11 @@ export function ExperimentalAgentOnboardingModal({
   );
 
   useEffect(() => {
+    activeRef.current = isOpen;
     if (!sessionId) return;
     const stream = connectAgentOnboardingStream(sessionId, projectId, {
       onThinking: (data) => {
+        if (!activeRef.current) return;
         setHistory((current) => {
           const next = [...current];
           const last = next[next.length - 1];
@@ -76,23 +79,30 @@ export function ExperimentalAgentOnboardingModal({
         });
       },
       onQuestion: (q) => {
+        if (!activeRef.current) return;
         setCurrentQuestion(q.question);
         setCurrentQuestionId(q.id);
         setViewState("question");
       },
       onSummary: (nextSummary) => {
+        if (!activeRef.current) return;
         setSummary(nextSummary);
         setViewState("summary");
       },
       onError: (message) => {
+        if (!activeRef.current) return;
         setError(message);
         setViewState("error");
       },
     });
-    return () => stream.close();
-  }, [sessionId, projectId]);
+    return () => {
+      activeRef.current = false;
+      stream.close();
+    };
+  }, [isOpen, sessionId, projectId]);
 
   const handleClose = async () => {
+    activeRef.current = false;
     try {
       if (sessionId) {
         await cancelAgentOnboarding(sessionId, projectId);
@@ -106,6 +116,7 @@ export function ExperimentalAgentOnboardingModal({
   };
 
   useEffect(() => {
+    activeRef.current = isOpen;
     if (!isOpen) {
       resetState();
     }
@@ -134,8 +145,10 @@ export function ExperimentalAgentOnboardingModal({
         },
         projectId,
       );
+      if (!activeRef.current) return;
       setSessionId(result.sessionId);
     } catch (err) {
+      if (!activeRef.current) return;
       setError((err as Error).message);
       setViewState("error");
     }
@@ -155,8 +168,10 @@ export function ExperimentalAgentOnboardingModal({
         },
       ]);
       await respondToAgentOnboarding(sessionId, responsePayload, projectId);
+      if (!activeRef.current) return;
       setAnswer("");
     } catch (err) {
+      if (!activeRef.current) return;
       setError((err as Error).message);
       setViewState("error");
     }

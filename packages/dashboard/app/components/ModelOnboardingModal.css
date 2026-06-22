@@ -1,6 +1,10 @@
 /* ===== Model Onboarding Modal ===== */
 
 .model-onboarding-modal {
+  /*
+  FNXC:Onboarding 2026-06-22-04:16:
+  First-time provider/GitHub onboarding should visually match new-project onboarding, including spacing, button treatment, contrast, and persistent Discord help access.
+  */
   /* Resizable via the native CSS grip. The user's chosen size is persisted
      by useModalResizePersist. Min/max keep the dimensions sane so a value
      saved on a 4K display still renders on a laptop. */
@@ -15,7 +19,7 @@
 }
 
 .model-onboarding-modal:not([style*="width"]) {
-  width: min(1100px, calc(100vw - 40px));
+  width: min(960px, calc(100vw - 40px));
 }
 .model-onboarding-modal:not([style*="height"]) {
   height: min(85vh, calc(100dvh - 40px));
@@ -25,8 +29,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-xl) var(--space-xl) 0;
+  gap: var(--space-md);
 }
 
 .model-onboarding-header .modal-close {
@@ -46,12 +50,14 @@
 }
 
 .model-onboarding-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 800;
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--text);
+  line-height: 1.1;
 }
 
 .model-onboarding-title svg {
@@ -77,7 +83,7 @@
   align-items: center;
   justify-content: center;
   gap: 0;
-  padding: 16px 24px;
+  padding: var(--space-md) var(--space-xl);
   border-bottom: 1px solid var(--border);
 }
 
@@ -157,10 +163,10 @@
 }
 
 .model-onboarding-step-connector {
-  width: 40px;
+  width: 30px;
   height: 2px;
   background: var(--border);
-  margin: 0 12px;
+  margin: 0 var(--space-sm);
   transition: background-color var(--transition-fast);
 }
 
@@ -170,19 +176,19 @@
 
 /* Content area */
 .model-onboarding-content {
-  padding: 20px 24px;
+  padding: var(--space-md) var(--space-xl);
   overflow-y: auto;
   flex: 1;
 }
 
 .model-onboarding-description {
-  color: var(--text-muted);
+  color: var(--text);
   margin-bottom: 16px;
   line-height: 1.5;
 }
 
 .onboarding-helper-text {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   margin: 4px 0 0 0;
   line-height: 1.4;
@@ -873,6 +879,19 @@
   gap: calc(var(--space-xl) - var(--space-xs));
 }
 
+.model-onboarding-agent-step .setup-wizard-agent-intro {
+  color: var(--text);
+}
+
+.model-onboarding-agent-step .setup-wizard-agent-preset-description,
+.model-onboarding-agent-step .setup-wizard-agent-preview-title-row p {
+  color: var(--text-muted);
+}
+
+.model-onboarding-agent-step .setup-wizard-agent-preview-list dd {
+  color: var(--text);
+}
+
 /* === Onboarding First Task Inline Form === */
 .onboarding-first-task-form {
   display: flex;
@@ -1134,22 +1153,25 @@
 .model-onboarding-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-xl) var(--space-lg);
   border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .model-onboarding-footer .btn-primary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
-/* When the footer holds only the "Get Started" button (final "complete"
-   step), push it to the right edge instead of hugging the left under
-   `justify-content: space-between`. */
-.model-onboarding-footer > .btn-primary:only-child {
-  margin-inline-start: auto;
+.model-onboarding-help-link {
+  margin-right: auto;
+  text-decoration: none;
 }
 
 .onboarding-skip-step-link {
@@ -1382,6 +1404,22 @@
   .model-onboarding-footer .btn-primary {
     flex: 1;
     min-width: 0;
+  }
+
+  .model-onboarding-help-link {
+    margin-right: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .model-onboarding-agent-step .setup-wizard-agent-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .model-onboarding-agent-step .setup-wizard-agent-preset-list {
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
   }
 
   .onboarding-step-wrapper {

@@ -2369,7 +2369,8 @@ function AppInner() {
           }}
         />
       )}
-      {viewMode === "project" && currentProject && showGitHubStarPrompt && !gitHubStarPromptShown && (
+      {/* FNXC:Onboarding 2026-06-22-03:11: The one-time GitHub star prompt stays tied to first completed task, but first-run setup must finish the optional persistent-agent create/skip step before any star ask can surface. Do not add a second setup-specific star prompt. */}
+      {viewMode === "project" && currentProject && showGitHubStarPrompt && !gitHubStarPromptShown && !modalManager.setupWizardOpen && (
         <GitHubStarPrompt
           onDismiss={() => {
             markGitHubStarPromptShown();
@@ -2521,6 +2522,7 @@ function AppInner() {
         onSettingsClose={handleSettingsCloseWithNav}
         onReopenOnboarding={reopenOnboardingWithNav}
         onOpenApprovals={(_approvalId) => handleTaskViewChange("mailbox")}
+        agentOnboardingEnabled={agentOnboardingEnabled}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
             {shellApi && (

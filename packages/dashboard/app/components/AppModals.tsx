@@ -89,6 +89,8 @@ interface AppModalsProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open mailbox approvals from Settings. */
   onOpenApprovals?: (approvalId?: string) => void;
+  /** Enables planning-style agent onboarding entry points inside setup. */
+  agentOnboardingEnabled?: boolean;
 }
 
 export function AppModals({
@@ -110,6 +112,7 @@ export function AppModals({
   onSettingsClose,
   onReopenOnboarding,
   onOpenApprovals,
+  agentOnboardingEnabled = false,
 }: AppModalsProps) {
   const { pushNav, removeNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
@@ -471,6 +474,7 @@ export function AppModals({
           <SetupWizardModal
             onProjectRegistered={projectActions.handleSetupComplete}
             onClose={closeSetupWizardWithNav}
+            agentOnboardingEnabled={agentOnboardingEnabled}
           />
         </Suspense>
       )}

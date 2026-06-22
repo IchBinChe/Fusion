@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SetupWizardModal } from "../SetupWizardModal";
+import { AGENT_PRESETS } from "../agent-presets";
+import { buildAgentCreatePayload, mapPresetToAgentDraft } from "../agent-presets/agentCreatePayload";
 
 // Mock lucide-react
 vi.mock("lucide-react", async () => {
@@ -38,11 +40,42 @@ vi.mock("../../hooks/useNodes", () => ({
 // Mock api module
 vi.mock("../../api", () => ({
   registerProject: vi.fn(),
+  createAgent: vi.fn(),
   browseDirectory: vi.fn().mockResolvedValue({
     currentPath: "/home/user",
     parentPath: "/home",
     entries: [],
   }),
+}));
+
+vi.mock("../ExperimentalAgentOnboardingModal", () => ({
+  ExperimentalAgentOnboardingModal: ({ isOpen, onClose, onUseDraft }: { isOpen: boolean; onClose: () => void; onUseDraft: (draft: any) => void }) => (
+    isOpen ? (
+      <div data-testid="agent-interview-modal">
+        AI Interview Modal
+        <button
+          type="button"
+          onClick={() => {
+            onUseDraft({
+              name: "Launch Coordinator",
+              title: "Launch Planning Agent",
+              icon: "◇",
+              role: "not-a-real-role",
+              instructionsText: "Coordinate launch tasks.",
+              soul: "Strategic launch planner.",
+              skills: ["planning", "review"],
+              runtimeHint: "codex-local",
+              maxTurns: 24,
+              thinkingLevel: "medium",
+            });
+            onClose();
+          }}
+        >
+          Use Draft
+        </button>
+      </div>
+    ) : null
+  ),
 }));
 
 vi.mock("../../auth", () => ({
@@ -51,21 +84,61 @@ vi.mock("../../auth", () => ({
   clearAuthToken: vi.fn(),
 }));
 
-import { registerProject } from "../../api";
+import { createAgent, registerProject } from "../../api";
 import { getAuthToken, setAuthToken, clearAuthToken } from "../../auth";
 import { useNodes } from "../../hooks/useNodes";
 
 const mockRegisterProject = vi.mocked(registerProject);
+const mockCreateAgent = vi.mocked(createAgent);
 const mockGetAuthToken = vi.mocked(getAuthToken);
 const mockSetAuthToken = vi.mocked(setAuthToken);
 const mockClearAuthToken = vi.mocked(clearAuthToken);
 const mockUseNodes = vi.mocked(useNodes);
+
+function buildMockProject(overrides = {}) {
+  return {
+    id: "proj_123",
+    name: "test-project",
+    path: "/home/user/project",
+    status: "active" as const,
+    isolationMode: "in-process" as const,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function buildMockAgent(overrides = {}) {
+  return {
+    id: "agent_123",
+    projectId: "proj_123",
+    name: "Agent",
+    role: "custom",
+    status: "active",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+async function registerProjectFromWizard() {
+  fireEvent.change(screen.getByPlaceholderText("/path/to/your/project"), {
+    target: { value: "/home/user/project" },
+  });
+  fireEvent.change(screen.getByPlaceholderText("my-project"), {
+    target: { value: "test-project" },
+  });
+  fireEvent.click(screen.getByText("Register Project"));
+  return screen.findByText("Create your first agent");
+}
 
 describe("SetupWizardModal", () => {
   let reloadMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRegisterProject.mockReset();
+    mockCreateAgent.mockReset();
     // Default: auth token is stored so wizard starts on the project form step.
     // Tests for the auth step explicitly unset this.
     mockGetAuthToken.mockReturnValue("stored-token");
@@ -261,6 +334,7 @@ describe("SetupWizardModal", () => {
   });
 
   it("clone mode submit sends cloneUrl payload", async () => {
+    const onProjectRegistered = vi.fn();
     mockRegisterProject.mockResolvedValueOnce({
       id: "proj_clone",
       name: "fusion",
@@ -273,7 +347,7 @@ describe("SetupWizardModal", () => {
 
     render(
       <SetupWizardModal
-        onProjectRegistered={vi.fn()}
+        onProjectRegistered={onProjectRegistered}
         onClose={vi.fn()}
       />
     );
@@ -298,6 +372,9 @@ describe("SetupWizardModal", () => {
         cloneUrl: "https://github.com/runfusion/fusion.git",
       });
     });
+    expect(await screen.findByText("Create your first agent")).toBeDefined();
+    expect(screen.getByRole("radio", { name: "CEO selected" })).toHaveAttribute("aria-checked", "true");
+    expect(onProjectRegistered).not.toHaveBeenCalled();
   });
 
   it("register button disabled/enabled logic is mode-aware", () => {
@@ -377,16 +454,8 @@ describe("SetupWizardModal", () => {
     expect(await screen.findByText("Path does not exist")).toBeDefined();
   });
 
-  it("shows completion state after successful registration", async () => {
-    const mockProject = {
-      id: "proj_123",
-      name: "test-project",
-      path: "/home/user/project",
-      status: "active" as const,
-      isolationMode: "in-process" as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+  it("shows optional first-agent step after successful registration", async () => {
+    const mockProject = buildMockProject();
     mockRegisterProject.mockResolvedValueOnce(mockProject);
 
     const onProjectRegistered = vi.fn();
@@ -397,22 +466,243 @@ describe("SetupWizardModal", () => {
       />
     );
 
-    fireEvent.change(screen.getByPlaceholderText("/path/to/your/project"), {
-      target: { value: "/home/user/project" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("my-project"), {
-      target: { value: "test-project" },
-    });
-
-    fireEvent.click(screen.getByText("Register Project"));
+    await registerProjectFromWizard();
 
     await waitFor(() => {
       expect(mockRegisterProject).toHaveBeenCalled();
     });
-    expect(await screen.findByText("All Set!")).toBeDefined();
-    expect(await screen.findByText("Get Started")).toBeDefined();
+    expect(screen.getByText(/You do not need to create or assign an agent/)).toBeDefined();
+    expect(screen.getByRole("radio", { name: "CEO selected" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Create Agent")).toBeDefined();
+    expect(screen.getByText("Skip for now")).toBeDefined();
+    expect(screen.queryByText("AI Interview")).toBeNull();
 
+    expect(onProjectRegistered).not.toHaveBeenCalled();
+  });
+
+  it("can skip first-agent creation and finish setup", async () => {
+    const mockProject = buildMockProject();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+
+    const onProjectRegistered = vi.fn();
+    render(
+      <SetupWizardModal
+        onProjectRegistered={onProjectRegistered}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+
+    fireEvent.click(screen.getByText("Skip for now"));
+    expect(await screen.findByText("All Set!")).toBeDefined();
+    expect(screen.getByText("You can create agents later from the Agents view.")).toBeDefined();
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Get Started"));
     expect(onProjectRegistered).toHaveBeenCalledWith(mockProject);
+  });
+
+  it("does not show an ambiguous close button on the first-agent step", async () => {
+    const mockProject = buildMockProject();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+
+    const onProjectRegistered = vi.fn();
+    render(
+      <SetupWizardModal
+        onProjectRegistered={onProjectRegistered}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+
+    expect(screen.queryByLabelText("Close wizard")).toBeNull();
+
+    fireEvent.click(screen.getByText("Skip for now"));
+    expect(await screen.findByText("All Set!")).toBeDefined();
+    expect(screen.getByText("You can create agents later from the Agents view.")).toBeDefined();
+    expect(onProjectRegistered).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Get Started"));
+    expect(onProjectRegistered).toHaveBeenCalledWith(mockProject);
+  });
+
+  it("creates the default CEO agent before finishing setup", async () => {
+    const mockProject = buildMockProject();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+    mockCreateAgent.mockResolvedValueOnce(buildMockAgent({
+      id: "agent_ceo",
+      projectId: mockProject.id,
+      name: "CEO",
+    }) as any);
+
+    const onProjectRegistered = vi.fn();
+    render(
+      <SetupWizardModal
+        onProjectRegistered={onProjectRegistered}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+
+    fireEvent.click(screen.getByText("Create Agent"));
+
+    await waitFor(() => {
+      expect(mockCreateAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "CEO",
+          role: "custom",
+          title: "Oversees project strategy, sets priorities, and coordinates between departments to ensure alignment with business goals.",
+        }),
+        mockProject.id,
+      );
+    });
+    expect(await screen.findByText("Your project is registered and your first agent is ready.")).toBeDefined();
+
+    fireEvent.click(screen.getByText("Get Started"));
+    expect(onProjectRegistered).toHaveBeenCalledWith(mockProject);
+  });
+
+  it("creates the selected non-CEO preset with the shared payload mapping", async () => {
+    const mockProject = buildMockProject();
+    const engineerPreset = AGENT_PRESETS.find((preset) => preset.id === "engineer")!;
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+    mockCreateAgent.mockResolvedValueOnce(buildMockAgent({
+      id: "agent_engineer",
+      projectId: mockProject.id,
+      name: engineerPreset.name,
+      role: engineerPreset.role,
+    }) as any);
+
+    render(
+      <SetupWizardModal
+        onProjectRegistered={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+    fireEvent.click(screen.getByRole("radio", { name: engineerPreset.name }));
+
+    expect(screen.getByRole("radio", { name: `${engineerPreset.name} selected` })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByText(engineerPreset.description!).length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getByText("Create Agent"));
+
+    await waitFor(() => {
+      expect(mockCreateAgent).toHaveBeenCalledWith(
+        buildAgentCreatePayload(mapPresetToAgentDraft(engineerPreset)),
+        mockProject.id,
+      );
+    });
+  });
+
+  it("supports arrow-key navigation in the first-agent template radio group", async () => {
+    const mockProject = buildMockProject();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+
+    render(
+      <SetupWizardModal
+        onProjectRegistered={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+    const ceoOption = screen.getByRole("radio", { name: "CEO selected" });
+    ceoOption.focus();
+
+    fireEvent.keyDown(ceoOption, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: "CTO selected" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    fireEvent.keyDown(screen.getByRole("radio", { name: "CTO selected" }), { key: "End" });
+    const lastPreset = AGENT_PRESETS[AGENT_PRESETS.length - 1]!;
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: `${lastPreset.name} selected` })).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  it("keeps first-agent step available when agent creation fails", async () => {
+    const mockProject = buildMockProject();
+    const onProjectRegistered = vi.fn();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+    mockCreateAgent.mockRejectedValueOnce(new Error("Agent quota reached"));
+
+    render(
+      <SetupWizardModal
+        onProjectRegistered={onProjectRegistered}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+    fireEvent.click(screen.getByText("Create Agent"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Agent quota reached");
+    expect(document.activeElement).toBe(alert);
+    expect(screen.getByText("Create Agent")).toBeDefined();
+    expect(screen.getByText("Skip for now")).toBeDefined();
+    expect(screen.getByRole("radio", { name: "CEO selected" })).toHaveAttribute("aria-checked", "true");
+    expect(onProjectRegistered).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Skip for now"));
+    expect(await screen.findByText("You can create agents later from the Agents view.")).toBeDefined();
+  });
+
+  it("applies an AI interview draft and waits for explicit creation", async () => {
+    const mockProject = buildMockProject();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+    mockCreateAgent.mockResolvedValueOnce(buildMockAgent({
+      id: "agent_launch",
+      projectId: mockProject.id,
+      name: "Launch Coordinator",
+    }) as any);
+
+    render(
+      <SetupWizardModal
+        onProjectRegistered={vi.fn()}
+        onClose={vi.fn()}
+        agentOnboardingEnabled
+      />
+    );
+
+    expect(await registerProjectFromWizard()).toBeDefined();
+    expect(screen.getByText("AI Interview")).toBeDefined();
+
+    fireEvent.click(screen.getByText("AI Interview"));
+    expect(await screen.findByTestId("agent-interview-modal")).toBeDefined();
+
+    fireEvent.click(screen.getByText("Use Draft"));
+
+    expect(await screen.findByText("Launch Coordinator")).toBeDefined();
+    expect(screen.getByText("Launch Planning Agent")).toBeDefined();
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Create Agent"));
+
+    await waitFor(() => {
+      expect(mockCreateAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Launch Coordinator",
+          role: "custom",
+          title: "Launch Planning Agent",
+          instructionsText: "Coordinate launch tasks.",
+          soul: "Strategic launch planner.",
+          metadata: { skills: ["planning", "review"] },
+          runtimeConfig: {
+            runtimeHint: "codex-local",
+            maxTurns: 24,
+            thinkingLevel: "medium",
+          },
+        }),
+        mockProject.id,
+      );
+    });
   });
 
   it("close button calls onClose", () => {
@@ -605,15 +895,7 @@ describe("SetupWizardModal", () => {
         healthCheck: vi.fn(),
       }));
 
-      const mockProject = {
-        id: "proj_123",
-        name: "test-project",
-        path: "/home/user/project",
-        status: "active" as const,
-        isolationMode: "in-process" as const,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      const mockProject = buildMockProject();
       mockRegisterProject.mockResolvedValueOnce(mockProject);
 
       render(
@@ -664,15 +946,7 @@ describe("SetupWizardModal", () => {
         healthCheck: vi.fn(),
       }));
 
-      const mockProject = {
-        id: "proj_123",
-        name: "test-project",
-        path: "/home/user/project",
-        status: "active" as const,
-        isolationMode: "in-process" as const,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      const mockProject = buildMockProject();
       mockRegisterProject.mockResolvedValueOnce(mockProject);
 
       render(

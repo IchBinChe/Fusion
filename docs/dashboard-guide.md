@@ -357,7 +357,7 @@ Mailbox view shows inbox/outbox communication threads and unread state.
 - mailbox entry points now show unread/pending indicators: the desktop/tablet Header mailbox toggle shows a pending-approval dot first or an unread dot when unread mail exists without pending approvals, the mobile bottom-nav Mailbox tab carries the mobile badges/dots, and the compact Header actions overflow keeps a Mailbox entry only when the mobile bottom nav is disabled
 - approval lifecycle SSE events (`approval:requested`, `approval:updated`, `approval:decided`) trigger mailbox approvals refresh without manual reload
 - when a task newly enters `awaiting-approval`, the app shows a persistent approval banner above project content with an **Open Mailbox** CTA; dismissals are remembered per approval item until that item advances or a different one arrives
-- when a task first transitions into `done`, the dashboard shows a one-time **Enjoying Fusion?** GitHub star prompt in the project view; clicking **Star on GitHub** or dismissing the card marks it shown in browser `localStorage`, so it does not reappear on reload or later task completions
+- when a task first transitions into `done`, the dashboard shows a one-time **Enjoying Fusion?** GitHub star prompt in the project view after first-run setup is closed; clicking **Star on GitHub** or dismissing the card marks it shown in browser `localStorage`, so it does not reappear on reload or later task completions. The setup wizard does not add a second star prompt.
 - Visible message history/threading is driven by explicit `message.metadata.replyTo.messageId` links
 - Separate top-level messages from the same sender remain independent in the inbox and detail pane
 
@@ -595,6 +595,7 @@ Navigation:
 Features:
 - Switch between **List**, **Board**, and **Org chart** layouts
 - Filter by role/state, include/exclude system agents, and inspect health/status
+- First-run setup asks whether to create a first persistent agent after project registration. The default template is **CEO**, users can choose another preset, use the AI interview when `experimentalFeatures.agentOnboarding` is enabled, or skip the step. Task creation and execution do not require creating or assigning a persistent agent: Fusion automatically spawns temporary agents to plan, execute, review, and merge task work.
 - Start, pause, stop, and trigger agent runs from the view and from detail panels
 - In **Agent detail**, use the kebab **Bulk agent actions** button in the header utility cluster (next to **Refresh** and **Close**) to run project-wide lifecycle transitions for non-ephemeral agents in the current project — **Pause All Agents** targets agents in the `active` or `running` state, while **Resume All Agents** targets agents in the `paused` state only
 - Bulk menu items stay disabled when nothing is eligible and show an inline hint (`Loading eligible agents...`, `No active agents eligible`, `No paused agents eligible`, or the current eligible count such as `Pause 2 active/running agents`)

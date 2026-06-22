@@ -1,23 +1,39 @@
 import "./SetupWizardModal.css";
-import { useState, useCallback } from "react";
-import { X, Loader2, CheckCircle, ChevronRight } from "lucide-react";
+import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, type KeyboardEvent } from "react";
+import { X, Loader2, CheckCircle, ChevronRight, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { ProjectInfo, ProjectCreateInput } from "../api";
-import { registerProject } from "../api";
+import type { AgentOnboardingSummary, ProjectInfo, ProjectCreateInput } from "../api";
+import { createAgent, registerProject } from "../api";
 import { getAuthToken, setAuthToken, clearAuthToken } from "../auth";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { suggestProjectName } from "../utils/projectDetection";
 import { useNodes } from "../hooks/useNodes";
+import { AgentAvatar } from "./AgentAvatar";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { AGENT_PRESETS, getPresetById } from "./agent-presets";
+import {
+  buildAgentCreatePayload,
+  mapOnboardingSummaryToAgentDraft,
+  mapPresetToAgentDraft,
+  type AgentDraftValues,
+} from "./agent-presets/agentCreatePayload";
+
+const ExperimentalAgentOnboardingModal = lazy(() =>
+  import("./ExperimentalAgentOnboardingModal").then((m) => ({ default: m.ExperimentalAgentOnboardingModal })),
+);
 
 export interface SetupWizardModalProps {
-  /** Called when a single project is registered */
+  /** Called when first-run setup should enter the registered project. */
   onProjectRegistered: (project: ProjectInfo) => void;
   /** Called when wizard is closed (completed or cancelled) */
   onClose?: () => void;
+  /** Enables the existing AI interview entry point for first-agent drafting. */
+  agentOnboardingEnabled?: boolean;
 }
 
-type WizardStep = "auth" | "manual" | "complete";
+type WizardStep = "auth" | "manual" | "agent" | "complete";
 type ManualSetupMode = "existing" | "clone";
+type AgentOutcome = "created" | "skipped" | null;
 
 interface WizardState {
   step: WizardStep;
@@ -27,8 +43,14 @@ interface WizardState {
   manualName: string;
   manualIsolationMode: "in-process" | "child-process";
   manualNodeId: string;
+  registeredProject: ProjectInfo | null;
+  selectedPresetId: string;
+  agentDraft: AgentDraftValues;
+  isCreatingAgent: boolean;
   isRegistering: boolean;
   error: string | null;
+  agentError: string | null;
+  agentOutcome: AgentOutcome;
 }
 
 /**
@@ -40,9 +62,19 @@ interface WizardState {
 export function SetupWizardModal({
   onProjectRegistered,
   onClose,
+  agentOnboardingEnabled = false,
 }: SetupWizardModalProps) {
   const { t } = useTranslation("app");
   const helpUrl = "https://github.com/runfusion/fusion/discussions";
+  /*
+  FNXC:Onboarding 2026-06-22-03:11:
+  First-run project setup must offer a first persistent agent after registration, defaulting to the CEO preset while still letting users choose another template or skip creation.
+  The AI interview entry point is feature-flagged by `agentOnboardingEnabled`; preset creation and skip remain available without it.
+  */
+  const ceoPreset = useMemo(
+    () => getPresetById("ceo") ?? AGENT_PRESETS[0]!,
+    [],
+  );
   const [isOpen, setIsOpen] = useState(true);
   const [state, setState] = useState<WizardState>(() => ({
     step: getAuthToken() ? "manual" : "auth",
@@ -52,12 +84,20 @@ export function SetupWizardModal({
     manualName: "",
     manualIsolationMode: "in-process",
     manualNodeId: "",
+    registeredProject: null,
+    selectedPresetId: ceoPreset.id,
+    agentDraft: mapPresetToAgentDraft(ceoPreset),
+    isCreatingAgent: false,
     isRegistering: false,
     error: null,
+    agentError: null,
+    agentOutcome: null,
   }));
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [authTokenInput, setAuthTokenInput] = useState("");
   const [storedAuthToken, setStoredAuthToken] = useState(() => getAuthToken());
+  const [isInterviewOpen, setIsInterviewOpen] = useState(false);
+  const agentErrorRef = useRef<HTMLDivElement | null>(null);
 
   const { nodes, loading: nodesLoading } = useNodes();
   const localNodeId = nodes.find((n) => n.type === "local")?.id;
@@ -66,6 +106,20 @@ export function SetupWizardModal({
     setIsOpen(false);
     onClose?.();
   }, [onClose]);
+
+  const handleFinish = useCallback(() => {
+    if (state.registeredProject) {
+      onProjectRegistered(state.registeredProject);
+      return;
+    }
+    handleClose();
+  }, [handleClose, onProjectRegistered, state.registeredProject]);
+
+  useEffect(() => {
+    if (state.agentError) {
+      agentErrorRef.current?.focus();
+    }
+  }, [state.agentError]);
 
   const handlePathChange = useCallback((path: string) => {
     setState((prev) => {
@@ -98,11 +152,11 @@ export function SetupWizardModal({
       };
 
       const result = await registerProject(input);
-      onProjectRegistered(result);
 
       setState((prev) => ({
         ...prev,
-        step: "complete",
+        step: "agent",
+        registeredProject: result,
         isRegistering: false,
       }));
     } catch (err) {
@@ -112,7 +166,7 @@ export function SetupWizardModal({
         error: err instanceof Error ? err.message : "Failed to register project",
       }));
     }
-  }, [state.manualPath, state.manualName, state.manualCloneUrl, state.manualMode, state.manualIsolationMode, state.manualNodeId, onProjectRegistered]);
+  }, [state.manualPath, state.manualName, state.manualCloneUrl, state.manualMode, state.manualIsolationMode, state.manualNodeId]);
 
   const handleSetAuthToken = useCallback(() => {
     const token = authTokenInput.trim();
@@ -134,6 +188,81 @@ export function SetupWizardModal({
     setState((prev) => ({ ...prev, step: "manual" }));
   }, []);
 
+  const handlePresetSelect = useCallback((presetId: string) => {
+    const preset = getPresetById(presetId);
+    if (!preset) return;
+    setState((prev) => ({
+      ...prev,
+      selectedPresetId: preset.id,
+      agentDraft: mapPresetToAgentDraft(preset),
+      agentError: null,
+    }));
+  }, []);
+
+  const handlePresetKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, presetId: string) => {
+    const currentIndex = AGENT_PRESETS.findIndex((preset) => preset.id === presetId);
+    if (currentIndex < 0) return;
+
+    const lastIndex = AGENT_PRESETS.length - 1;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = lastIndex;
+    }
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextPreset = AGENT_PRESETS[nextIndex];
+    handlePresetSelect(nextPreset.id);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`[data-agent-preset-id="${nextPreset.id}"]`)?.focus();
+    });
+  }, [handlePresetSelect]);
+
+
+  const handleApplyAgentDraft = useCallback((draft: AgentOnboardingSummary) => {
+    setState((prev) => ({
+      ...prev,
+      selectedPresetId: "",
+      agentDraft: mapOnboardingSummaryToAgentDraft(draft),
+      agentError: null,
+    }));
+  }, []);
+
+  const handleCreateFirstAgent = useCallback(async () => {
+    if (!state.registeredProject || !state.agentDraft.name.trim()) return;
+    setState((prev) => ({ ...prev, isCreatingAgent: true, agentError: null }));
+    try {
+      await createAgent(buildAgentCreatePayload(state.agentDraft), state.registeredProject.id);
+      setState((prev) => ({
+        ...prev,
+        step: "complete",
+        isCreatingAgent: false,
+        agentOutcome: "created",
+      }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        isCreatingAgent: false,
+        agentError: err instanceof Error ? err.message : t("setup.firstAgentCreateError", "Failed to create agent"),
+      }));
+    }
+  }, [state.agentDraft, state.registeredProject, t]);
+
+  const handleSkipAgent = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      step: "complete",
+      agentError: null,
+      agentOutcome: "skipped",
+    }));
+  }, []);
+
   if (!isOpen) return null;
 
   const isExistingMode = state.manualMode === "existing";
@@ -145,6 +274,10 @@ export function SetupWizardModal({
     || !hasPath
     || !hasName
     || (isCloneMode && !hasCloneUrl);
+  const selectedPreset = state.selectedPresetId
+    ? getPresetById(state.selectedPresetId)
+    : undefined;
+  const isAgentActionDisabled = state.isCreatingAgent;
 
   return (
     <div className="modal-overlay open setup-wizard-overlay" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
@@ -179,10 +312,11 @@ export function SetupWizardModal({
             <h2 id="wizard-title" className="setup-wizard-title">
               {state.step === "auth" && t("setup.setAuthToken", "Set Auth Token")}
               {state.step === "manual" && t("setup.welcomeToFusion", "Welcome to Fusion")}
+              {state.step === "agent" && t("setup.firstAgentTitle", "Create your first agent")}
               {state.step === "complete" && t("setup.setupCompleteTitle", "Setup Complete!")}
             </h2>
           </div>
-          {state.step !== "complete" && (
+          {state.step !== "complete" && state.step !== "agent" && (
             <button
               className="modal-close"
               onClick={handleClose}
@@ -427,6 +561,94 @@ export function SetupWizardModal({
             </div>
           )}
 
+          {/* FNXC:Onboarding 2026-06-22-03:11: First-run setup asks for an optional persistent coordinating agent after project registration. Users can skip it because task creation and task execution do not require an assigned persistent agent; Fusion automatically spawns temporary planning, execution, review, and merge agents for task work. */}
+          {state.step === "agent" && (
+            <div className="setup-wizard-agent-step">
+              <p className="setup-wizard-agent-intro">
+                {t("setup.firstAgentIntro", "You do not need to create or assign an agent for Fusion to build tasks. Fusion automatically spawns temporary agents to plan, execute, review, and merge task work. A persistent agent is optional and can coordinate work, help create tasks, and keep direction across sessions.")}
+              </p>
+
+              <div className="setup-wizard-agent-layout">
+                <section className="setup-wizard-agent-presets" aria-labelledby="setup-first-agent-presets-heading">
+                  <div className="setup-wizard-agent-section-heading" id="setup-first-agent-presets-heading">
+                    {t("setup.firstAgentTemplates", "Templates")}
+                  </div>
+                  <div className="setup-wizard-agent-preset-list" role="radiogroup" aria-label={t("setup.firstAgentTemplates", "Templates")}>
+                    {AGENT_PRESETS.map((preset) => {
+                      const selected = state.selectedPresetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          className={`setup-wizard-agent-preset${selected ? " selected" : ""}`}
+                          role="radio"
+                          aria-checked={selected}
+                          aria-label={selected ? t("setup.selectedAgentTemplate", "{{name}} selected", { name: preset.name }) : preset.name}
+                          tabIndex={selected ? 0 : -1}
+                          data-agent-preset-id={preset.id}
+                          disabled={isAgentActionDisabled}
+                          onClick={() => handlePresetSelect(preset.id)}
+                          onKeyDown={(event) => handlePresetKeyDown(event, preset.id)}
+                        >
+                          <AgentAvatar agent={{ id: preset.id, icon: preset.icon, name: preset.name }} size={28} />
+                          <span className="setup-wizard-agent-preset-copy">
+                            <span className="setup-wizard-agent-preset-name">
+                              {preset.name}
+                              {preset.id === "ceo" && <span className="wizard-option-recommended">{t("setup.recommended", "Recommended")}</span>}
+                            </span>
+                            <span className="setup-wizard-agent-preset-description">{preset.description}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="setup-wizard-agent-preview" aria-labelledby="setup-first-agent-preview-heading">
+                  <div className="setup-wizard-agent-section-heading" id="setup-first-agent-preview-heading">
+                    {t("setup.firstAgentPreview", "Preview")}
+                  </div>
+                  <div className="setup-wizard-agent-preview-card">
+                    <div className="setup-wizard-agent-preview-title-row">
+                      <AgentAvatar agent={{ id: state.selectedPresetId || "draft", icon: state.agentDraft.icon, name: state.agentDraft.name }} size={36} />
+                      <div>
+                        <h3>{state.agentDraft.name || t("setup.firstAgentDraftName", "Draft agent")}</h3>
+                        <p>{state.agentDraft.title || selectedPreset?.title || t("setup.firstAgentCustomDraft", "Custom agent draft")}</p>
+                      </div>
+                    </div>
+                    <dl className="setup-wizard-agent-preview-list">
+                      <div>
+                        <dt>{t("agents.fieldRole", "Role")}</dt>
+                        <dd>{state.agentDraft.role}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("agents.fieldInstructionsText", "Inline Instructions")}</dt>
+                        <dd>{state.agentDraft.instructionsText || t("setup.firstAgentNoInstructions", "No inline instructions yet")}</dd>
+                      </div>
+                    </dl>
+                    {agentOnboardingEnabled && (
+                      <button
+                        type="button"
+                        className="btn setup-wizard-agent-ai-btn"
+                        onClick={() => setIsInterviewOpen(true)}
+                        disabled={isAgentActionDisabled}
+                      >
+                        <Sparkles size={16} />
+                        <span>{t("agents.aiInterview", "AI Interview")}</span>
+                      </button>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              {state.agentError && (
+                <div className="wizard-error" role="alert" tabIndex={-1} ref={agentErrorRef}>
+                  {state.agentError}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Complete Step */}
           {state.step === "complete" && (
             <div className="setup-wizard-complete">
@@ -436,8 +658,16 @@ export function SetupWizardModal({
               </div>
               <CheckCircle size={64} className="success-icon" />
               <h3>{t("setup.allSet", "All Set!")}</h3>
-              <p>{t("setup.projectRegisteredSuccess", "Your project has been registered successfully.")}</p>
-              <p>{t("setup.addMoreProjectsHint", "You can add more projects anytime from the project overview.")}</p>
+              <p>
+                {state.agentOutcome === "created"
+                  ? t("setup.firstAgentCreatedSuccess", "Your project is registered and your first agent is ready.")
+                  : t("setup.projectRegisteredSuccess", "Your project has been registered successfully.")}
+              </p>
+              <p>
+                {state.agentOutcome === "skipped"
+                  ? t("setup.firstAgentSkippedHint", "You can create agents later from the Agents view.")
+                  : t("setup.addMoreProjectsHint", "You can add more projects anytime from the project overview.")}
+              </p>
             </div>
           )}
         </div>
@@ -486,14 +716,65 @@ export function SetupWizardModal({
             </button>
           )}
 
+          {state.step === "agent" && (
+            <>
+              <button
+                className="btn"
+                onClick={handleSkipAgent}
+                disabled={isAgentActionDisabled}
+              >
+                {t("setup.skipFirstAgent", "Skip for now")}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void handleCreateFirstAgent()}
+                disabled={isAgentActionDisabled || !state.agentDraft.name.trim()}
+                aria-busy={state.isCreatingAgent}
+              >
+                {state.isCreatingAgent ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>{t("setup.creatingFirstAgent", "Creating agent...")}</span>
+                  </>
+                ) : (
+                  <span>{t("setup.createFirstAgent", "Create Agent")}</span>
+                )}
+              </button>
+            </>
+          )}
+
           {state.step === "complete" && (
-            <button className="btn btn-primary" onClick={handleClose}>
+            <button className="btn btn-primary" onClick={handleFinish}>
               <CheckCircle size={16} />
               <span>{t("setup.getStarted", "Get Started")}</span>
             </button>
           )}
         </div>
       </div>
+      {agentOnboardingEnabled && isInterviewOpen && (
+        <ErrorBoundary
+          level="modal"
+          fallback={(
+            <div className="wizard-error setup-wizard-agent-interview-error" role="alert">
+              <span>{t("setup.firstAgentInterviewLoadError", "AI interview could not load. You can still create an agent from a template or skip this step.")}</span>
+              <button type="button" className="btn" onClick={() => setIsInterviewOpen(false)}>
+                {t("setup.firstAgentContinueWithTemplates", "Continue with templates")}
+              </button>
+            </div>
+          )}
+        >
+          <Suspense fallback={null}>
+            <ExperimentalAgentOnboardingModal
+              isOpen={isInterviewOpen}
+              onClose={() => setIsInterviewOpen(false)}
+              onUseDraft={handleApplyAgentDraft}
+              projectId={state.registeredProject?.id}
+              existingAgents={[]}
+              mode="create"
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

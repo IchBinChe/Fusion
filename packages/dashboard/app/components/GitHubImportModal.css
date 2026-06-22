@@ -1018,9 +1018,15 @@ Embedded Import Tasks must scroll vertically so a long preview is fully reachabl
   overflow-y: auto;
 }
 
-/* Default (narrow container): single stacked column. */
+/*
+FNXC:RightDockEmbedding 2026-06-22-13:30:
+Default (narrow container): single stacked column. The workspace takes its natural (content) height
+(flex: 0 0 auto) rather than the shared `flex: 1`, so the tall preview can push the workspace past the
+body height and .github-import-modal__body scrolls to reveal it. The list pane stays internally capped.
+*/
 .github-import-modal--embedded .github-import-workspace {
   flex-direction: column;
+  flex: 0 0 auto;
 }
 
 /* Override the inline viewport-derived flex-basis so the list never forces overflow when stacked. */
@@ -1037,6 +1043,20 @@ Embedded Import Tasks must scroll vertically so a long preview is fully reachabl
   min-width: 0;
 }
 
+/*
+FNXC:RightDockEmbedding 2026-06-22-13:30:
+Stacked (narrow) embedded layout: the preview pane is natural-height (flex: 0 0 auto), so its inner
+.github-import-pane-content must NOT keep the side-by-side `flex: 1; min-height: 0; overflow-y: auto`
+treatment — under a natural-height parent that collapses the content to ~zero and clips the issue/PR
+body. Let the content take its full intrinsic height and hand vertical scrolling to .github-import-modal__body
+(the view scroll owner) so a long, tall preview is fully reachable by scrolling the whole view.
+*/
+.github-import-modal--embedded .github-import-preview-pane .github-import-pane-content {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow-y: visible;
+}
+
 /* Hide the col-resize handle when stacked; it only makes sense in the side-by-side layout. */
 .github-import-modal--embedded .github-import-workspace__resize-handle {
   display: none;
@@ -1045,6 +1065,8 @@ Embedded Import Tasks must scroll vertically so a long preview is fully reachabl
 @container github-import-embedded (min-width: 720px) {
   .github-import-modal--embedded .github-import-workspace {
     flex-direction: row;
+    /* Wide layout: fill the body height so the preview pane can scroll internally (not the whole view). */
+    flex: 1 1 auto;
   }
 
   /* Side-by-side again: bound the list pane to a share of the CONTAINER width, overriding the inline viewport width. */
@@ -1053,6 +1075,24 @@ Embedded Import Tasks must scroll vertically so a long preview is fully reachabl
     width: auto;
     max-height: none;
     padding-right: var(--space-md);
+  }
+
+  /*
+  FNXC:RightDockEmbedding 2026-06-22-13:30:
+  Wide (two-pane) embedded layout: the preview pane fills the available row height and scrolls
+  INTERNALLY so a long preview is reachable without moving the list. Restore the flex-fill pane and
+  let .github-import-pane-content own the vertical scroll (min-height:0 enables the overflow inside a
+  flex child). The list keeps its own internal scroll, so the two panes scroll independently.
+  */
+  .github-import-modal--embedded .github-import-preview-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .github-import-modal--embedded .github-import-preview-pane .github-import-pane-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .github-import-modal--embedded .github-import-workspace__resize-handle {

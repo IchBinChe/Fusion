@@ -117,6 +117,54 @@ describe("GitHubImportModal", () => {
     expect(screen.queryByText("Import from GitHub")).toBeNull();
   });
 
+  // FNXC:EmbeddedPresentation 2026-06-22-12:00:
+  // presentation="embedded" was a zero-coverage branch. Assert the embedded contract via useEmbeddedPresentation:
+  // embedded root class present, no fixed .modal-overlay backdrop, no close button, and Escape does NOT dismiss.
+  describe("embedded presentation", () => {
+    it("renders the embedded root class with no modal overlay or close button", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import Tasks")).toBeTruthy();
+      });
+      expect(container.querySelector(".github-import-embedded")).not.toBeNull();
+      expect(container.querySelector(".github-import-modal--embedded")).not.toBeNull();
+      // No fixed full-screen overlay backdrop, and no modal-header / close button in embedded mode.
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+      expect(screen.queryByText("Import from GitHub")).toBeNull();
+      expect(container.querySelector(".github-import-modal__header")).toBeNull();
+    });
+
+    it("does not dismiss on Escape in embedded mode", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Import Tasks")).toBeTruthy();
+      });
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("keeps the modal overlay and Escape-to-close in modal mode", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import from GitHub")).toBeTruthy();
+      });
+      expect(container.querySelector(".modal-overlay")).not.toBeNull();
+      expect(container.querySelector(".github-import-modal--embedded")).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).toHaveBeenCalled();
+    });
+  });
+
   it("renders compact toolbar and two-pane layout", async () => {
     vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
     render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);

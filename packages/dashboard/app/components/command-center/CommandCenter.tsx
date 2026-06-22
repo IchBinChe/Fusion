@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Gauge } from "lucide-react";
+import { AlertCircle, Cpu, Gauge } from "lucide-react";
 import type { ActivityAnalytics, ColorTheme, LiveSnapshot, SignalsAnalytics, ThemeMode, TokenAnalytics, ToolAnalytics } from "@fusion/core";
 import { api } from "../../api/legacy";
 import { DateRangePicker, defaultPresets, rangeFromPreset, type DateRange } from "./DateRangePicker";
@@ -267,17 +267,60 @@ function OverviewTab({
   // The throughput funnel reads its own data (activityLog transitions) and shows
   // its own empty state, so it renders even when the stat-card aggregates have no
   // data yet.
+  /*
+  FNXC:CommandCenter 2026-06-22-18:00:
+  The "AI Engine" panel hosts the "View Board"/"View Agents" navigation shortcuts and lives inside controlsSection, which renders in EVERY Overview branch (loading/error/empty/populated), so the panel is always visible regardless of data state. It previously rendered only inside the populated return as the .cc-overview-engine-nav row, leaving loading/empty/error states with no shortcuts. The optional status line reuses already-fetched live-snapshot (inProgressTasks) and activity (activeAgents) data — no new endpoint — and is skipped while the live snapshot is still loading. Navigation is owned by App (onChangeView), so the button row only renders when wired up.
+  */
+  const enginePanel = (
+    <div className="cc-overview-engine-panel" data-testid="command-center-engine-panel">
+      <div className="cc-overview-engine-panel-header">
+        <Cpu size={18} aria-hidden="true" />
+        <span className="cc-overview-engine-panel-title">
+          {t("commandCenter.overview.aiEngine", "AI Engine")}
+        </span>
+      </div>
+      {!liveSnapshotLoading ? (
+        <p className="cc-overview-engine-panel-status" data-testid="command-center-engine-panel-status">
+          {t("commandCenter.overview.aiEngineStatus", "{{agents}} agents working · {{tasks}} tasks in progress", {
+            agents: formatCount(activeAgents),
+            tasks: formatCount(inProgressTasks),
+          })}
+        </p>
+      ) : null}
+      {onChangeView ? (
+        <div className="cc-overview-engine-nav">
+          <button
+            type="button"
+            className="btn btn-sm cc-overview-engine-nav-btn"
+            onClick={() => onChangeView("board")}
+          >
+            {t("commandCenter.controls.engine.viewBoard", "View Board")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm cc-overview-engine-nav-btn"
+            onClick={() => onChangeView("agents")}
+          >
+            {t("commandCenter.controls.engine.viewAgents", "View Agents")}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
   const controlsSection = (
-    <CommandCenterControls
-      projectId={projectId}
-      colorTheme={colorTheme}
-      themeMode={themeMode}
-      shadcnCustomColors={shadcnCustomColors}
-      resolvedThemeMode={resolvedThemeMode}
-      onColorThemeChange={onColorThemeChange}
-      onThemeModeChange={onThemeModeChange}
-      onShadcnCustomColorsChange={onShadcnCustomColorsChange}
-    />
+    <>
+      <CommandCenterControls
+        projectId={projectId}
+        colorTheme={colorTheme}
+        themeMode={themeMode}
+        shadcnCustomColors={shadcnCustomColors}
+        resolvedThemeMode={resolvedThemeMode}
+        onColorThemeChange={onColorThemeChange}
+        onThemeModeChange={onThemeModeChange}
+        onShadcnCustomColorsChange={onShadcnCustomColorsChange}
+      />
+      {enginePanel}
+    </>
   );
   const throughputSection = (
     <div className="cc-overview-throughput" data-testid="command-center-throughput">
@@ -374,28 +417,6 @@ function OverviewTab({
           />
         </div>
       </div>
-      {/*
-      FNXC:CommandCenter 2026-06-22-15:30:
-      "View Board" / "View Agents" shortcuts live on the Overview landing, directly under the Live activity snapshot (the engine-activity strip — the closest "AI engine" element on Overview). Moved here from the Team-tab Heartbeat card. Navigation is owned by App (onChangeView), so this row only renders when wired up. Reuses the .cc-team-engine-nav row styling.
-      */}
-      {onChangeView ? (
-        <div className="cc-overview-engine-nav" data-testid="command-center-overview-engine-nav">
-          <button
-            type="button"
-            className="btn btn-sm cc-overview-engine-nav-btn"
-            onClick={() => onChangeView("board")}
-          >
-            {t("commandCenter.controls.engine.viewBoard", "View Board")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm cc-overview-engine-nav-btn"
-            onClick={() => onChangeView("agents")}
-          >
-            {t("commandCenter.controls.engine.viewAgents", "View Agents")}
-          </button>
-        </div>
-      ) : null}
       {hasOverviewChartData ? (
         /*
         FNXC:CommandCenter 2026-06-18-00:00:

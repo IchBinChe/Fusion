@@ -18,6 +18,7 @@ import { GithubIcon } from "./GithubIcon";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 
 interface GitHubImportModalProps {
   isOpen: boolean;
@@ -30,7 +31,7 @@ interface GitHubImportModalProps {
   Right-dock redesign renders the GitHub import surface inline inside the main content area instead of as a fixed popup overlay.
   "embedded" drops the modal overlay/close button and disables modal-only chrome (scroll lock, resize persistence, escape/overlay dismiss); "modal" (default) keeps the original byte-identical overlay behavior.
   */
-  presentation?: "modal" | "embedded";
+  presentation?: ModalPresentation;
 }
 
 // Mobile and two-pane breakpoints in pixels
@@ -58,8 +59,8 @@ function formatPreviewBody(body: string | null | undefined, isMobile: boolean) {
 }
 
 export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
-  const isEmbedded = presentation === "embedded";
-  useMobileScrollLock(isOpen && !isEmbedded);
+  const { isEmbedded, scrollLockEnabled, resizePersistEnabled, escapeEnabled } = useEmbeddedPresentation(presentation);
+  useMobileScrollLock(isOpen && scrollLockEnabled);
   const { t } = useTranslation("app");
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
@@ -88,7 +89,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const [selectedRemoteName, setSelectedRemoteName] = useState<string>("");
   const mountedRef = useRef(false);
   const modalRef = useRef<HTMLDivElement>(null);
-  useModalResizePersist(modalRef, isOpen && !isEmbedded, "fusion:github-modal-size");
+  useModalResizePersist(modalRef, isOpen && resizePersistEnabled, "fusion:github-modal-size");
   const overlayDismissProps = useOverlayDismiss(onClose);
 
   // Responsive view state
@@ -291,13 +292,13 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   // Handle escape key
   // FNXC:RightDockEmbedding 2026-06-22-00:00: Escape-to-close is a modal-only affordance; embedded mode has no dismiss.
   useEffect(() => {
-    if (!isOpen || isEmbedded) return;
+    if (!isOpen || !escapeEnabled) return;
     const handleKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, isEmbedded, onClose]);
+  }, [isOpen, escapeEnabled, onClose]);
 
   // Detect responsive viewport bands
   useEffect(() => {

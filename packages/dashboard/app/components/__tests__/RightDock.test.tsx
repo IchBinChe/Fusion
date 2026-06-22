@@ -219,6 +219,15 @@ describe("RightDock", () => {
 
     expect(screen.getByTestId("right-dock-expand-modal")).toBeInTheDocument();
     expect(screen.getByTestId("right-dock-expand-body")).toBeInTheDocument();
+    /*
+    FNXC:RightDock 2026-06-22-17:40:
+    The pop-out is a floating, non-blocking window: the overlay carries the non-blocking class (transparent + pointer-events:none in CSS so behind-clicks pass through), a drag handle (header) exists, and the panel is the floating variant. There is no overlay click-to-dismiss; the explicit close button is the only dismissal.
+    */
+    expect(screen.getByTestId("right-dock-expand-modal")).toHaveClass("right-dock-expand-modal-overlay");
+    expect(screen.getByTestId("right-dock-expand-modal")).toHaveAttribute("aria-modal", "false");
+    expect(screen.getByTestId("right-dock-expand-drag-handle")).toBeInTheDocument();
+    expect(screen.getByTestId("right-dock-expand-modal").querySelector(".right-dock-expand-modal--floating")).not.toBeNull();
+    expect(screen.getByTestId("right-dock-expand-resize-se")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("right-dock-expand-close"));
     expect(onClose).toHaveBeenCalledTimes(1);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -252,6 +261,31 @@ describe("RightDock", () => {
       width: "640px",
       height: "480px",
     });
+  });
+
+  it("drags the floating pop-out by its header and clamps + persists the new position", () => {
+    /*
+    FNXC:RightDock 2026-06-22-17:40:
+    Pointerdown on the header drag handle then pointermove on the document moves the panel via state-driven fixed left/top, and pointerup persists the clamped position. Assert the panel moved and that a position was persisted (clamped on-screen).
+    */
+    render(
+      <RightDockExpandModal
+        viewKey="files"
+        renderProps={renderProps}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const handle = screen.getByTestId("right-dock-expand-drag-handle");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: 60, clientY: 140 });
+    fireEvent.pointerUp(document, { pointerId: 1, clientX: 60, clientY: 140 });
+
+    const persisted = window.localStorage.getItem("fusion:right-dock-expand-modal-position");
+    expect(persisted).not.toBeNull();
+    const parsed = JSON.parse(persisted as string) as { x: number; y: number };
+    expect(parsed.x).toBeGreaterThanOrEqual(0);
+    expect(parsed.y).toBeGreaterThanOrEqual(0);
   });
 
   it("fires expand for the currently selected inline entry", () => {

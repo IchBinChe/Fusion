@@ -9,6 +9,7 @@ import type { TFunction } from "i18next";
 import { X, History, Trash2, Filter, RefreshCw, CheckCircle, XCircle, ArrowRight, Plus, Settings, AlertCircle, Loader2, Folder } from "lucide-react";
 import { clearActivityLog, type ActivityLogEntry, type ActivityEventType, type ActivityFeedEntry } from "../api";
 import { useActivityLog } from "../hooks/useActivityLog";
+import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 import type { Task, ProjectInfo } from "@fusion/core";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
@@ -30,7 +31,7 @@ interface ActivityLogModalProps {
   FNXC:RightDockEmbedded 2026-06-22-00:00:
   Right-dock redesign renders dock items inline (not as fixed popup overlays). When presentation="embedded" the component drops the .modal-overlay fixed full-screen host and the modal close button (the dock owns its own header/close), and disables modal-only Escape-to-close. presentation="modal" (default) stays byte-identical to preserve existing modal behavior.
   */
-  presentation?: "modal" | "embedded";
+  presentation?: ModalPresentation;
 }
 
 function getEventTypeLabels(t: TFunction<"app">): Record<ActivityEventType, string> {
@@ -131,7 +132,7 @@ export function ActivityLogModal({
   currentProject,
   presentation = "modal",
 }: ActivityLogModalProps) {
-  const isEmbedded = presentation === "embedded";
+  const { isEmbedded, escapeEnabled } = useEmbeddedPresentation(presentation);
   const { t } = useTranslation("app");
   const EVENT_TYPE_LABELS = getEventTypeLabels(t);
   const [filteredType, setFilteredType] = useState<ActivityEventType | "all">("all");
@@ -209,7 +210,7 @@ export function ActivityLogModal({
   // Handle escape key to close.
   // FNXC:RightDockEmbedded 2026-06-22-00:00: Embedded presentation must not auto-close on Escape; the dock owns lifecycle.
   useEffect(() => {
-    if (!isOpen || isEmbedded) return;
+    if (!isOpen || !escapeEnabled) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showConfirmClear) {
@@ -221,7 +222,7 @@ export function ActivityLogModal({
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, isEmbedded, onClose, showConfirmClear]);
+  }, [isOpen, escapeEnabled, onClose, showConfirmClear]);
 
   // Determine if any filter is active
   const isFilterActive = filteredType !== "all" || filteredProjectId !== "all";

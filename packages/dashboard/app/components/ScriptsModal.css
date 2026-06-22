@@ -2025,33 +2025,33 @@ The previous bespoke rules here hid the tab labels (icon-only) and used a crampe
     flex-direction: column;
   }
 
+  /*
+  FNXC:GitManager 2026-06-22-17:30:
+  The dock tab strip WRAPS so every section is visible at once (no single-tab horizontal swipe). Tabs take intrinsic width — width:auto overrides the base .gm-nav-item width:100% that otherwise made each tab fill the row (one per swipe) — and are compact icon+label so all ~7 sections fit across 2-3 wrapped rows.
+  */
   .gm-modal--embedded .gm-sidebar {
     flex: 0 0 auto;
     flex-direction: row;
+    flex-wrap: wrap;
     width: 100%;
     min-width: 0;
-    min-height: calc(var(--space-2xl) + var(--space-md));
     border-right: none;
     border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    overflow-y: hidden;
-    touch-action: pan-x pan-y;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
+    overflow: visible;
     padding: var(--space-xs) var(--space-sm);
     gap: var(--space-xs);
   }
 
   .gm-modal--embedded .gm-nav-item {
     flex: 0 0 auto;
+    width: auto;
     flex-direction: column;
     gap: calc(var(--space-xs) / 2);
     padding: var(--space-xs) var(--space-sm);
     border-left: none;
     border-bottom: 2px solid transparent;
     font-size: var(--font-size-xs);
-    min-width: calc(var(--space-2xl) + var(--space-xl));
-    min-height: calc(var(--space-xl) + var(--space-sm));
+    min-width: calc(var(--space-2xl) + var(--space-sm));
     text-align: center;
     justify-content: center;
   }

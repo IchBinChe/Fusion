@@ -720,3 +720,111 @@ FNXC:DevServer 2026-06-22-01:00:
     font-size: 0.625rem;
   }
 }
+
+/*
+FNXC:RightDockEmbedded 2026-06-22-00:00:
+When DevServerView is hosted in the narrow right dock, the dock body's `right-dock-body` query container drives this
+block. The viewport is desktop, so the desktop min-width:769px two-column grid above also fires and would overflow
+the narrow dock — here we override it back to a single scrollable column and mirror the phone-width max-width:768px
+stacking: the config and preview panels stack full-width, the section sheds its max-width cap, preview header/url/
+actions wrap, candidate rows wrap, and logs/preview keep a bounded min-height. The whole view already scrolls
+vertically (.dev-server-view overflow-y:auto), so each panel just needs to be full-width and not overflow.
+*/
+@container right-dock-body (max-width: 768px) {
+  .dev-server-view {
+    display: flex;
+    flex-direction: column;
+    padding: 0 var(--space-md) var(--space-md);
+  }
+
+  .dev-server-view > .view-header {
+    grid-column: auto;
+  }
+
+  .dev-server-header-title {
+    flex-wrap: wrap;
+  }
+
+  .dev-server-header-actions {
+    width: 100%;
+  }
+
+  .dev-server-config {
+    grid-column: auto;
+    grid-row: auto;
+    max-height: min(48vh, calc(var(--space-2xl) * 13));
+  }
+
+  .dev-server-content {
+    grid-column: auto;
+    grid-row: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .devserver-preview-panel {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .dev-server-section {
+    padding: var(--space-md);
+    max-width: none;
+  }
+
+  .devserver-preview-header {
+    flex-wrap: wrap;
+  }
+
+  .devserver-preview-url-badge {
+    order: 2;
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .devserver-preview-actions {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+
+  .dev-server-preview-override {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dev-server-candidate,
+  .dev-server-selected {
+    flex-wrap: wrap;
+  }
+
+  .dev-server-candidate-command {
+    flex: 1 1 100%;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .dev-server-candidate-source {
+    margin-left: 0;
+  }
+
+  .dev-server-candidates {
+    max-height: min(32vh, calc(var(--space-2xl) * 7));
+  }
+
+  .dev-server-logs,
+  .devserver-preview-container,
+  .devserver-preview-iframe {
+    min-height: calc(var(--space-2xl) * 4 + var(--space-md));
+    max-height: none;
+  }
+
+  .devserver-preview-blocked-panel,
+  .devserver-preview-error-panel,
+  .devserver-preview-external-only {
+    word-break: break-word;
+  }
+}

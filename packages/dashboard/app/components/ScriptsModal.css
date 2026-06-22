@@ -1213,6 +1213,79 @@ The embedded root is a plain flow box that fills the dock; the inner panel sheds
   box-shadow: none;
   border-radius: 0;
   resize: none;
+  /*
+  FNXC:RightDockEmbedded 2026-06-22-00:00:
+  The dock is narrow (~280-420px) while the viewport stays desktop, so the view's @media (max-width:768px) mobile
+  rules never fire. Make the embedded panel an inline-size query container so the dock width — not the viewport —
+  drives the mobile single-column layout below. See the @container activity-log-embedded block below.
+  */
+  container-type: inline-size;
+  container-name: activity-log-embedded;
+}
+
+/*
+FNXC:RightDockEmbedded 2026-06-22-00:00:
+Mirror the phone-width (@media max-width:768px) activity-log layout-stacking rules for the narrow dock, scoped to the
+embedded variant. Header wraps (title + close on top row, actions/filters stack full-width), filters/selects go 100%,
+the active-filters bar wraps, and entry headers/details/text wrap instead of overflowing horizontally. Only layout
+stacking is mirrored; behavior and the real @media rules are untouched.
+*/
+@container activity-log-embedded (max-width: 560px) {
+  .activity-log-modal--embedded .activity-log-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+  }
+
+  .activity-log-modal--embedded .activity-log-title {
+    flex: 1 1 auto;
+    order: 0;
+  }
+
+  .activity-log-modal--embedded .activity-log-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    order: 2;
+  }
+
+  .activity-log-modal--embedded .activity-log-filter,
+  .activity-log-modal--embedded .activity-log-filter--project {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .activity-log-modal--embedded .activity-log-filter-select {
+    width: 100%;
+  }
+
+  .activity-log-modal--embedded .activity-log-active-filters {
+    flex-wrap: wrap;
+    padding: var(--space-sm) var(--space-lg);
+    gap: var(--space-xs);
+  }
+
+  .activity-log-modal--embedded .activity-log-clear-filters {
+    margin-left: 0;
+  }
+
+  .activity-log-modal--embedded .activity-log-content {
+    padding: var(--space-md) var(--space-lg);
+  }
+
+  .activity-log-modal--embedded .activity-log-entry-header {
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  .activity-log-modal--embedded .activity-log-entry-details {
+    flex-wrap: wrap;
+    word-break: break-word;
+  }
+
+  .activity-log-modal--embedded .activity-log-entry-text {
+    word-break: break-word;
+  }
 }
 
 /*
@@ -1976,62 +2049,115 @@ The embedded host fills its right-dock container; the inner shell drops overlay-
 }
 
 /*
-FNXC:GitManager 2026-06-22-00:25:
-The embedded Git Manager adapts to its container width, not the viewport, so the SAME embedded render works in both the narrow right dock and the wide pop-out (expand) modal:
-- Wide container (expand modal): inherits the default desktop layout — vertical section sidebar + content (two-pane, like before).
-- Narrow container (dock, < 560px): section tabs become a horizontal strip above a full-width content pane, and each tab is compact (min-width:0, tight padding, inline icon+label) so MORE tabs fit in the strip at once. The content collapses to a single column.
+FNXC:GitManager 2026-06-22-17:30:
+The embedded Git Manager adapts to its CONTAINER width, not the viewport, so the SAME embedded render works in both the narrow right dock and the wide pop-out (expand) modal:
+- Wide container (expand modal, > 560px): inherits the default desktop layout — vertical section sidebar + content (two-pane, like before). Those default rules live OUTSIDE this container query and are untouched.
+- Narrow container (dock, <= 560px): MIRRORS the phone-width (@media max-width:768px) gm layout exactly. Section tabs become a horizontal strip with ICON + TEXT LABEL per tab (the mobile .gm-nav-item: column, icon over label, comfortable padding), and every section (status grid, create form, branches, stashes, changes/files split, and the REMOTES view) collapses to its mobile single-column form. The remotes view is CSS-only (no JS width gating in GitManagerModal.tsx), so mirroring the @media remotes rules here gives the dock the mobile remotes selector strip + stacked detail.
+The previous bespoke rules here hid the tab labels (icon-only) and used a cramped strip; the user wants labeled tabs, more spacing, and the mobile remotes layout, so we now mirror the @media gm INTERNAL rules verbatim under the .gm-modal--embedded prefix. Only the viewport-takeover (.modal.gm-modal 100vw/100dvh) rules are NOT mirrored — they are scoped to :not(.gm-modal--embedded) and must never apply to the embedded pane.
 */
 @container gm-embedded (max-width: 560px) {
+  .gm-modal--embedded .gm-changes-split {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-modal--embedded .gm-changes-lists {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gm-modal--embedded .gm-file-section {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gm-modal--embedded .gm-file-section-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-file-section-header h5 {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .gm-modal--embedded .gm-file-section-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .gm-modal--embedded .gm-file-section-actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .gm-modal--embedded .gm-file-item {
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .gm-modal--embedded .gm-file-checkbox,
+  .gm-modal--embedded .gm-file-icon,
+  .gm-modal--embedded .gm-file-badge,
+  .gm-modal--embedded .gm-file-item .gm-icon-btn {
+    flex: 0 0 auto;
+  }
+
+  .gm-modal--embedded .gm-file-name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* ── Section tabs: mobile horizontal strip with icon + TEXT LABEL ── */
   .gm-modal--embedded .gm-layout {
     flex-direction: column;
   }
 
-  /*
-  FNXC:GitManager 2026-06-22-01:35:
-  In the narrow dock the section tabs are ICON-ONLY (the label is visually hidden but kept for screen readers; the button title/aria-label provides a tooltip). This makes each tab a compact icon-sized square so many tabs are visible horizontally at once. The strip is a single short row.
-  */
   .gm-modal--embedded .gm-sidebar {
     flex: 0 0 auto;
     flex-direction: row;
     width: 100%;
     min-width: 0;
-    min-height: 0;
+    min-height: calc(var(--space-2xl) + var(--space-md));
     border-right: none;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     overflow-y: hidden;
-    padding: calc(var(--space-xs) / 2);
-    gap: calc(var(--space-xs) / 2);
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    padding: var(--space-xs) var(--space-sm);
+    gap: var(--space-xs);
   }
 
   .gm-modal--embedded .gm-nav-item {
-    /* width:auto resets the base .gm-nav-item width:100% which otherwise made each tab span the whole strip (one wide tab at a time). */
     flex: 0 0 auto;
-    width: auto;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    padding: var(--space-xs);
+    flex-direction: column;
+    gap: calc(var(--space-xs) / 2);
+    padding: var(--space-xs) var(--space-sm);
     border-left: none;
     border-bottom: 2px solid transparent;
-    min-width: 0;
-  }
-
-  .gm-modal--embedded .gm-nav-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+    font-size: var(--font-size-xs);
+    min-width: calc(var(--space-2xl) + var(--space-xl));
+    min-height: calc(var(--space-xl) + var(--space-sm));
+    text-align: center;
+    justify-content: center;
   }
 
   .gm-modal--embedded .gm-nav-item.active {
     border-left-color: transparent;
     border-bottom-color: var(--todo);
+  }
+
+  .gm-modal--embedded .gm-content {
+    min-height: 200px;
+    padding: var(--space-md);
+  }
+
+  .gm-modal--embedded .gm-search-box input {
+    font-size: 16px;
   }
 
   .gm-modal--embedded .gm-status-grid {
@@ -2040,6 +2166,109 @@ The embedded Git Manager adapts to its container width, not the viewport, so the
 
   .gm-modal--embedded .gm-create-form {
     flex-wrap: wrap;
+  }
+
+  .gm-modal--embedded .gm-create-form input,
+  .gm-modal--embedded .gm-create-form select {
+    flex: 1 1 100%;
+    font-size: 16px;
+  }
+
+  .gm-modal--embedded .gm-branch-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-stash-header {
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-stash-actions {
+    width: 100%;
+  }
+
+  .gm-modal--embedded .gm-remote-actions {
+    flex-wrap: wrap;
+  }
+
+  .gm-modal--embedded .gm-pull-split {
+    flex: 1 1 100%;
+  }
+
+  .gm-modal--embedded .gm-pull-split-toggle {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .gm-modal--embedded .gm-pull-menu {
+    left: 0;
+    right: auto;
+    min-width: 100%;
+  }
+
+  /* ── Remotes view: mobile single-column (selector strip + stacked detail) ── */
+  .gm-modal--embedded .gm-remotes-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gm-modal--embedded .gm-remote-selector {
+    width: 100%;
+    min-width: 0;
+    border-right: 1px solid var(--border);
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-remote-selector-header {
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding: 0 var(--space-xs) 0 0;
+  }
+
+  .gm-modal--embedded .gm-remote-selector-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-xs);
+    min-width: 120px;
+    flex-shrink: 0;
+  }
+
+  .gm-modal--embedded .gm-remote-selector-name {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .gm-modal--embedded .gm-remote-detail {
+    min-height: 200px;
+    padding-right: 0;
+  }
+
+  .gm-modal--embedded .gm-remote-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .gm-modal--embedded .gm-remote-form .gm-input,
+  .gm-modal--embedded .gm-remote-form .gm-input-url {
+    width: 100%;
+    min-width: unset;
+  }
+
+  .gm-modal--embedded .gm-remote-detail-url-row {
+    flex-wrap: wrap;
+  }
+
+  .gm-modal--embedded .gm-remote-inline-actions {
+    margin-left: auto;
+  }
+
+  .gm-modal--embedded .gm-commit-form .gm-commit-actions {
+    flex-direction: column;
   }
 }
 

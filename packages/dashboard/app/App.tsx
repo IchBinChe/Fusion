@@ -1029,6 +1029,8 @@ function AppInner() {
   const nodesEnabled = experimentalFeatures.nodesView === true;
   const researchEnabled = experimentalFeatures.researchView === true;
   const evalsEnabled = experimentalFeatures.evalsView === true;
+  /* FNXC:QuickAddSubtaskFlag 2026-06-21-00:00: Missing or false `subtaskBreakdown` settings must hide the AI Subtask quick-add handoff across List, Board, and New Task Modal surfaces; only an explicit true wires the callback. */
+  const subtaskBreakdownEnabled = experimentalFeatures.subtaskBreakdown === true;
   /*
   FNXC:Navigation 2026-06-19-00:00:
   Experimental left sidebar navigation replaces the Header view shortcuts with a persistent sidebar on non-mobile project screens, while mobile continues to use the bottom navigation bar as the only primary navigation surface.
@@ -1861,7 +1863,7 @@ function AppInner() {
             onQuickCreate={handleBoardQuickCreate}
             onNewTask={openNewTaskWithNav}
             onPlanningMode={openPlanningWithInitialPlanWithNav}
-            onSubtaskBreakdown={openSubtaskBreakdownWithNav}
+            onSubtaskBreakdown={subtaskBreakdownEnabled ? openSubtaskBreakdownWithNav : undefined}
             autoMerge={autoMerge}
             onToggleAutoMerge={toggleAutoMerge}
             globalPaused={globalPaused}
@@ -1915,7 +1917,7 @@ function AppInner() {
           onNewTask={openNewTaskWithNav}
           onQuickCreate={handleBoardQuickCreate}
           onPlanningMode={openPlanningWithInitialPlanWithNav}
-          onSubtaskBreakdown={openSubtaskBreakdownWithNav}
+          onSubtaskBreakdown={subtaskBreakdownEnabled ? openSubtaskBreakdownWithNav : undefined}
           availableModels={availableModels}
           favoriteProviders={favoriteProviders}
           favoriteModels={favoriteModels}
@@ -2273,7 +2275,7 @@ function AppInner() {
           handleGitHubImport,
         }}
         onPlanningMode={openPlanningWithInitialPlanWithNav}
-        onSubtaskBreakdown={openSubtaskBreakdownWithNav}
+        onSubtaskBreakdown={subtaskBreakdownEnabled ? openSubtaskBreakdownWithNav : undefined}
         taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, retryTask, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}
         settings={{ prAuthAvailable, autoMerge, themeMode, colorTheme, dashboardFontScalePct, shadcnCustomColors, resolvedThemeMode, setThemeMode, setColorTheme, setDashboardFontScalePct, setShadcnCustomColors }}

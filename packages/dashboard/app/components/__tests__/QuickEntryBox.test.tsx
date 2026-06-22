@@ -242,6 +242,7 @@ function renderQuickEntryBox(props = {}, { startExpanded = false } = {}) {
     tasks: mockTasks,
     availableModels: MOCK_MODELS,
     projectId: TEST_PROJECT_ID,
+    onSubtaskBreakdown: vi.fn(),
   };
   const result = render(<QuickEntryBox {...defaultProps} {...props} />);
   return { ...result, props: { ...defaultProps, ...props } };
@@ -3346,6 +3347,17 @@ describe("QuickEntryBox", () => {
       const actionsContainer = screen.getByTestId("quick-entry-actions");
       expect(actionsContainer.contains(screen.getByTestId("plan-button"))).toBe(true);
       expect(actionsContainer.contains(screen.getByTestId("subtask-button"))).toBe(true);
+      expect(actionsContainer.contains(screen.getByTestId("refine-button"))).toBe(true);
+    });
+
+    it("hides the Subtask quick-add action without leaving an action-row shell when the callback is omitted", () => {
+      renderQuickEntryBox({ onSubtaskBreakdown: undefined });
+      expandQuickEntry();
+
+      const actionsContainer = screen.getByTestId("quick-entry-actions");
+      expect(screen.queryByTestId("subtask-button")).not.toBeInTheDocument();
+      expect(screen.queryByTitle("Break down into AI-generated subtasks")).not.toBeInTheDocument();
+      expect(actionsContainer.contains(screen.getByTestId("plan-button"))).toBe(true);
       expect(actionsContainer.contains(screen.getByTestId("refine-button"))).toBe(true);
     });
 

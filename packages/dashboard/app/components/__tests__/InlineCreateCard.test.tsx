@@ -197,6 +197,7 @@ function renderCard(
     addToast: vi.fn(),
     availableModels: MOCK_MODELS,
     projectId: TEST_PROJECT_ID,
+    onSubtaskBreakdown: vi.fn(),
     ...overrides,
   };
   const result = render(<InlineCreateCard {...props} />);
@@ -857,6 +858,18 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
 
     expect(onSubtaskBreakdown).toHaveBeenCalledWith("Break this down");
     expect((textarea as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("hides the Subtask quick-add action without leaving an inline controls shell when the callback is omitted", () => {
+    renderCard([], { onSubtaskBreakdown: undefined });
+    expandCard();
+
+    const controlsRow = document.querySelector(".inline-create-controls") as HTMLElement;
+    expect(controlsRow).toBeTruthy();
+    expect(screen.queryByTestId("subtask-button")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Break down into AI-generated subtasks")).not.toBeInTheDocument();
+    expect(controlsRow.contains(screen.getByTestId("plan-button"))).toBe(true);
+    expect(controlsRow.querySelector(".dep-trigger")).toBeTruthy();
   });
 
   it("shows toast when Plan clicked with empty description (via direct handler call)", () => {

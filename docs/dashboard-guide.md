@@ -259,7 +259,7 @@ Rules:
 - `Merge target / base branch` stays optional for all modes and uses the same branch-dropdown + `Custom…` fallback behavior as Planning Mode.
 - In **More options → Model Configuration**, **Auto-merge** is a per-task override with three states: **Default** (follow project setting), **Enabled**, or **Disabled**.
 
-The dialog also exposes the board quick-add AI handoffs: **Plan** opens Planning Mode with the current description, and **Subtask** opens Subtask Breakdown with the current description. Both buttons remain disabled until the description has content, matching the quick-add row behavior.
+The dialog also exposes the board quick-add AI handoffs: **Plan** opens Planning Mode with the current description, and **Subtask** opens Subtask Breakdown with the current description when **Settings → Experimental Features → Subtask Breakdown** is enabled. The Subtask handoff is hidden by default; visible handoff buttons remain disabled until the description has content, matching the quick-add row behavior.
 
 ## Chat View
 

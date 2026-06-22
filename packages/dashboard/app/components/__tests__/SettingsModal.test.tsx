@@ -3777,6 +3777,7 @@ describe("SettingsModal", () => {
       for (const featureLabel of [
         "Research View",
         "Evals View",
+        "Subtask Breakdown",
         "Chat Rooms",
         "Sandbox (command isolation)",
         "Planning-style Agent Onboarding",
@@ -3786,6 +3787,18 @@ describe("SettingsModal", () => {
 
       // Dev Server has a single canonical toggle (no legacy duplicate).
       expect(screen.getAllByLabelText("Dev Server")).toHaveLength(1);
+    });
+
+    it("shows the Subtask Breakdown toggle as off when the setting is missing", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: {},
+      });
+
+      renderModal();
+      await openExperimentalFeaturesSection();
+
+      expect(screen.getByLabelText("Subtask Breakdown")).not.toBeChecked();
     });
 
     it("does not render duplicate Dev Server rows when legacy and canonical keys are both present", async () => {

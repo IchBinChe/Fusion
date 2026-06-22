@@ -1144,9 +1144,16 @@ body. Let the content take its full intrinsic height and hand vertical scrolling
     flex: 1 1 auto;
   }
 
-  /* Side-by-side again: bound the list pane to a share of the CONTAINER width, overriding the inline viewport width. */
+  /*
+  FNXC:GitHubImport 2026-06-23-00:30:
+  Wide (two-pane) embedded layout: the list pane must honor the user's inline `flex: 0 0 <listPaneWidth>px` from the resize
+  handle — the prior `flex: ... !important` clamp silently overrode it, which is why the embedded Import Tasks list "couldn't
+  be made smaller" and the preview stayed cramped. Reset only the stacked-mode overrides (width/max-height/padding) here and let
+  the inline flex win. The preview pane is `flex: 1 1 auto; min-width: 0` (below) so the freed width flows to the preview.
+  */
   .github-import-modal--embedded .github-import-list-pane {
-    flex: 0 1 clamp(240px, 38cqi, 420px) !important;
+    /* `!important` here only neutralizes the stacked rule's own `!important`; the width comes from the inline CSS var. */
+    flex: 0 0 var(--gh-import-list-width, clamp(160px, 30cqi, 480px)) !important;
     width: auto;
     max-height: none;
     padding-right: var(--space-md);

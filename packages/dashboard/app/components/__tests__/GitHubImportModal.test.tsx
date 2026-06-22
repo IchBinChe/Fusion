@@ -1083,20 +1083,29 @@ describe("GitHubImportModal", () => {
       fireEvent.pointerUp(document, { pointerId: 1, clientX: endX });
     };
 
+    /*
+     * FNXC:GitHubImport 2026-06-23-00:30:
+     * The list pane defaults narrow (256px) and clamps to [160px, 480px] (the absolute cap; a 50%-of-container cap also
+     * applies once the workspace is measured, which jsdom reports as 0 so the absolute cap governs here). Width persists
+     * per-project via projectStorage under the unscoped key `kb-dashboard-github-import-list-width` (no projectId in tests).
+     * Pointer drags map absolute pointer X to the list width relative to the workspace left edge (jsdom rect is all-zeros).
+     */
+    const LIST_WIDTH_KEY = "kb-dashboard-github-import-list-width";
+
     beforeEach(() => {
-      window.localStorage.removeItem("fusion:github-import-list-pane-width");
+      window.localStorage.removeItem(LIST_WIDTH_KEY);
       setViewportWidth(1200);
     });
 
     afterEach(() => {
-      window.localStorage.removeItem("fusion:github-import-list-pane-width");
+      window.localStorage.removeItem(LIST_WIDTH_KEY);
       setViewportWidth(originalInnerWidth);
     });
 
     it("renders handle only in the side-by-side two-pane band", async () => {
       await renderWithIssues();
       expect(screen.getByTestId("github-import-resize-handle")).toBeTruthy();
-      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 360px");
+      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 256px");
 
       setViewportWidth(800);
 
@@ -1118,41 +1127,54 @@ describe("GitHubImportModal", () => {
       const handle = screen.getByTestId("github-import-resize-handle");
       const listPane = screen.getByTestId("github-import-list-pane");
 
-      dragHandle(handle, 100, 160);
-      expect(handle.getAttribute("aria-valuenow")).toBe("420");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 420px");
+      // jsdom workspace rect is all-zeros, so the pane width equals the clamped absolute pointer X.
+      dragHandle(handle, 256, 300);
+      expect(handle.getAttribute("aria-valuenow")).toBe("300");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 300px");
 
-      dragHandle(handle, 160, 120);
-      expect(handle.getAttribute("aria-valuenow")).toBe("380");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 380px");
+      dragHandle(handle, 300, 200);
+      expect(handle.getAttribute("aria-valuenow")).toBe("200");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 200px");
 
-      dragHandle(handle, 120, -200);
-      expect(handle.getAttribute("aria-valuenow")).toBe("240");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 240px");
+      // Below the 160px minimum clamps up.
+      dragHandle(handle, 200, 40);
+      expect(handle.getAttribute("aria-valuenow")).toBe("160");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 160px");
 
-      dragHandle(handle, -200, 700);
-      expect(handle.getAttribute("aria-valuenow")).toBe("640");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 640px");
+      // Above the 480px maximum clamps down.
+      dragHandle(handle, 40, 900);
+      expect(handle.getAttribute("aria-valuenow")).toBe("480");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 480px");
+    });
+
+    it("exposes the resize width as an inline CSS var for the embedded container query", async () => {
+      await renderWithIssues();
+      const listPane = screen.getByTestId("github-import-list-pane");
+      expect(listPane.getAttribute("style")).toContain("--gh-import-list-width: 256px");
+
+      const handle = screen.getByTestId("github-import-resize-handle");
+      dragHandle(handle, 256, 320);
+      expect(listPane.getAttribute("style")).toContain("--gh-import-list-width: 320px");
     });
 
     it("renders the desktop handle regardless of list content or active tab", async () => {
       const mounted = await renderWithEmptyIssues();
       expect(screen.getByTestId("github-import-resize-handle")).toBeTruthy();
-      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 360px");
+      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 256px");
       mounted.unmount();
 
       vi.clearAllMocks();
-      window.localStorage.removeItem("fusion:github-import-list-pane-width");
+      window.localStorage.removeItem(LIST_WIDTH_KEY);
       setViewportWidth(1200);
 
       await renderWithPulls();
       expect(screen.getByTestId("github-import-resize-handle")).toBeTruthy();
-      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 360px");
+      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 256px");
     });
     it.each([
-      [{ key: "ArrowRight" }, 370],
-      [{ key: "ArrowLeft" }, 350],
-      [{ key: "ArrowRight", shiftKey: true }, 410],
+      [{ key: "ArrowRight" }, 272],
+      [{ key: "ArrowLeft" }, 240],
+      [{ key: "ArrowRight", shiftKey: true }, 320],
     ])("handles keyboard nudge %#", async (eventInit, expected) => {
       await renderWithIssues();
       const handle = screen.getByTestId("github-import-resize-handle");
@@ -1167,10 +1189,10 @@ describe("GitHubImportModal", () => {
       const handle = screen.getByTestId("github-import-resize-handle");
 
       fireEvent.keyDown(handle, { key: "Home" });
-      expect(handle.getAttribute("aria-valuenow")).toBe("240");
+      expect(handle.getAttribute("aria-valuenow")).toBe("160");
 
       fireEvent.keyDown(handle, { key: "End" });
-      expect(handle.getAttribute("aria-valuenow")).toBe("640");
+      expect(handle.getAttribute("aria-valuenow")).toBe("480");
     });
 
     it("clamps keyboard resizing to min and max bounds", async () => {
@@ -1180,12 +1202,12 @@ describe("GitHubImportModal", () => {
       for (let i = 0; i < 30; i += 1) {
         fireEvent.keyDown(handle, { key: "ArrowLeft" });
       }
-      expect(handle.getAttribute("aria-valuenow")).toBe("240");
+      expect(handle.getAttribute("aria-valuenow")).toBe("160");
 
       for (let i = 0; i < 60; i += 1) {
         fireEvent.keyDown(handle, { key: "ArrowRight" });
       }
-      expect(handle.getAttribute("aria-valuenow")).toBe("640");
+      expect(handle.getAttribute("aria-valuenow")).toBe("480");
     });
 
     it("persists width across remounts", async () => {
@@ -1193,20 +1215,29 @@ describe("GitHubImportModal", () => {
       let handle = screen.getByTestId("github-import-resize-handle");
 
       fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
-      expect(handle.getAttribute("aria-valuenow")).toBe("410");
+      expect(handle.getAttribute("aria-valuenow")).toBe("320");
+      // Persisted under the projectStorage key (unscoped without a projectId).
+      expect(window.localStorage.getItem(LIST_WIDTH_KEY)).toBe("320");
 
       mounted.unmount();
 
       await renderWithIssues();
       handle = await screen.findByTestId("github-import-resize-handle");
-      expect(handle.getAttribute("aria-valuenow")).toBe("410");
+      expect(handle.getAttribute("aria-valuenow")).toBe("320");
+    });
+
+    it("clamps an out-of-range stored width back into bounds on mount", async () => {
+      window.localStorage.setItem(LIST_WIDTH_KEY, "9000");
+      await renderWithIssues();
+      // Stored value above the 480px max is clamped down on read.
+      expect(screen.getByTestId("github-import-resize-handle").getAttribute("aria-valuenow")).toBe("480");
     });
 
     it("falls back to default width for invalid stored values", async () => {
-      window.localStorage.setItem("fusion:github-import-list-pane-width", "not-a-number");
+      window.localStorage.setItem(LIST_WIDTH_KEY, "not-a-number");
       await renderWithIssues();
 
-      expect(screen.getByTestId("github-import-resize-handle").getAttribute("aria-valuenow")).toBe("360");
+      expect(screen.getByTestId("github-import-resize-handle").getAttribute("aria-valuenow")).toBe("256");
     });
   });
 

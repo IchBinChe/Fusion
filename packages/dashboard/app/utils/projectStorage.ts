@@ -18,6 +18,7 @@ export const PROJECT_STORAGE_KEYS: string[] = [
   "kb-dashboard-list-sidebar-width",
   "kb-dashboard-mailbox-sidebar-width",
   "kb-dashboard-agents-sidebar-width",
+  "kb-dashboard-github-import-list-width",
   "kb-quick-entry-text",
   "kb-inline-create-text",
   "fn-agent-view",

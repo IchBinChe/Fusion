@@ -1,5 +1,5 @@
 import "./GitHubImportModal.css";
-import { useState, useEffect, useCallback, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useCallback, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -20,6 +20,7 @@ import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
+import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 
 interface GitHubImportModalProps {
   isOpen: boolean;
@@ -38,15 +39,32 @@ interface GitHubImportModalProps {
 // Mobile and two-pane breakpoints in pixels
 const MOBILE_BREAKPOINT = 640;
 const TWO_PANE_BREAKPOINT = 860;
-const GITHUB_IMPORT_LIST_PANE_MIN_WIDTH = 240;
-const GITHUB_IMPORT_LIST_PANE_MAX_WIDTH = 640;
-const GITHUB_IMPORT_LIST_PANE_DEFAULT_WIDTH = 360;
-const GITHUB_IMPORT_LIST_PANE_STORAGE_KEY = "fusion:github-import-list-pane-width";
+/*
+FNXC:GitHubImport 2026-06-23-00:30:
+The Import Tasks two-pane split (Issues AND Pull Requests share the same workspace/list/preview structure) must let the user
+shrink the LEFT list far below its old fixed share so the RIGHT preview gets the freed space. Default the list narrow (256px),
+clamp to [160px, min(480px, 50% of container)] so the preview always keeps at least half. Width is user-resizable via a drag
+handle and persisted per-project through projectStorage (key `kb-dashboard-github-import-list-width`) so each repo context keeps
+its own split. The freed width flows to the preview because the preview is `flex: 1 1 auto; min-width: 0` (fills remainder).
+*/
+const GITHUB_IMPORT_LIST_PANE_MIN_WIDTH = 160;
+const GITHUB_IMPORT_LIST_PANE_MAX_WIDTH = 480;
+const GITHUB_IMPORT_LIST_PANE_MAX_RATIO = 0.5;
+const GITHUB_IMPORT_LIST_PANE_DEFAULT_WIDTH = 256;
+const GITHUB_IMPORT_LIST_PANE_KEYBOARD_STEP = 16;
+const GITHUB_IMPORT_LIST_WIDTH_STORAGE_KEY = "kb-dashboard-github-import-list-width";
 
 type TabType = "issues" | "pulls";
 
-function clampListPaneWidth(width: number) {
-  return Math.max(GITHUB_IMPORT_LIST_PANE_MIN_WIDTH, Math.min(GITHUB_IMPORT_LIST_PANE_MAX_WIDTH, width));
+/**
+ * Clamp the list-pane width to [MIN, min(MAX, container * MAX_RATIO)].
+ * The container-relative cap guarantees the preview pane keeps at least half the workspace even on narrow screens.
+ * `containerWidth <= 0` (e.g. unmeasured/test) falls back to the absolute MAX so the static bound still applies.
+ */
+function clampListPaneWidth(width: number, containerWidth = 0) {
+  const ratioMax = containerWidth > 0 ? containerWidth * GITHUB_IMPORT_LIST_PANE_MAX_RATIO : Number.POSITIVE_INFINITY;
+  const maxWidth = Math.min(GITHUB_IMPORT_LIST_PANE_MAX_WIDTH, ratioMax);
+  return Math.max(GITHUB_IMPORT_LIST_PANE_MIN_WIDTH, Math.min(maxWidth, width));
 }
 
 /*
@@ -95,13 +113,15 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const [isMobile, setIsMobile] = useState(false);
   const [canResizePanes, setCanResizePanes] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "preview">("list");
+  // Workspace flex-row container; used to measure available width for the container-relative resize clamp.
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  // Parks the active drag teardown (release capture + remove listeners) so it runs once on pointerup/cancel/unmount.
+  const listResizeTeardownRef = useRef<(() => void) | null>(null);
+  // rAF handle so pointermove width updates are batched to one state write per frame.
+  const listResizeFrameRef = useRef<number | null>(null);
   const [listPaneWidth, setListPaneWidth] = useState(() => {
-    if (typeof window === "undefined") {
-      return GITHUB_IMPORT_LIST_PANE_DEFAULT_WIDTH;
-    }
-
     try {
-      const stored = window.localStorage.getItem(GITHUB_IMPORT_LIST_PANE_STORAGE_KEY);
+      const stored = getScopedItem(GITHUB_IMPORT_LIST_WIDTH_STORAGE_KEY, projectId);
       if (!stored) {
         return GITHUB_IMPORT_LIST_PANE_DEFAULT_WIDTH;
       }
@@ -328,60 +348,119 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
     return () => window.removeEventListener("resize", checkViewportBands);
   }, [isOpen]);
 
+  // Persist the (already clamped) width per-project; best-effort, scoped so each repo context keeps its own split.
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
     try {
-      window.localStorage.setItem(GITHUB_IMPORT_LIST_PANE_STORAGE_KEY, String(listPaneWidth));
+      setScopedItem(GITHUB_IMPORT_LIST_WIDTH_STORAGE_KEY, String(listPaneWidth), projectId);
     } catch {
       // Ignore storage write failures.
     }
-  }, [listPaneWidth]);
+  }, [listPaneWidth, projectId]);
 
+  /*
+  FNXC:GitHubImport 2026-06-23-00:30:
+  Mirror the proven MailboxView split drag. Pointer events + setPointerCapture keep the drag tracking even when the cursor
+  leaves the thin handle. Each move maps the pointer X to a list-pane width relative to the workspace's left edge, clamped to
+  [MIN, min(MAX, container * MAX_RATIO)] so the preview keeps at least half. Updates are rAF-batched (one state write per
+  frame). The teardown (release capture + remove listeners + cancel frame) runs once on pointerup/pointercancel and is parked
+  in listResizeTeardownRef for unmount safety. Resize only applies in the wide two-pane band (canResizePanes).
+  */
   const handleListPaneResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!canResizePanes) {
       return;
     }
+    event.preventDefault();
 
+    listResizeTeardownRef.current?.();
+
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const workspaceRect = workspaceRef.current?.getBoundingClientRect();
+    // Fall back to pointer-relative delta math when the workspace is unmeasured (e.g. jsdom layout-less tests).
     const startX = event.clientX;
     const startWidth = listPaneWidth;
-    const target = event.currentTarget;
-    target.setPointerCapture(event.pointerId);
 
-    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      setListPaneWidth(clampListPaneWidth(startWidth + deltaX));
+    // Latest pointer X awaiting a frame; flushed on the next rAF or synchronously at teardown so the final drag position is never dropped.
+    let pendingClientX: number | null = null;
+
+    const applyWidth = (clientX: number) => {
+      const containerWidth = workspaceRect?.width ?? 0;
+      const proposed = workspaceRect ? clientX - workspaceRect.left : startWidth + (clientX - startX);
+      setListPaneWidth(clampListPaneWidth(proposed, containerWidth));
     };
 
-    const handlePointerUp = () => {
-      document.removeEventListener("pointermove", handlePointerMove);
-      document.removeEventListener("pointerup", handlePointerUp);
-      if (target.hasPointerCapture(event.pointerId)) {
-        target.releasePointerCapture(event.pointerId);
+    const flushPending = () => {
+      listResizeFrameRef.current = null;
+      if (pendingClientX !== null) {
+        const clientX = pendingClientX;
+        pendingClientX = null;
+        applyWidth(clientX);
       }
     };
 
-    document.addEventListener("pointermove", handlePointerMove);
-    document.addEventListener("pointerup", handlePointerUp);
+    const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      pendingClientX = moveEvent.clientX;
+      if (listResizeFrameRef.current !== null) return;
+      const schedule = typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+        ? window.requestAnimationFrame
+        : (cb: FrameRequestCallback) => { cb(0); return 0; };
+      listResizeFrameRef.current = schedule(flushPending);
+    };
+
+    const teardown = () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", teardown);
+      document.removeEventListener("pointercancel", teardown);
+      if (listResizeFrameRef.current !== null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(listResizeFrameRef.current);
+        listResizeFrameRef.current = null;
+      }
+      // Apply any width queued for a frame that never fired so the final drag position sticks (and tests stay deterministic).
+      flushPending();
+      try {
+        handle.releasePointerCapture(pointerId);
+      } catch {
+        // Pointer capture may already be released; ignore.
+      }
+      listResizeTeardownRef.current = null;
+    };
+
+    listResizeTeardownRef.current = teardown;
+
+    try {
+      handle.setPointerCapture(pointerId);
+    } catch {
+      // setPointerCapture can throw in non-DOM test environments; drag still works via listeners.
+    }
+    // Listen on document so the drag keeps tracking even when the pointer leaves the thin handle.
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", teardown);
+    document.addEventListener("pointercancel", teardown);
   }, [canResizePanes, listPaneWidth]);
+
+  // Detach any in-flight drag on unmount.
+  useEffect(() => () => {
+    listResizeTeardownRef.current?.();
+  }, []);
 
   const handleListPaneResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!canResizePanes) {
       return;
     }
 
-    const step = event.shiftKey ? 50 : 10;
+    const containerWidth = workspaceRef.current?.clientWidth ?? 0;
+    const step = event.shiftKey ? GITHUB_IMPORT_LIST_PANE_KEYBOARD_STEP * 4 : GITHUB_IMPORT_LIST_PANE_KEYBOARD_STEP;
 
     if (event.key === "ArrowLeft") {
       event.preventDefault();
-      setListPaneWidth((current) => clampListPaneWidth(current - step));
+      setListPaneWidth((current) => clampListPaneWidth(current - step, containerWidth));
       return;
     }
 
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      setListPaneWidth((current) => clampListPaneWidth(current + step));
+      setListPaneWidth((current) => clampListPaneWidth(current + step, containerWidth));
       return;
     }
 
@@ -393,7 +472,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
 
     if (event.key === "End") {
       event.preventDefault();
-      setListPaneWidth(GITHUB_IMPORT_LIST_PANE_MAX_WIDTH);
+      setListPaneWidth(clampListPaneWidth(GITHUB_IMPORT_LIST_PANE_MAX_WIDTH, containerWidth));
     }
   }, [canResizePanes]);
 
@@ -662,11 +741,20 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
           )}
 
           {/* Two-pane workspace */}
-          <div className="github-import-workspace">
+          <div className="github-import-workspace" ref={workspaceRef}>
             {/* Left pane: Issue/PR list */}
             <section
               className={`github-import-list-pane ${isMobile ? 'mobile' : ''} ${mobileView === 'list' ? 'active' : ''}`}
-              style={canResizePanes ? { flex: `0 0 ${listPaneWidth}px` } : undefined}
+              /*
+              FNXC:GitHubImport 2026-06-23-00:30:
+              Drive the wide two-pane width from a CSS var so the embedded layout's container query can apply it with the
+              precedence it needs (`flex-basis: var(--gh-import-list-width) !important`) WITHOUT the stacked/narrow rule's
+              own `!important` reset stomping it. `flex` is also set inline for the non-embedded (dialog) presentation, which
+              has no competing `!important`. Both surfaces (Issues + Pull Requests) share this single list pane.
+              */
+              style={canResizePanes
+                ? ({ flex: `0 0 ${listPaneWidth}px`, ["--gh-import-list-width" as string]: `${listPaneWidth}px` } as CSSProperties)
+                : undefined}
               data-testid="github-import-list-pane"
               aria-labelledby="github-import-results-heading"
             >
@@ -806,7 +894,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
 
             {canResizePanes && (
               <div
-                className="github-import-workspace__resize-handle"
+                className="github-import-workspace__resize-handle github-import-resize-handle"
                 role="separator"
                 aria-orientation="vertical"
                 aria-label={t("git.resizeIssuesList", "Resize issues list")}

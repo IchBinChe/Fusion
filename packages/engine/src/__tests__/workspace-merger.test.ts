@@ -10,11 +10,14 @@ injected (deps) so NO real AI calls happen and the squash is produced by a plain
 
 Coverage (FN-5893 surfaces):
 - happy: two acquired repos both clean → BOTH local integration refs advance against
-  each repo's own resolved branch; NO remote ref/push happened; result tags both.
+  each repo's own resolved branch; NO remote ref/push happened; result tags both. Since
+  Phase C U2, a fully-landed workspace task also finalizes ONCE (moves done, emits
+  task:merged) — asserted here; the landed-predicate/finalize-once/retry mechanics have
+  dedicated coverage in workspace-merger-idempotency.test.ts.
 - per-repo resolution: repos with DIFFERENT origin/HEAD integration branches → each
   lands on its own (override-stripping works, not a shared branch).
 - partial: a conflict in repo B → repo A lands (landedSha recorded); B reports the
-  failure; the task is NOT moved done (no finalizeTask call).
+  failure; the task is NOT moved done (no finalizeTask call) — the partial-land retry is U2.
 - defense-in-depth: store.mergeTask / aiMergeTask with a workspace task → still throw
   WorkspaceTaskMergeError.
 The single-repo runAiMerge regression lives in the existing merger-ai*.test.ts (the
@@ -187,9 +190,9 @@ describeIfGit("landWorkspaceTask — per-repo merge loop (Phase C U1)", () => {
       expect(remoteRefs).toBe("");
     }
 
-    // U1 does NOT move the task to done.
-    expect(store.moveTaskCalls).toHaveLength(0);
-    expect(store.emitted.some((e) => e.event === "task:merged")).toBe(false);
+    // U2 finalize-once: every repo landed → the task moves to done exactly once.
+    expect(store.moveTaskCalls).toEqual([{ id: TASK_ID, column: "done" }]);
+    expect(store.emitted.filter((e) => e.event === "task:merged")).toHaveLength(1);
   });
 
   it("per-repo resolution: each repo lands on its OWN origin/HEAD branch (override-stripping)", async () => {

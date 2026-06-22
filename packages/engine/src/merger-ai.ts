@@ -1341,6 +1341,13 @@ export interface WorkspaceRepoLandResult {
   localSync?: LocalSyncOutcome;
   /** Failure message when `status === "failed"`. */
   error?: string;
+  /**
+   * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+   * True when this repo was SKIPPED by the landed predicate on a retry (its recorded
+   * `landedSha` is already an ancestor of the integration tip) — its ref was NOT
+   * re-advanced this run.
+   */
+  alreadyLanded?: boolean;
 }
 
 /** Aggregated result of a workspace task's per-repo merge loop. */
@@ -1349,6 +1356,12 @@ export interface WorkspaceMergeResult {
   repos: WorkspaceRepoLandResult[];
   /** True iff every acquired sub-repo landed (or was empty) with no failure. */
   allLanded: boolean;
+  /**
+   * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+   * True iff the finalize-once move-to-done ran this call (only when `allLanded`).
+   * False on a partial land (the task stays put for the engine dispatch's auto-retry).
+   */
+  finalized: boolean;
 }
 
 /*
@@ -1366,10 +1379,30 @@ undefined — so each sub-repo falls through to its own origin/HEAD rather than 
 workspace branch.
 
 U1 scope: on a repo failure we stop the loop and return a PARTIAL result (repo A may
-have landed; B reports the failure). The landed-state predicate + idempotent retry and
-the finalize-task-ONCE move-to-done are U2 — `landWorkspaceTask` here deliberately does
-NOT call finalizeMerged/finalizeTask or move the task. Routing the engine + CLI doors
-to this loop is KTD2.
+have landed; B reports the failure). Routing the engine + CLI doors to this loop is KTD2.
+
+FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+U2 adds per-repo landed tracking + finalize-once + idempotent retry on top of U1's loop:
+
+  - Landed predicate + skip: before landing a repo, we skip it iff its `landedSha` is
+    recorded AND that sha is an ancestor of (or equals) the repo's CURRENT integration
+    tip. A skipped repo's ref is NEVER re-advanced, so re-running `landWorkspaceTask`
+    after a partial land (A landed, B failed) re-attempts ONLY B — A is idempotent.
+  - landedSha persistence: after a repo lands, we record `workspaceWorktrees[repo].landedSha`
+    = the advanced integration tip via a FRESH-read-then-merge `store.updateTask` (re-read
+    the latest task and merge only this repo's entry, so concurrent sibling-entry writes
+    are not clobbered — the Phase A/B per-repo persistence pattern).
+  - finalize-once: the task moves to `done` EXACTLY ONCE, only after EVERY acquired repo's
+    landed predicate holds (all landed/empty, none failed). We reuse the task-global
+    `finalizeTask` move-done path with an AGGREGATE mergeDetails (representative
+    `commitSha` = first sorted landed repo + a `workspaceLandedShas` map) so the existing
+    `task:merged` consumer is satisfied. On a partial land we do NOT move done — we return
+    `allLanded:false` with the landed repos' `landedSha` already persisted.
+
+The partial-land retry/park policy (consume a mergeRetry, auto-retry skipping landed
+repos up to MAX, then operator-park) is wired at the engine dispatch (project-engine.ts),
+NOT here: this function reports the partial via `allLanded:false` and the dispatch drives
+the retry seam.
 */
 export async function landWorkspaceTask(
   store: TaskStore,
@@ -1430,6 +1463,19 @@ export async function landWorkspaceTask(
       break;
     }
 
+    // U2 landed predicate + skip (KTD3): a repo whose recorded `landedSha` is an
+    // ancestor of (or equals) its CURRENT integration tip is already landed — SKIP
+    // it so a retry never re-advances the ref. This makes a re-run after a partial
+    // land idempotent for the already-landed repos.
+    if (await isRepoLanded(repoRootDir, integrationBranch, entry.landedSha)) {
+      await log(`AI merge (workspace): sub-repo ${repoRel} already landed (${short(entry.landedSha!)} ⊑ ${integrationBranch}) — skipping`);
+      repos.push({
+        repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
+        status: "landed", landedSha: entry.landedSha, alreadyLanded: true,
+      });
+      continue;
+    }
+
     try {
       const landResult = await landOneRepo(store, repoRootDir, entry.branch, integrationBranch, {
         taskId, settings, audit, log, setStatus, maxPasses,
@@ -1438,6 +1484,10 @@ export async function landWorkspaceTask(
         allowDirtyLocalCheckoutSync: options.allowDirtyLocalCheckoutSync === true,
       });
       if (landResult.outcome === "landed") {
+        // Persist this repo's landedSha BEFORE moving on (fresh-read-then-merge so
+        // sibling entries written by a concurrent path are not clobbered). The retry
+        // predicate above reads this back to skip the repo on a re-run.
+        await persistRepoLandedSha(store, taskId, repoRel, landResult.squashSha);
         repos.push({
           repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
           status: "landed", landedSha: landResult.squashSha, localSync: landResult.localSync,
@@ -1451,18 +1501,114 @@ export async function landWorkspaceTask(
       await audit.git({ type: "merge:ai-no-branch", target: entry.branch, metadata: { taskId, kind: "workspace-repo-land-failed", repo: repoRel, error: message } }).catch(() => undefined);
       repos.push({ repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch, status: "failed", error: message });
       allLanded = false;
-      // U1: stop on first failure and return a partial result. U2 adds the landed
-      // predicate + idempotent retry so a re-run skips the already-landed repos.
+      // Stop on first failure and return a partial result. The already-landed repos'
+      // `landedSha` is persisted, so the engine dispatch's auto-retry re-runs this
+      // loop and the landed predicate above skips them (only the failed repo retries).
       break;
     }
   }
 
   await setStatus(null);
-  // TODO(Phase C U2): when `allLanded` and every acquired repo landed, finalize the
-  // task ONCE (finalizeTask / move-done) — NEVER per repo. Until U2's landed
-  // predicate + idempotent retry land, this loop leaves the task in place; the
-  // engine dispatch (KTD2) does not move it on a partial result.
-  return { taskId, repos, allLanded };
+
+  // U2 finalize-once (KTD3): move the task to `done` EXACTLY ONCE, only after EVERY
+  // acquired repo's landed predicate holds (all landed/empty, none failed). Reuse the
+  // task-global `finalizeTask` move-done path with an aggregate mergeDetails so the
+  // existing `task:merged` consumer is satisfied. On a partial land we do NOT move
+  // done (the landed repos' `landedSha` is already persisted for the retry).
+  if (allLanded) {
+    const finalized = await finalizeWorkspaceTask(store, taskId, task, repos);
+    return { taskId, repos, allLanded, finalized };
+  }
+  return { taskId, repos, allLanded, finalized: false };
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+ * Landed predicate: a sub-repo is landed iff a `landedSha` is recorded AND that sha is
+ * an ancestor of (or equals) the repo's CURRENT integration tip. The ancestor check
+ * (not just sha presence) survives a later un-related advance of the integration ref:
+ * the landed commit is still reachable, so the repo stays "landed". A `landedSha` that
+ * is NOT reachable from the tip (e.g. the ref was reset/rebuilt) reads as NOT landed and
+ * the repo re-lands.
+ */
+async function isRepoLanded(
+  repoRootDir: string,
+  integrationBranch: string,
+  landedSha: string | undefined,
+): Promise<boolean> {
+  if (!landedSha) return false;
+  if (!(await gitOk(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], repoRootDir))) {
+    return false;
+  }
+  // `merge-base --is-ancestor X Y` exits 0 iff X is an ancestor of (or equal to) Y.
+  return await gitOk(["merge-base", "--is-ancestor", landedSha, `refs/heads/${integrationBranch}`], repoRootDir);
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+ * Persist one sub-repo's `landedSha` with a FRESH-read-then-merge so a concurrent
+ * sibling-entry write is not clobbered (Phase A/B per-repo `workspaceWorktrees`
+ * pattern). Re-read the latest task, merge only this repo's entry, write the whole map.
+ */
+async function persistRepoLandedSha(
+  store: TaskStore,
+  taskId: string,
+  repoRel: string,
+  landedSha: string,
+): Promise<void> {
+  const latest = await store.getTask(taskId).catch(() => undefined);
+  const current = latest?.workspaceWorktrees ?? {};
+  const entry = current[repoRel];
+  if (!entry) return; // entry vanished — nothing to merge into
+  const next = { ...current, [repoRel]: { ...entry, landedSha } };
+  await store.updateTask(taskId, { workspaceWorktrees: next }).catch(() => undefined);
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+ * Finalize-once: build an aggregate `MergeResult` from the per-repo lands and run the
+ * task-global `finalizeTask` move-done path ONCE. The representative `commitSha` is the
+ * first sorted landed repo's sha (so `mergeDetails.commitSha` is populated for the
+ * `task:merged` consumer); the full per-repo map is carried in `mergeDetails.workspaceLandedShas`.
+ * Returns true iff the task was moved to done.
+ */
+async function finalizeWorkspaceTask(
+  store: TaskStore,
+  taskId: string,
+  task: Task,
+  repos: WorkspaceRepoLandResult[],
+): Promise<boolean> {
+  const landed = repos.filter((r) => r.status === "landed" && r.landedSha);
+  const workspaceLandedShas: Record<string, string> = {};
+  for (const r of landed) workspaceLandedShas[r.repo] = r.landedSha!;
+  const representative = landed.length > 0 ? landed[0].landedSha : undefined;
+  const anyLanded = landed.length > 0;
+
+  // Pre-populate task.mergeDetails so finalizeTask's spread carries the workspace map.
+  const mergeDetails: MergeDetails = {
+    ...task.mergeDetails,
+    ...(representative ? { commitSha: representative } : {}),
+    ...(anyLanded ? { workspaceLandedShas } : {}),
+    mergeConfirmed: anyLanded,
+  };
+  await store.updateTask(taskId, { mergeDetails }).catch(() => undefined);
+  task.mergeDetails = mergeDetails;
+
+  const result: MergeResult = {
+    task,
+    branch: task.branch ?? "",
+    merged: anyLanded,
+    noOp: !anyLanded,
+    ok: true,
+    reason: anyLanded ? undefined : "no-net-changes",
+    commitSha: representative,
+    mergeConfirmed: anyLanded,
+    worktreeRemoved: false,
+    branchDeleted: false,
+  };
+  await store.logEntry(taskId, `AI merge (workspace): all ${repos.length} sub-repo(s) landed — task → done`, "AiMerge").catch(() => undefined);
+  await finalizeTask(store, taskId, result);
+  return true;
 }
 
 async function mergeAndReview(input: {

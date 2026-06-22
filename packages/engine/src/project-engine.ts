@@ -137,6 +137,28 @@ export function shouldRetryAutoMergeConflict(
   };
 }
 
+/*
+FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+Pure retry/park decision for a workspace PARTIAL land (some sub-repos landed, one failed).
+Mirrors `shouldRetryAutoMergeConflict` so the engine dispatch's partial-land catch branch
+has a narrow, unit-testable seam: a partial land is RETRYABLE (the landed repos' `landedSha`
+is persisted, so a re-run skips them and only the failed repo retries), so it CONSUMES a
+mergeRetry and re-enqueues up to `resolveMaxAutoMergeRetries(settings)`, then OPERATOR-PARKS
+(`shouldRetry:false`). `currentRetries + 1 < MAX` keeps the LAST attempt's failure parking
+in the same tick rather than scheduling an Nth timer that a restart could strand.
+*/
+export function shouldRetryWorkspacePartialLand(
+  currentRetries: number,
+  settings: { maxAutoMergeRetries?: unknown } | null | undefined,
+): { shouldRetry: boolean; maxAutoMergeRetries: number; nextRetryCount: number } {
+  const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
+  return {
+    shouldRetry: currentRetries + 1 < maxAutoMergeRetries,
+    maxAutoMergeRetries,
+    nextRetryCount: currentRetries + 1,
+  };
+}
+
 /**
  * FN-5627: Defense-in-depth gate for the auto-merge "merge already confirmed"
  * fast-path. Verifies the task's recorded `mergeDetails.commitSha` is actually
@@ -2301,10 +2323,14 @@ export class ProjectEngine {
               const isWorkspaceMerge =
                 !!mergeTask?.workspaceWorktrees && Object.keys(mergeTask.workspaceWorktrees).length > 0;
               if (isWorkspaceMerge) {
-                // U1: land each acquired sub-repo on its own local integration ref.
-                // Task move-to-done (finalize once after all land) + idempotent retry
-                // are U2 — for now the loop returns a partial/aggregate result and the
-                // task is left in place.
+                // FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+                // Land each acquired sub-repo on its own local integration ref;
+                // `landWorkspaceTask` records each landed `landedSha`, skips
+                // already-landed repos on a retry (idempotent), and on full success
+                // finalizes the task to `done` EXACTLY ONCE. On a PARTIAL land it does
+                // NOT finalize — it returns `allLanded:false`, which we surface as a
+                // WorkspacePartialLandError so the catch-block auto-retry consumes a
+                // mergeRetry and re-runs (skipping landed repos) up to MAX, then parks.
                 const settings = await store.getSettings().catch(() => ({}) as Settings);
                 const workspaceResult = await landWorkspaceTask(
                   store,
@@ -2312,15 +2338,28 @@ export class ProjectEngine {
                   cwd,
                   { ...mergerOptions, allowDirtyLocalCheckoutSync: settings.merger?.allowDirtyLocalCheckoutSync === true },
                 );
+                if (!workspaceResult.allLanded) {
+                  const failed = workspaceResult.repos.filter((r) => r.status === "failed");
+                  const landedCount = workspaceResult.repos.filter((r) => r.status === "landed").length;
+                  const detail = failed.map((r) => `${r.repo}: ${r.error ?? "land failed"}`).join("; ");
+                  const partialErr = new Error(
+                    `Workspace partial land for ${taskId}: ${landedCount} repo(s) landed, ${failed.length} failed — ${detail}`,
+                  );
+                  partialErr.name = "WorkspacePartialLandError";
+                  throw partialErr;
+                }
+                // Finalized to done by landWorkspaceTask; report the merge as merged so
+                // the success path (retry reset + branch-group promotion) runs normally.
                 const latest = await store.getTask(taskId).catch(() => mergeTask!);
+                const anyLanded = workspaceResult.repos.some((r) => r.status === "landed");
                 return {
                   task: latest ?? mergeTask!,
                   branch: mergeTask!.branch ?? "",
-                  // U1 does not finalize the task; report merged=false until U2 wires
-                  // the finalize-once move-to-done after every repo lands.
-                  merged: false,
-                  noOp: !workspaceResult.repos.some((r) => r.status === "landed"),
-                  ok: workspaceResult.allLanded,
+                  merged: anyLanded,
+                  noOp: !anyLanded,
+                  ok: true,
+                  commitSha: workspaceResult.repos.find((r) => r.status === "landed")?.landedSha,
+                  mergeConfirmed: anyLanded,
                   worktreeRemoved: false,
                   branchDeleted: false,
                 } as MergeResult;
@@ -2417,6 +2456,54 @@ export class ProjectEngine {
               await store
                 .updateTask(taskId, { status: "failed", mergeRetries: 0, error: errorMsg })
                 .catch(() => undefined);
+            }
+            continue;
+          }
+
+          // FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+          // Workspace PARTIAL-LAND auto-retry-then-park (user decision). Unlike the R7
+          // WorkspaceTaskMergeError above (a permanent config error that must NOT burn
+          // retries), a partial land — repo A landed, repo B failed — is RETRYABLE: the
+          // landed repos' `landedSha` is persisted, so a re-run of `landWorkspaceTask`
+          // skips them and re-attempts only the failed repo (idempotent). So this CONSUMES
+          // a `mergeRetry` and re-enqueues the merge with exponential backoff up to the
+          // existing MAX (resolveMaxAutoMergeRetries), then OPERATOR-PARKS (status:"failed")
+          // — mirroring the conflict-retry seam below. Detect by err.name (robust across
+          // the package boundary). Manual merges fall through to rejectMergeResolvers at
+          // the hasManualResolver early-return below (no auto-retry for manual).
+          const isWorkspacePartialLand =
+            err instanceof Error && err.name === "WorkspacePartialLandError";
+          if (isWorkspacePartialLand && !hasManualResolver) {
+            const wsSettings = await store.getSettings().catch(() => ({ maxAutoMergeRetries: undefined }));
+            const wsTask = await store.getTask(taskId).catch(() => null);
+            const wsRetries = wsTask?.mergeRetries ?? 0;
+            const decision = shouldRetryWorkspacePartialLand(wsRetries, wsSettings as { maxAutoMergeRetries?: unknown });
+            await store
+              .logEntry(taskId, `Workspace partial land: ${errorMsg}`, "WorkspacePartialLand")
+              .catch(() => undefined);
+            if (decision.shouldRetry) {
+              await store.updateTask(taskId, { mergeRetries: decision.nextRetryCount, status: null }).catch(() => undefined);
+              const delayMs = 5000 * Math.pow(2, wsRetries);
+              runtimeLog.log(
+                `Workspace partial-land retry ${decision.nextRetryCount}/${decision.maxAutoMergeRetries} for ${taskId} in ${delayMs / 1000}s (re-runs skipping landed repos)`,
+              );
+              setTimeout(() => {
+                if (!this.shuttingDown) this.internalEnqueueMerge(taskId);
+              }, delayMs);
+            } else {
+              await store
+                .updateTask(taskId, { status: "failed", mergeRetries: decision.maxAutoMergeRetries, error: errorMsg })
+                .catch(() => undefined);
+              await store
+                .logEntry(
+                  taskId,
+                  `Workspace partial land exhausted ${decision.maxAutoMergeRetries} retries — parking as failed for operator intervention (landed repos remain landed locally): ${errorMsg}`,
+                  "WorkspacePartialLand",
+                )
+                .catch(() => undefined);
+              runtimeLog.error(
+                `Auto-merge: ${taskId} workspace partial land exhausted ${decision.maxAutoMergeRetries} retries — parked as failed`,
+              );
             }
             continue;
           }

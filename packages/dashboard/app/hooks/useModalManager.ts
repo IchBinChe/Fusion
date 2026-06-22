@@ -97,6 +97,11 @@ export interface ModalManager {
   closeGroupModal: () => void;
 
   openSettings: (section?: SectionId) => void;
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Sets the Settings initial/active section WITHOUT opening the modal overlay. Used by the embedded main-content Settings view so header/sidebar/deep-link entry points can carry a requested section while navigating to taskView === "settings" instead of mounting the dialog.
+  */
+  setSettingsSection: (section?: SectionId) => void;
   closeSettings: () => void;
 
   openSchedules: () => void;
@@ -331,6 +336,9 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     setSettingsInitialSection(section);
     setSettingsOpen(true);
   }, []);
+  const setSettingsSection = useCallback((section?: SectionId) => {
+    setSettingsInitialSection(section);
+  }, []);
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
     setSettingsInitialSection(undefined);
@@ -495,6 +503,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     openGroupModal,
     closeGroupModal,
     openSettings,
+    setSettingsSection,
     closeSettings,
     openSchedules,
     closeSchedules,

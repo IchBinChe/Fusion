@@ -175,6 +175,13 @@ vi.mock("../../components/SettingsModal", () => ({
       <button type="button" data-testid="settings-close-btn" onClick={onClose}>Close</button>
     </div>
   ),
+  // FNXC:Settings 2026-06-22: Settings now opens as an embedded main-content view (presentation="embedded").
+  SettingsView: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="settings-view">
+      <h2>Settings</h2>
+      <button type="button" data-testid="settings-close-btn" onClick={onClose}>Close</button>
+    </div>
+  ),
 }));
 
 vi.mock("../../components/GitHubImportModal", () => ({
@@ -416,7 +423,8 @@ describe("Navigation history integration", () => {
   }
 
   // 1. Desktop: opening Settings pushes a history entry
-  it("pushes history entry when opening Settings modal on desktop", async () => {
+  // FNXC:Settings 2026-06-22: Settings opens as an embedded main-content view (settings-view), not a modal overlay.
+  it("pushes history entry when opening Settings view on desktop", async () => {
     await renderAppAndWait();
 
     const pushCallsBefore = (window.history.pushState as any).mock.calls.length;
@@ -424,30 +432,35 @@ describe("Navigation history integration", () => {
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-modal")).toBeTruthy();
+      expect(screen.getByTestId("settings-view")).toBeTruthy();
     });
 
-    // Back-button nav is enabled on desktop too — pushState called for the modal open
+    // Back-button nav is enabled on desktop too — pushState called for the view navigation
     expect((window.history.pushState as any).mock.calls.length).toBeGreaterThan(pushCallsBefore);
   });
 
-  // 2. Desktop: popstate dismisses modals
-  it("dismisses Settings modal on popstate in desktop mode", async () => {
+  // 2. Desktop: popstate reverts the Settings view back to the previous view
+  it("dismisses Settings view on popstate in desktop mode", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+    const taskViewStorageKey = scopedKey("kb-dashboard-task-view", DEFAULT_PROJECT_ID);
+    localStorage.setItem(taskViewStorageKey, "board");
+
     await renderAppAndWait();
 
     const settingsBtn = screen.getByTitle("Settings");
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-modal")).toBeTruthy();
+      expect(screen.getByTestId("settings-view")).toBeTruthy();
     });
 
     // Simulate back button
     dispatchPopState({ navIndex: 0 });
 
-    // Settings modal should be dismissed
+    // Settings view should be dismissed (reverted to the previous board view)
     await waitFor(() => {
-      expect(screen.queryByTestId("settings-modal")).toBeNull();
+      expect(screen.queryByTestId("settings-view")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
     });
   });
 

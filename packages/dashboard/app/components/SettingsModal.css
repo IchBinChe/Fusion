@@ -103,6 +103,58 @@
   resize: both;
 }
 
+/*
+FNXC:Settings 2026-06-22-00:00:
+Embedded settings is a main-content destination (taskView === "settings"), mirroring Planning/Command Center. The host (.settings-embedded.right-dock-embedded-view) fills the content pane and the inner panel (.settings-modal--embedded) sheds all dialog chrome — fixed dialog sizing, shadow, border, radius, resize grip — so the view sits flush on the project-content surface. Theme tokens only; no hardcoded colors.
+*/
+.settings-embedded.right-dock-embedded-view {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-lg);
+  overflow: hidden;
+}
+
+.settings-embedded .settings-modal--embedded {
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  position: static;
+}
+
+/*
+FNXC:Settings 2026-06-22-00:00:
+The embedded title reads like other embedded-view titles (Planning modal-header--embedded, Command Center cc-title): a plain heading with no tinted modal-header bar, no bottom divider, no close button, aligned to the content edge, at the shared 1.125rem embedded-title size. Header actions (Star/Discord) and footer remain so the full-width panel keeps its controls.
+*/
+.settings-modal--embedded .modal-header--embedded {
+  padding: 0 0 var(--space-md);
+  background: transparent;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.settings-modal--embedded .modal-header--embedded .settings-modal-heading h3 {
+  font-size: 1.125rem;
+  letter-spacing: normal;
+}
+
+/* Embedded footer actions sit flush on the content surface (no tinted modal bar). */
+.settings-modal--embedded .modal-actions {
+  background: transparent;
+  flex-shrink: 0;
+}
+
 /* Mobile: full-screen sheet. The desktop `min-width: 520px` was forcing the
    modal wider than narrow viewports, pushing it off-screen; the desktop
    `height: 80vh` left awkward strips of overlay above and below. Drop the

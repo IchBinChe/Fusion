@@ -9,7 +9,7 @@ export type ViewMode = "overview" | "project";
 FNXC:ViewState 2026-06-22-00:00:
 Workflows, Import Tasks, and Automations are promoted to top-level main-content task views (left-sidebar destinations) instead of modal-only overlays, so they render in the main panel like Command Center.
 */
-export type BuiltInTaskView = "board" | "list" | "graph" | "agents" | "missions" | "chat" | "documents" | "research" | "evals" | "goalsView" | "todos" | "planning" | "skills" | "mailbox" | "insights" | "memory" | "command-center" | "secrets" | "devserver" | "dev-server" | "pull-requests" | "workflows" | "import-tasks" | "automations";
+export type BuiltInTaskView = "board" | "list" | "graph" | "agents" | "missions" | "chat" | "documents" | "research" | "evals" | "goalsView" | "todos" | "planning" | "skills" | "mailbox" | "insights" | "memory" | "command-center" | "secrets" | "devserver" | "dev-server" | "pull-requests" | "workflows" | "import-tasks" | "automations" | "settings";
 export type PluginTaskView = `plugin:${string}:${string}`;
 export type TaskView = BuiltInTaskView | PluginTaskView;
 
@@ -47,6 +47,11 @@ const BUILT_IN_TASK_VIEWS: readonly BuiltInTaskView[] = [
   "workflows",
   "import-tasks",
   "automations",
+  /*
+  FNXC:ViewState 2026-06-22-00:00:
+  Settings is promoted from a modal-only overlay into a top-level main-content task view so the header/sidebar Settings entry points dock it in the main panel like Command Center, while preserving deep-link section navigation.
+  */
+  "settings",
 ];
 
 function isBuiltInTaskView(value: string | null): value is BuiltInTaskView {

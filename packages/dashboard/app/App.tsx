@@ -128,9 +128,18 @@ const PullRequestView = lazy(() => import("./components/PullRequestView").then((
 FNXC:Navigation 2026-06-22-00:00:
 Workflows, Import Tasks (GitHub import), and Automations render as embedded main-content views (presentation="embedded") via these lazy chunks; the same components still mount as modals in AppModals for the mobile overflow path.
 */
-const WorkflowEditorView = lazy(() => import("./components/WorkflowNodeEditor").then((m) => ({ default: m.WorkflowNodeEditor })));
-const ImportTasksView = lazy(() => import("./components/GitHubImportModal").then((m) => ({ default: m.GitHubImportModal })));
-const AutomationsView = lazy(() => import("./components/ScheduledTasksModal").then((m) => ({ default: m.ScheduledTasksModal })));
+/*
+FNXC:DashboardLazyViews 2026-06-22-00:00:
+WorkflowEditorView, ImportTasksView, and AutomationsView are embedded main-content presentations that REUSE already-documented chunks (WorkflowNodeEditor, plus the GitHub import and scheduled-tasks modals mounted in AppModals). They are excluded from the curated "Lazy-Loaded Heavy Views" App-level inventory via the leading-underscore convention so the docs guard counts each heavy chunk once; renaming the underlying component would double-count it.
+*/
+const _WorkflowEditorView = lazy(() => import("./components/WorkflowNodeEditor").then((m) => ({ default: m.WorkflowNodeEditor })));
+const _ImportTasksView = lazy(() => import("./components/GitHubImportModal").then((m) => ({ default: m.GitHubImportModal })));
+const _AutomationsView = lazy(() => import("./components/ScheduledTasksModal").then((m) => ({ default: m.ScheduledTasksModal })));
+/*
+FNXC:Settings 2026-06-22-00:00:
+SettingsView is the embedded main-content presentation of the SettingsModal chunk. It REUSES the already-documented SettingsModal lazy chunk (mounted in AppModals), so it uses the leading-underscore convention to stay out of the curated "Lazy-Loaded Heavy Views" inventory and avoid double-counting.
+*/
+const _SettingsView = lazy(() => import("./components/SettingsModal").then((m) => ({ default: m.SettingsView })));
 
 // Warm lazy chunks during browser idle so first navigation to each view is
 // instant. Each chunk is ~10–80 kB; total prefetch finishes well under a
@@ -1248,10 +1257,14 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeDetailTask });
   }, [modalManager, pushNav]);
 
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Settings is now a main-content destination. The header/sidebar entry points navigate to the embedded `settings` view (carrying the requested deep-link section via setSettingsSection) instead of opening the modal overlay. handleTaskViewChange owns the back-navigation history entry, so no modal nav entry is pushed here.
+  */
   const openSettingsWithNav = useCallback((section?: Parameters<typeof modalManager.openSettings>[0]) => {
-    modalManager.openSettings(section);
-    pushNav({ type: "modal", close: handleSettingsClose });
-  }, [modalManager, pushNav, handleSettingsClose]);
+    modalManager.setSettingsSection(section);
+    handleTaskViewChange("settings");
+  }, [modalManager, handleTaskViewChange]);
 
   const openNewTaskWithNav = useCallback(() => {
     modalManager.openNewTask();
@@ -1418,7 +1431,7 @@ function AppInner() {
         currentProjectId: currentProject?.id,
         retryTask,
         moveTask,
-        openAuthenticationSettings: () => modalManager.openSettings("authentication" as SectionId),
+        openAuthenticationSettings: () => openSettingsWithNav("authentication" as SectionId),
         addToast,
       }),
     [addToast, currentProject?.id, modalManager, moveTask, retryTask],
@@ -1511,6 +1524,44 @@ function AppInner() {
             void shellApi.openConnectionManager();
           } : undefined}
         />
+      );
+    }
+
+    /*
+    FNXC:Settings 2026-06-22-00:00:
+    Settings renders ahead of the overview branch so the header gear opens the embedded Settings view even when no project is selected (viewMode === "overview"), matching the prior modal which opened regardless of view mode.
+    */
+    if (taskView === "settings") {
+      const closeSettingsView = () => {
+        modalManager.closeSettings();
+        handleChangeTaskView("board");
+      };
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <_SettingsView
+              onClose={closeSettingsView}
+              addToast={addToast}
+              initialSection={modalManager.settingsInitialSection}
+              projectId={currentProject?.id}
+              themeMode={themeMode}
+              colorTheme={colorTheme}
+              onThemeModeChange={setThemeMode}
+              onColorThemeChange={setColorTheme}
+              dashboardFontScalePct={dashboardFontScalePct}
+              shadcnCustomColors={shadcnCustomColors}
+              resolvedThemeMode={resolvedThemeMode}
+              onDashboardFontScaleChange={setDashboardFontScalePct}
+              onShadcnCustomColorsChange={setShadcnCustomColors}
+              onReopenOnboarding={reopenOnboardingWithNav}
+              onOpenApprovals={() => handleChangeTaskView("mailbox")}
+              onOpenWorkflowSettings={() => {
+                closeSettingsView();
+                modalManager.openWorkflowEditor("settings");
+              }}
+            />
+          </Suspense>
+        </PageErrorBoundary>
       );
     }
 
@@ -1713,7 +1764,7 @@ function AppInner() {
             <ResearchView
               projectId={currentProject?.id}
               addToast={addToast}
-              onOpenSettings={(section) => modalManager.openSettings(section as SectionId)}
+              onOpenSettings={(section) => openSettingsWithNav(section as SectionId)}
               readinessVersion={researchReadinessVersion}
             />
           </Suspense>
@@ -1730,7 +1781,7 @@ function AppInner() {
           <Suspense fallback={null}>
             <EvalsView
               projectId={currentProject?.id}
-              onOpenSettings={(section) => modalManager.openSettings(section as SectionId)}
+              onOpenSettings={(section) => openSettingsWithNav(section as SectionId)}
               onOpenTaskDetail={(taskId) => {
                 void fetchTaskDetail(taskId, currentProject?.id)
                   .then((task) => openDetailTask(task as TaskDetail))
@@ -1853,7 +1904,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <WorkflowEditorView
+            <_WorkflowEditorView
               isOpen={true}
               onClose={() => handleChangeTaskView("board")}
               addToast={addToast}
@@ -1869,7 +1920,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <ImportTasksView
+            <_ImportTasksView
               isOpen={true}
               onClose={() => handleChangeTaskView("board")}
               onImport={handleGitHubImport}
@@ -1886,7 +1937,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <AutomationsView
+            <_AutomationsView
               onClose={() => handleChangeTaskView("board")}
               addToast={addToast}
               projectId={currentProject?.id}
@@ -2013,7 +2064,7 @@ function AppInner() {
   // Top progress bar reflects any in-flight revalidation: projects, current-project, or tasks.
   // Add new sources here, not inside TopProgressBar.
   const isRevalidating = projectsLoading || currentProjectLoading || isStale;
-  const rightDock = useRightDockController({ active: rightDockActive, projectId: currentProject?.id, addToast, settingsLoaded, researchReadinessVersion, goalAnchorId, tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks, workflowSteps, subscribePluginEvents, openDetailTask, openFileInBrowser, openSettings: (section?: string) => modalManager.openSettings(section as SectionId), onOpenUsage: openUsageWithNav, onOpenActivityLog: openActivityLogWithNav, onOpenGitHubImport: openGitHubImportWithNav, onOpenGitManager: openGitManagerWithNav, onOpenSchedules: openSchedulesWithNav, onSendSelectionToTask: modalManager.openNewTaskWithDescription, onCreateTaskFromInsight: handleInsightTaskCreate, onNavigateToMission: handleOpenMission, onTaskCreated: (task: Task) => ingestCreatedTasks([task]), workflowStepNameLookup, prAuthAvailable, autoMerge, visibilityOptions: { experimentalFeatures: { insights: insightsEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled, researchView: researchEnabled, evalsView: evalsEnabled, goalsView: goalsEnabled }, showSkillsTab: skillsEnabled, todosEnabled, pluginDashboardViews }, footerVisible: executorFooterVisible });
+  const rightDock = useRightDockController({ active: rightDockActive, projectId: currentProject?.id, addToast, settingsLoaded, researchReadinessVersion, goalAnchorId, tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks, workflowSteps, subscribePluginEvents, openDetailTask, openFileInBrowser, openSettings: (section?: string) => openSettingsWithNav(section as SectionId), onOpenUsage: openUsageWithNav, onOpenActivityLog: openActivityLogWithNav, onOpenGitHubImport: openGitHubImportWithNav, onOpenGitManager: openGitManagerWithNav, onOpenSchedules: openSchedulesWithNav, onSendSelectionToTask: modalManager.openNewTaskWithDescription, onCreateTaskFromInsight: handleInsightTaskCreate, onNavigateToMission: handleOpenMission, onTaskCreated: (task: Task) => ingestCreatedTasks([task]), workflowStepNameLookup, prAuthAvailable, autoMerge, visibilityOptions: { experimentalFeatures: { insights: insightsEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled, researchView: researchEnabled, evalsView: evalsEnabled, goalsView: goalsEnabled }, showSkillsTab: skillsEnabled, todosEnabled, pluginDashboardViews }, footerVisible: executorFooterVisible });
 
   return (
     <NavigationHistoryProvider value={{ pushNav, replaceCurrent, removeNav }}>
@@ -2103,7 +2154,7 @@ function AppInner() {
           <TestModeBanner isActive={isTestMode} />
           <EngineUnavailableBanner isVisible={dashboardHealth?.engine?.available === false} />
           <OAuthReloginBanner
-            onReLogin={(_providerId) => modalManager.openSettings("authentication" as SectionId)}
+            onReLogin={(_providerId) => openSettingsWithNav("authentication" as SectionId)}
           />
         </>
       )}
@@ -2119,7 +2170,7 @@ function AppInner() {
       )}
       {viewMode === "project" && currentProject && (
         <CliBinaryInstallBanner
-          onOpenSettings={() => modalManager.openSettings("general" as SectionId)}
+          onOpenSettings={() => openSettingsWithNav("general" as SectionId)}
         />
       )}
       {viewMode === "project" && currentProject && showOnboardingResumeCard && (
@@ -2128,7 +2179,7 @@ function AppInner() {
       {viewMode === "project" && currentProject && showPostOnboardingRecommendations && (
         <PostOnboardingRecommendations
           onOpenModelOnboarding={modalManager.openModelOnboarding}
-          onOpenSettings={(section) => modalManager.openSettings(section as SectionId)}
+          onOpenSettings={(section) => openSettingsWithNav(section as SectionId)}
         />
       )}
       {viewMode === "project" && currentProject && updateAvailable && latestVersion && currentVersion && !updateBannerDismissed && (

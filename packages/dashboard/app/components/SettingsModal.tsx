@@ -378,6 +378,11 @@ interface SettingsModalProps {
    * redirect stubs (U9 / KTD-5, R10). Optional so the modal renders standalone.
    */
   onOpenWorkflowSettings?: () => void;
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Settings renders both as a dialog overlay (presentation="modal", default) and as an embedded main-content view (presentation="embedded"). Embedded mode drops the fixed overlay backdrop and modal close button, fills the host pane, and disables modal-only behaviors (scroll lock, escape-to-close, resize-persist, overlay click-dismiss). The modal path is kept byte-identical for non-navigation callers (e.g. mobile/right-dock).
+  */
+  presentation?: "modal" | "embedded";
 }
 
 /** Adapter descriptor served by GET /api/cli-agents (U15). */
@@ -624,13 +629,16 @@ export function SettingsModal({
   onReopenOnboarding,
   onOpenApprovals,
   onOpenWorkflowSettings,
+  presentation = "modal",
 }: SettingsModalProps) {
+  const isEmbedded = presentation === "embedded";
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   const worktrunkInstall = useWorktrunkInstallStatus(projectId);
   const worktrunkInstallVerified = worktrunkInstall.status === "installed";
   const viewportMode = useViewportMode();
-  useMobileScrollLock(true);
+  // Modal-only: lock background scroll on mobile. Embedded view owns its own scroll region.
+  useMobileScrollLock(!isEmbedded);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
     enabled: viewportMode === "mobile",
   });
@@ -647,7 +655,8 @@ export function SettingsModal({
   const registerWorkflowLaneSaver = useCallback((saver: SectionSaveHandler | null) => {
     workflowLaneSaverRef.current = saver;
   }, []);
-  useModalResizePersist(modalRef, true, "fusion:settings-modal-size");
+  // Modal-only: persist user-resized dialog dimensions. Embedded view fills its host and is not resizable.
+  useModalResizePersist(modalRef, !isEmbedded, "fusion:settings-modal-size");
   const sessionBannersHidden = useSessionBannersHidden();
   const [form, setForm] = useState<SettingsFormState>({
     maxConcurrent: 2,
@@ -1993,15 +2002,19 @@ export function SettingsModal({
     }
   }, [favoriteModels, favoriteProviders]);
 
+  // Modal-only: Escape dismisses the dialog. Embedded view is navigated away via the left sidebar, not Escape.
   useEffect(() => {
+    if (isEmbedded) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [onClose, isEmbedded]);
 
-  const overlayDismissProps = useOverlayDismiss(onClose);
+  // Modal-only: backdrop click dismisses. Embedded view has no overlay backdrop.
+  const modalOverlayDismissProps = useOverlayDismiss(onClose);
+  const overlayDismissProps = isEmbedded ? {} : modalOverlayDismissProps;
 
   /**
    * Lane status types:
@@ -2888,10 +2901,25 @@ export function SettingsModal({
     }
   };
 
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Embedded settings is a main-content destination, not a dialog. It drops the fixed `.modal-overlay` backdrop and the inner card chrome (modal-overlay/modal/settings-modal classes), and instead uses `settings-embedded right-dock-embedded-view` (host) + `settings-modal--embedded` (panel) to fill the pane flush like other embedded views (Planning, Command Center). The modal path stays byte-identical.
+  */
   return (
-    <div className="modal-overlay open settings-modal-overlay" {...overlayDismissProps} role="dialog" aria-modal="true">
-      <div className="modal modal-lg settings-modal" ref={modalRef} style={keyboardStyle}>
-        <div className="modal-header">
+    <div
+      className={isEmbedded ? "settings-embedded right-dock-embedded-view" : "modal-overlay open settings-modal-overlay"}
+      {...overlayDismissProps}
+      data-testid={isEmbedded ? "settings-view" : undefined}
+      role={isEmbedded ? "region" : "dialog"}
+      aria-label={isEmbedded ? t("settings.title", "Settings") : undefined}
+      aria-modal={isEmbedded ? undefined : "true"}
+    >
+      <div
+        className={isEmbedded ? "modal modal-lg settings-modal settings-modal--embedded" : "modal modal-lg settings-modal"}
+        ref={modalRef}
+        style={isEmbedded ? undefined : keyboardStyle}
+      >
+        <div className={isEmbedded ? "modal-header modal-header--embedded" : "modal-header"}>
           <div className="settings-modal-heading">
             <h3>{t("settings.title", "Settings")}</h3>
           </div>
@@ -2931,9 +2959,11 @@ export function SettingsModal({
               {t("settings.header.discord", "Discord")}
             </a>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label={t("actions.close", "Close")}>
-            &times;
-          </button>
+          {!isEmbedded && (
+            <button className="modal-close" onClick={onClose} aria-label={t("actions.close", "Close")}>
+              &times;
+            </button>
+          )}
         </div>
         {loading ? (
           <div className="settings-empty-state settings-loading"><LoadingSpinner label={t("settings.loading", "Loading…")} /></div>
@@ -3066,9 +3096,12 @@ export function SettingsModal({
             </button>
           </div>
           <div className="modal-actions-right">
-            <button className="btn btn-sm" onClick={onClose}>
-              {t("settings.actions.cancel", "Cancel")}
-            </button>
+            {/* FNXC:Settings 2026-06-22-00:00: Cancel/close is a dialog affordance; the embedded main view is left via the sidebar, so it shows only Save. */}
+            {!isEmbedded && (
+              <button className="btn btn-sm" onClick={onClose}>
+                {t("settings.actions.cancel", "Cancel")}
+              </button>
+            )}
             <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={loading || isSaving}>
               {t("settings.actions.save", "Save")}
             </button>
@@ -3262,4 +3295,12 @@ export function SettingsModal({
       )}
     </div>
   );
+}
+
+/*
+FNXC:Settings 2026-06-22-00:00:
+SettingsView is the embedded main-content presentation of SettingsModal. App.tsx lazy-imports this alias and renders it in renderMainContent() for taskView === "settings" with presentation defaulting to "embedded". It is a thin wrapper so the heavy SettingsModal body stays a single chunk and the modal path is unaffected.
+*/
+export function SettingsView(props: SettingsModalProps) {
+  return <SettingsModal presentation="embedded" {...props} />;
 }

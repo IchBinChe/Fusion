@@ -19,8 +19,11 @@ const execAsync = promisify(exec);
 /*
 FNXC:GitHubImport 2026-06-23-03:30:
 Resolve a comment author's bot flag + avatar URL for the Import Tasks preview.
-isBot: true when the author type is a GitHub Bot (gh GraphQL `__typename === "Bot"` / `is_bot`, REST `user.type === "Bot"`) OR the login ends in `[bot]`.
+isBot: true when the author type is a GitHub Bot (gh GraphQL Actor `__typename === "Bot"` / `is_bot`, REST `user.type === "Bot"`) OR the login ends in `[bot]` (case-insensitive).
 avatarUrl: prefer the API-provided avatar; otherwise fall back to `https://github.com/{login}.png?size=40` — but NOT for bots, whose `[bot]`-suffixed login does not resolve to a real avatar (the frontend renders a generic bot icon instead of a broken image).
+
+FNXC:GitHubImport 2026-06-22-12:00:
+The TYPE field is the real bot signal and must be read directly. `gh pr/issue view --json comments` does NOT expose `__typename`/`type`/`is_bot` and surfaces an app bot's bare display login (e.g. `coderabbitai`, `greptileai`) WITHOUT the `[bot]` suffix, so the suffix heuristic alone misclassified GitHub App reviewers (CodeRabbit, Greptile) as HUMAN. The comment fetch now reads Actor `__typename` via `gh api graphql` (and REST `user.type`/`[bot]` login on the token path) — never hardcode specific app names; the type field catches ANY app bot.
 */
 function resolveCommentAuthor(input: {
   login: string;
@@ -44,6 +47,17 @@ function resolveCommentAuthor(input: {
     authorAvatarUrl = `https://github.com/${encodeURIComponent(login)}.png?size=40`;
   }
   return { authorIsBot, authorAvatarUrl };
+}
+
+/*
+FNXC:GitHubImport 2026-06-22-12:00:
+Shape of a single comment node from the `gh api graphql` conversation query. The Actor
+`__typename` is the authoritative bot signal (`gh pr/issue view --json comments` omits it).
+*/
+interface GhGraphqlCommentNode {
+  author?: { __typename?: string | null; login?: string | null; avatarUrl?: string | null } | null;
+  body?: string | null;
+  createdAt?: string | null;
 }
 
 function quoteGitArg(value: string): string {
@@ -3638,6 +3652,62 @@ export class GitHubClient {
     throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided. Run 'gh auth login' to authenticate.");
   }
 
+  /*
+  FNXC:GitHubImport 2026-06-22-12:00:
+  Fetch a PR/issue's conversation comments via `gh api graphql` so the author's authoritative
+  Actor `__typename` (User | Bot | Organization | Mannequin) is available per comment. The
+  `gh pr/issue view --json comments` path only surfaces `{ login }` with no type and a bot's bare
+  display login (no `[bot]` suffix), which silently misclassified GitHub App reviewers as human.
+  Returns the same `{ author, body, createdAt, authorAvatarUrl?, authorIsBot }` shape; `authorIsBot`
+  is true when `__typename === "Bot"` (or the `[bot]`-login suffix fallback inside resolveCommentAuthor).
+  */
+  private async fetchCommentsWithGhGraphql(
+    owner: string,
+    repo: string,
+    number: number,
+    kind: "pullRequest" | "issue",
+  ): Promise<Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>> {
+    const query = `query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    ${kind}(number:$number){
+      comments(first:100){
+        nodes{ author{ __typename login avatarUrl } body createdAt }
+      }
+    }
+  }
+}`;
+    const result = await runGhJsonAsync<{
+      data?: {
+        repository?: {
+          pullRequest?: { comments?: { nodes?: GhGraphqlCommentNode[] } } | null;
+          issue?: { comments?: { nodes?: GhGraphqlCommentNode[] } } | null;
+        } | null;
+      };
+    }>([
+      "api", "graphql",
+      "-f", `query=${query}`,
+      "-F", `owner=${owner}`,
+      "-F", `repo=${repo}`,
+      "-F", `number=${number}`,
+    ]);
+
+    const container = kind === "pullRequest"
+      ? result.data?.repository?.pullRequest
+      : result.data?.repository?.issue;
+    const nodes = container?.comments?.nodes ?? [];
+
+    return nodes.map((c) => {
+      const author = c.author?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        // Actor.__typename is the real signal: "Bot" for any GitHub App (CodeRabbit, Greptile, ...).
+        typename: c.author?.__typename,
+        avatarUrl: c.author?.avatarUrl,
+      });
+      return { author, body: c.body ?? "", createdAt: c.createdAt ?? "", authorAvatarUrl, authorIsBot };
+    });
+  }
+
   private async getPullRequestDetailWithGh(
     owner: string,
     repo: string,
@@ -3646,9 +3716,18 @@ export class GitHubClient {
     comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
     checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
   }> {
+    // FNXC:GitHubImport 2026-06-22-12:00:
+    // `gh pr view --json comments` author is just `{ login }` — no `__typename`/`type`/`is_bot`,
+    // and the surfaced login is the app's bare display login (e.g. `coderabbitai`, `greptileai`)
+    // WITHOUT the `[bot]` suffix. That made every GitHub App reviewer (CodeRabbit, Greptile, etc.)
+    // misclassify as HUMAN, since neither the type field nor the `[bot]` suffix heuristic could fire.
+    // Fix: read the authoritative Actor `__typename` (User | Bot | Organization | Mannequin) via
+    // `gh api graphql`, so `authorIsBot = __typename === "Bot"` catches ANY app bot by type, not by name.
+    // statusCheckRollup is still only on `gh pr view`, so it stays a separate (best-effort) call.
+    const comments = await this.fetchCommentsWithGhGraphql(owner, repo, number, "pullRequest");
+
+    let checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }> = [];
     const pr = await runGhJsonAsync<{
-      // gh pr view comment authors expose login + avatarUrl; `__typename`/`is_bot` surface bot actors when present.
-      comments?: Array<{ author?: { login?: string; avatarUrl?: string; __typename?: string; is_bot?: boolean } | null; body?: string; createdAt?: string }>;
       // `gh pr view --json statusCheckRollup` returns a flat array of mixed CheckRun/StatusContext shapes.
       statusCheckRollup?: Array<{
         name?: string;
@@ -3663,21 +3742,10 @@ export class GitHubClient {
     }>([
       "pr", "view", String(number),
       "--repo", `${owner}/${repo}`,
-      "--json", "comments,statusCheckRollup",
+      "--json", "statusCheckRollup",
     ]);
 
-    const comments = (pr.comments ?? []).map((c) => {
-      const author = c.author?.login ?? "unknown";
-      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
-        login: author,
-        typename: c.author?.__typename,
-        isBot: c.author?.is_bot,
-        avatarUrl: c.author?.avatarUrl,
-      });
-      return { author, body: c.body ?? "", createdAt: c.createdAt ?? "", authorAvatarUrl, authorIsBot };
-    });
-
-    const checks = (pr.statusCheckRollup ?? []).map((c) => ({
+    checks = (pr.statusCheckRollup ?? []).map((c) => ({
       name: c.name ?? c.context ?? "check",
       // CheckRun uses `status`; StatusContext uses `state`. Surface whichever is present.
       status: (c.status ?? c.state ?? "").toLowerCase(),
@@ -3789,24 +3857,10 @@ export class GitHubClient {
   ): Promise<{
     comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
   }> {
-    const issue = await runGhJsonAsync<{
-      comments?: Array<{ author?: { login?: string; avatarUrl?: string; __typename?: string; is_bot?: boolean } | null; body?: string; createdAt?: string }>;
-    }>([
-      "issue", "view", String(number),
-      "--repo", `${owner}/${repo}`,
-      "--json", "comments",
-    ]);
-
-    const comments = (issue.comments ?? []).map((c) => {
-      const author = c.author?.login ?? "unknown";
-      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
-        login: author,
-        typename: c.author?.__typename,
-        isBot: c.author?.is_bot,
-        avatarUrl: c.author?.avatarUrl,
-      });
-      return { author, body: c.body ?? "", createdAt: c.createdAt ?? "", authorAvatarUrl, authorIsBot };
-    });
+    // FNXC:GitHubImport 2026-06-22-12:00:
+    // Use the graphql Actor.__typename path (not `gh issue view --json comments`, which omits the
+    // type) so GitHub App reviewers like CodeRabbit/Greptile are correctly flagged as bots.
+    const comments = await this.fetchCommentsWithGhGraphql(owner, repo, number, "issue");
 
     return { comments };
   }

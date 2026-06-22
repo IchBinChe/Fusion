@@ -17,6 +17,7 @@ import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
+import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
 
 interface NewTaskModalProps {
   isOpen: boolean;
@@ -147,6 +148,11 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   const [size, setSizeState] = useState<FloatSize>(() => readFloatSize());
   const [position, setPositionState] = useState<FloatPosition>(() => readFloatPosition(readFloatSize()));
   const dragTeardownRef = useRef<(() => void) | null>(null);
+  // FNXC:FloatingWindow 2026-06-22-21:30: Floating (desktop) New Task dialog shares the SINGLE cross-type floating z-index stack (floatingWindowStack). Mounting claims the front; tapping the panel (pointerdown/focus capture) raises it above every other floating modal regardless of type. Mobile keeps the full-screen sheet so this z-index is harmless there.
+  const [zIndex, setZIndex] = useState<number>(() => nextFloatingZ());
+  const bringToFront = useCallback(() => {
+    setZIndex((current) => (current >= currentFloatingZ() ? current : nextFloatingZ()));
+  }, []);
 
   const persistSize = useCallback((next: FloatSize) => {
     setSizeState(writeFloatSize(next));
@@ -737,7 +743,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
 
   // FNXC:NewTask 2026-06-22-20:30: Desktop = floating fixed panel positioned by state-driven left/top/width/height. Mobile keeps the keyboard-aware full-screen sheet (no floating). The transparent click-through overlay never dismisses on click; the header X / Cancel / Escape are the only dismissals.
   const panelStyle: CSSProperties = isFloating
-    ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.width}px`, height: `${size.height}px` }
+    ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.width}px`, height: `${size.height}px`, zIndex }
     : keyboardStyle;
 
   return (
@@ -752,6 +758,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       <div
         className={`modal modal-lg new-task-modal${isFloating ? " new-task-modal--floating" : ""}`}
         style={panelStyle}
+        onPointerDownCapture={isFloating ? bringToFront : undefined}
+        onFocusCapture={isFloating ? bringToFront : undefined}
       >
         {isFloating && NEW_TASK_RESIZE_DIRECTIONS.map((direction) => (
           <div

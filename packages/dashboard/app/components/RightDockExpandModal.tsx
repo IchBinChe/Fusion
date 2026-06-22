@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { Maximize2, X } from "lucide-react";
 import { findOverflowViewEntry, type OverflowViewEntry, type OverflowViewKey, type OverflowViewRenderProps, type OverflowViewVisibilityOptions } from "./overflowViewRegistry";
+import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
 import "./RightDock.css";
 
 const RIGHT_DOCK_EXPAND_MODAL_SIZE_STORAGE_KEY = "fusion:right-dock-expand-modal-size";
@@ -124,6 +125,11 @@ export function RightDockExpandModal({
 
   const [size, setSizeState] = useState<ExpandSize>(() => readExpandSize());
   const [position, setPositionState] = useState<ExpandPosition>(() => readExpandPosition(readExpandSize()));
+  // FNXC:FloatingWindow 2026-06-22-21:30: The right-dock pop-out shares the SINGLE cross-type floating z-index stack (floatingWindowStack). Mounting claims the front; tapping the panel (pointerdown/focus capture) raises it above every other floating modal regardless of type.
+  const [zIndex, setZIndex] = useState<number>(() => nextFloatingZ());
+  const bringToFront = useCallback(() => {
+    setZIndex((current) => (current >= currentFloatingZ() ? current : nextFloatingZ()));
+  }, []);
 
   /*
   FNXC:RightDock 2026-06-22-17:40:
@@ -294,11 +300,17 @@ export function RightDockExpandModal({
     top: `${position.y}px`,
     width: `${size.width}px`,
     height: `${size.height}px`,
+    zIndex,
   } as CSSProperties;
 
   return (
     <div className="modal-overlay open right-dock-expand-modal-overlay" role="dialog" aria-modal="false" aria-label={`${entry.label} expanded`} data-testid="right-dock-expand-modal">
-      <div className="modal right-dock-expand-modal right-dock-expand-modal--floating" style={panelStyle}>
+      <div
+        className="modal right-dock-expand-modal right-dock-expand-modal--floating"
+        style={panelStyle}
+        onPointerDownCapture={bringToFront}
+        onFocusCapture={bringToFront}
+      >
         {EXPAND_RESIZE_DIRECTIONS.map((direction) => (
           <div
             key={direction}

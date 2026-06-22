@@ -44,6 +44,14 @@ The override MUST out-specify the base `.modal-overlay` (which sets a dimmed bac
   pointer-events: none;
 }
 
+/*
+FNXC:FloatingWindow 2026-06-22-21:30:
+Only the FLOATING terminal joins the shared cross-type floating stack. Reset the base `.modal-overlay` z-index:100 to auto so this click-through overlay does NOT establish a stacking context; the floating panel's inline z-index (from floatingWindowStack, 4000+) then interleaves at the root with the right-dock pop-out, the floating New Task dialog, and FloatingWindow. Docked mode keeps the base overlay stacking (full-width bottom panel) and is intentionally excluded.
+*/
+.modal-overlay.terminal-modal-overlay--floating {
+  z-index: auto;
+}
+
 .modal.terminal-modal {
   /* Initial dimensions are applied only when no persisted size has been
      restored — see :not([style*=...]) selectors below. */

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useTerminal } from "../hooks/useTerminal";
 import { useTerminalSessions } from "../hooks/useTerminalSessions";
+import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
 import { getPathBasename } from "../utils/pathDisplay";
 import {
   DEFAULT_TERMINAL_PREFERENCES,
@@ -405,6 +406,12 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   const [isMobileTerminal, setIsMobileTerminal] = useState(() => isTerminalMobileViewport());
   const isDockedMode = !isMobileTerminal && displayMode === "docked";
   const isFloatingMode = !isMobileTerminal && displayMode === "floating";
+  // FNXC:FloatingWindow 2026-06-22-21:30: The FLOATING terminal shares the SINGLE cross-type floating z-index stack (floatingWindowStack) so tapping it raises it above every other floating modal regardless of type. A fresh z is claimed each time the modal opens (see effect below); tapping the panel (pointerdown/focus capture) re-raises it. Docked/mobile modes ignore this z-index (full-width bottom panel / full-screen sheet).
+  const [floatingZ, setFloatingZ] = useState<number>(() => nextFloatingZ());
+  const bringFloatingToFront = useCallback(() => {
+    if (!isFloatingMode) return;
+    setFloatingZ((current) => (current >= currentFloatingZ() ? current : nextFloatingZ()));
+  }, [isFloatingMode]);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -711,9 +718,11 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
 
   // Bump open generation whenever the modal opens so the initialCommand
   // effect re-evaluates after a close/reopen cycle (deps may be identical).
+  // FNXC:FloatingWindow 2026-06-22-21:30: Each open also claims the front of the shared floating-window stack so a freshly-opened floating terminal sits above other floating modals.
   useEffect(() => {
     if (isOpen) {
       setOpenGeneration((g) => g + 1);
+      setFloatingZ(nextFloatingZ());
     }
   }, [isOpen]);
 
@@ -1758,6 +1767,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
           "--terminal-float-y": `${floatingPosition.y}px`,
           "--terminal-float-width": `${floatingSize.width}px`,
           "--terminal-float-height": `${floatingSize.height}px`,
+          // FNXC:FloatingWindow 2026-06-22-21:30: Inline z from the shared cross-type stack; only the floating panel participates.
+          zIndex: floatingZ,
         }
       : {}),
   } as CSSProperties;
@@ -1783,6 +1794,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         className={modalClassName}
         data-testid="terminal-modal"
         style={modalStyle}
+        onPointerDownCapture={isFloatingMode ? bringFloatingToFront : undefined}
+        onFocusCapture={isFloatingMode ? bringFloatingToFront : undefined}
       >
         {isDockedMode && (
           <div

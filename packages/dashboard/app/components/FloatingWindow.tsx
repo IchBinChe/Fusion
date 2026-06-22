@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
 import "./FloatingWindow.css";
 
 /*
@@ -46,13 +47,9 @@ const DEFAULT_MIN_HEIGHT = 280;
 const VIEWPORT_PADDING = 16;
 
 /*
-FNXC:FloatingWindow 2026-06-22-20:45:
-Base z-index band sits at 4000+, above ordinary page content and interoperable with the existing terminal/right-dock pop-out band. `nextZ()` bumps the shared counter so a freshly mounted or freshly clicked window comes to the front. The counter is module-level and intentionally monotonic — it only ever climbs, which is fine for a session-length dashboard.
+FNXC:FloatingWindow 2026-06-22-21:30:
+Z-index now comes from the SHARED `floatingWindowStack` module (`nextFloatingZ`/`currentFloatingZ`) so FloatingWindow stacks in ONE counter with the right-dock pop-out, the floating terminal, and the floating New Task dialog — tapping ANY of them raises it above all the others regardless of type. The local `topZ`/`nextZ` counter this file previously owned is gone.
 */
-let topZ = 4000;
-function nextZ(): number {
-  return ++topZ;
-}
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 const RESIZE_DIRECTIONS: ResizeDirection[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
@@ -113,8 +110,8 @@ export function FloatingWindow({
     const initialSize = clampSize(defaultSize ?? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, resolvedMinSize);
     return defaultPosition ? clampPosition(defaultPosition, initialSize) : defaultPositionFor(windowKey, initialSize);
   });
-  // FNXC:FloatingWindow 2026-06-22-20:45: Each window owns its z-index; mounting claims the front of the stack.
-  const [zIndex, setZIndex] = useState<number>(() => nextZ());
+  // FNXC:FloatingWindow 2026-06-22-21:30: Each window owns its z-index; mounting claims the front of the SHARED cross-type stack.
+  const [zIndex, setZIndex] = useState<number>(() => nextFloatingZ());
 
   /*
   FNXC:FloatingWindow 2026-06-22-20:45:
@@ -122,12 +119,12 @@ export function FloatingWindow({
   */
   const dragTeardownRef = useRef<(() => void) | null>(null);
 
-  // FNXC:FloatingWindow 2026-06-22-20:45: Focus-to-front. Pointerdown/focus anywhere on the panel raises this window above the rest.
+  // FNXC:FloatingWindow 2026-06-22-21:30: Focus-to-front. Pointerdown/focus anywhere on the panel raises this window above ALL other floating modals (any type) via the shared stack.
   const bringToFront = useCallback(() => {
     setZIndex((current) => {
       // Only claim a new z if we are not already on top, to avoid needless counter churn on every move.
-      if (current > topZ) return current;
-      return nextZ();
+      if (current >= currentFloatingZ()) return current;
+      return nextFloatingZ();
     });
   }, []);
 

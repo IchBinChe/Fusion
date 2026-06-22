@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="./demo/assets/fusion-logo.png" alt="Fusion" width="72" />
-
-# Fusion
+# <img src="./demo/assets/fusion-logo-orange.svg" alt="" width="34" align="center" /> Fusion
 
 ### From rough idea to production code — automatically.
 

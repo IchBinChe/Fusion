@@ -879,7 +879,11 @@ describe("SkillsView", () => {
       });
     });
 
-    it("collapses detail when clicking the same skill again", async () => {
+    it("collapses detail back to the empty-state when clicking the same skill again", async () => {
+      // FNXC:Skills 2026-06-23-01:45: in the two-pane master/detail layout the
+      // detail PANE (data-testid="skill-detail") is always mounted; clicking the
+      // selected skill again clears the selection so the pane returns to its
+      // empty-state placeholder (content gone), rather than unmounting.
       render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
 
       await waitFor(() => {
@@ -893,7 +897,7 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId("skill-detail")).toBeTruthy();
+        expect(document.querySelector(".skills-view-detail-content")).toBeTruthy();
       });
 
       // Click again to collapse
@@ -902,7 +906,10 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        expect(screen.queryByTestId("skill-detail")).toBeNull();
+        expect(screen.queryByTestId("skill-detail")).toBeTruthy();
+        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(screen.getByTestId("skills-detail-empty")).toBeTruthy();
+        expect(document.querySelector(".skills-view-item--selected")).toBeNull();
       });
     });
 
@@ -1013,7 +1020,7 @@ describe("SkillsView", () => {
       expect(mockFetchSkillContent).toHaveBeenCalledTimes(2);
     });
 
-    it("collapses detail when close button is clicked", async () => {
+    it("clears the detail pane when the close button is clicked", async () => {
       render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
 
       await waitFor(() => {
@@ -1027,16 +1034,56 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId("skill-detail")).toBeTruthy();
+        expect(document.querySelector(".skills-view-detail-content")).toBeTruthy();
       });
 
-      // Click close button
+      // Click close button (detail-pane close, not the view close)
       await act(async () => {
-        fireEvent.click(screen.getByText("Close"));
+        fireEvent.click(screen.getByLabelText("Close skill detail"));
+      });
+
+      // FNXC:Skills 2026-06-23-01:45: the detail pane persists (two-pane layout);
+      // Close clears the selection so it returns to the empty-state placeholder.
+      await waitFor(() => {
+        expect(screen.queryByTestId("skill-detail")).toBeTruthy();
+        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(screen.getByTestId("skills-detail-empty")).toBeTruthy();
+      });
+    });
+
+    it("returns to the list via the narrow-mode back button (master→detail flow)", async () => {
+      // FNXC:Skills 2026-06-23-01:45: NARROW single-panel master→detail flow.
+      // Selecting a skill shows the detail ON TOP; the BACK affordance
+      // (data-testid="skills-detail-back") clears the selection and returns to
+      // the list. Asserts the back control exists and restores the empty-state.
+      render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("test-skill")).toBeTruthy();
+      });
+
+      const testSkillItem = screen.getByText("test-skill").closest(".skills-view-item");
+      await act(async () => {
+        fireEvent.click(testSkillItem!);
       });
 
       await waitFor(() => {
-        expect(screen.queryByTestId("skill-detail")).toBeNull();
+        expect(document.querySelector(".skills-view-detail-content")).toBeTruthy();
+        expect(screen.getByTestId("skills-view").getAttribute("data-selected")).toBe("true");
+      });
+
+      const backButton = screen.getByTestId("skills-detail-back");
+      expect(backButton).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.click(backButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("skills-view").getAttribute("data-selected")).toBe("false");
+        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(screen.getByTestId("skills-detail-empty")).toBeTruthy();
+        expect(document.querySelector(".skills-view-item--selected")).toBeNull();
       });
     });
 

@@ -1,7 +1,7 @@
 import "./SkillsView.css";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Zap, RefreshCw, X, ChevronRight, ChevronDown, AlertCircle, Loader2 } from "lucide-react";
+import { Zap, RefreshCw, X, ChevronRight, ChevronDown, AlertCircle, Loader2, ArrowLeft } from "lucide-react";
 import { ViewHeader } from "./ViewHeader";
 import {
   fetchDiscoveredSkills,
@@ -231,9 +231,88 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
     void loadSkillContent(skillId);
   }, [loadSkillContent, selectedSkillId]);
 
+  /*
+  FNXC:Skills 2026-06-23-01:45:
+  Master/detail clear. Returns the list from the narrow single-panel detail view (the BACK affordance) and also backs the detail-pane Close button. Mirrors DockFilesView's handleBack: drop the selection + cached content so the right pane shows its empty-state (wide) or the list reappears (narrow).
+  */
+  const clearSelection = useCallback(() => {
+    setSelectedSkillId(null);
+    setSkillContent(null);
+    setContentError(null);
+  }, []);
+
+  // FNXC:Skills 2026-06-23-01:45: the detail pane renders the SELECTED skill's row data (name/path) alongside its fetched content. Resolve it once from the loaded list so the pane header stays correct even when the search filter would otherwise hide the row.
+  const selectedSkill = useMemo(
+    () => discoveredSkills.find((s) => s.id === selectedSkillId) ?? null,
+    [discoveredSkills, selectedSkillId],
+  );
+
+  /*
+  FNXC:Skills 2026-06-23-01:45:
+  Responsive master/detail, modeled exactly on DockFilesView (RightDockFiles). The root `.skills-view` is a query container (container-type: inline-size, container-name: skills-view). BOTH panes — `.skills-view__list` (left) and `.skills-view__detail` (right) — are ALWAYS rendered in the DOM; CSS decides what is visible per container width.
+  - WIDE (@container min-width: 640px): two-pane side-by-side. List pinned LEFT (clamped width, scrolls), detail flex:1 on the RIGHT (scrolls), empty-state until a skill is selected. Both always visible, so the BACK button is hidden (the list never disappears). Selecting a skill updates the right pane in place.
+  - NARROW (default, e.g. embedded sidebar dock + mobile): single-panel master→detail stack. The list fills the root; selecting a skill (root [data-selected="true"]) reveals the detail pane ON TOP and hides the list. The BACK button (data-testid="skills-detail-back") returns to the list.
+  `data-selected` on the root lets the container query distinguish "no skill selected" (narrow: detail hidden, list shows) from "skill selected" (narrow: detail covers the stack). When wide both panes are always visible regardless of this flag — same deterministic fallback path DockFilesView documents if the @container proves unreliable, except SkillsView always lives in a full-width main panel so the query fires reliably here.
+  */
+  const renderDetailBody = () => {
+    if (!selectedSkillId) {
+      return (
+        <div className="skills-view-detail-placeholder" data-testid="skills-detail-empty">
+          {t("skills.selectASkill", "Select a skill to view its details")}
+        </div>
+      );
+    }
+    if (isLoadingContent) {
+      return (
+        <div className="skills-view-detail-loading">
+          <Loader2 size={16} className="spin" />
+          {t("skills.loadingContent", "Loading skill content...")}
+        </div>
+      );
+    }
+    if (contentError) {
+      return (
+        <div className="skills-view-detail-error">
+          <AlertCircle size={14} />
+          <span>{contentError}</span>
+          <button
+            className="btn btn-sm"
+            onClick={() => handleRetrySkillContent(selectedSkillId)}
+          >
+            {t("common.retry", "Retry")}
+          </button>
+        </div>
+      );
+    }
+    if (skillContent) {
+      return (
+        <>
+          <pre className="skills-view-detail-content">
+            {skillContent.skillMd || t("skills.noSkillMd", "(No SKILL.md found)")}
+          </pre>
+          {skillContent.files.length > 0 && (
+            <div className="skills-view-detail-files">
+              <span className="skills-view-detail-files-label">{t("skills.filesLabel", "Files")}:</span>
+              {skillContent.files.map((file) => (
+                <span key={file.relativePath} className="badge badge--sm">
+                  {file.name}
+                  {file.type === "directory" && "/"}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      );
+    }
+    return null;
+  };
 
   return (
-    <div className="skills-view" data-testid="skills-view">
+    <div
+      className="skills-view"
+      data-testid="skills-view"
+      data-selected={selectedSkillId ? "true" : "false"}
+    >
       {/*
       FNXC:Navigation 2026-06-22-01:10:
       Skills adopts the shared ViewHeader (Command Center-modeled) for a consistent main-content title row. Icon matches the left-sidebar nav (Zap). The discovered-count badge plus Close and Refresh controls move into the header actions cluster so they keep working.
@@ -264,6 +343,13 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
         }
       />
 
+      {/*
+      FNXC:Skills 2026-06-23-01:45:
+      Master/detail body. Holds the two always-rendered panes. CSS (container query on the `.skills-view` root) lays them out side-by-side when wide and stacks them (list, then detail-on-top) when narrow.
+      */}
+      <div className="skills-view-body">
+        {/* FNXC:Skills 2026-06-23-01:45: LEFT pane = master list (search + discovered + catalog). Always in the DOM; CSS hides it only in the narrow stack once a skill is selected. */}
+        <div className="skills-view__list" data-testid="skills-list">
       {/* Scrollable content area */}
       <div className="skills-view-content">
         {/* Search — at top for both sections */}
@@ -339,62 +425,6 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
                         <span className="skills-view-toggle-slider" />
                       </label>
                     </div>
-
-                    {/* Skill Content Detail Panel */}
-                    {isSelected && (
-                      <div className="skills-view-detail" data-testid="skill-detail">
-                        <div className="skills-view-detail-header">
-                          <span className="skills-view-detail-title">{skill.name}</span>
-                          <button
-                            className="btn btn-sm skills-view-detail-close"
-                            onClick={() => {
-                              setSelectedSkillId(null);
-                              setSkillContent(null);
-                              setContentError(null);
-                            }}
-                            aria-label={t("skills.closeDetail", "Close skill detail")}
-                          >
-                            <X size={14} />
-                            {t("common.close", "Close")}
-                          </button>
-                        </div>
-
-                        {isLoadingContent ? (
-                          <div className="skills-view-detail-loading">
-                            <Loader2 size={16} className="spin" />
-                            {t("skills.loadingContent", "Loading skill content...")}
-                          </div>
-                        ) : contentError ? (
-                          <div className="skills-view-detail-error">
-                            <AlertCircle size={14} />
-                            <span>{contentError}</span>
-                            <button
-                              className="btn btn-sm"
-                              onClick={() => handleRetrySkillContent(skill.id)}
-                            >
-                              {t("common.retry", "Retry")}
-                            </button>
-                          </div>
-                        ) : skillContent ? (
-                          <>
-                            <pre className="skills-view-detail-content">
-                              {skillContent.skillMd || t("skills.noSkillMd", "(No SKILL.md found)")}
-                            </pre>
-                            {skillContent.files.length > 0 && (
-                              <div className="skills-view-detail-files">
-                                <span className="skills-view-detail-files-label">{t("skills.filesLabel", "Files")}:</span>
-                                {skillContent.files.map((file) => (
-                                  <span key={file.relativePath} className="badge badge--sm">
-                                    {file.name}
-                                    {file.type === "directory" && "/"}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        ) : null}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -479,6 +509,44 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
             </div>
           )}
         </section>
+      </div>
+        </div>
+
+        {/*
+        FNXC:Skills 2026-06-23-01:45:
+        RIGHT pane = detail. Always in the DOM; CSS shows it side-by-side when wide (empty-state until a skill is selected), or as the single-panel stack overlay when narrow + a skill is selected. Preserves the original detail content: SKILL.md body, file badges, load/error/retry states.
+        */}
+        <div className="skills-view__detail" data-testid="skill-detail">
+          <div className="skills-view-detail-header">
+            {/* FNXC:Skills 2026-06-23-01:45: BACK only matters in the narrow stack (returns to the list); CSS hides it when wide since the list is always visible. Mirrors DockFilesView's back affordance. */}
+            <button
+              type="button"
+              className="btn btn-sm btn-icon skills-view-detail-back"
+              onClick={clearSelection}
+              aria-label={t("skills.backToList", "Back to skills")}
+              title={t("skills.backToList", "Back to skills")}
+              data-testid="skills-detail-back"
+            >
+              <ArrowLeft size={14} />
+            </button>
+            <span className="skills-view-detail-title">
+              {selectedSkill?.name ?? t("skills.detailTitle", "Skill")}
+            </span>
+            {/* FNXC:Skills 2026-06-23-01:45: Close clears the selection. In the wide two-pane layout it returns the detail to its empty-state; in the narrow stack it returns to the list (same effect as BACK). */}
+            <button
+              className="btn btn-sm skills-view-detail-close"
+              onClick={clearSelection}
+              disabled={!selectedSkillId}
+              aria-label={t("skills.closeDetail", "Close skill detail")}
+            >
+              <X size={14} />
+              {t("common.close", "Close")}
+            </button>
+          </div>
+          <div className="skills-view-detail-body">
+            {renderDetailBody()}
+          </div>
+        </div>
       </div>
     </div>
   );
